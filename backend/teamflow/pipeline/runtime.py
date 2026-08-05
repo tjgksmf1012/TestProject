@@ -215,9 +215,14 @@ def build_loader(settings: Settings) -> FileSystemAudioLoader:
 def build_chunk_loader(settings: Settings) -> ChunkAudioLoader:
     """멀티트랙(모드 A) 기본 경로.
 
-    ⚠️ ffmpeg 이 PATH 에 없으면 여기서 `DecodeError` 가 난다. 첫 청크에서
+    ⚠️ ffmpeg 이 PATH 에 없으면 여기서 `DecoderUnavailable` 이 난다. 첫 청크에서
     터지는 것보다 시작할 때 알려주는 게 낫다 — 회의 하나를 다 처리하고 나서
     "디코딩 실패" 를 보는 것만큼 나쁜 게 없다.
+
+    `DecodeError` 와 구분하는 게 중요하다. 그건 "이 청크의 바이트가 나쁘다"
+    라서 로더가 잡아 무음으로 메우지만, 이건 설정 문제라 잡으면 안 된다 —
+    잡으면 **모든 청크가 조용히 무음이 되고** 회의 전체가 "아무도 말하지
+    않았다" 로 처리된다.
     `python3 scripts/check_env.py` 가 존재 여부를 확인해 준다.
     """
     return ChunkAudioLoader(

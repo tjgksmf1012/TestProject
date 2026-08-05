@@ -156,7 +156,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 515 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 536 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
@@ -168,9 +168,14 @@ docker compose up -d postgres redis              # 인프라
 DATABASE_URL=... .venv/bin/alembic upgrade head   # 스키마 생성
 ```
 
-**핵심 흐름이 전 구간 테스트로 검증됩니다.** GPU가 없어도 LLM 호출부만 페이크로 바꾸면
-`전사 → 분석 → 업무 후보 → 검증 → 담당자·마감일 해석 → 승인 → 칸반 등록`이 통째로 돌아갑니다.
-(`test_meeting_pipeline.py::test_end_to_end_transcript_to_kanban`)
+**핵심 흐름이 전 구간 테스트로 검증됩니다.** `test_end_to_end.py` 는 **폰이 HTTP로 올린
+청크가 칸반 업무가 될 때까지**를 한 번에 돌립니다 — 가짜로 바꾸는 건 이 환경에 없는 셋
+(ffmpeg·ASR·LLM)뿐이고, 동의 게이트·청크 저장·무음 패딩·GCC-PHAT 정렬·주화자 판정·
+환각 검증·승인 규칙은 전부 진짜입니다.
+
+> 이 파일이 따로 있는 이유가 있습니다. 구간별 테스트가 전부 통과하는데도
+> **아무도 회의 처리를 큐에 넣지 않았고, 잡은 항상 WAV 로더를 썼습니다.**
+> 각 구간은 정상이었으니 구간별 테스트로는 원리적으로 못 잡습니다.
 
 > 🔍 **구현하면서 설계 결함을 하나 잡았습니다.** 초기 산식은 병합 PR마다 고정 8점을 줬는데,
 > 조작 저항성 테스트에서 **오타 PR 30개(250점)가 실제 기능 구현 1개(44점)를 이겼습니다.**
