@@ -62,9 +62,9 @@ function escapeHtml(text: string): string {
   return div.innerHTML;
 }
 
-function memberName(userId: number | null): string {
-  if (userId === null) return '미지정';
-  return members.find((m) => m.user_id === userId)?.name ?? `알 수 없음(${userId})`;
+/** 명단에 없는 user_id 도 사람이 볼 수 있게 이름을 만든다. */
+function memberName(userId: number): string {
+  return members.find((m) => m.user_id === userId)?.name ?? `알 수 없는 사용자 #${userId}`;
 }
 
 function draftOf(id: number): Draft {
@@ -120,10 +120,19 @@ function cardHtml(candidate: Candidate): string {
   const decided = candidate.review_status !== 'pending';
   const low = candidate.confidence < LOW_CONFIDENCE;
 
+  const assignee = effectiveAssignee(candidate, draft);
+  const known = members.some((m) => m.user_id === assignee);
   const options = [
-    `<option value="">담당자 미지정</option>`,
+    `<option value=""${assignee === null ? ' selected' : ''}>담당자 미지정</option>`,
+    // 팀에서 빠졌거나 잘못 들어온 담당자도 반드시 보여준다.
+    // 명단에 없다고 조용히 "미지정" 으로 그리면, 사람은 비어 있는 줄 알고
+    // 그냥 승인해 버린다 — 서버가 unknown_assignee 로 막긴 하지만 이유를
+    // 화면에서 먼저 알아야 고칠 수 있다.
+    ...(assignee !== null && !known
+      ? [`<option value="${assignee}" selected>${escapeHtml(memberName(assignee))}</option>`]
+      : []),
     ...members.map((m) => {
-      const selected = effectiveAssignee(candidate, draft) === m.user_id ? ' selected' : '';
+      const selected = assignee === m.user_id ? ' selected' : '';
       return `<option value="${m.user_id}"${selected}>${escapeHtml(m.name)}</option>`;
     }),
   ].join('');

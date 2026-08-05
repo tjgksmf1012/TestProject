@@ -119,6 +119,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **GitHub 웹훅 (HMAC 서명 검증)** | ✅ | `backend/teamflow/github/webhook.py` |
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
 | docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
+| **Dockerfile (api·gpu, ffmpeg 포함)** | ⚠️ 빌드 미검증 | `docker/` |
 | **Alembic 마이그레이션** | ✅ 26개 테이블 | `backend/migrations/` |
 | GPU 배타 락 (TTL·소유권 검증) | ✅ | `backend/teamflow/jobs/gpu_lock.py` |
 | **보존기간 삭제 잡** (법적 요구사항) | ✅ | `backend/teamflow/jobs/retention.py` |
@@ -143,7 +144,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 트랙 품질 기록 (커버리지·공백·캡처 경고) | ✅ | `backend/teamflow/services/recording_service.py` |
 | **트랙 재조립 — 공백 무음 패딩** | ✅ | `backend/teamflow/audio/assembly.py` |
 | 청크 → 정렬된 트랙 로더 | ✅ | `backend/teamflow/pipeline/runtime.py` |
-| 청크 디코더 (FFmpeg) | ⬜ | 인터페이스 확정. ffmpeg 있는 머신에서 |
+| **청크 디코더 (FFmpeg)** | ⚠️ 명령·오류처리만 검증 | `backend/teamflow/audio/decode.py` |
 | HTTP 전송기 (시각 헤더·캐시 금지) | ✅ | `frontend/src/lib/recording/browser-adapter.ts` |
 | 브라우저 미디어 어댑터 (getUserMedia/MediaRecorder) | ⚠️ 미검증 | 〃 |
 | **실기기 녹음 테스트 페이지** (실험 5용) | ✅ | `frontend/src/demo/`, `frontend/public/` |
@@ -153,7 +154,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 470 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 502 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 

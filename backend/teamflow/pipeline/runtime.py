@@ -22,7 +22,7 @@ from typing import Protocol
 import numpy as np
 from sqlalchemy import select
 
-from teamflow.audio import assembly
+from teamflow.audio import assembly, decode
 from teamflow.audio.chunk_store import ChunkStore
 from teamflow.config import Settings
 from teamflow.db import models as m
@@ -210,6 +210,20 @@ class ChunkAudioLoader:
 
 def build_loader(settings: Settings) -> FileSystemAudioLoader:
     return FileSystemAudioLoader(storage_root=settings.audio_storage_root)
+
+
+def build_chunk_loader(settings: Settings) -> ChunkAudioLoader:
+    """멀티트랙(모드 A) 기본 경로.
+
+    ⚠️ ffmpeg 이 PATH 에 없으면 여기서 `DecodeError` 가 난다. 첫 청크에서
+    터지는 것보다 시작할 때 알려주는 게 낫다 — 회의 하나를 다 처리하고 나서
+    "디코딩 실패" 를 보는 것만큼 나쁜 게 없다.
+    `python3 scripts/check_env.py` 가 존재 여부를 확인해 준다.
+    """
+    return ChunkAudioLoader(
+        store=ChunkStore(root=settings.audio_storage_root),
+        decoder=decode.build_decoder(),
+    )
 
 
 def build_transcriber(settings: Settings):

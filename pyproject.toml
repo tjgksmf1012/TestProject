@@ -15,11 +15,16 @@ dependencies = [
     "redis>=5.2",
     "httpx>=0.28",
     "pyjwt[crypto]>=2.10",
+    # 선택 의존성이 아니다. api.main → recording_service → audio.assembly 가
+    # 모듈 최상위에서 numpy 를 쓴다. ai 엑스트라에만 두면 기본 설치로는
+    # API 가 import 조차 되지 않는다. (test_packaging.py 가 잡는다)
+    "numpy>=2.0",
 ]
 
 [project.optional-dependencies]
-# GPU 파이프라인. RTX 5080(Blackwell sm_120)에서는 torch를 반드시
-# cu128 인덱스로 설치해야 합니다 — scripts/check_env.py 참조.
+# GPU 파이프라인. 개발 머신은 중급 GPU(Ampere/Ada) 10~16GB 이므로
+# CUDA 12.x 계열 기본 휠이면 됩니다 — 특정 인덱스 강제 불필요.
+# 환경 확인: scripts/check_env.py
 ai = [
     "torch>=2.7",
     "torchaudio>=2.7",
@@ -27,7 +32,6 @@ ai = [
     "pyannote.audio>=4.0",
     "vllm>=0.8",
     "soundfile>=0.12",
-    "numpy>=2.0",
 ]
 dev = [
     "pytest>=8.3",

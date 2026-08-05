@@ -1,0 +1,44 @@
+# API 서버와 CPU 워커가 같이 쓰는 이미지.
+#
+# docker-compose.yml 의 api / worker-cpu 가 둘 다 이걸 씁니다.
+# 같은 이미지를 쓰는 이유: 워커가 API 와 똑같은 코드(모델·서비스·오디오
+# 처리)를 import 하므로 나누면 두 벌을 유지해야 합니다.
+#
+# ⚠️ 이 개발 환경에는 Docker 데몬이 없어 **빌드를 확인하지 못했습니다.**
+# 처음 띄울 때 `docker compose --profile app build` 로 검증하세요.
+
+FROM python:3.11-slim
+
+# ffmpeg 은 선택이 아닙니다.
+#
+# 브라우저 MediaRecorder 는 webm/opus(크롬·파이어폭스) 또는 mp4/aac(사파리)
+# 를 냅니다. 백엔드 신호처리는 전부 16kHz 모노 PCM 전제이므로 변환이 필요하고,
+# 순수 파이썬 opus/aac 디코더는 사실상 없습니다.
+# → backend/teamflow/audio/decode.py
+#
+# 없으면 청크가 하나도 디코딩되지 않습니다. `DecoderUnavailable` 로
+# 크게 터지도록 해 뒀지만, 애초에 이미지에 넣어두는 게 맞습니다.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# 의존성 목록만 먼저 복사한다 — 소스만 바뀌었을 때 pip 층을 다시 안 태운다.
+COPY pyproject.toml README.md ./
+COPY backend/teamflow/__init__.py backend/teamflow/__init__.py
+RUN pip install --upgrade pip && pip install -e .
+
+COPY backend/ backend/
+COPY alembic.ini ./
+
+# 오디오는 별도 볼륨으로 마운트된다 (docs/07 P4 — 분리 보관).
+# 디렉터리가 없으면 첫 업로드에서 만들어지지만, 권한 문제를 미리 없앤다.
+RUN mkdir -p /var/teamflow/audio
+
+EXPOSE 8000
+CMD ["uvicorn", "teamflow.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

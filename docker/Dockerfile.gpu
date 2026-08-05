@@ -1,0 +1,54 @@
+# GPU 워커 — ASR · 화자분리 · (선택) LLM.
+#
+# docker-compose.yml 의 worker-gpu 가 씁니다. concurrency=1 이 필수인 이유는
+# compose 쪽 주석 참고 (VRAM 에 모델을 동시에 못 올립니다, docs/02 §3).
+#
+# ⚠️ 이 개발 환경에는 GPU 도 Docker 도 없어 **빌드·실행을 확인하지 못했습니다.**
+# 실제 머신에서 아래 순서로 검증하세요.
+#
+#   1. python3 scripts/check_env.py          — GPU·VRAM·CUDA 확인
+#   2. docker compose --profile gpu build
+#   3. docker compose --profile gpu up
+#
+# CUDA 12.4 런타임을 고른 이유: 개발 머신이 Ampere/Ada 세대로 확인됐고
+# (docs/09 실험 0), 그 구간은 PyTorch 기본 휠이 그대로 동작합니다.
+# Blackwell(sm_120) 이면 베이스 이미지와 torch 인덱스를 함께 올려야 합니다.
+
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+# python3.11 은 우분투 22.04 기본(3.10)이 아니라 deadsnakes 에서 받는다.
+# pyproject 가 requires-python >=3.11 이다.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install --no-install-recommends -y \
+        python3.11 python3.11-venv python3.11-dev \
+        python3-pip ffmpeg git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    # HF 모델 캐시를 볼륨으로 빼면 컨테이너를 다시 만들어도 재다운로드가 없다.
+    HF_HOME=/models
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY backend/teamflow/__init__.py backend/teamflow/__init__.py
+
+# torch 를 먼저 따로 깐다. 여기서 실패하면 원인이 명확하고,
+# 뒤 의존성 해석에 끌려다니지 않는다.
+RUN python3 -m pip install --upgrade pip \
+    && python3 -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124 \
+    && python3 -m pip install -e ".[ai]"
+
+COPY backend/ backend/
+COPY alembic.ini ./
+
+RUN mkdir -p /var/teamflow/audio /models
+
+CMD ["celery", "-A", "teamflow.tasks", "worker", "-Q", "gpu", "--concurrency=1", "-l", "info"]

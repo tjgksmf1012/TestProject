@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.pool import StaticPool
 
 from teamflow.audio.chunk_store import ChunkStore
@@ -268,3 +268,50 @@ def test_decoder_is_only_asked_for_chunks_that_exist(
     ).load(meeting)
 
     assert len(decoder.calls) == 2, "없는 청크를 디코딩하려 들지 않는다"
+
+
+# ══════════════════════════════════════════════════════════════
+# 실제 디코더의 오류 구분이 로더까지 이어지는가
+# ══════════════════════════════════════════════════════════════
+
+
+def test_bad_chunk_is_skipped_but_a_missing_decoder_is_not(
+    engine, meeting: int, store: ChunkStore
+):
+    """⭐ 두 오류는 결과가 완전히 달라야 한다.
+
+    청크 하나가 깨진 것 → 그 자리만 무음, 나머지는 살린다.
+    ffmpeg 이 없는 것    → 전부 무음이 되면 회의 하나를 통째로 날린 뒤에야
+                          알게 된다. 그러니 위로 올려 보내야 한다.
+    """
+    from teamflow.audio.decode import DecodeError, DecoderUnavailable
+
+    make_track(meeting, email="a@x.com", seqs=[0, 1, 2], slices=3, store=store)
+
+    class OneBadChunk(FakeDecoder):
+        def decode(self, data: bytes, *, target_sample_rate: int) -> np.ndarray:
+            if data == b"\x01":
+                raise DecodeError("컨테이너가 잘렸습니다")
+            return super().decode(data, target_sample_rate=target_sample_rate)
+
+    class NoFfmpeg(FakeDecoder):
+        def decode(self, data: bytes, *, target_sample_rate: int) -> np.ndarray:
+            raise DecoderUnavailable("ffmpeg 을 찾을 수 없습니다")
+
+    # 가운데 청크만 깨뜨린다
+    with db_session.session_scope() as s:
+        row = s.scalars(select(m.MeetingTrack)).one()
+        broken_track_id = row.id
+    store.write(meeting, broken_track_id, 1, b"\x01")
+
+    samples = ChunkAudioLoader(
+        store=store, decoder=OneBadChunk(), timeslice_ms=TIMESLICE, sample_rate=SR
+    ).load(meeting)[0].samples
+    assert np.all(samples[: 5 * SR] > 0)
+    assert np.all(samples[5 * SR : 10 * SR] == 0.0), "깨진 청크만 무음"
+    assert np.all(samples[10 * SR :] > 0), "나머지는 살아남는다"
+
+    with pytest.raises(DecoderUnavailable):
+        ChunkAudioLoader(
+            store=store, decoder=NoFfmpeg(), timeslice_ms=TIMESLICE, sample_rate=SR
+        ).load(meeting)
