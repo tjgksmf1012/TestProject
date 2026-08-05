@@ -118,13 +118,15 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **Alembic 마이그레이션** | ✅ 25개 테이블 | `backend/migrations/` |
 | GPU 배타 락 (TTL·소유권 검증) | ✅ | `backend/teamflow/jobs/gpu_lock.py` |
 | **보존기간 삭제 잡** (법적 요구사항) | ✅ | `backend/teamflow/jobs/retention.py` |
+| **멀티트랙 정렬 (GCC-PHAT)** | ✅ | `backend/teamflow/audio/multitrack.py` |
+| **누출 제거 · 주화자 판정 · 동시발언** | ✅ | 〃 |
 | LLM 클라이언트 (vLLM / llama.cpp) | ⚠️ 미검증 | `backend/teamflow/meeting/llm.py` |
 | ASR·화자분리 파이프라인 | ⬜ | 실제 GPU 머신에서 |
 | Next.js 프런트 | ⬜ | |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 262 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 298 passed
 .venv/bin/ruff check backend/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
