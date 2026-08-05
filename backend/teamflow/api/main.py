@@ -5,10 +5,11 @@ docs/03-시스템-아키텍처.md §1 — Spring Boot 없이 FastAPI 단일 백�
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, date, datetime
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -39,6 +40,37 @@ AppSettings = Annotated[Settings, Depends(get_settings)]
 def health(settings: AppSettings) -> dict[str, Any]:
     # safe_dump 를 쓴다 — 시크릿이 헬스체크로 새는 사고가 흔하다
     return {"status": "ok", **safe_dump(settings)}
+
+
+# ══════════════════════════════════════════════════════════════
+# 시각 동기화
+# ══════════════════════════════════════════════════════════════
+#
+# 멀티트랙 녹음은 팀원 각자의 폰이 개별 트랙을 만든다. 기기 시계가 서로
+# 다르면 트랙 정렬이 GCC-PHAT 탐색창(±500ms) 밖으로 나가 정렬 자체가 실패한다.
+#
+# NTP 와 같은 방식으로 왕복을 재려면 서버가 **받은 시각과 보낸 시각**을
+# 둘 다 알려줘야 한다. 그래야 클라이언트가 서버 처리 시간을 왕복에서 빼고
+# 순수 네트워크 지연만 남길 수 있다.
+#   → frontend/src/lib/recording/clock.ts
+
+
+class ServerTime(BaseModel):
+    """epoch 밀리초. 클라이언트는 이 둘로 오차 상한을 계산한다."""
+
+    t1: int = Field(description="서버가 요청을 받은 시각")
+    t2: int = Field(description="서버가 응답을 보낸 시각")
+
+
+@app.get("/api/time", response_model=ServerTime)
+def server_time(response: Response) -> ServerTime:
+    t1 = time.time_ns() // 1_000_000
+    # 여기서 아무것도 하지 않는 게 중요하다. DB 를 건드리거나 로그를 쓰면
+    # 그 시간이 t2-t1 로 잡히고, 지연이 큰 표본으로 보여 버려진다.
+    t2 = time.time_ns() // 1_000_000
+    # 캐시되면 동기화가 통째로 무의미해진다. 프록시가 끼어도 막는다.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return ServerTime(t1=t1, t2=t2)
 
 
 # ══════════════════════════════════════════════════════════════

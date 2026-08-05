@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import inspect
 import json
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
@@ -165,6 +167,50 @@ def test_health_does_not_leak_secrets(client: TestClient):
     assert WEBHOOK_SECRET not in body
     for key in ("secret", "token", "password", "private_key", "database_url"):
         assert key not in body.lower()
+
+
+# ══════════════════════════════════════════════════════════════
+# 시각 동기화
+# ══════════════════════════════════════════════════════════════
+
+
+def test_server_time_returns_epoch_millis(client: TestClient):
+    body = client.get("/api/time").json()
+    now_ms = time.time_ns() // 1_000_000
+    # 2020년 이후이고 미래가 아니면 epoch 밀리초가 맞다
+    assert 1_577_836_800_000 < body["t1"] <= now_ms + 1_000
+    assert body["t2"] >= body["t1"]
+
+
+def test_server_time_processing_is_near_zero(client: TestClient):
+    """t2-t1 이 크면 클라이언트가 그만큼을 왕복에서 빼버려 추정이 흔들린다."""
+    body = client.get("/api/time").json()
+    assert body["t2"] - body["t1"] < 50
+
+
+def test_server_time_is_never_cached(client: TestClient):
+    """캐시되면 모든 기기가 같은 시각을 받아 동기화가 통째로 무의미해진다."""
+    cache_control = client.get("/api/time").headers["cache-control"]
+    assert "no-store" in cache_control
+
+
+def test_server_time_advances(client: TestClient):
+    first = client.get("/api/time").json()
+    time.sleep(0.01)
+    second = client.get("/api/time").json()
+    assert second["t1"] >= first["t2"]
+
+
+def test_server_time_touches_nothing(client: TestClient):
+    """동기화는 회의마다 수십 번 불린다.
+
+    DB 나 설정을 타면 그 지연이 t2-t1 로 잡히고, 왕복 추정이 흔들린다.
+    의존성이 하나라도 붙는 순간 그렇게 되므로 시그니처로 못 박아 둔다.
+    """
+    from teamflow.api.main import server_time
+
+    params = inspect.signature(server_time).parameters
+    assert list(params) == ["response"]
 
 
 # ══════════════════════════════════════════════════════════════

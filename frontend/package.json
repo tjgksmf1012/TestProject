@@ -1,0 +1,14 @@
+{
+  "name": "teamflow-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TeamFlow AI 녹음 클라이언트 — 순수 로직은 의존성 0으로 검증된다",
+  "scripts": {
+    "test": "node --test 'src/lib/**/*.test.ts'",
+    "test:watch": "node --test --watch 'src/lib/**/*.test.ts'"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

@@ -129,13 +129,22 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 오디오 로더 (WAV, 경로 탈출 차단) | ✅ | `backend/teamflow/pipeline/runtime.py` |
 | LLM 클라이언트 (vLLM / llama.cpp) | ⚠️ 미검증 | `backend/teamflow/meeting/llm.py` |
 | ASR·화자분리 **모델 구현** | ⬜ | 인터페이스 확정, 실제 GPU 머신에서 |
-| Next.js 프런트 | ⬜ | |
+| **서버 시각 동기화 (NTP 방식)** | ✅ | `frontend/src/lib/recording/clock.ts` + `GET /api/time` |
+| **트랙 공백 탐지 · 커버리지 판정** | ✅ | `frontend/src/lib/recording/timeline.ts` |
+| **청크 업로드 큐 (재시도·재개·백프레셔)** | ✅ | `frontend/src/lib/recording/upload-queue.ts` |
+| **녹음 세션 상태 머신 (동의 게이트)** | ✅ | `frontend/src/lib/recording/session.ts` |
+| 캡처 제약 검증 (AGC·잡음억제 해제 확인) | ✅ | `frontend/src/lib/recording/capture.ts` |
+| 녹음 클라이언트 조립 | ✅ | `frontend/src/lib/recording/client.ts` |
+| 브라우저 어댑터 (getUserMedia/MediaRecorder) | ⚠️ 미검증 | `frontend/src/lib/recording/browser-adapter.ts` |
+| Next.js 화면 (녹음 UI · 승인 UI) | ⬜ | |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 364 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 369 passed
 .venv/bin/ruff check backend/
 python3 scripts/check_env.py                     # 하드웨어 진단
+
+cd frontend && npm test                          # 151 passed, 의존성 0개
 
 cp .env.example .env                             # 시크릿 채우기
 docker compose up -d postgres redis              # 인프라
@@ -189,5 +198,3 @@ DATABASE_URL=... .venv/bin/alembic upgrade head   # 스키마 생성
 `gt-kim.github.io`, `chatgpt.com` 등에 대한 직접 페이지 열람을 차단했습니다.
 내용은 웹 검색 결과를 교차 대조한 것이며, **직접 확인이 필요한 항목 10개**를
 [09번 문서 §C](docs/09-리스크와-검증-실험.md)에 정리해 두었습니다.
-</content>
-</invoke>

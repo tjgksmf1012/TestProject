@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "// erasableSyntaxOnly": "Node 의 타입 스트리핑으로 테스트한다. enum, namespace, 생성자 파라미터 프로퍼티를 쓰면 런타임에 거부된다.",
+    "erasableSyntaxOnly": true,
+
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts"]
+}

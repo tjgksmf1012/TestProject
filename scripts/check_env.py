@@ -319,8 +319,8 @@ def check_https_note() -> None:
     print()
     print(f"  {BOLD}확인 절차{RESET}")
     print(f"  1. {DIM}cloudflared tunnel --url http://localhost:3000{RESET}")
-    print(f"  2. 출력된 https://xxx.trycloudflare.com 주소를 폰 2대로 접속")
-    print(f"  3. 마이크 권한 팝업이 뜨는지 확인")
+    print("  2. 출력된 https://xxx.trycloudflare.com 주소를 폰 2대로 접속")
+    print("  3. 마이크 권한 팝업이 뜨는지 확인")
     print()
     print(f"  {DIM}여기서 막히면 docs/04 멀티트랙 설계 전체를 다시 짜야 합니다.{RESET}")
 
