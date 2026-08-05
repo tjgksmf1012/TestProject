@@ -87,6 +87,7 @@
 | [09. 리스크와 검증 실험](docs/09-리스크와-검증-실험.md) | 지금 당장 돌릴 실험 5개 + 위험 등록부 |
 | [10. 열린 질문](docs/10-열린-질문.md) | 결정이 필요한 10가지 |
 | [11. 비용 제로 구성](docs/11-비용-제로-구성.md) | 전 구성요소 비용 감사, 함정 4개, 학생 무료 리소스 |
+| [12. CCTV 영상 기반 화자판정](docs/12-CCTV-영상-기반-화자판정.md) | 모드 C 법적·기술 검토, 모드 비교, 융합 설계 |
 | [원본 자료](docs/원본자료/) | ChatGPT 대화 전문, 제안서 텍스트 추출본 |
 
 ---
@@ -120,6 +121,9 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **보존기간 삭제 잡** (법적 요구사항) | ✅ | `backend/teamflow/jobs/retention.py` |
 | **멀티트랙 정렬 (GCC-PHAT)** | ✅ | `backend/teamflow/audio/multitrack.py` |
 | **누출 제거 · 주화자 판정 · 동시발언** | ✅ | 〃 |
+| **오디오·영상 융합 화자 판정** | ✅ | `backend/teamflow/video/speaker.py` |
+| 얼굴 ↔ 팀원 매칭 (임계값·모호성 처리) | ✅ | 〃 |
+| Active Speaker Detection 모델 | ⬜ | 인터페이스 확정, Light-ASD 연동 예정 |
 | **회의 처리 파이프라인 오케스트레이션** | ✅ | `backend/teamflow/pipeline/` |
 | **Celery 앱 · 태스크 · beat 스케줄** | ✅ | `backend/teamflow/tasks/` |
 | 오디오 로더 (WAV, 경로 탈출 차단) | ✅ | `backend/teamflow/pipeline/runtime.py` |
@@ -129,7 +133,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 337 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 364 passed
 .venv/bin/ruff check backend/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
