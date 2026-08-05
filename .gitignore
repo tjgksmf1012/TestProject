@@ -11,6 +11,8 @@ venv/
 # ── Node / Next.js ────────────────────────────────────────
 node_modules/
 .next/
+# esbuild 산출물. `npm run build:demo` 로 만든다.
+frontend/public/demo.js
 out/
 dist/
 build/

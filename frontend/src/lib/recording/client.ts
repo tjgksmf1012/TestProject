@@ -191,9 +191,11 @@ export class RecordingClient {
     recorder.onError((error) => this.#dispatch({ type: 'ERROR', message: error.message }));
 
     this.#queue.start();
-    this.#dispatch({ type: 'START', atMs: this.#clock.now() });
+    // 반환값을 쓴다. `this.#state` 를 다시 읽으면 TypeScript 가 위 가드에서
+    // 좁혀둔 'ready' 를 그대로 들고 있어 비교가 항상 거짓으로 보인다.
+    const started = this.#dispatch({ type: 'START', atMs: this.#clock.now() });
     recorder.start(this.#timesliceMs);
-    return this.#state.phase === 'recording';
+    return started.phase === 'recording';
   }
 
   /**
@@ -252,10 +254,12 @@ export class RecordingClient {
     this.#dispatch({ type: 'STOP', atMs: this.#clock.now() });
   }
 
-  #dispatch(event: SessionEvent): void {
+  /** 이벤트를 적용하고 **새 상태를 돌려준다.** 호출자가 다시 읽지 않게 하려는 것이다. */
+  #dispatch(event: SessionEvent): SessionState {
     const next = reduce(this.#state, event);
-    if (next === this.#state) return;
+    if (next === this.#state) return next;
     this.#state = next;
     this.#options.onStateChange?.(next);
+    return next;
   }
 }

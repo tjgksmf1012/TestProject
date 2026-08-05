@@ -146,7 +146,9 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 청크 디코더 (FFmpeg) | ⬜ | 인터페이스 확정. ffmpeg 있는 머신에서 |
 | HTTP 전송기 (시각 헤더·캐시 금지) | ✅ | `frontend/src/lib/recording/browser-adapter.ts` |
 | 브라우저 미디어 어댑터 (getUserMedia/MediaRecorder) | ⚠️ 미검증 | 〃 |
-| Next.js 화면 (녹음 UI · 승인 UI) | ⬜ | |
+| **실기기 녹음 테스트 페이지** (실험 5용) | ✅ | `frontend/src/demo/`, `frontend/public/` |
+| 타입 검사 (`tsc --noEmit`, strict) | ✅ | `frontend/tsconfig.json` |
+| 승인 화면 | ⬜ | |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
@@ -154,7 +156,8 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 160 passed, 의존성 0개
+cd frontend && npm test                          # 160 passed, 설치 불필요
+cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
 
 cp .env.example .env                             # 시크릿 채우기
 docker compose up -d postgres redis              # 인프라

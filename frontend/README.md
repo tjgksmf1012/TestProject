@@ -8,13 +8,40 @@
 
 ```bash
 cd frontend
-npm test          # 의존성 설치 없이 바로 돌아갑니다
+npm test          # 설치 없이 바로 돌아갑니다
 ```
 
-**의존성이 0개입니다.** Node 22.18+ 가 TypeScript 를 그대로 실행하고
+**테스트는 의존성 0개입니다.** Node 22.18+ 가 TypeScript 를 그대로 실행하고
 (`--experimental-strip-types` 가 기본 활성), 테스트 러너도 내장이라
-`npm install` 이 필요 없습니다. 설치 용량 0, 비용 0
-([docs/11](../docs/11-비용-제로-구성.md)).
+`npm install` 없이 돌아갑니다 ([docs/11](../docs/11-비용-제로-구성.md)).
+
+타입 검사와 데모 페이지 빌드에만 개발 의존성 3개(약 34MB)가 필요합니다.
+
+```bash
+npm install       # typescript, esbuild, @types/node
+npm run check     # 타입 검사 + 테스트
+```
+
+> ⚠️ Node 의 타입 스트리핑은 **타입을 검사하지 않고 지우기만 합니다.**
+> `npm run typecheck` 를 따로 돌려야 실제로 검사됩니다. 실제로 이걸 처음
+> 붙였을 때 `client.ts` 에서 항상 거짓인 비교를 하나 잡았습니다.
+
+## 실기기 녹음 테스트 페이지 (docs/09 실험 5)
+
+**모드 A(멀티트랙)의 성립 여부를 결정하는 실험**입니다. 폰이 회의 끝까지
+녹음을 유지하는지 확인합니다.
+
+```bash
+npm install && npm run build:demo
+npm run serve                                  # localhost:3000
+cloudflared tunnel --url http://localhost:3000  # → https 주소 (무료)
+```
+
+폰에서 그 https 주소를 열면 됩니다. **서버 없이도 동작합니다** — 시각
+동기화와 업로드를 로컬에서 흉내 내므로 폰만 있으면 커버리지와 공백 원인을
+바로 볼 수 있습니다. 결과는 docs/09 실험 5 표에 붙여 넣을 한 줄로 나옵니다.
+
+백엔드에 붙이려면 `?api=https://…&track=https://…/tracks/1` 을 붙이세요.
 
 대신 제약이 하나 있습니다 — **지울 수 있는 문법만** 씁니다.
 `enum`, `namespace`, 생성자 파라미터 프로퍼티(`constructor(private x)`)는
@@ -99,7 +126,9 @@ WebKit 의 제약입니다. Screen Wake Lock(iOS 16.4+)으로 완화할 수 있�
 | browser-adapter.ts — HTTP 전송기 | ✅ fetch 를 갈아끼워 검증 |
 | browser-adapter.ts — 미디어 어댑터 | ⚠️ 문법 로딩만 확인. 실기기 확인 필요 |
 | iOS Safari 실제 중단 동작 | ⚠️ 문헌 근거만. 실측 필요 |
-| 화면(React 컴포넌트) | ⬜ 미착수 |
+| 타입 검사 (`tsc --noEmit`, strict) | ✅ 통과 |
+| 실기기 테스트 페이지 (`src/demo/`) | ⚠️ 화면 코드라 자동 테스트 없음 |
+| 승인 화면 | ⬜ 미착수 |
 
 실기기에서 확인해야 하는 항목은 [docs/09 §C](../docs/09-리스크와-검증-실험.md)에
 있습니다.
