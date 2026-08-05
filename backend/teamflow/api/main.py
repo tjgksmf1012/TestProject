@@ -276,6 +276,8 @@ class TrackComplete(BaseModel):
     capture_confidence: float = Field(default=1.0, ge=0, le=1)
     capture_warnings: list[dict[str, Any]] = Field(default_factory=list)
     stop_reason: str | None = None
+    # 서버가 배치를 다시 계산할 때 필요하다 (MediaRecorder.start(timeslice))
+    timeslice_ms: int = Field(default=5_000, gt=0)
 
 
 class TrackCompleteOut(BaseModel):
@@ -318,6 +320,7 @@ def complete_track(
                 capture_confidence=payload.capture_confidence,
                 capture_warnings=payload.capture_warnings,
                 stop_reason=payload.stop_reason,
+                timeslice_ms=payload.timeslice_ms,
             ),
         )
     except recording_service.TrackError as exc:

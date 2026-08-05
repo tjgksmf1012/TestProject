@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from teamflow.audio import assembly
 from teamflow.audio.chunk_store import ChunkStore
 from teamflow.db import models as m
 
@@ -208,6 +209,32 @@ class TrackSummary:
     capture_confidence: float
     capture_warnings: list[dict]
     stop_reason: str | None = None
+    #: `MediaRecorder.start(timeslice)` 값. 서버가 배치를 다시 계산할 때 쓴다.
+    timeslice_ms: int = 5_000
+
+
+def _epoch_ms(value: datetime) -> int:
+    """DB 에서 온 datetime 을 epoch ms 로. SQLite 는 naive 로 돌려준다."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return int(value.timestamp() * 1000)
+
+
+def build_plan(session: Session, track: m.MeetingTrack, *, timeslice_ms: int) -> assembly.TrackPlan:
+    """서버가 **실제로 받은** 청크로 배치 계획을 세운다.
+
+    클라이언트 보고와 별개로 계산한다. 오디오를 실제로 배치하는 건 서버이므로
+    배치의 근거도 서버가 가진 사실이어야 한다 (`audio/assembly.py` 참고).
+    """
+    rows = session.scalars(
+        select(m.TrackChunk).where(m.TrackChunk.track_id == track.id)
+    ).all()
+    return assembly.plan_track(
+        [assembly.ChunkRecord(seq=r.seq, client_at_ms=r.client_at_ms) for r in rows],
+        timeslice_ms=timeslice_ms,
+        started_at_ms=_epoch_ms(track.started_at),
+        ended_at_ms=_epoch_ms(track.ended_at or track.started_at),
+    )
 
 
 # 이 아래면 트랙을 쓰지 않는다. frontend timeline.ts 의 MIN_USABLE_COVERAGE 와 같은 값.
@@ -224,44 +251,45 @@ def complete_track(
 ) -> m.MeetingTrack:
     """녹음 종료를 기록한다.
 
-    클라이언트가 보고한 커버리지를 **그대로 믿지 않는다.** 서버가 가진 청크
-    수와 대조해서 더 나쁜 쪽을 택한다. 클라이언트는 자기가 만든 청크를
-    기준으로 계산하는데, 그중 일부는 업로드에 실패해 서버에 없을 수 있다.
+    클라이언트가 보고한 커버리지를 **그대로 믿지 않는다.** 서버가 실제로 받은
+    청크로 배치를 다시 계산해 더 나쁜 쪽을 택한다. 클라이언트는 자기가 *만든*
+    청크를 기준으로 계산하는데, 그중 일부는 업로드에 실패해 서버에 없다.
+
+    저장되는 공백 목록은 **서버 계산 + 클라이언트만 아는 것**의 합집합이다.
+    `track_muted`(청크는 오는데 내용이 무음)는 서버가 알 방법이 없으므로
+    클라이언트 보고를 그대로 받는다.
     """
     track = _load_track(session, meeting_id, track_id)
-
-    have = len(store.stored_seqs(meeting_id, track_id))
-    coverage = float(summary.coverage)
-    expected = _expected_chunk_count(session, track_id)
-    if expected > 0:
-        delivered_ratio = have / expected
-        coverage = min(coverage, delivered_ratio)
-
     track.ended_at = summary.ended_at
+
+    plan = build_plan(session, track, timeslice_ms=summary.timeslice_ms)
+
+    # 파일이 실제로 있는지도 본다. DB 행은 있는데 파일이 없으면 그건 공백이다.
+    on_disk = set(store.stored_seqs(meeting_id, track_id))
+    placed = {p.seq for p in plan.placements}
+    orphaned = placed - on_disk
+
+    coverage = min(float(summary.coverage), plan.coverage)
+    if placed:
+        coverage = min(coverage, (len(placed) - len(orphaned)) / len(placed))
+
+    server_gaps = [
+        {"reason": g.reason, "startMs": g.start_ms, "endMs": g.end_ms, "durationMs": g.duration_ms}
+        for g in plan.gaps
+    ]
+    # 서버가 볼 수 없는 원인만 클라이언트에서 가져온다
+    client_only = [g for g in summary.gaps if g.get("reason") == "track_muted"]
+
     track.coverage = round(coverage, 3)
-    track.total_gap_ms = summary.total_gap_ms
-    track.longest_gap_ms = summary.longest_gap_ms
-    track.gaps = summary.gaps
+    track.total_gap_ms = max(summary.total_gap_ms, plan.total_gap_ms)
+    track.longest_gap_ms = max(summary.longest_gap_ms, plan.longest_gap_ms)
+    track.gaps = server_gaps + client_only
     track.capture_confidence = round(float(summary.capture_confidence), 3)
     track.capture_warnings = summary.capture_warnings
     track.stop_reason = summary.stop_reason
     track.status = "completed" if coverage >= MIN_USABLE_COVERAGE else "unusable"
     session.flush()
     return track
-
-
-def _expected_chunk_count(session: Session, track_id: int) -> int:
-    """클라이언트가 만들었다고 알고 있는 청크 수 = 최대 seq + 1.
-
-    seq 는 0부터 빠짐없이 올라간다 (client.ts). 그래서 최대값이 곧 개수다.
-    """
-    max_seq = session.scalar(
-        select(m.TrackChunk.seq)
-        .where(m.TrackChunk.track_id == track_id)
-        .order_by(m.TrackChunk.seq.desc())
-        .limit(1)
-    )
-    return 0 if max_seq is None else int(max_seq) + 1
 
 
 def track_health(session: Session, meeting_id: int) -> list[dict]:

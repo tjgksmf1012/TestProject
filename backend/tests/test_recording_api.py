@@ -10,7 +10,7 @@ frontend/src/lib/recording/ 이 기대하는 서버 계약을 고정한다.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -25,6 +25,8 @@ from teamflow.db import models as m
 from teamflow.db import session as db_session
 
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
+NOW_MS = int(NOW.timestamp() * 1000)
+TIMESLICE = 5_000
 CHUNK = b"\x1a\x45\xdf\xa3" + b"opus-payload" * 100  # 대충 1.2KB
 
 
@@ -220,19 +222,24 @@ def join(client: TestClient, meeting_id: int, user_id: int):
     )
 
 
+def chunk_time(seq: int) -> int:
+    """seq 번째 청크가 도착하는 시각. 5초마다 하나씩 온다."""
+    return NOW_MS + TIMESLICE * (seq + 1)
+
+
 def put_chunk(
     client: TestClient,
     meeting_id: int,
     track_id: int,
     seq: int,
     *,
-    at_ms: int = 1_700_000_000_000,
+    at_ms: int | None = None,
     data: bytes = CHUNK,
 ):
     return client.put(
         f"/api/meetings/{meeting_id}/tracks/{track_id}/chunks/{seq}",
         content=data,
-        headers={"X-Client-At-Ms": str(at_ms)},
+        headers={"X-Client-At-Ms": str(at_ms if at_ms is not None else chunk_time(seq))},
     )
 
 
@@ -308,7 +315,7 @@ def test_put_chunk_stores_file_and_row(
             select(m.TrackChunk).where(m.TrackChunk.track_id == track["track_id"])
         ).all()
         assert len(rows) == 1
-        assert rows[0].client_at_ms == 1_700_000_000_000
+        assert rows[0].client_at_ms == chunk_time(0)
 
 
 def test_put_same_seq_twice_is_idempotent(client: TestClient, track: dict, engine):
@@ -318,7 +325,7 @@ def test_put_same_seq_twice_is_idempotent(client: TestClient, track: dict, engin
         track["meeting_id"],
         track["track_id"],
         0,
-        at_ms=1_700_000_005_000,
+        at_ms=chunk_time(0) + 40,  # 재시도 시점의 시각이 조금 다르다
         data=b"retry",
     )
 
@@ -328,7 +335,7 @@ def test_put_same_seq_twice_is_idempotent(client: TestClient, track: dict, engin
         ).all()
         assert len(rows) == 1, "재시도가 행을 두 개 만들면 안 된다"
         assert rows[0].bytes == len(b"retry")
-        assert rows[0].client_at_ms == 1_700_000_005_000
+        assert rows[0].client_at_ms == chunk_time(0) + 40
 
 
 def test_put_chunk_requires_client_timestamp(client: TestClient, track: dict):
@@ -432,9 +439,13 @@ def test_rejoin_returns_stored_seqs_for_resume(
 # ── 종료 ──────────────────────────────────────────────────────
 
 
-def complete(client: TestClient, track: dict, **overrides):
+def complete(client: TestClient, track: dict, *, slices: int = 1, **overrides):
+    """녹음 종료. `slices` 는 클라이언트가 만든 청크 수 = 녹음 길이/5초.
+
+    종료 시각이 청크 수와 맞아야 서버가 배치를 제대로 계산한다.
+    """
     payload = {
-        "ended_at": datetime(2026, 9, 1, 10, 30, tzinfo=UTC).isoformat(),
+        "ended_at": (NOW + timedelta(seconds=5 * slices)).isoformat(),
         "coverage": 1.0,
         "total_gap_ms": 0,
         "longest_gap_ms": 0,
@@ -442,6 +453,7 @@ def complete(client: TestClient, track: dict, **overrides):
         "capture_confidence": 1.0,
         "capture_warnings": [],
         "stop_reason": "user",
+        "timeslice_ms": TIMESLICE,
     }
     payload.update(overrides)
     return client.post(
@@ -454,7 +466,7 @@ def test_complete_marks_track_completed(client: TestClient, track: dict, engine)
     for seq in range(4):
         put_chunk(client, track["meeting_id"], track["track_id"], seq)
 
-    body = complete(client, track).json()
+    body = complete(client, track, slices=4).json()
     assert body["status"] == "completed"
     assert body["usable"] is True
     assert body["coverage"] == 1.0
@@ -470,6 +482,7 @@ def test_complete_stores_gaps_and_warnings(client: TestClient, track: dict, engi
     complete(
         client,
         track,
+        slices=1,
         coverage=0.9,
         total_gap_ms=6_000,
         longest_gap_ms=6_000,
@@ -493,7 +506,7 @@ def test_low_coverage_track_is_marked_unusable(client: TestClient, track: dict):
     for seq in range(4):
         put_chunk(client, track["meeting_id"], track["track_id"], seq)
 
-    body = complete(client, track, coverage=0.4, total_gap_ms=36_000).json()
+    body = complete(client, track, slices=4, coverage=0.4, total_gap_ms=36_000).json()
     assert body["status"] == "unusable"
     assert body["usable"] is False
     assert "발화량을 판단할 수 없습니다" in body["message"]
@@ -508,10 +521,78 @@ def test_server_does_not_trust_inflated_client_coverage(client: TestClient, trac
     for seq in (0, 1, 3, 4, 6, 8, 9):  # 2, 5, 7 은 끝내 실패
         put_chunk(client, track["meeting_id"], track["track_id"], seq)
 
-    body = complete(client, track, coverage=1.0).json()
+    body = complete(client, track, slices=10, coverage=1.0).json()
 
-    assert body["coverage"] == 0.7, "받은 7개 / 만들어진 10개"
+    assert body["coverage"] == 0.7, "50초 중 15초가 비었다 (유실 3개 × 5초)"
     assert body["usable"] is False
+
+
+def test_server_finds_a_gap_the_client_never_reported(
+    client: TestClient, track: dict, engine
+):
+    """⭐ 클라이언트가 "문제 없었다"고 해도 서버가 타임스탬프로 직접 본다.
+
+    청크는 전부 도착했지만 seq 1 과 2 사이에 30초가 비어 있다.
+    폰이 잠겨 레코더가 멈춘 것이고, 클라이언트 보고가 틀렸거나 없어도
+    서버 혼자 알아낸다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0, at_ms=NOW_MS + 5_000)
+    put_chunk(client, track["meeting_id"], track["track_id"], 1, at_ms=NOW_MS + 10_000)
+    put_chunk(client, track["meeting_id"], track["track_id"], 2, at_ms=NOW_MS + 45_000)
+    put_chunk(client, track["meeting_id"], track["track_id"], 3, at_ms=NOW_MS + 50_000)
+
+    body = complete(client, track, slices=10, coverage=1.0, total_gap_ms=0).json()
+
+    assert body["coverage"] == 0.4, "50초 중 30초가 비었다"
+    assert body["usable"] is False
+
+    with Session(engine) as s:
+        row = s.get(m.MeetingTrack, track["track_id"])
+        assert [g["reason"] for g in row.gaps] == ["recorder_stalled"]
+        assert row.gaps[0]["durationMs"] == 30_000
+        assert row.total_gap_ms == 30_000
+
+
+def test_server_labels_upload_loss_differently_from_a_stall(
+    client: TestClient, track: dict, engine
+):
+    """원인이 다르면 사용자에게 할 말도 다르다.
+
+    한쪽은 "녹음 중에는 화면을 켜두세요", 다른 쪽은 "네트워크가 불안정했습니다".
+    seq 가 0부터 빽빽하게 올라간다는 성질 덕에 서버 혼자 구별한다.
+    """
+    for seq in (0, 1, 3, 4):  # seq 2 가 업로드에 실패했다
+        put_chunk(client, track["meeting_id"], track["track_id"], seq)
+
+    complete(client, track, slices=5, coverage=1.0)
+
+    with Session(engine) as s:
+        row = s.get(m.MeetingTrack, track["track_id"])
+        assert [g["reason"] for g in row.gaps] == ["chunk_lost"]
+
+
+def test_client_only_gap_reasons_survive(client: TestClient, track: dict, engine):
+    """`track_muted` 는 서버가 알 방법이 없다 — 청크는 정상적으로 오니까.
+
+    서버 계산으로 덮어쓰면 이 정보가 사라진다.
+    """
+    for seq in range(4):
+        put_chunk(client, track["meeting_id"], track["track_id"], seq)
+
+    complete(
+        client,
+        track,
+        slices=4,
+        coverage=0.75,
+        total_gap_ms=5_000,
+        gaps=[{"reason": "track_muted", "startMs": 5_000, "endMs": 10_000}],
+    )
+
+    with Session(engine) as s:
+        row = s.get(m.MeetingTrack, track["track_id"])
+        reasons = [g["reason"] for g in row.gaps]
+        assert "track_muted" in reasons
+        assert row.coverage is not None and float(row.coverage) == 0.75
 
 
 def test_server_keeps_client_coverage_when_it_is_worse(client: TestClient, track: dict):
@@ -523,7 +604,7 @@ def test_server_keeps_client_coverage_when_it_is_worse(client: TestClient, track
     for seq in range(10):
         put_chunk(client, track["meeting_id"], track["track_id"], seq)
 
-    body = complete(client, track, coverage=0.5, total_gap_ms=30_000).json()
+    body = complete(client, track, slices=10, coverage=0.5, total_gap_ms=30_000).json()
     assert body["coverage"] == 0.5
 
 
@@ -562,7 +643,7 @@ def test_track_list_shows_consent_and_health(
 ):
     for seq in range(4):
         put_chunk(client, track["meeting_id"], track["track_id"], seq)
-    complete(client, track, coverage=0.55, capture_confidence=0.7)
+    complete(client, track, slices=4, coverage=0.55, capture_confidence=0.7)
 
     body = client.get(f"/api/meetings/{meeting['meeting_id']}/tracks").json()
 
