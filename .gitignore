@@ -1,0 +1,79 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── Node / Next.js ────────────────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# ── 환경 변수 / 시크릿 ─────────────────────────────────────
+# HF_TOKEN, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET,
+# AUDIO_ENCRYPTION_KEY 등이 여기 들어갑니다. 절대 커밋 금지.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ── AI 모델 가중치 ────────────────────────────────────────
+# 합계 30~50GB. git에 넣지 마세요. HuggingFace에서 받으세요.
+models/
+checkpoints/
+*.safetensors
+*.gguf
+*.bin
+*.ckpt
+*.pt
+*.pth
+.cache/huggingface/
+
+# ── 회의 오디오 / 개인정보 ────────────────────────────────
+# 음성은 개인정보이며 생체인식정보로 간주될 수 있습니다.
+# 저장소에 절대 올리지 마세요. → docs/07-법적-윤리-요구사항.md
+audio/
+recordings/
+uploads/
+*.wav
+*.mp3
+*.m4a
+*.opus
+*.flac
+*.webm
+
+# ── 전사 / 회의록 산출물 ──────────────────────────────────
+transcripts/
+meeting_outputs/
+
+# ── 데이터셋 ──────────────────────────────────────────────
+data/
+datasets/
+*.tar.gz
+*.zip
+
+# ── 로그 / 임시 ───────────────────────────────────────────
+*.log
+logs/
+tmp/
+.DS_Store
+Thumbs.db
+
+# ── IDE ───────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+
+# ── Docker 볼륨 ───────────────────────────────────────────
+pgdata/
+redisdata/
+storage/
