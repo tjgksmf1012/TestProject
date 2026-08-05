@@ -111,15 +111,23 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 환각 방어 (근거 발화 검증) | ✅ | `backend/teamflow/meeting/validation.py` |
 | 담당자·마감일 해석 (한국어) | ✅ | `backend/teamflow/meeting/resolve.py` |
 | **회의→후보→승인→칸반 흐름** | ✅ **11주차 게이트** | `backend/teamflow/meeting/approval.py` |
+| **FastAPI 앱 + 통합 테스트** | ✅ | `backend/teamflow/api/main.py` |
+| **GitHub 웹훅 (HMAC 서명 검증)** | ✅ | `backend/teamflow/github/webhook.py` |
+| 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
+| docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
 | LLM 클라이언트 (vLLM / llama.cpp) | ⚠️ 미검증 | `backend/teamflow/meeting/llm.py` |
 | ASR·화자분리 파이프라인 | ⬜ | 실제 GPU 머신에서 |
-| FastAPI / Next.js | ⬜ | |
+| Alembic 마이그레이션 | ⬜ | |
+| Next.js 프런트 | ⬜ | |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 191 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 227 passed
 .venv/bin/ruff check backend/
 python3 scripts/check_env.py                     # 하드웨어 진단
+
+cp .env.example .env                             # 시크릿 채우기
+docker compose up -d postgres redis              # 인프라
 ```
 
 **핵심 흐름이 전 구간 테스트로 검증됩니다.** GPU가 없어도 LLM 호출부만 페이크로 바꾸면

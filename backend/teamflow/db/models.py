@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -29,13 +30,30 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+# ── dialect 변형 ──────────────────────────────────────────────
+#
+# 프로덕션은 PostgreSQL이지만, 테스트는 SQLite 인메모리로 돌린다.
+# 개발 환경에 Docker 데몬이 없어도 실제 DB 통합 테스트를 할 수 있어야 하기 때문이다.
+#
+# with_variant() 를 쓰면 PostgreSQL에서는 JSONB/ARRAY/INET 이 그대로 나가고,
+# SQLite에서는 JSON 으로 대체된다. 프로덕션 타입을 낮추지 않으면서 테스트가 가능해진다.
+
+JSONType = JSONB().with_variant(JSON(), "sqlite")
+BigIntArray = ARRAY(BigInteger).with_variant(JSON(), "sqlite")
+NumericArray = ARRAY(Numeric).with_variant(JSON(), "sqlite")
+InetType = INET().with_variant(String(45), "sqlite")
+
+# SQLite는 `INTEGER PRIMARY KEY` 만 autoincrement 한다. BIGINT는 rowid 별칭이
+# 되지 않아 NOT NULL 위반이 난다. PostgreSQL에서는 BIGINT를 그대로 쓴다.
+PkType = BigInteger().with_variant(Integer, "sqlite")
+
 
 class Base(DeclarativeBase):
     pass
 
 
 def _pk() -> Mapped[int]:
-    return mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    return mapped_column(PkType, primary_key=True, autoincrement=True)
 
 
 def _now() -> Mapped[datetime]:
@@ -80,8 +98,8 @@ class Member(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     # 겸직 지원: {"developer": 0.7, "planner": 0.3}
-    role_shares: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    skills: Mapped[list | None] = mapped_column(JSONB)
+    role_shares: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    skills: Mapped[list | None] = mapped_column(JSONType)
     github_login: Mapped[str | None] = mapped_column(String(100))
 
     __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_member"),)
@@ -156,7 +174,7 @@ class GithubEvent(Base):
     actor_login: Mapped[str] = mapped_column(String(100), nullable=False)
     actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     ref: Mapped[str | None] = mapped_column(String(255))
-    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    payload: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -248,7 +266,7 @@ class Utterance(Base):
 
     # 반복 논의 탐지용. 실제 컬럼 타입은 pgvector 의 vector(768).
     # Alembic 마이그레이션에서 `CREATE EXTENSION vector` 후 ALTER 로 교체한다.
-    embedding: Mapped[list | None] = mapped_column(ARRAY(Numeric))
+    embedding: Mapped[list | None] = mapped_column(NumericArray)
 
     __table_args__ = (
         CheckConstraint("end_ms >= start_ms", name="ck_utterance_span"),
@@ -271,7 +289,7 @@ class Decision(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     # 이 결정이 뒤집은 이전 결정 (제안서 5장의 결정 번복 추적)
     supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("decisions.id"))
-    evidence_utterance_ids: Mapped[list | None] = mapped_column(ARRAY(BigInteger))
+    evidence_utterance_ids: Mapped[list | None] = mapped_column(BigIntArray)
     confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = _now()
 
@@ -295,7 +313,7 @@ class MeetingTaskCandidate(Base):
     confidence: Mapped[float] = mapped_column(Numeric(4, 3), nullable=False)
     # LLM 출력의 근거. 존재하지 않는 ID를 참조하면 서버가 후보를 버린다.
     evidence_utterance_ids: Mapped[list] = mapped_column(
-        ARRAY(BigInteger), nullable=False
+        BigIntArray, nullable=False
     )
     # pending | approved | rejected
     review_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
@@ -318,9 +336,9 @@ class MeetingEvent(Base):
     start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     evidence_utterance_ids: Mapped[list] = mapped_column(
-        ARRAY(BigInteger), nullable=False
+        BigIntArray, nullable=False
     )
-    detail: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    detail: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -355,7 +373,7 @@ class ContributionEventRow(Base):
 
     magnitude: Mapped[float | None] = mapped_column(Numeric(12, 3))
     event_metadata: Mapped[dict] = mapped_column(
-        "metadata", JSONB, nullable=False, default=dict
+        "metadata", JSONType, nullable=False, default=dict
     )
 
     __table_args__ = (
@@ -375,7 +393,7 @@ class ScoringProfileRow(Base):
     id: Mapped[int] = _pk()
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"))
     project_role: Mapped[str] = mapped_column(String(20), nullable=False)
-    weights: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    weights: Mapped[dict] = mapped_column(JSONType, nullable=False)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = _now()
     note: Mapped[str | None] = mapped_column(Text)
@@ -409,7 +427,7 @@ class ScoreResult(Base):
     range_low: Mapped[float | None] = mapped_column(Numeric(6, 3))
     range_high: Mapped[float | None] = mapped_column(Numeric(6, 3))
     # 화면의 모든 숫자가 원본 이벤트로 역추적된다 (docs/07 E5)
-    evidence_ids: Mapped[list] = mapped_column(ARRAY(BigInteger), nullable=False)
+    evidence_ids: Mapped[list] = mapped_column(BigIntArray, nullable=False)
 
 
 class FinalContribution(Base):
@@ -445,7 +463,7 @@ class PeerReview(Base):
     reviewee_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     # {"team_contribution": 4, "interaction": 5, "keeping_on_track": 3,
     #  "expecting_quality": 4, "knowledge_skills": 4}
-    ratings: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    ratings: Mapped[dict] = mapped_column(JSONType, nullable=False)
     comment: Mapped[str | None] = mapped_column(Text)
     submitted_at: Mapped[datetime] = _now()
 
@@ -480,7 +498,7 @@ class RecordingConsent(Base):
     # recording | raw_audio_retention | voiceprint_storage
     consent_type: Mapped[str] = mapped_column(String(30), nullable=False)
     consented_at: Mapped[datetime] = _now()
-    ip_address: Mapped[str | None] = mapped_column(INET)
+    ip_address: Mapped[str | None] = mapped_column(InetType)
 
     __table_args__ = (
         UniqueConstraint(
@@ -537,7 +555,7 @@ class Voiceprint(Base):
     # 프로젝트 범위로 한정. 프로젝트가 끝나면 폐기한다.
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     # ECAPA-TDNN 192차원. 실제 컬럼은 pgvector 의 vector(192).
-    embedding: Mapped[list] = mapped_column(ARRAY(Numeric), nullable=False)
+    embedding: Mapped[list] = mapped_column(NumericArray, nullable=False)
     sample_asset_id: Mapped[int | None] = mapped_column(ForeignKey("audio_assets.id"))
     created_at: Mapped[datetime] = _now()
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -562,8 +580,8 @@ class AuditLog(Base):
     # candidate_approved | member_removed
     action: Mapped[str] = mapped_column(String(50), nullable=False)
     target: Mapped[str] = mapped_column(String(100), nullable=False)
-    before: Mapped[dict | None] = mapped_column(JSONB)
-    after: Mapped[dict | None] = mapped_column(JSONB)
+    before: Mapped[dict | None] = mapped_column(JSONType)
+    after: Mapped[dict | None] = mapped_column(JSONType)
     at: Mapped[datetime] = _now()
 
     __table_args__ = (Index("ix_audit_project_time", "project_id", "at"),)
@@ -578,5 +596,5 @@ class Report(Base):
     report_type: Mapped[str] = mapped_column(String(20), nullable=False)
     period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    content: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    content: Mapped[dict] = mapped_column(JSONType, nullable=False)
     generated_at: Mapped[datetime] = _now()
