@@ -17,14 +17,18 @@ import logging
 import wave
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 from sqlalchemy import select
 
+from teamflow.audio import assembly
+from teamflow.audio.chunk_store import ChunkStore
 from teamflow.config import Settings
 from teamflow.db import models as m
 from teamflow.db.session import session_scope
 from teamflow.pipeline.steps import LoadedTrack
+from teamflow.services import recording_service
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +119,93 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
         data = data.reshape(-1, n_channels).mean(axis=1)
 
     return data.astype(np.float32), sample_rate
+
+
+class ChunkDecoder(Protocol):
+    """청크 바이트 → PCM.
+
+    실제 구현은 FFmpeg 호출이다 (webm/opus, mp4/aac → 16kHz 모노 float32).
+    ⚠️ 이 개발 환경에는 ffmpeg 이 없어 구현을 넣지 않았습니다.
+    인터페이스만 확정하고, 순수 계산(배치·패딩)은 전부 검증했습니다.
+    """
+
+    def decode(self, data: bytes, *, target_sample_rate: int) -> np.ndarray: ...
+
+
+@dataclass
+class ChunkAudioLoader:
+    """업로드된 청크에서 트랙을 복원한다. **멀티트랙(모드 A)의 기본 경로다.**
+
+    `FileSystemAudioLoader` 와의 차이가 중요하다.
+
+        [FileSystemAudioLoader]  트랙당 WAV 하나. 정렬은 track.started_at 차이로.
+                                 → 폰이 중간에 멈췄으면 그 사실을 알 수 없다.
+
+        [ChunkAudioLoader]       청크를 절대 시각에 배치하고 공백은 무음으로.
+                                 → 모든 트랙이 같은 시간축. 길이도 같다.
+                                 → GCC-PHAT 미세 정렬이 비로소 의미를 가진다.
+
+    커버리지가 낮은 트랙도 **버리지 않고 usable=False 로 실어 보낸다.**
+    빼버리면 그 사람이 목록에서 사라져 결국 "말을 안 한 사람"이 된다.
+    0과 "측정 불가"는 다르고, 그 구분을 여기서 잃으면 복구할 수 없다.
+    """
+
+    store: ChunkStore
+    decoder: ChunkDecoder
+    timeslice_ms: int = 5_000
+    sample_rate: int = TARGET_SAMPLE_RATE
+    min_usable_coverage: float = recording_service.MIN_USABLE_COVERAGE
+
+    def load(self, meeting_id: int) -> list[LoadedTrack]:
+        with session_scope() as session:
+            tracks = session.scalars(
+                select(m.MeetingTrack)
+                .where(m.MeetingTrack.meeting_id == meeting_id)
+                .order_by(m.MeetingTrack.id)
+            ).all()
+            tracks = [t for t in tracks if t.ended_at is not None]
+            if not tracks:
+                return []
+
+            earliest = min(t.started_at for t in tracks)
+            loaded: list[LoadedTrack] = []
+            for track in tracks:
+                plan = recording_service.build_plan(
+                    session, track, timeslice_ms=self.timeslice_ms
+                )
+                samples = assembly.render(
+                    plan,
+                    self._decode_chunks(meeting_id, track.id, plan),
+                    sample_rate=self.sample_rate,
+                )
+                loaded.append(
+                    LoadedTrack(
+                        track_id=track.id,
+                        user_id=track.user_id,
+                        samples=samples,
+                        sample_rate=self.sample_rate,
+                        started_at_offset_sec=(track.started_at - earliest).total_seconds(),
+                        coverage=plan.coverage,
+                        usable=plan.coverage >= self.min_usable_coverage,
+                    )
+                )
+            return loaded
+
+    def _decode_chunks(
+        self, meeting_id: int, track_id: int, plan: assembly.TrackPlan
+    ) -> dict[int, np.ndarray]:
+        decoded: dict[int, np.ndarray] = {}
+        for placement in plan.placements:
+            try:
+                raw = self.store.read(meeting_id, track_id, placement.seq)
+                decoded[placement.seq] = self.decoder.decode(
+                    raw, target_sample_rate=self.sample_rate
+                )
+            except (OSError, ValueError) as exc:
+                # 청크 하나가 깨져도 나머지는 살린다. 그 자리는 무음이 되고,
+                # 어디가 비었는지는 plan.gaps 가 아니라 여기 로그로 남는다.
+                logger.warning("청크 디코딩 실패 track=%s seq=%s: %s", track_id, placement.seq, exc)
+        return decoded
 
 
 def build_loader(settings: Settings) -> FileSystemAudioLoader:

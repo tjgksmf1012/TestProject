@@ -141,13 +141,15 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 청크 파일 저장 (원자적 쓰기 · 경로 고정) | ✅ | `backend/teamflow/audio/chunk_store.py` |
 | 트랙 품질 기록 (커버리지·공백·캡처 경고) | ✅ | `backend/teamflow/services/recording_service.py` |
 | **트랙 재조립 — 공백 무음 패딩** | ✅ | `backend/teamflow/audio/assembly.py` |
+| 청크 → 정렬된 트랙 로더 | ✅ | `backend/teamflow/pipeline/runtime.py` |
+| 청크 디코더 (FFmpeg) | ⬜ | 인터페이스 확정. ffmpeg 있는 머신에서 |
 | HTTP 전송기 (시각 헤더·캐시 금지) | ✅ | `frontend/src/lib/recording/browser-adapter.ts` |
 | 브라우저 미디어 어댑터 (getUserMedia/MediaRecorder) | ⚠️ 미검증 | 〃 |
 | Next.js 화면 (녹음 UI · 승인 UI) | ⬜ | |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 441 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 450 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 

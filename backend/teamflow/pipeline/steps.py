@@ -30,6 +30,14 @@ class LoadedTrack:
     sample_rate: int
     started_at_offset_sec: float = 0.0  # 서버 타임스탬프 기준 상대 시작 시각
 
+    # ── 녹음 품질 (docs/04 §2.6) ──────────────────────────────
+    # 폰이 잠기면 트랙에 구멍이 뚫린다. 커버리지가 낮은 트랙을 그대로 쓰면
+    # 그 사람이 "말을 안 한 사람"이 된다.
+    coverage: float = 1.0
+    # False 면 이 사람의 발화량을 **측정할 수 없다**는 뜻이다.
+    # 0으로 처리하면 안 된다 — 0과 "모름"은 다르다.
+    usable: bool = True
+
 
 @dataclass(frozen=True, slots=True)
 class TranscribedSegment:
