@@ -59,3 +59,9 @@ ignore = [
     "RUF002",
     "RUF003",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic 자동생성 파일. 사람이 포맷을 맞출 대상이 아니다.
+"backend/migrations/versions/*" = ["E501"]
+# env.py 는 teamflow 를 import 하기 전에 sys.path 를 조작해야 한다.
+"backend/migrations/env.py" = ["E402"]
