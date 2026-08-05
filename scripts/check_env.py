@@ -72,6 +72,25 @@ class Gpu:
         return bool(self.capability and self.capability[0] >= 12)
 
 
+def parse_version(raw: str) -> tuple[int, ...]:
+    """'4.0.1', '5.13.0.dev0', '12.8' → 비교 가능한 정수 튜플.
+
+    숫자가 아닌 꼬리(`.dev0`, `+cu128`, `rc1`)는 버린다. 여기서 예외가 나면
+    안 된다 — 진단 도구가 진단 대상 때문에 죽으면 아무 진단도 못 한다.
+    """
+    parts: list[int] = []
+    for chunk in raw.split("."):
+        digits = ""
+        for ch in chunk:
+            if not ch.isdigit():
+                break
+            digits += ch
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
 def detect_ram_gb() -> float | None:
     try:
         if hasattr(os, "sysconf") and "SC_PAGE_SIZE" in os.sysconf_names:
@@ -147,7 +166,6 @@ def recommend(vram: float, ram: float | None) -> list[str]:
 
     docs/02-모델-선정과-VRAM-예산.md 의 티어 표와 같은 기준.
     """
-    ram = ram or 16.0
     lines: list[str] = []
 
     if vram <= 0:
@@ -184,7 +202,14 @@ def recommend(vram: float, ram: float | None) -> list[str]:
             "  전략      순차 적재. ASR+화자분리 상주도 가능",
         ]
 
-    if ram >= 32 and 0 < vram < 14:
+    if ram is None:
+        # 모르는 값을 기본값으로 메우고 단정하지 않는다. RAM 32GB 여부는 이
+        # 프로젝트에서 "LLM 을 CPU 로 내린다"는 전략 전체가 걸린 조건이라,
+        # 조용히 16GB 로 가정해 버리면 가장 중요한 권고가 사라진다.
+        lines.append(f"  {YELLOW}RAM 탐지 실패{RESET} — 직접 확인하세요")
+        if 0 < vram < 14:
+            lines.append(f"  {DIM}32GB 이상이면 LLM 단계를 CPU로 내리는 쪽이 유리합니다{RESET}")
+    elif ram >= 32 and 0 < vram < 14:
         lines.append(
             f"  {GREEN}RAM {ram:.0f}GB{RESET} — LLM 단계를 CPU로 내리면 VRAM이 크게 여유로워집니다"
         )
@@ -236,14 +261,16 @@ def check_hardware() -> tuple[float, float | None]:
             print(f"{WARN} 사용 가능한 GPU 없음 — CPU 전용 구성으로 진행합니다")
         return 0.0, ram
 
-    total = 0.0
+    # 합이 아니라 **가장 큰 한 장**이다. 모델 하나는 카드 하나에 올라가므로
+    # 8GB 두 장은 16GB 가 아니다. 합으로 잡으면 티어를 한 칸 올려 추천하게 된다.
+    largest = 0.0
     for i, g in enumerate(gpus):
         cap = f"sm_{g.capability[0]}{g.capability[1]}" if g.capability else "?"
         print(f"{OK} GPU {i}: {g.name}  {g.vram_gb:.1f}GB  [{g.arch} / {cap}]")
-        total = max(total, g.vram_gb)
+        largest = max(largest, g.vram_gb)
 
         if g.needs_cu128:
-            need = cuda_build and tuple(map(int, cuda_build.split("."))) >= (12, 8)
+            need = bool(cuda_build) and parse_version(cuda_build or "") >= (12, 8)
             mark = OK if need else FAIL
             print(f"  {mark} Blackwell — PyTorch 2.7+ / cu128 휠 필수")
             if not need:
@@ -256,7 +283,40 @@ def check_hardware() -> tuple[float, float | None]:
                 f"  {INFO} FP8 {'지원' if g.supports_fp8 else '미지원'}"
                 f"{'' if g.supports_fp8 else ' — KV 캐시는 INT8 양자화 사용'}"
             )
-    return total, ram
+    return largest, ram
+
+
+#: 이 버전 아래면 설치돼 있어도 안 됩니다. **설치 여부만 보면 안 되는 이유**가 있는
+#: 것들만 넣습니다 — Qwen3-ASR 은 transformers v5.13 부터 네이티브 지원이고,
+#: community-1 은 pyannote.audio v4.0 부터입니다. 4.x transformers 에 초록 체크를
+#:찍어주면 사용자는 준비가 끝난 줄 알고 모델 로딩에서 처음 막힙니다.
+MIN_VERSIONS: dict[str, tuple[int, ...]] = {
+    "transformers": (5, 13),
+    "pyannote.audio": (4, 0),
+}
+
+
+def module_version(name: str) -> str | None:
+    """설치된 패키지 버전. 없으면 None, 알 수 없으면 빈 문자열.
+
+    `__import__("pyannote.audio")` 는 최상위 `pyannote` 를 돌려주므로
+    `__version__` 을 읽으면 엉뚱한 것을 본다. 배포 메타데이터를 먼저 본다.
+    """
+    from importlib import import_module
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        import_module(name)
+    except ImportError:
+        return None
+    except Exception:  # 임포트가 무거워 다른 이유로 터질 수 있다 (CUDA 초기화 등)
+        return ""
+
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        module = sys.modules.get(name)
+        return str(getattr(module, "__version__", "") or "")
 
 
 def check_packages() -> None:
@@ -275,33 +335,37 @@ def check_packages() -> None:
     ]
 
     for mod, why in required:
-        try:
-            __import__(mod.replace("-", "_").replace(".", "_") if mod != "pyannote.audio" else mod)
-            print(f"{OK} {mod:16} {DIM}{why}{RESET}")
-        except ImportError:
-            print(f"{FAIL} {mod:16} {DIM}{why}{RESET}")
+        mark = OK if module_version(mod) is not None else FAIL
+        print(f"{mark} {mod:16} {DIM}{why}{RESET}")
 
     print()
     for mod, why in optional:
-        try:
-            m = __import__(mod)
-            ver = getattr(m, "__version__", "?")
-            print(f"{OK} {mod:16} {ver:10} {DIM}{why}{RESET}")
-        except ImportError:
+        found = module_version(mod)
+        if found is None:
             print(f"{INFO} {mod:16} {'미설치':10} {DIM}{why}{RESET}")
+            continue
+
+        mark, note = OK, ""
+        minimum = MIN_VERSIONS.get(mod)
+        if minimum and found and parse_version(found) < minimum:
+            mark = FAIL
+            note = f"  {RED}← v{'.'.join(map(str, minimum))} 이상 필요{RESET}"
+        print(f"{mark} {mod:16} {found or '?':10} {DIM}{why}{RESET}{note}")
 
 
 def check_external() -> None:
     h("4. 외부 도구")
+    # required=True 는 "없으면 모드 A 가 아예 안 돈다"는 뜻이다.
+    # ffmpeg 이 없으면 청크를 하나도 디코딩할 수 없다 — 회의가 통째로 빈다.
     tools = [
-        ("ffmpeg", "오디오 전처리 — 필수"),
-        ("cloudflared", "HTTPS 터널 — 멀티트랙 녹음에 필수"),
-        ("docker", "인프라 (postgres/redis)"),
-        ("psql", "DB 클라이언트"),
+        ("ffmpeg", "오디오 전처리 — 없으면 청크를 디코딩할 수 없습니다", True),
+        ("cloudflared", "HTTPS 터널 — 폰에서 마이크를 열려면 필요", False),
+        ("docker", "인프라 (postgres/redis)", False),
+        ("psql", "DB 클라이언트", False),
     ]
-    for cmd, why in tools:
-        path = shutil.which(cmd)
-        mark = OK if path else WARN
+    for cmd, why, required in tools:
+        found = shutil.which(cmd)
+        mark = OK if found else (FAIL if required else WARN)
         print(f"{mark} {cmd:14} {DIM}{why}{RESET}")
 
     print()

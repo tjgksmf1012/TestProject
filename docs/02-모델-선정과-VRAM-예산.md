@@ -68,11 +68,16 @@ python3 scripts/check_env.py     # 전체 진단
 ```
 
 - [ ] `torch.cuda.is_available()` 이 True
-- [ ] `transformers` ≥ 5.13 (Qwen3-ASR 네이티브 지원)
-- [ ] `pyannote.audio` ≥ 4.0 + `HF_TOKEN` (community-1은 gated)
+- [ ] `transformers` ≥ 5.13 (Qwen3-ASR 네이티브 지원) — 스크립트가 버전을 대조합니다
+- [ ] `pyannote.audio` ≥ 4.0 + `HF_TOKEN` (community-1은 gated) — 〃
 - [ ] vLLM 사전빌드 휠 설치 성공
-- [ ] `ffmpeg` 설치
+- [ ] `ffmpeg` 설치 — 없으면 ✗ 로 나옵니다. 모드 A 가 아예 안 돕니다
 - [ ] `cloudflared` 로 HTTPS 터널 → **폰 2대에서 마이크 권한 팝업 확인**
+
+> 버전은 **설치 여부와 별개로** 봐야 합니다. transformers 4.x 가 깔려 있어도
+> Qwen3-ASR 은 안 올라갑니다. 스크립트가 초록 체크를 찍어 주면 사용자는
+> 준비가 끝난 줄 알고 모델 로딩에서 처음 막히므로, 두 패키지는 버전이
+> 모자라면 ✗ 로 표시합니다 (`MIN_VERSIONS`, `test_check_env.py` 로 고정).
 
 마지막 항목이 멀티트랙 설계의 전제조건입니다. → [`11-비용-제로-구성.md`](11-비용-제로-구성.md) §3
 
