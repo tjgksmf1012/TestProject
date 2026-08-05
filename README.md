@@ -106,6 +106,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | GitHub 이벤트 정규화 | ✅ | `backend/teamflow/contribution/github_ingest.py` |
 | 역할별 가중치 프로파일 | ✅ | `backend/teamflow/contribution/profiles.py` |
 | 신뢰도·조정범위 계산 | ✅ | `backend/teamflow/contribution/confidence.py` |
+| **측정 불가 처리 (0점과 구분)** | ✅ | `backend/teamflow/contribution/scoring.py` |
 | 기여도 산정 엔진 | ✅ | `backend/teamflow/contribution/scoring.py` |
 | DB 스키마 (26개 테이블) | ✅ | `backend/teamflow/db/models.py` |
 | **조작 저항성 테스트** | ✅ **24 시나리오** | `backend/tests/test_anti_gaming.py` |
@@ -149,7 +150,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 450 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 466 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 

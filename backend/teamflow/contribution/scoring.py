@@ -202,6 +202,24 @@ class IntegrityFlag:
 
 
 @dataclass(frozen=True, slots=True)
+class MeasurementGap:
+    """이 사람의 이 영역은 **측정하지 못했다**는 표시.
+
+    0점과는 완전히 다르다. 폰이 잠겨 녹음이 끊긴 사람을 "말을 안 한 사람"으로
+    처리하면 그건 측정이 아니라 오답이다 (docs/04 §2.6).
+
+    측정하지 못한 영역은 그 사람의 점수 계산에서 **빼고 나머지로 재정규화**한다.
+    즉 "회의 기여도가 0" 이 아니라 "회의 기여도는 나머지 활동과 같은 수준이라고
+    가정" 하는 것이다. 근거 없는 벌점보다 근거 없는 평균이 낫다 —
+    그리고 그 가정을 여기에 표시해서 사람이 고칠 수 있게 한다.
+    """
+
+    category: Category
+    reason: str
+    detail: dict[str, float | int | str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class MemberScore:
     user_id: int
     role: str
@@ -211,6 +229,7 @@ class MemberScore:
     confidence: ConfidenceBreakdown
     categories: dict[Category, CategoryScore]
     integrity_flags: list[IntegrityFlag] = field(default_factory=list)
+    measurement_gaps: list[MeasurementGap] = field(default_factory=list)
 
     @property
     def evidence_ids(self) -> list[int]:
@@ -327,6 +346,7 @@ def score_team(
     events_by_user: dict[int, list[ContributionEvent]],
     profiles: dict[int, ScoringProfile],
     coverage: CoverageStats,
+    unmeasurable: dict[int, list[MeasurementGap]] | None = None,
 ) -> TeamScoreResult:
     """팀 전체 기여도를 산정한다.
 
@@ -334,10 +354,14 @@ def score_team(
         events_by_user: 멤버별 기여 이벤트. 중복은 내부에서 제거된다.
         profiles: 멤버별 역할 가중치 프로파일.
         coverage: 신뢰도 계산용 데이터 커버리지 (프로젝트 전체 공통).
+        unmeasurable: 멤버별로 **측정하지 못한** 영역. 그 영역은 해당 멤버의
+            가중치 재정규화에서 제외된다 — 0점을 주는 것과 다르다.
+            예: 녹음이 끊긴 트랙 → 그 사람의 MEETING 은 측정 불가.
 
     Returns:
         멤버별 점유율·신뢰도·조정범위·근거를 담은 결과.
     """
+    gaps: dict[int, list[MeasurementGap]] = unmeasurable or {}
     users = sorted(events_by_user)
     clean: dict[int, list[ContributionEvent]] = {
         uid: deduplicate(events_by_user[uid]) for uid in users
@@ -364,12 +388,22 @@ def score_team(
 
     for uid in users:
         profile = profiles[uid]
-        # 이 멤버의 가중치를 활성 카테고리에 대해서만 재정규화
-        active_weight_total = sum(profile.weight(c) for c in active)
+        # 측정하지 못한 영역은 이 사람의 계산에서 뺀다. 남기면 0점이 되고,
+        # 0점은 "안 했다"는 뜻이 되어버린다 — 우리가 아는 건 "모른다" 뿐이다.
+        unmeasured = {g.category for g in gaps.get(uid, [])}
+        scored_categories = [c for c in active if c not in unmeasured]
+
+        # 전부 측정 불가면 뺄 수 없다. 그때는 원래대로 두고 표시만 한다 —
+        # 아무 카테고리도 없으면 점수 자체를 만들 수 없기 때문이다.
+        if not scored_categories:
+            scored_categories = active
+
+        # 이 멤버의 가중치를 측정 가능한 카테고리에 대해서만 재정규화
+        active_weight_total = sum(profile.weight(c) for c in scored_categories)
         member_categories: dict[Category, CategoryScore] = {}
         total = 0.0
 
-        for category in active:
+        for category in scored_categories:
             base_weight = profile.weight(category)
             norm_weight = base_weight / active_weight_total if active_weight_total > 0 else 0.0
             share = raws[uid][category] / team_totals[category]
@@ -401,6 +435,7 @@ def score_team(
             confidence=confidence,
             categories=category_scores[uid],
             integrity_flags=_detect_integrity_flags(clean[uid]),
+            measurement_gaps=list(gaps.get(uid, [])),
         )
 
     return TeamScoreResult(

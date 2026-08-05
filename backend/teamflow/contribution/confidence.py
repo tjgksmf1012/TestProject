@@ -29,6 +29,14 @@ class CoverageStats:
     # 'diarization'(SPEAKER_XX 미매핑)은 불확실한 것으로 본다.
     utterances_speaker_certain: int = 0
 
+    # 녹음 트랙 품질. 폰이 잠기면 그 사람 트랙에 구멍이 뚫린다 (docs/04 §2.6).
+    #
+    # ⚠️ 이 신호가 없으면 **망가진 녹음이 오히려 높은 신뢰도로 보인다.**
+    # 멀티트랙에서는 트랙이 곧 사람이라 화자 확정도(speaker_certainty)가 항상
+    # 1.0 이기 때문이다. 40%만 녹음된 회의도 "화자가 전부 확정됨"으로 잡힌다.
+    tracks_total: int = 0
+    tracks_usable: int = 0
+
     project_days: int = 0
     github_connected_days: int = 0
 
@@ -59,6 +67,7 @@ class ConfidenceBreakdown:
 _WEIGHTS: dict[str, float] = {
     "meeting_recording": 1.0,
     "speaker_certainty": 1.5,  # 화자 오류는 기여도로 직접 전파되므로 가중치가 높다
+    "track_quality": 1.5,  # 끊긴 트랙도 마찬가지다 — 안 들린 말은 세지지 않는다
     "github_coverage": 1.0,
     "peer_completion": 0.5,
 }
@@ -66,6 +75,7 @@ _WEIGHTS: dict[str, float] = {
 _REASON_TEXT: dict[str, str] = {
     "meeting_recording": "녹음되지 않은 회의가 있습니다",
     "speaker_certainty": "화자가 확정되지 않은 발화가 있습니다",
+    "track_quality": "녹음이 끊긴 트랙이 있습니다 — 해당 팀원의 발언량은 측정할 수 없습니다",
     "github_coverage": "GitHub 연결 이전 기간의 활동이 누락되었습니다",
     "peer_completion": "동료평가 미제출자가 있습니다",
 }
@@ -80,6 +90,7 @@ def compute_confidence(stats: CoverageStats, *, threshold: float = 0.9) -> Confi
     raw: dict[str, float | None] = {
         "meeting_recording": _ratio(stats.meetings_recorded, stats.meetings_total),
         "speaker_certainty": _ratio(stats.utterances_speaker_certain, stats.utterances_total),
+        "track_quality": _ratio(stats.tracks_usable, stats.tracks_total),
         "github_coverage": _ratio(stats.github_connected_days, stats.project_days),
         "peer_completion": _ratio(stats.peer_reviews_submitted, stats.peer_reviews_expected),
     }

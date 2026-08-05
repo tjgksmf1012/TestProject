@@ -12,18 +12,23 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from teamflow.contribution.confidence import CoverageStats
-from teamflow.contribution.events import ContributionEvent, EventType, SourceKind
+from teamflow.contribution.events import (
+    Category,
+    ContributionEvent,
+    EventType,
+    SourceKind,
+)
 from teamflow.contribution.profiles import (
     DEFAULT_PROFILES,
     Role,
     ScoringProfile,
     blended_profile,
 )
-from teamflow.contribution.scoring import TeamScoreResult, score_team
+from teamflow.contribution.scoring import MeasurementGap, TeamScoreResult, score_team
 from teamflow.db import models as m
 
 
@@ -115,6 +120,27 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         or 0
     )
 
+    # 녹음 트랙 품질. 이 신호가 없으면 망가진 녹음이 오히려 높은 신뢰도로
+    # 보인다 — 멀티트랙에서는 화자 확정도가 항상 1.0 이기 때문이다.
+    tracks_total = (
+        session.scalar(
+            select(func.count(m.MeetingTrack.id)).where(
+                m.MeetingTrack.meeting_id.in_(meeting_ids),
+                m.MeetingTrack.ended_at.is_not(None),
+            )
+        )
+        or 0
+    )
+    tracks_usable = (
+        session.scalar(
+            select(func.count(m.MeetingTrack.id)).where(
+                m.MeetingTrack.meeting_id.in_(meeting_ids),
+                m.MeetingTrack.status == "completed",
+            )
+        )
+        or 0
+    )
+
     project = session.get(m.Project, project_id)
     project_days = 0
     github_days = 0
@@ -145,11 +171,65 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         meetings_recorded=meetings_recorded,
         utterances_total=utterances_total,
         utterances_speaker_certain=utterances_certain,
+        tracks_total=tracks_total,
+        tracks_usable=tracks_usable,
         project_days=project_days,
         github_connected_days=min(github_days, project_days) if project_days else 0,
         peer_reviews_expected=peer_expected,
         peer_reviews_submitted=peer_submitted,
     )
+
+
+# 이 사람 트랙의 절반 넘게 못 쓰게 됐으면 회의 기여도를 "측정 불가"로 본다.
+#
+# 왜 0.5 인가: 회의 한 번 끊긴 걸로 회의 영역을 통째로 빼면 과잉 반응이다.
+# 절반을 넘겨 잃으면 남은 데이터로 비교하는 게 더 위험해진다.
+#
+# ⚠️ 남는 한계: 5번 중 1번을 잃은 사람은 여전히 조금 불리하다. 그건
+# 프로젝트 전체 신뢰도(track_quality)에 반영될 뿐 개인 보정은 하지 않는다.
+# 근거 없이 보정하면 그게 또 다른 왜곡이다. (docs/05 §4.1)
+MIN_MEASURABLE_TRACK_RATIO = 0.5
+
+
+def load_measurement_gaps(
+    session: Session, project_id: int
+) -> dict[int, list[MeasurementGap]]:
+    """녹음이 끊겨 발언량을 측정할 수 없는 사람을 찾는다.
+
+    **0점을 주지 않기 위한 함수다.** 폰이 잠긴 사람을 "말을 안 한 사람"으로
+    처리하면 측정이 아니라 오답이다 (docs/04 §2.6).
+    """
+    meeting_ids = select(m.Meeting.id).where(m.Meeting.project_id == project_id)
+    rows = session.execute(
+        select(
+            m.MeetingTrack.user_id,
+            func.count(m.MeetingTrack.id),
+            func.sum(case((m.MeetingTrack.status == "completed", 1), else_=0)),
+        )
+        .where(
+            m.MeetingTrack.meeting_id.in_(meeting_ids),
+            m.MeetingTrack.ended_at.is_not(None),
+        )
+        .group_by(m.MeetingTrack.user_id)
+    ).all()
+
+    gaps: dict[int, list[MeasurementGap]] = {}
+    for user_id, total, usable in rows:
+        total = int(total or 0)
+        usable = int(usable or 0)
+        if total == 0 or usable / total >= MIN_MEASURABLE_TRACK_RATIO:
+            continue
+        gaps[user_id] = [
+            MeasurementGap(
+                category=Category.MEETING,
+                reason=(
+                    f"녹음 {total}건 중 {total - usable}건이 끊겼습니다. "
+                    "발언량을 측정할 수 없어 회의 기여도를 계산에서 제외했습니다"
+                ),
+                detail={"tracks_total": total, "tracks_usable": usable},
+            )
+        ]
+    return gaps
 
 
 def compute(session: Session, project_id: int) -> TeamScoreResult:
@@ -162,4 +242,9 @@ def compute(session: Session, project_id: int) -> TeamScoreResult:
     for user_id in profiles:
         events.setdefault(user_id, [])
 
-    return score_team(events, profiles, load_coverage(session, project_id))
+    return score_team(
+        events,
+        profiles,
+        load_coverage(session, project_id),
+        unmeasurable=load_measurement_gaps(session, project_id),
+    )

@@ -536,6 +536,8 @@ class MemberScoreOut(BaseModel):
     confidence_reasons: list[str]
     categories: list[CategoryOut]
     integrity_flags: list[dict[str, Any]]
+    # 측정하지 못한 영역. 0점과 다르다는 걸 화면이 반드시 구분해서 보여야 한다.
+    measurement_gaps: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ScoreOut(BaseModel):
@@ -587,6 +589,14 @@ def contributions(project_id: int, session: DbSession, settings: AppSettings) ->
                 integrity_flags=[
                     {"code": f.code, "message": f.message, "detail": f.detail}
                     for f in ms.integrity_flags
+                ],
+                measurement_gaps=[
+                    {
+                        "category": g.category.value,
+                        "reason": g.reason,
+                        "detail": g.detail,
+                    }
+                    for g in ms.measurement_gaps
                 ],
             )
             for ms in result.members.values()
