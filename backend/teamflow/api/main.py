@@ -364,6 +364,37 @@ def list_tracks(meeting_id: int, session: DbSession) -> dict[str, Any]:
 # ══════════════════════════════════════════════════════════════
 
 
+class MemberOut(BaseModel):
+    user_id: int
+    name: str
+    role_shares: dict[str, float]
+
+
+@app.get("/api/meetings/{meeting_id}/members", response_model=list[MemberOut])
+def list_meeting_members(meeting_id: int, session: DbSession) -> list[MemberOut]:
+    """이 회의가 속한 프로젝트의 팀원.
+
+    승인 화면이 담당자를 고르려면 명단이 필요하다. 명단 없이 담당자 id 를
+    직접 입력하게 하면 오타 하나로 엉뚱한 사람에게 업무가 붙는다 —
+    서버가 `unknown_assignee` 로 막긴 하지만, 애초에 고를 수 있게 하는 게 맞다.
+    """
+    meeting = _load_meeting(session, meeting_id)
+    rows = session.execute(
+        select(m.Member, m.User)
+        .join(m.User, m.User.id == m.Member.user_id)
+        .where(m.Member.project_id == meeting.project_id)
+        .order_by(m.Member.id)
+    ).all()
+    return [
+        MemberOut(
+            user_id=member.user_id,
+            name=user.name,
+            role_shares={k: float(v) for k, v in (member.role_shares or {}).items()},
+        )
+        for member, user in rows
+    ]
+
+
 @app.get("/api/meetings/{meeting_id}/candidates", response_model=list[CandidateOut])
 def list_candidates(meeting_id: int, session: DbSession) -> list[CandidateOut]:
     """검토 대기 중인 업무 후보. 확신도가 낮은 것부터 나온다."""

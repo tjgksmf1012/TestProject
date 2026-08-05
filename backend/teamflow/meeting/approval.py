@@ -39,6 +39,7 @@ class ApprovalError(StrEnum):
     NO_REVIEWER = "no_reviewer"
     DEADLINE_IN_PAST = "deadline_in_past"
     UNKNOWN_ASSIGNEE = "unknown_assignee"
+    NO_EVIDENCE = "no_evidence"
 
 
 _ERROR_TEXT: dict[ApprovalError, str] = {
@@ -49,6 +50,7 @@ _ERROR_TEXT: dict[ApprovalError, str] = {
     ApprovalError.NO_REVIEWER: "승인자 정보가 없습니다",
     ApprovalError.DEADLINE_IN_PAST: "마감일이 과거입니다",
     ApprovalError.UNKNOWN_ASSIGNEE: "담당자가 이 프로젝트의 팀원이 아닙니다",
+    ApprovalError.NO_EVIDENCE: "근거 발화가 없습니다 — 회의에 없던 내용일 수 있습니다",
 }
 
 
@@ -205,6 +207,15 @@ def apply_approval(
         if request.deadline_override is not None
         else candidate.deadline
     )
+
+    # 근거 없는 후보는 사람이 고쳐도 통과시킬 수 없다.
+    #
+    # LLM 출력 단계에서 이미 막지만(meeting/schema.py 의 min_length=1,
+    # meeting/validation.py), 여기서 한 번 더 본다. 환각을 담당자·마감일만
+    # 채워 승인하는 경로가 생기면 환각 방어 전체가 무의미해진다.
+    # docs/04 §4.1
+    if not candidate.evidence_utterance_ids:
+        errors.append(ApprovalError.NO_EVIDENCE)
 
     if assignee_id is None:
         errors.append(ApprovalError.MISSING_ASSIGNEE)

@@ -123,12 +123,13 @@ WebKit 의 제약입니다. Screen Wake Lock(iOS 16.4+)으로 완화할 수 있�
 | | 상태 |
 |---|---|
 | clock / timeline / upload-queue / session / capture / client | ✅ 160개 테스트 |
+| review/candidates (승인 규칙·페이로드) | ✅ 38개 테스트 |
 | browser-adapter.ts — HTTP 전송기 | ✅ fetch 를 갈아끼워 검증 |
 | browser-adapter.ts — 미디어 어댑터 | ⚠️ 문법 로딩만 확인. 실기기 확인 필요 |
 | iOS Safari 실제 중단 동작 | ⚠️ 문헌 근거만. 실측 필요 |
 | 타입 검사 (`tsc --noEmit`, strict) | ✅ 통과 |
 | 실기기 테스트 페이지 (`src/demo/`) | ⚠️ 화면 코드라 자동 테스트 없음 |
-| 승인 화면 | ⬜ 미착수 |
+| 승인 화면 (`public/review.html`) | ⚠️ 화면 코드라 자동 테스트 없음 |
 
 실기기에서 확인해야 하는 항목은 [docs/09 §C](../docs/09-리스크와-검증-실험.md)에
 있습니다.
@@ -142,6 +143,9 @@ WebKit 의 제약입니다. Screen Wake Lock(iOS 16.4+)으로 완화할 수 있�
 | `PUT …/tracks/{tid}/chunks/{seq}` | 청크 하나. PUT 이라 재시도가 안전합니다. `X-Client-At-Ms` 헤더 필수. |
 | `GET …/tracks/{tid}/chunks` | 서버가 가진 seq 목록. `UploadQueue.resumeWith()` 에 그대로 넣습니다. |
 | `POST …/tracks/{tid}/complete` | 종료 요약(커버리지·공백·캡처 경고). 서버가 실제 청크 수와 대조합니다. |
+| `GET /api/meetings/{id}/candidates` | 업무 후보. 확신도 낮은 것부터. |
+| `GET /api/meetings/{id}/members` | 팀원 명단. 담당자를 **고르게** 하려면 필요합니다. |
+| `POST …/candidates/review` | 승인·거절 제출. 실패는 **코드**로 오고 화면이 문구로 옮깁니다. |
 
 동의 검사는 클라이언트와 서버 **양쪽**에 있습니다. 클라이언트 검사는 UX 이고,
 서버 검사는 법적 방어선입니다 — 요청은 curl 로도 보낼 수 있습니다.

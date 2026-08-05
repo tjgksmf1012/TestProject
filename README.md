@@ -148,15 +148,16 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 브라우저 미디어 어댑터 (getUserMedia/MediaRecorder) | ⚠️ 미검증 | 〃 |
 | **실기기 녹음 테스트 페이지** (실험 5용) | ✅ | `frontend/src/demo/`, `frontend/public/` |
 | 타입 검사 (`tsc --noEmit`, strict) | ✅ | `frontend/tsconfig.json` |
-| 승인 화면 | ⬜ | |
+| **업무 후보 승인 화면** | ✅ | `frontend/src/lib/review/`, `frontend/public/review.html` |
+| 팀원 명단 API (승인 화면용) | ✅ | `backend/teamflow/api/main.py` |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 466 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 470 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 160 passed, 설치 불필요
+cd frontend && npm test                          # 198 passed, 설치 불필요
 cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
 
 cp .env.example .env                             # 시크릿 채우기

@@ -614,3 +614,62 @@ def test_contributions_blended_role_is_supported(client: TestClient, seeded):
     member = next(mem for mem in data["members"] if mem["user_id"] == seeded["user_ids"][2])
     assert member["role"] == "developer"  # 비중이 큰 쪽
     assert member["share"] > 0
+
+
+# ══════════════════════════════════════════════════════════════
+# 팀원 명단 (승인 화면용)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_meeting_members_lists_the_project_roster(client: TestClient, seeded):
+    body = client.get(f"/api/meetings/{seeded['meeting_id']}/members").json()
+
+    assert [m["user_id"] for m in body] == seeded["user_ids"]
+    assert [m["name"] for m in body] == ["김민수", "이하늘", "박지원"]
+
+
+def test_meeting_members_includes_role_shares(client: TestClient, seeded):
+    """겸직도 그대로 보여준다 — 역할이 가중치를 바꾸므로 승인자가 알아야 한다."""
+    body = client.get(f"/api/meetings/{seeded['meeting_id']}/members").json()
+
+    assert body[0]["role_shares"] == {"developer": 1.0}
+    assert body[2]["role_shares"] == {"developer": 0.6, "planner": 0.4}
+
+
+def test_meeting_members_404_for_unknown_meeting(client: TestClient, seeded):
+    assert client.get("/api/meetings/99999/members").status_code == 404
+
+
+def test_candidate_without_evidence_cannot_be_approved(client: TestClient, seeded, engine):
+    """⭐ 환각을 사람이 "고쳐서" 통과시키는 경로를 만들면 안 된다.
+
+    담당자·마감일이 다 채워져 있어도 근거 발화가 없으면 승인할 수 없다.
+    LLM 출력 단계에서 이미 막지만(schema min_length=1), 승인 단계에서
+    한 번 더 본다 — 방어가 한 겹뿐이면 그 겹이 뚫렸을 때 끝이다.
+    """
+    with db_session.session_scope() as s:
+        hallucinated = m.MeetingTaskCandidate(
+            meeting_id=seeded["meeting_id"],
+            title="회의에 없던 업무",
+            assignee_id=seeded["user_ids"][0],
+            deadline=datetime(2026, 9, 20, tzinfo=UTC),
+            confidence=0.9,
+            evidence_utterance_ids=[],  # 근거 없음
+        )
+        s.add(hallucinated)
+        s.flush()
+        candidate_id = hallucinated.id
+
+    response = client.post(
+        f"/api/meetings/{seeded['meeting_id']}/candidates/review",
+        json={
+            "reviewer_id": seeded["user_ids"][0],
+            "items": [{"candidate_id": candidate_id, "approve": True}],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["approved_count"] == 0
+    # 서버는 코드를 돌려주고 화면이 문구로 옮긴다 (frontend candidates.ts)
+    assert body["failures"][str(candidate_id)] == ["no_evidence"]
