@@ -120,13 +120,16 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **보존기간 삭제 잡** (법적 요구사항) | ✅ | `backend/teamflow/jobs/retention.py` |
 | **멀티트랙 정렬 (GCC-PHAT)** | ✅ | `backend/teamflow/audio/multitrack.py` |
 | **누출 제거 · 주화자 판정 · 동시발언** | ✅ | 〃 |
+| **회의 처리 파이프라인 오케스트레이션** | ✅ | `backend/teamflow/pipeline/` |
+| **Celery 앱 · 태스크 · beat 스케줄** | ✅ | `backend/teamflow/tasks/` |
+| 오디오 로더 (WAV, 경로 탈출 차단) | ✅ | `backend/teamflow/pipeline/runtime.py` |
 | LLM 클라이언트 (vLLM / llama.cpp) | ⚠️ 미검증 | `backend/teamflow/meeting/llm.py` |
-| ASR·화자분리 파이프라인 | ⬜ | 실제 GPU 머신에서 |
+| ASR·화자분리 **모델 구현** | ⬜ | 인터페이스 확정, 실제 GPU 머신에서 |
 | Next.js 프런트 | ⬜ | |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 298 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 337 passed
 .venv/bin/ruff check backend/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
