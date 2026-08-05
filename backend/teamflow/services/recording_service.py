@@ -318,3 +318,130 @@ def track_health(session: Session, meeting_id: int) -> list[dict]:
 
 def now_utc() -> datetime:
     return datetime.now(UTC)
+
+
+# ══════════════════════════════════════════════════════════════
+# 녹음 종료 → 처리 시작
+# ══════════════════════════════════════════════════════════════
+#
+# 이 연결이 없으면 녹음은 저장되기만 하고 아무 일도 일어나지 않는다.
+# 회의 하나는 참여자 수만큼의 트랙으로 이루어지고, **전원이 끝내야** 처리를
+# 시작할 수 있다 — 한 명이라도 녹음 중이면 그 사람 발언이 통째로 빠진다.
+
+
+@dataclass(frozen=True, slots=True)
+class FinalizeResult:
+    """녹음 종료 판정."""
+
+    ready: bool
+    #: 이번 호출이 처리 시작을 **확정한** 경우에만 True.
+    #: 동시에 두 명이 종료해도 하나만 True 가 된다.
+    should_enqueue: bool
+    total_tracks: int
+    finished_tracks: int
+    reason: str
+
+
+def try_finalize_meeting(
+    session: Session, meeting_id: int, *, force: bool = False
+) -> FinalizeResult:
+    """전원이 녹음을 끝냈으면 회의를 처리 대기로 옮긴다.
+
+    ## "전원" 은 트랙이 아니라 **동의한 사람** 기준이다
+
+    트랙만 세면, 첫 번째 사람이 종료하는 순간 "트랙이 하나 있고 그게 끝났다"
+    가 되어 처리가 시작된다. 나머지가 아직 녹음 중인데도. (실제로 그 버그를
+    테스트가 잡았다.)
+
+    동의 기록이 참여자 명단이다 (`consent_status` 와 같은 기준). 동의했는데
+    아직 참가하지 않은 사람이 있으면 기다린다.
+
+    ## 멱등하다
+
+    마지막 두 사람이 동시에 종료해도 `should_enqueue` 는 한 번만 True 다.
+    두 번 큐에 들어가면 GPU 잡이 두 번 돌고 발화가 중복 저장된다.
+    상태를 'pending' → 'queued' 로 바꾸는 것이 그 자물쇠다.
+
+    Args:
+        force: 참가하지 않은 사람을 기다리지 않는다. `/finish` 전용 —
+            브라우저를 닫은 사람 때문에 회의가 영영 안 끝나는 걸 푼다.
+    """
+    meeting = session.get(m.Meeting, meeting_id)
+    if meeting is None:
+        raise TrackError("회의를 찾을 수 없습니다")
+
+    tracks = session.scalars(
+        select(m.MeetingTrack).where(m.MeetingTrack.meeting_id == meeting_id)
+    ).all()
+    finished = [t for t in tracks if t.ended_at is not None]
+
+    if not tracks:
+        return FinalizeResult(False, False, 0, 0, "트랙이 없습니다")
+
+    if len(finished) < len(tracks):
+        waiting = len(tracks) - len(finished)
+        return FinalizeResult(
+            False, False, len(tracks), len(finished), f"{waiting}명이 아직 녹음 중입니다"
+        )
+
+    if not force:
+        expected = {
+            row.user_id
+            for row in session.scalars(
+                select(m.RecordingConsent).where(
+                    m.RecordingConsent.meeting_id == meeting_id,
+                    m.RecordingConsent.consent_type == RECORDING_CONSENT,
+                    m.RecordingConsent.consented.is_(True),
+                )
+            ).all()
+        }
+        joined = {t.user_id for t in tracks}
+        missing = expected - joined
+        if missing:
+            return FinalizeResult(
+                False,
+                False,
+                len(tracks),
+                len(finished),
+                f"{len(missing)}명이 아직 참가하지 않았습니다",
+            )
+
+    if meeting.status != "pending":
+        # 이미 누가 먼저 확정했다. 상태만 알려주고 큐에는 넣지 않는다.
+        return FinalizeResult(
+            True, False, len(tracks), len(finished), f"이미 처리 중입니다 ({meeting.status})"
+        )
+
+    meeting.status = "queued"
+    session.flush()
+    return FinalizeResult(True, True, len(tracks), len(finished), "전원 녹음 종료")
+
+
+def force_finish_tracks(
+    session: Session, meeting_id: int, *, ended_at: datetime, reason: str = "aborted"
+) -> list[int]:
+    """아직 녹음 중인 트랙을 강제로 종료한다.
+
+    브라우저를 그냥 닫은 사람이 있으면 그 트랙은 영원히 'recording' 으로 남고,
+    회의는 영영 처리되지 않는다. 그 상태를 사람이 풀 수 있어야 한다.
+
+    강제 종료한 트랙은 `status='aborted'` 로 남긴다 — **'completed' 로 두면
+    안 된다.** 커버리지를 계산한 적이 없는데 정상 종료로 보이면, 그 사람의
+    발언량을 측정한 것처럼 취급된다 (docs/05 §4.1.1).
+
+    Returns:
+        강제 종료된 트랙 id 목록.
+    """
+    live = session.scalars(
+        select(m.MeetingTrack).where(
+            m.MeetingTrack.meeting_id == meeting_id,
+            m.MeetingTrack.ended_at.is_(None),
+        )
+    ).all()
+
+    for track in live:
+        track.ended_at = ended_at
+        track.status = "aborted"
+        track.stop_reason = reason
+    session.flush()
+    return [t.id for t in live]

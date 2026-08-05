@@ -21,6 +21,7 @@ from teamflow.db.session import get_db
 from teamflow.github import webhook as gh
 from teamflow.meeting.approval import ApprovalRequest
 from teamflow.services import approval_service, recording_service
+from teamflow.tasks import dispatch
 
 app = FastAPI(
     title="TeamFlow AI",
@@ -286,6 +287,10 @@ class TrackCompleteOut(BaseModel):
     coverage: float
     usable: bool
     message: str
+    #: 전원이 끝나 회의 처리가 큐에 들어갔는가
+    meeting_queued: bool = False
+    #: 아직 녹음 중인 사람이 있으면 그 안내
+    meeting_status: str = ""
 
 
 @app.post(
@@ -326,9 +331,17 @@ def complete_track(
     except recording_service.TrackError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
+    # 전원이 끝났으면 여기서 처리를 시작한다.
+    # 이 연결이 없으면 녹음은 저장만 되고 아무 일도 일어나지 않는다.
+    finalize = recording_service.try_finalize_meeting(session, meeting_id)
+    if finalize.should_enqueue:
+        dispatch.enqueue_meeting_processing(meeting_id)
+
     usable = track.status == "completed"
     coverage = float(track.coverage or 0.0)
     return TrackCompleteOut(
+        meeting_queued=finalize.should_enqueue,
+        meeting_status=finalize.reason,
         track_id=track.id,
         status=track.status,
         coverage=coverage,
@@ -338,6 +351,45 @@ def complete_track(
             if usable
             else f"커버리지 {coverage:.0%} — 이 트랙으로는 발화량을 판단할 수 없습니다. "
             "회의록에서 이 팀원의 발언은 확인이 필요합니다"
+        ),
+    )
+
+
+class FinishMeetingOut(BaseModel):
+    meeting_queued: bool
+    aborted_track_ids: list[int]
+    message: str
+
+
+@app.post("/api/meetings/{meeting_id}/finish", response_model=FinishMeetingOut)
+def finish_meeting(
+    meeting_id: int, session: DbSession, settings: AppSettings
+) -> FinishMeetingOut:
+    """회의를 강제로 종료한다.
+
+    브라우저를 그냥 닫은 사람이 있으면 그 트랙은 영원히 `recording` 으로 남고,
+    회의는 **영영 처리되지 않는다.** 사람이 그 상태를 풀 수 있어야 한다.
+
+    강제 종료한 트랙은 `aborted` 로 남는다 — `completed` 로 두면 커버리지를
+    계산한 적이 없는데 정상 종료로 보이고, 그 사람의 발언량을 측정한 것처럼
+    취급된다 (docs/05 §4.1.1).
+    """
+    _load_meeting(session, meeting_id)
+    aborted = recording_service.force_finish_tracks(
+        session, meeting_id, ended_at=datetime.now(UTC)
+    )
+    # force=True — 참가하지 않은 사람을 더 기다리지 않는다. 그게 이 엔드포인트의 존재 이유다.
+    finalize = recording_service.try_finalize_meeting(session, meeting_id, force=True)
+    if finalize.should_enqueue:
+        dispatch.enqueue_meeting_processing(meeting_id)
+
+    return FinishMeetingOut(
+        meeting_queued=finalize.should_enqueue,
+        aborted_track_ids=aborted,
+        message=(
+            f"{len(aborted)}개 트랙을 강제 종료했습니다. {finalize.reason}"
+            if aborted
+            else finalize.reason
         ),
     )
 

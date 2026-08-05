@@ -146,6 +146,10 @@ WebKit 의 제약입니다. Screen Wake Lock(iOS 16.4+)으로 완화할 수 있�
 | `GET /api/meetings/{id}/candidates` | 업무 후보. 확신도 낮은 것부터. |
 | `GET /api/meetings/{id}/members` | 팀원 명단. 담당자를 **고르게** 하려면 필요합니다. |
 | `POST …/candidates/review` | 승인·거절 제출. 실패는 **코드**로 오고 화면이 문구로 옮깁니다. |
+| `POST /api/meetings/{id}/finish` | 강제 종료. 브라우저를 그냥 닫은 사람이 있으면 회의가 영영 처리되지 않습니다. |
+
+`complete` 응답의 `meeting_queued` 가 true 면 전원이 끝나 회의 처리가
+시작된 것입니다. false 면 `meeting_status` 에 누구를 기다리는지 들어 있습니다.
 
 동의 검사는 클라이언트와 서버 **양쪽**에 있습니다. 클라이언트 검사는 UX 이고,
 서버 검사는 법적 방어선입니다 — 요청은 curl 로도 보낼 수 있습니다.

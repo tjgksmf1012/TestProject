@@ -36,6 +36,26 @@ app.conf.update(
     # GPU 워커는 한 번에 하나만 가져간다. prefetch 를 키우면
     # 다른 워커가 놀고 있는데 잡이 한쪽에 쌓인다.
     worker_prefetch_multiplier=1,
+    # ── Redis 가 죽었을 때 빨리 실패한다 ────────────────────────
+    #
+    # 기본값이면 연결 실패 시 백오프하며 재시도를 반복한다. 워커에서는
+    # 그래도 되지만, **API 가 잡을 큐에 넣을 때는 재앙**이다. 사용자가
+    # "정지" 를 누르고 20초를 기다리게 된다 (실측 19.5초).
+    #
+    # 녹음은 이미 저장돼 있으므로 큐잉 실패는 나중에 복구할 수 있다.
+    # 요청을 붙잡는 것보다 빨리 실패하고 로그를 남기는 게 낫다.
+    broker_transport_options={
+        "socket_connect_timeout": 2,
+        "socket_timeout": 2,
+        "max_retries": 1,
+    },
+    result_backend_transport_options={
+        "socket_connect_timeout": 2,
+        "socket_timeout": 2,
+        "max_retries": 1,
+        "retry_policy": {"timeout": 3.0},
+    },
+    broker_connection_retry_on_startup=False,
     task_routes={
         "teamflow.tasks.meeting_tasks.process_meeting_task": {"queue": "gpu"},
         "teamflow.tasks.meeting_tasks.persist_results_task": {"queue": "cpu"},

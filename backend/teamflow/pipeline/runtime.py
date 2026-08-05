@@ -226,6 +226,26 @@ def build_chunk_loader(settings: Settings) -> ChunkAudioLoader:
     )
 
 
+def build_audio_loader(settings: Settings, capture_mode: str):
+    """회의의 녹음 방식에 맞는 로더를 고른다.
+
+    이 분기가 없으면 **모드 A(멀티트랙) 경로가 영영 실행되지 않는다.**
+    청크 업로드·재조립을 다 만들어 놓고도 잡은 항상 WAV 로더를 쓰는
+    상태였다 (실제로 그랬다).
+
+        multitrack → ChunkAudioLoader  청크를 절대 시각에 배치, 공백은 무음
+        single     → FileSystemAudioLoader  트랙당 WAV 하나 (모드 B 폴백)
+
+    Raises:
+        DecoderUnavailable: 멀티트랙인데 ffmpeg 이 없으면. 조용히 모드 B 로
+            떨어뜨리지 않는다 — 그러면 청크가 있는데 WAV 를 찾다가 빈 결과를
+            내고, 회의가 통째로 비어 보인다.
+    """
+    if capture_mode == "multitrack":
+        return build_chunk_loader(settings)
+    return build_loader(settings)
+
+
 def build_transcriber(settings: Settings):
     """ASR 구현을 고른다.
 

@@ -315,3 +315,66 @@ def test_bad_chunk_is_skipped_but_a_missing_decoder_is_not(
         ChunkAudioLoader(
             store=store, decoder=NoFfmpeg(), timeslice_ms=TIMESLICE, sample_rate=SR
         ).load(meeting)
+
+
+# ══════════════════════════════════════════════════════════════
+# 녹음 방식에 따른 로더 선택
+# ══════════════════════════════════════════════════════════════
+
+
+def test_multitrack_meetings_use_the_chunk_loader(monkeypatch, tmp_path: Path):
+    """⭐ 이 분기가 없으면 모드 A 경로가 영영 실행되지 않는다.
+
+    청크 업로드·재조립을 다 만들어 놓고도 잡은 항상 WAV 로더를 썼다.
+    """
+    from teamflow.config import Settings
+    from teamflow.pipeline import runtime
+
+    monkeypatch.setattr(
+        runtime.decode, "build_decoder", lambda **kw: FakeDecoder(), raising=True
+    )
+    settings = Settings(
+        environment="test",
+        github_webhook_secret="x",
+        database_url="sqlite://",
+        audio_storage_root=tmp_path,
+    )
+
+    assert isinstance(runtime.build_audio_loader(settings, "multitrack"), ChunkAudioLoader)
+
+
+def test_single_mic_meetings_use_the_wav_loader(tmp_path: Path):
+    """모드 B 폴백은 그대로 유지된다 (docs/04 §2.5)."""
+    from teamflow.config import Settings
+    from teamflow.pipeline import runtime
+
+    settings = Settings(
+        environment="test",
+        github_webhook_secret="x",
+        database_url="sqlite://",
+        audio_storage_root=tmp_path,
+    )
+
+    loader = runtime.build_audio_loader(settings, "single")
+    assert isinstance(loader, runtime.FileSystemAudioLoader)
+
+
+def test_multitrack_without_ffmpeg_fails_loudly(tmp_path: Path):
+    """⭐ 조용히 모드 B 로 떨어뜨리면 안 된다.
+
+    청크가 있는데 WAV 를 찾다가 빈 결과를 내고, 회의가 통째로 비어 보인다.
+    """
+    from teamflow.audio.decode import DecoderUnavailable
+    from teamflow.config import Settings
+    from teamflow.pipeline import runtime
+
+    settings = Settings(
+        environment="test",
+        github_webhook_secret="x",
+        database_url="sqlite://",
+        audio_storage_root=tmp_path,
+    )
+
+    # 이 환경에는 ffmpeg 이 없으므로 실제로 터진다
+    with pytest.raises(DecoderUnavailable):
+        runtime.build_audio_loader(settings, "multitrack")

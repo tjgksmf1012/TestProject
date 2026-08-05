@@ -33,8 +33,12 @@ GPU_RETRY_COUNTDOWN = 30
 GPU_MAX_RETRIES = 120  # 최대 1시간 대기
 
 
-def _build_steps():
-    """설정에 따라 실제 구현을 고른다.
+def _build_steps(capture_mode: str):
+    """설정과 **회의의 녹음 방식**에 맞는 구현을 고른다.
+
+    `capture_mode` 를 받는 게 중요하다. 멀티트랙(모드 A)은 청크에서
+    복원해야 하고, 단일 파일(모드 B)은 WAV 를 읽는다. 이 인자가 없던
+    동안에는 청크 경로가 만들어져 있는데도 한 번도 실행되지 않았다.
 
     ⚠️ ASR·화자분리 실제 구현은 이 개발 환경에 모델도 GPU도 없어 아직 없습니다.
     `scripts/check_env.py` 로 환경을 확인한 뒤 실제 머신에서 붙입니다.
@@ -64,7 +68,11 @@ def _build_steps():
     # 로더·전사기는 실제 머신에서 주입한다.
     from teamflow.pipeline import runtime
 
-    return runtime.build_loader(settings), runtime.build_transcriber(settings), _Analyzer()
+    return (
+        runtime.build_audio_loader(settings, capture_mode),
+        runtime.build_transcriber(settings),
+        _Analyzer(),
+    )
 
 
 @app.task(
@@ -88,6 +96,7 @@ def process_meeting_task(self: Task, meeting_id: int) -> dict:
 
         meeting.status = "processing"
         project_id = meeting.project_id
+        capture_mode = meeting.capture_mode
         meeting_date = meeting.started_at.date()
 
         members = [
@@ -115,7 +124,7 @@ def process_meeting_task(self: Task, meeting_id: int) -> dict:
             ).all()
         )
 
-    loader, transcriber, analyzer = _build_steps()
+    loader, transcriber, analyzer = _build_steps(capture_mode)
 
     try:
         import redis as redis_lib

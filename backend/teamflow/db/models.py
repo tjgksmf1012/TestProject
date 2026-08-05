@@ -214,7 +214,9 @@ class Meeting(Base):
     duration_sec: Mapped[int | None] = mapped_column(Integer)
     # multitrack | single  — docs/04 의 모드 A / 모드 B
     capture_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="multitrack")
-    # pending | processing | needs_review | confirmed | failed
+    # pending   : 녹음 중이거나 아직 전원이 끝나지 않음
+    # queued    : 전원 종료 → 처리 대기 (이 전이가 중복 큐잉을 막는 자물쇠다)
+    # processing | needs_review | confirmed | failed
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     # 녹음을 시작한 사람. 통신비밀보호법상 반드시 회의 참석자여야 한다 (docs/07 L1).
     started_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)

@@ -151,10 +151,12 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 타입 검사 (`tsc --noEmit`, strict) | ✅ | `frontend/tsconfig.json` |
 | **업무 후보 승인 화면** | ✅ | `frontend/src/lib/review/`, `frontend/public/review.html` |
 | 팀원 명단 API (승인 화면용) | ✅ | `backend/teamflow/api/main.py` |
+| **녹음 종료 → 회의 처리 큐잉** | ✅ | `backend/teamflow/tasks/dispatch.py` |
+| 녹음 방식별 로더 선택 (모드 A/B) | ✅ | `backend/teamflow/pipeline/runtime.py` |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 502 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 515 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
