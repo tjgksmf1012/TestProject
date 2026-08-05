@@ -17,8 +17,9 @@
 - 15장 일정: 이 6개를 **7~10주, 4주 안에**
 
 그리고 15장에 **환경 구축 기간이 0주**입니다.
-RTX 5080은 Blackwell(sm_120)이라 PyTorch 2.7+ cu128 전용 셋업이 필요하고,
-vLLM·pyannote·transformers 버전 충돌까지 겪으면 며칠~일주일이 사라집니다.
+torch·vLLM·pyannote·transformers 버전 충돌, 모델 다운로드 30~50GB, HF gated 토큰 발급,
+그리고 폰 마이크 권한(HTTPS) 확인까지 하면 며칠이 사라집니다.
+`python3 scripts/check_env.py` 로 진단부터 하세요.
 
 ---
 
@@ -80,7 +81,7 @@ vLLM·pyannote·transformers 버전 충돌까지 겪으면 며칠~일주일이 �
 
 | 주차 | 작업 | 산출물 | 변경 |
 |---|---|---|---|
-| **0주** | **환경 구축**: PyTorch 2.7+ cu128, vLLM, pyannote 4.x, transformers 5.13+ 공존 확인. 모델 다운로드. HF 토큰. VRAM 실측 | 동작하는 개발 환경 + **VRAM 실측표** | ⭐ 신설 |
+| **0주** | **환경 구축**: `scripts/check_env.py` 통과. torch·vLLM·pyannote 4.x·transformers 5.13+ 공존 확인. 모델 다운로드. HF 토큰. VRAM 실측. **폰 마이크 권한 확인** | 동작하는 개발 환경 + **VRAM 실측표** | ⭐ 신설 |
 | 1~2 | 요구사항, 사용자 시나리오, 기능 우선순위, **법적 요구사항 정리** | 요구사항 명세, 화면 흐름 | +법적 |
 | 3~4 | DB·API·GitHub·AI 아키텍처 설계. **동의/오디오 분리 스키마 포함** | 시스템 설계서, 스키마 | +스키마 |
 | 5~6 | 프로젝트·팀원·칸반 + **GitHub App 연동 + 백필** | 협업 플랫폼 MVP | +App/백필 |
