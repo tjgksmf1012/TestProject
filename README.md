@@ -89,6 +89,37 @@
 
 ---
 
+## 구현 현황
+
+결정(Q1~Q10)은 [10번 문서](docs/10-열린-질문.md) 하단에 확정 기록해 두었습니다.
+GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있습니다.
+
+| 영역 | 상태 | 위치 |
+|---|---|---|
+| 기여도 이벤트 모델 | ✅ | `backend/teamflow/contribution/events.py` |
+| diff 필터 (조작 저항성 핵심) | ✅ | `backend/teamflow/contribution/diff_filter.py` |
+| GitHub 이벤트 정규화 | ✅ | `backend/teamflow/contribution/github_ingest.py` |
+| 역할별 가중치 프로파일 | ✅ | `backend/teamflow/contribution/profiles.py` |
+| 신뢰도·조정범위 계산 | ✅ | `backend/teamflow/contribution/confidence.py` |
+| 기여도 산정 엔진 | ✅ | `backend/teamflow/contribution/scoring.py` |
+| DB 스키마 (25개 테이블) | ✅ | `backend/teamflow/db/models.py` |
+| **조작 저항성 테스트** | ✅ **24 시나리오** | `backend/tests/test_anti_gaming.py` |
+| 회의 처리 파이프라인 (GPU) | ⬜ | 5080 환경에서 |
+| FastAPI / Next.js | ⬜ | |
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pytest backend/tests/ -q     # 88 passed
+.venv/bin/ruff check backend/
+```
+
+> 🔍 **구현하면서 설계 결함을 하나 잡았습니다.** 초기 산식은 병합 PR마다 고정 8점을 줬는데,
+> 조작 저항성 테스트에서 **오타 PR 30개(250점)가 실제 기능 구현 1개(44점)를 이겼습니다.**
+> 커밋 단위 조작 문제를 PR 단위로 옮겨놨을 뿐이었습니다.
+> 고정 기본점 제거 + 사소변경 감쇠 + 카테고리 천장으로 수정했고, 200건까지 억제됩니다.
+> 500건 이상은 물량이 이기지만 이건 원리적으로 못 막는 영역이라 **탐지해서 표시**합니다.
+> 전말: [09번 문서 실험 4](docs/09-리스크와-검증-실험.md)
+
 ## 다음에 할 일
 
 문서를 더 쓰는 것보다 **[실험](docs/09-리스크와-검증-실험.md)을 돌리는 게 낫습니다.**

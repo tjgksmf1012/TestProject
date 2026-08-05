@@ -1,0 +1,61 @@
+[project]
+name = "teamflow"
+version = "0.1.0"
+description = "AI 기반 팀 프로젝트 협업 및 회의 리뷰 통합 플랫폼"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "celery[redis]>=5.4",
+    "redis>=5.2",
+    "httpx>=0.28",
+    "pyjwt[crypto]>=2.10",
+]
+
+[project.optional-dependencies]
+# GPU 파이프라인. RTX 5080(Blackwell sm_120)에서는 torch를 반드시
+# cu128 인덱스로 설치해야 합니다 — scripts/check_env.py 참조.
+ai = [
+    "torch>=2.7",
+    "torchaudio>=2.7",
+    "transformers>=5.13",
+    "pyannote.audio>=4.0",
+    "vllm>=0.8",
+    "soundfile>=0.12",
+    "numpy>=2.0",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+filterwarnings = ["error::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["backend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "RUF001",  # 한국어 주석의 전각 문자를 모호한 유니코드로 잡음
+    "RUF002",
+    "RUF003",
+]
