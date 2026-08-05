@@ -95,8 +95,9 @@ WebKit 의 제약입니다. Screen Wake Lock(iOS 16.4+)으로 완화할 수 있�
 
 | | 상태 |
 |---|---|
-| clock / timeline / upload-queue / session / capture / client | ✅ 151개 테스트 |
-| browser-adapter.ts | ⚠️ 문법 로딩만 확인. 실기기 확인 필요 |
+| clock / timeline / upload-queue / session / capture / client | ✅ 160개 테스트 |
+| browser-adapter.ts — HTTP 전송기 | ✅ fetch 를 갈아끼워 검증 |
+| browser-adapter.ts — 미디어 어댑터 | ⚠️ 문법 로딩만 확인. 실기기 확인 필요 |
 | iOS Safari 실제 중단 동작 | ⚠️ 문헌 근거만. 실측 필요 |
 | 화면(React 컴포넌트) | ⬜ 미착수 |
 
@@ -108,5 +109,10 @@ WebKit 의 제약입니다. Screen Wake Lock(iOS 16.4+)으로 완화할 수 있�
 | 엔드포인트 | 용도 |
 |---|---|
 | `GET /api/time` | `{t1, t2}` — 받은 시각과 보낸 시각. 왕복에서 서버 처리 시간을 빼기 위해 둘 다 필요합니다. 캐시 금지. |
-| `PUT …/tracks/{id}/chunks/{seq}` | 청크 하나. PUT 이라 재시도가 안전합니다. |
-| (재연결 시) 서버가 가진 seq 목록 | `UploadQueue.resumeWith()` 로 중복 업로드를 건너뜁니다. |
+| `POST /api/meetings/{id}/tracks` | 트랙 참가. 멱등이라 새로고침해도 같은 트랙입니다. **전원 동의 전에는 403.** |
+| `PUT …/tracks/{tid}/chunks/{seq}` | 청크 하나. PUT 이라 재시도가 안전합니다. `X-Client-At-Ms` 헤더 필수. |
+| `GET …/tracks/{tid}/chunks` | 서버가 가진 seq 목록. `UploadQueue.resumeWith()` 에 그대로 넣습니다. |
+| `POST …/tracks/{tid}/complete` | 종료 요약(커버리지·공백·캡처 경고). 서버가 실제 청크 수와 대조합니다. |
+
+동의 검사는 클라이언트와 서버 **양쪽**에 있습니다. 클라이언트 검사는 UX 이고,
+서버 검사는 법적 방어선입니다 — 요청은 curl 로도 보낼 수 있습니다.

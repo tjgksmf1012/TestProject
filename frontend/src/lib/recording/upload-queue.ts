@@ -23,6 +23,13 @@
 export interface PendingChunk {
   seq: number;
   byteLength: number;
+  /**
+   * 이 청크가 도착한 시각 (동기화된 서버 시각).
+   *
+   * 서버가 `X-Client-At-Ms` 로 요구한다. 파일시스템에는 이 정보가 없어서,
+   * 이게 빠지면 공백을 절대 시각으로 복원할 수 없다 (timeline.ts).
+   */
+  atMs: number;
   /** 실제 바이트. 브라우저에서는 Blob, 테스트에서는 아무거나. */
   payload: unknown;
 }

@@ -138,7 +138,13 @@ export class HttpUploadTransport implements UploadTransport {
   async send(chunk: PendingChunk): Promise<void> {
     const response = await fetch(`${this.#trackUrl}/chunks/${chunk.seq}`, {
       method: 'PUT', // PUT 이라서 같은 seq 를 두 번 올려도 덮어쓴다
-      headers: { 'Content-Type': 'application/octet-stream', ...this.#headers },
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        // 서버가 요구한다. 이게 없으면 400 이다 — 공백을 절대 시각으로
+        // 복원할 근거가 사라지기 때문이다 (backend api/main.py put_chunk).
+        'X-Client-At-Ms': String(chunk.atMs),
+        ...this.#headers,
+      },
       body: chunk.payload as Blob,
     });
     if (!response.ok) throw new Error(`업로드 실패 (HTTP ${response.status})`);

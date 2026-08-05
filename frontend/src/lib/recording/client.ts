@@ -231,7 +231,12 @@ export class RecordingClient {
 
     const chunk = { seq, atMs: this.#clock.now(), byteLength: data.byteLength };
     this.#dispatch({ type: 'CHUNK', chunk });
-    const status = this.#queue.enqueue({ seq, byteLength: data.byteLength, payload: data.payload });
+    const status = this.#queue.enqueue({
+      seq,
+      atMs: chunk.atMs,
+      byteLength: data.byteLength,
+      payload: data.payload,
+    });
 
     if (status.backpressure) {
       // 업로드가 못 따라간다. 청크를 버리지 않고 녹음을 멈춘다.

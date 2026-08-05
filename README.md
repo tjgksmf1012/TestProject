@@ -3,7 +3,9 @@
 > AI 기반 팀 프로젝트 협업 및 회의 리뷰 통합 플랫폼
 > 회의에서 나온 결정을 실제 업무와 코드 활동까지 연결한다.
 
-**현재 상태: 설계 확정 + 기여도 엔진 구현 완료.** 회의 처리 파이프라인(GPU)과 웹 계층은 미구현.
+**현재 상태: 설계 확정 + GPU 없이 검증 가능한 전 구간 구현 완료.**
+기여도 엔진, 회의 처리 파이프라인, 녹음 수집(클라이언트·서버)까지 동작하고
+테스트로 고정돼 있습니다. 남은 것은 **모델 구현(GPU 필요)** 과 **화면**입니다.
 이 저장소는 "무엇을 어떻게 만들 것인가"를 검증·기록하고, 검증된 것부터 코드로 옮기는 곳입니다.
 
 ---
@@ -105,7 +107,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 역할별 가중치 프로파일 | ✅ | `backend/teamflow/contribution/profiles.py` |
 | 신뢰도·조정범위 계산 | ✅ | `backend/teamflow/contribution/confidence.py` |
 | 기여도 산정 엔진 | ✅ | `backend/teamflow/contribution/scoring.py` |
-| DB 스키마 (25개 테이블) | ✅ | `backend/teamflow/db/models.py` |
+| DB 스키마 (26개 테이블) | ✅ | `backend/teamflow/db/models.py` |
 | **조작 저항성 테스트** | ✅ **24 시나리오** | `backend/tests/test_anti_gaming.py` |
 | 환경 진단 스크립트 | ✅ | `scripts/check_env.py` |
 | LLM 출력 스키마 (guided decoding) | ✅ | `backend/teamflow/meeting/schema.py` |
@@ -116,7 +118,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **GitHub 웹훅 (HMAC 서명 검증)** | ✅ | `backend/teamflow/github/webhook.py` |
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
 | docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
-| **Alembic 마이그레이션** | ✅ 25개 테이블 | `backend/migrations/` |
+| **Alembic 마이그레이션** | ✅ 26개 테이블 | `backend/migrations/` |
 | GPU 배타 락 (TTL·소유권 검증) | ✅ | `backend/teamflow/jobs/gpu_lock.py` |
 | **보존기간 삭제 잡** (법적 요구사항) | ✅ | `backend/teamflow/jobs/retention.py` |
 | **멀티트랙 정렬 (GCC-PHAT)** | ✅ | `backend/teamflow/audio/multitrack.py` |
@@ -135,16 +137,20 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **녹음 세션 상태 머신 (동의 게이트)** | ✅ | `frontend/src/lib/recording/session.ts` |
 | 캡처 제약 검증 (AGC·잡음억제 해제 확인) | ✅ | `frontend/src/lib/recording/capture.ts` |
 | 녹음 클라이언트 조립 | ✅ | `frontend/src/lib/recording/client.ts` |
-| 브라우저 어댑터 (getUserMedia/MediaRecorder) | ⚠️ 미검증 | `frontend/src/lib/recording/browser-adapter.ts` |
+| **청크 업로드 API** (멱등 PUT · 재개 · 동의 게이트) | ✅ | `backend/teamflow/api/main.py` |
+| 청크 파일 저장 (원자적 쓰기 · 경로 고정) | ✅ | `backend/teamflow/audio/chunk_store.py` |
+| 트랙 품질 기록 (커버리지·공백·캡처 경고) | ✅ | `backend/teamflow/services/recording_service.py` |
+| HTTP 전송기 (시각 헤더·캐시 금지) | ✅ | `frontend/src/lib/recording/browser-adapter.ts` |
+| 브라우저 미디어 어댑터 (getUserMedia/MediaRecorder) | ⚠️ 미검증 | 〃 |
 | Next.js 화면 (녹음 UI · 승인 UI) | ⬜ | |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 369 passed
-.venv/bin/ruff check backend/
+.venv/bin/python -m pytest backend/tests/ -q     # 414 passed
+.venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 151 passed, 의존성 0개
+cd frontend && npm test                          # 160 passed, 의존성 0개
 
 cp .env.example .env                             # 시크릿 채우기
 docker compose up -d postgres redis              # 인프라

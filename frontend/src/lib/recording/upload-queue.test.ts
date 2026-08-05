@@ -41,7 +41,12 @@ function fakeSleep(): { sleep: (ms: number) => Promise<void>; delays: number[] }
 }
 
 function chunks(count: number, byteLength = 1000): PendingChunk[] {
-  return Array.from({ length: count }, (_, seq) => ({ seq, byteLength, payload: `c${seq}` }));
+  return Array.from({ length: count }, (_, seq) => ({
+    seq,
+    byteLength,
+    atMs: 1_700_000_000_000 + seq * 5_000,
+    payload: `c${seq}`,
+  }));
 }
 
 describe('UploadQueue — 정상 경로', () => {
@@ -78,11 +83,11 @@ describe('UploadQueue — 정상 경로', () => {
   it('같은 seq 를 두 번 넣어도 한 번만 올린다', async () => {
     const transport = new FakeTransport();
     const queue = new UploadQueue(transport, { sleep: fakeSleep().sleep, concurrency: 1 });
-    queue.enqueue({ seq: 0, byteLength: 10, payload: 'a' });
+    queue.enqueue({ seq: 0, byteLength: 10, atMs: 1_700_000_000_000, payload: 'a' });
     queue.start();
     await Promise.resolve();
     await Promise.resolve();
-    queue.enqueue({ seq: 0, byteLength: 10, payload: 'a' });
+    queue.enqueue({ seq: 0, byteLength: 10, atMs: 1_700_000_000_000, payload: 'a' });
 
     const result = await queue.finish();
     assert.deepEqual(result.acked, [0]);
@@ -275,7 +280,7 @@ describe('UploadQueue — 백프레셔', () => {
       sleep: fakeSleep().sleep,
       maxAttempts: 2,
     });
-    queue.enqueue({ seq: 0, byteLength: 5000, payload: 'x' });
+    queue.enqueue({ seq: 0, byteLength: 5000, atMs: 1_700_000_000_000, payload: 'x' });
     await queue.finish();
     assert.equal(queue.status.pendingBytes, 0, '메모리가 새면 안 된다');
   });

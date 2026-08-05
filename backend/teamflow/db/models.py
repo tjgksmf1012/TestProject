@@ -231,11 +231,54 @@ class MeetingTrack(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     device_label: Mapped[str | None] = mapped_column(String(100))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 트랙 간 시간 정렬 보정값
     offset_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sample_rate: Mapped[int | None] = mapped_column(Integer)
 
+    # ── 클라이언트가 보고한 녹음 품질 (docs/04 §2.6) ────────────────
+    # 폰이 잠기거나 앱이 전환되면 트랙에 구멍이 뚫린다. 그걸 모르고 쓰면
+    # 말을 안 한 사람으로 잡히므로, 클라이언트 판정을 그대로 받아 저장한다.
+    #
+    # recording | completed | unusable | aborted
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="recording")
+    # 0~1. 오디오가 실제로 존재한 시간 비율.
+    coverage: Mapped[float | None] = mapped_column(Numeric(4, 3))
+    total_gap_ms: Mapped[int | None] = mapped_column(Integer)
+    longest_gap_ms: Mapped[int | None] = mapped_column(Integer)
+    # 공백 목록 (원인별). buildTimeline 의 gaps 를 그대로 담는다.
+    gaps: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    # 브라우저가 AGC·잡음억제를 못 끈 경우 낮아진다 (docs/04 §2.7)
+    capture_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
+    capture_warnings: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
+    # 녹음 중단 사유: user | consent_revoked | backpressure | error
+    stop_reason: Mapped[str | None] = mapped_column(String(30))
+
     __table_args__ = (UniqueConstraint("meeting_id", "user_id", name="uq_track_user"),)
+
+
+class TrackChunk(Base):
+    """업로드된 청크 하나의 기록.
+
+    파일 자체는 `audio/chunk_store.py` 가 디스크에 둔다. 여기 남기는 건
+    **클라이언트가 찍은 도착 시각**이다. 그게 있어야 공백을 절대 시각으로
+    복원할 수 있다 (docs/04 §2.6). 파일시스템에는 그 정보가 없다.
+    """
+
+    __tablename__ = "track_chunks"
+
+    id: Mapped[int] = _pk()
+    track_id: Mapped[int] = mapped_column(ForeignKey("meeting_tracks.id"), nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 동기화된 서버 시각 기준 epoch ms. 클라이언트가 계산해서 보낸다.
+    client_at_ms: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    received_at: Mapped[datetime] = _now()
+
+    __table_args__ = (
+        UniqueConstraint("track_id", "seq", name="uq_track_chunk"),
+        Index("ix_chunk_track_seq", "track_id", "seq"),
+    )
 
 
 class Utterance(Base):

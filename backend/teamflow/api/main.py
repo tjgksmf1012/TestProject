@@ -14,12 +14,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from teamflow.audio.chunk_store import ChunkStore
 from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
 from teamflow.db.session import get_db
 from teamflow.github import webhook as gh
 from teamflow.meeting.approval import ApprovalRequest
-from teamflow.services import approval_service
+from teamflow.services import approval_service, recording_service
 
 app = FastAPI(
     title="TeamFlow AI",
@@ -117,6 +118,247 @@ def _load_meeting(session: Session, meeting_id: int) -> m.Meeting:
     if meeting is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "회의를 찾을 수 없습니다")
     return meeting
+
+
+# ══════════════════════════════════════════════════════════════
+# 녹음 트랙 수집
+# ══════════════════════════════════════════════════════════════
+#
+# frontend/src/lib/recording/ 의 서버 쪽 짝이다.
+#   ① POST   …/tracks              트랙 참가 (멱등)
+#   ② PUT    …/tracks/{tid}/chunks/{seq}   청크 (멱등)
+#   ③ GET    …/tracks/{tid}/chunks         재개용 seq 목록
+#   ④ POST   …/tracks/{tid}/complete       종료 요약
+
+
+def _chunk_store(settings: Settings) -> ChunkStore:
+    return ChunkStore(root=settings.audio_storage_root)
+
+
+class TrackJoin(BaseModel):
+    user_id: int = Field(gt=0)
+    started_at: datetime
+    device_label: str | None = Field(default=None, max_length=100)
+    sample_rate: int | None = Field(default=None, gt=0)
+
+
+class TrackOut(BaseModel):
+    track_id: int
+    meeting_id: int
+    user_id: int
+    status: str
+    # 재개용. 새로 만든 트랙이면 빈 목록이다.
+    stored_seqs: list[int]
+
+
+@app.post(
+    "/api/meetings/{meeting_id}/tracks",
+    response_model=TrackOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def join_track(
+    meeting_id: int, payload: TrackJoin, session: DbSession, settings: AppSettings
+) -> TrackOut:
+    """회의에 트랙으로 참가한다. 새로고침해도 같은 트랙으로 이어붙는다."""
+    _load_meeting(session, meeting_id)
+    try:
+        track = recording_service.join_track(
+            session,
+            meeting_id=meeting_id,
+            user_id=payload.user_id,
+            started_at=payload.started_at,
+            device_label=payload.device_label,
+            sample_rate=payload.sample_rate,
+        )
+    except recording_service.ConsentError as exc:
+        # 403 이다. 인증 문제가 아니라 "동의가 없어서 안 된다"는 뜻이다.
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except recording_service.TrackError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+    return TrackOut(
+        track_id=track.id,
+        meeting_id=meeting_id,
+        user_id=track.user_id,
+        status=track.status,
+        stored_seqs=recording_service.stored_seqs(
+            _chunk_store(settings), meeting_id=meeting_id, track_id=track.id
+        ),
+    )
+
+
+class ChunkAck(BaseModel):
+    seq: int
+    bytes: int
+
+
+@app.put(
+    "/api/meetings/{meeting_id}/tracks/{track_id}/chunks/{seq}",
+    response_model=ChunkAck,
+)
+async def put_chunk(
+    meeting_id: int,
+    track_id: int,
+    seq: int,
+    request: Request,
+    session: DbSession,
+    settings: AppSettings,
+    x_client_at_ms: Annotated[int | None, Header()] = None,
+) -> ChunkAck:
+    """청크 하나를 받는다.
+
+    PUT 이라 같은 seq 를 다시 받으면 덮어쓴다 — 업로드 큐가 재시도하기 때문이다.
+    `X-Client-At-Ms` 는 클라이언트가 **동기화된 서버 시각**으로 찍은 도착
+    시각이다. 이게 없으면 공백을 절대 시각으로 복원할 수 없다 (docs/04 §2.6).
+    """
+    if seq < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "seq 는 0 이상이어야 합니다")
+    if x_client_at_ms is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "X-Client-At-Ms 헤더가 필요합니다 (동기화된 청크 도착 시각)",
+        )
+
+    data = await request.body()
+    try:
+        chunk = recording_service.store_chunk(
+            session,
+            _chunk_store(settings),
+            meeting_id=meeting_id,
+            track_id=track_id,
+            seq=seq,
+            client_at_ms=x_client_at_ms,
+            data=data,
+        )
+    except recording_service.ConsentError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except recording_service.TrackError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return ChunkAck(seq=chunk.seq, bytes=chunk.bytes)
+
+
+class StoredChunks(BaseModel):
+    track_id: int
+    seqs: list[int]
+    total_bytes: int
+
+
+@app.get(
+    "/api/meetings/{meeting_id}/tracks/{track_id}/chunks",
+    response_model=StoredChunks,
+)
+def list_chunks(
+    meeting_id: int, track_id: int, session: DbSession, settings: AppSettings
+) -> StoredChunks:
+    """재연결 후 "어디까지 올렸나"를 묻는 엔드포인트.
+
+    이게 없으면 클라이언트가 매번 처음부터 다시 올려 영영 못 따라잡는다
+    (`UploadQueue.resumeWith`).
+    """
+    _load_meeting(session, meeting_id)
+    store = _chunk_store(settings)
+    return StoredChunks(
+        track_id=track_id,
+        seqs=store.stored_seqs(meeting_id, track_id),
+        total_bytes=store.total_bytes(meeting_id, track_id),
+    )
+
+
+class TrackComplete(BaseModel):
+    ended_at: datetime
+    coverage: float = Field(ge=0, le=1)
+    total_gap_ms: int = Field(ge=0)
+    longest_gap_ms: int = Field(default=0, ge=0)
+    gaps: list[dict[str, Any]] = Field(default_factory=list)
+    capture_confidence: float = Field(default=1.0, ge=0, le=1)
+    capture_warnings: list[dict[str, Any]] = Field(default_factory=list)
+    stop_reason: str | None = None
+
+
+class TrackCompleteOut(BaseModel):
+    track_id: int
+    status: str
+    coverage: float
+    usable: bool
+    message: str
+
+
+@app.post(
+    "/api/meetings/{meeting_id}/tracks/{track_id}/complete",
+    response_model=TrackCompleteOut,
+)
+def complete_track(
+    meeting_id: int,
+    track_id: int,
+    payload: TrackComplete,
+    session: DbSession,
+    settings: AppSettings,
+) -> TrackCompleteOut:
+    """녹음 종료. 클라이언트가 계산한 품질 정보를 받아 저장한다.
+
+    보고된 커버리지를 그대로 믿지 않는다 — 서버가 실제로 받은 청크 수와
+    대조해서 더 나쁜 쪽을 쓴다.
+    """
+    _load_meeting(session, meeting_id)
+    try:
+        track = recording_service.complete_track(
+            session,
+            _chunk_store(settings),
+            meeting_id=meeting_id,
+            track_id=track_id,
+            summary=recording_service.TrackSummary(
+                ended_at=payload.ended_at,
+                coverage=payload.coverage,
+                total_gap_ms=payload.total_gap_ms,
+                longest_gap_ms=payload.longest_gap_ms,
+                gaps=payload.gaps,
+                capture_confidence=payload.capture_confidence,
+                capture_warnings=payload.capture_warnings,
+                stop_reason=payload.stop_reason,
+            ),
+        )
+    except recording_service.TrackError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    usable = track.status == "completed"
+    coverage = float(track.coverage or 0.0)
+    return TrackCompleteOut(
+        track_id=track.id,
+        status=track.status,
+        coverage=coverage,
+        usable=usable,
+        message=(
+            "녹음이 정상 저장됐습니다"
+            if usable
+            else f"커버리지 {coverage:.0%} — 이 트랙으로는 발화량을 판단할 수 없습니다. "
+            "회의록에서 이 팀원의 발언은 확인이 필요합니다"
+        ),
+    )
+
+
+@app.get("/api/meetings/{meeting_id}/tracks")
+def list_tracks(meeting_id: int, session: DbSession) -> dict[str, Any]:
+    """트랙별 상태. 승인 화면이 "이 트랙은 못 씁니다"를 띄우는 근거."""
+    _load_meeting(session, meeting_id)
+    consent = recording_service.consent_status(session, meeting_id)
+    return {
+        "meeting_id": meeting_id,
+        "consent": {
+            "total": consent.total,
+            "granted": consent.granted,
+            "refused": consent.refused,
+            "all_confirmed": consent.all_confirmed,
+        },
+        "tracks": recording_service.track_health(session, meeting_id),
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# 회의 업무 후보 검토 (이어서)
+# ══════════════════════════════════════════════════════════════
 
 
 @app.get("/api/meetings/{meeting_id}/candidates", response_model=list[CandidateOut])
