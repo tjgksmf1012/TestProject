@@ -276,6 +276,9 @@ $("record").addEventListener("click", () => {
 $("review").addEventListener("click", () => {
   location.href = `/review.html?meeting=${meetingId}`;
 });
+$("kanban").addEventListener("click", () => {
+  location.href = `/kanban.html?project=${projectId}&meeting=${meetingId}`;
+});
 $("contrib").addEventListener("click", () => {
   location.href = `/contributions.html?project=${projectId}&meeting=${meetingId}`;
 });

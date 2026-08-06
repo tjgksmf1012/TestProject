@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>칸반 — TeamFlow</title>
+<style>
+  :root { color-scheme: light dark; --line: #d8dbe0; --dim: #6b7280; --bad: #b91c1c; --warn: #b45309; --ok: #15803d; }
+  @media (prefers-color-scheme: dark) { :root { --line: #3a3f47; --dim: #9aa2ad; --bad: #f87171; --warn: #fbbf24; --ok: #4ade80; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 1rem; font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; max-width: 64rem; margin-inline: auto; }
+  h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+  .sub { color: var(--dim); font-size: .875rem; margin: 0 0 .25rem; }
+  #unassigned { margin: .75rem 0; padding: .625rem .875rem; border-radius: .5rem; font-size: .875rem; background: color-mix(in srgb, var(--warn) 12%, transparent); }
+
+  /* 좁은 화면에서는 세로로 쌓인다. 폰에서 열어보는 게 기본이다. */
+  #board { display: grid; gap: 1rem; margin-top: 1rem; }
+  @media (min-width: 46rem) { #board { grid-template-columns: repeat(3, 1fr); align-items: start; } }
+
+  .col { border: 1px solid var(--line); border-radius: .75rem; padding: .75rem; }
+  .col h2 { font-size: .8125rem; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 0 0 .625rem; }
+  .col h2 .n { float: right; font-variant-numeric: tabular-nums; }
+  .empty { font-size: .8125rem; color: var(--dim); margin: .5rem 0; }
+
+  .task { border: 1px solid var(--line); border-radius: .5rem; padding: .625rem .75rem; margin-bottom: .625rem; }
+  .task .title { font-weight: 600; margin: 0 0 .25rem; font-size: .9375rem; }
+  .task .meta { font-size: .8125rem; color: var(--dim); margin: 0; }
+
+  /* 회의 → 업무 연결이 이 화면의 존재 이유다. 눈에 띄어야 한다. */
+  .origin { font-size: .75rem; margin: .375rem 0 0; color: var(--ok); }
+  .origin.manual { color: var(--dim); }
+
+  .warn { list-style: none; padding: 0; margin: .375rem 0 0; font-size: .75rem; color: var(--warn); }
+  .warn li::before { content: "⚠ "; }
+
+  .moves { display: flex; gap: .375rem; margin-top: .5rem; flex-wrap: wrap; }
+  .moves button { font: inherit; font-size: .75rem; padding: .25rem .5rem; border: 1px solid var(--line); border-radius: .3rem; background: transparent; color: inherit; cursor: pointer; }
+
+  #result { font-size: .875rem; color: var(--bad); margin-top: 1rem; }
+  .note { font-size: .8125rem; color: var(--dim); margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+  <h1>칸반</h1>
+  <p class="sub" id="who"></p>
+  <p class="sub" id="counts"></p>
+
+  <div id="unassigned" hidden></div>
+  <div id="board"></div>
+  <p id="result"></p>
+
+  <p class="note">
+    🗣 표시가 붙은 업무는 <strong>회의에서 나온 결정</strong>이 사람의 승인을
+    거쳐 여기까지 온 것입니다. 근거 발화까지 거슬러 올라갈 수 있습니다 —
+    그게 이 프로젝트가 하려는 일입니다.
+    <br /><br />
+    업무를 <strong>완료</strong>로 옮기면 그 시점에 기여 이벤트가 만들어지고
+    기여도 화면에 반영됩니다. 마감일이 있으면 지켰는지도 같이 기록됩니다.
+    담당자가 없는 업무는 누구의 기여인지 알 수 없어 반영되지 않습니다.
+  </p>
+
+  <script type="module" src="/kanban.js"></script>
+</body>
+</html>

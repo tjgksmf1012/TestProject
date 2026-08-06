@@ -188,6 +188,9 @@ $('record').addEventListener('click', () => {
 $('review').addEventListener('click', () => {
   location.href = `/review.html?meeting=${meetingId}`;
 });
+$('kanban').addEventListener('click', () => {
+  location.href = `/kanban.html?project=${projectId}&meeting=${meetingId}`;
+});
 $('contrib').addEventListener('click', () => {
   // 기여도는 프로젝트 단위지만 이름을 붙이려면 회의 단위 명단 API 가 필요하다.
   location.href = `/contributions.html?project=${projectId}&meeting=${meetingId}`;

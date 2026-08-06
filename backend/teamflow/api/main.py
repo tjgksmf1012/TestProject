@@ -27,7 +27,12 @@ from teamflow.db.session import get_db
 from teamflow.github import webhook as gh
 from teamflow.logging_config import configure_logging
 from teamflow.meeting.approval import ApprovalRequest
-from teamflow.services import approval_service, auth_service, recording_service
+from teamflow.services import (
+    approval_service,
+    auth_service,
+    recording_service,
+    task_service,
+)
 from teamflow.tasks import dispatch
 
 logger = logging.getLogger(__name__)
@@ -1084,6 +1089,116 @@ async def github_webhook(
         "event_type": normalized.event_type,
         "linked_user": actor_user_id,
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# 칸반 업무
+# ══════════════════════════════════════════════════════════════
+#
+# 승인하면 `tasks` 에 들어가는데 **그걸 읽는 엔드포인트가 없었습니다.**
+# 그리고 업무를 완료해도 기여도에 아무 일도 일어나지 않았습니다 —
+# 자세한 것은 `services/task_service.py` 의 모듈 주석에 있습니다.
+
+
+class TaskOriginOut(BaseModel):
+    """이 업무가 어느 회의에서 나왔는가. 손으로 만든 업무면 없다."""
+
+    candidate_id: int
+    meeting_id: int
+    meeting_title: str | None
+    evidence_utterance_ids: list[int]
+
+
+class TaskOut(BaseModel):
+    id: int
+    title: str
+    assignee_id: int | None
+    status: str
+    deadline: date | None
+    completed_at: datetime | None
+    origin: TaskOriginOut | None
+
+
+class TaskBoardOut(BaseModel):
+    project_id: int
+    statuses: list[str]
+    tasks: list[TaskOut]
+
+
+@app.get("/api/projects/{project_id}/tasks", response_model=TaskBoardOut)
+def list_tasks(project_id: int, session: DbSession, user: CurrentUser) -> TaskBoardOut:
+    """칸반 보드가 읽는 목록.
+
+    **어느 회의에서 나왔는지를 같이 싣습니다.** 그게 없으면 이 화면은 그냥
+    할 일 목록이고, 이 프로젝트의 주장(회의 결정 → 칸반 업무)을 화면에서
+    확인할 방법이 없습니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    return TaskBoardOut(
+        project_id=project_id,
+        statuses=list(task_service.STATUSES),
+        tasks=[TaskOut(**row) for row in task_service.list_tasks(session, project_id)],
+    )
+
+
+class TaskPatch(BaseModel):
+    status: str | None = None
+    # `deadline` 은 None 이 두 뜻이라 따로 받는다 — 아래 엔드포인트 주석 참조.
+    deadline: date | None = None
+    reason: str | None = Field(default=None, max_length=300)
+
+
+@app.patch("/api/projects/{project_id}/tasks/{task_id}", response_model=TaskOut)
+async def patch_task(
+    project_id: int,
+    task_id: int,
+    payload: TaskPatch,
+    request: Request,
+    session: DbSession,
+    user: CurrentUser,
+) -> TaskOut:
+    """상태·마감일 변경.
+
+    ⚠️ `deadline: null` 이 **"마감일을 지운다"** 인지 **"마감일은 안
+    건드린다"** 인지 본문만으로는 알 수 없습니다. pydantic 은 둘 다 None 으로
+    만듭니다. 그래서 원본 JSON 에 키가 있었는지를 직접 봅니다 — 이걸 구분하지
+    않으면 상태만 바꾸려는 요청이 마감일을 **조용히 지웁니다.**
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    try:
+        raw = await request.json()
+    except Exception:
+        raw = {}
+    deadline_provided = isinstance(raw, dict) and "deadline" in raw
+
+    try:
+        task = task_service.change_task(
+            session,
+            project_id=project_id,
+            task_id=task_id,
+            actor_id=user.id,
+            status=payload.status,
+            deadline=payload.deadline,
+            deadline_provided=deadline_provided,
+            reason=payload.reason,
+        )
+    except task_service.TaskError as exc:
+        code = (
+            status.HTTP_404_NOT_FOUND
+            if "찾을 수 없습니다" in str(exc)
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(code, str(exc)) from exc
+
+    rows = task_service.list_tasks(session, project_id)
+    updated = next(row for row in rows if row["id"] == task.id)
+    return TaskOut(**updated)
 
 
 # ══════════════════════════════════════════════════════════════

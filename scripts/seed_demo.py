@@ -261,6 +261,7 @@ def seed(*, reset: bool) -> dict:
         )
 
         _seed_contribution_events(s, project.id, user_ids)
+        _seed_tasks(s, project.id, user_ids, meeting.id)
 
         return {
             "project_id": project.id,
@@ -324,6 +325,57 @@ def _seed_contribution_events(session, project_id: int, user_ids: list[int]) -> 
                 source_id=index * 1000 + seq,
                 magnitude=magnitude,
                 event_metadata={},
+            )
+        )
+
+
+# 칸반에 이미 올라가 있는 업무.
+#
+# 상태가 서로 달라야 화면이 의미가 있고, **회의에서 나온 것과 손으로 만든
+# 것이 섞여 있어야** 이 프로젝트의 주장이 화면에서 구분됩니다.
+#
+#   (제목, 담당자 index(-1 이면 없음), 상태, 마감일 오프셋(일), 회의에서 나왔는가)
+_TASKS: list[tuple[str, int, str, int | None, bool]] = [
+    ("로그인 API 구현", 0, "in_progress", 4, True),
+    ("회원가입 화면 작업", 1, "todo", 7, True),
+    ("DB 스키마 정리", 2, "done", 2, True),
+    # 손으로 만든 업무. 회의에서 나오지 않은 것도 칸반에는 있습니다.
+    ("개발 환경 문서 정리", 1, "todo", None, False),
+    # 담당자가 없는 업무 — 완료해도 기여도에 잡히지 않는다는 걸 화면이
+    # 말해 줘야 하는 경우입니다.
+    ("배포 방식 조사", -1, "todo", 10, False),
+]
+
+
+def _seed_tasks(session, project_id: int, user_ids: list[int], meeting_id: int) -> None:
+    candidates = list(
+        session.scalars(
+            select(m.MeetingTaskCandidate).where(
+                m.MeetingTaskCandidate.meeting_id == meeting_id
+            )
+        ).all()
+    )
+
+    for index, (title, owner, status, due_days, from_meeting) in enumerate(_TASKS):
+        deadline = (
+            MEETING_START + timedelta(days=due_days) if due_days is not None else None
+        )
+        completed_at = MEETING_START + timedelta(days=1) if status == "done" else None
+        session.add(
+            m.Task(
+                project_id=project_id,
+                title=title,
+                assignee_id=user_ids[owner] if owner >= 0 else None,
+                deadline=deadline,
+                status=status,
+                completed_at=completed_at,
+                # 회의에서 나온 업무는 후보를 가리킨다. 그 연결이 화면에서
+                # "🗣 회의에서 나온 업무" 로 보인다.
+                origin_candidate_id=(
+                    candidates[index].id
+                    if from_meeting and index < len(candidates)
+                    else None
+                ),
             )
         )
 

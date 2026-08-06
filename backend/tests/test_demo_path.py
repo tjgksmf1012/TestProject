@@ -507,3 +507,56 @@ def test_seeded_members_have_different_shapes(client: TestClient, seeded: dict):
     assert len(body["members"]) == 3
     assert len(set(round(s, 1) for s in shares)) == 3, f"전부 같은 값입니다: {shares}"
     assert all(mem["categories"] for mem in body["members"])
+
+
+# ══════════════════════════════════════════════════════════════
+# 7. 칸반 화면
+# ══════════════════════════════════════════════════════════════
+
+
+def test_kanban_page_is_served(client: TestClient):
+    for path in ("/kanban.html", "/kanban.js"):
+        assert client.get(path).status_code == 200, f"{path} 가 안 열립니다"
+
+
+def test_kanban_response_has_the_fields_the_screen_reads(client: TestClient, seeded: dict):
+    """`board.ts` 의 `Task` 와 서버 응답이 어긋나면 카드가 조용히 빕니다."""
+    body = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()
+
+    assert body["statuses"] == ["todo", "in_progress", "done"]
+    assert body["tasks"]
+    for task in body["tasks"]:
+        assert {
+            "id",
+            "title",
+            "assignee_id",
+            "status",
+            "deadline",
+            "completed_at",
+            "origin",
+        } <= set(task)
+
+
+def test_seeded_board_shows_the_chain_and_the_exceptions(client: TestClient, seeded: dict):
+    """⭐ 시연 보드에 네 가지가 다 있어야 화면이 무엇을 말하는지 보입니다.
+
+    회의에서 나온 업무 · 손으로 만든 업무 · 담당자 없는 업무 · 완료된 업무.
+    전부 같은 모양이면 이 화면은 그냥 할 일 목록으로 보입니다.
+    """
+    tasks = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()["tasks"]
+
+    assert [t for t in tasks if t["origin"]], "회의에서 나온 업무가 있어야 합니다"
+    assert [t for t in tasks if not t["origin"]], "손으로 만든 업무도 있어야 합니다"
+    assert [t for t in tasks if t["assignee_id"] is None], "담당자 없는 업무가 있어야 합니다"
+    assert len({t["status"] for t in tasks}) >= 2, "상태가 하나뿐이면 열이 비어 보입니다"
+
+
+def test_seeded_origin_reaches_back_to_an_utterance(client: TestClient, seeded: dict):
+    """업무 → 후보 → 회의 → 근거 발화. 이 사슬이 이 프로젝트의 주장입니다."""
+    tasks = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()["tasks"]
+    from_meeting = [t for t in tasks if t["origin"]]
+
+    assert from_meeting
+    for task in from_meeting:
+        assert task["origin"]["meeting_id"] == seeded["meeting_id"]
+        assert task["origin"]["evidence_utterance_ids"]
