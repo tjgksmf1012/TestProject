@@ -221,6 +221,25 @@ def test_every_routed_queue_has_a_consumer_in_the_app_profile():
     )
 
 
+def test_env_file_targets_exist_or_are_optional():
+    """⭐ `env_file: .env` 는 파일이 없으면 **파싱 단계에서** 실패한다.
+
+    `.env` 는 `.gitignore` 대상이라 clone 직후에는 없다. README 가
+    `cp .env.example .env` 를 먼저 시키긴 하지만, 그 순서를 건너뛴 사람은
+    `docker compose --profile app up` 이 서비스 하나 뜨기 전에 죽는 걸 본다.
+
+    이 저장소가 `.env.example` 을 제공하므로 여기서는 그 존재를 확인한다 —
+    적어도 복사할 원본은 있어야 한다.
+    """
+    text = COMPOSE.read_text("utf-8")
+    if "env_file" not in text:
+        pytest.skip("compose 가 env_file 을 쓰지 않습니다")
+
+    assert (REPO_ROOT / ".env.example").is_file(), (
+        "compose 가 .env 를 요구하는데 복사할 .env.example 이 없습니다"
+    )
+
+
 def test_compose_header_documents_the_llm_profile():
     """`--profile app` 만 안내하면 사용자는 LLM 없이 띄우고 분석에서 막힌다."""
     header = COMPOSE.read_text("utf-8").split("services:")[0]

@@ -327,3 +327,93 @@ def test_full_flow_over_http_only(client: TestClient, meeting: dict):
 
     tracks = client.get(f"/api/meetings/{meeting_id}/tracks").json()["tracks"]
     assert len(tracks) == 3
+
+
+# ══════════════════════════════════════════════════════════════
+# 없는 ID 를 보냈을 때 — 조용한 성공이 없어야 한다
+#
+# 재계산·후보 조회가 전부 "없으면 빈 결과" 로 멀쩡히 동작하다 보니,
+# 없는 것을 물어봐도 200 이 나갔습니다. 화면은 그걸 정상 상태로 그립니다.
+# ══════════════════════════════════════════════════════════════
+
+
+def test_unknown_candidate_is_reported_not_silently_ignored(
+    client: TestClient, meeting: dict
+):
+    """⭐ 사람이 "승인" 을 눌렀는데 아무 일도 안 일어나면 그건 성공이 아니다.
+
+    이 시스템에서 사람이 개입하는 유일한 지점이라(docs/03 §3), 여기서
+    조용히 넘어가면 승인했다고 믿고 넘어가게 된다.
+    """
+    response = client.post(
+        f"/api/meetings/{meeting['meeting_id']}/candidates/review",
+        json={
+            "reviewer_id": meeting["members"][0],
+            "items": [{"candidate_id": 99_999, "approve": True}],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["approved_count"] == 0
+    assert body["failures"] == {"99999": ["unknown_candidate"]}
+
+
+def test_candidate_from_another_meeting_is_refused(client: TestClient, meeting: dict, engine):
+    """다른 회의의 후보 ID 를 보내도 조용히 넘어가면 안 된다."""
+    with db_session.session_scope() as s:
+        other = m.Meeting(
+            project_id=meeting["project_id"],
+            started_at=NOW,
+            started_by=meeting["members"][0],
+        )
+        s.add(other)
+        s.flush()
+        utterance = m.Utterance(
+            meeting_id=other.id,
+            speaker_id=meeting["members"][0],
+            start_ms=0,
+            end_ms=1000,
+            text="다른 회의",
+            speaker_source="track",
+        )
+        s.add(utterance)
+        s.flush()
+        candidate = m.MeetingTaskCandidate(
+            meeting_id=other.id,
+            title="남의 후보",
+            confidence=0.9,
+            evidence_utterance_ids=[utterance.id],
+        )
+        s.add(candidate)
+        s.flush()
+        foreign_id = candidate.id
+        other_id = other.id
+
+    response = client.post(
+        f"/api/meetings/{meeting['meeting_id']}/candidates/review",
+        json={
+            "reviewer_id": meeting["members"][0],
+            "items": [{"candidate_id": foreign_id, "approve": True}],
+        },
+    )
+
+    assert response.json()["failures"] == {str(foreign_id): ["unknown_candidate"]}
+    with db_session.session_scope() as s:
+        assert s.get(m.MeetingTaskCandidate, foreign_id).review_status == "pending"
+        assert s.get(m.Meeting, other_id) is not None
+
+
+def test_unknown_project_contributions_is_404(client: TestClient):
+    """⭐ 재계산 방식이라 없는 프로젝트도 "이벤트 0건 → 빈 결과" 로 계산된다.
+
+    화면은 그걸 "기여도가 없는 프로젝트" 로 그린다 — 오타 하나로 팀 전체가
+    0점인 것처럼 보이고 아무 오류도 나지 않는다.
+    """
+    assert client.get("/api/projects/99999/contributions").status_code == 404
+
+
+def test_real_project_contributions_still_works(client: TestClient, meeting: dict):
+    response = client.get(f"/api/projects/{meeting['project_id']}/contributions")
+    assert response.status_code == 200
+    assert len(response.json()["members"]) == 3

@@ -871,6 +871,14 @@ def contributions(project_id: int, session: DbSession, settings: AppSettings) ->
     """
     from teamflow.services import scoring_service
 
+    # ⚠️ 없는 프로젝트를 200 으로 돌려주면 안 된다.
+    #
+    # 재계산 방식이라 없는 프로젝트도 "이벤트 0건 → 빈 결과" 로 멀쩡히
+    # 계산된다. 화면은 그걸 **"기여도가 없는 프로젝트"** 로 그린다 —
+    # 오타 하나로 팀 전체가 0점인 것처럼 보이고, 아무 오류도 나지 않는다.
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+
     result = scoring_service.compute(session, project_id)
     return ScoreOut(
         algo_version=settings.scoring_algo_version,

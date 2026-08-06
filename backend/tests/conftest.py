@@ -5,12 +5,37 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 from teamflow.contribution.confidence import CoverageStats
 from teamflow.contribution.diff_filter import ChangedFile
 from teamflow.contribution.events import ContributionEvent, EventType, SourceKind
 from teamflow.contribution.github_ingest import PullRequest, Review
 from teamflow.contribution.profiles import DEFAULT_PROFILES, Role
+
+# ══════════════════════════════════════════════════════════════
+# SQLite 에서 외래키를 강제한다
+# ══════════════════════════════════════════════════════════════
+#
+# SQLite 는 기본값이 **꺼짐**이다. 그래서 592개 테스트가 전부 참조 무결성이
+# 없는 DB 에서 돌고 있었다 — 없는 user_id 를 넣어도 통과한다.
+#
+# 프로덕션은 PostgreSQL 이고 거기서는 강제된다. 즉 요청 본문의 id 를 그대로
+# FK 컬럼에 쓰는 엔드포인트는 **테스트에서 200, 배포에서 500** 이 된다.
+# 이 프로젝트에서 반복해서 나온 "테스트는 통과하는데 실제로는 안 되는"
+# 부류이고, 이건 그 부류를 자동으로 잡는 그물이다.
+#
+# 여기서 깨지는 테스트가 곧 프로덕션에서 깨질 것들이다.
+
+
+@event.listens_for(Engine, "connect")
+def _enforce_sqlite_foreign_keys(dbapi_connection, _record) -> None:
+    if type(dbapi_connection).__module__.startswith("sqlite3"):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
 
 T0 = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 
