@@ -176,6 +176,200 @@ def _enqueue_after_commit(session: Session, meeting_id: int) -> None:
         dispatch.enqueue_meeting_processing(meeting_id)
 
 
+# ══════════════════════════════════════════════════════════════
+# 프로젝트·회의 생성
+# ══════════════════════════════════════════════════════════════
+#
+# 이게 없어서 지금까지 DB 를 손으로 건드리지 않으면 회의를 만들 수 없었다.
+#
+# ⚠️ 인증이 아직 없다. `owner_id`·`user_id` 를 요청 본문으로 받는다는 뜻이고,
+# 이건 **누구나 남을 사칭할 수 있다**는 뜻이다. 시연 단계라 이렇게 두지만
+# 배포 전에 반드시 세션에서 꺼내야 한다. 여기 적어 두는 이유는, 이런 것이
+# 조용히 남아 있는 게 이 저장소에서 반복해서 나온 결함이기 때문이다.
+
+
+class ProjectIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    github_repo: str | None = None
+    member_ids: list[int] = Field(min_length=1)
+
+
+class ProjectOut(BaseModel):
+    project_id: int
+    title: str
+    member_ids: list[int]
+
+
+@app.post("/api/projects", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
+def create_project(payload: ProjectIn, session: DbSession) -> ProjectOut:
+    known = set(
+        session.scalars(select(m.User.id).where(m.User.id.in_(payload.member_ids))).all()
+    )
+    missing = set(payload.member_ids) - known
+    if missing:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"없는 사용자입니다: {sorted(missing)}"
+        )
+
+    project = m.Project(
+        title=payload.title,
+        started_at=datetime.now(UTC),
+        github_repo=payload.github_repo,
+    )
+    session.add(project)
+    session.flush()
+
+    for user_id in dict.fromkeys(payload.member_ids):  # 순서 유지 + 중복 제거
+        session.add(
+            m.Member(
+                project_id=project.id, user_id=user_id, role_shares={"developer": 1.0}
+            )
+        )
+    session.flush()
+
+    return ProjectOut(
+        project_id=project.id, title=project.title, member_ids=list(payload.member_ids)
+    )
+
+
+class MeetingIn(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    started_by: int
+    #: multitrack 만 받는다. 단일 마이크(모드 B)는 화자 분리 구현이 없어
+    #: 만들어 두면 처리 단계에서 빈 결과가 나온다 — 만들 수 없게 막는다.
+    capture_mode: str = "multitrack"
+
+
+class MeetingOut(BaseModel):
+    meeting_id: int
+    project_id: int
+    status: str
+    consent_url: str
+
+
+@app.post(
+    "/api/projects/{project_id}/meetings",
+    response_model=MeetingOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_meeting(
+    project_id: int, payload: MeetingIn, session: DbSession
+) -> MeetingOut:
+    """회의를 연다. 아직 녹음은 시작되지 않는다 — 동의가 먼저다."""
+    project = session.get(m.Project, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+
+    if payload.capture_mode != "multitrack":
+        # 모드 B 는 화자 분리(`build_diarizer`)가 미구현이다. 만들 수 있게
+        # 두면 녹음은 되는데 처리에서 조용히 빈 결과가 나온다.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "지금은 멀티트랙(각자 폰으로 녹음)만 지원합니다. "
+            "단일 마이크는 화자 분리 구현 후에 열립니다 (docs/04 §2).",
+        )
+
+    member = session.scalars(
+        select(m.Member).where(
+            m.Member.project_id == project_id, m.Member.user_id == payload.started_by
+        )
+    ).one_or_none()
+    if member is None:
+        # 통신비밀보호법 L1 — 녹음을 시작하는 사람은 회의 당사자여야 한다.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "이 프로젝트의 구성원만 회의를 시작할 수 있습니다"
+        )
+
+    meeting = m.Meeting(
+        project_id=project_id,
+        title=payload.title,
+        started_at=datetime.now(UTC),
+        started_by=payload.started_by,
+        capture_mode=payload.capture_mode,
+    )
+    session.add(meeting)
+    session.flush()
+
+    return MeetingOut(
+        meeting_id=meeting.id,
+        project_id=project_id,
+        status=meeting.status,
+        consent_url=f"/api/meetings/{meeting.id}/consent",
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 동의 — 법적 방어선
+# ══════════════════════════════════════════════════════════════
+
+
+class ConsentIn(BaseModel):
+    user_id: int
+    #: recording | raw_audio_retention | voiceprint_storage
+    consent_type: str = "recording"
+    consented: bool
+
+
+class ConsentOut(BaseModel):
+    meeting_id: int
+    roster: list[dict[str, Any]]
+    all_confirmed: bool
+    message: str
+
+
+@app.post("/api/meetings/{meeting_id}/consent", response_model=ConsentOut)
+def submit_consent(
+    meeting_id: int, payload: ConsentIn, request: Request, session: DbSession
+) -> ConsentOut:
+    """동의를 제출하거나 철회한다.
+
+    **철회는 소급하지 않는다.** `consented=false` 는 이후 청크만 막고,
+    이미 받은 오디오는 보존기간까지 남는다. 삭제는 별도 절차다 (docs/07 P6).
+    """
+    _load_meeting(session, meeting_id)
+    try:
+        recording_service.submit_consent(
+            session,
+            meeting_id=meeting_id,
+            user_id=payload.user_id,
+            consent_type=payload.consent_type,
+            consented=payload.consented,
+            ip_address=request.client.host if request.client else None,
+        )
+    except recording_service.ConsentError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    status_ = recording_service.consent_status(session, meeting_id)
+    return ConsentOut(
+        meeting_id=meeting_id,
+        roster=recording_service.consent_roster(session, meeting_id),
+        all_confirmed=status_.all_confirmed,
+        message="전원 동의했습니다. 녹음을 시작할 수 있습니다"
+        if status_.all_confirmed
+        else status_.describe(),
+    )
+
+
+@app.get("/api/meetings/{meeting_id}/consent", response_model=ConsentOut)
+def read_consent(meeting_id: int, session: DbSession) -> ConsentOut:
+    """동의 현황. **아직 응답하지 않은 사람도 보인다.**
+
+    동의 행이 있는 사람만 보여주면 기다려야 할 대상이 화면에서 사라진다.
+    """
+    _load_meeting(session, meeting_id)
+    status_ = recording_service.consent_status(session, meeting_id)
+    return ConsentOut(
+        meeting_id=meeting_id,
+        roster=recording_service.consent_roster(session, meeting_id),
+        all_confirmed=status_.all_confirmed,
+        message="전원 동의했습니다. 녹음을 시작할 수 있습니다"
+        if status_.all_confirmed
+        else status_.describe(),
+    )
+
+
 class TrackOut(BaseModel):
     track_id: int
     meeting_id: int

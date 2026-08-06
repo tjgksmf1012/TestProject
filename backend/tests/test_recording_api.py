@@ -194,6 +194,15 @@ def meeting(engine) -> dict[str, int]:
         s.add(project)
         s.flush()
 
+        # 프로젝트 구성원으로 등록한다. 예전 픽스처는 이걸 빠뜨렸고, 그래서
+        # "동의만 있으면 남의 회의에도 들어갈 수 있다" 는 구멍이 보이지 않았다.
+        for user in users:
+            s.add(
+                m.Member(
+                    project_id=project.id, user_id=user.id, role_shares={"developer": 1.0}
+                )
+            )
+
         meeting = m.Meeting(
             project_id=project.id, started_at=NOW, started_by=users[0].id
         )

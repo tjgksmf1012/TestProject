@@ -153,10 +153,15 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 팀원 명단 API (승인 화면용) | ✅ | `backend/teamflow/api/main.py` |
 | **녹음 종료 → 회의 처리 큐잉** | ✅ | `backend/teamflow/tasks/dispatch.py` |
 | 녹음 방식별 로더 선택 (모드 A/B) | ✅ | `backend/teamflow/pipeline/runtime.py` |
+| **동의 제출·철회 API + 3중 게이트** | ✅ | `backend/teamflow/services/recording_service.py` |
+| **프로젝트·회의 생성 API** | ✅ | `backend/teamflow/api/main.py` |
+| **시연 데이터 + 가짜 ASR** | ✅ | `scripts/seed_demo.py`, `ASR_BACKEND=fake` |
+| 화면·API 한 오리진 (StaticFiles 마운트) | ✅ | `backend/teamflow/api/main.py` |
+| 인증·세션 | ⬜ | 지금은 `user_id` 를 요청 본문으로 받습니다 (시연 단계) |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 630 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 646 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 

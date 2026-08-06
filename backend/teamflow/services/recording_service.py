@@ -47,51 +47,238 @@ class TrackError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ConsentStatus:
-    """회의 참여자들의 동의 현황."""
+    """회의 참여자들의 동의 현황.
+
+    `total` 은 **프로젝트 구성원 수**다. 동의 행이 있는 사람 수가 아니다.
+    아래 `consent_status` 의 설명 참조 — 이 구분이 이 클래스의 전부다.
+    """
 
     total: int
     granted: int
     refused: int
 
     @property
+    def pending(self) -> int:
+        """아직 아무 응답도 하지 않은 사람. 거부(refused)와 다르다."""
+        return self.total - self.granted - self.refused
+
+    @property
     def all_confirmed(self) -> bool:
-        # 아무도 응답하지 않았으면 "전원 동의"가 아니다.
+        # 아무도 없거나, 거부가 있거나, 아직 답 안 한 사람이 있으면 아니다.
         # 빈 집합에 대한 전칭명제는 참이지만, 여기서는 그게 곧 사고다.
         return self.total > 0 and self.granted == self.total
 
     def describe(self) -> str:
         if self.total == 0:
-            return "녹음 동의 기록이 없습니다"
+            return "이 프로젝트에 구성원이 없습니다"
         if self.refused:
             return f"{self.refused}명이 녹음에 동의하지 않았습니다"
-        return f"{self.total - self.granted}명이 아직 동의하지 않았습니다"
+        return f"{self.pending}명이 아직 동의하지 않았습니다"
 
 
 def consent_status(session: Session, meeting_id: int) -> ConsentStatus:
     """이 회의의 녹음 동의(①단계) 현황.
 
-    참여자 집합은 `recording_consents` 에 행이 있는 사람들이다. 회의방에
-    들어온 순간 행이 만들어진다.
+    ⚠️ **분모는 프로젝트 구성원이다.** 동의 행이 있는 사람이 아니다.
 
-    ⚠️ **한계**: 앱을 켜지 않고 자리에 앉아 있는 사람은 시스템이 알 수 없다.
-    그 사람에 대해서는 소프트웨어가 해줄 수 있는 게 없고, 화면에서 "참석자
-    전원이 동의했는지" 육안 확인을 요구하는 수밖에 없다. 숨기지 말고 그렇게 적는다.
+    예전에는 `recording_consents` 행만 셌다. 그러면 3명 팀에서 1명만 동의해도
+    total=1, granted=1 이라 **"전원 동의했습니다. 녹음을 시작할 수 있습니다"**
+    가 떴다. 법적 게이트가 초록불을 켜 주는데 두 사람은 아무 말도 한 적이
+    없는 상태다.
+
+    같은 오류가 두 곳에서 났었다 — 여기와 `join_track`. 뿌리가 같다:
+    **응답하지 않은 사람을 분모에서 빼면 침묵이 동의가 된다.**
+
+    ⚠️ 남는 한계 둘. 숨기지 않고 적는다.
+
+    1. 회의에 안 오는 구성원이 있으면 그 사람이 응답할 때까지 녹음을 시작할
+       수 없다. 그게 안전한 쪽이다 — 반대로 하면 "출석한 사람만 동의하면 된다"
+       가 되는데, 시스템은 누가 출석했는지 모른다.
+    2. 앱을 켜지 않고 자리에 앉아 있는 사람은 시스템이 알 수 없다. 소프트웨어가
+       해줄 수 있는 게 없고, 화면에서 육안 확인을 요구하는 수밖에 없다.
     """
+    meeting = session.get(m.Meeting, meeting_id)
+    if meeting is None:
+        return ConsentStatus(total=0, granted=0, refused=0)
+
+    member_ids = set(
+        session.scalars(
+            select(m.Member.user_id).where(m.Member.project_id == meeting.project_id)
+        ).all()
+    )
+
     rows = session.scalars(
         select(m.RecordingConsent).where(
             m.RecordingConsent.meeting_id == meeting_id,
             m.RecordingConsent.consent_type == RECORDING_CONSENT,
         )
     ).all()
-    granted = sum(1 for r in rows if r.consented)
-    return ConsentStatus(total=len(rows), granted=granted, refused=len(rows) - granted)
+
+    # 구성원이 아닌 사람의 동의 행은 세지 않는다. 있어서는 안 되지만
+    # (`submit_consent` 가 막는다), 있다고 해서 분자를 부풀리면 안 된다.
+    granted = sum(1 for r in rows if r.consented and r.user_id in member_ids)
+    refused = sum(1 for r in rows if not r.consented and r.user_id in member_ids)
+    return ConsentStatus(total=len(member_ids), granted=granted, refused=refused)
 
 
 def require_consent(session: Session, meeting_id: int) -> ConsentStatus:
+    """회의 **전체**가 동의했는가. 이것만으로는 부족하다 — 아래를 같이 쓴다."""
     status = consent_status(session, meeting_id)
     if not status.all_confirmed:
         raise ConsentError(status.describe())
     return status
+
+
+def require_own_consent(session: Session, meeting_id: int, user_id: int) -> None:
+    """**이 사람 본인**이 동의했는가.
+
+    ⚠️ 전체 동의만 확인하면 구멍이 난다. `consent_status` 는 동의 행이 있는
+    사람만 세므로, **동의 행이 아예 없는 사람은 분모에도 안 들어간다.**
+    다른 참석자 셋이 동의를 마쳐 놓으면 넷째 사람은 아무 기록 없이 트랙을
+    만들고 자기 목소리를 올릴 수 있었다.
+
+    그 오디오는 발화가 되고 기여도 계산에 들어간다. 개인정보보호법이
+    요구하는 건 "회의가 동의를 받았다" 가 아니라 **"이 사람이 동의했다"**
+    이므로, 법적 방어선이 통째로 없는 상태였다 (docs/07 L1·P1).
+
+    회의 도중 철회하면 그 즉시 여기서 막힌다 — 청크마다 확인하기 때문이다.
+    이미 받은 것은 지우지 않는다. 철회는 소급하지 않는다.
+    """
+    row = session.scalars(
+        select(m.RecordingConsent).where(
+            m.RecordingConsent.meeting_id == meeting_id,
+            m.RecordingConsent.user_id == user_id,
+            m.RecordingConsent.consent_type == RECORDING_CONSENT,
+        )
+    ).one_or_none()
+
+    if row is None:
+        raise ConsentError("본인의 녹음 동의 기록이 없습니다")
+    if not row.consented:
+        raise ConsentError("녹음에 동의하지 않았습니다")
+
+
+def require_project_member(session: Session, meeting_id: int, user_id: int) -> None:
+    """이 회의가 속한 프로젝트의 구성원인가 (docs/07 P7).
+
+    동의는 "내 목소리를 써도 된다" 는 것이고, 이건 "이 회의에 들어올 자격이
+    있는가" 다. 둘은 다른 질문이라 따로 확인한다 — 남의 프로젝트 회의에
+    동의서를 내고 들어가는 걸 동의 검사만으로는 막을 수 없다.
+    """
+    meeting = session.get(m.Meeting, meeting_id)
+    if meeting is None:
+        raise TrackError("회의를 찾을 수 없습니다")
+
+    member = session.scalars(
+        select(m.Member).where(
+            m.Member.project_id == meeting.project_id,
+            m.Member.user_id == user_id,
+        )
+    ).one_or_none()
+    if member is None:
+        raise ConsentError("이 프로젝트의 구성원이 아닙니다")
+
+
+#: 3단계 동의. ②③ 을 거부해도 서비스는 동작해야 한다 (필요 최소 수집 원칙).
+CONSENT_TYPES = ("recording", "raw_audio_retention", "voiceprint_storage")
+
+
+def submit_consent(
+    session: Session,
+    *,
+    meeting_id: int,
+    user_id: int,
+    consent_type: str,
+    consented: bool,
+    ip_address: str | None = None,
+) -> m.RecordingConsent:
+    """동의를 제출하거나 철회한다.
+
+    같은 (회의, 사람, 종류) 는 행 하나다. 다시 제출하면 덮어쓴다 —
+    화면을 새로고침해도 동의가 두 번 세어지면 안 된다.
+
+    ## 철회는 소급하지 않는다
+
+    `consented=False` 로 바꾸면 **이후 청크만** 막힌다. 이미 받은 오디오는
+    지우지 않는다. 그건 삭제 요청(docs/07 P6)이라는 별도 절차이고, 보존기간
+    삭제 잡이 따로 처리한다. 여기서 지워 버리면 이미 승인된 업무의 근거가
+    끊어진다.
+
+    ⚠️ 회의가 이미 끝난 뒤의 동의 제출은 막지 않는다. 늦게 낸 동의도
+    기록으로서 의미가 있고, 녹음은 어차피 트랙 상태로 막힌다.
+    """
+    if consent_type not in CONSENT_TYPES:
+        raise ValueError(f"알 수 없는 동의 종류입니다: {consent_type}")
+
+    require_project_member(session, meeting_id, user_id)
+
+    row = session.scalars(
+        select(m.RecordingConsent).where(
+            m.RecordingConsent.meeting_id == meeting_id,
+            m.RecordingConsent.user_id == user_id,
+            m.RecordingConsent.consent_type == consent_type,
+        )
+    ).one_or_none()
+
+    if row is None:
+        row = m.RecordingConsent(
+            meeting_id=meeting_id,
+            user_id=user_id,
+            consent_type=consent_type,
+            consented=consented,
+            ip_address=ip_address,
+        )
+        session.add(row)
+    else:
+        row.consented = consented
+        row.consented_at = datetime.now(UTC)
+        if ip_address:
+            row.ip_address = ip_address
+
+    session.flush()
+    return row
+
+
+def consent_roster(session: Session, meeting_id: int) -> list[dict]:
+    """**프로젝트 구성원 전원**에 대한 동의 현황.
+
+    동의 행이 있는 사람만 보여주면 아무 의미가 없다 — 아직 아무 응답도 하지
+    않은 사람이 화면에서 사라지기 때문이다. 그 사람이야말로 기다려야 하는
+    대상이다.
+    """
+    meeting = session.get(m.Meeting, meeting_id)
+    if meeting is None:
+        raise TrackError("회의를 찾을 수 없습니다")
+
+    members = session.execute(
+        select(m.Member.user_id, m.User.name)
+        .join(m.User, m.User.id == m.Member.user_id)
+        .where(m.Member.project_id == meeting.project_id)
+        .order_by(m.Member.user_id)
+    ).all()
+
+    rows = session.scalars(
+        select(m.RecordingConsent).where(m.RecordingConsent.meeting_id == meeting_id)
+    ).all()
+    by_user: dict[int, dict[str, bool]] = {}
+    for row in rows:
+        by_user.setdefault(row.user_id, {})[row.consent_type] = row.consented
+
+    roster = []
+    for user_id, name in members:
+        answers = by_user.get(user_id, {})
+        roster.append(
+            {
+                "user_id": user_id,
+                "name": name,
+                # None = 아직 응답 없음. False(거부)와 구분해야 한다 —
+                # 화면이 "기다리는 중" 과 "거부함" 을 다르게 말해야 하므로.
+                "recording": answers.get("recording"),
+                "raw_audio_retention": answers.get("raw_audio_retention"),
+                "voiceprint_storage": answers.get("voiceprint_storage"),
+            }
+        )
+    return roster
 
 
 def join_track(
@@ -107,7 +294,14 @@ def join_track(
 
     멱등이다. 회의 도중 브라우저를 새로고침해도 같은 트랙으로 이어붙는다 —
     새 트랙이 생기면 그 사람이 두 명으로 세어진다.
+
+    게이트가 셋이다. 하나라도 빠지면 방어선이 아니다.
+        1. 이 프로젝트 구성원인가          (docs/07 P7)
+        2. **본인이** 동의했는가            (docs/07 P1) ← 이게 빠져 있었다
+        3. 참석자 전원이 동의했는가        (docs/07 L1)
     """
+    require_project_member(session, meeting_id, user_id)
+    require_own_consent(session, meeting_id, user_id)
     require_consent(session, meeting_id)
 
     track = session.scalars(
@@ -166,6 +360,10 @@ def store_chunk(
         raise TrackError(f"녹음이 끝난 트랙입니다 (status={track.status})")
 
     # 매 청크마다 확인한다. 회의 도중에 철회할 수 있기 때문이다.
+    # 본인 동의를 먼저 본다 — 혼자 철회한 경우 전체 검사만으로는 막히지 않는다
+    # (철회하면 granted 가 줄지만 total 도 그대로라 "아직 동의하지 않았습니다"
+    # 로 걸리기는 한다. 그래도 이유가 정확해야 화면이 옳은 말을 한다).
+    require_own_consent(session, meeting_id, track.user_id)
     require_consent(session, meeting_id)
 
     store.write(meeting_id, track_id, seq, data)
