@@ -61,6 +61,7 @@ app.conf.update(
     task_routes={
         "teamflow.tasks.meeting_tasks.process_meeting_task": {"queue": "gpu"},
         "teamflow.tasks.meeting_tasks.persist_results_task": {"queue": "cpu"},
+        "teamflow.tasks.github_tasks.*": {"queue": "cpu"},
         "teamflow.tasks.maintenance.*": {"queue": "cpu"},
     },
     beat_schedule={

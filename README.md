@@ -164,11 +164,11 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **기여도 화면** (구간·근거·측정 불가 표시, 순위 없음) | ✅ | `frontend/src/lib/contribution/`, `public/contributions.html` |
 | **칸반 화면 + 업무 API** (회의 근거 표시) | ✅ | `frontend/src/lib/kanban/`, `public/kanban.html` |
 | **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
-| GitHub 활동 → 기여 이벤트 | ⚠️ 미연결 | `github_ingest.py` 는 완성됐지만 **웹훅 페이로드에 diff 가 없어** GitHub API 호출이 필요합니다 |
+| **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ⚠️ 실측 미검증 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 784 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 821 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 

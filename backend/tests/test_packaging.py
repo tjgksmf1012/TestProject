@@ -267,6 +267,24 @@ def _top_level_imports(path: Path) -> set[str]:
     return names
 
 
+def _all_imports(path: Path) -> set[str]:
+    """지연 import 까지 포함한 **모든** import.
+
+    `_top_level_imports` 와 나눈 이유: "기본 설치로 import 되는가" 는 최상위만
+    보면 되지만, "이 의존성이 쓰이긴 하는가" 는 함수 안의 import 도 세야
+    합니다. `github/client.py` 가 `jwt` 를 함수 안에서 부릅니다 — Fake 만
+    쓰는 경로에서는 서명이 필요 없기 때문입니다.
+    """
+    tree = ast.parse(path.read_text("utf-8"), filename=str(path))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+    return names
+
+
 def test_every_runtime_import_is_declared():
     """⭐ 기본 설치만으로 패키지가 import 되어야 한다.
 
@@ -334,3 +352,46 @@ def test_python_version_matches_the_dockerfiles():
 @pytest.mark.parametrize("extra", ["ai", "dev"])
 def test_extras_are_declared(extra: str):
     assert extra in _pyproject()["project"]["optional-dependencies"]
+
+
+# 직접 import 하지 않지만 필요한 것들. 이유를 적어 둡니다 — 적지 않으면
+# 다음 사람이 "안 쓰네" 하고 지웁니다.
+_NOT_IMPORTED_BUT_NEEDED = {
+    "uvicorn": "ASGI 서버. 명령줄로 실행합니다 (Dockerfile CMD)",
+    "alembic": "마이그레이션 CLI. 코드에서 부르지 않습니다",
+    "psycopg": "SQLAlchemy 가 DATABASE_URL 로 고르는 드라이버입니다",
+    "pydantic-settings": "teamflow.config 가 pydantic_settings 로 import 합니다",
+}
+
+
+def test_no_dependency_sits_unused():
+    """⭐ 선언만 해 놓고 아무도 안 쓰는 의존성을 잡는다.
+
+    `pyjwt[crypto]` 가 이 저장소에 그렇게 있었습니다 — GitHub App 인증
+    경로를 만들려고 넣어 두고 **그 경로를 만들지 않은 채로** 남아 있었습니다.
+    운영 이미지에 이유 없는 패키지가 들어가고, 더 나쁘게는 "그 기능이 있다"
+    는 인상을 줍니다.
+
+    위 `test_every_runtime_import_is_declared` 는 반대 방향(import → 선언)만
+    봅니다. 이 방향을 아무도 보지 않았습니다.
+    """
+    declared = _requirement_names(_pyproject()["project"]["dependencies"])
+
+    imported: set[str] = set()
+    for path in sorted(PACKAGE.rglob("*.py")):
+        for module in _all_imports(path):
+            imported.add(_MODULE_TO_DISTRIBUTION.get(module, module).lower())
+
+    unused = sorted(declared - imported - set(_NOT_IMPORTED_BUT_NEEDED))
+    assert not unused, (
+        "기본 의존성에 선언됐는데 teamflow 어디에서도 import 하지 않습니다. "
+        "쓰거나, 빼거나, _NOT_IMPORTED_BUT_NEEDED 에 이유를 적으세요:\n"
+        + "\n".join(f"  {name}" for name in unused)
+    )
+
+
+def test_the_allowlist_itself_stays_honest():
+    """면제 목록에 없는 이름이 쌓이면 위 테스트가 무력해진다."""
+    declared = _requirement_names(_pyproject()["project"]["dependencies"])
+    stale = sorted(set(_NOT_IMPORTED_BUT_NEEDED) - declared)
+    assert not stale, f"면제 목록에 이제 없는 의존성이 있습니다: {stale}"

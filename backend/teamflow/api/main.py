@@ -371,6 +371,21 @@ def _enqueue_after_commit(session: Session, meeting_id: int) -> None:
         dispatch.enqueue_meeting_processing(meeting_id)
 
 
+def _enqueue_github_after_commit(session: Session, event_id: int) -> None:
+    """커밋이 끝난 **뒤에** GitHub 수집을 큐에 넣는다.
+
+    `_enqueue_after_commit` 과 같은 이유입니다 — 커밋은 엔드포인트 본문이
+    아니라 의존성 teardown 에서 일어나므로, 본문에서 큐에 넣으면 항상
+    커밋보다 먼저입니다. 워커가 그 사이에 도착하면 `GithubEvent` 행을
+    찾지 못하고 `not_found` 로 끝납니다 — 예외도 로그도 없이 그 PR 의
+    기여가 사라집니다.
+    """
+
+    @event.listens_for(session, "after_commit", once=True)
+    def _fire(_session: Session) -> None:  # pragma: no cover - 커밋 시점에 실행된다
+        dispatch.enqueue_github_ingest(event_id)
+
+
 # ══════════════════════════════════════════════════════════════
 # 프로젝트·회의 생성
 # ══════════════════════════════════════════════════════════════
@@ -1083,11 +1098,23 @@ async def github_webhook(
     session.add(row)
     session.flush()
 
+    # 병합된 PR 만 기여 이벤트가 됩니다. 나머지는 원본만 남깁니다.
+    #
+    # ⚠️ **커밋 뒤에** 큐에 넣습니다. 여기서 바로 넣으면 워커가 그 사이에
+    # 도착해 아직 없는 행을 찾습니다 — 회의 처리에서 이미 한 번 당한
+    # 결함입니다(`_enqueue_after_commit` 의 주석). 커밋은 이 함수가 아니라
+    # FastAPI 의존성 teardown 에서 일어납니다.
+    queued = False
+    if normalized.event_type == "pull_request.merged":
+        _enqueue_github_after_commit(session, row.id)
+        queued = True
+
     return {
         "status": "accepted",
         "event_id": row.id,
         "event_type": normalized.event_type,
         "linked_user": actor_user_id,
+        "queued": queued,
     }
 
 

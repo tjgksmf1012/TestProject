@@ -695,3 +695,94 @@ def test_candidate_without_evidence_cannot_be_approved(client: TestClient, seede
     assert body["approved_count"] == 0
     # 서버는 코드를 돌려주고 화면이 문구로 옮긴다 (frontend candidates.ts)
     assert body["failures"][str(candidate_id)] == ["no_evidence"]
+
+
+# ══════════════════════════════════════════════════════════════
+# 웹훅 → 기여 이벤트 큐잉
+# ══════════════════════════════════════════════════════════════
+#
+# 이 구간이 생기기 전까지 웹훅은 `GithubEvent` 행만 남기고 끝났습니다.
+# `github_ingest.pr_to_events` 는 완성돼 있었는데 **호출자가 0곳**이라,
+# GitHub 활동이 기여도에 도달한 적이 없었습니다.
+
+
+def test_merged_pr_is_queued_for_ingestion(client: TestClient, seeded, monkeypatch):
+    """⭐ 웹훅이 저장만 하고 끝나면 GitHub 활동은 기여도에 영영 못 온다."""
+    from teamflow.tasks import dispatch
+
+    queued: list[int] = []
+    monkeypatch.setattr(
+        dispatch, "enqueue_github_ingest", lambda event_id: queued.append(event_id)
+    )
+
+    response = post_webhook(client, pr_merged_payload())
+    assert response.status_code == 202
+    assert response.json()["queued"] is True
+    assert len(queued) == 1
+
+
+def test_the_queued_event_row_is_already_committed(client: TestClient, seeded, monkeypatch):
+    """⭐ 커밋보다 먼저 큐에 넣으면 워커가 없는 행을 찾는다.
+
+    회의 처리에서 이미 한 번 당한 결함이다. 커밋은 엔드포인트 본문이 아니라
+    FastAPI 의존성 teardown 에서 일어나므로, 본문에서 넣으면 **항상** 커밋보다
+    먼저다. 워커가 그 사이에 도착하면 `not_found` 로 끝나고 — 예외도 로그도
+    없이 그 PR 의 기여가 사라진다.
+
+    여기서는 큐잉 시점에 **그 행이 이미 보이는가**를 재서 순서를 고정한다.
+    """
+    from teamflow.db import session as db_session
+    from teamflow.tasks import dispatch
+
+    seen: list[bool] = []
+
+    def _spy(event_id: int) -> None:
+        with db_session.session_scope() as s:
+            seen.append(s.get(m.GithubEvent, event_id) is not None)
+
+    monkeypatch.setattr(dispatch, "enqueue_github_ingest", _spy)
+    post_webhook(client, pr_merged_payload())
+
+    assert seen == [True], "큐잉 시점에 GithubEvent 행이 아직 커밋되지 않았습니다"
+
+
+def test_an_unmerged_pr_is_not_queued(client: TestClient, seeded, monkeypatch):
+    """열기만 한 PR 은 기여가 아니다. API 호출도 낭비다."""
+    from teamflow.tasks import dispatch
+
+    queued: list[int] = []
+    monkeypatch.setattr(
+        dispatch, "enqueue_github_ingest", lambda event_id: queued.append(event_id)
+    )
+
+    payload = pr_merged_payload()
+    payload["pull_request"]["merged"] = False
+    post_webhook(client, payload)
+
+    assert queued == []
+
+
+def test_a_review_event_is_stored_but_not_queued(client: TestClient, seeded, monkeypatch):
+    """리뷰는 병합된 PR 을 훑을 때 같이 집계된다 — 따로 부르면 중복 호출이다."""
+    from teamflow.tasks import dispatch
+
+    queued: list[int] = []
+    monkeypatch.setattr(
+        dispatch, "enqueue_github_ingest", lambda event_id: queued.append(event_id)
+    )
+
+    response = post_webhook(
+        client,
+        {
+            "action": "submitted",
+            "repository": {"full_name": "team/teamflow"},
+            "review": {"id": 1, "submitted_at": "2026-09-01T12:00:00Z", "state": "APPROVED"},
+            "pull_request": {"number": 42, "user": {"login": "minsu-dev"}},
+        },
+        event="pull_request_review",
+        delivery="delivery-review-1",
+    )
+
+    assert response.status_code == 202
+    assert response.json()["queued"] is False
+    assert queued == []
