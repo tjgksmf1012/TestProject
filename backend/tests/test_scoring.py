@@ -1,0 +1,315 @@
+"""기여도 산정 엔진 단위 테스트."""
+
+from __future__ import annotations
+
+import pytest
+
+from teamflow.contribution.confidence import (
+    CoverageStats,
+    adjustment_range,
+    compute_confidence,
+)
+from teamflow.contribution.events import Category, EventType
+from teamflow.contribution.profiles import DEFAULT_PROFILES, Role, blended_profile
+from teamflow.contribution.scoring import score_team
+
+from .conftest import Ids, deadline, task_done, utterance
+
+# ─────────────────────────────────────────────────────────────
+# 프로파일
+# ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("role", list(Role))
+def test_default_profile_weights_sum_to_one(role: Role):
+    assert sum(DEFAULT_PROFILES[role].weights.values()) == pytest.approx(1.0)
+
+
+def test_planner_has_no_code_weight():
+    """기획자는 코드 기여로 평가받지 않는다."""
+    assert DEFAULT_PROFILES[Role.PLANNER].weight(Category.CODE) == 0.0
+
+
+def test_blended_profile_sums_to_one():
+    blended = blended_profile({Role.DEVELOPER: 0.7, Role.PLANNER: 0.3})
+    assert sum(blended.weights.values()) == pytest.approx(1.0)
+    # 개발 70%면 코드 가중치는 개발자 전용의 70%
+    assert blended.weight(Category.CODE) == pytest.approx(0.35 * 0.7)
+
+
+def test_blended_profile_rejects_zero_shares():
+    with pytest.raises(ValueError, match="비중 합"):
+        blended_profile({Role.DEVELOPER: 0.0})
+
+
+def test_invalid_profile_rejected():
+    from teamflow.contribution.profiles import ScoringProfile
+
+    with pytest.raises(ValueError, match="가중치 합"):
+        ScoringProfile(role=Role.DEVELOPER, weights={Category.CODE: 0.5})
+
+
+# ─────────────────────────────────────────────────────────────
+# 신뢰도
+# ─────────────────────────────────────────────────────────────
+
+
+def test_full_coverage_gives_high_confidence(full_coverage: CoverageStats):
+    result = compute_confidence(full_coverage)
+    assert result.value == pytest.approx(1.0)
+    assert result.label == "높음"
+    assert result.reasons == []
+
+
+def test_missing_recordings_lower_confidence():
+    stats = CoverageStats(
+        meetings_total=10,
+        meetings_recorded=3,
+        utterances_total=100,
+        utterances_speaker_certain=100,
+        project_days=90,
+        github_connected_days=90,
+    )
+    result = compute_confidence(stats)
+    assert result.value < 1.0
+    assert "녹음되지 않은 회의가 있습니다" in result.reasons
+
+
+def test_uncertain_speakers_weigh_heaviest():
+    """화자 불확실성은 기여도로 직접 전파되므로 가중치가 가장 크다."""
+    base = dict(
+        meetings_total=10,
+        meetings_recorded=10,
+        utterances_total=100,
+        project_days=90,
+        github_connected_days=90,
+    )
+    speaker_bad = compute_confidence(
+        CoverageStats(**base, utterances_speaker_certain=20)
+    )
+    meeting_bad = compute_confidence(
+        CoverageStats(
+            meetings_total=10,
+            meetings_recorded=2,
+            utterances_total=100,
+            utterances_speaker_certain=100,
+            project_days=90,
+            github_connected_days=90,
+        )
+    )
+    assert speaker_bad.value < meeting_bad.value
+
+
+def test_unused_modules_do_not_penalize_confidence():
+    """동료평가를 안 쓰는 팀이 그 때문에 신뢰도를 잃지 않는다."""
+    stats = CoverageStats(
+        meetings_total=5,
+        meetings_recorded=5,
+        utterances_total=50,
+        utterances_speaker_certain=50,
+        project_days=30,
+        github_connected_days=30,
+        peer_reviews_expected=0,  # 미사용
+        peer_reviews_submitted=0,
+    )
+    assert compute_confidence(stats).value == pytest.approx(1.0)
+
+
+def test_no_data_gives_zero_confidence():
+    result = compute_confidence(CoverageStats())
+    assert result.value == 0.0
+    assert result.label == "매우 낮음"
+
+
+def test_adjustment_range_widens_as_confidence_drops():
+    tight_low, tight_high = adjustment_range(27.0, confidence=0.95)
+    wide_low, wide_high = adjustment_range(27.0, confidence=0.4)
+    assert (tight_high - tight_low) < (wide_high - wide_low)
+
+
+def test_full_confidence_gives_no_range():
+    low, high = adjustment_range(27.0, confidence=1.0)
+    assert low == pytest.approx(high) == pytest.approx(27.0)
+
+
+def test_range_never_goes_negative():
+    low, _ = adjustment_range(1.0, confidence=0.0)
+    assert low >= 0.0
+
+
+# ─────────────────────────────────────────────────────────────
+# 팀 산정
+# ─────────────────────────────────────────────────────────────
+
+
+def test_shares_sum_to_100(ids: Ids, full_coverage: CoverageStats):
+    profiles = {
+        1: DEFAULT_PROFILES[Role.DEVELOPER],
+        2: DEFAULT_PROFILES[Role.PLANNER],
+        3: DEFAULT_PROFILES[Role.DESIGNER],
+    }
+    events = {
+        1: [task_done(1, ids.next(), difficulty=2) for _ in range(5)],
+        2: [task_done(2, ids.next()) for _ in range(3)],
+        3: [task_done(3, ids.next()) for _ in range(2)],
+    }
+    result = score_team(events, profiles, full_coverage)
+    assert sum(m.share for m in result.members.values()) == pytest.approx(100.0)
+
+
+def test_empty_categories_are_skipped(ids: Ids, full_coverage: CoverageStats):
+    """팀 전체가 0인 카테고리는 제외되고 가중치가 재정규화된다."""
+    profiles = {1: DEFAULT_PROFILES[Role.DEVELOPER], 2: DEFAULT_PROFILES[Role.DEVELOPER]}
+    events = {
+        1: [task_done(1, ids.next())],
+        2: [task_done(2, ids.next())],
+    }
+    result = score_team(events, profiles, full_coverage)
+    assert Category.CODE in result.skipped_categories
+    assert Category.TASK not in result.skipped_categories
+    # 남은 카테고리 가중치 합이 1이 되도록 재정규화
+    total_weight = sum(cs.weight for cs in result.members[1].categories.values())
+    assert total_weight == pytest.approx(1.0)
+
+
+def test_every_score_has_evidence(ids: Ids, full_coverage: CoverageStats):
+    """모든 점수는 근거 이벤트로 역추적되어야 한다 (docs/07 E5)."""
+    profiles = {1: DEFAULT_PROFILES[Role.DEVELOPER], 2: DEFAULT_PROFILES[Role.DEVELOPER]}
+    events = {
+        1: [task_done(1, ids.next()), utterance(1, EventType.UTT_DECISION, ids.next())],
+        2: [task_done(2, ids.next())],
+    }
+    result = score_team(events, profiles, full_coverage)
+    for member in result.members.values():
+        for cs in member.categories.values():
+            if cs.raw > 0:
+                assert cs.evidence_ids, f"{cs.category} 점수에 근거가 없습니다"
+
+
+def test_scoring_is_deterministic(ids: Ids, full_coverage: CoverageStats):
+    """같은 입력이면 항상 같은 출력. 재계산 가능해야 한다."""
+    profiles = {1: DEFAULT_PROFILES[Role.DEVELOPER], 2: DEFAULT_PROFILES[Role.DEVELOPER]}
+    events = {
+        1: [task_done(1, 100 + i, difficulty=2) for i in range(4)],
+        2: [task_done(2, 200 + i) for i in range(6)],
+    }
+    a = score_team(events, profiles, full_coverage)
+    b = score_team(events, profiles, full_coverage)
+    assert {k: v.share for k, v in a.members.items()} == {
+        k: v.share for k, v in b.members.items()
+    }
+
+
+def test_weight_change_shifts_result_without_touching_events(
+    ids: Ids, full_coverage: CoverageStats
+):
+    """가중치를 바꾸면 같은 이벤트로 다른 점수가 나온다 — 재계산 구조의 핵심."""
+    from teamflow.contribution.profiles import ScoringProfile
+
+    events = {
+        1: [utterance(1, EventType.UTT_DECISION, 10 + i) for i in range(5)],
+        2: [task_done(2, 20 + i) for i in range(5)],
+    }
+
+    meeting_heavy = ScoringProfile(
+        role=Role.DEVELOPER,
+        weights={
+            Category.MEETING: 0.8,
+            Category.TASK: 0.2,
+            Category.CODE: 0.0,
+            Category.DOCUMENT: 0.0,
+            Category.SCHEDULE: 0.0,
+            Category.PEER: 0.0,
+        },
+        version="meeting-heavy",
+    )
+    task_heavy = ScoringProfile(
+        role=Role.DEVELOPER,
+        weights={
+            Category.MEETING: 0.2,
+            Category.TASK: 0.8,
+            Category.CODE: 0.0,
+            Category.DOCUMENT: 0.0,
+            Category.SCHEDULE: 0.0,
+            Category.PEER: 0.0,
+        },
+        version="task-heavy",
+    )
+
+    r1 = score_team(events, {1: meeting_heavy, 2: meeting_heavy}, full_coverage)
+    r2 = score_team(events, {1: task_heavy, 2: task_heavy}, full_coverage)
+
+    # 회의 중심 가중치에서는 1번이, 업무 중심에서는 2번이 앞선다
+    assert r1.members[1].share > r1.members[2].share
+    assert r2.members[2].share > r2.members[1].share
+
+
+def test_schedule_ratio_beats_volume(ids: Ids, full_coverage: CoverageStats):
+    """일정 준수는 비율 기반. 마감을 많이 놓치면 건수가 많아도 점수가 낮다."""
+    profiles = {1: DEFAULT_PROFILES[Role.DEVELOPER], 2: DEFAULT_PROFILES[Role.DEVELOPER]}
+    sloppy = [deadline(1, ids.next(), EventType.DEADLINE_MET) for _ in range(10)]
+    sloppy += [deadline(1, ids.next(), EventType.DEADLINE_MISSED) for _ in range(10)]
+    reliable = [deadline(2, ids.next(), EventType.DEADLINE_MET) for _ in range(8)]
+
+    result = score_team({1: sloppy, 2: reliable}, profiles, full_coverage)
+    assert (
+        result.members[2].categories[Category.SCHEDULE].raw
+        > result.members[1].categories[Category.SCHEDULE].raw
+    )
+
+
+def test_peer_rating_uses_median_not_mean(ids: Ids, full_coverage: CoverageStats):
+    """감정적인 극단값 하나가 결과를 흔들지 못한다."""
+    from teamflow.contribution.events import ContributionEvent, SourceKind
+
+    from .conftest import at
+
+    def rating(uid: int, sid: int, value: float):
+        return ContributionEvent(
+            user_id=uid,
+            event_type=EventType.PEER_RATING,
+            occurred_at=at(),
+            source_kind=SourceKind.PEER_REVIEW,
+            source_id=sid,
+            magnitude=value,
+        )
+
+    profiles = {1: DEFAULT_PROFILES[Role.DEVELOPER], 2: DEFAULT_PROFILES[Role.DEVELOPER]}
+    # 1번: 4,4,4 인데 한 명이 1점 테러
+    attacked = [rating(1, ids.next(), v) for v in (4, 4, 4, 1)]
+    normal = [rating(2, ids.next(), v) for v in (4, 4, 4, 4)]
+
+    result = score_team({1: attacked, 2: normal}, profiles, full_coverage)
+    # 중앙값이므로 4점 그대로 유지된다
+    assert result.members[1].categories[Category.PEER].raw == pytest.approx(
+        result.members[2].categories[Category.PEER].raw
+    )
+
+
+def test_no_events_yields_zero_shares(full_coverage: CoverageStats):
+    profiles = {1: DEFAULT_PROFILES[Role.DEVELOPER], 2: DEFAULT_PROFILES[Role.DEVELOPER]}
+    result = score_team({1: [], 2: []}, profiles, full_coverage)
+    assert all(m.share == 0.0 for m in result.members.values())
+    assert len(result.skipped_categories) == len(Category)
+
+
+def test_low_confidence_produces_wide_range(ids: Ids):
+    """데이터가 부족하면 조정 범위가 넓어진다."""
+    sparse = CoverageStats(
+        meetings_total=10,
+        meetings_recorded=1,
+        utterances_total=100,
+        utterances_speaker_certain=20,
+        project_days=90,
+        github_connected_days=10,
+    )
+    profiles = {1: DEFAULT_PROFILES[Role.DEVELOPER], 2: DEFAULT_PROFILES[Role.DEVELOPER]}
+    events = {
+        1: [task_done(1, ids.next()) for _ in range(6)],
+        2: [task_done(2, ids.next()) for _ in range(4)],
+    }
+    result = score_team(events, profiles, sparse)
+    member = result.members[1]
+    assert member.confidence.value < 0.6
+    assert member.range_high - member.range_low > 5.0
+    assert member.confidence.reasons

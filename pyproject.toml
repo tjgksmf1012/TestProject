@@ -1,0 +1,71 @@
+[project]
+name = "teamflow"
+version = "0.1.0"
+description = "AI 기반 팀 프로젝트 협업 및 회의 리뷰 통합 플랫폼"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "celery[redis]>=5.4",
+    "redis>=5.2",
+    "httpx>=0.28",
+    "pyjwt[crypto]>=2.10",
+    # 선택 의존성이 아니다. api.main → recording_service → audio.assembly 가
+    # 모듈 최상위에서 numpy 를 쓴다. ai 엑스트라에만 두면 기본 설치로는
+    # API 가 import 조차 되지 않는다. (test_packaging.py 가 잡는다)
+    "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+# GPU 파이프라인. 개발 머신은 중급 GPU(Ampere/Ada) 10~16GB 이므로
+# CUDA 12.x 계열 기본 휠이면 됩니다 — 특정 인덱스 강제 불필요.
+# 환경 확인: scripts/check_env.py
+ai = [
+    "torch>=2.7",
+    "torchaudio>=2.7",
+    "transformers>=5.13",
+    "pyannote.audio>=4.0",
+    "vllm>=0.8",
+    "soundfile>=0.12",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+filterwarnings = ["error::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["backend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "RUF001",  # 한국어 주석의 전각 문자를 모호한 유니코드로 잡음
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic 자동생성 파일. 사람이 포맷을 맞출 대상이 아니다.
+"backend/migrations/versions/*" = ["E501"]
+# env.py 는 teamflow 를 import 하기 전에 sys.path 를 조작해야 한다.
+"backend/migrations/env.py" = ["E402"]

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>업무 후보 검토 — TeamFlow AI</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --ok: #1a7f37;
+        --bad: #cf222e;
+        --warn: #9a6700;
+        --line: color-mix(in srgb, currentColor 15%, transparent);
+        --soft: color-mix(in srgb, currentColor 6%, transparent);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 1rem 1rem 6rem;
+        font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+          "Malgun Gothic", system-ui, sans-serif;
+        max-width: 44rem; margin-inline: auto;
+      }
+      h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+      .sub { opacity: .7; font-size: .875rem; margin: 0 0 1.25rem; }
+      .banner { padding: .7rem .9rem; border-radius: .5rem; font-size: .875rem; margin-bottom: .75rem; }
+      #attention { background: color-mix(in srgb, var(--warn) 15%, transparent); }
+      #blocked { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+      #counts { font-size: .875rem; opacity: .75; margin-bottom: 1rem; }
+
+      .card {
+        border: 1px solid var(--line); border-radius: .75rem;
+        padding: 1rem; margin-bottom: .85rem;
+      }
+      .card[data-decision="approve"] { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 6%, transparent); }
+      .card[data-decision="reject"] { border-color: var(--line); opacity: .6; }
+      .card header { display: flex; gap: .75rem; align-items: center; margin-bottom: .75rem; }
+      .card header .title {
+        flex: 1; font: inherit; font-weight: 600; padding: .4rem .5rem;
+        border: 1px solid transparent; border-radius: .35rem; background: var(--soft); color: inherit;
+      }
+      .card header .title:focus { border-color: var(--line); outline: none; }
+      .conf { font-size: .75rem; white-space: nowrap; opacity: .7; font-variant-numeric: tabular-nums; }
+      .conf.low { color: var(--warn); opacity: 1; font-weight: 700; }
+
+      .row { display: flex; gap: .75rem; flex-wrap: wrap; margin-bottom: .6rem; }
+      .row label { font-size: .8rem; opacity: .75; display: flex; gap: .35rem; align-items: center; }
+      select, input[type="date"], .note {
+        font: inherit; font-size: .875rem; padding: .35rem .5rem;
+        border: 1px solid var(--line); border-radius: .35rem;
+        background: transparent; color: inherit;
+      }
+      .note { width: 100%; margin-top: .6rem; }
+
+      .evidence { font-size: .8rem; opacity: .75; margin: .4rem 0; }
+      .evidence code { font-size: .95em; }
+      .evidence .bad { color: var(--bad); opacity: 1; }
+
+      .blockers { list-style: none; padding: 0; margin: .5rem 0; font-size: .8rem; color: var(--bad); }
+      .blockers li::before { content: "⚠ "; }
+
+      .actions { display: flex; gap: .5rem; margin-top: .75rem; }
+      .actions button {
+        font: inherit; font-size: .875rem; padding: .45rem .9rem; cursor: pointer;
+        border: 1px solid var(--line); border-radius: .4rem;
+        background: transparent; color: inherit;
+      }
+      .actions button:disabled { opacity: .35; cursor: not-allowed; }
+      .actions .approve.on { background: var(--ok); color: #fff; border-color: transparent; }
+      .actions .reject.on { background: var(--bad); color: #fff; border-color: transparent; }
+      .done { font-size: .8rem; opacity: .6; margin: .5rem 0 0; }
+
+      footer {
+        position: fixed; left: 0; right: 0; bottom: 0;
+        padding: .75rem 1rem; border-top: 1px solid var(--line);
+        background: Canvas; display: flex; gap: 1rem; align-items: center;
+      }
+      footer > div { flex: 1; font-size: .8rem; }
+      #submit {
+        font: inherit; font-weight: 600; padding: .7rem 1.4rem;
+        border: none; border-radius: .5rem; background: #0969da; color: #fff; cursor: pointer;
+      }
+      #submit:disabled { opacity: .35; cursor: not-allowed; }
+      .ok { color: var(--ok); }
+      .bad { color: var(--bad); }
+      .note-block { font-size: .8rem; opacity: .7; margin-top: 1.5rem; }
+    </style>
+  </head>
+  <body>
+    <h1>업무 후보 검토</h1>
+    <p class="sub">
+      AI가 회의에서 뽑은 <strong>후보</strong>입니다. 승인해야 칸반에 등록됩니다.
+      확신도가 낮은 것부터 보입니다.
+    </p>
+
+    <div id="attention" class="banner" hidden></div>
+    <div id="blocked" class="banner" hidden></div>
+    <p id="counts"></p>
+
+    <div id="list"></div>
+
+    <p class="note-block">
+      근거 발화가 없는 후보는 승인할 수 없습니다. 담당자·마감일을 채워도
+      마찬가지입니다 — 회의에 없던 내용을 사람이 "고쳐서" 통과시키는 경로를
+      만들면 안 되기 때문입니다.
+    </p>
+
+    <footer>
+      <div id="result"></div>
+      <button id="submit" disabled>제출</button>
+    </footer>
+
+    <script type="module" src="./review.js"></script>
+  </body>
+</html>

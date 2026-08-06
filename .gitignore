@@ -11,6 +11,9 @@ venv/
 # ── Node / Next.js ────────────────────────────────────────
 node_modules/
 .next/
+# esbuild 산출물. `npm run build:demo` 로 만든다.
+frontend/public/main.js
+frontend/public/review.js
 out/
 dist/
 build/
@@ -41,9 +44,17 @@ checkpoints/
 # ── 회의 오디오 / 개인정보 ────────────────────────────────
 # 음성은 개인정보이며 생체인식정보로 간주될 수 있습니다.
 # 저장소에 절대 올리지 마세요. → docs/07-법적-윤리-요구사항.md
-audio/
-recordings/
-uploads/
+#
+# ⚠️ 경로를 반드시 `/` 로 시작하세요.
+# 예전에 `audio/` 라고만 적어뒀더니 **소스 패키지 `backend/teamflow/audio/`
+# 가 통째로 무시됐습니다.** `git add -A` 는 무시된 파일을 조용히 건너뛰기
+# 때문에 커밋은 성공하고, 새로 clone 하면 모듈이 없어 테스트가 깨집니다.
+# 저장 디렉터리만 가리키도록 앵커링합니다.
+/audio/
+/recordings/
+/uploads/
+/var/
+data/audio/
 *.wav
 *.mp3
 *.m4a
@@ -60,6 +71,12 @@ data/
 datasets/
 *.tar.gz
 *.zip
+
+# ── 로컬 DB / 임시 ────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+.tmp-*
 
 # ── 로그 / 임시 ───────────────────────────────────────────
 *.log

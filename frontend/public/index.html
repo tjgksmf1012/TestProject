@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>녹음 생존율 테스트 — TeamFlow AI</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --ok: #1a7f37;
+        --bad: #cf222e;
+        --warn: #9a6700;
+        --line: color-mix(in srgb, currentColor 15%, transparent);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 1rem;
+        font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+          "Malgun Gothic", system-ui, sans-serif;
+        max-width: 34rem;
+        margin-inline: auto;
+      }
+      h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+      .sub { opacity: .7; font-size: .875rem; margin: 0 0 1.5rem; }
+      section { border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; margin-bottom: 1rem; }
+      h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; opacity: .6; margin: 0 0 .75rem; }
+      button {
+        font: inherit;
+        padding: .85rem 1rem;
+        border-radius: .5rem;
+        border: 1px solid var(--line);
+        background: color-mix(in srgb, currentColor 8%, transparent);
+        color: inherit;
+        width: 100%;
+        margin-bottom: .5rem;
+        cursor: pointer;
+        /* 폰에서 누르기 좋은 크기. 실험 중에 오조작하면 결과가 날아간다. */
+        min-height: 3rem;
+      }
+      button:disabled { opacity: .35; cursor: not-allowed; }
+      button.primary { background: #0969da; color: #fff; border-color: transparent; font-weight: 600; }
+      ul { list-style: none; padding: 0; margin: 0; font-size: .875rem; }
+      li { padding: .25rem 0; }
+      li::before { content: "· "; opacity: .5; }
+      li.ok { color: var(--ok); }
+      li.ok::before { content: "✓ "; }
+      li.critical { color: var(--bad); }
+      li.warning { color: var(--warn); }
+      li.info { opacity: .7; }
+      dl { display: grid; grid-template-columns: 1fr auto; gap: .35rem 1rem; margin: 0; font-size: .9rem; }
+      dt { opacity: .65; }
+      dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+      #phase {
+        display: inline-block; padding: .3rem .7rem; border-radius: 999px;
+        font-size: .8rem; font-weight: 600;
+        background: color-mix(in srgb, currentColor 10%, transparent);
+      }
+      #phase[data-phase="recording"] { background: var(--bad); color: #fff; }
+      #phase[data-phase="interrupted"] { background: var(--warn); color: #fff; }
+      #phase[data-phase="completed"] { background: var(--ok); color: #fff; }
+      #verdict { font-weight: 600; margin: 0 0 .75rem; }
+      #verdict.ok { color: var(--ok); }
+      #verdict.bad { color: var(--bad); }
+      #row {
+        display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: .7rem; white-space: pre-wrap; word-break: break-all;
+        background: color-mix(in srgb, currentColor 6%, transparent);
+        padding: .6rem; border-radius: .4rem; margin: .75rem 0;
+      }
+      label.check { display: flex; align-items: center; gap: .5rem; font-size: .875rem; padding: .5rem 0; }
+      .note { font-size: .8rem; opacity: .7; margin-top: .75rem; }
+      code { font-size: .85em; background: color-mix(in srgb, currentColor 8%, transparent); padding: .1em .3em; border-radius: .25em; }
+    </style>
+  </head>
+  <body>
+    <h1>녹음 생존율 테스트</h1>
+    <p class="sub">
+      docs/09 실험 5 — 폰이 회의 끝까지 녹음을 유지하는지 확인합니다.
+      <strong>모드 A(멀티트랙)의 성립 여부</strong>가 여기서 결정됩니다.
+    </p>
+
+    <section>
+      <h2>상태</h2>
+      <p><span id="phase">준비 중</span> <span id="elapsed"></span></p>
+      <ul id="blockers"></ul>
+    </section>
+
+    <section>
+      <h2>준비</h2>
+      <button id="consent">1. 녹음에 동의</button>
+      <button id="permission">2. 마이크 권한 + 시각 동기화</button>
+      <label class="check">
+        <input type="checkbox" id="wakelock" checked />
+        화면 꺼짐 방지(Wake Lock) 사용
+      </label>
+      <p class="note">
+        Wake Lock 을 껐다 켰다 하며 각각 측정하세요. iOS 는 16.4+, 설치형 PWA 는 18.4+ 부터 동작합니다.
+      </p>
+    </section>
+
+    <section>
+      <h2>캡처 설정 확인</h2>
+      <ul id="warnings"></ul>
+      <p class="note">
+        <code>autoGainControl</code> 이 안 꺼지면 조용한 트랙이 증폭되고,
+        <code>noiseSuppression</code> 이 안 꺼지면 트랙 정렬의 근거인 누출이 지워집니다.
+      </p>
+    </section>
+
+    <section>
+      <h2>녹음</h2>
+      <button id="start" class="primary" disabled>녹음 시작</button>
+      <button id="stop" disabled>정지</button>
+      <dl>
+        <dt>청크</dt><dd><span id="chunks">0</span></dd>
+        <dt>화면 가려짐</dt><dd><span id="interruptions">0</span>회</dd>
+        <dt>업로드</dt><dd id="uploaded">-</dd>
+      </dl>
+      <p class="note">
+        실험 조건: ① 화면 켜둠 ② 화면 잠금 ③ 다른 앱 전환 ④ 통화 수신.
+        각각 10분씩 돌리세요.
+      </p>
+    </section>
+
+    <section id="result" hidden>
+      <h2>결과</h2>
+      <p id="verdict"></p>
+      <dl>
+        <dt>커버리지</dt><dd id="coverage">-</dd>
+        <dt>총 공백</dt><dd id="totalgap">-</dd>
+        <dt>최장 공백</dt><dd id="longestgap">-</dd>
+        <dt>판정</dt><dd id="usable">-</dd>
+      </dl>
+      <ul id="gaps"></ul>
+      <code id="row"></code>
+      <button id="copy">표에 붙일 한 줄 복사</button>
+      <p class="note">
+        커버리지 <strong>95% 미만</strong>이면(화면 켜둠 + Wake Lock 조건에서)
+        모드 A 를 주력에서 내려야 합니다. 배터리 소모가 시간당 30% 를 넘으면
+        2시간 회의를 못 버팁니다.
+      </p>
+    </section>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

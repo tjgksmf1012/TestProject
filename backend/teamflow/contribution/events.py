@@ -1,0 +1,143 @@
+"""기여도 이벤트 정의.
+
+설계 원칙 (docs/05-기여도-산정-설계.md §1):
+    점수 = f(불변 이벤트 로그, 가중치 버전, 역할)
+
+이벤트는 append-only이며, 점수는 저장하지 않고 이 이벤트들로부터 재계산한다.
+그래야 "왜 이 점수인가"에 답할 수 있고, 가중치를 바꿔도 과거가 오염되지 않는다.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+
+
+class Category(StrEnum):
+    """기여 영역. 역할별 가중치가 이 단위로 붙는다."""
+
+    TASK = "task"
+    CODE = "code"
+    MEETING = "meeting"
+    DOCUMENT = "document"
+    SCHEDULE = "schedule"
+    PEER = "peer"
+
+
+class EventType(StrEnum):
+    """이벤트 종류.
+
+    주의: COMMIT 이벤트는 의도적으로 존재하지 않는다.
+    커밋은 쪼개기가 너무 쉬워서 지표로 쓸 수 없다 (docs/05 §2.1).
+    코드 기여는 병합된 PR 단위로만 집계한다.
+    """
+
+    # ── code ──────────────────────────────────────────────
+    PR_MERGED = "pr_merged"
+    REVIEW_GIVEN = "review_given"  # 남에게 준 리뷰. 받은 건 세지 않는다
+    ISSUE_RESOLVED = "issue_resolved"
+
+    # ── task ──────────────────────────────────────────────
+    TASK_COMPLETED = "task_completed"
+    BLOCKER_RESOLVED = "blocker_resolved"
+
+    # ── meeting ───────────────────────────────────────────
+    # 발언 유형은 docs/10-열린-질문.md Q9의 확정 8개 라벨을 따른다
+    MEETING_ATTENDED = "meeting_attended"
+    UTT_QUESTION = "utt_question"
+    UTT_ANSWER = "utt_answer"
+    UTT_PROPOSAL = "utt_proposal"
+    UTT_OPINION = "utt_opinion"
+    UTT_DECISION = "utt_decision"
+    UTT_COMMITMENT = "utt_commitment"
+    UTT_SOCIAL = "utt_social"  # 맞장구·농담·잡담 → 0점
+    UTT_OTHER = "utt_other"  # 기타·미완성 발언 → 0점
+
+    # ── document ──────────────────────────────────────────
+    DOCUMENT_REVISED = "document_revised"
+
+    # ── schedule ──────────────────────────────────────────
+    DEADLINE_MET = "deadline_met"
+    DEADLINE_MISSED = "deadline_missed"
+    DEADLINE_CHANGED = "deadline_changed"  # 점수 없음. 조작 탐지용 기록
+
+    # ── peer ──────────────────────────────────────────────
+    PEER_RATING = "peer_rating"
+
+
+CATEGORY_OF: dict[EventType, Category] = {
+    EventType.PR_MERGED: Category.CODE,
+    EventType.REVIEW_GIVEN: Category.CODE,
+    EventType.ISSUE_RESOLVED: Category.CODE,
+    EventType.TASK_COMPLETED: Category.TASK,
+    EventType.BLOCKER_RESOLVED: Category.TASK,
+    EventType.MEETING_ATTENDED: Category.MEETING,
+    EventType.UTT_QUESTION: Category.MEETING,
+    EventType.UTT_ANSWER: Category.MEETING,
+    EventType.UTT_PROPOSAL: Category.MEETING,
+    EventType.UTT_OPINION: Category.MEETING,
+    EventType.UTT_DECISION: Category.MEETING,
+    EventType.UTT_COMMITMENT: Category.MEETING,
+    EventType.UTT_SOCIAL: Category.MEETING,
+    EventType.UTT_OTHER: Category.MEETING,
+    EventType.DOCUMENT_REVISED: Category.DOCUMENT,
+    EventType.DEADLINE_MET: Category.SCHEDULE,
+    EventType.DEADLINE_MISSED: Category.SCHEDULE,
+    EventType.DEADLINE_CHANGED: Category.SCHEDULE,
+    EventType.PEER_RATING: Category.PEER,
+}
+
+
+class SourceKind(StrEnum):
+    """이벤트의 원본 근거. 모든 점수는 여기까지 역추적되어야 한다."""
+
+    GITHUB_EVENT = "github_event"
+    TASK = "task"
+    UTTERANCE = "utterance"
+    MEETING = "meeting"
+    DOCUMENT = "document"
+    PEER_REVIEW = "peer_review"
+
+
+@dataclass(frozen=True, slots=True)
+class ContributionEvent:
+    """불변 기여 이벤트.
+
+    ``(source_kind, source_id, event_type)`` 가 유일 키다.
+    GitHub 웹훅은 재전송될 수 있고 백필과 겹칠 수 있으므로,
+    이 제약이 없으면 점수가 부풀려진다.
+    """
+
+    user_id: int
+    event_type: EventType
+    occurred_at: datetime
+    source_kind: SourceKind
+    source_id: int
+    magnitude: float = 0.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def category(self) -> Category:
+        return CATEGORY_OF[self.event_type]
+
+    @property
+    def dedupe_key(self) -> tuple[str, int, str]:
+        return (self.source_kind.value, self.source_id, self.event_type.value)
+
+
+def deduplicate(events: list[ContributionEvent]) -> list[ContributionEvent]:
+    """중복 이벤트 제거. 먼저 온 것을 남긴다.
+
+    DB의 ``UNIQUE (source_kind, source_id, event_type)`` 제약과 같은 규칙을
+    메모리에서도 적용해, 웹훅 재전송이나 백필 중복이 점수를 부풀리지 못하게 한다.
+    """
+    seen: set[tuple[str, int, str]] = set()
+    out: list[ContributionEvent] = []
+    for ev in events:
+        if ev.dedupe_key in seen:
+            continue
+        seen.add(ev.dedupe_key)
+        out.append(ev)
+    return out

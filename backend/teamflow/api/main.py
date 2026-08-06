@@ -1,0 +1,688 @@
+"""FastAPI 애플리케이션.
+
+docs/03-시스템-아키텍처.md §1 — Spring Boot 없이 FastAPI 단일 백엔드.
+"""
+
+from __future__ import annotations
+
+import time
+from datetime import UTC, date, datetime
+from typing import Annotated, Any
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from teamflow.audio.chunk_store import ChunkStore
+from teamflow.config import Settings, get_settings, safe_dump
+from teamflow.db import models as m
+from teamflow.db.session import get_db
+from teamflow.github import webhook as gh
+from teamflow.meeting.approval import ApprovalRequest
+from teamflow.services import approval_service, recording_service
+from teamflow.tasks import dispatch
+
+app = FastAPI(
+    title="TeamFlow AI",
+    description="회의에서 나온 결정을 실제 업무와 코드 활동까지 연결한다",
+    version="0.1.0",
+)
+
+DbSession = Annotated[Session, Depends(get_db)]
+AppSettings = Annotated[Settings, Depends(get_settings)]
+
+
+# ══════════════════════════════════════════════════════════════
+# 헬스체크
+# ══════════════════════════════════════════════════════════════
+
+
+@app.get("/health")
+def health(settings: AppSettings) -> dict[str, Any]:
+    # safe_dump 를 쓴다 — 시크릿이 헬스체크로 새는 사고가 흔하다
+    return {"status": "ok", **safe_dump(settings)}
+
+
+# ══════════════════════════════════════════════════════════════
+# 시각 동기화
+# ══════════════════════════════════════════════════════════════
+#
+# 멀티트랙 녹음은 팀원 각자의 폰이 개별 트랙을 만든다. 기기 시계가 서로
+# 다르면 트랙 정렬이 GCC-PHAT 탐색창(±500ms) 밖으로 나가 정렬 자체가 실패한다.
+#
+# NTP 와 같은 방식으로 왕복을 재려면 서버가 **받은 시각과 보낸 시각**을
+# 둘 다 알려줘야 한다. 그래야 클라이언트가 서버 처리 시간을 왕복에서 빼고
+# 순수 네트워크 지연만 남길 수 있다.
+#   → frontend/src/lib/recording/clock.ts
+
+
+class ServerTime(BaseModel):
+    """epoch 밀리초. 클라이언트는 이 둘로 오차 상한을 계산한다."""
+
+    t1: int = Field(description="서버가 요청을 받은 시각")
+    t2: int = Field(description="서버가 응답을 보낸 시각")
+
+
+@app.get("/api/time", response_model=ServerTime)
+def server_time(response: Response) -> ServerTime:
+    t1 = time.time_ns() // 1_000_000
+    # 여기서 아무것도 하지 않는 게 중요하다. DB 를 건드리거나 로그를 쓰면
+    # 그 시간이 t2-t1 로 잡히고, 지연이 큰 표본으로 보여 버려진다.
+    t2 = time.time_ns() // 1_000_000
+    # 캐시되면 동기화가 통째로 무의미해진다. 프록시가 끼어도 막는다.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return ServerTime(t1=t1, t2=t2)
+
+
+# ══════════════════════════════════════════════════════════════
+# 회의 업무 후보 검토
+# ══════════════════════════════════════════════════════════════
+
+
+class CandidateOut(BaseModel):
+    id: int
+    title: str
+    assignee_id: int | None
+    deadline: date | None
+    confidence: float
+    evidence_utterance_ids: list[int]
+    review_status: str
+
+    @property
+    def is_complete(self) -> bool:
+        return self.assignee_id is not None and self.deadline is not None
+
+
+class ReviewItem(BaseModel):
+    candidate_id: int
+    approve: bool
+    title_override: str | None = None
+    assignee_override: int | None = None
+    deadline_override: date | None = None
+    note: str | None = None
+
+
+class ReviewPayload(BaseModel):
+    reviewer_id: int = Field(gt=0)
+    items: list[ReviewItem] = Field(min_length=1)
+
+
+class ReviewResult(BaseModel):
+    approved_task_ids: list[int]
+    approved_count: int
+    failures: dict[int, list[str]]
+
+
+def _load_meeting(session: Session, meeting_id: int) -> m.Meeting:
+    meeting = session.get(m.Meeting, meeting_id)
+    if meeting is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "회의를 찾을 수 없습니다")
+    return meeting
+
+
+# ══════════════════════════════════════════════════════════════
+# 녹음 트랙 수집
+# ══════════════════════════════════════════════════════════════
+#
+# frontend/src/lib/recording/ 의 서버 쪽 짝이다.
+#   ① POST   …/tracks              트랙 참가 (멱등)
+#   ② PUT    …/tracks/{tid}/chunks/{seq}   청크 (멱등)
+#   ③ GET    …/tracks/{tid}/chunks         재개용 seq 목록
+#   ④ POST   …/tracks/{tid}/complete       종료 요약
+
+
+def _chunk_store(settings: Settings) -> ChunkStore:
+    return ChunkStore(root=settings.audio_storage_root)
+
+
+class TrackJoin(BaseModel):
+    user_id: int = Field(gt=0)
+    started_at: datetime
+    device_label: str | None = Field(default=None, max_length=100)
+    sample_rate: int | None = Field(default=None, gt=0)
+
+
+class TrackOut(BaseModel):
+    track_id: int
+    meeting_id: int
+    user_id: int
+    status: str
+    # 재개용. 새로 만든 트랙이면 빈 목록이다.
+    stored_seqs: list[int]
+
+
+@app.post(
+    "/api/meetings/{meeting_id}/tracks",
+    response_model=TrackOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def join_track(
+    meeting_id: int, payload: TrackJoin, session: DbSession, settings: AppSettings
+) -> TrackOut:
+    """회의에 트랙으로 참가한다. 새로고침해도 같은 트랙으로 이어붙는다."""
+    _load_meeting(session, meeting_id)
+    try:
+        track = recording_service.join_track(
+            session,
+            meeting_id=meeting_id,
+            user_id=payload.user_id,
+            started_at=payload.started_at,
+            device_label=payload.device_label,
+            sample_rate=payload.sample_rate,
+        )
+    except recording_service.ConsentError as exc:
+        # 403 이다. 인증 문제가 아니라 "동의가 없어서 안 된다"는 뜻이다.
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except recording_service.TrackError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+    return TrackOut(
+        track_id=track.id,
+        meeting_id=meeting_id,
+        user_id=track.user_id,
+        status=track.status,
+        stored_seqs=recording_service.stored_seqs(
+            _chunk_store(settings), meeting_id=meeting_id, track_id=track.id
+        ),
+    )
+
+
+class ChunkAck(BaseModel):
+    seq: int
+    bytes: int
+
+
+@app.put(
+    "/api/meetings/{meeting_id}/tracks/{track_id}/chunks/{seq}",
+    response_model=ChunkAck,
+)
+async def put_chunk(
+    meeting_id: int,
+    track_id: int,
+    seq: int,
+    request: Request,
+    session: DbSession,
+    settings: AppSettings,
+    x_client_at_ms: Annotated[int | None, Header()] = None,
+) -> ChunkAck:
+    """청크 하나를 받는다.
+
+    PUT 이라 같은 seq 를 다시 받으면 덮어쓴다 — 업로드 큐가 재시도하기 때문이다.
+    `X-Client-At-Ms` 는 클라이언트가 **동기화된 서버 시각**으로 찍은 도착
+    시각이다. 이게 없으면 공백을 절대 시각으로 복원할 수 없다 (docs/04 §2.6).
+    """
+    if seq < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "seq 는 0 이상이어야 합니다")
+    if x_client_at_ms is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "X-Client-At-Ms 헤더가 필요합니다 (동기화된 청크 도착 시각)",
+        )
+
+    data = await request.body()
+    try:
+        chunk = recording_service.store_chunk(
+            session,
+            _chunk_store(settings),
+            meeting_id=meeting_id,
+            track_id=track_id,
+            seq=seq,
+            client_at_ms=x_client_at_ms,
+            data=data,
+        )
+    except recording_service.ConsentError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except recording_service.TrackError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return ChunkAck(seq=chunk.seq, bytes=chunk.bytes)
+
+
+class StoredChunks(BaseModel):
+    track_id: int
+    seqs: list[int]
+    total_bytes: int
+
+
+@app.get(
+    "/api/meetings/{meeting_id}/tracks/{track_id}/chunks",
+    response_model=StoredChunks,
+)
+def list_chunks(
+    meeting_id: int, track_id: int, session: DbSession, settings: AppSettings
+) -> StoredChunks:
+    """재연결 후 "어디까지 올렸나"를 묻는 엔드포인트.
+
+    이게 없으면 클라이언트가 매번 처음부터 다시 올려 영영 못 따라잡는다
+    (`UploadQueue.resumeWith`).
+    """
+    _load_meeting(session, meeting_id)
+    store = _chunk_store(settings)
+    return StoredChunks(
+        track_id=track_id,
+        seqs=store.stored_seqs(meeting_id, track_id),
+        total_bytes=store.total_bytes(meeting_id, track_id),
+    )
+
+
+class TrackComplete(BaseModel):
+    ended_at: datetime
+    coverage: float = Field(ge=0, le=1)
+    total_gap_ms: int = Field(ge=0)
+    longest_gap_ms: int = Field(default=0, ge=0)
+    gaps: list[dict[str, Any]] = Field(default_factory=list)
+    capture_confidence: float = Field(default=1.0, ge=0, le=1)
+    capture_warnings: list[dict[str, Any]] = Field(default_factory=list)
+    stop_reason: str | None = None
+    # 서버가 배치를 다시 계산할 때 필요하다 (MediaRecorder.start(timeslice))
+    timeslice_ms: int = Field(default=5_000, gt=0)
+
+
+class TrackCompleteOut(BaseModel):
+    track_id: int
+    status: str
+    coverage: float
+    usable: bool
+    message: str
+    #: 전원이 끝나 회의 처리가 큐에 들어갔는가
+    meeting_queued: bool = False
+    #: 아직 녹음 중인 사람이 있으면 그 안내
+    meeting_status: str = ""
+
+
+@app.post(
+    "/api/meetings/{meeting_id}/tracks/{track_id}/complete",
+    response_model=TrackCompleteOut,
+)
+def complete_track(
+    meeting_id: int,
+    track_id: int,
+    payload: TrackComplete,
+    session: DbSession,
+    settings: AppSettings,
+) -> TrackCompleteOut:
+    """녹음 종료. 클라이언트가 계산한 품질 정보를 받아 저장한다.
+
+    보고된 커버리지를 그대로 믿지 않는다 — 서버가 실제로 받은 청크 수와
+    대조해서 더 나쁜 쪽을 쓴다.
+    """
+    _load_meeting(session, meeting_id)
+    try:
+        track = recording_service.complete_track(
+            session,
+            _chunk_store(settings),
+            meeting_id=meeting_id,
+            track_id=track_id,
+            summary=recording_service.TrackSummary(
+                ended_at=payload.ended_at,
+                coverage=payload.coverage,
+                total_gap_ms=payload.total_gap_ms,
+                longest_gap_ms=payload.longest_gap_ms,
+                gaps=payload.gaps,
+                capture_confidence=payload.capture_confidence,
+                capture_warnings=payload.capture_warnings,
+                stop_reason=payload.stop_reason,
+                timeslice_ms=payload.timeslice_ms,
+            ),
+        )
+    except recording_service.TrackError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    # 전원이 끝났으면 여기서 처리를 시작한다.
+    # 이 연결이 없으면 녹음은 저장만 되고 아무 일도 일어나지 않는다.
+    finalize = recording_service.try_finalize_meeting(session, meeting_id)
+    if finalize.should_enqueue:
+        dispatch.enqueue_meeting_processing(meeting_id)
+
+    usable = track.status == "completed"
+    coverage = float(track.coverage or 0.0)
+    return TrackCompleteOut(
+        meeting_queued=finalize.should_enqueue,
+        meeting_status=finalize.reason,
+        track_id=track.id,
+        status=track.status,
+        coverage=coverage,
+        usable=usable,
+        message=(
+            "녹음이 정상 저장됐습니다"
+            if usable
+            else f"커버리지 {coverage:.0%} — 이 트랙으로는 발화량을 판단할 수 없습니다. "
+            "회의록에서 이 팀원의 발언은 확인이 필요합니다"
+        ),
+    )
+
+
+class FinishMeetingOut(BaseModel):
+    meeting_queued: bool
+    aborted_track_ids: list[int]
+    message: str
+
+
+@app.post("/api/meetings/{meeting_id}/finish", response_model=FinishMeetingOut)
+def finish_meeting(
+    meeting_id: int, session: DbSession, settings: AppSettings
+) -> FinishMeetingOut:
+    """회의를 강제로 종료한다.
+
+    브라우저를 그냥 닫은 사람이 있으면 그 트랙은 영원히 `recording` 으로 남고,
+    회의는 **영영 처리되지 않는다.** 사람이 그 상태를 풀 수 있어야 한다.
+
+    강제 종료한 트랙은 `aborted` 로 남는다 — `completed` 로 두면 커버리지를
+    계산한 적이 없는데 정상 종료로 보이고, 그 사람의 발언량을 측정한 것처럼
+    취급된다 (docs/05 §4.1.1).
+    """
+    _load_meeting(session, meeting_id)
+    aborted = recording_service.force_finish_tracks(
+        session, meeting_id, ended_at=datetime.now(UTC)
+    )
+    # force=True — 참가하지 않은 사람을 더 기다리지 않는다. 그게 이 엔드포인트의 존재 이유다.
+    finalize = recording_service.try_finalize_meeting(session, meeting_id, force=True)
+    if finalize.should_enqueue:
+        dispatch.enqueue_meeting_processing(meeting_id)
+
+    return FinishMeetingOut(
+        meeting_queued=finalize.should_enqueue,
+        aborted_track_ids=aborted,
+        message=(
+            f"{len(aborted)}개 트랙을 강제 종료했습니다. {finalize.reason}"
+            if aborted
+            else finalize.reason
+        ),
+    )
+
+
+@app.get("/api/meetings/{meeting_id}/tracks")
+def list_tracks(meeting_id: int, session: DbSession) -> dict[str, Any]:
+    """트랙별 상태. 승인 화면이 "이 트랙은 못 씁니다"를 띄우는 근거."""
+    _load_meeting(session, meeting_id)
+    consent = recording_service.consent_status(session, meeting_id)
+    return {
+        "meeting_id": meeting_id,
+        "consent": {
+            "total": consent.total,
+            "granted": consent.granted,
+            "refused": consent.refused,
+            "all_confirmed": consent.all_confirmed,
+        },
+        "tracks": recording_service.track_health(session, meeting_id),
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# 회의 업무 후보 검토 (이어서)
+# ══════════════════════════════════════════════════════════════
+
+
+class MemberOut(BaseModel):
+    user_id: int
+    name: str
+    role_shares: dict[str, float]
+
+
+@app.get("/api/meetings/{meeting_id}/members", response_model=list[MemberOut])
+def list_meeting_members(meeting_id: int, session: DbSession) -> list[MemberOut]:
+    """이 회의가 속한 프로젝트의 팀원.
+
+    승인 화면이 담당자를 고르려면 명단이 필요하다. 명단 없이 담당자 id 를
+    직접 입력하게 하면 오타 하나로 엉뚱한 사람에게 업무가 붙는다 —
+    서버가 `unknown_assignee` 로 막긴 하지만, 애초에 고를 수 있게 하는 게 맞다.
+    """
+    meeting = _load_meeting(session, meeting_id)
+    rows = session.execute(
+        select(m.Member, m.User)
+        .join(m.User, m.User.id == m.Member.user_id)
+        .where(m.Member.project_id == meeting.project_id)
+        .order_by(m.Member.id)
+    ).all()
+    return [
+        MemberOut(
+            user_id=member.user_id,
+            name=user.name,
+            role_shares={k: float(v) for k, v in (member.role_shares or {}).items()},
+        )
+        for member, user in rows
+    ]
+
+
+@app.get("/api/meetings/{meeting_id}/candidates", response_model=list[CandidateOut])
+def list_candidates(meeting_id: int, session: DbSession) -> list[CandidateOut]:
+    """검토 대기 중인 업무 후보. 확신도가 낮은 것부터 나온다."""
+    _load_meeting(session, meeting_id)
+    rows = approval_service.pending_candidates(session, meeting_id)
+    return [
+        CandidateOut(
+            id=r.id,
+            title=r.title,
+            assignee_id=r.assignee_id,
+            deadline=r.deadline.date() if isinstance(r.deadline, datetime) else r.deadline,
+            confidence=float(r.confidence),
+            evidence_utterance_ids=list(r.evidence_utterance_ids or []),
+            review_status=r.review_status,
+        )
+        for r in rows
+    ]
+
+
+@app.post("/api/meetings/{meeting_id}/candidates/review", response_model=ReviewResult)
+def review(meeting_id: int, payload: ReviewPayload, session: DbSession) -> ReviewResult:
+    """후보 승인/거절.
+
+    **승인된 것만 칸반에 등록된다.** AI가 만든 업무가 사람을 거치지 않고
+    tasks 로 가는 경로는 존재하지 않는다.
+    """
+    meeting = _load_meeting(session, meeting_id)
+
+    requests = [
+        ApprovalRequest(
+            candidate_id=item.candidate_id,
+            reviewer_id=payload.reviewer_id,
+            approve=item.approve,
+            title_override=item.title_override,
+            assignee_override=item.assignee_override,
+            deadline_override=item.deadline_override,
+            note=item.note,
+        )
+        for item in payload.items
+    ]
+
+    outcome = approval_service.review_candidates(
+        session,
+        project_id=meeting.project_id,
+        meeting_id=meeting_id,
+        requests=requests,
+    )
+
+    task_ids = session.scalars(
+        select(m.Task.id).where(
+            m.Task.origin_candidate_id.in_([t.origin_candidate_id for t in outcome.approved])
+        )
+    ).all() if outcome.approved else []
+
+    return ReviewResult(
+        approved_task_ids=list(task_ids),
+        approved_count=len(outcome.approved),
+        failures={cid: [e.value for e in errs] for cid, errs in outcome.failures.items()},
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# GitHub 웹훅
+# ══════════════════════════════════════════════════════════════
+
+
+@app.post("/api/github/webhook", status_code=status.HTTP_202_ACCEPTED)
+async def github_webhook(
+    request: Request,
+    session: DbSession,
+    settings: AppSettings,
+    x_github_event: Annotated[str | None, Header()] = None,
+    x_github_delivery: Annotated[str | None, Header()] = None,
+    x_hub_signature_256: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    """GitHub 웹훅 수신.
+
+    서명 검증이 첫 번째 관문이다. 이게 없으면 누구나
+    "내가 PR 50개를 병합했다"고 POST 할 수 있다.
+    """
+    body = await request.body()
+
+    try:
+        gh.verify_signature(body, x_hub_signature_256, settings.require_webhook_secret())
+    except gh.WebhookError as exc:
+        # 401. 무엇이 틀렸는지 자세히 알려주지 않는다.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "서명 검증 실패") from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "웹훅이 설정되지 않았습니다"
+        ) from exc
+
+    if not x_github_event or not x_github_delivery:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "필수 헤더가 없습니다")
+
+    payload = await request.json()
+    normalized = gh.normalize(x_github_event, x_github_delivery, payload)
+    if normalized is None:
+        return {"status": "ignored", "event": x_github_event}
+
+    project = session.scalar(
+        select(m.Project).where(m.Project.github_repo == normalized.repo)
+    )
+    if project is None:
+        # 연결되지 않은 저장소. 조용히 무시한다 — 존재 여부를 알려주지 않는다.
+        return {"status": "ignored", "reason": "unlinked_repo"}
+
+    # 중복 방어. 웹훅은 재전송되고 백필과 겹칠 수 있다.
+    exists = session.scalar(
+        select(m.GithubEvent.id).where(
+            m.GithubEvent.repo == normalized.repo,
+            m.GithubEvent.event_type == normalized.event_type,
+            m.GithubEvent.delivery_id == normalized.delivery_id,
+        )
+    )
+    if exists:
+        return {"status": "duplicate", "event_id": exists}
+
+    actor_user_id = session.scalar(
+        select(m.Member.user_id).where(
+            m.Member.project_id == project.id,
+            m.Member.github_login == normalized.actor_login,
+        )
+    )
+
+    row = m.GithubEvent(
+        project_id=project.id,
+        delivery_id=normalized.delivery_id,
+        repo=normalized.repo,
+        event_type=normalized.event_type,
+        actor_login=normalized.actor_login,
+        actor_user_id=actor_user_id,
+        ref=normalized.ref,
+        payload=normalized.payload,
+        occurred_at=normalized.occurred_at,
+    )
+    session.add(row)
+    session.flush()
+
+    return {
+        "status": "accepted",
+        "event_id": row.id,
+        "event_type": normalized.event_type,
+        "linked_user": actor_user_id,
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# 기여도
+# ══════════════════════════════════════════════════════════════
+
+
+class CategoryOut(BaseModel):
+    category: str
+    raw: float
+    team_share: float
+    weight: float
+    event_count: int
+    evidence_ids: list[int]
+
+
+class MemberScoreOut(BaseModel):
+    user_id: int
+    role: str
+    share: float
+    range_low: float
+    range_high: float
+    confidence: float
+    confidence_label: str
+    confidence_reasons: list[str]
+    categories: list[CategoryOut]
+    integrity_flags: list[dict[str, Any]]
+    # 측정하지 못한 영역. 0점과 다르다는 걸 화면이 반드시 구분해서 보여야 한다.
+    measurement_gaps: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ScoreOut(BaseModel):
+    algo_version: str
+    computed_at: datetime
+    members: list[MemberScoreOut]
+    skipped_categories: list[str]
+    # ⚠️ 순위는 의도적으로 제공하지 않는다. docs/07 E2
+    notice: str = (
+        "이 수치는 활동 기록에 기반한 참고값입니다. 최종 기여도는 팀이 합의하여 확정합니다."
+    )
+
+
+@app.get("/api/projects/{project_id}/contributions", response_model=ScoreOut)
+def contributions(project_id: int, session: DbSession, settings: AppSettings) -> ScoreOut:
+    """기여도 조회.
+
+    저장된 점수를 읽는 게 아니라 **이벤트 로그에서 매번 재계산한다.**
+    그래야 가중치를 바꿔도 과거가 오염되지 않고, 모든 숫자에 근거가 붙는다.
+    docs/05 §1
+    """
+    from teamflow.services import scoring_service
+
+    result = scoring_service.compute(session, project_id)
+    return ScoreOut(
+        algo_version=settings.scoring_algo_version,
+        computed_at=datetime.now(UTC),
+        members=[
+            MemberScoreOut(
+                user_id=ms.user_id,
+                role=ms.role,
+                share=round(ms.share, 2),
+                range_low=round(ms.range_low, 2),
+                range_high=round(ms.range_high, 2),
+                confidence=round(ms.confidence.value, 3),
+                confidence_label=ms.confidence.label,
+                confidence_reasons=ms.confidence.reasons,
+                categories=[
+                    CategoryOut(
+                        category=cs.category.value,
+                        raw=round(cs.raw, 3),
+                        team_share=round(cs.team_share, 4),
+                        weight=round(cs.weight, 4),
+                        event_count=cs.event_count,
+                        evidence_ids=cs.evidence_ids,
+                    )
+                    for cs in ms.categories.values()
+                ],
+                integrity_flags=[
+                    {"code": f.code, "message": f.message, "detail": f.detail}
+                    for f in ms.integrity_flags
+                ],
+                measurement_gaps=[
+                    {
+                        "category": g.category.value,
+                        "reason": g.reason,
+                        "detail": g.detail,
+                    }
+                    for g in ms.measurement_gaps
+                ],
+            )
+            for ms in result.members.values()
+        ],
+        skipped_categories=[c.value for c in result.skipped_categories],
+    )

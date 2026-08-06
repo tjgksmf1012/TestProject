@@ -1,0 +1,163 @@
+# TeamFlow AI — 로컬 개발·시연 스택
+#
+# docs/03-시스템-아키텍처.md §5
+#
+#   docker compose up -d postgres redis                       # 인프라만
+#   docker compose --profile app --profile llm up -d          # 앱 + LLM
+#   docker compose --profile app --profile llm --profile gpu up -d   # GPU 워커까지
+#
+# ⚠️ `llm` 프로필을 빼면 회의 처리가 **분석 단계에서 전부 실패**합니다.
+#    ASR 까지는 되고 요약·업무추출에서 연결 거부가 납니다. 처음엔
+#    `--profile app --profile llm` 로 시작하세요.
+#
+# ⚠️ 외부 공개가 필요하면 Cloudflare Tunnel(무료)을 쓰세요.
+#    멀티트랙 녹음의 getUserMedia() 는 HTTPS에서만 동작합니다.
+#      cloudflared tunnel --url http://localhost:3000
+#    → docs/11-비용-제로-구성.md §3
+
+name: teamflow
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-teamflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-teamflow}
+      POSTGRES_DB: ${POSTGRES_DB:-teamflow}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-teamflow}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    # Celery 브로커 + GPU 배타 락 (docs/03 §2.1)
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-teamflow}:${POSTGRES_PASSWORD:-teamflow}@postgres:5432/${POSTGRES_DB:-teamflow}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # 오디오는 별도 볼륨. 개인정보보호법상 분리 보관 요구 (docs/07 P4)
+      - audio:/var/teamflow/audio
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  worker-cpu:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    command: celery -A teamflow.tasks worker -Q cpu --concurrency=4 -l info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-teamflow}:${POSTGRES_PASSWORD:-teamflow}@postgres:5432/${POSTGRES_DB:-teamflow}
+      REDIS_URL: redis://redis:6379/0
+      # .env 의 localhost:8080 은 **이 컨테이너 자신**을 가리킨다.
+      # 덮어쓰지 않으면 LLM 호출이 전부 연결 거부로 죽는다.
+      LLM_BASE_URL: http://llm:8080/v1
+    volumes:
+      - audio:/var/teamflow/audio
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  beat:
+    # 주기 작업 스케줄러.
+    #
+    # ⚠️ 이 서비스가 없으면 `beat_schedule` 에 적어둔 것이 **하나도 돌지
+    # 않습니다.** 보존기간이 지난 원본 오디오 삭제는 개인정보보호법상
+    # 요구사항이라(docs/07 P5), 스케줄러가 없다는 건 음성을 무기한
+    # 보관한다는 뜻입니다. 워커만 띄우면 조용히 그렇게 됩니다.
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    # 스케줄 파일을 볼륨에 둔다. 컨테이너를 다시 만들 때마다 초기화되면
+    # 재시작 직후 잡이 한 번 더 돈다 (둘 다 멱등이라 사고는 아니지만).
+    command: celery -A teamflow.tasks beat -l info --schedule /var/teamflow/beat/schedule
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-teamflow}:${POSTGRES_PASSWORD:-teamflow}@postgres:5432/${POSTGRES_DB:-teamflow}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - beatdata:/var/teamflow/beat
+    depends_on:
+      redis: {condition: service_healthy}
+
+  worker-gpu:
+    profiles: ["gpu"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gpu
+    # ⚠️ concurrency=1 필수.
+    # VRAM에 ASR + 화자분리 + LLM을 동시에 못 올린다 (docs/02 §3).
+    # 잡을 동시에 돌리면 OOM이 난다.
+    command: celery -A teamflow.tasks worker -Q gpu --concurrency=1 -l info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-teamflow}:${POSTGRES_PASSWORD:-teamflow}@postgres:5432/${POSTGRES_DB:-teamflow}
+      REDIS_URL: redis://redis:6379/0
+      # 회의 분석(요약·업무추출)이 도는 곳이 여기다. .env 의 localhost 를
+      # 그대로 두면 GPU 워커가 자기 자신에게 LLM 요청을 보낸다.
+      LLM_BASE_URL: http://llm:8080/v1
+    volumes:
+      - audio:/var/teamflow/audio
+      - models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  llm:
+    # LLM은 CPU에서 돌린다. RAM 32GB 환경의 1순위 전략 (docs/02 §5 전략 C).
+    # GPU는 ASR·화자분리만 맡고, GPU/CPU가 병렬로 일한다.
+    profiles: ["llm"]
+    image: ghcr.io/ggml-org/llama.cpp:server
+    command: >
+      -m /models/${LLM_GGUF:-qwen3-8b-q4_k_m.gguf}
+      --host 0.0.0.0 --port 8080
+      -c ${LLM_CONTEXT:-16384}
+      -t ${LLM_THREADS:-8}
+    ports:
+      - "${LLM_PORT:-8080}:8080"
+    volumes:
+      - models:/models
+
+volumes:
+  pgdata:
+  redisdata:
+  models:
+  beatdata:
+  audio:
+    # 오디오 원본은 다른 데이터와 분리된 볼륨에 둔다.
+    # 별도 암호화 키·별도 접근 권한과 함께 docs/07 §2.2 P4 요구를 충족한다.
