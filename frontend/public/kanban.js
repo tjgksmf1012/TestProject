@@ -38,11 +38,19 @@ function sortForBoard(tasks2) {
     return a.id - b.id;
   });
 }
+function localDateOf(instant) {
+  const at = new Date(instant);
+  if (Number.isNaN(at.getTime())) return null;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
 function isOverdue(task, today) {
   if (task.deadline === null) return false;
   if (task.status === "done") {
     if (!task.completed_at) return false;
-    return task.completed_at.slice(0, 10) > task.deadline;
+    const completedOn = localDateOf(task.completed_at);
+    if (completedOn === null) return false;
+    return completedOn > task.deadline;
   }
   return task.deadline < today;
 }

@@ -24,6 +24,12 @@ import {
   keepScreenAwake,
 } from '../lib/recording/browser-adapter.ts';
 import { RecordingClient, type RecordingSummary } from '../lib/recording/client.ts';
+import {
+  completeBody,
+  describeCompletion,
+  describeCompletionFailure,
+  type TrackCompleteResult,
+} from '../lib/recording/complete.ts';
 import { blockers as sessionBlockers } from '../lib/recording/session.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
@@ -214,6 +220,73 @@ $('start').addEventListener('click', async () => {
   }, 1000);
 });
 
+/**
+ * 서버에 "이 트랙 끝났다" 고 알린다.
+ *
+ * ⚠️ **이걸 부르는 코드가 없었습니다.** 정지 버튼은 요약을 화면에만 그리고
+ * 끝났고, 그래서 트랙은 영원히 `recording` 으로 남았습니다. 회의는 큐에
+ * 들어가지 않고, 로비에서는 강제 종료 버튼도 검토 버튼도 뜨지 않습니다 —
+ * 오류 메시지 하나 없이 **이 프로젝트의 주장 전체가 첫 단계에서 멈춰**
+ * 있었습니다.
+ *
+ * 실패해도 화면을 지우지 않습니다. 사람이 다시 누를 수 있어야 합니다.
+ */
+async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
+  if (!trackUrl) return; // 서버 없이 도는 로컬 실험 — 알릴 곳이 없다
+
+  $('finish-state').hidden = false;
+  $('finish-state').textContent = '녹음 종료를 서버에 알리는 중…';
+  $('finish-retry').hidden = true;
+
+  const body = completeBody({
+    timeline: result.timeline,
+    verdict: result.verdict,
+    captureConfidence: result.captureConfidence,
+    warnings: result.warnings,
+    timesliceMs: result.timesliceMs,
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(`${trackUrl}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    });
+  } catch {
+    $('finish-state').textContent = describeCompletionFailure(0);
+    $('finish-retry').hidden = false;
+    return;
+  }
+
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({}))) as { detail?: string };
+    $('finish-state').textContent = describeCompletionFailure(
+      response.status,
+      detail.detail,
+    );
+    // 401 은 다시 눌러도 똑같다 — 로그인 화면으로 보낸다.
+    if (isSessionExpired(response.status)) {
+      location.href = loginUrlFor(location.pathname + location.search);
+      return;
+    }
+    $('finish-retry').hidden = false;
+    return;
+  }
+
+  const done = (await response.json()) as TrackCompleteResult;
+  $('finish-state').textContent = describeCompletion(done);
+  $('finish-retry').hidden = true;
+
+  // 로비로 돌아갈 길을 만들어 준다. 여기가 끝이 아니라 다음이 있다는
+  // 걸 화면이 말해 주지 않으면 사람은 여기서 멈춘다.
+  if (meetingId) {
+    $('finish-next').hidden = false;
+    ($('finish-next') as HTMLAnchorElement).href = `/lobby.html?meeting=${meetingId}`;
+  }
+}
+
 $('stop').addEventListener('click', async () => {
   if (resyncTimer) clearInterval(resyncTimer);
   if (elapsedTimer) clearInterval(elapsedTimer);
@@ -222,6 +295,11 @@ $('stop').addEventListener('click', async () => {
 
   summary = await client.stop();
   showResult(summary);
+  await tellServerWeAreDone(summary);
+});
+
+$('finish-retry').addEventListener('click', () => {
+  if (summary) void tellServerWeAreDone(summary);
 });
 
 document.addEventListener('visibilitychange', () => {

@@ -131,6 +131,14 @@
 
     <section id="result" hidden>
       <h2>결과</h2>
+
+      <!-- 서버에 "끝났다" 고 알렸는가. 이걸 알리지 않으면 트랙이 영원히
+           `recording` 으로 남고, 로비에서 검토 버튼도 강제 종료 버튼도
+           뜨지 않는다 — 오류 없이 회의가 멈춘다. -->
+      <p id="finish-state" hidden></p>
+      <button id="finish-retry" hidden type="button">다시 시도</button>
+      <a id="finish-next" hidden href="/lobby.html">회의 로비로 돌아가기</a>
+
       <p id="verdict"></p>
       <dl>
         <dt>커버리지</dt><dd id="coverage">-</dd>

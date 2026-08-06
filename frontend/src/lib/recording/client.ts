@@ -83,6 +83,14 @@ export interface RecordingSummary {
   /** 캡처 설정 문제로 낮아진 신뢰도 (0~1) */
   captureConfidence: number;
   warnings: CaptureWarning[];
+  /**
+   * `MediaRecorder.start(timeslice)` 에 넘긴 값.
+   *
+   * 서버가 배치를 다시 계산할 때 필요합니다 — 종료 요청에 실어 보냅니다.
+   * 요약에 넣어 두지 않으면 화면 코드가 이 값을 알 방법이 없어, 기본값을
+   * 짐작해 보내게 됩니다. 짐작이 틀리면 서버의 공백 계산이 어긋납니다.
+   */
+  timesliceMs: number;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -223,6 +231,7 @@ export class RecordingClient {
       verdict: judgeTrack(timeline),
       captureConfidence: captureConfidence(this.#warnings),
       warnings: [...this.#warnings],
+      timesliceMs: this.#timesliceMs,
     };
   }
 

@@ -6,6 +6,7 @@ import {
   describeStatus,
   isDueSoon,
   isOverdue,
+  localDateOf,
   nextStatuses,
   sortForBoard,
   statusPatch,
@@ -139,6 +140,43 @@ describe('isOverdue', () => {
       completed_at: '2026-09-03T10:00:00Z',
     });
     strictEqual(isOverdue(late, TODAY), true);
+  });
+
+  it('⭐ 한국에서 마감 다음날 새벽에 끝낸 것은 지연이다', () => {
+    // 서버는 `completed_at` 을 UTC 순간으로 주고 `deadline` 은 달력 날짜로
+    // 준다. 앞 10자를 자르면 UTC 달력일이 나오는데, 한국 시각 9월 5일
+    // 01:00 은 UTC 로 9월 4일이다 — 그대로 비교하면 마감 9월 4일을 넘긴
+    // 업무가 "제때" 로 읽힌다. 오차가 한쪽으로만 나서 **지연을 과소보고만
+    // 한다.**
+    const previous = process.env.TZ;
+    process.env.TZ = 'Asia/Seoul';
+    try {
+      const late = task({
+        status: 'done',
+        deadline: '2026-09-04',
+        completed_at: '2026-09-04T16:00:00Z', // KST 09-05 01:00
+      });
+      strictEqual(localDateOf('2026-09-04T16:00:00Z'), '2026-09-05');
+      strictEqual(isOverdue(late, TODAY), true);
+
+      // 같은 날 안에서 끝낸 것은 지연이 아니다 (KST 09-04 23:00).
+      const onTime = task({
+        status: 'done',
+        deadline: '2026-09-04',
+        completed_at: '2026-09-04T14:00:00Z',
+      });
+      strictEqual(isOverdue(onTime, TODAY), false);
+    } finally {
+      process.env.TZ = previous;
+    }
+  });
+
+  it('완료 시각이 이상한 문자열이면 지연으로 몰지 않는다', () => {
+    strictEqual(
+      isOverdue(task({ status: 'done', deadline: '2026-09-01', completed_at: 'x' }), TODAY),
+      false,
+    );
+    strictEqual(localDateOf('x'), null);
   });
 
   it('완료됐는데 완료 시각이 없으면 지연으로 몰지 않는다', () => {

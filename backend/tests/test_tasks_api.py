@@ -279,6 +279,63 @@ def test_completing_twice_does_not_count_twice(client: TestClient, board: dict):
     assert len(completions) == 1
 
 
+def test_one_task_cannot_hold_both_a_met_and_a_missed_deadline(
+    client: TestClient, board: dict
+):
+    """⭐ 한 업무가 마감 준수와 미준수를 동시에 가질 수 없다.
+
+    `_emit` 의 멱등성은 `(source_kind, source_id, event_type)` 기준이라
+    `deadline_met` 과 `deadline_missed` 를 **서로 다른 행**으로 본다.
+    그래서 늦게 완료 → 되돌리기 → 마감일을 미래로 → 다시 완료 하면 둘 다
+    남았다. `scoring._schedule_raw` 는 met/(met+missed) 를 쓰므로
+    준수율이 0 에서 0.5 로 올라간다 — 버튼 세 번으로 점수가 오르는 경로다.
+    """
+    task_id = board["from_meeting"]
+
+    # 마감일을 과거로 옮겨 놓고 완료 → 미준수.
+    # 완료 시각은 실제 현재 시각이라 픽스처의 NOW 와 무관하다. 그래서
+    # 시간이 흘러도 뜻이 변하지 않는 날짜를 쓴다.
+    assert patch(client, board, task_id, {"deadline": "2020-01-01"}).status_code == 200
+    assert patch(client, board, task_id, {"status": "done"}).status_code == 200
+
+    kinds = [e["event_type"] for e in events(board["member"])]
+    assert "deadline_missed" in kinds
+
+    # 되돌리고 마감일을 미래로 옮긴 뒤 다시 완료
+    assert patch(client, board, task_id, {"status": "todo"}).status_code == 200
+    assert patch(client, board, task_id, {"deadline": "2099-12-31"}).status_code == 200
+    assert patch(client, board, task_id, {"status": "done"}).status_code == 200
+
+    kinds = [e["event_type"] for e in events(board["member"])]
+    assert "deadline_met" not in kinds, kinds
+    assert kinds.count("deadline_missed") == 1, kinds
+
+
+def test_a_deadline_added_after_completion_does_not_create_a_met(
+    client: TestClient, board: dict
+):
+    """⭐ 마감일 없이 끝낸 업무에 나중에 마감일을 붙여 준수를 만들 수 없다.
+
+    마감일이 없으면 준수 여부를 물을 수 없고, **지켰다고 치지도 않는다**
+    (docs/05 §5 — 측정 불가는 0점이 아니다). 그런데 완료를 되돌리고
+    마감일을 미래로 넣은 뒤 다시 완료하면 **없던 준수 기록이 생겼다.**
+    아무도 마감일을 과거로 넣지는 않으므로 이 조작은 한쪽으로만 작동한다.
+    """
+    task_id = board["by_hand"]  # 마감일 없음, 담당자 other
+    owner = board["other"]
+
+    assert patch(client, board, task_id, {"status": "done"}).status_code == 200
+    kinds = [e["event_type"] for e in events(owner)]
+    assert kinds == ["task_completed"], kinds
+
+    assert patch(client, board, task_id, {"status": "todo"}).status_code == 200
+    assert patch(client, board, task_id, {"deadline": "2099-12-31"}).status_code == 200
+    assert patch(client, board, task_id, {"status": "done"}).status_code == 200
+
+    kinds = [e["event_type"] for e in events(owner)]
+    assert kinds == ["task_completed"], kinds
+
+
 def test_reopening_clears_completed_at_but_keeps_the_record(
     client: TestClient, board: dict
 ):

@@ -180,3 +180,43 @@ def test_every_script_the_screens_load_is_in_the_repository():
         "화면이 부르는 스크립트가 저장소에 없습니다. clone 하면 빈 화면입니다:\n"
         + "\n".join(f"  {m}" for m in missing)
     )
+
+
+def test_the_screens_have_a_korean_label_for_every_category_the_server_sends():
+    """⭐ 기여도 화면의 카테고리 어휘가 서버 `Category` 와 같아야 한다.
+
+    어긋나 있었다. 화면 표에는 서버가 만들지 않는 `review`·`design`·
+    `planning` 이 있었고, 서버가 실제로 보내는 `schedule`·`peer` 가
+    없었다. `describeCategory` 는 모르는 값을 **그대로 돌려주므로**
+    예외도 콘솔 경고도 없이 한글 화면에 영어 식별자가 찍혔다:
+
+        "schedule, peer 활동은 이번 계산에서 빠졌습니다."
+
+    성적으로 이어질 수 있는 화면에서 학생이 자기 점수에서 무엇이
+    빠졌는지 읽을 수 없는 상태였다. 프런트 테스트는 그 잘못된 어휘를
+    그대로 고정하고 있어서 절대 잡지 못했다 — 두 언어에 걸친 규약은
+    한쪽 테스트로 못 잡으므로 여기서 잡는다.
+    """
+    import re
+
+    from teamflow.contribution.events import Category
+
+    source = (
+        REPO_ROOT / "frontend" / "src" / "lib" / "contribution" / "view.ts"
+    ).read_text()
+
+    block = re.search(
+        r"export const CATEGORY_LABEL: Record<string, string> = \{(.*?)\};",
+        source,
+        re.DOTALL,
+    )
+    assert block is not None, "CATEGORY_LABEL 을 찾지 못했습니다"
+
+    labelled = set(re.findall(r"^\s*(\w+):", block.group(1), re.MULTILINE))
+    expected = {c.value for c in Category}
+
+    assert labelled == expected, (
+        "화면의 카테고리 라벨이 서버 Category 와 다릅니다.\n"
+        f"  서버에만 있음(화면에 영어로 찍힙니다): {sorted(expected - labelled)}\n"
+        f"  화면에만 있음(죽은 코드입니다):        {sorted(labelled - expected)}"
+    )

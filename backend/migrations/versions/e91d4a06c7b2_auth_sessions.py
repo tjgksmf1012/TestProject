@@ -23,6 +23,14 @@ down_revision: str | Sequence[str] | None = "c5b28e91a740"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# ⚠️ SQLite 는 `INTEGER PRIMARY KEY` 만 rowid 별칭이 되어 autoincrement 한다.
+# `BIGINT` 로 만들면 별칭이 되지 않아 INSERT 마다 NOT NULL 위반이 난다.
+#
+# 이 표만 맨 `sa.BigInteger()` 였다. 그래서 `alembic upgrade head` 로 만든
+# SQLite DB 는 **로그인이 전부 500** 이었다 — 다른 표는 전부 정상이라
+# 눈에 띄지 않는다. `models.py` 의 `PkType` 과 같은 것이다.
+_PK = sa.BigInteger().with_variant(sa.Integer(), "sqlite")
+
 
 def upgrade() -> None:
     # nullable=True 가 의도입니다. 기존 사용자는 비밀번호가 없고, 그 상태는
@@ -31,8 +39,8 @@ def upgrade() -> None:
 
     op.create_table(
         "user_sessions",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
-        sa.Column("user_id", sa.BigInteger(), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("id", _PK, primary_key=True, autoincrement=True),
+        sa.Column("user_id", _PK, sa.ForeignKey("users.id"), nullable=False),
         # unique: 같은 토큰이 두 세션을 가리키면 어느 쪽이 유효한지 알 수 없습니다.
         sa.Column("token_hash", sa.String(64), nullable=False, unique=True),
         sa.Column(

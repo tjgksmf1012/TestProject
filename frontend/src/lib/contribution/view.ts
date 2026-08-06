@@ -67,14 +67,30 @@ export interface Person {
   name: string;
 }
 
+/**
+ * 서버 `contribution/events.py` 의 `Category` 와 **정확히 같아야 한다.**
+ *
+ * ⚠️ 어긋나 있었습니다. 이 표에는 서버가 만들지 않는 `review`·`design`·
+ * `planning` 이 있었고, 서버가 실제로 보내는 `schedule`·`peer` 가 없었습니다.
+ * `describeCategory` 는 모르는 값을 **그대로 돌려주므로** 예외도 경고도
+ * 없이 한글 화면에 영어 식별자가 찍혔습니다.
+ *
+ *     "schedule, peer 활동은 이번 계산에서 빠졌습니다."
+ *
+ * 성적으로 이어질 수 있는 화면에서, 학생이 자기 점수에서 무엇이 빠졌는지
+ * 읽을 수 없는 상태였습니다. 세 역할 프로파일 전부가 `schedule`·`peer` 에
+ * 0.10~0.15 가중치를 주므로 무시해도 되는 곁가지도 아닙니다.
+ *
+ * 어긋나면 `backend/tests/test_repo_integrity.py` 가 잡습니다 — 두 곳에
+ * 적어 두면 반드시 갈라지므로, 갈라진 것을 잡는 쪽을 택했습니다.
+ */
 export const CATEGORY_LABEL: Record<string, string> = {
-  code: '코드',
-  review: '리뷰',
-  meeting: '회의',
   task: '업무',
+  code: '코드',
+  meeting: '회의',
   document: '문서',
-  design: '디자인',
-  planning: '기획',
+  schedule: '일정 준수',
+  peer: '동료 평가',
 };
 
 export function describeCategory(category: string): string {

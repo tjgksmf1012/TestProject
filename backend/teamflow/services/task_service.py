@@ -19,8 +19,14 @@
 
 지우지 않는 이유: 지우면 "완료했다가 되돌렸다" 가 기록에서 사라지고, 점수는
 조용히 내려갑니다. 기여도 분쟁에서 필요한 건 지금 상태가 아니라 **무슨 일이
-있었는가**입니다. 다시 완료해도 중복으로 세지 않습니다 —
-`(source_kind, source_id, event_type)` 이 유니크라 두 번째 INSERT 가 막힙니다.
+있었는가**입니다.
+
+다시 완료해도 중복으로 세지 않습니다. 유니크 제약
+`(source_kind, source_id, event_type)` 이 같은 종류의 두 번째 INSERT 를
+막습니다 — 그런데 **그것만으로는 부족합니다.** 유니크 키에 `event_type` 이
+들어 있어서 `DEADLINE_MET` 과 `DEADLINE_MISSED` 는 서로 다른 행입니다.
+그래서 마감 준수는 `_record_completion` 이 **업무 하나당 한 번만** 판정합니다
+(거기 주석에 왜 그런지 적어 두었습니다).
 """
 
 from __future__ import annotations
@@ -154,7 +160,7 @@ def _record_completion(session: Session, task: m.Task, completed_at: datetime) -
         )
         return
 
-    _emit(
+    first_completion = _emit(
         session,
         project_id=task.project_id,
         user_id=task.assignee_id,
@@ -162,6 +168,28 @@ def _record_completion(session: Session, task: m.Task, completed_at: datetime) -
         source_id=task.id,
         occurred_at=completed_at,
     )
+
+    # ⚠️ **마감 준수는 업무 하나당 딱 한 번만 판정한다.**
+    #
+    # `_emit` 의 멱등성은 `(source_kind, source_id, event_type)` 기준이라
+    # `DEADLINE_MET` 과 `DEADLINE_MISSED` 를 **서로 다른 행**으로 본다.
+    # 그래서 여기서 막지 않으면 한 업무가 met 과 missed 를 동시에 갖는다.
+    # `scoring._schedule_raw` 는 met/(met+missed) 를 쓰므로, 늦게 끝낸
+    # 업무 하나가 준수율 0 에서 0.5 로 올라간다.
+    #
+    # 더 나쁜 경로도 있었다. 마감일 없이 완료한 업무(판정 없음)를 되돌린 뒤
+    # 마감일을 미래로 넣고 다시 완료하면 **없던 met 이 생겼다.** 아무도
+    # 마감일을 과거로 넣지는 않으므로 이 조작은 한쪽으로만 작동한다 —
+    # 버튼 세 번으로 점수가 오르는 경로였다.
+    #
+    # 되돌리기 자체는 막지 않는다. 그건 정상적인 일이고, 되돌렸다는 사실은
+    # 감사 로그에 남는다. 다시 판정하지 않을 뿐이다.
+    if not first_completion:
+        logger.info(
+            "task=%s 는 이미 완료된 적이 있어 마감 준수를 다시 판정하지 않습니다",
+            task.id,
+        )
+        return
 
     deadline = _aware(task.deadline)
     if deadline is None:

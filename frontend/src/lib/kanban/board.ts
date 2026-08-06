@@ -93,16 +93,48 @@ export function sortForBoard(tasks: readonly Task[]): Task[] {
 }
 
 /**
+ * UTC **순간**을 보고 있는 사람의 달력 날짜로.
+ *
+ * ⚠️ 서버는 `completed_at` 을 UTC 순간으로 주고 `deadline` 은 시각 성분이
+ * 없는 **달력 날짜**로 줍니다. 앞 10자를 잘라 쓰면 UTC 달력일이 나오는데,
+ * 한국(UTC+9)에서는 그게 사람이 보는 날짜와 다릅니다.
+ *
+ *     완료 2026-09-04T14:00:00Z → UTC 09-04 · KST 09-04 23:00  (같다)
+ *     완료 2026-09-04T16:00:00Z → UTC 09-04 · KST **09-05** 01:00  (다르다)
+ *
+ * 두 번째 줄이 문제입니다. 마감이 9월 4일인 업무를 한국 시각 9월 5일
+ * 새벽에 끝냈는데 "제때" 로 읽힙니다. 오차가 한쪽으로만 납니다 — UTC
+ * 날짜는 KST 날짜보다 같거나 하루 이르므로 **지연을 과소보고만 합니다.**
+ * 늦은 것이 제때로 보이지, 그 반대는 없습니다.
+ *
+ * 미완료 업무는 이미 로컬 자정 기준(`todayIso()`)과 비교하고 있었으므로,
+ * 한 모듈 안에서 기준이 둘로 갈라져 있기도 했습니다. 바로 아래
+ * `daysBetween` 에 "한쪽만 로컬로 만들면 한국에서 하루가 어긋난다" 는
+ * 주석이 붙어 있는데, 정작 `isOverdue` 가 그 실수를 하고 있었습니다.
+ */
+export function localDateOf(instant: string): string | null {
+  const at = new Date(instant);
+  if (Number.isNaN(at.getTime())) return null;
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
+
+/**
  * 이 업무가 지금 늦었는가.
  *
  * 완료된 업무는 **완료 시점** 기준으로 판단합니다. 오늘 날짜로 보면
  * 지난달에 제때 끝낸 업무가 시간이 갈수록 "지연" 으로 바뀝니다.
+ *
+ * 완료 시각은 UTC 순간이라 **보는 사람의 달력으로 옮긴 뒤** 비교합니다.
+ * 마감일은 달력 날짜라 옮길 것이 없습니다.
  */
 export function isOverdue(task: Task, today: string): boolean {
   if (task.deadline === null) return false;
   if (task.status === 'done') {
     if (!task.completed_at) return false;
-    return task.completed_at.slice(0, 10) > task.deadline;
+    const completedOn = localDateOf(task.completed_at);
+    if (completedOn === null) return false;
+    return completedOn > task.deadline;
   }
   return task.deadline < today;
 }

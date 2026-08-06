@@ -23,7 +23,19 @@ from teamflow.db.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # ⚠️ `disable_existing_loggers` 를 반드시 False 로 둔다. 기본값은 True 다.
+    #
+    # `alembic upgrade` 를 **인프로세스로** 부르는 곳이 있다 (테스트,
+    # 앱 기동 스크립트). 기본값이면 그 시점까지 만들어진 모든 로거가
+    # `disabled=True` 로 영구히 꺼지고, `dictConfig(disable_existing_loggers=
+    # False)` 로도 다시 켜지지 않는다.
+    #
+    # 이 저장소의 결함은 거의 전부 예외를 내지 않는다 — **로그가 유일한
+    # 흔적**이다. 그 흔적을 마이그레이션 한 번이 통째로 꺼 버렸다. 실제로
+    # pytest 에서 `test_migrations.py` 다음에 도는 모든 파일이 로그가 꺼진
+    # 상태로 돌고 있었고, 로그 테스트 4개는 파일 이름 순서 덕분에 통과하고
+    # 있었다.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # 우선순위: 환경 변수 > 애플리케이션 설정 기본값
 config.set_main_option(

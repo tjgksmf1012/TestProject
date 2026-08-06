@@ -272,9 +272,18 @@ describe('teamWarnings', () => {
     strictEqual(warnings.some((w) => w.includes('비교하지 마세요')), false);
   });
 
-  it('빠진 카테고리를 말한다', () => {
-    const warnings = teamWarnings(team({ skipped_categories: ['design'] }), PEOPLE);
-    strictEqual(warnings.some((w) => w.includes('디자인')), true);
+  it('⭐ 빠진 카테고리를 **한글로** 말한다', () => {
+    // 서버가 실제로 보내는 값이어야 한다. 라벨 표에 없는 값을 넣으면
+    // `describeCategory` 가 그대로 돌려주므로, 예외도 경고도 없이
+    // "schedule, peer 활동은 이번 계산에서 빠졌습니다" 가 찍힌다.
+    const warnings = teamWarnings(
+      team({ skipped_categories: ['schedule', 'peer'] }),
+      PEOPLE,
+    );
+    const text = warnings.join(' ');
+    strictEqual(text.includes('일정 준수'), true);
+    strictEqual(text.includes('동료 평가'), true);
+    strictEqual(/schedule|peer/.test(text), false, text);
   });
 
   it('⭐ 팀원이 0명이면 "전원 0점" 이 아니라 "기록이 없다" 다', () => {
@@ -298,18 +307,18 @@ describe('teamWarnings', () => {
 
 describe('categoriesForDisplay', () => {
   it('⭐ 0 인 카테고리를 버리지 않는다', () => {
-    // 빼 버리면 "이 사람은 리뷰를 안 했다" 가 화면에서 사라진다.
+    // 빼 버리면 "이 사람은 동료 평가를 안 받았다" 가 화면에서 사라진다.
     // 그건 팀이 이야기해야 할 것이지 숨길 것이 아니다.
     const shown = categoriesForDisplay(
       member({
         categories: [
           category({ category: 'code', weight: 0.5, event_count: 3 }),
-          category({ category: 'review', weight: 0.3, event_count: 0, raw: 0 }),
+          category({ category: 'peer', weight: 0.3, event_count: 0, raw: 0 }),
         ],
       }),
     );
     strictEqual(shown.length, 2);
-    strictEqual(shown.some((c) => c.category === 'review'), true);
+    strictEqual(shown.some((c) => c.category === 'peer'), true);
   });
 
   it('가중치가 큰 것부터 — 이 역할에서 무엇이 중요한가', () => {
@@ -328,12 +337,12 @@ describe('categoriesForDisplay', () => {
     const shown = categoriesForDisplay(
       member({
         categories: [
-          category({ category: 'review', weight: 0.5 }),
+          category({ category: 'schedule', weight: 0.5 }),
           category({ category: 'code', weight: 0.5 }),
         ],
       }),
     );
-    deepStrictEqual(shown.map((c) => c.category), ['code', 'review']);
+    deepStrictEqual(shown.map((c) => c.category), ['code', 'schedule']);
   });
 });
 

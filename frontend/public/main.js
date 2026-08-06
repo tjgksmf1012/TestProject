@@ -909,7 +909,8 @@ var RecordingClient = class {
       timeline,
       verdict: judgeTrack(timeline),
       captureConfidence: captureConfidence(this.#warnings),
-      warnings: [...this.#warnings]
+      warnings: [...this.#warnings],
+      timesliceMs: this.#timesliceMs
     };
   }
   #onData(data) {
@@ -943,6 +944,58 @@ var RecordingClient = class {
     return next;
   }
 };
+
+// src/lib/recording/complete.ts
+function isoOf(serverTimeMs) {
+  return new Date(serverTimeMs).toISOString();
+}
+function gapOf(gap) {
+  return {
+    reason: gap.reason,
+    start_ms: gap.startMs,
+    end_ms: gap.endMs,
+    duration_ms: gap.durationMs,
+    after_seq: gap.afterSeq
+  };
+}
+function completeBody(input) {
+  const { timeline } = input;
+  return {
+    ended_at: isoOf(timeline.endedAtMs),
+    // 서버가 0~1 을 요구한다. 계산 오차로 1 을 아주 조금 넘으면 422 가
+    // 나는데, 그 422 는 "녹음이 끝나지 않는다" 로 보인다.
+    coverage: Math.min(1, Math.max(0, timeline.coverage)),
+    total_gap_ms: Math.max(0, Math.round(timeline.totalGapMs)),
+    longest_gap_ms: Math.max(0, Math.round(timeline.longestGapMs)),
+    gaps: timeline.gaps.map(gapOf),
+    capture_confidence: Math.min(1, Math.max(0, input.captureConfidence)),
+    capture_warnings: input.warnings.map((w) => ({
+      setting: w.setting,
+      severity: w.severity,
+      message: w.message
+    })),
+    stop_reason: input.stopReason ?? null,
+    timeslice_ms: input.timesliceMs
+  };
+}
+function describeCompletion(result) {
+  const percent = `${(result.coverage * 100).toFixed(1)}%`;
+  if (result.meeting_queued) {
+    return `녹음을 마쳤습니다 (서버 기준 커버리지 ${percent}). 전원이 끝나 회의 처리를 시작합니다.`;
+  }
+  if (result.meeting_status) {
+    return `녹음을 마쳤습니다 (서버 기준 커버리지 ${percent}). ${result.meeting_status}`;
+  }
+  return `녹음을 마쳤습니다 (서버 기준 커버리지 ${percent}).`;
+}
+function describeCompletionFailure(status, detail) {
+  const suffix = "다시 시도를 눌러 주세요 — 끝내지 않으면 회의 처리가 시작되지 않습니다.";
+  if (status === 401) return "로그인이 풀렸습니다. 다시 로그인한 뒤 종료해야 합니다.";
+  if (status === 404) return `이 트랙을 찾을 수 없습니다. ${suffix}`;
+  if (status === 409) return detail || `이미 끝난 트랙입니다. ${suffix}`;
+  if (status === 0) return `서버에 연결하지 못했습니다. ${suffix}`;
+  return `${detail || `종료하지 못했습니다 (HTTP ${status})`}. ${suffix}`;
+}
 
 // src/lib/auth/session.ts
 function loginUrlFor(pathWithQuery) {
@@ -1184,6 +1237,52 @@ $("start").addEventListener("click", async () => {
     $("elapsed").textContent = `${Math.floor(sec / 60)}분 ${sec % 60}초`;
   }, 1e3);
 });
+async function tellServerWeAreDone(result) {
+  if (!trackUrl) return;
+  $("finish-state").hidden = false;
+  $("finish-state").textContent = "녹음 종료를 서버에 알리는 중…";
+  $("finish-retry").hidden = true;
+  const body = completeBody({
+    timeline: result.timeline,
+    verdict: result.verdict,
+    captureConfidence: result.captureConfidence,
+    warnings: result.warnings,
+    timesliceMs: result.timesliceMs
+  });
+  let response;
+  try {
+    response = await fetch(`${trackUrl}/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(body)
+    });
+  } catch {
+    $("finish-state").textContent = describeCompletionFailure(0);
+    $("finish-retry").hidden = false;
+    return;
+  }
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    $("finish-state").textContent = describeCompletionFailure(
+      response.status,
+      detail.detail
+    );
+    if (isSessionExpired(response.status)) {
+      location.href = loginUrlFor(location.pathname + location.search);
+      return;
+    }
+    $("finish-retry").hidden = false;
+    return;
+  }
+  const done = await response.json();
+  $("finish-state").textContent = describeCompletion(done);
+  $("finish-retry").hidden = true;
+  if (meetingId) {
+    $("finish-next").hidden = false;
+    $("finish-next").href = `/lobby.html?meeting=${meetingId}`;
+  }
+}
 $("stop").addEventListener("click", async () => {
   if (resyncTimer) clearInterval(resyncTimer);
   if (elapsedTimer) clearInterval(elapsedTimer);
@@ -1191,6 +1290,10 @@ $("stop").addEventListener("click", async () => {
   wakeLock = null;
   summary = await client.stop();
   showResult(summary);
+  await tellServerWeAreDone(summary);
+});
+$("finish-retry").addEventListener("click", () => {
+  if (summary) void tellServerWeAreDone(summary);
 });
 document.addEventListener("visibilitychange", () => {
   client.setHidden(document.visibilityState === "hidden");

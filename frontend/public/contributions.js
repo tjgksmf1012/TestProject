@@ -1,12 +1,11 @@
 // src/lib/contribution/view.ts
 var CATEGORY_LABEL = {
-  code: "코드",
-  review: "리뷰",
-  meeting: "회의",
   task: "업무",
+  code: "코드",
+  meeting: "회의",
   document: "문서",
-  design: "디자인",
-  planning: "기획"
+  schedule: "일정 준수",
+  peer: "동료 평가"
 };
 function describeCategory(category) {
   return CATEGORY_LABEL[category] ?? category;
