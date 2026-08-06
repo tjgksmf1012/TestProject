@@ -95,9 +95,14 @@
       .ok { color: var(--ok); }
       .bad { color: var(--bad); }
       .note-block { font-size: .8rem; opacity: .7; margin-top: 1.5rem; }
+          nav#nav { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; font-size: .8125rem; }
+      nav#nav a { padding: .2rem .55rem; border: 1px solid var(--line, #d8dbe0); border-radius: .35rem; text-decoration: none; color: inherit; opacity: .85; }
+      nav#nav a:hover { opacity: 1; }
+      nav#nav .miss { color: var(--dim, #6b7280); }
     </style>
   </head>
   <body>
+    <nav id="nav"></nav>
     <h1>업무 후보 검토</h1>
     <p class="sub">
       AI가 회의에서 뽑은 <strong>후보</strong>입니다. 승인해야 칸반에 등록됩니다.

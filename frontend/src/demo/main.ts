@@ -28,6 +28,7 @@ import { blockers as sessionBlockers } from '../lib/recording/session.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { renderNav } from './nav.ts';
 import type { SyncTransport } from '../lib/recording/client.ts';
 import type { PendingChunk, UploadTransport } from '../lib/recording/upload-queue.ts';
 
@@ -260,3 +261,5 @@ $('copy').addEventListener('click', async () => {
 });
 
 render();
+
+renderNav('record');

@@ -653,3 +653,65 @@ def test_outsider_cannot_list_meetings(client: TestClient, seeded: dict):
 def test_anonymous_sees_no_projects(client: TestClient, seeded: dict):
     client.cookies.clear()
     assert client.get("/api/projects").status_code == 401
+
+
+def test_project_members_are_reachable_without_a_meeting(client: TestClient, seeded: dict):
+    """⭐ 이름은 프로젝트 속성이지 회의 속성이 아니다.
+
+    명단 API 가 회의 단위뿐이던 동안, 칸반·기여도를 `?project=N` 만으로 열면
+    명단을 받을 길이 없어 **모든 이름이 `사용자 #3`** 으로 떴다. 기여도
+    화면에서는 이름 순 정렬까지 그 문자열 순으로 바뀌었다.
+    """
+    body = client.get(f"/api/projects/{seeded['project_id']}/members").json()
+
+    assert len(body) == 3
+    for row in body:
+        assert {"user_id", "name", "role_shares"} <= set(row)
+        assert row["name"] and not row["name"].startswith("사용자 #")
+
+
+def test_project_and_meeting_member_lists_agree(client: TestClient, seeded: dict):
+    """⭐ 같은 명단을 두 곳에서 따로 만들면 반드시 갈라진다.
+
+    갈라지면 화면마다 다른 명단을 보게 되고, 승인 화면에서 고른 담당자가
+    칸반에서는 "알 수 없는 사용자" 로 보이는 상태가 된다.
+    """
+    by_project = client.get(f"/api/projects/{seeded['project_id']}/members").json()
+    by_meeting = client.get(f"/api/meetings/{seeded['meeting_id']}/members").json()
+    assert by_project == by_meeting
+
+
+def test_outsider_cannot_read_the_member_list(client: TestClient, seeded: dict):
+    from teamflow.db import session as db_session
+
+    with db_session.session_scope() as s:
+        outsider = m.User(name="외부인3", email="outsider3-home@example.com")
+        s.add(outsider)
+        s.flush()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    assert client.get(f"/api/projects/{seeded['project_id']}/members").status_code == 403
+
+
+def test_no_screen_is_a_dead_end(client: TestClient):
+    """⭐ 화면 일곱 개 중 넷이 막다른 길이었다.
+
+    녹음·승인·칸반·기여도에 들어가면 브라우저 뒤로가기 말고는 나올 방법이
+    없었습니다. 폰에서 주소창 없이 열면 갇힙니다.
+
+    모든 화면에 `<nav id="nav">` 가 있는지를 봅니다 — 채우는 것은
+    `src/demo/nav.ts` 이고, 무엇을 채울지는 `src/lib/nav/links.ts` 가
+    정합니다(17개 테스트).
+    """
+    from pathlib import Path as _Path
+
+    public = _Path(__file__).resolve().parents[2] / "frontend" / "public"
+    missing = [
+        page.name
+        for page in sorted(public.glob("*.html"))
+        # 로그인·홈은 예외입니다. 로그인은 아직 신원이 없고, 홈이 그 목적지입니다.
+        if page.name not in {"login.html", "home.html"}
+        and 'id="nav"' not in page.read_text()
+    ]
+    assert not missing, f"빠져나올 길이 없는 화면: {missing}"

@@ -29,6 +29,7 @@ import {
 } from '../lib/review/candidates.ts';
 import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
 import { attr, escapeHtml } from '../lib/html.ts';
+import { renderNav } from './nav.ts';
 
 interface Member {
   user_id: number;
@@ -311,3 +312,5 @@ start().catch((error: unknown) => {
   $('result').className = 'bad';
   $('result').textContent = error instanceof Error ? error.message : String(error);
 });
+
+renderNav('review');

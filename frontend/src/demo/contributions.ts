@@ -26,12 +26,11 @@ import {
 } from '../lib/contribution/view.ts';
 import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { renderNav } from './nav.ts';
 
 const params = new URLSearchParams(location.search);
 const apiBase = params.get('api') ?? '';
 const projectId = Number(params.get('project') ?? '1');
-// 이름을 붙이려면 명단이 필요한데, 명단 API 는 회의 단위다.
-const meetingId = params.get('meeting');
 
 const $ = (id: string): HTMLElement => {
   const el = document.getElementById(id);
@@ -115,9 +114,12 @@ function render(score: TeamScore): void {
 }
 
 async function load(): Promise<void> {
+  // ⭐ 명단은 **프로젝트** 단위. 회의 단위로 받던 동안에는 `?project=N`
+  // 만으로 열면 이름이 전부 `사용자 #3` 이었고, 이름 순 정렬도 그 문자열
+  // 순으로 바뀌었다 — 사람별 기여를 보여주는 화면에서 가장 나쁜 실패다.
   const [scoreRes, memberRes] = await Promise.all([
     get(`/api/projects/${projectId}/contributions`),
-    meetingId ? get(`/api/meetings/${meetingId}/members`) : Promise.resolve(null),
+    get(`/api/projects/${projectId}/members`),
   ]);
 
   if (isSessionExpired(scoreRes.status)) {
@@ -133,7 +135,7 @@ async function load(): Promise<void> {
     return;
   }
 
-  if (memberRes?.ok) people = (await memberRes.json()) as Person[];
+  if (memberRes.ok) people = (await memberRes.json()) as Person[];
   render((await scoreRes.json()) as TeamScore);
 }
 
@@ -148,3 +150,5 @@ async function start(): Promise<void> {
 }
 
 void start();
+
+renderNav('contributions');

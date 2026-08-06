@@ -31,9 +31,14 @@
   .status { font-size: .875rem; color: var(--dim); margin: .75rem 0 0; }
   .note { font-size: .8125rem; color: var(--dim); margin-top: 1.5rem; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
-</style>
+      nav#nav { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; font-size: .8125rem; }
+      nav#nav a { padding: .2rem .55rem; border: 1px solid var(--line, #d8dbe0); border-radius: .35rem; text-decoration: none; color: inherit; opacity: .85; }
+      nav#nav a:hover { opacity: 1; }
+      nav#nav .miss { color: var(--dim, #6b7280); }
+    </style>
 </head>
 <body>
+    <nav id="nav"></nav>
   <h1 id="title">회의 로비</h1>
   <p class="sub" id="sub">불러오는 중…</p>
   <p class="sub" id="who"></p>

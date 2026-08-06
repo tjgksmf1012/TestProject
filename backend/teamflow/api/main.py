@@ -1044,6 +1044,44 @@ class MemberOut(BaseModel):
     role_shares: dict[str, float]
 
 
+def _project_members(session: Session, project_id: int) -> list[MemberOut]:
+    rows = session.execute(
+        select(m.Member, m.User)
+        .join(m.User, m.User.id == m.Member.user_id)
+        .where(m.Member.project_id == project_id)
+        .order_by(m.Member.id)
+    ).all()
+    return [
+        MemberOut(
+            user_id=member.user_id,
+            name=user.name,
+            role_shares={k: float(v) for k, v in (member.role_shares or {}).items()},
+        )
+        for member, user in rows
+    ]
+
+
+@app.get("/api/projects/{project_id}/members", response_model=list[MemberOut])
+def list_project_members(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> list[MemberOut]:
+    """이 프로젝트의 팀원.
+
+    ⭐ **이름은 프로젝트 속성이지 회의 속성이 아닙니다.**
+
+    처음에는 명단 API 가 회의 단위뿐이었습니다(승인 화면이 담당자를 고르려고
+    만든 것). 그래서 칸반·기여도 화면을 `?project=N` 만으로 열면 명단을 받을
+    길이 없어 **모든 이름이 `사용자 #3` 으로** 떴습니다.
+
+    기여도 화면에서는 특히 나쁩니다 — 사람별 기여를 보여주는 화면인데 이름이
+    없고, 이름 순 정렬이 `사용자 #N` 문자열 순으로 바뀝니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+    return _project_members(session, project_id)
+
+
 @app.get("/api/meetings/{meeting_id}/members", response_model=list[MemberOut])
 def list_meeting_members(
     meeting_id: int, session: DbSession, user: CurrentUser
@@ -1055,20 +1093,9 @@ def list_meeting_members(
     서버가 `unknown_assignee` 로 막긴 하지만, 애초에 고를 수 있게 하는 게 맞다.
     """
     meeting = _load_meeting_for(session, meeting_id, user)
-    rows = session.execute(
-        select(m.Member, m.User)
-        .join(m.User, m.User.id == m.Member.user_id)
-        .where(m.Member.project_id == meeting.project_id)
-        .order_by(m.Member.id)
-    ).all()
-    return [
-        MemberOut(
-            user_id=member.user_id,
-            name=user.name,
-            role_shares={k: float(v) for k, v in (member.role_shares or {}).items()},
-        )
-        for member, user in rows
-    ]
+    # 프로젝트 단위 조회에 위임합니다. 두 곳에 같은 쿼리를 두면 반드시
+    # 갈라지고, 갈라지면 화면마다 다른 명단을 보게 됩니다.
+    return _project_members(session, meeting.project_id)
 
 
 @app.get("/api/meetings/{meeting_id}/candidates", response_model=list[CandidateOut])

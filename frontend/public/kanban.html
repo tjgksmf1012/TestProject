@@ -38,9 +38,14 @@
 
   #result { font-size: .875rem; color: var(--bad); margin-top: 1rem; }
   .note { font-size: .8125rem; color: var(--dim); margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-</style>
+      nav#nav { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; font-size: .8125rem; }
+      nav#nav a { padding: .2rem .55rem; border: 1px solid var(--line, #d8dbe0); border-radius: .35rem; text-decoration: none; color: inherit; opacity: .85; }
+      nav#nav a:hover { opacity: 1; }
+      nav#nav .miss { color: var(--dim, #6b7280); }
+    </style>
 </head>
 <body>
+    <nav id="nav"></nav>
   <h1>칸반</h1>
   <p class="sub" id="who"></p>
   <p class="sub" id="counts"></p>

@@ -26,6 +26,7 @@ import {
 } from '../lib/lobby/room.ts';
 import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { renderNav } from './nav.ts';
 
 const params = new URLSearchParams(location.search);
 const meetingId = Number(params.get('meeting') ?? '1');
@@ -223,3 +224,5 @@ async function start(): Promise<void> {
 }
 
 void start();
+
+renderNav('lobby');

@@ -154,6 +154,79 @@ function attr(value) {
   return `"${escapeHtml(String(value))}"`;
 }
 
+// src/lib/nav/links.ts
+var LABEL = {
+  home: "홈",
+  lobby: "회의 로비",
+  record: "녹음",
+  review: "업무 후보 검토",
+  kanban: "칸반",
+  contributions: "기여도"
+};
+function positive(value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+function navLinks(context2) {
+  const project = positive(context2.projectId);
+  const meeting2 = positive(context2.meetingId);
+  const links = [{ screen: "home", label: LABEL.home, href: "/home.html" }];
+  if (meeting2 !== null) {
+    links.push({
+      screen: "lobby",
+      label: LABEL.lobby,
+      href: `/lobby.html?meeting=${meeting2}`
+    });
+    links.push({
+      screen: "review",
+      label: LABEL.review,
+      href: `/review.html?meeting=${meeting2}`
+    });
+  }
+  if (project !== null) {
+    const suffix = meeting2 !== null ? `&meeting=${meeting2}` : "";
+    links.push({
+      screen: "kanban",
+      label: LABEL.kanban,
+      href: `/kanban.html?project=${project}${suffix}`
+    });
+    links.push({
+      screen: "contributions",
+      label: LABEL.contributions,
+      href: `/contributions.html?project=${project}${suffix}`
+    });
+  }
+  return links.filter((link) => link.screen !== context2.current);
+}
+function missingLinks(context2) {
+  const notes = [];
+  if (positive(context2.meetingId) === null && context2.current !== "home") {
+    notes.push("회의를 지정하지 않아 로비·검토 화면으로 갈 수 없습니다");
+  }
+  if (positive(context2.projectId) === null && context2.current !== "home") {
+    notes.push("프로젝트를 지정하지 않아 칸반·기여도 화면으로 갈 수 없습니다");
+  }
+  return notes;
+}
+function contextFromSearch(current, search) {
+  const params2 = new URLSearchParams(search);
+  const read = (key) => {
+    const raw = params2.get(key);
+    if (raw === null) return null;
+    return positive(Number(raw));
+  };
+  return { current, projectId: read("project"), meetingId: read("meeting") };
+}
+
+// src/demo/nav.ts
+function renderNav(current) {
+  const host = document.getElementById("nav");
+  if (!host) return;
+  const context2 = contextFromSearch(current, location.search);
+  const links = navLinks(context2).map((link) => `<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`).join("");
+  const notes = missingLinks(context2).map((note) => `<span class="miss">${escapeHtml(note)}</span>`).join("");
+  host.innerHTML = links + notes;
+}
+
 // src/demo/review.ts
 var params = new URLSearchParams(location.search);
 var apiBase = params.get("api") ?? "";
@@ -349,3 +422,4 @@ start().catch((error) => {
   $("result").className = "bad";
   $("result").textContent = error instanceof Error ? error.message : String(error);
 });
+renderNav("review");

@@ -71,9 +71,14 @@
       label.check { display: flex; align-items: center; gap: .5rem; font-size: .875rem; padding: .5rem 0; }
       .note { font-size: .8rem; opacity: .7; margin-top: .75rem; }
       code { font-size: .85em; background: color-mix(in srgb, currentColor 8%, transparent); padding: .1em .3em; border-radius: .25em; }
+          nav#nav { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; font-size: .8125rem; }
+      nav#nav a { padding: .2rem .55rem; border: 1px solid var(--line, #d8dbe0); border-radius: .35rem; text-decoration: none; color: inherit; opacity: .85; }
+      nav#nav a:hover { opacity: 1; }
+      nav#nav .miss { color: var(--dim, #6b7280); }
     </style>
   </head>
   <body>
+    <nav id="nav"></nav>
     <h1>녹음 생존율 테스트</h1>
     <p id="who" class="sub"></p>
     <p class="sub">

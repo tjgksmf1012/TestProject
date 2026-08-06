@@ -16,11 +16,11 @@ import {
 } from '../lib/kanban/board.ts';
 import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { renderNav } from './nav.ts';
 
 const params = new URLSearchParams(location.search);
 const apiBase = params.get('api') ?? '';
 const projectId = Number(params.get('project') ?? '1');
-const meetingId = params.get('meeting');
 
 const $ = (id: string): HTMLElement => {
   const el = document.getElementById(id);
@@ -145,9 +145,13 @@ async function move(taskId: number, to: string): Promise<void> {
 }
 
 async function load(): Promise<void> {
+  // ⭐ 명단은 **프로젝트** 단위로 받는다.
+  //
+  // 예전에는 회의 단위 명단만 있어서, `?project=N` 만으로 이 화면을 열면
+  // 명단을 받을 길이 없어 모든 이름이 `사용자 #3` 으로 떴다.
   const [boardRes, memberRes] = await Promise.all([
     get(`/api/projects/${projectId}/tasks`),
-    meetingId ? get(`/api/meetings/${meetingId}/members`) : Promise.resolve(null),
+    get(`/api/projects/${projectId}/members`),
   ]);
 
   if (isSessionExpired(boardRes.status)) {
@@ -165,7 +169,7 @@ async function load(): Promise<void> {
   const board = (await boardRes.json()) as { statuses: string[]; tasks: Task[] };
   statuses = board.statuses;
   tasks = board.tasks;
-  if (memberRes?.ok) members = (await memberRes.json()) as Member[];
+  if (memberRes.ok) members = (await memberRes.json()) as Member[];
   render();
 }
 
@@ -180,3 +184,5 @@ async function start(): Promise<void> {
 }
 
 void start();
+
+renderNav('kanban');
