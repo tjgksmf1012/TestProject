@@ -27,7 +27,7 @@ import {
   type Draft,
   type ReviewContext,
 } from '../lib/review/candidates.ts';
-import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
+import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { attr, escapeHtml } from '../lib/html.ts';
 import { renderNav } from './nav.ts';
 
@@ -44,7 +44,10 @@ interface MeetingInfo {
 }
 
 const params = new URLSearchParams(location.search);
-const apiBase = params.get('api') ?? '';
+// ⚠️ 주소창의 `?api=` 를 그대로 쓰면 **비밀번호와 회의 음성이 어디로
+// 가는지**를 링크 하나로 바꿀 수 있다. safeApiBase 가 진짜 도메인에서는
+// 무시하고, 로컬 화면에서 로컬 서버일 때만 통과시킨다.
+const apiBase = safeApiBase(params.get('api'), location.origin);
 const meetingId = Number(params.get('meeting') ?? '1');
 
 const drafts = new Map<number, Draft>();

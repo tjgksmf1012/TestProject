@@ -15,11 +15,21 @@ import {
   type Meeting,
   type Project,
 } from '../lib/home/next.ts';
-import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
+import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
+import {
+  CODE_LENGTH,
+  codeProblem,
+  formatCode,
+  normalizeCode,
+  titleProblem,
+} from '../lib/project/setup.ts';
 import { escapeHtml } from '../lib/html.ts';
 
 const params = new URLSearchParams(location.search);
-const apiBase = params.get('api') ?? '';
+// ⚠️ 주소창의 `?api=` 를 그대로 쓰면 **비밀번호와 회의 음성이 어디로
+// 가는지**를 링크 하나로 바꿀 수 있다. safeApiBase 가 진짜 도메인에서는
+// 무시하고, 로컬 화면에서 로컬 서버일 때만 통과시킨다.
+const apiBase = safeApiBase(params.get('api'), location.origin);
 
 const $ = (id: string): HTMLElement => {
   const el = document.getElementById(id);
@@ -56,7 +66,10 @@ function meetingHtml(meeting: Meeting): string {
 function projectHtml(project: Project, meetings: Meeting[]): string {
   const links =
     `<a href="/kanban.html?project=${project.project_id}">칸반</a>` +
-    `<a href="/contributions.html?project=${project.project_id}">기여도</a>`;
+    `<a href="/contributions.html?project=${project.project_id}">기여도</a>` +
+    // 회의를 여는 곳·초대 코드를 보는 곳이 여기뿐이다. 이 링크가 없으면
+    // 프로젝트를 만들어 놓고도 다음 단계로 갈 방법이 없다.
+    `<a href="/project.html?project=${project.project_id}">설정 · 회의 열기</a>`;
 
   return `
 <section class="project">
@@ -103,6 +116,76 @@ async function load(): Promise<void> {
     .map((project, index) => projectHtml(project, meetings[index] ?? []))
     .join('');
 }
+
+// ══════════════════════════════════════════════════════════════
+// 시작하는 두 가지 방법
+//
+// ⭐ 이게 없던 동안 **가입한 첫 사용자는 할 수 있는 일이 없었습니다.**
+// `POST /api/projects` 는 `member_ids: list[int]` 를 받는데 화면에서는
+// 그걸 채울 수 없었고(남의 user_id 를 모릅니다), 그래서 첫 화면은
+// "팀원이 넣어 주기를 기다리세요" 로 끝났습니다 — 그 팀원도 같은
+// 화면을 보고 있었습니다.
+// ══════════════════════════════════════════════════════════════
+
+const input = (id: string): HTMLInputElement => $(id) as HTMLInputElement;
+
+function say(text: string): void {
+  $('start-error').textContent = text;
+  $('start-error').hidden = text === '';
+}
+
+$('create').addEventListener('click', () => {
+  const raw = input('new-title').value;
+  const problem = titleProblem(raw);
+  if (problem) return say(problem);
+
+  say('');
+  void fetch(`${apiBase}/api/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ title: raw.trim() }),
+  }).then(async (response) => {
+    if (!response.ok) {
+      if (isSessionExpired(response.status)) return goToLogin();
+      const body = (await response.json().catch(() => ({}))) as { detail?: string };
+      return say(body.detail ?? `만들지 못했습니다 (HTTP ${response.status})`);
+    }
+    // 만든 직후에는 혼자다. 목록으로 돌려보내면 초대 코드를 한 번 더
+    // 찾아가야 하므로, 코드가 있는 화면으로 바로 보낸다.
+    const created = (await response.json()) as { project_id: number };
+    location.href = `/project.html?project=${created.project_id}`;
+  });
+});
+
+$('join').addEventListener('click', () => {
+  const raw = input('code').value;
+  const problem = codeProblem(raw);
+  if (problem) return say(problem);
+
+  say('');
+  void fetch(`${apiBase}/api/projects/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ invite_code: normalizeCode(raw) }),
+  }).then(async (response) => {
+    if (!response.ok) {
+      if (isSessionExpired(response.status)) return goToLogin();
+      const body = (await response.json().catch(() => ({}))) as { detail?: string };
+      return say(body.detail ?? `참가하지 못했습니다 (HTTP ${response.status})`);
+    }
+    // 이미 구성원이어도 성공이다 — 그때는 그냥 그 프로젝트로 간다.
+    const joined = (await response.json()) as { project_id: number };
+    location.href = `/project.html?project=${joined.project_id}`;
+  });
+});
+
+// 화면이 하이픈을 보여주므로 사람은 하이픈을 친다. 치는 대로 끊어 준다.
+input('code').addEventListener('blur', () => {
+  const clean = normalizeCode(input('code').value);
+  if (clean.length === CODE_LENGTH) input('code').value = formatCode(clean);
+});
 
 $('logout').addEventListener('click', () => {
   void fetch(`${apiBase}/api/auth/logout`, {

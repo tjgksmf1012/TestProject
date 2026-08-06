@@ -34,9 +34,17 @@ describe('navLinks', () => {
     deepStrictEqual(screens.sort(), ['home', 'lobby', 'review']);
   });
 
-  it('프로젝트를 알면 칸반·기여도로 갈 수 있다', () => {
+  it('프로젝트를 알면 칸반·기여도·설정으로 갈 수 있다', () => {
     const screens = navLinks({ current: 'home', projectId: 3 }).map((l) => l.screen);
-    deepStrictEqual(screens.sort(), ['contributions', 'kanban']);
+    deepStrictEqual(screens.sort(), ['contributions', 'kanban', 'project']);
+  });
+
+  it('⭐ 설정 화면으로 가는 링크가 있다 — 회의를 여는 곳이 거기뿐이다', () => {
+    // 이 링크가 없으면 프로젝트를 만들어 놓고도 회의를 열 방법이 없다.
+    const link = navLinks({ current: 'kanban', projectId: 3 }).find(
+      (l) => l.screen === 'project',
+    );
+    strictEqual(link?.href, '/project.html?project=3');
   });
 
   it('⭐ id 가 없으면 링크를 만들지 않는다', () => {

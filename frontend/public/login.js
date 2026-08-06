@@ -32,6 +32,27 @@ function safeRedirect(next2, fallback = "/home.html") {
   if (next2.startsWith("/\\")) return fallback;
   return next2;
 }
+var LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+function safeApiBase(raw, pageOrigin) {
+  if (!raw) return "";
+  if (raw.startsWith("/")) {
+    if (raw.startsWith("//") || raw.startsWith("/\\")) return "";
+    return raw.replace(/\/+$/, "");
+  }
+  let target;
+  let page;
+  try {
+    target = new URL(raw);
+    page = new URL(pageOrigin);
+  } catch {
+    return "";
+  }
+  if (target.origin === page.origin) return target.origin + target.pathname.replace(/\/+$/, "");
+  if (!LOCAL_HOSTS.has(page.hostname)) return "";
+  if (!LOCAL_HOSTS.has(target.hostname)) return "";
+  if (target.protocol !== "http:" && target.protocol !== "https:") return "";
+  return target.origin + target.pathname.replace(/\/+$/, "");
+}
 function describeAuthFailure(status, detail) {
   if (status === 401) return detail || "이메일 또는 비밀번호가 올바르지 않습니다";
   if (status === 409) return detail || "이미 가입된 이메일입니다";
@@ -54,7 +75,7 @@ function escapeHtml(text) {
 
 // src/demo/login.ts
 var params = new URLSearchParams(location.search);
-var apiBase = params.get("api") ?? "";
+var apiBase = safeApiBase(params.get("api"), location.origin);
 var next = safeRedirect(params.get("next"));
 var $ = (id) => {
   const el = document.getElementById(id);

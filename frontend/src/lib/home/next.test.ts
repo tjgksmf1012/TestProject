@@ -159,6 +159,14 @@ describe('emptyProjectsMessage', () => {
     strictEqual(text.includes('없습니다'), true);
     strictEqual(text.includes('만들'), true);
   });
+
+  it('⭐ 남을 기다리라고 하지 않는다 — 그 남도 같은 화면을 보고 있다', () => {
+    // 예전 문구는 "팀원 중 한 명이 만들고 당신을 넣어야 합니다" 였다.
+    // 모두가 서로를 기다리다 아무도 시작하지 못한다.
+    const text = emptyProjectsMessage();
+    strictEqual(/기다|팀원 중 한 명/.test(text), false);
+    strictEqual(text.includes('초대 코드'), true);
+  });
 });
 
 // ══════════════════════════════════════════════════════════════

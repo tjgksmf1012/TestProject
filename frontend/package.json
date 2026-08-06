@@ -8,7 +8,7 @@
     "test": "node --test 'src/lib/**/*.test.ts'",
     "test:watch": "node --test --watch 'src/lib/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
-    "build:demo": "esbuild src/demo/main.ts src/demo/review.ts src/demo/lobby.ts src/demo/login.ts src/demo/contributions.ts src/demo/kanban.ts src/demo/home.ts --bundle --format=esm --target=es2022 --charset=utf8 --outdir=public",
+    "build:demo": "esbuild src/demo/main.ts src/demo/review.ts src/demo/lobby.ts src/demo/login.ts src/demo/contributions.ts src/demo/kanban.ts src/demo/home.ts src/demo/project.ts --bundle --format=esm --target=es2022 --charset=utf8 --outdir=public",
     "check": "npm run typecheck && npm test",
     "serve": "python3 -m http.server 3000 --directory public"
   },

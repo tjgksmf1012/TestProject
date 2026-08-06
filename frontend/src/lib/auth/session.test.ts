@@ -3,9 +3,11 @@ import { describe, it } from 'node:test';
 
 import {
   MIN_PASSWORD_LENGTH,
+  apiBaseFromLocation,
   describeAuthFailure,
   isSessionExpired,
   loginUrlFor,
+  safeApiBase,
   safeRedirect,
   validateLogin,
   validateSignup,
@@ -135,5 +137,78 @@ describe('isSessionExpired', () => {
     strictEqual(isSessionExpired(403), false);
     strictEqual(isSessionExpired(404), false);
     strictEqual(isSessionExpired(200), false);
+  });
+});
+
+describe('safeApiBase', () => {
+  const REAL = 'https://teamflow.example';
+  const LOCAL = 'http://localhost:5173';
+
+  it('없으면 같은 오리진 — 이게 정상 경로다', () => {
+    strictEqual(safeApiBase(null, REAL), '');
+    strictEqual(safeApiBase('', REAL), '');
+  });
+
+  it('⭐ 진짜 도메인에서는 남의 주소를 절대 받지 않는다', () => {
+    // 이걸 받으면 진짜 도메인·진짜 자물쇠·진짜 로그인 화면에서
+    // 평문 비밀번호가 남의 서버로 나간다. 사람이 알아챌 단서가 없다.
+    for (const evil of [
+      'https://evil.example',
+      'http://evil.example:8000',
+      'https://evil.example/api',
+      '//evil.example',
+      '/\\evil.example',
+      'https://teamflow.example.evil.com',
+      'javascript:alert(1)',
+      'data:text/html,x',
+    ]) {
+      strictEqual(safeApiBase(evil, REAL), '', evil);
+    }
+  });
+
+  it('⭐ 로컬 화면에서 로컬 서버는 허용한다 — 개발이 그렇게 돌아간다', () => {
+    // 화면은 :5173, API 는 :8000 에 뜨는 게 보통이다.
+    strictEqual(safeApiBase('http://localhost:8000', LOCAL), 'http://localhost:8000');
+    strictEqual(safeApiBase('http://127.0.0.1:8000', LOCAL), 'http://127.0.0.1:8000');
+  });
+
+  it('⭐ 로컬 화면이어도 바깥 주소는 막는다', () => {
+    // 개발 중이라고 해서 남의 서버로 보낼 이유는 없다.
+    strictEqual(safeApiBase('https://evil.example', LOCAL), '');
+  });
+
+  it('로컬이어도 http/https 가 아니면 막는다', () => {
+    strictEqual(safeApiBase('javascript://localhost/%0aalert(1)', LOCAL), '');
+    strictEqual(safeApiBase('file://localhost/etc/passwd', LOCAL), '');
+  });
+
+  it('같은 오리진을 절대 주소로 쓴 것은 어디서든 통과', () => {
+    strictEqual(safeApiBase(REAL, REAL), REAL);
+  });
+
+  it('같은 오리진의 경로는 통과 — 프록시를 앞에 둘 수 있다', () => {
+    strictEqual(safeApiBase('/proxy', REAL), '/proxy');
+  });
+
+  it('끝의 슬래시를 걷어낸다 — 붙이면 //api 가 된다', () => {
+    strictEqual(safeApiBase('http://localhost:8000/', LOCAL), 'http://localhost:8000');
+    strictEqual(safeApiBase('/proxy/', REAL), '/proxy');
+  });
+});
+
+describe('apiBaseFromLocation', () => {
+  it('주소창에서 읽어도 같은 판단을 한다', () => {
+    strictEqual(
+      apiBaseFromLocation('?api=https://evil.example&next=/home.html', 'https://teamflow.example'),
+      '',
+    );
+    strictEqual(
+      apiBaseFromLocation('?api=http://localhost:8000', 'http://localhost:5173'),
+      'http://localhost:8000',
+    );
+  });
+
+  it('파라미터가 없으면 빈 값', () => {
+    strictEqual(apiBaseFromLocation('', 'https://teamflow.example'), '');
   });
 });

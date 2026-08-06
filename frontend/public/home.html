@@ -34,6 +34,16 @@
   .go.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
 
   .empty { font-size: .875rem; color: var(--dim); margin: .5rem 0; }
+
+  .start { border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; margin-top: 1.5rem; }
+  .start h2 { font-size: .9375rem; margin: 0 0 .75rem; }
+  .row { display: flex; gap: .5rem; margin-bottom: .25rem; }
+  .row input { flex: 1; min-width: 0; font: inherit; font-size: .9375rem; padding: .45rem .6rem; border: 1px solid var(--line); border-radius: .35rem; background: transparent; color: inherit; }
+  .row button { font: inherit; font-size: .875rem; padding: .45rem .9rem; border: 1px solid var(--line); border-radius: .35rem; background: transparent; color: inherit; cursor: pointer; white-space: nowrap; }
+  .row button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+  .hint { font-size: .75rem; color: var(--dim); margin: 0 0 1rem; }
+  .error { font-size: .8125rem; color: #b91c1c; margin: .5rem 0 0; }
+  @media (prefers-color-scheme: dark) { .error { color: #fca5a5; } }
   .note { font-size: .8125rem; color: var(--dim); margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 </style>
 </head>
@@ -45,6 +55,25 @@
   </header>
 
   <div id="projects">불러오는 중…</div>
+
+  <section class="start">
+    <h2>시작하기</h2>
+    <div class="row">
+      <input id="new-title" type="text" placeholder="새 프로젝트 이름" maxlength="200"
+             autocomplete="off" />
+      <button id="create" type="button" class="primary">만들기</button>
+    </div>
+    <p class="hint">만들면 초대 코드가 나옵니다. 그 코드를 팀원에게 알려 주세요.</p>
+
+    <div class="row">
+      <input id="code" type="text" placeholder="초대 코드 (ABCD-EFGH)" maxlength="12"
+             autocomplete="off" autocapitalize="characters" spellcheck="false" />
+      <button id="join" type="button">참가</button>
+    </div>
+    <p class="hint">팀원에게 코드를 받았다면 여기에 넣으세요.</p>
+
+    <p id="start-error" class="error" hidden></p>
+  </section>
 
   <p class="note">
     회의는 <strong>녹음 → 처리 → 사람이 검토 → 칸반</strong> 순서로 갑니다.

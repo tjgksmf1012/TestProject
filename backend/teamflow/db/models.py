@@ -125,6 +125,14 @@ class Project(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # 팀원을 넣는 방법. `member_ids` 를 요청으로 받던 동안에는 **화면에서
+    # 채울 수가 없었습니다** — 사용자는 남의 user_id 를 모릅니다.
+    # 이메일 초대를 안 쓴 이유는 `projects/invites.py` 모듈 주석에 있습니다.
+    #
+    # nullable 인 이유: 이 컬럼이 생기기 전에 만들어진 프로젝트가 있고,
+    # 그 프로젝트는 코드를 발급받기 전까지 **참가할 수 없어야** 합니다.
+    # 빈 코드를 "아무나 통과" 로 읽으면 안 됩니다.
+    invite_code: Mapped[str | None] = mapped_column(String(16), unique=True)
     github_repo: Mapped[str | None] = mapped_column(String(255))
     github_installation_id: Mapped[int | None] = mapped_column(BigInteger)
     # GitHub 연결 시각. 이 이전 기간은 백필로 채우며, 신뢰도 계산에 쓰인다.

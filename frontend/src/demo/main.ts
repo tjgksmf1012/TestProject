@@ -26,7 +26,7 @@ import {
 import { RecordingClient, type RecordingSummary } from '../lib/recording/client.ts';
 import { blockers as sessionBlockers } from '../lib/recording/session.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
-import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
+import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { renderNav } from './nav.ts';
 import type { SyncTransport } from '../lib/recording/client.ts';
@@ -63,7 +63,10 @@ class LocalUploadTransport implements UploadTransport {
 }
 
 const params = new URLSearchParams(location.search);
-const apiBase = params.get('api') ?? '';
+// ⚠️ 주소창의 `?api=` 를 그대로 쓰면 **비밀번호와 회의 음성이 어디로
+// 가는지**를 링크 하나로 바꿀 수 있다. safeApiBase 가 진짜 도메인에서는
+// 무시하고, 로컬 화면에서 로컬 서버일 때만 통과시킨다.
+const apiBase = safeApiBase(params.get('api'), location.origin);
 const meetingId = params.get('meeting');
 
 // `?track=` 은 손으로 트랙 주소를 넣는 옛 경로다. `?meeting=` 이 있으면

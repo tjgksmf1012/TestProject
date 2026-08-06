@@ -6,6 +6,7 @@ docs/03-시스템-아키텍처.md §1 — Spring Boot 없이 FastAPI 단일 백�
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -27,6 +28,7 @@ from teamflow.db.session import get_db
 from teamflow.github import webhook as gh
 from teamflow.logging_config import configure_logging
 from teamflow.meeting.approval import ApprovalRequest
+from teamflow.projects import invites
 from teamflow.services import (
     approval_service,
     auth_service,
@@ -399,15 +401,37 @@ def _enqueue_github_after_commit(session: Session, event_id: int) -> None:
 
 
 class ProjectIn(BaseModel):
+    """만드는 사람 자신 외에는 아무도 넣을 수 없습니다.
+
+    ⚠️ 예전에는 `member_ids: list[int]` 를 받아 **그대로 믿었습니다.** 그건
+    두 가지를 동시에 열어 놓은 것이었습니다.
+
+      · **남을 내 팀에 강제로 넣을 수 있었습니다.** 이 시스템에서 `Member`
+        행은 곧 권한입니다 — 모든 조회가 `_require_project_member` 를
+        지나고, 동의 분모(`consent_status.total`)와 기여도 산정 대상이
+        전부 그 표에서 나옵니다. 넣는 데 본인 동의가 필요 없다면 그
+        위에 세운 접근 통제 전체가 신청제입니다. 실제로 가입만 한
+        외부인이 남을 넣어 프로젝트를 만들고, 회의를 열고,
+        `GET /api/meetings/{id}/members` 로 **가입자 실명**을 받아 갈 수
+        있었습니다.
+      · **가입자 명단을 뽑을 수 있었습니다.** 없는 id 만 골라
+        `없는 사용자입니다: [4, 5, …]` 로 돌려줬으므로, 목록에서 빠진
+        것이 곧 "존재하는 사용자" 였습니다. 로그인 화면이 일부러 감춘
+        것을 여기서 열어 주는 셈이었습니다.
+
+    팀원은 초대 코드로 **스스로** 들어옵니다 (`projects/invites.py`).
+    """
+
     title: str = Field(min_length=1, max_length=200)
     github_repo: str | None = None
-    member_ids: list[int] = Field(min_length=1)
 
 
 class ProjectOut(BaseModel):
     project_id: int
     title: str
     member_ids: list[int]
+    #: 팀원에게 알려 줄 코드. 화면은 `ABCD-EFGH` 로 끊어 보여줍니다.
+    invite_code: str
 
 
 class ProjectSummary(BaseModel):
@@ -476,39 +500,209 @@ def list_my_projects(session: DbSession, user: CurrentUser) -> list[ProjectSumma
     ]
 
 
+def _fresh_invite_code(session: Session, attempts: int = 8) -> str:
+    """아직 안 쓰인 코드를 만든다.
+
+    유니크 제약이 최종 방어선이지만, 충돌하면 **요청 전체가 IntegrityError**
+    로 실패합니다. 30^8 에서 충돌은 사실상 안 나지만, 안 나는 것과 안 나게
+    만든 것은 다릅니다.
+    """
+    for _ in range(attempts):
+        code = invites.generate_code()
+        exists = session.scalar(
+            select(m.Project.id).where(m.Project.invite_code == code)
+        )
+        if not exists:
+            return code
+    raise HTTPException(
+        status.HTTP_503_SERVICE_UNAVAILABLE, "초대 코드를 만들지 못했습니다"
+    )
+
+
 @app.post("/api/projects", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectIn, session: DbSession, user: CurrentUser) -> ProjectOut:
-    # 만든 사람은 반드시 구성원입니다. 빠뜨리면 자기가 만든 프로젝트를
-    # 자기가 못 봅니다 — 모든 조회가 구성원 확인을 지나기 때문입니다.
-    member_ids = [user.id, *payload.member_ids]
-
-    known = set(
-        session.scalars(select(m.User.id).where(m.User.id.in_(member_ids))).all()
-    )
-    missing = set(member_ids) - known
-    if missing:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, f"없는 사용자입니다: {sorted(missing)}"
-        )
-
     project = m.Project(
         title=payload.title,
         started_at=datetime.now(UTC),
         github_repo=payload.github_repo,
+        invite_code=_fresh_invite_code(session),
     )
     session.add(project)
     session.flush()
 
-    ordered = list(dict.fromkeys(member_ids))  # 순서 유지 + 중복 제거
-    for user_id in ordered:
-        session.add(
-            m.Member(
-                project_id=project.id, user_id=user_id, role_shares={"developer": 1.0}
-            )
-        )
+    # 만든 사람만 구성원입니다. 나머지는 초대 코드로 스스로 들어옵니다.
+    #
+    # 만든 사람을 빠뜨리면 자기가 만든 프로젝트를 자기가 못 봅니다 —
+    # 모든 조회가 구성원 확인을 지나기 때문입니다.
+    session.add(
+        m.Member(project_id=project.id, user_id=user.id, role_shares={"developer": 1.0})
+    )
     session.flush()
 
-    return ProjectOut(project_id=project.id, title=project.title, member_ids=ordered)
+    return ProjectOut(
+        project_id=project.id,
+        title=project.title,
+        member_ids=[user.id],
+        invite_code=project.invite_code or "",
+    )
+
+
+class ProjectDetail(BaseModel):
+    project_id: int
+    title: str
+    github_repo: str | None
+    github_connected: bool
+    #: 화면에 보여줄 형태(`ABCD-EFGH`). 코드가 없으면 빈 문자열.
+    invite_code: str
+    member_count: int
+
+
+@app.get("/api/projects/{project_id}", response_model=ProjectDetail)
+def get_project(project_id: int, session: DbSession, user: CurrentUser) -> ProjectDetail:
+    """프로젝트 설정 화면이 읽는 것. **초대 코드는 구성원에게만.**"""
+    project = session.get(m.Project, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    count = session.scalar(
+        select(func.count()).select_from(m.Member).where(m.Member.project_id == project_id)
+    )
+    return ProjectDetail(
+        project_id=project.id,
+        title=project.title,
+        github_repo=project.github_repo,
+        # 설치 id 자체는 내보내지 않습니다 — 화면이 쓸 일이 없고,
+        # 연결 여부만 알면 됩니다.
+        github_connected=project.github_installation_id is not None,
+        invite_code=invites.format_code(project.invite_code or ""),
+        member_count=int(count or 0),
+    )
+
+
+class ProjectPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    #: `owner/repo`. 빈 문자열이면 연결을 끊습니다.
+    github_repo: str | None = Field(default=None, max_length=255)
+    github_installation_id: int | None = None
+
+
+_REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+
+@app.patch("/api/projects/{project_id}", response_model=ProjectDetail)
+def patch_project(
+    project_id: int, payload: ProjectPatch, session: DbSession, user: CurrentUser
+) -> ProjectDetail:
+    """제목과 GitHub 연결.
+
+    ⚠️ 저장소 형식을 검사합니다. 웹훅은 `repository.full_name` 으로 프로젝트를
+    찾으므로, 여기에 `https://github.com/team/repo` 같은 걸 넣으면 **웹훅이
+    영원히 이 프로젝트를 못 찾습니다** — 오류도 안 나고 기여도만 비어 있습니다.
+    """
+    project = session.get(m.Project, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    if payload.title is not None:
+        project.title = payload.title
+
+    if payload.github_repo is not None:
+        repo = payload.github_repo.strip()
+        if repo and not _REPO_PATTERN.match(repo):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "저장소는 `owner/repo` 형식이어야 합니다 (주소 전체가 아니라)",
+            )
+        taken = session.scalar(
+            select(m.Project.id).where(
+                m.Project.github_repo == repo, m.Project.id != project_id
+            )
+        )
+        if repo and taken:
+            # 웹훅은 저장소로 프로젝트를 찾습니다. 둘이 같은 저장소를 가리키면
+            # 한쪽만 이벤트를 받고 다른 쪽은 이유 없이 빕니다.
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "다른 프로젝트가 이미 이 저장소를 쓰고 있습니다"
+            )
+        project.github_repo = repo or None
+        project.github_connected_at = datetime.now(UTC) if repo else None
+
+    if payload.github_installation_id is not None:
+        project.github_installation_id = payload.github_installation_id or None
+
+    session.flush()
+    return get_project(project_id, session, user)
+
+
+class JoinIn(BaseModel):
+    #: `ABCD-EFGH` 도 `abcdefgh` 도 받습니다.
+    invite_code: str = Field(min_length=1, max_length=32)
+
+
+class JoinOut(BaseModel):
+    project_id: int
+    title: str
+    already_member: bool
+
+
+@app.post("/api/projects/join", response_model=JoinOut)
+def join_project(payload: JoinIn, session: DbSession, user: CurrentUser) -> JoinOut:
+    """초대 코드로 팀에 들어간다.
+
+    형식이 틀린 코드와 없는 코드를 **다르게** 답합니다. 사람이 고쳐야 할
+    것이 다르기 때문입니다 — 앞은 오타이고 뒤는 상대에게 다시 물어야
+    합니다. 둘 다 "코드가 없습니다" 로 답하면 사람은 상대를 의심합니다.
+    """
+    code = invites.normalize_code(payload.invite_code)
+    if not invites.looks_like_code(code):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "코드 형식이 올바르지 않습니다 — 8자이고 0·O·1·I·L 은 쓰지 않습니다",
+        )
+
+    project = session.scalars(
+        select(m.Project).where(m.Project.invite_code == code)
+    ).first()
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "그런 초대 코드가 없습니다")
+
+    existing = session.scalars(
+        select(m.Member).where(
+            m.Member.project_id == project.id, m.Member.user_id == user.id
+        )
+    ).first()
+    if existing is not None:
+        # 두 번 눌러도 오류가 아닙니다. 이미 팀원인 게 원하던 결과입니다.
+        return JoinOut(project_id=project.id, title=project.title, already_member=True)
+
+    session.add(
+        m.Member(
+            project_id=project.id, user_id=user.id, role_shares={"developer": 1.0}
+        )
+    )
+    session.flush()
+    return JoinOut(project_id=project.id, title=project.title, already_member=False)
+
+
+@app.post("/api/projects/{project_id}/invite/rotate", response_model=ProjectDetail)
+def rotate_invite_code(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> ProjectDetail:
+    """코드를 새로 만든다. 옛 코드는 그 즉시 통하지 않습니다.
+
+    코드는 카톡·메신저로 돌아다니므로 **새어 나갑니다.** 회수할 방법이
+    없으면 한 번 새면 그 프로젝트는 영영 열려 있습니다.
+    """
+    project = session.get(m.Project, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    project.invite_code = _fresh_invite_code(session)
+    session.flush()
+    return get_project(project_id, session, user)
 
 
 class MeetingIn(BaseModel):

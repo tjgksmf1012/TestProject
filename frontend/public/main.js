@@ -948,6 +948,27 @@ var RecordingClient = class {
 function loginUrlFor(pathWithQuery) {
   return `/login.html?next=${encodeURIComponent(pathWithQuery)}`;
 }
+var LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+function safeApiBase(raw, pageOrigin) {
+  if (!raw) return "";
+  if (raw.startsWith("/")) {
+    if (raw.startsWith("//") || raw.startsWith("/\\")) return "";
+    return raw.replace(/\/+$/, "");
+  }
+  let target;
+  let page;
+  try {
+    target = new URL(raw);
+    page = new URL(pageOrigin);
+  } catch {
+    return "";
+  }
+  if (target.origin === page.origin) return target.origin + target.pathname.replace(/\/+$/, "");
+  if (!LOCAL_HOSTS.has(page.hostname)) return "";
+  if (!LOCAL_HOSTS.has(target.hostname)) return "";
+  if (target.protocol !== "http:" && target.protocol !== "https:") return "";
+  return target.origin + target.pathname.replace(/\/+$/, "");
+}
 function isSessionExpired(status) {
   return status === 401;
 }
@@ -971,7 +992,8 @@ var LABEL = {
   record: "녹음",
   review: "업무 후보 검토",
   kanban: "칸반",
-  contributions: "기여도"
+  contributions: "기여도",
+  project: "설정"
 };
 function positive(value) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
@@ -1004,6 +1026,11 @@ function navLinks(context) {
       label: LABEL.contributions,
       href: `/contributions.html?project=${project}${suffix}`
     });
+    links.push({
+      screen: "project",
+      label: LABEL.project,
+      href: `/project.html?project=${project}`
+    });
   }
   return links.filter((link) => link.screen !== context.current);
 }
@@ -1013,7 +1040,7 @@ function missingLinks(context) {
     notes.push("회의를 지정하지 않아 로비·검토 화면으로 갈 수 없습니다");
   }
   if (positive(context.projectId) === null && context.current !== "home") {
-    notes.push("프로젝트를 지정하지 않아 칸반·기여도 화면으로 갈 수 없습니다");
+    notes.push("프로젝트를 지정하지 않아 칸반·기여도·설정 화면으로 갈 수 없습니다");
   }
   return notes;
 }
@@ -1058,7 +1085,7 @@ var LocalUploadTransport = class {
   }
 };
 var params = new URLSearchParams(location.search);
-var apiBase = params.get("api") ?? "";
+var apiBase = safeApiBase(params.get("api"), location.origin);
 var meetingId = params.get("meeting");
 var trackUrl = params.get("track");
 var localUpload = new LocalUploadTransport();

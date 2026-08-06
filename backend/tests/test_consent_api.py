@@ -80,11 +80,18 @@ def meeting(client: TestClient, users: list[int]) -> dict:
     # 만드는 사람도 로그인해야 한다. 프로젝트 소유자를 요청 본문으로
     # 받으면 아무나 남을 팀에 넣고 그 팀의 회의를 열 수 있다.
     login_as(client, users[0])
-    project = client.post(
-        "/api/projects", json={"title": "TeamFlow", "member_ids": users[:3]}
-    )
+    project = client.post("/api/projects", json={"title": "TeamFlow"})
     assert project.status_code == 201, project.text
     project_id = project.json()["project_id"]
+
+    # 나머지는 **스스로** 들어온다. 요청 본문으로 남을 넣을 수 있으면
+    # 아무나 남을 팀에 집어넣고 그 팀의 회의를 열 수 있다.
+    invite_code = project.json()["invite_code"]
+    for user_id in users[1:3]:
+        login_as(client, user_id)
+        joined = client.post("/api/projects/join", json={"invite_code": invite_code})
+        assert joined.status_code == 200, joined.text
+    login_as(client, users[0])
 
     created = client.post(
         f"/api/projects/{project_id}/meetings", json={"title": "1주차"}
@@ -125,13 +132,16 @@ def test_project_and_meeting_can_be_created_over_http(meeting: dict):
     assert meeting["meeting_id"] > 0
 
 
-def test_project_rejects_unknown_members(client: TestClient, users: list[int]):
+def test_project_starts_with_only_its_creator(client: TestClient, users: list[int]):
+    """⭐ 만든 직후에는 혼자다 — 그게 정상적인 시작이다.
+
+    예전에는 `member_ids` 를 요청 본문으로 받았고, 없는 id 를 넣으면
+    **어떤 id 가 존재하는지 알려 주는 답**이 돌아왔다.
+    """
     login_as(client, users[0])
-    response = client.post(
-        "/api/projects", json={"title": "X", "member_ids": [users[0], 99_999]}
-    )
-    assert response.status_code == 400
-    assert "없는 사용자" in response.json()["detail"]
+    response = client.post("/api/projects", json={"title": "X"})
+    assert response.status_code == 201, response.text
+    assert response.json()["member_ids"] == [users[0]]
 
 
 def test_only_members_can_start_a_meeting(client: TestClient, meeting: dict):

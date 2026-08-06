@@ -15,6 +15,7 @@
  *     lobby/review  meeting 이 필요하다
  *     kanban        project 가 필요하다 (meeting 은 선택 — 어느 회의에서 왔는지)
  *     contributions project 가 필요하다
+ *     project(설정) project 가 필요하다
  *     index(녹음)   meeting 이 있으면 서버 트랙, 없으면 로컬 실험
  */
 
@@ -24,7 +25,8 @@ export type ScreenId =
   | 'record'
   | 'review'
   | 'kanban'
-  | 'contributions';
+  | 'contributions'
+  | 'project';
 
 export interface NavContext {
   /** 지금 보고 있는 화면 */
@@ -46,6 +48,7 @@ const LABEL: Record<ScreenId, string> = {
   review: '업무 후보 검토',
   kanban: '칸반',
   contributions: '기여도',
+  project: '설정',
 };
 
 export function labelOf(screen: ScreenId): string {
@@ -97,6 +100,13 @@ export function navLinks(context: NavContext): NavLink[] {
       label: LABEL.contributions,
       href: `/contributions.html?project=${project}${suffix}`,
     });
+    // 회의를 여는 곳이 여기뿐입니다. 이 링크가 없으면 프로젝트를 만들어
+    // 놓고도 다음 단계로 갈 방법이 없습니다.
+    links.push({
+      screen: 'project',
+      label: LABEL.project,
+      href: `/project.html?project=${project}`,
+    });
   }
 
   return links.filter((link) => link.screen !== context.current);
@@ -115,7 +125,7 @@ export function missingLinks(context: NavContext): string[] {
     notes.push('회의를 지정하지 않아 로비·검토 화면으로 갈 수 없습니다');
   }
   if (positive(context.projectId) === null && context.current !== 'home') {
-    notes.push('프로젝트를 지정하지 않아 칸반·기여도 화면으로 갈 수 없습니다');
+    notes.push('프로젝트를 지정하지 않아 칸반·기여도·설정 화면으로 갈 수 없습니다');
   }
   return notes;
 }

@@ -560,11 +560,65 @@ def test_project_creator_is_always_a_member(client: TestClient, team: dict):
     모든 조회가 구성원 확인을 지나기 때문이다.
     """
     login_as(client, team["outsider"])
-    created = client.post(
-        "/api/projects", json={"title": "내 프로젝트", "member_ids": [team["members"][0]]}
-    )
+    created = client.post("/api/projects", json={"title": "내 프로젝트"})
     assert created.status_code == 201, created.text
-    assert team["outsider"] in created.json()["member_ids"]
+    assert created.json()["member_ids"] == [team["outsider"]]
 
     project_id = created.json()["project_id"]
     assert client.get(f"/api/projects/{project_id}/contributions").status_code == 200
+
+
+def test_nobody_can_be_put_into_a_project_by_someone_else(
+    client: TestClient, team: dict
+):
+    """⭐ 남을 내 팀에 넣을 수 없다 — `Member` 행이 곧 권한이다.
+
+    예전에는 `member_ids` 를 요청 본문으로 받아 그대로 믿었다. 그러면
+    가입만 한 사람이 남을 자기 프로젝트에 넣고, 그 프로젝트의 회의를
+    열고, `GET /api/meetings/{id}/members` 로 **그 사람의 실명**을 받아
+    갈 수 있었다. 팀원은 초대 코드로 스스로 들어와야 한다.
+    """
+    victim = team["members"][0]
+    login_as(client, team["outsider"])
+
+    created = client.post(
+        "/api/projects", json={"title": "가로채기", "member_ids": [victim]}
+    )
+    # 필드를 무시하든 거절하든 상관없다. **피해자가 안 들어가는 것**이
+    # 지켜야 할 것이다.
+    assert created.status_code in (201, 422), created.text
+    if created.status_code == 201:
+        assert victim not in created.json()["member_ids"]
+
+        # 실제로 못 보는지까지 확인한다. 응답 모양만 보면, 넣어 놓고
+        # 응답에서만 빼는 구현도 통과해 버린다.
+        project_id = created.json()["project_id"]
+        meeting = client.post(
+            f"/api/projects/{project_id}/meetings", json={"title": "x"}
+        )
+        assert meeting.status_code == 201, meeting.text
+        members = client.get(f"/api/meetings/{meeting.json()['meeting_id']}/members")
+        assert members.status_code == 200
+        assert [row["user_id"] for row in members.json()] == [team["outsider"]]
+
+
+def test_creating_a_project_does_not_reveal_who_is_signed_up(
+    client: TestClient, team: dict
+):
+    """⭐ 가입자 명단이 새지 않는다.
+
+    예전에는 없는 id 만 골라 `없는 사용자입니다: [4, 5, …]` 로 답했다.
+    **목록에서 빠진 것이 곧 "존재하는 사용자"** 였으므로, 1..N 을 넣어
+    보면 전체 가입자 id 를 얻을 수 있었다. 로그인 화면이 일부러 감춘
+    것을 여기서 열어 주는 셈이었다.
+    """
+    login_as(client, team["outsider"])
+    response = client.post(
+        "/api/projects",
+        json={"title": "탐색", "member_ids": [1, 2, 3, 4, 5, 99_999]},
+    )
+    body = response.text
+    assert "없는 사용자" not in body
+    # 존재하는 id 든 아니든, 응답이 그 둘을 구분해 주지 않아야 한다.
+    for probe in ("99999", "99_999"):
+        assert probe not in body

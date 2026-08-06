@@ -84,7 +84,7 @@ function orderProjects(projects) {
   });
 }
 function emptyProjectsMessage() {
-  return "속한 프로젝트가 없습니다. 팀원 중 한 명이 프로젝트를 만들고 당신을 넣어야 합니다 — 만든 사람은 자동으로 구성원이 됩니다.";
+  return "속한 프로젝트가 없습니다. 아래에서 새로 만들거나, 팀원에게 받은 초대 코드로 참가하세요.";
 }
 function formatMeetingTime(iso, locale = "ko-KR") {
   const at = new Date(iso);
@@ -101,8 +101,58 @@ function formatMeetingTime(iso, locale = "ko-KR") {
 function loginUrlFor(pathWithQuery) {
   return `/login.html?next=${encodeURIComponent(pathWithQuery)}`;
 }
+var LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+function safeApiBase(raw, pageOrigin) {
+  if (!raw) return "";
+  if (raw.startsWith("/")) {
+    if (raw.startsWith("//") || raw.startsWith("/\\")) return "";
+    return raw.replace(/\/+$/, "");
+  }
+  let target;
+  let page;
+  try {
+    target = new URL(raw);
+    page = new URL(pageOrigin);
+  } catch {
+    return "";
+  }
+  if (target.origin === page.origin) return target.origin + target.pathname.replace(/\/+$/, "");
+  if (!LOCAL_HOSTS.has(page.hostname)) return "";
+  if (!LOCAL_HOSTS.has(target.hostname)) return "";
+  if (target.protocol !== "http:" && target.protocol !== "https:") return "";
+  return target.origin + target.pathname.replace(/\/+$/, "");
+}
 function isSessionExpired(status) {
   return status === 401;
+}
+
+// src/lib/project/setup.ts
+var CODE_LENGTH = 8;
+var CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+function normalizeCode(raw) {
+  return raw.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+}
+function formatCode(raw) {
+  const clean = normalizeCode(raw);
+  return clean.length === CODE_LENGTH ? `${clean.slice(0, 4)}-${clean.slice(4)}` : clean;
+}
+function codeProblem(raw) {
+  const clean = normalizeCode(raw);
+  if (clean.length === 0) return "초대 코드를 입력하세요";
+  if (clean.length !== CODE_LENGTH) {
+    return `초대 코드는 ${CODE_LENGTH}자입니다 (지금 ${clean.length}자)`;
+  }
+  const bad = [...clean].filter((ch) => !CODE_ALPHABET.includes(ch));
+  if (bad.length > 0) {
+    return `코드에 쓰지 않는 글자가 있습니다: ${[...new Set(bad)].join(", ")} — 0·O·1·I·L 은 쓰지 않습니다`;
+  }
+  return null;
+}
+function titleProblem(raw) {
+  const title = raw.trim();
+  if (title.length === 0) return "프로젝트 이름을 입력하세요";
+  if (title.length > 200) return "이름이 너무 깁니다 (200자까지)";
+  return null;
 }
 
 // src/lib/html.ts
@@ -119,7 +169,7 @@ function escapeHtml(text) {
 
 // src/demo/home.ts
 var params = new URLSearchParams(location.search);
-var apiBase = params.get("api") ?? "";
+var apiBase = safeApiBase(params.get("api"), location.origin);
 var $ = (id) => {
   const el = document.getElementById(id);
   if (!el) throw new Error(`요소 없음: ${id}`);
@@ -144,7 +194,7 @@ function meetingHtml(meeting) {
 </li>`;
 }
 function projectHtml(project, meetings) {
-  const links = `<a href="/kanban.html?project=${project.project_id}">칸반</a><a href="/contributions.html?project=${project.project_id}">기여도</a>`;
+  const links = `<a href="/kanban.html?project=${project.project_id}">칸반</a><a href="/contributions.html?project=${project.project_id}">기여도</a><a href="/project.html?project=${project.project_id}">설정 · 회의 열기</a>`;
   return `
 <section class="project">
   <h2>${escapeHtml(project.title)}</h2>
@@ -177,6 +227,55 @@ async function load() {
   );
   $("projects").innerHTML = projects.map((project, index) => projectHtml(project, meetings[index] ?? [])).join("");
 }
+var input = (id) => $(id);
+function say(text) {
+  $("start-error").textContent = text;
+  $("start-error").hidden = text === "";
+}
+$("create").addEventListener("click", () => {
+  const raw = input("new-title").value;
+  const problem = titleProblem(raw);
+  if (problem) return say(problem);
+  say("");
+  void fetch(`${apiBase}/api/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ title: raw.trim() })
+  }).then(async (response) => {
+    if (!response.ok) {
+      if (isSessionExpired(response.status)) return goToLogin();
+      const body = await response.json().catch(() => ({}));
+      return say(body.detail ?? `만들지 못했습니다 (HTTP ${response.status})`);
+    }
+    const created = await response.json();
+    location.href = `/project.html?project=${created.project_id}`;
+  });
+});
+$("join").addEventListener("click", () => {
+  const raw = input("code").value;
+  const problem = codeProblem(raw);
+  if (problem) return say(problem);
+  say("");
+  void fetch(`${apiBase}/api/projects/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ invite_code: normalizeCode(raw) })
+  }).then(async (response) => {
+    if (!response.ok) {
+      if (isSessionExpired(response.status)) return goToLogin();
+      const body = await response.json().catch(() => ({}));
+      return say(body.detail ?? `참가하지 못했습니다 (HTTP ${response.status})`);
+    }
+    const joined = await response.json();
+    location.href = `/project.html?project=${joined.project_id}`;
+  });
+});
+input("code").addEventListener("blur", () => {
+  const clean = normalizeCode(input("code").value);
+  if (clean.length === CODE_LENGTH) input("code").value = formatCode(clean);
+});
 $("logout").addEventListener("click", () => {
   void fetch(`${apiBase}/api/auth/logout`, {
     method: "POST",
