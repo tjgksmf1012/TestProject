@@ -25,7 +25,7 @@ function validateSignup(name, email, password) {
   }
   return problems;
 }
-function safeRedirect(next2, fallback = "/lobby.html") {
+function safeRedirect(next2, fallback = "/home.html") {
   if (!next2) return fallback;
   if (!next2.startsWith("/")) return fallback;
   if (next2.startsWith("//")) return fallback;

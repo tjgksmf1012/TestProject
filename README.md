@@ -163,16 +163,17 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **인증·세션** (scrypt · 세션 쿠키 · 구성원 확인) | ✅ | `backend/teamflow/auth/`, `services/auth_service.py` |
 | **기여도 화면** (구간·근거·측정 불가 표시, 순위 없음) | ✅ | `frontend/src/lib/contribution/`, `public/contributions.html` |
 | **칸반 화면 + 업무 API** (회의 근거 표시) | ✅ | `frontend/src/lib/kanban/`, `public/kanban.html` |
+| **첫 화면** (내 프로젝트·회의·다음 할 일) | ✅ | `frontend/src/lib/home/`, `public/home.html` |
 | **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
 | **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ⚠️ 실측 미검증 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 821 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 828 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 330 passed, 설치 불필요
+cd frontend && npm test                          # 349 passed, 설치 불필요
 cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
 
 cp .env.example .env                             # 시크릿 채우기
@@ -189,6 +190,7 @@ docker compose --profile app --profile llm up -d  # 앱 + LLM
 ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend --reload
 ```
 
+- `http://localhost:8000/home.html` — **여기부터.** 내 프로젝트와 회의, 다음에 할 일
 - `http://localhost:8000/lobby.html?meeting=1` — **회의 로비** (동의 → 상태 → 종료)
 - `http://localhost:8000/?meeting=1` — 녹음 화면 (서버 트랙에 참가)
 - `http://localhost:8000/` — 녹음 화면 (서버 없이, 실기기 실험 5)

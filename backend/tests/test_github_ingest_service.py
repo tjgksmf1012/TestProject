@@ -16,16 +16,12 @@ diff 파일 목록과 리뷰 코멘트 수를 요구하는데 `pull_request` 웹
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.pool import StaticPool
 
-from teamflow.config import Settings, get_settings
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 from teamflow.github import mapping

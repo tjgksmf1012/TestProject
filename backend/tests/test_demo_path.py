@@ -560,3 +560,96 @@ def test_seeded_origin_reaches_back_to_an_utterance(client: TestClient, seeded: 
     for task in from_meeting:
         assert task["origin"]["meeting_id"] == seeded["meeting_id"]
         assert task["origin"]["evidence_utterance_ids"]
+
+
+# ══════════════════════════════════════════════════════════════
+# 8. 첫 화면 — 로그인하면 갈 곳이 있는가
+# ══════════════════════════════════════════════════════════════
+
+
+def test_home_page_is_served(client: TestClient):
+    for path in ("/home.html", "/home.js"):
+        assert client.get(path).status_code == 200, f"{path} 가 안 열립니다"
+
+
+def test_my_projects_are_listed(client: TestClient, seeded: dict):
+    """⭐ `POST /api/projects` 는 있었는데 목록이 없었습니다.
+
+    그래서 화면을 열려면 `?project=1&meeting=1` 을 주소에 직접 적어야 했고,
+    그 숫자를 알 방법은 `seed_demo.py` 의 출력뿐이었습니다. 만들 수는 있는데
+    다시 찾을 수 없는 상태였습니다.
+    """
+    body = client.get("/api/projects").json()
+
+    assert len(body) == 1
+    assert body[0]["project_id"] == seeded["project_id"]
+    assert {"project_id", "title", "member_count", "meeting_count", "needs_review"} <= set(
+        body[0]
+    )
+    assert body[0]["member_count"] == 3
+    assert body[0]["meeting_count"] == 1
+
+
+def test_the_project_list_is_the_permission_boundary(client: TestClient, seeded: dict):
+    """⭐ 남의 프로젝트는 목록에 아예 나오지 않는다.
+
+    목록이 권한 경계입니다 — 나온 뒤에 열려다 403 을 받는 게 아니라,
+    존재 자체가 보이지 않아야 합니다.
+    """
+    from teamflow.db import session as db_session
+
+    with db_session.session_scope() as s:
+        outsider = m.User(name="외부인", email="outsider-home@example.com")
+        s.add(outsider)
+        s.flush()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    assert client.get("/api/projects").json() == []
+
+
+def test_meetings_are_listed_newest_first(client: TestClient, seeded: dict):
+    """오래된 것부터 두면 회의가 쌓일수록 지금 볼 것이 아래로 밀립니다."""
+    body = client.get(f"/api/projects/{seeded['project_id']}/meetings").json()
+
+    assert body
+    for row in body:
+        assert {"meeting_id", "title", "status", "started_at", "pending_candidates"} <= set(
+            row
+        )
+    times = [row["started_at"] for row in body]
+    assert times == sorted(times, reverse=True)
+
+
+def test_pending_candidate_count_is_what_the_home_screen_reads(
+    client: TestClient, seeded: dict
+):
+    """⭐ 0 이면 승인 화면으로 보내지 않는다 (`next.ts` 의 판단).
+
+    보내면 빈 목록이 뜨고 사용자는 화면이 고장 났다고 생각합니다.
+    """
+    body = client.get(f"/api/projects/{seeded['project_id']}/meetings").json()
+    meeting = next(r for r in body if r["meeting_id"] == seeded["meeting_id"])
+
+    assert meeting["status"] == "needs_review"
+    assert meeting["pending_candidates"] == seeded["candidates"]
+
+
+def test_outsider_cannot_list_meetings(client: TestClient, seeded: dict):
+    from teamflow.db import session as db_session
+
+    with db_session.session_scope() as s:
+        outsider = m.User(name="외부인2", email="outsider2-home@example.com")
+        s.add(outsider)
+        s.flush()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    assert (
+        client.get(f"/api/projects/{seeded['project_id']}/meetings").status_code == 403
+    )
+
+
+def test_anonymous_sees_no_projects(client: TestClient, seeded: dict):
+    client.cookies.clear()
+    assert client.get("/api/projects").status_code == 401

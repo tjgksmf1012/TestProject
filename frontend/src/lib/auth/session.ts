@@ -79,7 +79,7 @@ export function validateSignup(
  * `//` 는 아닌 것" 이다. `//evil.example` 은 프로토콜 상대 URL 이라
  * 브라우저가 외부 주소로 읽는다.
  */
-export function safeRedirect(next: string | null, fallback = '/lobby.html'): string {
+export function safeRedirect(next: string | null, fallback = '/home.html'): string {
   if (!next) return fallback;
   if (!next.startsWith('/')) return fallback;
   if (next.startsWith('//')) return fallback;

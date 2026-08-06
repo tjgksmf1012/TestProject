@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>TeamFlow</title>
+<style>
+  :root { color-scheme: light dark; --line: #d8dbe0; --dim: #6b7280; --accent: #2563eb; --todo: #b45309; }
+  @media (prefers-color-scheme: dark) { :root { --line: #3a3f47; --dim: #9aa2ad; --accent: #60a5fa; --todo: #fbbf24; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 1rem; font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; max-width: 40rem; margin-inline: auto; }
+  header { display: flex; align-items: baseline; gap: .75rem; margin-bottom: 1.5rem; }
+  h1 { font-size: 1.25rem; margin: 0; flex: 1; }
+  #who { font-size: .875rem; color: var(--dim); }
+  #logout { font: inherit; font-size: .8125rem; padding: .25rem .6rem; border: 1px solid var(--line); border-radius: .35rem; background: transparent; color: inherit; cursor: pointer; }
+
+  .project { border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; margin-bottom: 1rem; }
+  .project h2 { font-size: 1.0625rem; margin: 0 0 .125rem; }
+  .project .sub { font-size: .8125rem; color: var(--dim); margin: 0 0 .625rem; }
+  .links { display: flex; gap: .5rem; margin-bottom: .75rem; }
+  .links a { font-size: .8125rem; padding: .25rem .6rem; border: 1px solid var(--line); border-radius: .35rem; text-decoration: none; color: inherit; }
+
+  ul { list-style: none; padding: 0; margin: 0; }
+  .meeting { border-top: 1px solid var(--line); padding: .75rem 0; }
+  .meeting:first-child { border-top: 0; }
+  .meeting .head { display: flex; align-items: baseline; gap: .5rem; }
+  .meeting .name { font-weight: 600; font-size: .9375rem; flex: 1; }
+  .meeting .when { font-size: .75rem; color: var(--dim); white-space: nowrap; }
+  .meeting .status { font-size: .8125rem; color: var(--dim); margin: .125rem 0 .5rem; }
+  /* 지금 사람이 해야 할 일이 있는 회의만 눈에 띄게 한다. */
+  .meeting.todo .status { color: var(--todo); }
+
+  .go { display: inline-block; font-size: .8125rem; padding: .35rem .75rem; border: 1px solid var(--line); border-radius: .35rem; text-decoration: none; color: inherit; }
+  .go.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+
+  .empty { font-size: .875rem; color: var(--dim); margin: .5rem 0; }
+  .note { font-size: .8125rem; color: var(--dim); margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+  <header>
+    <h1>TeamFlow</h1>
+    <span id="who"></span>
+    <button id="logout" type="button">로그아웃</button>
+  </header>
+
+  <div id="projects">불러오는 중…</div>
+
+  <p class="note">
+    회의는 <strong>녹음 → 처리 → 사람이 검토 → 칸반</strong> 순서로 갑니다.
+    각 회의 아래 문구가 지금 어느 단계인지와 다음에 할 일을 말합니다.
+    처리 중인 회의에는 버튼이 없습니다 — 눌러도 아직 아무것도 없습니다.
+  </p>
+
+  <script type="module" src="/home.js"></script>
+</body>
+</html>

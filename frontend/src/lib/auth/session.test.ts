@@ -62,8 +62,8 @@ describe('safeRedirect', () => {
   });
 
   it('없으면 기본 화면으로', () => {
-    strictEqual(safeRedirect(null), '/lobby.html');
-    strictEqual(safeRedirect(''), '/lobby.html');
+    strictEqual(safeRedirect(null), '/home.html');
+    strictEqual(safeRedirect(''), '/home.html');
   });
 
   it('⭐ 외부 주소는 거부한다 — 열린 리다이렉트는 피싱이 된다', () => {
@@ -77,7 +77,7 @@ describe('safeRedirect', () => {
       'javascript:alert(1)',
       'evil.example',
     ]) {
-      strictEqual(safeRedirect(evil), '/lobby.html', evil);
+      strictEqual(safeRedirect(evil), '/home.html', evil);
     }
   });
 

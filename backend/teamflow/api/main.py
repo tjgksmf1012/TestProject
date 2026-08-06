@@ -16,7 +16,7 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import event, select
+from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
 from teamflow.audio.chunk_store import ChunkStore
@@ -408,6 +408,72 @@ class ProjectOut(BaseModel):
     project_id: int
     title: str
     member_ids: list[int]
+
+
+class ProjectSummary(BaseModel):
+    project_id: int
+    title: str
+    member_count: int
+    meeting_count: int
+    #: 아직 사람이 검토하지 않은 회의 수. 0 이 아니면 할 일이 있다.
+    needs_review: int
+
+
+@app.get("/api/projects", response_model=list[ProjectSummary])
+def list_my_projects(session: DbSession, user: CurrentUser) -> list[ProjectSummary]:
+    """내가 속한 프로젝트.
+
+    ⭐ **이게 없어서 로그인해도 갈 곳이 없었습니다.**
+
+    `POST /api/projects` 는 있었는데 목록이 없었습니다. 그래서 화면을 열려면
+    `?project=1&meeting=1` 을 주소에 직접 적어야 했고, 그 숫자를 알 방법은
+    `seed_demo.py` 의 출력뿐이었습니다. 만들 수는 있는데 다시 찾을 수 없는
+    상태였습니다 — 이 저장소에서 반복된 "만들어 놓고 잇지 않은" 것의
+    화면 쪽 형태입니다.
+
+    남의 프로젝트는 나오지 않습니다. 목록 자체가 권한 경계입니다.
+    """
+    project_ids = list(
+        session.scalars(select(m.Member.project_id).where(m.Member.user_id == user.id)).all()
+    )
+    if not project_ids:
+        return []
+
+    projects = session.scalars(
+        select(m.Project).where(m.Project.id.in_(project_ids)).order_by(m.Project.id)
+    ).all()
+
+    # 한 번에 세어 둡니다. 프로젝트마다 쿼리를 돌면 N+1 입니다.
+    member_counts = dict(
+        session.execute(
+            select(m.Member.project_id, func.count())
+            .where(m.Member.project_id.in_(project_ids))
+            .group_by(m.Member.project_id)
+        ).all()
+    )
+    meeting_rows = session.execute(
+        select(m.Meeting.project_id, m.Meeting.status).where(
+            m.Meeting.project_id.in_(project_ids)
+        )
+    ).all()
+
+    totals: dict[int, int] = {}
+    reviews: dict[int, int] = {}
+    for project_id, meeting_status in meeting_rows:
+        totals[project_id] = totals.get(project_id, 0) + 1
+        if meeting_status == "needs_review":
+            reviews[project_id] = reviews.get(project_id, 0) + 1
+
+    return [
+        ProjectSummary(
+            project_id=project.id,
+            title=project.title,
+            member_count=member_counts.get(project.id, 0),
+            meeting_count=totals.get(project.id, 0),
+            needs_review=reviews.get(project.id, 0),
+        )
+        for project in projects
+    ]
 
 
 @app.post("/api/projects", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
@@ -881,6 +947,58 @@ def list_tracks(
         },
         "tracks": recording_service.track_health(session, meeting_id),
     }
+
+
+class MeetingSummary(BaseModel):
+    meeting_id: int
+    title: str | None
+    status: str
+    started_at: datetime
+    #: 이 회의에서 사람이 아직 결정하지 않은 업무 후보 수
+    pending_candidates: int
+
+
+@app.get("/api/projects/{project_id}/meetings", response_model=list[MeetingSummary])
+def list_project_meetings(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> list[MeetingSummary]:
+    """이 프로젝트의 회의. **최근 것부터.**
+
+    오래된 것부터 두면 회의가 쌓일수록 지금 볼 것이 아래로 밀립니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    meetings = session.scalars(
+        select(m.Meeting)
+        .where(m.Meeting.project_id == project_id)
+        .order_by(m.Meeting.started_at.desc(), m.Meeting.id.desc())
+    ).all()
+    if not meetings:
+        return []
+
+    pending = dict(
+        session.execute(
+            select(m.MeetingTaskCandidate.meeting_id, func.count())
+            .where(
+                m.MeetingTaskCandidate.meeting_id.in_([x.id for x in meetings]),
+                m.MeetingTaskCandidate.review_status == "pending",
+            )
+            .group_by(m.MeetingTaskCandidate.meeting_id)
+        ).all()
+    )
+
+    return [
+        MeetingSummary(
+            meeting_id=meeting.id,
+            title=meeting.title,
+            status=meeting.status,
+            started_at=meeting.started_at,
+            pending_candidates=pending.get(meeting.id, 0),
+        )
+        for meeting in meetings
+    ]
 
 
 class MeetingDetail(BaseModel):
