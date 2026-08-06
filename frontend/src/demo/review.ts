@@ -26,6 +26,7 @@ import {
   type Draft,
   type ReviewContext,
 } from '../lib/review/candidates.ts';
+import { attr, escapeHtml } from '../lib/html.ts';
 
 interface Member {
   user_id: number;
@@ -55,12 +56,6 @@ const $ = (id: string): HTMLElement => {
   if (!el) throw new Error(`요소 없음: ${id}`);
   return el;
 };
-
-function escapeHtml(text: string): string {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
 
 /** 명단에 없는 user_id 도 사람이 볼 수 있게 이름을 만든다. */
 function memberName(userId: number): string {
@@ -140,7 +135,7 @@ function cardHtml(candidate: Candidate): string {
   return `
 <article class="card" data-id="${candidate.id}" data-decision="${draft.decision}">
   <header>
-    <input class="title" type="text" value="${escapeHtml(effectiveTitle(candidate, draft))}"
+    <input class="title" type="text" value=${attr(effectiveTitle(candidate, draft))}
            ${decided ? 'disabled' : ''} />
     <span class="conf ${low ? 'low' : ''}">확신도 ${(candidate.confidence * 100).toFixed(0)}%</span>
   </header>
@@ -178,7 +173,7 @@ function cardHtml(candidate: Candidate): string {
            <button class="clear">보류</button>
          </div>
          <input class="note" type="text" placeholder="메모 (선택) — 왜 이렇게 결정했는지"
-                value="${escapeHtml(draft.note ?? '')}" />`
+                value=${attr(draft.note ?? '')} />`
   }
 </article>`;
 }

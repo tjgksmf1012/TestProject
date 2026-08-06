@@ -24,7 +24,9 @@ import {
   keepScreenAwake,
 } from '../lib/recording/browser-adapter.ts';
 import { RecordingClient, type RecordingSummary } from '../lib/recording/client.ts';
+import { blockers as sessionBlockers } from '../lib/recording/session.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
+import { escapeHtml } from '../lib/html.ts';
 import type { SyncTransport } from '../lib/recording/client.ts';
 import type { PendingChunk, UploadTransport } from '../lib/recording/upload-queue.ts';
 
@@ -90,7 +92,7 @@ function render(): void {
     ? '서버로 전송'
     : `${(localUpload.totalBytes / 1024).toFixed(0)} KB (로컬)`;
 
-  const blockers = blockerList(state);
+  const blockers = sessionBlockers(state);
   $('blockers').innerHTML = blockers.length
     ? blockers.map((b) => `<li>${escapeHtml(b)}</li>`).join('')
     : '<li class="ok">준비됐습니다</li>';
@@ -116,22 +118,6 @@ const PHASE_LABEL: Record<string, string> = {
   failed: '오류',
 };
 
-/** `session.blockers` 를 그대로 쓰되 여기서는 표시만 한다. */
-function blockerList(state: typeof client.state): string[] {
-  const out: string[] = [];
-  if (!state.secureContext) out.push('HTTPS 연결이 필요합니다 (Cloudflare Tunnel 사용)');
-  if (state.permission !== 'granted') out.push('마이크 권한이 필요합니다');
-  if (state.consent !== 'all_confirmed') out.push('녹음 동의가 필요합니다');
-  if (state.clock === 'unsynced') out.push('시각 동기화가 필요합니다');
-  if (state.clock === 'poor') out.push('시각 오차가 큽니다 (네트워크 확인)');
-  return out;
-}
-
-function escapeHtml(text: string): string {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
 
 // ── 동작 ────────────────────────────────────────────────────
 
