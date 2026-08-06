@@ -156,7 +156,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 614 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 630 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
@@ -169,6 +169,28 @@ DATABASE_URL=... .venv/bin/alembic upgrade head   # 스키마 생성
 
 docker compose --profile app --profile llm up -d  # 앱 + LLM
 ```
+
+### 지금 바로 열어보기 (GPU 없이)
+
+```bash
+.venv/bin/python scripts/seed_demo.py            # 시연용 회의 하나 만들기
+ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend --reload
+```
+
+- `http://localhost:8000/` — 녹음 화면 (실기기 실험 5)
+- `http://localhost:8000/review.html?meeting=1&reviewer=1` — 업무 후보 승인 화면
+
+**화면과 API 가 같은 오리진에서 나옵니다.** FastAPI 가 `frontend/public` 을
+`/` 에 마운트하므로 터널 하나로 끝나고 CORS 설정이 필요 없습니다 — 폰에서
+`getUserMedia()` 를 열려면 페이지와 API 를 둘 다 HTTPS 로 잡아야 하는데,
+화면을 별도 서버에 두면 터널이 둘 필요합니다.
+
+승인 화면의 후보 3건은 성격이 일부러 다릅니다 — 바로 승인 가능한 것,
+담당자가 안 풀린 것, 확신도 0.34 짜리. **이 화면의 값어치는 "전부 승인"이
+아니라 사람이 고쳐야 할 것을 골라내는 데** 있습니다.
+
+> ⚠️ `ASR_BACKEND=fake` 는 오디오를 읽지 않고 대본을 돌려줍니다. 시연·개발
+> 전용이며 `/health` 에 그대로 노출되므로 켜져 있으면 바로 보입니다.
 
 > ⚠️ `--profile llm` 을 빼면 회의 처리가 **분석 단계에서 전부 실패합니다.**
 > ASR 까지는 돌고 요약·업무추출에서 연결 거부가 납니다.

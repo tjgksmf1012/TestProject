@@ -5,11 +5,14 @@ docs/03-시스템-아키텍처.md §1 — Spring Boot 없이 FastAPI 단일 백�
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import event, select
 from sqlalchemy.orm import Session
@@ -22,6 +25,8 @@ from teamflow.github import webhook as gh
 from teamflow.meeting.approval import ApprovalRequest
 from teamflow.services import approval_service, recording_service
 from teamflow.tasks import dispatch
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="TeamFlow AI",
@@ -714,3 +719,36 @@ def contributions(project_id: int, session: DbSession, settings: AppSettings) ->
         ],
         skipped_categories=[c.value for c in result.skipped_categories],
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 정적 파일 — **반드시 맨 마지막이다**
+# ══════════════════════════════════════════════════════════════
+#
+# `/` 마운트는 앞의 모든 경로를 삼키므로 API 라우트를 전부 정의한 뒤에 온다.
+# 위에 새 엔드포인트를 추가하되 이 아래에는 넣지 말 것.
+#
+# 왜 필요한가 — `getUserMedia()` 는 보안 컨텍스트에서만 동작한다. 폰이
+# 페이지와 API 를 **둘 다** HTTPS 로 잡아야 하는데, 화면을 별도 서버
+# (`python3 -m http.server:3000`)에 두면 터널이 둘이 되고 CORS 설정이
+# 필요하다. 한 오리진으로 합치면 터널 하나, CORS 0줄로 끝난다.
+#
+# 그래서 CORSMiddleware 를 넣지 않는다. 넣어야 한다면 그건 배치가
+# 잘못됐다는 신호다.
+
+
+def _mount_frontend(application: FastAPI) -> Path | None:
+    """`frontend/public` 이 있으면 `/` 에 붙인다.
+
+    없어도 API 는 정상 동작한다 — 백엔드만 띄우는 배포와 테스트가 있다.
+    """
+    candidate = Path(__file__).resolve().parents[3] / "frontend" / "public"
+    if not candidate.is_dir():
+        logger.info("정적 파일 디렉터리가 없어 마운트하지 않습니다: %s", candidate)
+        return None
+
+    application.mount("/", StaticFiles(directory=candidate, html=True), name="web")
+    return candidate
+
+
+FRONTEND_DIR = _mount_frontend(app)
