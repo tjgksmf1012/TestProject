@@ -240,11 +240,44 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
             meeting.status = "failed"
             return {"meeting_id": meeting_id, "status": "failed", "error": payload.get("error")}
 
-        # 재처리 시 이전 결과를 지운다. 안 그러면 발화가 두 배가 된다.
-        for row in session.scalars(
-            select(m.Utterance).where(m.Utterance.meeting_id == meeting_id)
-        ).all():
-            session.delete(row)
+        # ── 재처리 정리 ────────────────────────────────────────
+        #
+        # 예전에는 발화만 지웠다. 그러면 후보와 결정이 **중복 생성**되고,
+        # 더 나쁘게는 1회차 후보의 근거 발화 ID 가 삭제된 행을 가리킨다.
+        # SQLite 는 rowid 를 재사용해 우연히 맞지만 PostgreSQL 시퀀스는
+        # 재사용하지 않으므로 근거가 통째로 고아가 된다 — "근거를 클릭하면
+        # 원문으로" 가 끊기고, 근거 없는 후보를 막는 방어가 무력해진다.
+        #
+        # 재실행 경로는 실재한다: task_acks_late=True + reject_on_worker_lost
+        # 이라 워커가 죽으면 같은 회의가 다시 돈다.
+        reviewed = session.scalars(
+            select(m.MeetingTaskCandidate).where(
+                m.MeetingTaskCandidate.meeting_id == meeting_id,
+                m.MeetingTaskCandidate.review_status != "pending",
+            )
+        ).all()
+        if reviewed:
+            # ⚠️ 사람이 이미 판단한 회의는 다시 쓰지 않는다.
+            #
+            # 발화를 지우고 새로 만들면 승인된 후보(이미 칸반의 업무가 된 것)의
+            # 근거가 끊어진다. 그건 데이터 정정이 아니라 **분쟁 근거의 훼손**이다.
+            # 다시 처리해야 한다면 사람이 먼저 승인을 되돌려야 한다.
+            logger.warning(
+                "meeting=%s 는 이미 검토된 후보가 %d건 있어 재처리를 건너뜁니다",
+                meeting_id,
+                len(reviewed),
+            )
+            return {
+                "meeting_id": meeting_id,
+                "status": "already_reviewed",
+                "reviewed": len(reviewed),
+            }
+
+        for model in (m.Utterance, m.MeetingTaskCandidate, m.Decision):
+            for row in session.scalars(
+                select(model).where(model.meeting_id == meeting_id)
+            ).all():
+                session.delete(row)
         session.flush()
 
         utterance_ids: list[int] = []

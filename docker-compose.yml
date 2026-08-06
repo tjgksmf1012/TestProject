@@ -71,7 +71,17 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.api
-    command: celery -A teamflow.tasks worker -Q cpu --concurrency=4 -l info
+    # ⚠️ -Q cpu 만 두면 회의가 'queued' 에서 영원히 멈춘다.
+    #
+    # process_meeting_task 는 gpu 큐로 라우팅되는데(tasks/__init__.py), gpu 큐
+    # 소비자는 worker-gpu 뿐이고 그건 `gpu` 프로필이다. 즉 문서가 안내하는
+    # `--profile app --profile llm` 만으로는 **아무도 gpu 큐를 읽지 않는다.**
+    # 오류도 로그도 없이 그냥 안 돈다.
+    #
+    # 그래서 이 워커가 gpu 큐도 본다. worker-gpu 를 같이 띄우면 둘 다
+    # 소비자가 되지만, GPU 배타 락(jobs/gpu_lock.py)이 동시 실행을 막는다.
+    # GPU 가 없는 개발 환경에서도 전 구간이 도는 게 더 큰 이득이다.
+    command: celery -A teamflow.tasks worker -Q cpu,gpu --concurrency=2 -l info
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-teamflow}:${POSTGRES_PASSWORD:-teamflow}@postgres:5432/${POSTGRES_DB:-teamflow}

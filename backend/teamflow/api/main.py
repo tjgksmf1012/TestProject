@@ -11,7 +11,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from teamflow.audio.chunk_store import ChunkStore
@@ -141,6 +141,34 @@ class TrackJoin(BaseModel):
     started_at: datetime
     device_label: str | None = Field(default=None, max_length=100)
     sample_rate: int | None = Field(default=None, gt=0)
+
+
+def _enqueue_after_commit(session: Session, meeting_id: int) -> None:
+    """커밋이 끝난 **뒤에** 큐에 넣는다.
+
+    ⚠️ 순서가 뒤집히면 마지막에 녹음을 끝낸 사람의 트랙이 조용히 사라진다.
+
+    커밋은 이 함수가 아니라 FastAPI 의존성 teardown 에서 일어난다
+    (`db/session.py` 의 `session_scope` 가 yield 뒤에 commit 한다).
+    그래서 엔드포인트 본문에서 바로 큐에 넣으면 **항상 커밋보다 먼저**다.
+
+    워커가 그 사이에 도착하면 방금 `/complete` 를 호출해 큐잉을 촉발한 바로
+    그 트랙이 아직 `ended_at IS NULL` 로 보인다. 그러면
+    `pipeline/runtime.py` 의 `ChunkAudioLoader.load` 가
+
+        tracks = [t for t in tracks if t.ended_at is not None]
+
+    에서 그 트랙을 **예외도 경고도 없이** 버린다. 회의는 N-1 트랙으로 멀쩡히
+    처리되고, 빠진 사람은 발화 0건 — 즉 "말을 안 한 사람" 이 된다.
+    이 프로젝트가 막으려는 결과 그 자체다 (docs/05 §4.1.1).
+
+    `after_commit` 은 커밋이 성공한 뒤에만 불린다. 롤백되면 큐에 들어가지
+    않는다 — 그것도 맞는 동작이다. 없던 일이 처리될 이유가 없다.
+    """
+
+    @event.listens_for(session, "after_commit", once=True)
+    def _fire(_session: Session) -> None:  # pragma: no cover - 커밋 시점에 실행된다
+        dispatch.enqueue_meeting_processing(meeting_id)
 
 
 class TrackOut(BaseModel):
@@ -335,7 +363,7 @@ def complete_track(
     # 이 연결이 없으면 녹음은 저장만 되고 아무 일도 일어나지 않는다.
     finalize = recording_service.try_finalize_meeting(session, meeting_id)
     if finalize.should_enqueue:
-        dispatch.enqueue_meeting_processing(meeting_id)
+        _enqueue_after_commit(session, meeting_id)
 
     usable = track.status == "completed"
     coverage = float(track.coverage or 0.0)
@@ -381,7 +409,7 @@ def finish_meeting(
     # force=True — 참가하지 않은 사람을 더 기다리지 않는다. 그게 이 엔드포인트의 존재 이유다.
     finalize = recording_service.try_finalize_meeting(session, meeting_id, force=True)
     if finalize.should_enqueue:
-        dispatch.enqueue_meeting_processing(meeting_id)
+        _enqueue_after_commit(session, meeting_id)
 
     return FinishMeetingOut(
         meeting_queued=finalize.should_enqueue,

@@ -156,11 +156,11 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 592 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 607 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 198 passed, 설치 불필요
+cd frontend && npm test                          # 210 passed, 설치 불필요
 cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
 
 cp .env.example .env                             # 시크릿 채우기
@@ -174,6 +174,10 @@ docker compose --profile app --profile llm up -d  # 앱 + LLM
 > ASR 까지는 돌고 요약·업무추출에서 연결 거부가 납니다.
 > `app` 프로필에는 `beat` 도 들어 있습니다 — 이게 없으면 보존기간이 지난
 > 원본 오디오가 **영영 삭제되지 않습니다** (법적 요구사항, docs/07 P5).
+>
+> GPU 가 있으면 `--profile gpu` 를 더합니다. 없어도 `app` 의 워커가 `gpu`
+> 큐까지 읽으므로 전 구간이 돕니다 — 다만 ASR·화자분리는 CPU 로 돌아
+> 느립니다.
 
 **핵심 흐름이 전 구간 테스트로 검증됩니다.** `test_end_to_end.py` 는 **폰이 HTTP로 올린
 청크가 칸반 업무가 될 때까지**를 한 번에 돌립니다 — 가짜로 바꾸는 건 이 환경에 없는 셋

@@ -187,6 +187,40 @@ def test_beat_schedule_survives_a_restart():
     assert "volumes:" in body
 
 
+def test_every_routed_queue_has_a_consumer_in_the_app_profile():
+    """⭐ 라우팅한 큐를 아무도 안 읽으면 회의가 'queued' 에서 영원히 멈춘다.
+
+    `process_meeting_task` 는 gpu 큐로 간다. 그런데 gpu 큐 소비자가
+    `gpu` 프로필에만 있으면, 문서가 안내하는 `--profile app --profile llm`
+    으로 띄운 사람은 **아무 오류도 로그도 없이** 회의가 안 도는 걸 본다.
+
+    GPU 가 없는 개발 환경이 기본 경로이므로, `app` 프로필만으로 전 구간이
+    돌아야 한다.
+    """
+    import re
+
+    routed = set(
+        re.findall(
+            r'"queue":\s*"(\w+)"',
+            (REPO_ROOT / "backend" / "teamflow" / "tasks" / "__init__.py").read_text("utf-8"),
+        )
+    )
+    assert routed, "task_routes 를 못 찾았습니다 — 패턴이 바뀌었나요?"
+
+    consumed: set[str] = set()
+    for _name, body in _compose_services().items():
+        if '"app"' not in body and "'app'" not in body:
+            continue
+        for match in re.finditer(r"-Q\s+(\S+)", body):
+            consumed.update(match.group(1).split(","))
+
+    missing = routed - consumed
+    assert not missing, (
+        f"app 프로필에 소비자가 없는 큐: {sorted(missing)} — "
+        "회의가 큐에 들어간 채로 영영 처리되지 않습니다"
+    )
+
+
 def test_compose_header_documents_the_llm_profile():
     """`--profile app` 만 안내하면 사용자는 LLM 없이 띄우고 분석에서 막힌다."""
     header = COMPOSE.read_text("utf-8").split("services:")[0]

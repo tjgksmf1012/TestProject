@@ -356,17 +356,29 @@ def try_finalize_meeting(
     동의 기록이 참여자 명단이다 (`consent_status` 와 같은 기준). 동의했는데
     아직 참가하지 않은 사람이 있으면 기다린다.
 
-    ## 멱등하다
+    ## 멱등하다 — 단, 행 잠금이 있어야 한다
 
     마지막 두 사람이 동시에 종료해도 `should_enqueue` 는 한 번만 True 다.
     두 번 큐에 들어가면 GPU 잡이 두 번 돌고 발화가 중복 저장된다.
-    상태를 'pending' → 'queued' 로 바꾸는 것이 그 자물쇠다.
+
+    ⚠️ `pending` → `queued` 전이만으로는 **자물쇠가 되지 않는다.** READ
+    COMMITTED 에서 두 트랜잭션이 모두 `status='pending'` 을 읽고, 판정은
+    파이썬에서 이미 끝난 뒤에 UPDATE 가 나가기 때문이다. 실측(PostgreSQL 16,
+    스레드 2개 + Barrier)에서 `should_enqueue` 가 **[True, True]** 로 나왔다.
+
+    그래서 회의 행을 `FOR UPDATE` 로 잠근다. 두 번째 트랜잭션은 첫 번째가
+    커밋할 때까지 `session.get` 에서 막히고, 풀린 뒤에는 `queued` 를 본다.
+    SQLite 는 `FOR UPDATE` 를 무시하지만 어차피 커넥션 하나라 경합이 없다.
+
+    회의가 끝나면 팀원 전원이 같은 순간에 "정지"를 누른다. 인원이 늘수록
+    마지막 두 명이 겹칠 확률이 오르므로, 이건 이론적 경합이 아니다.
 
     Args:
         force: 참가하지 않은 사람을 기다리지 않는다. `/finish` 전용 —
             브라우저를 닫은 사람 때문에 회의가 영영 안 끝나는 걸 푼다.
     """
-    meeting = session.get(m.Meeting, meeting_id)
+    # with_for_update — 위 독스트링 참조. 이 한 줄이 자물쇠다.
+    meeting = session.get(m.Meeting, meeting_id, with_for_update=True)
     if meeting is None:
         raise TrackError("회의를 찾을 수 없습니다")
 

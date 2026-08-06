@@ -201,19 +201,51 @@ def frame_rms(
     return np.sqrt(np.mean(frames.astype(np.float64) ** 2, axis=1)).astype(np.float32)
 
 
-def to_db(rms: np.ndarray, *, floor: float = -100.0) -> np.ndarray:
+#: dB 하한. 이 값에 붙어 있는 프레임은 **측정된 소리가 아니라 데이터가 없는 자리**다.
+#: `assembly.render()` 가 녹음 공백을 정확한 0 으로 채우기 때문에 생긴다.
+DB_FLOOR = -100.0
+
+
+def to_db(rms: np.ndarray, *, floor: float = DB_FLOOR) -> np.ndarray:
     return np.maximum(20.0 * np.log10(rms + 1e-12), floor)
 
 
-def estimate_noise_floor_db(energy_db: np.ndarray, *, percentile: float = 20.0) -> float:
+def estimate_noise_floor_db(
+    energy_db: np.ndarray, *, percentile: float = 20.0, floor_db: float = DB_FLOOR
+) -> float:
     """하위 백분위를 잡음 바닥으로 본다.
 
     회의는 대부분 침묵이거나 한 사람만 말하므로, 각 트랙에서 하위 구간은
     대체로 잡음이다. 고정 임계값을 쓰면 기기마다 마이크 감도가 달라 실패한다.
+
+    ⚠️ **조립 공백은 백분위에서 뺀다.** 이게 없으면 정확히 뒤집힌 결과가 나온다.
+
+    `assembly.render()` 는 녹음이 끊긴 구간을 **정확한 0** 으로 채운다. 그 0 은
+    `to_db` 에서 하한 -100dB 에 붙는다. 트랙의 20% 넘게 공백이면 20백분위가
+    통째로 -100dB 가 되고, 잡음 바닥이 실제 -40dB 에서 -100dB 로 붕괴한다.
+
+    주화자는 `energy_db - noise_floor` 의 argmax 로 뽑으므로, 바닥이 60dB
+    내려간 트랙은 **모든 프레임에서 이긴다.** 실측: 3인 회의에서 한 명의 폰이
+    40% 끊기면 그 사람이 주화자 프레임의 **100%** 를 가져가고 나머지 두 명은
+    0 이 된다 (`test_multitrack.py` 로 고정해 뒀다).
+
+    측정 불가로 빠져야 할 사람이 오히려 나머지 전원을 "말 안 한 사람" 으로
+    만드는 것이라, 이 프로젝트가 막으려는 결과 그 자체다 (docs/05 §4.1.1).
+
+    바닥에 붙지 않은 프레임만 쓰면 해결된다 — 마이크가 살아 있으면 잡음이
+    있으므로 정확한 0 이 나오지 않는다. 즉 하한에 붙은 프레임은 침묵이 아니라
+    **데이터 없음**이고, 없는 데이터로 바닥을 추정하면 안 된다.
     """
     if energy_db.size == 0:
-        return -100.0
-    return float(np.percentile(energy_db, percentile))
+        return floor_db
+
+    measured = energy_db[energy_db > floor_db]
+    if measured.size == 0:
+        # 트랙 전체가 공백이다. 바닥을 추정할 근거가 없으므로 하한을 그대로 쓴다 —
+        # 이러면 relative 가 전부 0 이라 이 트랙은 어느 프레임에서도 이기지 못한다.
+        return floor_db
+
+    return float(np.percentile(measured, percentile))
 
 
 # ══════════════════════════════════════════════════════════════

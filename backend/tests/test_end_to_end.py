@@ -34,7 +34,6 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
-from sqlalchemy.pool import StaticPool
 
 from teamflow.audio import decode
 from teamflow.config import Settings, get_settings
@@ -146,14 +145,17 @@ class FakeAnalyzer:
 
 
 @pytest.fixture
-def engine():
-    eng = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+def engine(tmp_path: Path):
+    """**파일 기반**이다. 인메모리가 아니다.
+
+    커넥션이 진짜로 분리돼야 "큐잉 시점에 다른 커넥션이 무엇을 보는가" 를
+    잴 수 있다 (§6). 인메모리 + StaticPool 은 커넥션이 하나뿐이라 커밋 전
+    데이터도 보여서, 순서 결함이 있어도 테스트가 통과해 버린다.
+    """
+    eng = create_engine(f"sqlite:///{tmp_path / 'e2e.db'}")
     m.Base.metadata.create_all(eng)
     db_session.configure(eng)
     yield eng
-    m.Base.metadata.drop_all(eng)
     eng.dispose()
 
 
@@ -652,3 +654,86 @@ def test_revoking_consent_mid_meeting_stops_new_chunks(
             select(m.TrackChunk).where(m.TrackChunk.track_id == track_id)
         ).all()
         assert len(kept) == CHUNKS_PER_TRACK, "이미 받은 청크까지 지우면 안 된다"
+
+
+# ══════════════════════════════════════════════════════════════
+# 6. 큐잉과 커밋의 순서 — 스텁으로는 절대 안 잡히는 것
+#
+# `enqueue_meeting_processing` 을 가짜로 바꾸면 "불렸는가" 만 알 수 있고
+# "언제 불렸는가" 는 모른다. 그런데 이 프로젝트에서는 그 순서가 전부다.
+#
+# 커밋은 엔드포인트 본문이 아니라 FastAPI 의존성 teardown 에서 일어난다
+# (`db/session.py` 의 session_scope 가 yield 뒤에 commit).  그래서 본문에서
+# 바로 큐에 넣으면 항상 커밋보다 먼저이고, 워커가 그 사이에 도착하면
+# 방금 종료를 보고한 그 트랙이 아직 ended_at IS NULL 로 보인다.
+# `ChunkAudioLoader.load` 는 그런 트랙을 조용히 버린다 — 예외도 로그도 없다.
+#
+# 그래서 **다른 커넥션이 무엇을 보는가** 를 재야 한다. 파일 DB 를 쓰는 이유다
+# (인메모리 + StaticPool 은 커넥션이 하나라 이 성질을 측정할 수 없다).
+# ══════════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+def observed_at_enqueue(monkeypatch, engine) -> list[dict]:
+    """큐잉이 일어나는 **그 순간** 다른 커넥션이 보는 DB 상태를 기록한다."""
+    seen: list[dict] = []
+    from teamflow.tasks import dispatch
+
+    def spy(meeting_id: int) -> None:
+        with engine.connect() as conn:  # 별도 커넥션 — 커밋된 것만 보인다
+            status = conn.exec_driver_sql(
+                "SELECT status FROM meetings WHERE id = ?", (meeting_id,)
+            ).scalar()
+            unfinished = conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM meeting_tracks "
+                "WHERE meeting_id = ? AND ended_at IS NULL",
+                (meeting_id,),
+            ).scalar()
+        seen.append({"status": status, "unfinished_tracks": unfinished})
+
+    monkeypatch.setattr(dispatch, "enqueue_meeting_processing", spy)
+    return seen
+
+
+def test_enqueue_happens_after_the_commit(
+    client: TestClient, project: dict, observed_at_enqueue: list[dict]
+):
+    """⭐ 큐잉 시점에 마지막 트랙의 종료가 이미 커밋돼 있어야 한다.
+
+    아니면 워커가 그 트랙을 못 보고 버린다. 회의는 N-1 명으로 멀쩡히
+    처리되고, 빠진 사람은 발화 0건 — "말을 안 한 사람" 이 된다.
+    """
+    meeting_id = project['meeting_id']
+    track_ids = [
+        record_track(client, meeting_id, user_id, speaking=speaking)
+        for user_id, speaking in zip(project['user_ids'], SPEAKING_SEQS, strict=True)
+    ]
+    for tid in track_ids:
+        finish_track(client, meeting_id, tid)
+
+    assert len(observed_at_enqueue) == 1, '큐잉이 정확히 한 번 일어나야 합니다'
+    observed = observed_at_enqueue[0]
+
+    assert observed['unfinished_tracks'] == 0, (
+        '큐잉 시점에 아직 종료가 커밋되지 않은 트랙이 있습니다 — '
+        '워커가 먼저 도착하면 그 사람이 통째로 사라집니다'
+    )
+    assert observed['status'] == 'queued', (
+        f"큐잉 시점의 회의 상태가 커밋돼 있지 않습니다: {observed['status']}"
+    )
+
+
+def test_finish_endpoint_also_enqueues_after_commit(
+    client: TestClient, project: dict, observed_at_enqueue: list[dict]
+):
+    """강제 종료 경로도 같은 순서를 지켜야 한다."""
+    meeting_id = project['meeting_id']
+    record_track(client, meeting_id, project['user_ids'][0], speaking={0})
+
+    response = client.post(f'/api/meetings/{meeting_id}/finish')
+    assert response.status_code == 200, response.text
+
+    assert len(observed_at_enqueue) == 1
+    assert observed_at_enqueue[0]['unfinished_tracks'] == 0, (
+        '강제 종료한 트랙의 ended_at 이 커밋 전에 큐잉됐습니다'
+    )
