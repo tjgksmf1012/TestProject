@@ -188,15 +188,80 @@ def test_estimate_offsets_reference_is_zero():
     assert offsets[0].track_index == 0
 
 
-def test_estimate_offsets_recovers_device_skew():
-    """B 기기가 100ms 늦게 녹음을 시작한 상황."""
-    track_a, track_b = build_two_speaker_meeting(seed=31)
-    skew = int(SR * 0.1)
-    delayed_b = delay_signal(track_b, skew)[: len(track_b)]
+def start_late(room: np.ndarray, samples: int) -> np.ndarray:
+    """**늦게** 녹음을 시작한 기기 — 앞부분을 놓친다.
 
-    offsets = estimate_offsets([track_a, delayed_b], sample_rate=SR)
-    recovered_ms = offsets[1].offset_ms
-    assert abs(recovered_ms - 100) <= 15, f"100ms 스큐를 {recovered_ms}ms 로 추정"
+    앞에 0을 붙이는 `delay_signal` 은 반대다. 그건 소리가 나기 전부터 켜져
+    있던 기기, 즉 **일찍** 시작한 쪽이다. 이 둘을 헷갈린 탓에 부호 규약이
+    반대로 굳어 있었고, 테스트가 그 반대를 고정하고 있었다.
+    """
+    return room[samples:].copy()
+
+
+#: `offset_sec` 의 규약 — "이 트랙을 공통 시간축에서 얼마나 뒤로 밀어야 하는가".
+#: `apply_offsets` 가 앞을 그만큼 패딩하고, 서버 타임스탬프 폴백
+#: (`started_at - earliest`)도 같은 부호다. 늦게 시작한 기기는 **양수**.
+
+
+def test_estimate_offsets_recovers_late_start():
+    """B 기기가 100ms **늦게** 시작한 상황 — 앞 100ms 를 놓쳤다."""
+    room, _ = build_two_speaker_meeting(seed=31)
+    skew = int(SR * 0.1)
+    late_b = start_late(room, skew)
+
+    offsets = estimate_offsets([room[: len(late_b)], late_b], sample_rate=SR)
+
+    assert abs(offsets[1].offset_ms - 100) <= 15, (
+        f"늦게 시작한 기기는 +100ms 여야 하는데 {offsets[1].offset_ms}ms"
+    )
+
+
+def test_estimate_offsets_recovers_early_start():
+    """반대 방향도 맞아야 한다 — 일찍 시작한 기기는 음수."""
+    room, _ = build_two_speaker_meeting(seed=31)
+    skew = int(SR * 0.1)
+    early_b = delay_signal(room, skew)[: len(room)]
+
+    offsets = estimate_offsets([room, early_b], sample_rate=SR)
+
+    assert abs(offsets[1].offset_ms + 100) <= 15, (
+        f"일찍 시작한 기기는 -100ms 여야 하는데 {offsets[1].offset_ms}ms"
+    )
+
+
+@pytest.mark.parametrize("skew_ms", [-250, -100, -30, 30, 100, 250])
+def test_estimate_then_apply_actually_aligns(skew_ms: int):
+    """⭐ **왕복** 테스트 — 이게 없어서 정렬이 반대로 가는 걸 못 잡았다.
+
+    기존 테스트는 `gcc_phat` 이 지연을 맞히는지(맞았다), `apply_offsets` 가
+    길이를 맞추는지(맞았다)만 봤다. 둘을 이어 붙였을 때 실제로 겹치는지는
+    아무도 확인하지 않았고, 실제로 겹치지 않았다.
+
+    실측(수정 전): 잔차 1.9881 → 1.9651. 즉 **전혀 정렬되지 않았다.**
+    """
+    room, _ = build_two_speaker_meeting(seed=41)
+    skew = int(SR * abs(skew_ms) / 1000)
+    span = len(room) - skew
+
+    reference = room[:span]
+    shifted = (
+        start_late(room, skew)[:span]
+        if skew_ms > 0
+        else delay_signal(room, skew)[:span]
+    )
+
+    offsets = estimate_offsets([reference, shifted], sample_rate=SR)
+    aligned = apply_offsets([reference, shifted], offsets, sample_rate=SR)
+
+    n = min(len(a) for a in aligned)
+    power = float(np.mean(reference.astype(np.float64) ** 2))
+    before = float(np.mean((reference[:n] - shifted[:n]).astype(np.float64) ** 2)) / power
+    after = float(np.mean((aligned[0][:n] - aligned[1][:n]).astype(np.float64) ** 2)) / power
+
+    assert after < before * 0.25, (
+        f"정렬 후에도 어긋나 있습니다 (전 {before:.3f} → 후 {after:.3f}). "
+        f"추정값 {offsets[1].offset_ms}ms 의 부호가 반대일 수 있습니다"
+    )
 
 
 def test_estimate_offsets_falls_back_to_server_timestamps():

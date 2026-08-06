@@ -156,7 +156,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 607 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 614 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 

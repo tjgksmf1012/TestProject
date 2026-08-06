@@ -154,7 +154,30 @@ def estimate_offsets(
             fallback = server_offsets_sec[index] - server_offsets_sec[reference]
             offsets.append(TrackOffset(index, fallback, confidence, "server_timestamp"))
         else:
-            offsets.append(TrackOffset(index, tau, confidence, "gcc_phat"))
+            # ⚠️ **부호를 뒤집는다.** 이게 없으면 정렬이 반대로 간다.
+            #
+            # `offset_sec` 의 규약은 `apply_offsets` 와 서버 타임스탬프 폴백이
+            # 정하고 있다 — "이 트랙을 공통 시간축에서 얼마나 **뒤로** 밀어야
+            # 하는가". 늦게 시작한 기기는 앞부분을 놓쳤으므로 양수다
+            # (`started_at - earliest`).
+            #
+            # 그런데 `gcc_phat(track, ref)` 의 tau 는 "ref 대비 track 이 얼마나
+            # 늦게 들리는가" 다. 늦게 시작한 기기는 앞을 놓쳐서 같은 소리가
+            # **먼저** 나타나므로 tau 가 음수로 나온다. 규약과 정확히 반대다.
+            #
+            # 실측(백색잡음 5초, 0.1초 늦게 시작한 트랙, 잔차는 신호 전력 대비):
+            #     정렬 전            1.9881
+            #     뒤집지 않고 적용    1.9651   ← 전혀 정렬되지 않는다
+            #     뒤집어서 적용       0.0380   ← 정렬된다
+            #
+            # 즉 이 한 글자가 없으면 GCC-PHAT 이 지연을 정확히 구해 놓고도
+            # 트랙을 **더 어긋나게** 만든다. 그 위에서 도는 누출 제거와 주화자
+            # 판정은 전부 무의미해진다 — 이 프로젝트의 핵심 설계가 통째로.
+            #
+            # 기존 테스트가 못 잡은 이유: `gcc_phat` 이 지연을 맞히는지(맞다),
+            # `apply_offsets` 가 길이를 맞추는지(맞다)만 봤고 **왕복**을 본
+            # 테스트가 없었다.
+            offsets.append(TrackOffset(index, -tau, confidence, "gcc_phat"))
 
     return offsets
 
