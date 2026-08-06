@@ -218,6 +218,13 @@ class Meeting(Base):
     # queued    : 전원 종료 → 처리 대기 (이 전이가 중복 큐잉을 막는 자물쇠다)
     # processing | needs_review | confirmed | failed
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # LLM이 만든 회의 요약. 근거는 utterances 에 남아 있고 여기엔 본문만 둔다.
+    #
+    # 이게 없던 동안 파이프라인은 요약을 만들어 Celery 페이로드에 실어 보낸 뒤
+    # **저장하지 않고 버렸다.** 회의록은 이 시스템의 대표 산출물인데 어디에도
+    # 남지 않았다. 재생성하려면 회의를 통째로 다시 처리해야 하고, 그건 이미
+    # 사람이 검토한 회의에서는 거부된다 — 즉 영구 손실이었다.
+    summary: Mapped[str | None] = mapped_column(Text)
     # 녹음을 시작한 사람. 통신비밀보호법상 반드시 회의 참석자여야 한다 (docs/07 L1).
     started_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = _now()
@@ -360,6 +367,13 @@ class MeetingTaskCandidate(Base):
     evidence_utterance_ids: Mapped[list] = mapped_column(
         BigIntArray, nullable=False
     )
+    # 확신도를 **깎은 이유**. validation 이 후보마다 만든다.
+    #
+    # 확신도 0.34 만 보여주면 사람은 무엇을 확인해야 할지 모른다. "담당자
+    # 미확정 — 이름이 두 명과 일치" 와 "마감일이 회의일보다 이전" 은 손봐야
+    # 할 곳이 전혀 다르다. 검토 화면은 사람이 개입하는 유일한 지점이라,
+    # 여기서 이유를 잃으면 사람은 근거 없이 승인하게 된다.
+    warnings: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # pending | approved | rejected
     review_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))

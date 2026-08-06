@@ -71,6 +71,15 @@ class Settings(BaseSettings):
     # ── 기여도 ────────────────────────────────────────────
     scoring_algo_version: str = "scoring-v1"
 
+    # ── 로그 ──────────────────────────────────────────────
+    # 이 프로젝트의 결함은 대부분 **조용히** 일어난다 — 트랙 하나가 버려지고,
+    # 회의가 큐에서 멈추고, 후보가 승인되지 않는다. 예외가 안 나므로 로그가
+    # 유일한 흔적인데, 그 로그가 기본 설정으로는 나가지 않았다.
+    #
+    # log_format: text | json  — 컨테이너 로그 수집기가 붙으면 json.
+    log_level: str = "INFO"
+    log_format: str = "text"
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
@@ -90,7 +99,15 @@ def get_settings() -> Settings:
 
 
 TRUSTED_FIELDS = frozenset(
-    {"environment", "debug", "llm_backend", "asr_backend", "asr_model"}
+    {
+        "environment",
+        "debug",
+        "llm_backend",
+        "asr_backend",
+        "asr_model",
+        "log_level",
+        "log_format",
+    }
 )
 
 

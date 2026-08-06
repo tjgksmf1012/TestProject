@@ -49,6 +49,13 @@ class ResolvedCandidate:
     llm_confidence: float
     evidence_utterance_ids: tuple[int, ...]
     warnings: tuple[str, ...] = ()
+    # 전사에 등장한 이름 **그대로**. `assignee.matched_name` 과 다르다 —
+    # 저쪽은 명단에서 찾아낸 이름이고 매칭에 실패하면 None 이다.
+    #
+    # 매칭이 실패했을 때야말로 원문이 필요하다. 사람이 검토 화면에서
+    # "회의에서 '민수님' 이라고 했는데 명단에 민수가 둘" 을 보고 고르는 것과,
+    # 담당자 칸이 그냥 비어 있는 것은 전혀 다른 작업이다.
+    assignee_hint: str | None = None
 
     @property
     def is_complete(self) -> bool:
@@ -236,4 +243,5 @@ def _validate_task(
         llm_confidence=task.confidence,
         evidence_utterance_ids=evidence,
         warnings=tuple(warnings),
+        assignee_hint=task.assignee_hint,
     )

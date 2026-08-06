@@ -58,6 +58,18 @@
       .blockers { list-style: none; padding: 0; margin: .5rem 0; font-size: .8rem; color: var(--bad); }
       .blockers li::before { content: "⚠ "; }
 
+      /* 승인을 막는 것(blockers)과 서버가 확신 못 한 것(warnings)은 다르다.
+         색을 나눠야 사람이 "지금 고쳐야 할 것" 과 "확인해 볼 것" 을 구분한다. */
+      .warnings { list-style: none; padding: 0; margin: .5rem 0; font-size: .8rem; color: var(--warn, #b45309); }
+      .warnings li::before { content: "· "; }
+      .hint { font-size: .8rem; margin: .4rem 0; opacity: .85; }
+
+      #meeting-summary {
+        white-space: pre-wrap; font-size: .875rem; line-height: 1.65;
+        border-left: 3px solid var(--line, #d8dbe0); padding: .25rem 0 .25rem .875rem;
+        margin: 0 0 1rem;
+      }
+
       .actions { display: flex; gap: .5rem; margin-top: .75rem; }
       .actions button {
         font: inherit; font-size: .875rem; padding: .45rem .9rem; cursor: pointer;
@@ -91,6 +103,8 @@
       AI가 회의에서 뽑은 <strong>후보</strong>입니다. 승인해야 칸반에 등록됩니다.
       확신도가 낮은 것부터 보입니다.
     </p>
+
+    <p id="meeting-summary" hidden></p>
 
     <div id="attention" class="banner" hidden></div>
     <div id="blocked" class="banner" hidden></div>

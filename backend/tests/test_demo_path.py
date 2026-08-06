@@ -298,3 +298,62 @@ def test_seeded_meeting_shows_a_broken_track_in_the_lobby(client: TestClient, se
     tracks = client.get(f"/api/meetings/{seeded['meeting_id']}/tracks").json()["tracks"]
     broken = [t for t in tracks if t["coverage"] is not None and t["coverage"] < 0.8]
     assert broken, "커버리지가 낮은 트랙이 있어야 로비가 경고를 띄웁니다"
+
+
+# ══════════════════════════════════════════════════════════════
+# 4. 파이프라인이 만든 것이 화면까지 도착하는가
+# ══════════════════════════════════════════════════════════════
+#
+# 저장까지는 test_pipeline_output_persisted.py 가 잰다. 여기서는 그 값이
+# **HTTP 응답으로 나오는지**를 잰다. 저장은 되는데 어떤 엔드포인트도
+# 돌려주지 않으면 사람 입장에서는 여전히 없는 것과 같다.
+
+
+def test_meeting_endpoint_returns_the_summary(client: TestClient, seeded: dict):
+    """⭐ 요약은 이 시스템의 대표 산출물인데 볼 방법이 없었다."""
+    response = client.get(f"/api/meetings/{seeded['meeting_id']}")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["summary"]
+    assert "JWT" in body["summary"]
+    assert body["status"] == "needs_review"
+
+
+def test_unknown_meeting_is_404_not_an_empty_summary(client: TestClient, engine):
+    """없는 것을 빈 것으로 답하지 않는다."""
+    assert client.get("/api/meetings/999999").status_code == 404
+
+
+def test_candidates_carry_their_warnings_and_hint(client: TestClient, seeded: dict):
+    """⭐ 확신도 숫자만으로는 사람이 무엇을 확인해야 할지 모른다.
+
+    `candidates.ts` 의 `Candidate` 와 서버 응답이 어긋나면 경고가
+    조용히 사라진다 — 화면은 아무 설명 없이 빨간 표시만 띄운다.
+    """
+    rows = client.get(f"/api/meetings/{seeded['meeting_id']}/candidates").json()
+    assert rows
+
+    with_warnings = [r for r in rows if r["warnings"]]
+    assert with_warnings, "경고가 붙은 후보가 하나는 있어야 화면을 확인할 수 있습니다"
+
+    unresolved = [r for r in rows if r["assignee_id"] is None and r["assignee_hint"]]
+    assert unresolved, "담당자가 안 풀린 후보의 원문 이름이 내려와야 합니다"
+    for row in rows:
+        assert {"assignee_hint", "warnings"} <= set(row)
+
+
+def test_seeded_tracks_carry_their_alignment_offsets(seeded: dict):
+    """정렬 보정값이 0 만 있으면 시연에서 이 컬럼이 산 것인지 알 수 없다."""
+    from teamflow.db import session as db_session
+
+    with db_session.session_scope() as s:
+        offsets = [
+            t.offset_ms
+            for t in s.scalars(
+                select(m.MeetingTrack).where(
+                    m.MeetingTrack.meeting_id == seeded["meeting_id"]
+                )
+            ).all()
+        ]
+    assert any(o != 0 for o in offsets)

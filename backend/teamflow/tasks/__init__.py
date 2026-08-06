@@ -16,8 +16,10 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import setup_logging as _setup_logging
 
 from teamflow.config import get_settings
+from teamflow.logging_config import configure_logging
 
 settings = get_settings()
 
@@ -75,6 +77,19 @@ app.conf.update(
         },
     },
 )
+
+
+@_setup_logging.connect
+def _configure_worker_logging(**_kwargs: object) -> None:
+    """워커 로깅을 우리 설정으로 잡는다.
+
+    이 시그널에 **연결하는 것 자체가** Celery 에게 "로깅은 내가 한다" 는
+    뜻이다. 연결하지 않으면 Celery 가 루트 로거를 가로채(`worker_hijack_root_logger`
+    기본값 True) 자기 형식으로 덮어쓴다. 그러면 API 와 워커의 로그 형식이
+    갈리고, `log_format=json` 을 켜도 워커만 텍스트로 나간다.
+    """
+    configure_logging()
+
 
 app.autodiscover_tasks(["teamflow.tasks"], force=True)
 

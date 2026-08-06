@@ -72,6 +72,10 @@ class PipelineResult:
     validation: ValidationResult | None = None
     track_stats: list[mt.TrackStats] = field(default_factory=list)
     alignment: list[mt.TrackOffset] = field(default_factory=list)
+    # 로더가 준 순서 그대로의 track_id. `alignment` 와 `track_stats` 는
+    # **번째**로 트랙을 가리키므로(TrackOffset.track_index), 이게 없으면
+    # 결과를 DB 행에 되돌려 붙일 수 없다. 실제로 그래서 못 붙이고 있었다.
+    track_ids: list[int] = field(default_factory=list)
     error: str | None = None
 
     @property
@@ -124,6 +128,7 @@ def process_meeting(
             result.error = "오디오 트랙이 없습니다"
             reporter.report(meeting_id, Stage.FAILED, 0, result.error)
             return result
+        result.track_ids = [t.track_id for t in tracks]
 
         # ── 2. 정렬 · 주화자 판정 (CPU) ────────────────────
         step(Stage.ALIGN, f"트랙 {len(tracks)}개")

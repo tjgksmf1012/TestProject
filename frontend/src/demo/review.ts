@@ -12,6 +12,7 @@
 import {
   LOW_CONFIDENCE,
   approvalBlockers,
+  attentionReasons,
   buildReviewPayload,
   canSubmit,
   describeBlocker,
@@ -34,6 +35,12 @@ interface Member {
   role_shares: Record<string, number>;
 }
 
+interface MeetingInfo {
+  title: string | null;
+  status: string;
+  summary: string | null;
+}
+
 const params = new URLSearchParams(location.search);
 const apiBase = params.get('api') ?? '';
 const meetingId = Number(params.get('meeting') ?? '1');
@@ -42,6 +49,7 @@ const reviewerId = Number(params.get('reviewer') ?? '1');
 const drafts = new Map<number, Draft>();
 let candidates: Candidate[] = [];
 let members: Member[] = [];
+let meeting: MeetingInfo | null = null;
 let context: ReviewContext = { memberIds: [], today: todayIso() };
 
 /** 로컬 자정 기준 오늘. `toISOString()` 은 UTC 라 한국에서 하루 어긋난다. */
@@ -74,15 +82,18 @@ function update(id: number, patch: Partial<Draft>): void {
 // ── 불러오기 ────────────────────────────────────────────────
 
 async function load(): Promise<void> {
-  const [candidateRes, memberRes] = await Promise.all([
+  const [candidateRes, memberRes, meetingRes] = await Promise.all([
     fetch(`${apiBase}/api/meetings/${meetingId}/candidates`),
     fetch(`${apiBase}/api/meetings/${meetingId}/members`),
+    fetch(`${apiBase}/api/meetings/${meetingId}`),
   ]);
   if (!candidateRes.ok) throw new Error(`후보 조회 실패 (HTTP ${candidateRes.status})`);
   if (!memberRes.ok) throw new Error(`팀원 조회 실패 (HTTP ${memberRes.status})`);
+  if (!meetingRes.ok) throw new Error(`회의 조회 실패 (HTTP ${meetingRes.status})`);
 
   candidates = sortForReview((await candidateRes.json()) as Candidate[]);
   members = (await memberRes.json()) as Member[];
+  meeting = (await meetingRes.json()) as MeetingInfo;
   context = { memberIds: members.map((m) => m.user_id), today: todayIso() };
   render();
 }
@@ -91,6 +102,12 @@ async function load(): Promise<void> {
 
 function render(): void {
   const summary = summarize(candidates, drafts, context);
+
+  // 요약은 후보를 판단하는 맥락이다. 후보만 보고 승인하면 회의에서
+  // 무슨 얘기가 오갔는지 모른 채 제목만 보고 누르게 된다.
+  const text = meeting?.summary ?? '';
+  $('meeting-summary').hidden = text === '';
+  $('meeting-summary').textContent = text;
 
   $('counts').textContent =
     `전체 ${summary.total} · 승인 ${summary.approving} · 거절 ${summary.rejecting} · ` +
@@ -112,6 +129,7 @@ function render(): void {
 function cardHtml(candidate: Candidate): string {
   const draft = draftOf(candidate.id);
   const blockers = approvalBlockers(candidate, draft, context);
+  const reasons = attentionReasons(candidate);
   const decided = candidate.review_status !== 'pending';
   const low = candidate.confidence < LOW_CONFIDENCE;
 
@@ -146,6 +164,15 @@ function cardHtml(candidate: Candidate): string {
            value="${effectiveDeadline(candidate, draft) ?? ''}" ${decided ? 'disabled' : ''} /></label>
   </div>
 
+  ${
+    // 회의에서 부른 이름을 명단에서 못 찾았을 때만 보여준다. 이미 풀린
+    // 담당자 옆에 원문을 또 띄우면 읽을 게 늘 뿐이다.
+    candidate.assignee_hint && assignee === null
+      ? `<p class="hint">회의에서는 <strong>${escapeHtml(candidate.assignee_hint)}</strong>
+           라고 했습니다 — 명단에서 찾지 못했습니다</p>`
+      : ''
+  }
+
   <p class="evidence">
     근거 발화 ${candidate.evidence_utterance_ids.length}건
     ${
@@ -154,6 +181,16 @@ function cardHtml(candidate: Candidate): string {
         : '<strong class="bad">— 회의에 없던 내용일 수 있습니다</strong>'
     }
   </p>
+
+  ${
+    // 서버가 무엇을 확신하지 못했는가. 사람이 화면에서 고쳐도 남는다 —
+    // blockers 와 달리 이건 판정이 아니라 기록이다.
+    reasons.length
+      ? `<ul class="warnings">${reasons
+          .map((r) => `<li>${escapeHtml(r)}</li>`)
+          .join('')}</ul>`
+      : ''
+  }
 
   ${
     blockers.length

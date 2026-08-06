@@ -158,15 +158,17 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **시연 데이터 + 가짜 ASR** | ✅ | `scripts/seed_demo.py`, `ASR_BACKEND=fake` |
 | 화면·API 한 오리진 (StaticFiles 마운트) | ✅ | `backend/teamflow/api/main.py` |
 | **회의 로비 화면** (동의·트랙 상태·강제 종료) | ✅ | `frontend/src/lib/lobby/`, `public/lobby.html` |
+| **회의 요약·경고·정렬값 저장** | ✅ | `backend/teamflow/tasks/meeting_tasks.py` |
+| **로그 설정** (text/json, 개인정보 차단) | ✅ | `backend/teamflow/logging_config.py` |
 | 인증·세션 | ⬜ | 지금은 `user_id` 를 요청 본문으로 받습니다 (시연 단계) |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 656 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 695 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 235 passed, 설치 불필요
+cd frontend && npm test                          # 244 passed, 설치 불필요
 cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
 
 cp .env.example .env                             # 시크릿 채우기

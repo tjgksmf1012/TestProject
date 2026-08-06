@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -22,16 +24,41 @@ from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
 from teamflow.db.session import get_db
 from teamflow.github import webhook as gh
+from teamflow.logging_config import configure_logging
 from teamflow.meeting.approval import ApprovalRequest
 from teamflow.services import approval_service, recording_service
 from teamflow.tasks import dispatch
 
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    """서버가 실제로 뜰 때 로깅을 설정한다.
+
+    import 시점이 아니라 여기서 하는 이유: 이 모듈을 import 하는 것만으로
+    프로세스 전체의 로깅을 갈아엎으면, 이 앱을 라이브러리처럼 가져다 쓰는
+    쪽(테스트·스크립트)의 로깅까지 우리 마음대로 바꾸게 된다.
+
+    uvicorn 은 자기 로깅 설정을 **먼저** 적용하고 그 다음에 lifespan 을
+    돌린다. 그래서 여기서 덮어써야 우리 형식이 남는다.
+    """
+    configure_logging()
+    settings = get_settings()
+    logger.info(
+        "TeamFlow API 시작 — env=%s asr=%s llm=%s",
+        settings.environment,
+        settings.asr_backend,
+        settings.llm_backend,
+    )
+    yield
+
+
 app = FastAPI(
     title="TeamFlow AI",
     description="회의에서 나온 결정을 실제 업무와 코드 활동까지 연결한다",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 DbSession = Annotated[Session, Depends(get_db)]
@@ -88,11 +115,16 @@ def server_time(response: Response) -> ServerTime:
 class CandidateOut(BaseModel):
     id: int
     title: str
+    # 회의에서 실제로 불린 이름. assignee_id 가 None 일 때 사람이
+    # 누구를 골라야 할지 아는 유일한 단서다.
+    assignee_hint: str | None = None
     assignee_id: int | None
     deadline: date | None
     confidence: float
     evidence_utterance_ids: list[int]
     review_status: str
+    # 확신도를 깎은 이유. 숫자만으로는 무엇을 확인해야 할지 알 수 없다.
+    warnings: list[str] = []
 
     @property
     def is_complete(self) -> bool:
@@ -638,6 +670,38 @@ def list_tracks(meeting_id: int, session: DbSession) -> dict[str, Any]:
     }
 
 
+class MeetingDetail(BaseModel):
+    id: int
+    project_id: int
+    title: str | None
+    status: str
+    started_at: datetime
+    capture_mode: str
+    # 처리가 끝나기 전에는 None. 실패한 회의도 None 이다 —
+    # 빈 문자열로 내려보내면 화면이 "요약이 없는 회의" 로 그린다.
+    summary: str | None
+
+
+@app.get("/api/meetings/{meeting_id}", response_model=MeetingDetail)
+def get_meeting(meeting_id: int, session: DbSession) -> MeetingDetail:
+    """회의 하나. 승인 화면이 회의 요약을 보여주려면 이게 필요하다.
+
+    요약은 이 시스템이 회의에서 만들어 내는 대표 산출물인데, 이 엔드포인트가
+    생기기 전까지는 **DB 에 저장조차 되지 않았다.** 파이프라인이 만들어
+    Celery 페이로드에 실어 보낸 뒤 저장 태스크가 읽지 않고 버렸다.
+    """
+    meeting = _load_meeting(session, meeting_id)
+    return MeetingDetail(
+        id=meeting.id,
+        project_id=meeting.project_id,
+        title=meeting.title,
+        status=meeting.status,
+        started_at=meeting.started_at,
+        capture_mode=meeting.capture_mode,
+        summary=meeting.summary,
+    )
+
+
 # ══════════════════════════════════════════════════════════════
 # 회의 업무 후보 검토 (이어서)
 # ══════════════════════════════════════════════════════════════
@@ -683,11 +747,13 @@ def list_candidates(meeting_id: int, session: DbSession) -> list[CandidateOut]:
         CandidateOut(
             id=r.id,
             title=r.title,
+            assignee_hint=r.assignee_hint,
             assignee_id=r.assignee_id,
             deadline=r.deadline.date() if isinstance(r.deadline, datetime) else r.deadline,
             confidence=float(r.confidence),
             evidence_utterance_ids=list(r.evidence_utterance_ids or []),
             review_status=r.review_status,
+            warnings=list(r.warnings or []),
         )
         for r in rows
     ]

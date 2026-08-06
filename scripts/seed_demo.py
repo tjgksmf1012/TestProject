@@ -79,6 +79,7 @@ def build_candidates(utterance_ids: list[int], user_ids: list[int]) -> list[dict
             "deadline": datetime(2026, 9, 4, tzinfo=UTC),
             "confidence": 0.92,
             "evidence": [utterance_ids[0], utterance_ids[2]],
+            "warnings": [],
         },
         {
             # 2) 담당자가 안 풀린 후보 — "저는" 은 누구인지 알 수 없다.
@@ -89,6 +90,7 @@ def build_candidates(utterance_ids: list[int], user_ids: list[int]) -> list[dict
             "deadline": None,
             "confidence": 0.71,
             "evidence": [utterance_ids[1]],
+            "warnings": ["담당자 미확정 — '저' 는 명단의 누구와도 맞지 않습니다"],
         },
         {
             # 3) 확신도가 낮은 후보 — 애초에 업무가 아닐 수 있다.
@@ -99,6 +101,10 @@ def build_candidates(utterance_ids: list[int], user_ids: list[int]) -> list[dict
             "deadline": None,
             "confidence": 0.34,
             "evidence": [utterance_ids[4]],
+            "warnings": [
+                "회의에서 담당자가 지정되지 않았습니다",
+                "회의에서 마감일이 언급되지 않았습니다",
+            ],
         },
     ]
 
@@ -152,6 +158,16 @@ def seed(*, reset: bool) -> dict:
             started_by=users[0].id,
             capture_mode="multitrack",
             status="needs_review",
+            # 파이프라인이 만들어 저장하는 것과 같은 자리. 승인 화면이 후보를
+            # 판단하는 맥락으로 읽는다 — 요약 없이 제목만 보고 누르면 이 화면의
+            # 의미가 없다.
+            summary=(
+                "로그인 기능 분담과 인증 방식을 정했습니다.\n"
+                "· 인증은 JWT 로 합니다.\n"
+                "· 로그인 API 는 김민수, 회원가입 화면은 이하늘이 맡습니다.\n"
+                "· DB 스키마는 박지원이 다음 주 화요일까지 정리합니다.\n"
+                "· 배포 방식은 다음 회의로 미뤘습니다."
+            ),
         )
         s.add(meeting)
         s.flush()
@@ -169,7 +185,9 @@ def seed(*, reset: bool) -> dict:
         # 트랙 셋. 박지원의 폰은 중간에 잠겨 커버리지가 낮다 —
         # "측정 불가" 표시가 화면에서 어떻게 보이는지 확인하려면 필요하다.
         coverages = [1.0, 0.98, 0.42]
-        for user, coverage in zip(users, coverages, strict=True):
+        # 정렬 보정값. 기준 트랙이 0 이고 나머지는 GCC-PHAT 이 추정한 값이다.
+        offsets_ms = [0, 187, -64]
+        for user, coverage, offset_ms in zip(users, coverages, offsets_ms, strict=True):
             usable = coverage >= 0.8
             s.add(
                 m.MeetingTrack(
@@ -179,6 +197,7 @@ def seed(*, reset: bool) -> dict:
                     ended_at=MEETING_START + timedelta(minutes=40),
                     device_label="iPhone 14" if usable else "Galaxy S23",
                     sample_rate=16_000,
+                    offset_ms=offset_ms,
                     status="completed" if usable else "unusable",
                     coverage=coverage,
                     total_gap_ms=0 if usable else 1_392_000,
@@ -217,6 +236,7 @@ def seed(*, reset: bool) -> dict:
                     deadline=spec["deadline"],
                     confidence=spec["confidence"],
                     evidence_utterance_ids=spec["evidence"],
+                    warnings=spec["warnings"],
                 )
             )
 

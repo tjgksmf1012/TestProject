@@ -191,6 +191,9 @@ def _serialize(result: PipelineResult) -> dict:
         "candidates": [
             {
                 "title": c.title,
+                # 전사에 등장한 이름 그대로. `assignee_id` 가 None 일 때
+                # 사람이 누구를 골라야 하는지 아는 유일한 단서다.
+                "assignee_hint": c.assignee_hint,
                 "assignee_id": c.assignee.user_id,
                 "deadline": c.deadline.value.isoformat() if c.deadline.value else None,
                 "confidence": c.overall_confidence,
@@ -198,6 +201,18 @@ def _serialize(result: PipelineResult) -> dict:
                 "warnings": list(c.warnings),
             }
             for c in (validation.candidates if validation else [])
+        ],
+        # 트랙 번째가 아니라 track_id 로 바꿔서 넘긴다. 저장 태스크는
+        # 파이프라인이 트랙을 어떤 순서로 로드했는지 알 수 없다.
+        "alignment": [
+            {
+                "track_id": result.track_ids[o.track_index],
+                "offset_ms": o.offset_ms,
+                "confidence": round(float(o.confidence), 3),
+                "method": o.method,
+            }
+            for o in result.alignment
+            if 0 <= o.track_index < len(result.track_ids)
         ],
         "decisions": [
             {"content": content, "evidence": list(evidence), "supersedes": supersedes}
@@ -307,10 +322,12 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
                 m.MeetingTaskCandidate(
                     meeting_id=meeting_id,
                     title=candidate["title"],
+                    assignee_hint=candidate.get("assignee_hint"),
                     assignee_id=candidate["assignee_id"],
                     deadline=_parse_deadline(candidate["deadline"]),
                     confidence=candidate["confidence"],
                     evidence_utterance_ids=to_real_ids(candidate["evidence"]),
+                    warnings=list(candidate.get("warnings") or []),
                 )
             )
 
@@ -323,6 +340,28 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
                     evidence_utterance_ids=to_real_ids(decision["evidence"]),
                 )
             )
+
+        # 추정한 정렬 보정값을 트랙에 되돌려 쓴다.
+        #
+        # 이걸 안 쓰면 `offset_ms` 는 영원히 0 이다. 그러면 발화 시각이
+        # 트랙마다 다른 기준에서 매겨진 채로 남고, 나중에 회의를 다시
+        # 조립하거나 "이 발언이 저 발언에 대한 답인가" 를 보려면 정렬을
+        # 처음부터 다시 추정해야 한다 — 원본 오디오는 보존기간이 지나면
+        # 지워지므로(P8) 그때는 다시 구할 방법이 없다.
+        for entry in payload.get("alignment", []):
+            track = session.get(m.MeetingTrack, entry["track_id"])
+            if track is None or track.meeting_id != meeting_id:
+                # 재처리 중에 트랙이 지워졌거나 다른 회의의 id 가 섞인 경우.
+                logger.warning(
+                    "meeting=%s 정렬 결과의 track=%s 를 찾지 못해 건너뜁니다",
+                    meeting_id,
+                    entry["track_id"],
+                )
+                continue
+            track.offset_ms = entry["offset_ms"]
+
+        # 요약은 회의 행에 남는다. 근거 발화는 utterances 에 이미 있다.
+        meeting.summary = payload.get("summary") or None
 
         # 사람이 검토해야 하므로 confirmed 가 아니라 needs_review 다.
         # 승인 전에는 절대 tasks 로 넘어가지 않는다.

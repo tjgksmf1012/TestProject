@@ -24,6 +24,12 @@
 export interface Candidate {
   id: number;
   title: string;
+  /**
+   * 회의에서 실제로 불린 이름. `assignee_id` 가 null 일 때 사람이 누구를
+   * 골라야 하는지 아는 유일한 단서다 — 담당자 칸이 그냥 비어 있는 것과,
+   * "회의에서는 '민수님' 이라고 했다" 를 아는 것은 전혀 다른 작업이다.
+   */
+  assignee_hint?: string | null;
   assignee_id: number | null;
   /** ISO 날짜 `YYYY-MM-DD`. 시각 성분이 없다. */
   deadline: string | null;
@@ -31,6 +37,14 @@ export interface Candidate {
   /** 이 후보의 근거가 된 발화. 비어 있으면 환각이다 (docs/04 §4.1). */
   evidence_utterance_ids: number[];
   review_status: string;
+  /**
+   * 서버가 확신도를 깎은 이유. 숫자 0.34 만으로는 무엇을 확인해야 할지
+   * 알 수 없다 — "담당자 미확정" 과 "마감일이 회의일보다 이전" 은 손봐야
+   * 할 곳이 다르다.
+   *
+   * 선택 필드인 이유: 이 컬럼이 생기기 전에 저장된 후보는 빈 배열이다.
+   */
+  warnings?: string[];
 }
 
 export type Decision = 'pending' | 'approve' | 'reject';
@@ -139,6 +153,28 @@ export function approvalBlockers(
   }
 
   return blockers;
+}
+
+/**
+ * 사람이 이 후보를 왜 들여다봐야 하는지. 서버 경고를 그대로 쓴다.
+ *
+ * `approvalBlockers` 와 역할이 다르다. 저쪽은 **지금 승인이 되는가**를
+ * 판정하고, 사람이 화면에서 담당자를 고르면 사라진다. 이쪽은 **서버가
+ * 무엇을 확신하지 못했는가**의 기록이라 사람이 고쳐도 남아야 한다 —
+ * 남지 않으면 "왜 이 후보만 확신도가 낮았는지" 를 나중에 되짚을 수 없다.
+ *
+ * 경고가 하나도 없는데 확신도만 낮은 경우가 있다 (LLM 자체 확신도가 낮음).
+ * 그때도 빈손으로 두지 않는다 — 화면에 아무 설명 없이 빨간 표시만 뜨면
+ * 사람은 그냥 무시하게 된다.
+ */
+export function attentionReasons(candidate: Candidate): string[] {
+  const reasons = [...(candidate.warnings ?? [])];
+  if (reasons.length === 0 && candidate.confidence < LOW_CONFIDENCE) {
+    reasons.push(
+      `AI 확신도가 낮습니다 (${Math.round(candidate.confidence * 100)}%) — 근거 발화를 확인하세요`,
+    );
+  }
+  return reasons;
 }
 
 /**
