@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>회의 로비 — TeamFlow</title>
+<style>
+  :root { color-scheme: light dark; --line: #d8dbe0; --dim: #6b7280; --bad: #b91c1c; --warn: #b45309; --ok: #15803d; }
+  @media (prefers-color-scheme: dark) { :root { --line: #3a3f47; --dim: #9aa2ad; --bad: #f87171; --warn: #fbbf24; --ok: #4ade80; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 1rem; font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; max-width: 34rem; margin-inline: auto; }
+  h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+  .sub { color: var(--dim); font-size: .875rem; margin: 0 0 1.25rem; }
+  section { border: 1px solid var(--line); border-radius: .625rem; padding: .875rem 1rem; margin-bottom: 1rem; }
+  h2 { font-size: .8125rem; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 0 0 .625rem; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { display: flex; align-items: baseline; gap: .5rem; padding: .5rem 0; border-top: 1px solid var(--line); }
+  li:first-child { border-top: 0; }
+  .name { font-weight: 600; min-width: 4.5rem; }
+  .state { font-size: .8125rem; color: var(--dim); flex: 1; }
+  .granted { color: var(--ok); } .refused { color: var(--bad); } .pending { color: var(--warn); }
+  .broken .state, .at_risk .state { color: var(--warn); }
+  .broken .state { color: var(--bad); }
+  button { font: inherit; padding: .8rem 1rem; border-radius: .5rem; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; width: 100%; }
+  button.primary { background: #2563eb; color: #fff; border-color: #2563eb; font-weight: 600; }
+  button.primary:disabled { background: transparent; color: var(--dim); border-color: var(--line); font-weight: 400; cursor: not-allowed; }
+  button + button { margin-top: .5rem; }
+  .row { display: flex; gap: .5rem; } .row button { margin-top: 0; }
+  .blockers { margin: 0 0 .75rem; padding: .625rem .875rem; border-radius: .5rem; background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: .875rem; }
+  .blockers p { margin: .125rem 0; }
+  .status { font-size: .875rem; color: var(--dim); margin: .75rem 0 0; }
+  .note { font-size: .8125rem; color: var(--dim); margin-top: 1.5rem; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+</style>
+</head>
+<body>
+  <h1 id="title">회의 로비</h1>
+  <p class="sub" id="sub">불러오는 중…</p>
+
+  <section>
+    <h2>동의</h2>
+    <div id="blockers" class="blockers" hidden></div>
+    <ul id="roster"></ul>
+    <div class="row" style="margin-top:.75rem">
+      <button id="agree" class="primary">동의합니다</button>
+      <button id="refuse">거부</button>
+    </div>
+    <p class="status" id="consent-message"></p>
+  </section>
+
+  <section>
+    <h2>참가자 상태</h2>
+    <ul id="members"></ul>
+    <p class="status" id="room-message"></p>
+  </section>
+
+  <section>
+    <button id="record" class="primary" disabled>녹음 화면으로</button>
+    <button id="finish" hidden>강제 종료</button>
+    <button id="review" hidden>업무 후보 검토</button>
+  </section>
+
+  <p class="note">
+    이 화면은 <code>?meeting=1&amp;me=1</code> 로 누구인지 알려줘야 합니다 —
+    아직 로그인이 없습니다. 실제 사용 전에는 세션에서 꺼내야 합니다.
+  </p>
+
+  <script type="module" src="/lobby.js"></script>
+</body>
+</html>

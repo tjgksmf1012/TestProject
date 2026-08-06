@@ -157,15 +157,16 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **프로젝트·회의 생성 API** | ✅ | `backend/teamflow/api/main.py` |
 | **시연 데이터 + 가짜 ASR** | ✅ | `scripts/seed_demo.py`, `ASR_BACKEND=fake` |
 | 화면·API 한 오리진 (StaticFiles 마운트) | ✅ | `backend/teamflow/api/main.py` |
+| **회의 로비 화면** (동의·트랙 상태·강제 종료) | ✅ | `frontend/src/lib/lobby/`, `public/lobby.html` |
 | 인증·세션 | ⬜ | 지금은 `user_id` 를 요청 본문으로 받습니다 (시연 단계) |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 651 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 656 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 210 passed, 설치 불필요
+cd frontend && npm test                          # 235 passed, 설치 불필요
 cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
 
 cp .env.example .env                             # 시크릿 채우기
@@ -182,8 +183,13 @@ docker compose --profile app --profile llm up -d  # 앱 + LLM
 ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend --reload
 ```
 
+- `http://localhost:8000/lobby.html?meeting=1&me=1` — **회의 로비** (동의 → 상태 → 종료)
 - `http://localhost:8000/` — 녹음 화면 (실기기 실험 5)
 - `http://localhost:8000/review.html?meeting=1&reviewer=1` — 업무 후보 승인 화면
+
+로비부터 여세요. 팀원마다 `me=1`, `me=2`, `me=3` 으로 각자 열어 동의하면
+녹음 버튼이 열립니다. 회의 중에는 **누구의 폰이 끊기고 있는지**가 여기 뜹니다
+— 끝난 뒤에 알면 그 발언은 이미 사라진 뒤입니다.
 
 **화면과 API 가 같은 오리진에서 나옵니다.** FastAPI 가 `frontend/public` 을
 `/` 에 마운트하므로 터널 하나로 끝나고 CORS 설정이 필요 없습니다 — 폰에서

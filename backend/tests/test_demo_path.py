@@ -244,3 +244,57 @@ def test_health_exposes_the_fake_backend(client: TestClient):
     """
     body = client.get("/health").json()
     assert body["asr_backend"] == "fake"
+
+
+# ══════════════════════════════════════════════════════════════
+# 4. 로비 화면 — 동의 API 를 만들어 놓고 누를 곳이 없으면 절반만 끝난 것
+# ══════════════════════════════════════════════════════════════
+
+
+def test_lobby_page_is_served(client: TestClient):
+    for path in ("/lobby.html", "/lobby.js"):
+        assert client.get(path).status_code == 200, f"{path} 가 안 열립니다"
+
+
+def test_lobby_endpoints_exist(client: TestClient, seeded: dict):
+    """⭐ 화면이 부르는 두 엔드포인트가 실제로 있는가.
+
+    화면과 API 는 따로 자라기 쉽다. 화면은 타입 검사만 통과하면 되고
+    자동 테스트가 없으므로, 이 대조가 유일한 그물이다.
+    """
+    meeting_id = seeded["meeting_id"]
+
+    consent = client.get(f"/api/meetings/{meeting_id}/consent")
+    assert consent.status_code == 200
+    body = consent.json()
+    assert "roster" in body and "message" in body
+
+    tracks = client.get(f"/api/meetings/{meeting_id}/tracks")
+    assert tracks.status_code == 200
+    assert "tracks" in tracks.json()
+
+
+def test_roster_entries_have_the_fields_the_lobby_reads(client: TestClient, seeded: dict):
+    """`room.ts` 의 `RosterEntry` 와 서버 응답이 어긋나면 화면이 빈다."""
+    roster = client.get(f"/api/meetings/{seeded['meeting_id']}/consent").json()["roster"]
+    assert roster
+    for entry in roster:
+        assert {"user_id", "name", "recording"} <= set(entry)
+
+
+def test_track_entries_have_the_fields_the_lobby_reads(client: TestClient, seeded: dict):
+    """`room.ts` 의 `TrackHealth` 와 대조."""
+    tracks = client.get(f"/api/meetings/{seeded['meeting_id']}/tracks").json()["tracks"]
+    assert tracks
+    for track in tracks:
+        assert {"track_id", "user_id", "status", "coverage", "total_gap_ms"} <= set(track)
+
+
+def test_seeded_meeting_shows_a_broken_track_in_the_lobby(client: TestClient, seeded: dict):
+    """⭐ 로비의 존재 이유는 폰이 죽은 걸 **회의 중에** 보여주는 것이다.
+
+    시연 데이터에 그 경우가 없으면 화면을 열어도 보여줄 게 없다.
+    """
+    tracks = client.get(f"/api/meetings/{seeded['meeting_id']}/tracks").json()["tracks"]
+    broken = [t for t in tracks if t["coverage"] is not None and t["coverage"] < 0.8]
+    assert broken, "커버리지가 낮은 트랙이 있어야 로비가 경고를 띄웁니다"
