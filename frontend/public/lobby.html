@@ -36,6 +36,7 @@
 <body>
   <h1 id="title">회의 로비</h1>
   <p class="sub" id="sub">불러오는 중…</p>
+  <p class="sub" id="who"></p>
 
   <section>
     <h2>동의</h2>
@@ -58,11 +59,13 @@
     <button id="record" class="primary" disabled>녹음 화면으로</button>
     <button id="finish" hidden>강제 종료</button>
     <button id="review" hidden>업무 후보 검토</button>
+    <button id="logout">로그아웃</button>
   </section>
 
   <p class="note">
-    이 화면은 <code>?meeting=1&amp;me=1</code> 로 누구인지 알려줘야 합니다 —
-    아직 로그인이 없습니다. 실제 사용 전에는 세션에서 꺼내야 합니다.
+    주소에는 <code>?meeting=1</code> 만 붙습니다. <strong>내가 누구인지는
+    서버가 세션에서 읽습니다</strong> — 예전에는 <code>?me=1</code> 로
+    스스로 선언했고, 그래서 누구나 남을 사칭할 수 있었습니다.
   </p>
 
   <script type="module" src="/lobby.js"></script>

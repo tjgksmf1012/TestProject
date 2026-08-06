@@ -24,12 +24,16 @@ import {
   type RosterEntry,
   type TrackHealth,
 } from '../lib/lobby/room.ts';
+import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
 
 const params = new URLSearchParams(location.search);
 const meetingId = Number(params.get('meeting') ?? '1');
-const meId = Number(params.get('me') ?? '0');
 const apiBase = params.get('api') ?? '';
+
+// 내가 누구인지는 **서버가** 말해 준다. 예전에는 `?me=1` 을 읽었는데,
+// 그건 사용자가 자기 신원을 스스로 선언하는 구조였다.
+let meId = 0;
 
 const POLL_MS = 3_000;
 
@@ -43,8 +47,19 @@ let roster: RosterEntry[] = [];
 let tracks: TrackHealth[] = [];
 let consentMessage = '';
 
+function goToLogin(): void {
+  location.href = loginUrlFor(location.pathname + location.search);
+}
+
 async function getJson(path: string): Promise<unknown> {
-  const response = await fetch(`${apiBase}${path}`, { cache: 'no-store' });
+  const response = await fetch(`${apiBase}${path}`, {
+    cache: 'no-store',
+    credentials: 'same-origin',
+  });
+  if (isSessionExpired(response.status)) {
+    goToLogin();
+    throw new Error('로그인이 필요합니다');
+  }
   if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
   return response.json();
 }
@@ -68,16 +83,19 @@ async function refresh(): Promise<void> {
 }
 
 async function submitConsent(consented: boolean): Promise<void> {
-  if (meId <= 0) {
-    $('consent-message').textContent = '내가 누구인지 알 수 없습니다 — 주소에 ?me=... 를 붙이세요';
-    return;
-  }
   try {
     const response = await fetch(`${apiBase}/api/meetings/${meetingId}/consent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: meId, consent_type: 'recording', consented }),
+      // `user_id` 를 보내지 않는다. **동의는 본인만 한다** — 서버가 세션에서
+      // 읽으므로 남을 대신해 동의해 줄 방법이 없다.
+      body: JSON.stringify({ consent_type: 'recording', consented }),
+      credentials: 'same-origin',
     });
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
     const body = await response.json();
     if (!response.ok) {
       $('consent-message').textContent = body.detail ?? '동의를 제출하지 못했습니다';
@@ -101,6 +119,7 @@ async function forceFinish(): Promise<void> {
   try {
     const response = await fetch(`${apiBase}/api/meetings/${meetingId}/finish`, {
       method: 'POST',
+      credentials: 'same-origin',
     });
     const body = await response.json();
     $('room-message').textContent = body.message ?? '';
@@ -162,11 +181,33 @@ $('agree').addEventListener('click', () => void submitConsent(true));
 $('refuse').addEventListener('click', () => void submitConsent(false));
 $('finish').addEventListener('click', () => void forceFinish());
 $('record').addEventListener('click', () => {
-  location.href = `/index.html?meeting=${meetingId}&me=${meId}`;
+  location.href = `/index.html?meeting=${meetingId}`;
 });
 $('review').addEventListener('click', () => {
-  location.href = `/review.html?meeting=${meetingId}&reviewer=${meId}`;
+  location.href = `/review.html?meeting=${meetingId}`;
+});
+$('logout').addEventListener('click', () => {
+  void fetch(`${apiBase}/api/auth/logout`, {
+    method: 'POST',
+    credentials: 'same-origin',
+  }).then(() => {
+    location.href = '/login.html';
+  });
 });
 
-void refresh();
-setInterval(() => void refresh(), POLL_MS);
+async function start(): Promise<void> {
+  // 화면이 서버에 "나는 누구인가" 를 묻는다. 이 한 줄이 `?me=1` 을 대체한다.
+  const response = await fetch(`${apiBase}/api/auth/me`, { credentials: 'same-origin' });
+  if (!response.ok) {
+    goToLogin();
+    return;
+  }
+  const me = (await response.json()) as Me;
+  meId = me.user_id;
+  $('who').textContent = `${me.name} 님으로 로그인했습니다`;
+
+  await refresh();
+  setInterval(() => void refresh(), POLL_MS);
+}
+
+void start();

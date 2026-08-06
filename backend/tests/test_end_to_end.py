@@ -45,6 +45,8 @@ from teamflow.pipeline import runtime
 from teamflow.pipeline.meeting_pipeline import Stage, process_meeting
 from teamflow.tasks.meeting_tasks import _serialize, persist_results_task
 
+from .conftest import login_as
+
 # 2026-09-01 은 화요일. "금요일까지" → 09-04 로 풀려야 한다.
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 NOW_MS = int(NOW.timestamp() * 1000)
@@ -272,11 +274,15 @@ def record_track(
     speaking: set[int],
     seqs: range | None = None,
 ) -> int:
-    """폰 하나가 회의 내내 하는 일 전부: 참가 → 청크 업로드 → 종료 보고."""
+    """폰 하나가 회의 내내 하는 일 전부: 참가 → 청크 업로드 → 종료 보고.
+
+    로그인이 먼저다. 트랙 = 사람이 화자 라벨의 근거라, 서버는 트랙 주인을
+    요청 본문이 아니라 **세션에서** 읽는다.
+    """
+    login_as(client, user_id)
     joined = client.post(
         f"/api/meetings/{meeting_id}/tracks",
         json={
-            "user_id": user_id,
             "started_at": NOW.isoformat(),
             "device_label": "iPhone 14",
             "sample_rate": SR,
@@ -297,6 +303,15 @@ def record_track(
 
 
 def finish_track(client: TestClient, meeting_id: int, track_id: int) -> dict:
+    # 트랙 주인으로 로그인한 뒤 종료를 보고한다.
+    #
+    # 실제로는 각자의 폰이 자기 트랙을 끝내므로 이게 당연하지만, 테스트는
+    # 클라이언트 하나로 여러 사람을 흉내 내므로 쿠키가 마지막 사람에 머문다.
+    # 트랙 주인을 DB 에서 찾아 그 사람으로 바꿔 준다.
+    with db_session.session_scope() as session:
+        owner_id = session.get(m.MeetingTrack, track_id).user_id
+    login_as(client, owner_id)
+
     ended = NOW + timedelta(milliseconds=TIMESLICE * CHUNKS_PER_TRACK)
     response = client.post(
         f"/api/meetings/{meeting_id}/tracks/{track_id}/complete",
@@ -507,12 +522,10 @@ def test_approval_puts_it_on_the_kanban(processed: dict, client: TestClient):
         f"/api/meetings/{processed['meeting_id']}/candidates"
     ).json()[0]
 
+    login_as(client, processed["user_ids"][1])
     response = client.post(
         f"/api/meetings/{processed['meeting_id']}/candidates/review",
-        json={
-            "reviewer_id": processed["user_ids"][1],
-            "items": [{"candidate_id": candidate["id"], "approve": True}],
-        },
+        json={"items": [{"candidate_id": candidate["id"], "approve": True}]},
     )
 
     assert response.status_code == 200, response.text

@@ -210,7 +210,10 @@ export interface ReviewItem {
 }
 
 export interface ReviewPayload {
-  reviewer_id: number;
+  // `reviewer_id` 는 없다. 검토자는 서버가 **세션에서** 읽는다 — 승인은
+  // 이 시스템에서 사람이 개입하는 유일한 지점이고 승인된 업무는 칸반에
+  // 올라 기여도에 들어가므로, 검토자를 요청으로 정할 수 있으면 남의
+  // 이름으로 승인 기록이 남는다.
   items: ReviewItem[];
 }
 
@@ -229,7 +232,6 @@ export interface ReviewPayload {
  * @throws 결정된 항목이 없거나, 승인하려는 항목에 차단 사유가 있으면
  */
 export function buildReviewPayload(
-  reviewerId: number,
   candidates: readonly Candidate[],
   drafts: ReadonlyMap<number, Draft>,
   context: ReviewContext,
@@ -278,7 +280,7 @@ export function buildReviewPayload(
   if (items.length === 0) {
     throw new Error('결정한 후보가 없습니다');
   }
-  return { reviewer_id: reviewerId, items };
+  return { items };
 }
 
 // ══════════════════════════════════════════════════════════════

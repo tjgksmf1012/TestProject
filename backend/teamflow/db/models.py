@@ -73,7 +73,48 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     # 시스템 권한: student | instructor | admin
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="student")
+    # scrypt 해시. 형식은 `auth/passwords.py` 참조.
+    #
+    # nullable 인 이유: 인증이 생기기 전에 만들어진 사용자가 있고, 그 사람들은
+    # 비밀번호를 설정하기 전까지 **로그인할 수 없어야** 합니다. NULL 을
+    # "비밀번호 없음 = 통과" 로 읽으면 그 계정 전부가 무인증으로 열립니다 —
+    # `verify_password` 가 None 에서 False 를 돌려주는 이유입니다.
+    password_hash: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = _now()
+
+
+class UserSession(Base):
+    """로그인 세션 하나.
+
+    JWT 를 쓰지 않는 이유: **로그아웃이 안 되기 때문**입니다. 서명만으로
+    검증하는 토큰은 만료 전까지 서버가 취소할 수 없습니다. 회의 녹음에
+    접근하는 자격이라 "지금 당장 끊는다" 가 되어야 합니다 — 동의 철회와
+    같은 성격입니다(docs/07 P1).
+
+    DB 조회 한 번이 늘지만 이 규모에서는 문제가 되지 않습니다.
+    """
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = _pk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # ⚠️ 토큰 **원문이 아니라 해시**를 저장합니다.
+    #
+    # 원문을 저장하면 DB 를 한 번 읽은 사람이 그 순간부터 모든 사용자로
+    # 로그인할 수 있습니다. 비밀번호를 해싱하면서 세션 토큰을 평문으로
+    # 두면 앞의 노력이 무의미해집니다 — 토큰이 곧 그 계정이기 때문입니다.
+    #
+    # 토큰은 이미 무작위 32바이트라 사전 공격이 불가능하므로 scrypt 가
+    # 아니라 sha256 이면 충분합니다(느리게 만들 이유가 없습니다).
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = _now()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # 로그아웃 시각. 행을 지우지 않는 이유는 감사 때문입니다 — "누가 언제
+    # 로그인해 있었는가" 는 기여도 분쟁에서 확인할 거리가 됩니다.
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    user_agent: Mapped[str | None] = mapped_column(String(300))
+
+    __table_args__ = (Index("ix_user_sessions_user", "user_id"),)
 
 
 class Project(Base):

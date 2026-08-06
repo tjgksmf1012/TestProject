@@ -20,13 +20,14 @@ from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from teamflow.audio.chunk_store import ChunkStore
+from teamflow.auth import passwords
 from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
 from teamflow.db.session import get_db
 from teamflow.github import webhook as gh
 from teamflow.logging_config import configure_logging
 from teamflow.meeting.approval import ApprovalRequest
-from teamflow.services import approval_service, recording_service
+from teamflow.services import approval_service, auth_service, recording_service
 from teamflow.tasks import dispatch
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,160 @@ def server_time(response: Response) -> ServerTime:
 
 
 # ══════════════════════════════════════════════════════════════
+# 인증
+# ══════════════════════════════════════════════════════════════
+#
+# 이 구간이 생기기 전까지 서버는 **요청 본문에 적힌 `user_id` 를 그대로
+# 믿었습니다.** 누구나 남의 번호를 적어 동의를 제출하고, 남의 트랙에
+# 오디오를 올리고, 남의 이름으로 업무를 승인할 수 있었습니다. 기여도를
+# 산정하는 시스템에서 그건 기능 하나가 빠진 게 아니라 **산출물 전체가
+# 근거를 잃는** 문제입니다.
+#
+# 범위는 최소입니다 — 이메일·비밀번호 로그인과 세션 쿠키까지. 비밀번호
+# 재설정·이메일 인증·OAuth·권한 등급은 넣지 않았습니다.
+
+
+class SignupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=3, max_length=255)
+    password: str
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class MeOut(BaseModel):
+    user_id: int
+    name: str
+    email: str
+
+
+def _set_session_cookie(response: Response, token: str, settings: Settings) -> None:
+    response.set_cookie(
+        auth_service.COOKIE_NAME,
+        token,
+        max_age=auth_service.SESSION_DAYS * 24 * 3600,
+        # httponly: 스크립트가 토큰을 읽지 못하게 합니다. 이 앱은 회의
+        # 발화에서 뽑은 LLM 출력을 화면에 그리므로, XSS 가 하나라도 남아
+        # 있으면 토큰이 곧바로 새어 나갑니다.
+        httponly=True,
+        # samesite=lax: 다른 사이트에서 온 POST 에는 쿠키가 실리지 않습니다.
+        # 이 앱은 API 와 화면이 같은 오리진이라 이것으로 CSRF 가 막힙니다.
+        samesite="lax",
+        # 운영에서는 HTTPS 로만 보냅니다. 개발에서 True 로 두면 localhost
+        # (http) 에서 쿠키가 아예 저장되지 않아 로그인이 안 됩니다.
+        secure=settings.is_production,
+        path="/",
+    )
+
+
+@app.post("/api/auth/signup", response_model=MeOut, status_code=status.HTTP_201_CREATED)
+def signup(
+    payload: SignupIn, response: Response, session: DbSession, settings: AppSettings
+) -> MeOut:
+    """가입하고 곧바로 로그인 상태가 됩니다."""
+    try:
+        user = auth_service.register(
+            session, name=payload.name, email=payload.email, password=payload.password
+        )
+    except auth_service.EmailTaken as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except passwords.WeakPassword as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    token, _ = auth_service.issue_session(session, user_id=user.id)
+    _set_session_cookie(response, token, settings)
+    return MeOut(user_id=user.id, name=user.name, email=user.email)
+
+
+@app.post("/api/auth/login", response_model=MeOut)
+def login(
+    payload: LoginIn,
+    request: Request,
+    response: Response,
+    session: DbSession,
+    settings: AppSettings,
+) -> MeOut:
+    try:
+        user = auth_service.authenticate(
+            session, email=payload.email, password=payload.password
+        )
+    except auth_service.AuthError as exc:
+        # 이메일이 없는 것과 비밀번호가 틀린 것을 **같은 문구**로 답합니다.
+        # 구분해 주면 누가 가입돼 있는지 알아낼 수 있습니다.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+    token, _ = auth_service.issue_session(
+        session, user_id=user.id, user_agent=request.headers.get("user-agent")
+    )
+    _set_session_cookie(response, token, settings)
+    return MeOut(user_id=user.id, name=user.name, email=user.email)
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response, session: DbSession) -> dict[str, str]:
+    """세션을 **서버에서** 끊습니다.
+
+    쿠키만 지우면 토큰은 살아 있습니다. 그 토큰이 어딘가에 복사돼 있으면
+    로그아웃한 줄 알고 있는 동안 남이 그 계정으로 들어옵니다.
+    """
+    auth_service.revoke(session, request.cookies.get(auth_service.COOKIE_NAME))
+    response.delete_cookie(auth_service.COOKIE_NAME, path="/")
+    return {"status": "logged_out"}
+
+
+def optional_user(request: Request, session: DbSession) -> m.User | None:
+    return auth_service.resolve_session(
+        session, request.cookies.get(auth_service.COOKIE_NAME)
+    )
+
+
+def require_user(request: Request, session: DbSession) -> m.User:
+    user = optional_user(request, session)
+    if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "로그인이 필요합니다")
+    return user
+
+
+CurrentUser = Annotated[m.User, Depends(require_user)]
+
+
+@app.get("/api/auth/me", response_model=MeOut)
+def read_me(user: CurrentUser) -> MeOut:
+    """화면이 "나는 누구인가" 를 서버에 묻는 자리.
+
+    이게 없던 동안 화면은 주소창의 `?me=1` 을 읽었습니다. 즉 **자기가
+    누구인지 스스로 선언**했고, 서버는 그걸 그대로 믿었습니다.
+    """
+    return MeOut(user_id=user.id, name=user.name, email=user.email)
+
+
+def _require_project_member(session: Session, project_id: int, user: m.User) -> None:
+    """이 프로젝트 사람인가.
+
+    회의 내용·기여도는 팀 내부 자료입니다. 로그인만 확인하고 통과시키면,
+    가입만 하면 남의 팀 회의록을 읽을 수 있습니다.
+    """
+    member = session.scalars(
+        select(m.Member).where(
+            m.Member.project_id == project_id, m.Member.user_id == user.id
+        )
+    ).first()
+    if member is None:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "이 프로젝트의 구성원이 아닙니다"
+        )
+
+
+def _load_meeting_for(session: Session, meeting_id: int, user: m.User) -> m.Meeting:
+    meeting = _load_meeting(session, meeting_id)
+    _require_project_member(session, meeting.project_id, user)
+    return meeting
+
+
+# ══════════════════════════════════════════════════════════════
 # 회의 업무 후보 검토
 # ══════════════════════════════════════════════════════════════
 
@@ -141,7 +296,9 @@ class ReviewItem(BaseModel):
 
 
 class ReviewPayload(BaseModel):
-    reviewer_id: int = Field(gt=0)
+    # `reviewer_id` 는 없습니다. 승인은 **이 시스템에서 사람이 개입하는
+    # 유일한 지점**이고, 승인된 업무는 칸반에 올라 기여도에 들어갑니다.
+    # 검토자를 요청 본문으로 받으면 남의 이름으로 승인 기록이 남습니다.
     items: list[ReviewItem] = Field(min_length=1)
 
 
@@ -174,7 +331,8 @@ def _chunk_store(settings: Settings) -> ChunkStore:
 
 
 class TrackJoin(BaseModel):
-    user_id: int = Field(gt=0)
+    # `user_id` 는 없습니다. **트랙 = 사람**이 이 시스템의 화자 라벨 근거라,
+    # 남의 번호로 트랙을 만들 수 있으면 기여도가 통째로 조작 가능해집니다.
     started_at: datetime
     device_label: str | None = Field(default=None, max_length=100)
     sample_rate: int | None = Field(default=None, gt=0)
@@ -233,11 +391,15 @@ class ProjectOut(BaseModel):
 
 
 @app.post("/api/projects", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
-def create_project(payload: ProjectIn, session: DbSession) -> ProjectOut:
+def create_project(payload: ProjectIn, session: DbSession, user: CurrentUser) -> ProjectOut:
+    # 만든 사람은 반드시 구성원입니다. 빠뜨리면 자기가 만든 프로젝트를
+    # 자기가 못 봅니다 — 모든 조회가 구성원 확인을 지나기 때문입니다.
+    member_ids = [user.id, *payload.member_ids]
+
     known = set(
-        session.scalars(select(m.User.id).where(m.User.id.in_(payload.member_ids))).all()
+        session.scalars(select(m.User.id).where(m.User.id.in_(member_ids))).all()
     )
-    missing = set(payload.member_ids) - known
+    missing = set(member_ids) - known
     if missing:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"없는 사용자입니다: {sorted(missing)}"
@@ -251,7 +413,8 @@ def create_project(payload: ProjectIn, session: DbSession) -> ProjectOut:
     session.add(project)
     session.flush()
 
-    for user_id in dict.fromkeys(payload.member_ids):  # 순서 유지 + 중복 제거
+    ordered = list(dict.fromkeys(member_ids))  # 순서 유지 + 중복 제거
+    for user_id in ordered:
         session.add(
             m.Member(
                 project_id=project.id, user_id=user_id, role_shares={"developer": 1.0}
@@ -259,14 +422,14 @@ def create_project(payload: ProjectIn, session: DbSession) -> ProjectOut:
         )
     session.flush()
 
-    return ProjectOut(
-        project_id=project.id, title=project.title, member_ids=list(payload.member_ids)
-    )
+    return ProjectOut(project_id=project.id, title=project.title, member_ids=ordered)
 
 
 class MeetingIn(BaseModel):
     title: str | None = Field(default=None, max_length=200)
-    started_by: int
+    # `started_by` 는 없습니다. 녹음을 시작한 사람은 **세션에서** 나옵니다 —
+    # 통신비밀보호법상 녹음 개시자는 회의 당사자여야 하는데(L1), 그걸
+    # 요청 본문으로 받으면 아무나 남의 이름으로 회의를 열 수 있습니다.
     #: multitrack 만 받는다. 단일 마이크(모드 B)는 화자 분리 구현이 없어
     #: 만들어 두면 처리 단계에서 빈 결과가 나온다 — 만들 수 없게 막는다.
     capture_mode: str = "multitrack"
@@ -285,7 +448,7 @@ class MeetingOut(BaseModel):
     status_code=status.HTTP_201_CREATED,
 )
 def create_meeting(
-    project_id: int, payload: MeetingIn, session: DbSession
+    project_id: int, payload: MeetingIn, session: DbSession, user: CurrentUser
 ) -> MeetingOut:
     """회의를 연다. 아직 녹음은 시작되지 않는다 — 동의가 먼저다."""
     project = session.get(m.Project, project_id)
@@ -301,22 +464,14 @@ def create_meeting(
             "단일 마이크는 화자 분리 구현 후에 열립니다 (docs/04 §2).",
         )
 
-    member = session.scalars(
-        select(m.Member).where(
-            m.Member.project_id == project_id, m.Member.user_id == payload.started_by
-        )
-    ).one_or_none()
-    if member is None:
-        # 통신비밀보호법 L1 — 녹음을 시작하는 사람은 회의 당사자여야 한다.
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, "이 프로젝트의 구성원만 회의를 시작할 수 있습니다"
-        )
+    # 통신비밀보호법 L1 — 녹음을 시작하는 사람은 회의 당사자여야 한다.
+    _require_project_member(session, project_id, user)
 
     meeting = m.Meeting(
         project_id=project_id,
         title=payload.title,
         started_at=datetime.now(UTC),
-        started_by=payload.started_by,
+        started_by=user.id,
         capture_mode=payload.capture_mode,
     )
     session.add(meeting)
@@ -336,7 +491,8 @@ def create_meeting(
 
 
 class ConsentIn(BaseModel):
-    user_id: int
+    # `user_id` 는 없습니다. **동의는 본인만 할 수 있습니다** — 남의 번호를
+    # 적어 동의를 대신 제출할 수 있으면 이 게이트는 법적 방어선이 아닙니다.
     #: recording | raw_audio_retention | voiceprint_storage
     consent_type: str = "recording"
     consented: bool
@@ -351,19 +507,23 @@ class ConsentOut(BaseModel):
 
 @app.post("/api/meetings/{meeting_id}/consent", response_model=ConsentOut)
 def submit_consent(
-    meeting_id: int, payload: ConsentIn, request: Request, session: DbSession
+    meeting_id: int,
+    payload: ConsentIn,
+    request: Request,
+    session: DbSession,
+    user: CurrentUser,
 ) -> ConsentOut:
     """동의를 제출하거나 철회한다.
 
     **철회는 소급하지 않는다.** `consented=false` 는 이후 청크만 막고,
     이미 받은 오디오는 보존기간까지 남는다. 삭제는 별도 절차다 (docs/07 P6).
     """
-    _load_meeting(session, meeting_id)
+    _load_meeting_for(session, meeting_id, user)
     try:
         recording_service.submit_consent(
             session,
             meeting_id=meeting_id,
-            user_id=payload.user_id,
+            user_id=user.id,
             consent_type=payload.consent_type,
             consented=payload.consented,
             ip_address=request.client.host if request.client else None,
@@ -385,12 +545,12 @@ def submit_consent(
 
 
 @app.get("/api/meetings/{meeting_id}/consent", response_model=ConsentOut)
-def read_consent(meeting_id: int, session: DbSession) -> ConsentOut:
+def read_consent(meeting_id: int, session: DbSession, user: CurrentUser) -> ConsentOut:
     """동의 현황. **아직 응답하지 않은 사람도 보인다.**
 
     동의 행이 있는 사람만 보여주면 기다려야 할 대상이 화면에서 사라진다.
     """
-    _load_meeting(session, meeting_id)
+    _load_meeting_for(session, meeting_id, user)
     status_ = recording_service.consent_status(session, meeting_id)
     return ConsentOut(
         meeting_id=meeting_id,
@@ -417,15 +577,19 @@ class TrackOut(BaseModel):
     status_code=status.HTTP_201_CREATED,
 )
 def join_track(
-    meeting_id: int, payload: TrackJoin, session: DbSession, settings: AppSettings
+    meeting_id: int,
+    payload: TrackJoin,
+    session: DbSession,
+    settings: AppSettings,
+    user: CurrentUser,
 ) -> TrackOut:
     """회의에 트랙으로 참가한다. 새로고침해도 같은 트랙으로 이어붙는다."""
-    _load_meeting(session, meeting_id)
+    _load_meeting_for(session, meeting_id, user)
     try:
         track = recording_service.join_track(
             session,
             meeting_id=meeting_id,
-            user_id=payload.user_id,
+            user_id=user.id,
             started_at=payload.started_at,
             device_label=payload.device_label,
             sample_rate=payload.sample_rate,
@@ -447,6 +611,23 @@ def join_track(
     )
 
 
+def _own_track(session: Session, meeting_id: int, track_id: int, user: m.User) -> m.MeetingTrack:
+    """이 트랙이 **내 트랙인가**.
+
+    트랙 = 사람이 이 시스템의 화자 라벨 근거입니다. 남의 트랙에 오디오를
+    올릴 수 있으면 "이 목소리는 이 사람" 이라는 전제가 무너지고, 그 위에
+    쌓인 발언량·기여도가 전부 근거를 잃습니다.
+
+    404 를 쓰는 이유: "그 트랙은 남의 것" 이라고 알려 주면 트랙 id 를
+    훑어 누가 참가했는지 알아낼 수 있습니다. 없는 것과 남의 것을 구분해
+    답하지 않습니다.
+    """
+    track = session.get(m.MeetingTrack, track_id)
+    if track is None or track.meeting_id != meeting_id or track.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "트랙을 찾을 수 없습니다")
+    return track
+
+
 class ChunkAck(BaseModel):
     seq: int
     bytes: int
@@ -463,6 +644,7 @@ async def put_chunk(
     request: Request,
     session: DbSession,
     settings: AppSettings,
+    user: CurrentUser,
     x_client_at_ms: Annotated[int | None, Header()] = None,
 ) -> ChunkAck:
     """청크 하나를 받는다.
@@ -478,6 +660,8 @@ async def put_chunk(
             status.HTTP_400_BAD_REQUEST,
             "X-Client-At-Ms 헤더가 필요합니다 (동기화된 청크 도착 시각)",
         )
+
+    _own_track(session, meeting_id, track_id, user)
 
     data = await request.body()
     try:
@@ -511,14 +695,19 @@ class StoredChunks(BaseModel):
     response_model=StoredChunks,
 )
 def list_chunks(
-    meeting_id: int, track_id: int, session: DbSession, settings: AppSettings
+    meeting_id: int,
+    track_id: int,
+    session: DbSession,
+    settings: AppSettings,
+    user: CurrentUser,
 ) -> StoredChunks:
     """재연결 후 "어디까지 올렸나"를 묻는 엔드포인트.
 
     이게 없으면 클라이언트가 매번 처음부터 다시 올려 영영 못 따라잡는다
     (`UploadQueue.resumeWith`).
     """
-    _load_meeting(session, meeting_id)
+    _load_meeting_for(session, meeting_id, user)
+    _own_track(session, meeting_id, track_id, user)
     store = _chunk_store(settings)
     return StoredChunks(
         track_id=track_id,
@@ -562,13 +751,15 @@ def complete_track(
     payload: TrackComplete,
     session: DbSession,
     settings: AppSettings,
+    user: CurrentUser,
 ) -> TrackCompleteOut:
     """녹음 종료. 클라이언트가 계산한 품질 정보를 받아 저장한다.
 
     보고된 커버리지를 그대로 믿지 않는다 — 서버가 실제로 받은 청크 수와
     대조해서 더 나쁜 쪽을 쓴다.
     """
-    _load_meeting(session, meeting_id)
+    _load_meeting_for(session, meeting_id, user)
+    _own_track(session, meeting_id, track_id, user)
     try:
         track = recording_service.complete_track(
             session,
@@ -622,7 +813,7 @@ class FinishMeetingOut(BaseModel):
 
 @app.post("/api/meetings/{meeting_id}/finish", response_model=FinishMeetingOut)
 def finish_meeting(
-    meeting_id: int, session: DbSession, settings: AppSettings
+    meeting_id: int, session: DbSession, settings: AppSettings, user: CurrentUser
 ) -> FinishMeetingOut:
     """회의를 강제로 종료한다.
 
@@ -633,7 +824,7 @@ def finish_meeting(
     계산한 적이 없는데 정상 종료로 보이고, 그 사람의 발언량을 측정한 것처럼
     취급된다 (docs/05 §4.1.1).
     """
-    _load_meeting(session, meeting_id)
+    _load_meeting_for(session, meeting_id, user)
     aborted = recording_service.force_finish_tracks(
         session, meeting_id, ended_at=datetime.now(UTC)
     )
@@ -654,9 +845,11 @@ def finish_meeting(
 
 
 @app.get("/api/meetings/{meeting_id}/tracks")
-def list_tracks(meeting_id: int, session: DbSession) -> dict[str, Any]:
+def list_tracks(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> dict[str, Any]:
     """트랙별 상태. 승인 화면이 "이 트랙은 못 씁니다"를 띄우는 근거."""
-    _load_meeting(session, meeting_id)
+    _load_meeting_for(session, meeting_id, user)
     consent = recording_service.consent_status(session, meeting_id)
     return {
         "meeting_id": meeting_id,
@@ -683,14 +876,14 @@ class MeetingDetail(BaseModel):
 
 
 @app.get("/api/meetings/{meeting_id}", response_model=MeetingDetail)
-def get_meeting(meeting_id: int, session: DbSession) -> MeetingDetail:
+def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> MeetingDetail:
     """회의 하나. 승인 화면이 회의 요약을 보여주려면 이게 필요하다.
 
     요약은 이 시스템이 회의에서 만들어 내는 대표 산출물인데, 이 엔드포인트가
     생기기 전까지는 **DB 에 저장조차 되지 않았다.** 파이프라인이 만들어
     Celery 페이로드에 실어 보낸 뒤 저장 태스크가 읽지 않고 버렸다.
     """
-    meeting = _load_meeting(session, meeting_id)
+    meeting = _load_meeting_for(session, meeting_id, user)
     return MeetingDetail(
         id=meeting.id,
         project_id=meeting.project_id,
@@ -714,14 +907,16 @@ class MemberOut(BaseModel):
 
 
 @app.get("/api/meetings/{meeting_id}/members", response_model=list[MemberOut])
-def list_meeting_members(meeting_id: int, session: DbSession) -> list[MemberOut]:
+def list_meeting_members(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> list[MemberOut]:
     """이 회의가 속한 프로젝트의 팀원.
 
     승인 화면이 담당자를 고르려면 명단이 필요하다. 명단 없이 담당자 id 를
     직접 입력하게 하면 오타 하나로 엉뚱한 사람에게 업무가 붙는다 —
     서버가 `unknown_assignee` 로 막긴 하지만, 애초에 고를 수 있게 하는 게 맞다.
     """
-    meeting = _load_meeting(session, meeting_id)
+    meeting = _load_meeting_for(session, meeting_id, user)
     rows = session.execute(
         select(m.Member, m.User)
         .join(m.User, m.User.id == m.Member.user_id)
@@ -739,9 +934,11 @@ def list_meeting_members(meeting_id: int, session: DbSession) -> list[MemberOut]
 
 
 @app.get("/api/meetings/{meeting_id}/candidates", response_model=list[CandidateOut])
-def list_candidates(meeting_id: int, session: DbSession) -> list[CandidateOut]:
+def list_candidates(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> list[CandidateOut]:
     """검토 대기 중인 업무 후보. 확신도가 낮은 것부터 나온다."""
-    _load_meeting(session, meeting_id)
+    _load_meeting_for(session, meeting_id, user)
     rows = approval_service.pending_candidates(session, meeting_id)
     return [
         CandidateOut(
@@ -760,18 +957,20 @@ def list_candidates(meeting_id: int, session: DbSession) -> list[CandidateOut]:
 
 
 @app.post("/api/meetings/{meeting_id}/candidates/review", response_model=ReviewResult)
-def review(meeting_id: int, payload: ReviewPayload, session: DbSession) -> ReviewResult:
+def review(
+    meeting_id: int, payload: ReviewPayload, session: DbSession, user: CurrentUser
+) -> ReviewResult:
     """후보 승인/거절.
 
     **승인된 것만 칸반에 등록된다.** AI가 만든 업무가 사람을 거치지 않고
     tasks 로 가는 경로는 존재하지 않는다.
     """
-    meeting = _load_meeting(session, meeting_id)
+    meeting = _load_meeting_for(session, meeting_id, user)
 
     requests = [
         ApprovalRequest(
             candidate_id=item.candidate_id,
-            reviewer_id=payload.reviewer_id,
+            reviewer_id=user.id,
             approve=item.approve,
             title_override=item.title_override,
             assignee_override=item.assignee_override,
@@ -928,7 +1127,9 @@ class ScoreOut(BaseModel):
 
 
 @app.get("/api/projects/{project_id}/contributions", response_model=ScoreOut)
-def contributions(project_id: int, session: DbSession, settings: AppSettings) -> ScoreOut:
+def contributions(
+    project_id: int, session: DbSession, settings: AppSettings, user: CurrentUser
+) -> ScoreOut:
     """기여도 조회.
 
     저장된 점수를 읽는 게 아니라 **이벤트 로그에서 매번 재계산한다.**
@@ -944,6 +1145,9 @@ def contributions(project_id: int, session: DbSession, settings: AppSettings) ->
     # 오타 하나로 팀 전체가 0점인 것처럼 보이고, 아무 오류도 나지 않는다.
     if session.get(m.Project, project_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+
+    # 기여도는 성적에 반영될 수 있는 값입니다. 남의 팀 점수를 볼 이유가 없습니다.
+    _require_project_member(session, project_id, user)
 
     result = scoring_service.compute(session, project_id)
     return ScoreOut(

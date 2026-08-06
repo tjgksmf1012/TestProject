@@ -24,6 +24,8 @@ from teamflow.config import Settings, get_settings
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
+from .conftest import login_as
+
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 NOW_MS = int(NOW.timestamp() * 1000)
 TIMESLICE = 5_000
@@ -225,9 +227,12 @@ def grant_consent(user_ids: list[int], meeting_id: int, *, consented: bool = Tru
 
 
 def join(client: TestClient, meeting_id: int, user_id: int):
+    # 이제 서버가 "누가 요청했는가" 를 세션에서 읽는다. 트랙 주인을 요청
+    # 본문으로 정할 수 없으므로, 그 사람으로 로그인한 뒤 참가한다.
+    login_as(client, user_id)
     return client.post(
         f"/api/meetings/{meeting_id}/tracks",
-        json={"user_id": user_id, "started_at": NOW.isoformat(), "device_label": "iPhone"},
+        json={"started_at": NOW.isoformat(), "device_label": "iPhone"},
     )
 
 
@@ -670,6 +675,7 @@ def test_track_list_shows_consent_and_health(
 
 
 def test_track_list_exposes_refusals(client: TestClient, meeting: dict):
+    login_as(client, meeting["user_ids"][0])
     grant_consent(meeting["user_ids"][:2], meeting["meeting_id"])
     grant_consent(meeting["user_ids"][2:], meeting["meeting_id"], consented=False)
 
@@ -836,6 +842,7 @@ def test_finish_is_harmless_when_everyone_already_stopped(
 
 
 def test_finish_on_unknown_meeting_is_404(client: TestClient, meeting: dict):
+    login_as(client, meeting["user_ids"][0])
     assert client.post("/api/meetings/99999/finish").status_code == 404
 
 

@@ -34,6 +34,8 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import seed_demo  # noqa: E402
 
+from .conftest import login_as  # noqa: E402
+
 
 @pytest.fixture
 def engine(tmp_path: Path):
@@ -45,8 +47,15 @@ def engine(tmp_path: Path):
 
 
 @pytest.fixture
-def seeded(engine) -> dict:
-    return seed_demo.seed(reset=True)
+def seeded(engine, client: TestClient) -> dict:
+    """시연 데이터 + 첫 팀원으로 로그인.
+
+    회의 관련 조회는 전부 구성원 확인을 지난다. 로그인하지 않으면 401 이고,
+    그게 맞다 — 남의 팀 회의록이 열려 있으면 안 된다.
+    """
+    result = seed_demo.seed(reset=True)
+    login_as(client, result["user_ids"][0])
+    return result
 
 
 @pytest.fixture
@@ -106,7 +115,7 @@ def test_no_cors_middleware_is_needed(client: TestClient):
     )
 
 
-def test_unknown_path_is_404_not_a_screen(client: TestClient):
+def test_unknown_path_is_404_not_a_screen(client: TestClient, seeded: dict):
     assert client.get("/api/meetings/99999/candidates").status_code == 404
 
 
@@ -320,7 +329,7 @@ def test_meeting_endpoint_returns_the_summary(client: TestClient, seeded: dict):
     assert body["status"] == "needs_review"
 
 
-def test_unknown_meeting_is_404_not_an_empty_summary(client: TestClient, engine):
+def test_unknown_meeting_is_404_not_an_empty_summary(client: TestClient, seeded: dict):
     """없는 것을 빈 것으로 답하지 않는다."""
     assert client.get("/api/meetings/999999").status_code == 404
 
@@ -357,3 +366,56 @@ def test_seeded_tracks_carry_their_alignment_offsets(seeded: dict):
             ).all()
         ]
     assert any(o != 0 for o in offsets)
+
+
+# ══════════════════════════════════════════════════════════════
+# 5. 시연 계정으로 실제로 로그인이 되는가
+# ══════════════════════════════════════════════════════════════
+
+
+def test_seeded_accounts_can_actually_log_in(client: TestClient, seeded: dict):
+    """⭐ `seed_demo.py` 가 화면에 찍는 비밀번호가 진짜여야 한다.
+
+    안내문과 실제 값이 어긋나면 시연 자리에서 로그인이 안 된다. 그때는
+    코드를 읽을 시간이 없다 — 이 저장소에서 반복해서 나온 "문서가 안내하는
+    명령이 실제로는 동작하지 않는" 부류다.
+    """
+    for email in seeded["emails"]:
+        response = client.post(
+            "/api/auth/login", json={"email": email, "password": seed_demo.DEMO_PASSWORD}
+        )
+        assert response.status_code == 200, f"{email}: {response.text}"
+
+
+def test_login_screen_is_served_from_the_same_origin(client: TestClient):
+    """로그인 화면도 API 와 같은 서버에서 나와야 쿠키가 붙는다."""
+    response = client.get("/login.html")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+
+
+def test_the_demo_walkthrough_works_end_to_end(client: TestClient, seeded: dict):
+    """⭐ 로그인 → 로비 → 승인 화면 데이터까지 한 번에.
+
+    구간별로 200 을 확인하는 테스트는 있었지만, **로그인부터 이어서** 도는지는
+    아무도 묻지 않았다. 인증을 추가하면서 어느 한 화면만 막혀도 시연 경로가
+    끊긴다.
+    """
+    client.cookies.clear()
+    meeting_id = seeded["meeting_id"]
+
+    # 로그인 전에는 아무것도 안 보인다
+    assert client.get(f"/api/meetings/{meeting_id}/consent").status_code == 401
+
+    login = client.post(
+        "/api/auth/login",
+        json={"email": seeded["emails"][0], "password": seed_demo.DEMO_PASSWORD},
+    )
+    assert login.status_code == 200
+
+    assert client.get("/api/auth/me").json()["email"] == seeded["emails"][0]
+    assert client.get(f"/api/meetings/{meeting_id}/consent").status_code == 200
+    assert client.get(f"/api/meetings/{meeting_id}/tracks").status_code == 200
+    assert client.get(f"/api/meetings/{meeting_id}").json()["summary"]
+    assert client.get(f"/api/meetings/{meeting_id}/candidates").json()
+    assert client.get(f"/api/meetings/{meeting_id}/members").json()

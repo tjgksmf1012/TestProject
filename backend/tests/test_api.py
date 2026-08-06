@@ -25,6 +25,8 @@ from teamflow.config import Settings, get_settings
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
+from .conftest import login_as
+
 WEBHOOK_SECRET = "test-webhook-secret-do-not-use"
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 
@@ -69,8 +71,13 @@ def client(engine) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def seeded(engine) -> dict[str, int]:
-    """프로젝트 하나 + 팀원 셋 + 회의 하나 + 후보 둘."""
+def seeded(engine, client: TestClient) -> dict[str, int]:
+    """프로젝트 하나 + 팀원 셋 + 회의 하나 + 후보 둘.
+
+    **팀원 첫 사람으로 로그인까지 해 둔다.** 회의 내용·기여도는 팀 내부
+    자료라 서버가 구성원인지 확인하고, 확인의 근거는 세션이다. 예전에는
+    `reviewer_id` 를 요청 본문으로 받았고 그게 고친 결함이다.
+    """
     with db_session.session_scope() as s:
         users = [
             m.User(name="김민수", email="minsu@example.com"),
@@ -138,12 +145,15 @@ def seeded(engine) -> dict[str, int]:
         s.add_all(candidates)
         s.flush()
 
-        return {
+        result = {
             "project_id": project.id,
             "meeting_id": meeting.id,
             "user_ids": [u.id for u in users],
             "candidate_ids": [c.id for c in candidates],
         }
+
+    login_as(client, result["user_ids"][0])
+    return result
 
 
 def sign(body: bytes, secret: str = WEBHOOK_SECRET) -> str:
@@ -448,12 +458,10 @@ def test_human_override_completes_candidate(client: TestClient, seeded):
 
 def test_approval_writes_audit_log(client: TestClient, seeded):
     """불변식: 감사 로그 없는 승인은 존재할 수 없다."""
+    login_as(client, seeded["user_ids"][2])
     client.post(
         f"/api/meetings/{seeded['meeting_id']}/candidates/review",
-        json={
-            "reviewer_id": seeded["user_ids"][2],
-            "items": [{"candidate_id": seeded["candidate_ids"][0], "approve": True}],
-        },
+        json={"items": [{"candidate_id": seeded["candidate_ids"][0], "approve": True}]},
     )
     with db_session.session_scope() as s:
         logs = s.scalars(select(m.AuditLog)).all()
@@ -509,15 +517,30 @@ def test_partial_batch_failure_still_commits_successes(client: TestClient, seede
     assert len(result["failures"]) == 1
 
 
-def test_reviewer_id_must_be_positive(client: TestClient, seeded):
+def test_reviewer_cannot_be_chosen_by_the_request(client: TestClient, seeded):
+    """⭐ 요청 본문에 `reviewer_id` 를 적어도 무시된다.
+
+    예전에는 이 값을 그대로 믿었다. 승인은 이 시스템에서 사람이 개입하는
+    유일한 지점이고 승인된 업무는 칸반에 올라 기여도에 들어가므로, 검토자를
+    요청으로 정할 수 있으면 **남의 이름으로 승인 기록을 남길 수 있다.**
+
+    필드를 지운 것만으로는 부족하다 — pydantic 은 모르는 필드를 조용히
+    버리므로, 옛 클라이언트가 계속 보내도 200 이 나온다. 기록되는 검토자가
+    **세션 사용자**인지를 확인해야 한다.
+    """
+    login_as(client, seeded["user_ids"][0])
     response = client.post(
         f"/api/meetings/{seeded['meeting_id']}/candidates/review",
         json={
-            "reviewer_id": 0,
+            "reviewer_id": seeded["user_ids"][2],  # 사칭 시도
             "items": [{"candidate_id": seeded["candidate_ids"][0], "approve": True}],
         },
     )
-    assert response.status_code == 422
+    assert response.status_code == 200, response.text
+
+    with db_session.session_scope() as s:
+        log = s.scalars(select(m.AuditLog)).one()
+        assert log.actor_id == seeded["user_ids"][0]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -663,8 +686,7 @@ def test_candidate_without_evidence_cannot_be_approved(client: TestClient, seede
     response = client.post(
         f"/api/meetings/{seeded['meeting_id']}/candidates/review",
         json={
-            "reviewer_id": seeded["user_ids"][0],
-            "items": [{"candidate_id": candidate_id, "approve": True}],
+                        "items": [{"candidate_id": candidate_id, "approve": True}],
         },
     )
 

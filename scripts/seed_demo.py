@@ -38,11 +38,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from sqlalchemy import create_engine, select
 
+from teamflow.auth import passwords
 from teamflow.config import get_settings
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
 PROJECT_TITLE = "TeamFlow 시연 프로젝트"
+
+# 시연 계정 비밀번호. 운영에 쓸 값이 아니고, 이 파일은 시연 데이터 전용이다.
+DEMO_PASSWORD = "teamflow-demo"
 
 #: 회의 시작 시각. 마감일 해석("금요일까지")의 기준이 되므로 요일이 중요하다.
 #: 2026-09-01 은 화요일 — "금요일까지" 는 09-04 로 풀린다.
@@ -127,7 +131,13 @@ def seed(*, reset: bool) -> dict:
         for name, email, _login, _roles in MEMBERS:
             user = s.scalars(select(m.User).where(m.User.email == email)).first()
             if user is None:
-                user = m.User(name=name, email=email)
+                user = m.User(
+                    name=name,
+                    email=email,
+                    # 시연 계정. 비밀번호가 없으면 로그인할 수 없고,
+                    # 로그인 없이는 이제 어떤 화면도 열리지 않는다.
+                    password_hash=passwords.hash_password(DEMO_PASSWORD),
+                )
                 s.add(user)
             users.append(user)
         s.flush()
@@ -253,6 +263,7 @@ def seed(*, reset: bool) -> dict:
             "project_id": project.id,
             "meeting_id": meeting.id,
             "user_ids": user_ids,
+            "emails": [u.email for u in users],
             "candidates": 3,
         }
 
@@ -328,10 +339,16 @@ def main() -> int:
         f"· 후보 {result['candidates']}건"
     )
     print(f"  팀원 user_id: {result['user_ids']}\n")
+    print("로그인 계정 (비밀번호는 셋 다 같습니다):\n")
+    for email in result["emails"]:
+        print(f"  {email} / {DEMO_PASSWORD}")
+    print()
     print("이제 이렇게 엽니다:\n")
     print("  ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend --reload")
-    print(f"  http://localhost:8000/review.html?meeting={result['meeting_id']}"
-          f"&reviewer={result['user_ids'][0]}\n")
+    print(f"  http://localhost:8000/lobby.html?meeting={result['meeting_id']}\n")
+    print("  주소에 누구인지 적지 않습니다 — 로그인 화면으로 넘어가고,")
+    print("  그 뒤로는 서버가 세션에서 신원을 읽습니다.\n")
+    print(f"  http://localhost:8000/review.html?meeting={result['meeting_id']}\n")
     print("  후보 3건이 확신도 낮은 순으로 뜹니다 —")
     print("  담당자가 안 풀린 것과 확신도 0.34 짜리가 왜 그대로 승인되지 않는지 보세요.")
     return 0

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>로그인 — TeamFlow</title>
+<style>
+  :root { color-scheme: light dark; --line: #d8dbe0; --dim: #6b7280; --bad: #b91c1c; }
+  @media (prefers-color-scheme: dark) { :root { --line: #3a3f47; --dim: #9aa2ad; --bad: #f87171; } }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5rem 1rem;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    max-width: 22rem; margin-inline: auto;
+  }
+  h1 { font-size: 1.375rem; margin: 2rem 0 .25rem; }
+  .sub { color: var(--dim); font-size: .875rem; margin: 0 0 1.75rem; }
+  label { display: block; font-size: .8125rem; color: var(--dim); margin-bottom: .875rem; }
+  input {
+    display: block; width: 100%; margin-top: .25rem; padding: .7rem .75rem;
+    font: inherit; border: 1px solid var(--line); border-radius: .5rem;
+    background: transparent; color: inherit;
+  }
+  button {
+    font: inherit; width: 100%; padding: .8rem 1rem; border-radius: .5rem;
+    border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer;
+  }
+  #submit { background: #2563eb; color: #fff; border-color: #2563eb; font-weight: 600; margin-top: .5rem; }
+  #submit:disabled { opacity: .6; cursor: progress; }
+  #toggle { border: 0; color: var(--dim); margin-top: .75rem; text-decoration: underline; }
+  .error {
+    margin: 0 0 1rem; padding: .625rem .875rem; border-radius: .5rem; font-size: .875rem;
+    color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent);
+  }
+  .error p { margin: .125rem 0; }
+  .note { font-size: .8125rem; color: var(--dim); margin-top: 2rem; }
+</style>
+</head>
+<body>
+  <h1 id="title">로그인</h1>
+  <p class="sub">회의 녹음과 기여도는 팀 내부 자료라 로그인이 필요합니다.</p>
+
+  <div id="error" class="error" hidden></div>
+
+  <form id="form">
+    <label id="name-row" hidden>이름
+      <input id="name" type="text" autocomplete="name" />
+    </label>
+    <label>이메일
+      <input id="email" type="email" autocomplete="email" inputmode="email" />
+    </label>
+    <label>비밀번호
+      <input id="password" type="password" autocomplete="current-password" />
+    </label>
+    <button id="submit" type="submit">로그인</button>
+  </form>
+  <button id="toggle" type="button">처음이신가요? 가입하기</button>
+
+  <p class="note">
+    비밀번호는 scrypt 로 해싱해 저장하고, 세션 토큰은 원문이 아니라
+    해시만 남깁니다. 로그아웃하면 서버에서 세션을 끊습니다.
+  </p>
+
+  <script type="module" src="/login.js"></script>
+</body>
+</html>

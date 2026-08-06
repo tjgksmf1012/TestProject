@@ -160,15 +160,15 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **회의 로비 화면** (동의·트랙 상태·강제 종료) | ✅ | `frontend/src/lib/lobby/`, `public/lobby.html` |
 | **회의 요약·경고·정렬값 저장** | ✅ | `backend/teamflow/tasks/meeting_tasks.py` |
 | **로그 설정** (text/json, 개인정보 차단) | ✅ | `backend/teamflow/logging_config.py` |
-| 인증·세션 | ⬜ | 지금은 `user_id` 를 요청 본문으로 받습니다 (시연 단계) |
+| **인증·세션** (scrypt · 세션 쿠키 · 구성원 확인) | ✅ | `backend/teamflow/auth/`, `services/auth_service.py` |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 695 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 749 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 244 passed, 설치 불필요
+cd frontend && npm test                          # 264 passed, 설치 불필요
 cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
 
 cp .env.example .env                             # 시크릿 채우기
@@ -185,13 +185,18 @@ docker compose --profile app --profile llm up -d  # 앱 + LLM
 ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend --reload
 ```
 
-- `http://localhost:8000/lobby.html?meeting=1&me=1` — **회의 로비** (동의 → 상태 → 종료)
-- `http://localhost:8000/` — 녹음 화면 (실기기 실험 5)
-- `http://localhost:8000/review.html?meeting=1&reviewer=1` — 업무 후보 승인 화면
+- `http://localhost:8000/lobby.html?meeting=1` — **회의 로비** (동의 → 상태 → 종료)
+- `http://localhost:8000/?meeting=1` — 녹음 화면 (서버 트랙에 참가)
+- `http://localhost:8000/` — 녹음 화면 (서버 없이, 실기기 실험 5)
+- `http://localhost:8000/review.html?meeting=1` — 업무 후보 승인 화면
 
-로비부터 여세요. 팀원마다 `me=1`, `me=2`, `me=3` 으로 각자 열어 동의하면
-녹음 버튼이 열립니다. 회의 중에는 **누구의 폰이 끊기고 있는지**가 여기 뜹니다
-— 끝난 뒤에 알면 그 발언은 이미 사라진 뒤입니다.
+**주소에 자기가 누구인지 적지 않습니다.** 로그인 화면으로 넘어가고, 그
+뒤로는 서버가 세션 쿠키에서 신원을 읽습니다. 시연 계정은 `seed_demo.py` 가
+찍어 줍니다 (비밀번호 `teamflow-demo`).
+
+로비부터 여세요. 팀원마다 다른 브라우저(또는 시크릿 창)로 각자 로그인해
+동의하면 녹음 버튼이 열립니다. 회의 중에는 **누구의 폰이 끊기고 있는지**가
+여기 뜹니다 — 끝난 뒤에 알면 그 발언은 이미 사라진 뒤입니다.
 
 **화면과 API 가 같은 오리진에서 나옵니다.** FastAPI 가 `frontend/public` 을
 `/` 에 마운트하므로 터널 하나로 끝나고 CORS 설정이 필요 없습니다 — 폰에서

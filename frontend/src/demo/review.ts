@@ -27,6 +27,7 @@ import {
   type Draft,
   type ReviewContext,
 } from '../lib/review/candidates.ts';
+import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
 import { attr, escapeHtml } from '../lib/html.ts';
 
 interface Member {
@@ -44,7 +45,6 @@ interface MeetingInfo {
 const params = new URLSearchParams(location.search);
 const apiBase = params.get('api') ?? '';
 const meetingId = Number(params.get('meeting') ?? '1');
-const reviewerId = Number(params.get('reviewer') ?? '1');
 
 const drafts = new Map<number, Draft>();
 let candidates: Candidate[] = [];
@@ -81,12 +81,23 @@ function update(id: number, patch: Partial<Draft>): void {
 
 // ── 불러오기 ────────────────────────────────────────────────
 
+function goToLogin(): void {
+  location.href = loginUrlFor(location.pathname + location.search);
+}
+
+const get = (path: string): Promise<Response> =>
+  fetch(`${apiBase}${path}`, { credentials: 'same-origin' });
+
 async function load(): Promise<void> {
   const [candidateRes, memberRes, meetingRes] = await Promise.all([
-    fetch(`${apiBase}/api/meetings/${meetingId}/candidates`),
-    fetch(`${apiBase}/api/meetings/${meetingId}/members`),
-    fetch(`${apiBase}/api/meetings/${meetingId}`),
+    get(`/api/meetings/${meetingId}/candidates`),
+    get(`/api/meetings/${meetingId}/members`),
+    get(`/api/meetings/${meetingId}`),
   ]);
+  if ([candidateRes, memberRes, meetingRes].some((r) => isSessionExpired(r.status))) {
+    goToLogin();
+    return;
+  }
   if (!candidateRes.ok) throw new Error(`후보 조회 실패 (HTTP ${candidateRes.status})`);
   if (!memberRes.ok) throw new Error(`팀원 조회 실패 (HTTP ${memberRes.status})`);
   if (!meetingRes.ok) throw new Error(`회의 조회 실패 (HTTP ${meetingRes.status})`);
@@ -244,7 +255,7 @@ function wireCards(): void {
 $('submit').addEventListener('click', async () => {
   let payload;
   try {
-    payload = buildReviewPayload(reviewerId, candidates, drafts, context);
+    payload = buildReviewPayload(candidates, drafts, context);
   } catch (error) {
     alert(error instanceof Error ? error.message : String(error));
     return;
@@ -254,7 +265,13 @@ $('submit').addEventListener('click', async () => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    credentials: 'same-origin',
   });
+
+  if (isSessionExpired(response.status)) {
+    goToLogin();
+    return;
+  }
 
   if (!response.ok) {
     $('result').textContent = `제출 실패 (HTTP ${response.status})`;
@@ -279,7 +296,18 @@ $('submit').addEventListener('click', async () => {
   await load();
 });
 
-load().catch((error: unknown) => {
+async function start(): Promise<void> {
+  const response = await get('/api/auth/me');
+  if (!response.ok) {
+    goToLogin();
+    return;
+  }
+  const me = (await response.json()) as Me;
+  $('who').textContent = `${me.name} 님이 검토하고 있습니다`;
+  await load();
+}
+
+start().catch((error: unknown) => {
   $('result').className = 'bad';
   $('result').textContent = error instanceof Error ? error.message : String(error);
 });

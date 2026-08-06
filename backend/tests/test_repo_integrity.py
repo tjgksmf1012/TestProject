@@ -143,3 +143,40 @@ def test_audio_storage_paths_are_still_ignored():
     ignored = set(_ignored([Path(p) for p in must_ignore]))
     for path in must_ignore:
         assert path in ignored, f"{path} 가 무시되지 않습니다 — 음성이 커밋될 수 있습니다"
+
+
+def test_every_script_the_screens_load_is_in_the_repository():
+    """⭐ clone 하고 uvicorn 만 띄우면 화면이 떠야 한다.
+
+    이게 없던 동안 `frontend/public/main.js` 와 `review.js` 가 .gitignore
+    에 들어 있었다. README 가 안내하는 대로
+
+        clone → seed_demo.py → uvicorn → http://localhost:8000/review.html
+
+    을 따라가면 **HTML 은 뜨는데 스크립트가 404 라 빈 화면**이었다. 오류도
+    안 난다 — 이 저장소에서 반복해서 나오는 "문서가 안내하는 대로 했는데
+    동작하지 않는" 부류다.
+
+    프런트에 런타임 의존성이 0개인 게 이 프로젝트의 선택이고, "Node 없이
+    연다" 가 시연 경로의 전제다. 그러니 번들을 커밋한다. 소스를 고치면
+    `npm run build:demo` 로 다시 만들어 같이 커밋해야 한다.
+    """
+    import re
+
+    public = REPO_ROOT / "frontend" / "public"
+    tracked = _tracked()
+    missing = []
+
+    for page in sorted(public.glob("*.html")):
+        for src in re.findall(r'<script[^>]+src="([^"]+)"', page.read_text()):
+            if src.startswith(("http://", "https://", "//")):
+                continue
+            target = (public / src.lstrip("./").lstrip("/")).resolve()
+            rel = target.relative_to(REPO_ROOT)
+            if rel not in tracked:
+                missing.append(f"{page.name} → {src}")
+
+    assert not missing, (
+        "화면이 부르는 스크립트가 저장소에 없습니다. clone 하면 빈 화면입니다:\n"
+        + "\n".join(f"  {m}" for m in missing)
+    )

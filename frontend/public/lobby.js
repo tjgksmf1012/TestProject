@@ -130,6 +130,14 @@ function roomStatus(statuses) {
   };
 }
 
+// src/lib/auth/session.ts
+function loginUrlFor(pathWithQuery) {
+  return `/login.html?next=${encodeURIComponent(pathWithQuery)}`;
+}
+function isSessionExpired(status) {
+  return status === 401;
+}
+
 // src/lib/html.ts
 var ESCAPES = {
   "&": "&amp;",
@@ -145,8 +153,8 @@ function escapeHtml(text) {
 // src/demo/lobby.ts
 var params = new URLSearchParams(location.search);
 var meetingId = Number(params.get("meeting") ?? "1");
-var meId = Number(params.get("me") ?? "0");
 var apiBase = params.get("api") ?? "";
+var meId = 0;
 var POLL_MS = 3e3;
 var $ = (id) => {
   const el = document.getElementById(id);
@@ -156,8 +164,18 @@ var $ = (id) => {
 var roster = [];
 var tracks = [];
 var consentMessage = "";
+function goToLogin() {
+  location.href = loginUrlFor(location.pathname + location.search);
+}
 async function getJson(path) {
-  const response = await fetch(`${apiBase}${path}`, { cache: "no-store" });
+  const response = await fetch(`${apiBase}${path}`, {
+    cache: "no-store",
+    credentials: "same-origin"
+  });
+  if (isSessionExpired(response.status)) {
+    goToLogin();
+    throw new Error("로그인이 필요합니다");
+  }
   if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
   return response.json();
 }
@@ -176,16 +194,19 @@ async function refresh() {
   }
 }
 async function submitConsent(consented) {
-  if (meId <= 0) {
-    $("consent-message").textContent = "내가 누구인지 알 수 없습니다 — 주소에 ?me=... 를 붙이세요";
-    return;
-  }
   try {
     const response = await fetch(`${apiBase}/api/meetings/${meetingId}/consent`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: meId, consent_type: "recording", consented })
+      // `user_id` 를 보내지 않는다. **동의는 본인만 한다** — 서버가 세션에서
+      // 읽으므로 남을 대신해 동의해 줄 방법이 없다.
+      body: JSON.stringify({ consent_type: "recording", consented }),
+      credentials: "same-origin"
     });
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
     const body = await response.json();
     if (!response.ok) {
       $("consent-message").textContent = body.detail ?? "동의를 제출하지 못했습니다";
@@ -205,7 +226,8 @@ async function forceFinish() {
   if (!ok) return;
   try {
     const response = await fetch(`${apiBase}/api/meetings/${meetingId}/finish`, {
-      method: "POST"
+      method: "POST",
+      credentials: "same-origin"
     });
     const body = await response.json();
     $("room-message").textContent = body.message ?? "";
@@ -248,10 +270,29 @@ $("agree").addEventListener("click", () => void submitConsent(true));
 $("refuse").addEventListener("click", () => void submitConsent(false));
 $("finish").addEventListener("click", () => void forceFinish());
 $("record").addEventListener("click", () => {
-  location.href = `/index.html?meeting=${meetingId}&me=${meId}`;
+  location.href = `/index.html?meeting=${meetingId}`;
 });
 $("review").addEventListener("click", () => {
-  location.href = `/review.html?meeting=${meetingId}&reviewer=${meId}`;
+  location.href = `/review.html?meeting=${meetingId}`;
 });
-void refresh();
-setInterval(() => void refresh(), POLL_MS);
+$("logout").addEventListener("click", () => {
+  void fetch(`${apiBase}/api/auth/logout`, {
+    method: "POST",
+    credentials: "same-origin"
+  }).then(() => {
+    location.href = "/login.html";
+  });
+});
+async function start() {
+  const response = await fetch(`${apiBase}/api/auth/me`, { credentials: "same-origin" });
+  if (!response.ok) {
+    goToLogin();
+    return;
+  }
+  const me = await response.json();
+  meId = me.user_id;
+  $("who").textContent = `${me.name} 님으로 로그인했습니다`;
+  await refresh();
+  setInterval(() => void refresh(), POLL_MS);
+}
+void start();

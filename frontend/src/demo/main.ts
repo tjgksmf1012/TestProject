@@ -26,6 +26,7 @@ import {
 import { RecordingClient, type RecordingSummary } from '../lib/recording/client.ts';
 import { blockers as sessionBlockers } from '../lib/recording/session.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
+import { isSessionExpired, loginUrlFor, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
 import type { SyncTransport } from '../lib/recording/client.ts';
 import type { PendingChunk, UploadTransport } from '../lib/recording/upload-queue.ts';
@@ -61,15 +62,32 @@ class LocalUploadTransport implements UploadTransport {
 }
 
 const params = new URLSearchParams(location.search);
-const apiBase = params.get('api');
-const trackUrl = params.get('track');
+const apiBase = params.get('api') ?? '';
+const meetingId = params.get('meeting');
+
+// `?track=` 은 손으로 트랙 주소를 넣는 옛 경로다. `?meeting=` 이 있으면
+// 아래 `joinMeeting()` 이 로그인한 사람의 트랙을 서버에서 받아 온다.
+let trackUrl = params.get('track');
 
 const localUpload = new LocalUploadTransport();
+const httpUpload = new HttpUploadTransport('');
+
+/**
+ * `?meeting=` 없이 열면 **서버 없이도 끝까지 돈다.**
+ *
+ * 실험 5의 목적은 "폰이 한 시간을 버티는가" 이지 네트워크가 아니다.
+ * 서버를 세워야만 돌아가는 실험은 결국 안 돌리게 된다.
+ */
 const client = new RecordingClient({
   monotonic: () => performance.now(),
   media: new BrowserMediaAdapter(),
-  sync: apiBase ? new HttpSyncTransport(apiBase) : new LocalSyncTransport(),
-  upload: trackUrl ? new HttpUploadTransport(trackUrl) : localUpload,
+  sync: apiBase || meetingId ? new HttpSyncTransport(apiBase) : new LocalSyncTransport(),
+  upload: {
+    async send(chunk) {
+      if (!trackUrl) return localUpload.send(chunk);
+      return httpUpload.send(chunk);
+    },
+  },
   timesliceMs: 5_000,
   onStateChange: () => render(),
 });
@@ -126,6 +144,48 @@ $('consent').addEventListener('click', () => {
   // 실제 서비스에서는 서버가 참여자 전원의 동의를 확인해야 한다 (docs/07 §1).
   client.setConsent('all_confirmed');
 });
+
+/**
+ * 회의에 트랙으로 참가한다.
+ *
+ * 트랙 주인은 **서버가 세션에서 정한다** — 예전에는 `?me=1` 로 화면이
+ * 선언했고, 그래서 남의 트랙에 목소리를 올릴 수 있었다.
+ */
+async function joinMeeting(id: string): Promise<void> {
+  const me = await fetch(`${apiBase}/api/auth/me`, { credentials: 'same-origin' });
+  if (!me.ok) {
+    location.href = loginUrlFor(location.pathname + location.search);
+    return;
+  }
+  $('who').textContent = `${((await me.json()) as Me).name} 님의 트랙으로 녹음합니다`;
+
+  const response = await fetch(`${apiBase}/api/meetings/${id}/tracks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      started_at: new Date().toISOString(),
+      device_label: navigator.userAgent.slice(0, 100),
+    }),
+    credentials: 'same-origin',
+  });
+
+  if (isSessionExpired(response.status)) {
+    location.href = loginUrlFor(location.pathname + location.search);
+    return;
+  }
+  if (!response.ok) {
+    const detail = await response.text();
+    $('who').textContent = `트랙에 참가하지 못했습니다: ${detail}`;
+    return;
+  }
+
+  const track = (await response.json()) as { track_id: number };
+  trackUrl = `${apiBase}/api/meetings/${id}/tracks/${track.track_id}`;
+  httpUpload.retarget(trackUrl);
+  render();
+}
+
+if (meetingId) void joinMeeting(meetingId);
 
 $('permission').addEventListener('click', async () => {
   await client.requestMicrophone();

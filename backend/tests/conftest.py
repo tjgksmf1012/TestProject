@@ -183,3 +183,34 @@ def dev_profiles() -> dict[int, object]:
         1: DEFAULT_PROFILES[Role.DEVELOPER],
         2: DEFAULT_PROFILES[Role.DEVELOPER],
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# 로그인 헬퍼
+# ══════════════════════════════════════════════════════════════
+#
+# 인증이 생기기 전에는 HTTP 테스트가 `user_id` 를 요청 본문에 적었습니다.
+# 그게 **정확히 고친 결함**이라, 테스트도 이제 로그인을 거쳐야 합니다.
+#
+# 비밀번호를 태우지 않고 세션을 직접 발급하는 이유: scrypt 는 일부러
+# 느리게 만든 함수이고(16MiB), HTTP 테스트 수십 개가 매번 그걸 돌면
+# 스위트가 눈에 띄게 느려집니다. 비밀번호 검증 경로는 `test_auth.py` 가
+# 따로 잽니다 — 여기서 확인할 것은 **세션이 없으면 막히는가**입니다.
+
+
+def login_as(client, user_id: int) -> str:
+    """이 클라이언트를 이 사용자로 로그인시킨다. 토큰을 돌려준다."""
+    from teamflow.db import session as db_session
+    from teamflow.services import auth_service
+
+    with db_session.session_scope() as session:
+        token, _ = auth_service.issue_session(session, user_id=user_id)
+
+    client.cookies.set(auth_service.COOKIE_NAME, token)
+    return token
+
+
+def logout(client) -> None:
+    from teamflow.services import auth_service
+
+    client.cookies.delete(auth_service.COOKIE_NAME)

@@ -30,6 +30,8 @@ from teamflow.config import Settings, get_settings
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
+from .conftest import login_as
+
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 
 
@@ -75,6 +77,9 @@ def users(engine) -> list[int]:
 @pytest.fixture
 def meeting(client: TestClient, users: list[int]) -> dict:
     """API 로만 만든다 — 이 경로가 실제로 도는지가 이 파일의 절반이다."""
+    # 만드는 사람도 로그인해야 한다. 프로젝트 소유자를 요청 본문으로
+    # 받으면 아무나 남을 팀에 넣고 그 팀의 회의를 열 수 있다.
+    login_as(client, users[0])
     project = client.post(
         "/api/projects", json={"title": "TeamFlow", "member_ids": users[:3]}
     )
@@ -82,8 +87,7 @@ def meeting(client: TestClient, users: list[int]) -> dict:
     project_id = project.json()["project_id"]
 
     created = client.post(
-        f"/api/projects/{project_id}/meetings",
-        json={"title": "1주차", "started_by": users[0]},
+        f"/api/projects/{project_id}/meetings", json={"title": "1주차"}
     )
     assert created.status_code == 201, created.text
     return {
@@ -95,16 +99,19 @@ def meeting(client: TestClient, users: list[int]) -> dict:
 
 
 def consent(client: TestClient, meeting_id: int, user_id: int, *, ok: bool = True):
+    # **동의는 본인만 한다.** 그래서 대신 제출할 방법이 없고, 헬퍼도
+    # 그 사람으로 로그인한 뒤에야 부를 수 있다.
+    login_as(client, user_id)
     return client.post(
         f"/api/meetings/{meeting_id}/consent",
-        json={"user_id": user_id, "consent_type": "recording", "consented": ok},
+        json={"consent_type": "recording", "consented": ok},
     )
 
 
 def join(client: TestClient, meeting_id: int, user_id: int):
+    login_as(client, user_id)
     return client.post(
-        f"/api/meetings/{meeting_id}/tracks",
-        json={"user_id": user_id, "started_at": NOW.isoformat()},
+        f"/api/meetings/{meeting_id}/tracks", json={"started_at": NOW.isoformat()}
     )
 
 
@@ -119,6 +126,7 @@ def test_project_and_meeting_can_be_created_over_http(meeting: dict):
 
 
 def test_project_rejects_unknown_members(client: TestClient, users: list[int]):
+    login_as(client, users[0])
     response = client.post(
         "/api/projects", json={"title": "X", "member_ids": [users[0], 99_999]}
     )
@@ -128,12 +136,12 @@ def test_project_rejects_unknown_members(client: TestClient, users: list[int]):
 
 def test_only_members_can_start_a_meeting(client: TestClient, meeting: dict):
     """통신비밀보호법 L1 — 녹음을 시작하는 사람은 회의 당사자여야 한다."""
+    login_as(client, meeting["outsider"])
     response = client.post(
-        f"/api/projects/{meeting['project_id']}/meetings",
-        json={"started_by": meeting["outsider"]},
+        f"/api/projects/{meeting['project_id']}/meetings", json={}
     )
     assert response.status_code == 403
-    assert "구성원만" in response.json()["detail"]
+    assert "구성원이 아닙니다" in response.json()["detail"]
 
 
 def test_single_mic_mode_is_refused(client: TestClient, meeting: dict):
@@ -142,9 +150,10 @@ def test_single_mic_mode_is_refused(client: TestClient, meeting: dict):
     화자 분리(`build_diarizer`)가 미구현이기 때문이다. 못 만들게 막는 게
     "만들어 놓고 나중에 빈 회의록을 보는 것" 보다 낫다.
     """
+    login_as(client, meeting["members"][0])
     response = client.post(
         f"/api/projects/{meeting['project_id']}/meetings",
-        json={"started_by": meeting["members"][0], "capture_mode": "single"},
+        json={"capture_mode": "single"},
     )
     assert response.status_code == 400
     assert "멀티트랙" in response.json()["detail"]
@@ -404,12 +413,13 @@ def test_candidate_from_another_meeting_is_refused(client: TestClient, meeting: 
         assert s.get(m.Meeting, other_id) is not None
 
 
-def test_unknown_project_contributions_is_404(client: TestClient):
+def test_unknown_project_contributions_is_404(client: TestClient, users: list[int]):
     """⭐ 재계산 방식이라 없는 프로젝트도 "이벤트 0건 → 빈 결과" 로 계산된다.
 
     화면은 그걸 "기여도가 없는 프로젝트" 로 그린다 — 오타 하나로 팀 전체가
     0점인 것처럼 보이고 아무 오류도 나지 않는다.
     """
+    login_as(client, users[0])
     assert client.get("/api/projects/99999/contributions").status_code == 404
 
 

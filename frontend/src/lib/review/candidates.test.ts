@@ -133,13 +133,14 @@ describe('buildReviewPayload', () => {
   it('결정한 것만 담는다', () => {
     const list = [candidate({ id: 1 }), candidate({ id: 2 }), candidate({ id: 3 })];
     const payload = buildReviewPayload(
-      7,
       list,
       drafts([1, { decision: 'approve' }], [3, { decision: 'reject' }]),
       CONTEXT,
     );
 
-    assert.equal(payload.reviewer_id, 7);
+    // ⭐ 검토자는 페이로드에 없다. 서버가 세션에서 읽는다 — 요청으로
+    // 정할 수 있으면 남의 이름으로 승인 기록이 남는다.
+    assert.equal('reviewer_id' in payload, false);
     assert.deepEqual(
       payload.items.map((i) => [i.candidate_id, i.approve]),
       [
@@ -153,7 +154,6 @@ describe('buildReviewPayload', () => {
     // 원본과 같은 값을 override 로 보내면 감사 로그에 "사람이 바꿨다"로
     // 남는다. 안 바꿨는데 바꿨다고 기록되면 분쟁의 근거가 뒤틀린다.
     const payload = buildReviewPayload(
-      7,
       [candidate({ id: 1 })],
       drafts([
         1,
@@ -172,7 +172,6 @@ describe('buildReviewPayload', () => {
 
   it('실제로 바꾼 값만 override 로 나간다', () => {
     const payload = buildReviewPayload(
-      7,
       [candidate({ id: 1 })],
       drafts([
         1,
@@ -191,7 +190,6 @@ describe('buildReviewPayload', () => {
 
   it('공백만 있는 메모는 보내지 않는다', () => {
     const payload = buildReviewPayload(
-      7,
       [candidate({ id: 1 })],
       drafts([1, { decision: 'approve', note: '   ' }]),
       CONTEXT,
@@ -205,7 +203,6 @@ describe('buildReviewPayload', () => {
     assert.throws(
       () =>
         buildReviewPayload(
-          7,
           [candidate({ id: 1, assignee_id: null })],
           drafts([1, { decision: 'approve' }]),
           CONTEXT,
@@ -217,7 +214,6 @@ describe('buildReviewPayload', () => {
   it('거절은 불완전해도 보낼 수 있다', () => {
     // "이건 업무가 아니다" 라는 판단은 담당자가 없어도 할 수 있어야 한다.
     const payload = buildReviewPayload(
-      7,
       [candidate({ id: 1, assignee_id: null, deadline: null })],
       drafts([1, { decision: 'reject', note: '이미 완료된 일' }]),
       CONTEXT,
@@ -232,14 +228,13 @@ describe('buildReviewPayload', () => {
 
   it('아무것도 결정하지 않으면 던진다 — 서버가 빈 목록을 거부한다', () => {
     assert.throws(
-      () => buildReviewPayload(7, [candidate()], drafts(), CONTEXT),
+      () => buildReviewPayload([candidate()], drafts(), CONTEXT),
       /결정한 후보가 없습니다/,
     );
   });
 
   it('제목만 바꿔도 반영된다', () => {
     const payload = buildReviewPayload(
-      7,
       [candidate({ id: 1 })],
       drafts([1, { decision: 'approve', titleOverride: '  로그인 API + 소셜 로그인  ' }]),
       CONTEXT,
@@ -387,7 +382,7 @@ describe('실제 검토 시나리오', () => {
     assert.equal(canSubmit(summary), true);
 
     // 5) 채운 값만 override 로 나간다
-    const payload = buildReviewPayload(7, list, state, CONTEXT);
+    const payload = buildReviewPayload(list, state, CONTEXT);
     assert.deepEqual(payload.items, [
       { candidate_id: 1, approve: true, assignee_override: 3, deadline_override: '2026-09-15' },
       { candidate_id: 2, approve: true },
