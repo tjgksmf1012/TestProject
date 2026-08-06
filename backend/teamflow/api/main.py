@@ -59,6 +59,18 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         settings.asr_backend,
         settings.llm_backend,
     )
+    # ⚠️ 화면이 없으면 **여기서** 말한다.
+    #
+    # `_mount_frontend` 는 import 시점에 돌고, 로깅은 방금 위에서야
+    # 설정된다. 그래서 거기서 찍은 안내는 `logging.lastResort`(WARNING)
+    # 에 걸려 사라졌다 — 즉 컨테이너에서 모든 화면이 404 인데 그 사실을
+    # 알리는 유일한 로그가 버려지고 있었다.
+    if FRONTEND_DIR is None:
+        logger.warning(
+            "정적 파일 디렉터리가 없어 화면을 서빙하지 않습니다: %s — "
+            "이 서버로 열면 모든 화면이 404 입니다",
+            FRONTEND_EXPECTED_AT,
+        )
     yield
 
 
@@ -146,7 +158,45 @@ class MeOut(BaseModel):
     email: str
 
 
-def _set_session_cookie(response: Response, token: str, settings: Settings) -> None:
+def should_mark_cookie_secure(
+    *, is_production: bool, scheme: str, forwarded_proto: str | None
+) -> bool:
+    """세션 쿠키에 `Secure` 를 붙일 것인가.
+
+    ⚠️ 예전에는 `settings.is_production` 하나만 봤습니다. 그런데 **그
+    "운영" 을 만드는 방법이 저장소에 없었습니다** — `.env.example` 은
+    `ENVIRONMENT=development` 로 고정이고 docker-compose 도 덮어쓰지
+    않습니다. 즉 이 코드가 실제로 뜨는 모든 경우에 `Secure` 가 빠졌고,
+    14일짜리 세션 토큰이 평문으로 나갈 수 있었습니다. `httponly` 로 XSS
+    를 막아 둔 바로 그 토큰인데 전송 구간만 벗겨져 있었습니다.
+
+    설정값 하나에 안전이 걸려 있고 그 값을 켜는 경로가 없으면, 그건
+    안전장치가 아니라 장식입니다. 그래서 **실제 연결을 봅니다.**
+
+    이 프로젝트의 배포는 Cloudflare Tunnel 이라 앱이 보는 스킴은 http
+    입니다. 터널이 붙여 주는 `X-Forwarded-Proto` 가 진짜 스킴입니다.
+    그 헤더를 믿어도 되는 이유: 공격자가 헤더를 넣어도 결과는 쿠키가
+    **더** 엄격해지는 것뿐입니다(브라우저가 http 로는 안 보냄). 반대로
+    느슨해지게 만들 수는 없습니다 — 진짜 HTTPS 면 프록시가 이 헤더를
+    자기 값으로 덮어씁니다.
+
+    localhost 개발에서는 붙이지 않습니다. 붙이면 http 라 브라우저가
+    쿠키를 아예 저장하지 않아 로그인이 안 됩니다.
+    """
+    if is_production:
+        return True
+    if scheme == "https":
+        return True
+    if forwarded_proto:
+        # `X-Forwarded-Proto: https, http` 처럼 여러 개가 올 수 있다.
+        # 클라이언트에 가장 가까운 것이 맨 앞이다.
+        return forwarded_proto.split(",")[0].strip().lower() == "https"
+    return False
+
+
+def _set_session_cookie(
+    response: Response, token: str, settings: Settings, request: Request | None = None
+) -> None:
     response.set_cookie(
         auth_service.COOKIE_NAME,
         token,
@@ -158,16 +208,24 @@ def _set_session_cookie(response: Response, token: str, settings: Settings) -> N
         # samesite=lax: 다른 사이트에서 온 POST 에는 쿠키가 실리지 않습니다.
         # 이 앱은 API 와 화면이 같은 오리진이라 이것으로 CSRF 가 막힙니다.
         samesite="lax",
-        # 운영에서는 HTTPS 로만 보냅니다. 개발에서 True 로 두면 localhost
-        # (http) 에서 쿠키가 아예 저장되지 않아 로그인이 안 됩니다.
-        secure=settings.is_production,
+        secure=should_mark_cookie_secure(
+            is_production=settings.is_production,
+            scheme=request.url.scheme if request else "http",
+            forwarded_proto=(
+                request.headers.get("x-forwarded-proto") if request else None
+            ),
+        ),
         path="/",
     )
 
 
 @app.post("/api/auth/signup", response_model=MeOut, status_code=status.HTTP_201_CREATED)
 def signup(
-    payload: SignupIn, response: Response, session: DbSession, settings: AppSettings
+    payload: SignupIn,
+    request: Request,
+    response: Response,
+    session: DbSession,
+    settings: AppSettings,
 ) -> MeOut:
     """가입하고 곧바로 로그인 상태가 됩니다."""
     try:
@@ -179,8 +237,10 @@ def signup(
     except passwords.WeakPassword as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
-    token, _ = auth_service.issue_session(session, user_id=user.id)
-    _set_session_cookie(response, token, settings)
+    token, _ = auth_service.issue_session(
+        session, user_id=user.id, user_agent=request.headers.get("user-agent")
+    )
+    _set_session_cookie(response, token, settings, request)
     return MeOut(user_id=user.id, name=user.name, email=user.email)
 
 
@@ -204,7 +264,7 @@ def login(
     token, _ = auth_service.issue_session(
         session, user_id=user.id, user_agent=request.headers.get("user-agent")
     )
-    _set_session_cookie(response, token, settings)
+    _set_session_cookie(response, token, settings, request)
     return MeOut(user_id=user.id, name=user.name, email=user.email)
 
 
@@ -1695,13 +1755,18 @@ def _mount_frontend(application: FastAPI) -> Path | None:
 
     없어도 API 는 정상 동작한다 — 백엔드만 띄우는 배포와 테스트가 있다.
     """
-    candidate = Path(__file__).resolve().parents[3] / "frontend" / "public"
-    if not candidate.is_dir():
-        logger.info("정적 파일 디렉터리가 없어 마운트하지 않습니다: %s", candidate)
+    if not FRONTEND_EXPECTED_AT.is_dir():
+        # 여기서 로그를 찍지 않는다 — 이 함수는 import 시점에 돌고
+        # 로깅은 lifespan 에서 설정된다. 지금 찍으면 사라진다.
         return None
 
-    application.mount("/", StaticFiles(directory=candidate, html=True), name="web")
-    return candidate
+    application.mount(
+        "/", StaticFiles(directory=FRONTEND_EXPECTED_AT, html=True), name="web"
+    )
+    return FRONTEND_EXPECTED_AT
 
+
+#: 화면이 있어야 할 자리. 없을 때 **어디를 봐야 하는지** 말해 주려고 둔다.
+FRONTEND_EXPECTED_AT = Path(__file__).resolve().parents[3] / "frontend" / "public"
 
 FRONTEND_DIR = _mount_frontend(app)

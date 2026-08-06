@@ -36,6 +36,17 @@ RUN pip install --upgrade pip && pip install -e .
 COPY backend/ backend/
 COPY alembic.ini ./
 
+# ⚠️ 화면을 빼먹으면 **컨테이너에서 모든 화면이 404** 입니다.
+#
+# `api/main.py` 의 `_mount_frontend` 가 `frontend/public` 을 `/` 에 붙이는데,
+# 이미지에 그 디렉터리가 없으면 조용히 마운트를 건너뜁니다. API 는 멀쩡히
+# 뜨고 `/health` 도 200 이라 컨테이너는 정상으로 보입니다 — 사람이 주소를
+# 열었을 때만 아무것도 안 나옵니다.
+#
+# 프런트에는 런타임 의존성이 0개이고 번들(`*.js`)을 커밋하므로,
+# **Node 를 이미지에 넣을 필요 없이 파일만 복사하면 됩니다.**
+COPY frontend/public/ frontend/public/
+
 # 오디오는 별도 볼륨으로 마운트된다 (docs/07 P4 — 분리 보관).
 # 디렉터리가 없으면 첫 업로드에서 만들어지지만, 권한 문제를 미리 없앤다.
 RUN mkdir -p /var/teamflow/audio

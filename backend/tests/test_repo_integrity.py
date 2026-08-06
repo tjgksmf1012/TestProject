@@ -220,3 +220,34 @@ def test_the_screens_have_a_korean_label_for_every_category_the_server_sends():
         f"  서버에만 있음(화면에 영어로 찍힙니다): {sorted(expected - labelled)}\n"
         f"  화면에만 있음(죽은 코드입니다):        {sorted(labelled - expected)}"
     )
+
+
+def test_the_api_image_ships_the_screens():
+    """⭐ 컨테이너로 띄웠을 때 화면이 나와야 한다.
+
+    `Dockerfile.api` 가 `frontend/` 를 복사하지 않고 있었다. 그러면
+    `_mount_frontend` 가 조용히 마운트를 건너뛰고 **모든 화면이 404**
+    가 된다. API 는 멀쩡히 뜨고 `/health` 도 200 이라 컨테이너는
+    정상으로 보인다 — 사람이 주소를 열었을 때만 아무것도 안 나온다.
+
+    이 환경에는 Docker 데몬이 없어 이미지를 실제로 빌드해 볼 수 없다.
+    그래서 파일에 그 COPY 가 있는지만 본다. 약한 검사지만, 없는 것보다
+    낫다 — 없을 때는 아무도 몰랐다.
+    """
+    dockerfile = (REPO_ROOT / "docker" / "Dockerfile.api").read_text()
+
+    from teamflow.api import main as api_main
+
+    mounted = api_main.FRONTEND_EXPECTED_AT.relative_to(REPO_ROOT)
+    # `frontend/public` → 이미지가 이 경로를 만들어야 한다.
+    assert str(mounted) == "frontend/public"
+
+    copies = [
+        line
+        for line in dockerfile.splitlines()
+        if line.strip().upper().startswith("COPY") and "frontend" in line
+    ]
+    assert copies, (
+        "Dockerfile.api 가 frontend/ 를 복사하지 않습니다. "
+        "컨테이너에서 모든 화면이 404 가 되는데 API 는 정상으로 보입니다."
+    )

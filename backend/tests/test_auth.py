@@ -352,6 +352,65 @@ def test_session_cookie_is_httponly(client: TestClient, engine):
     assert "samesite=lax" in header
 
 
+def test_session_cookie_gets_secure_behind_a_tls_terminating_proxy(
+    client: TestClient, engine
+):
+    """⭐ 이 프로젝트의 배포(Cloudflare Tunnel)에서 `Secure` 가 붙어야 한다.
+
+    예전에는 `settings.is_production` 하나만 봤는데, **그 "운영" 을
+    만드는 방법이 저장소에 없었다** — `.env.example` 은
+    `ENVIRONMENT=development` 고정이고 docker-compose 도 안 덮어쓴다.
+    즉 이 코드가 실제로 뜨는 모든 경우에 14일짜리 세션 토큰이 평문으로
+    나갈 수 있었다. `httponly` 로 XSS 를 막아 둔 그 토큰인데 전송 구간만
+    벗겨져 있었다.
+
+    터널 뒤에서는 앱이 보는 스킴이 http 다. 진짜 스킴은
+    `X-Forwarded-Proto` 에 있다.
+    """
+    response = client.post(
+        "/api/auth/signup",
+        json={"name": "가", "email": "tls@example.com", "password": PASSWORD},
+        headers={"X-Forwarded-Proto": "https"},
+    )
+    assert "secure" in response.headers["set-cookie"].lower()
+
+
+def test_session_cookie_has_no_secure_on_plain_localhost(client: TestClient, engine):
+    """개발에서 붙이면 http 라 브라우저가 쿠키를 아예 저장하지 않는다.
+
+    그러면 로그인이 안 되고, 사람은 비밀번호를 의심한다.
+    """
+    response = client.post(
+        "/api/auth/signup",
+        json={"name": "나", "email": "plain@example.com", "password": PASSWORD},
+    )
+    assert "secure" not in response.headers["set-cookie"].lower()
+
+
+@pytest.mark.parametrize(
+    ("is_production", "scheme", "forwarded", "expected"),
+    [
+        (True, "http", None, True),  # 설정이 운영이면 무조건
+        (False, "https", None, True),  # 앱이 직접 TLS 를 받는 경우
+        (False, "http", "https", True),  # 터널·리버스 프록시 뒤
+        (False, "http", "https, http", True),  # 프록시가 여럿
+        (False, "http", "http", False),  # 진짜 평문
+        (False, "http", None, False),  # localhost 개발
+    ],
+)
+def test_secure_flag_rule(
+    is_production: bool, scheme: str, forwarded: str | None, expected: bool
+):
+    from teamflow.api.main import should_mark_cookie_secure
+
+    assert (
+        should_mark_cookie_secure(
+            is_production=is_production, scheme=scheme, forwarded_proto=forwarded
+        )
+        is expected
+    )
+
+
 def test_logout_kills_the_token_on_the_server(client: TestClient, engine):
     """⭐ 쿠키만 지우면 토큰은 살아 있다.
 

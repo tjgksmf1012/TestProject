@@ -126,7 +126,8 @@ def test_unknown_path_is_404_not_a_screen(client: TestClient, seeded: dict):
 
 def test_seed_creates_a_reviewable_meeting(client: TestClient, seeded: dict):
     candidates = client.get(f"/api/meetings/{seeded['meeting_id']}/candidates").json()
-    assert len(candidates) == 3
+    assert len(candidates) == seeded["pending"]
+    assert seeded["pending"] >= 2
 
 
 def test_candidates_are_not_all_the_same_shape(client: TestClient, seeded: dict):
@@ -196,6 +197,158 @@ def test_seed_refuses_to_duplicate_without_reset(engine):
     seed_demo.seed(reset=True)
     with pytest.raises(SystemExit, match="이미 있습니다"):
         seed_demo.seed(reset=False)
+
+
+def test_reset_still_works_after_someone_actually_uses_the_demo(
+    client: TestClient, seeded: dict
+):
+    """⭐ 시연을 **한 번 해 본 뒤에도** `--reset` 이 돌아야 한다.
+
+    `_delete_project` 는 지울 표를 손으로 나열하고 있었다. 그래서 처음
+    한 번은 잘 되고, 시연자가 실제로 해 보고 나면 안 됐다 — 승인 화면에서
+    승인하면 `audit_logs` 가 생기고, 칸반에서 되돌려도 생기기 때문이다.
+    프로덕션은 PostgreSQL 이라 외래키가 항상 강제되므로,
+    **데이터를 손으로 지우기 전까지 다시 시연할 수 없는** 상태였다.
+    """
+    project_id = seeded["project_id"]
+
+    # 시연자가 실제로 하는 일: 완료를 되돌린다 → 감사 로그가 생긴다.
+    tasks = client.get(f"/api/projects/{project_id}/tasks").json()["tasks"]
+    done = next(t for t in tasks if t["status"] == "done")
+    assert (
+        client.patch(
+            f"/api/projects/{project_id}/tasks/{done['id']}", json={"status": "todo"}
+        ).status_code
+        == 200
+    )
+
+    with db_session.session_scope() as s:
+        assert s.scalars(
+            select(m.AuditLog).where(m.AuditLog.project_id == project_id)
+        ).all(), "이 테스트의 전제(감사 로그가 생긴다)가 깨졌습니다"
+
+    # 예전에는 여기서 `FOREIGN KEY constraint failed` 가 났다.
+    seed_demo.seed(reset=True)
+
+    with db_session.session_scope() as s:
+        projects = s.scalars(
+            select(m.Project).where(m.Project.title == seed_demo.PROJECT_TITLE)
+        ).all()
+        assert len(projects) == 1
+        assert not s.scalars(
+            select(m.AuditLog).where(m.AuditLog.project_id == project_id)
+        ).all()
+
+
+def test_the_demo_board_matches_what_the_review_screen_says(
+    client: TestClient, seeded: dict
+):
+    """⭐ 승인 화면과 칸반이 같은 말을 해야 한다.
+
+    후보가 전부 `pending` 인데 그 후보를 가리키는 업무가 이미 칸반에
+    있었다. `approval.py` 의 불변식 1번("승인자 없이는 업무가 만들어지지
+    않는다")을 시연 시작 상태가 어기고 있었고, README 가 시키는 대로
+    승인하면 **같은 업무 카드가 하나 더** 생겼다.
+    """
+    meeting_id = seeded["meeting_id"]
+    pending = {
+        c["title"]
+        for c in client.get(f"/api/meetings/{meeting_id}/candidates").json()
+    }
+    tasks = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()["tasks"]
+
+    from_meeting = {t["title"] for t in tasks if t["origin"] is not None}
+    assert from_meeting, "회의에서 나온 업무가 하나는 있어야 화면의 주장이 보인다"
+
+    overlap = pending & from_meeting
+    assert not overlap, (
+        f"승인 대기 중인데 칸반에 이미 있는 업무: {sorted(overlap)}. "
+        "승인하면 카드가 하나 더 생깁니다."
+    )
+
+
+def test_every_task_from_a_meeting_shows_its_own_evidence(
+    client: TestClient, seeded: dict
+):
+    """⭐ 업무 → 후보 → 근거 발화가 **같은 것을 가리켜야** 한다.
+
+    후보를 목록 순서로 이었더니 'DB 스키마 정리' 가 '배포 방식 결정'
+    후보를 가리켰고, 근거 발화로 "배포는 아직 정하지 말고 다음 회의에서
+    다시 얘기해요" 를 보여주고 있었다. 사슬이 이어져 있는지만 보면
+    내용이 어긋난 것을 통과시킨다.
+    """
+    tasks = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()["tasks"]
+    with db_session.session_scope() as s:
+        for task in tasks:
+            if task["origin"] is None:
+                continue
+            candidate = s.get(
+                m.MeetingTaskCandidate, task["origin"]["candidate_id"]
+            )
+            assert candidate is not None
+            assert candidate.title == task["title"], (
+                f"업무 {task['title']!r} 가 후보 {candidate.title!r} 를 가리킵니다"
+            )
+
+
+def test_approving_the_complete_candidate_adds_exactly_one_card(
+    client: TestClient, seeded: dict
+):
+    """⭐ 시연의 핵심 동작이 실제로 되는가.
+
+    README 가 시연자에게 시키는 것이 이것이다 — 승인 화면에서 완전한
+    후보를 승인하면 칸반에 카드가 생긴다. 예전 시드는 그 후보를 가리키는
+    업무를 미리 넣어 두면서 후보는 `pending` 으로 뒀다. 그래서 승인하면
+    **같은 제목의 카드가 둘** 생겼다.
+    """
+    meeting_id, project_id = seeded["meeting_id"], seeded["project_id"]
+
+    candidates = client.get(f"/api/meetings/{meeting_id}/candidates").json()
+    complete = next(c for c in candidates if c["assignee_id"] and c["deadline"])
+
+    before = client.get(f"/api/projects/{project_id}/tasks").json()["tasks"]
+    assert complete["title"] not in {t["title"] for t in before}
+
+    response = client.post(
+        f"/api/meetings/{meeting_id}/candidates/review",
+        json={"items": [{"candidate_id": complete["id"], "approve": True}]},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["approved_count"] == 1, response.text
+
+    after = client.get(f"/api/projects/{project_id}/tasks").json()["tasks"]
+    titles = [t["title"] for t in after]
+    assert titles.count(complete["title"]) == 1, titles
+    assert len(after) == len(before) + 1
+
+    # 새 카드가 그 후보에서 왔다고 화면이 말할 수 있어야 한다.
+    created = next(t for t in after if t["title"] == complete["title"])
+    assert created["origin"] is not None
+    assert created["origin"]["candidate_id"] == complete["id"]
+
+
+def test_seeded_events_do_not_squat_on_real_task_ids(client: TestClient, seeded: dict):
+    """⭐ 합성 기여 이벤트가 실제 업무 id 를 선점하면 안 된다.
+
+    `_emit` 은 `(source_kind, source_id, event_type)` 로 선점 여부를 보고
+    이미 있으면 **아무것도 안 하고 False 를 돌려준다** — 로그도 예외도
+    없다. 시드가 `index * 1000 + seq` 로 만든 첫 값이 `4` 라
+    `tasks.id = 4` 와 충돌했고, 그래서 시연에서 그 카드를 완료해도 기여
+    이벤트가 조용히 안 생겼다. 게다가 선점한 이벤트의 주인은 그 업무의
+    담당자가 아니었다.
+    """
+    with db_session.session_scope() as s:
+        task_ids = set(s.scalars(select(m.Task.id)).all())
+        squatted = sorted(
+            row.source_id
+            for row in s.scalars(
+                select(m.ContributionEventRow).where(
+                    m.ContributionEventRow.source_kind == "task"
+                )
+            ).all()
+            if row.source_id in task_ids
+        )
+    assert squatted == [], f"합성 이벤트가 선점한 업무: {squatted}"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -632,7 +785,7 @@ def test_pending_candidate_count_is_what_the_home_screen_reads(
     meeting = next(r for r in body if r["meeting_id"] == seeded["meeting_id"])
 
     assert meeting["status"] == "needs_review"
-    assert meeting["pending_candidates"] == seeded["candidates"]
+    assert meeting["pending_candidates"] == seeded["pending"]
 
 
 def test_outsider_cannot_list_meetings(client: TestClient, seeded: dict):
