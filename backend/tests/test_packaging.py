@@ -104,6 +104,96 @@ def test_dockerfiles_copy_the_backend():
 
 
 # ══════════════════════════════════════════════════════════════
+# compose 배선 — 만들어 놓고 연결하지 않은 것 잡기
+# ══════════════════════════════════════════════════════════════
+
+
+def _compose_services() -> dict[str, str]:
+    """서비스 이름 → 그 블록의 원문.
+
+    YAML 파서를 배포 의존성에 더하지 않으려고 직접 자른다. 들여쓰기가
+    2칸 고정이라 이 정도로 충분하고, 이 테스트 때문에 의존성이 늘면
+    본말전도다.
+    """
+    lines = COMPOSE.read_text("utf-8").splitlines()
+    try:
+        start = lines.index("services:") + 1
+    except ValueError:
+        return {}
+
+    services: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in lines[start:]:
+        if line and not line[0].isspace():  # 최상위 키(volumes: 등)를 만나면 끝
+            break
+        stripped = line.strip()
+        if (
+            line.startswith("  ")
+            and not line.startswith("   ")
+            and stripped.endswith(":")
+            and not stripped.startswith("#")
+        ):
+            current = stripped[:-1]
+            services[current] = []
+        elif current:
+            services[current].append(line)
+    return {name: "\n".join(body) for name, body in services.items()}
+
+
+def test_compose_services_are_parsed():
+    """파서가 헛돌면 아래 테스트들이 전부 조용히 통과한다."""
+    services = _compose_services()
+    assert {"postgres", "redis", "api", "worker-cpu", "worker-gpu", "llm"} <= set(services)
+
+
+def test_workers_do_not_look_for_the_llm_inside_themselves():
+    """⭐ `.env` 의 `LLM_BASE_URL=http://localhost:8080/v1` 은 컨테이너 안에서
+    **자기 자신**을 가리킨다.
+
+    `DATABASE_URL` 과 `REDIS_URL` 은 서비스 이름으로 덮어쓰면서 이것만
+    빠져 있었다. ASR 까지 멀쩡히 돌고 요약·업무추출에서 연결 거부가 난다
+    — 회의 하나를 다 처리한 뒤에 실패하는, 가장 비싼 종류의 실패다.
+    """
+    services = _compose_services()
+    for name in ("worker-cpu", "worker-gpu"):
+        body = services[name]
+        assert "LLM_BASE_URL:" in body, f"{name} 이 LLM_BASE_URL 을 덮어쓰지 않습니다"
+        assert "http://llm:8080" in body, f"{name} 의 LLM 주소가 서비스 이름이 아닙니다"
+        assert "LLM_BASE_URL: http://localhost" not in body
+
+
+def test_scheduled_jobs_actually_have_a_scheduler():
+    """⭐ `beat_schedule` 만 적어두고 `celery beat` 를 띄우지 않으면 **하나도
+    돌지 않는다.**
+
+    보존기간이 지난 원본 오디오 삭제는 개인정보보호법상 요구사항이다
+    (docs/07 P5). 스케줄러가 없다는 건 음성을 무기한 보관한다는 뜻이고,
+    워커만 띄우면 조용히 그렇게 된다 — 아무 오류도 나지 않는다.
+    """
+    from teamflow.tasks import app
+
+    assert app.conf.beat_schedule, "beat_schedule 이 비었습니다"
+
+    beat_services = [
+        name for name, body in _compose_services().items() if "tasks beat" in body
+    ]
+    assert beat_services, "compose 에 celery beat 서비스가 없습니다"
+
+
+def test_beat_schedule_survives_a_restart():
+    """스케줄 파일이 컨테이너 안에만 있으면 재생성마다 초기화된다."""
+    body = _compose_services()["beat"]
+    assert "--schedule" in body
+    assert "volumes:" in body
+
+
+def test_compose_header_documents_the_llm_profile():
+    """`--profile app` 만 안내하면 사용자는 LLM 없이 띄우고 분석에서 막힌다."""
+    header = COMPOSE.read_text("utf-8").split("services:")[0]
+    assert "--profile llm" in header
+
+
+# ══════════════════════════════════════════════════════════════
 # 의존성 선언
 # ══════════════════════════════════════════════════════════════
 
