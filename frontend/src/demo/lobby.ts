@@ -34,6 +34,8 @@ const apiBase = params.get('api') ?? '';
 // 내가 누구인지는 **서버가** 말해 준다. 예전에는 `?me=1` 을 읽었는데,
 // 그건 사용자가 자기 신원을 스스로 선언하는 구조였다.
 let meId = 0;
+// 기여도 화면으로 넘어가려면 프로젝트 id 가 필요한데, 로비는 회의 id 만 안다.
+let projectId = 0;
 
 const POLL_MS = 3_000;
 
@@ -186,6 +188,10 @@ $('record').addEventListener('click', () => {
 $('review').addEventListener('click', () => {
   location.href = `/review.html?meeting=${meetingId}`;
 });
+$('contrib').addEventListener('click', () => {
+  // 기여도는 프로젝트 단위지만 이름을 붙이려면 회의 단위 명단 API 가 필요하다.
+  location.href = `/contributions.html?project=${projectId}&meeting=${meetingId}`;
+});
 $('logout').addEventListener('click', () => {
   void fetch(`${apiBase}/api/auth/logout`, {
     method: 'POST',
@@ -205,6 +211,9 @@ async function start(): Promise<void> {
   const me = (await response.json()) as Me;
   meId = me.user_id;
   $('who').textContent = `${me.name} 님으로 로그인했습니다`;
+
+  const meeting = (await getJson(`/api/meetings/${meetingId}`)) as { project_id: number };
+  projectId = meeting.project_id;
 
   await refresh();
   setInterval(() => void refresh(), POLL_MS);

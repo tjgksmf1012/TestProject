@@ -155,6 +155,7 @@ var params = new URLSearchParams(location.search);
 var meetingId = Number(params.get("meeting") ?? "1");
 var apiBase = params.get("api") ?? "";
 var meId = 0;
+var projectId = 0;
 var POLL_MS = 3e3;
 var $ = (id) => {
   const el = document.getElementById(id);
@@ -275,6 +276,9 @@ $("record").addEventListener("click", () => {
 $("review").addEventListener("click", () => {
   location.href = `/review.html?meeting=${meetingId}`;
 });
+$("contrib").addEventListener("click", () => {
+  location.href = `/contributions.html?project=${projectId}&meeting=${meetingId}`;
+});
 $("logout").addEventListener("click", () => {
   void fetch(`${apiBase}/api/auth/logout`, {
     method: "POST",
@@ -292,6 +296,8 @@ async function start() {
   const me = await response.json();
   meId = me.user_id;
   $("who").textContent = `${me.name} 님으로 로그인했습니다`;
+  const meeting = await getJson(`/api/meetings/${meetingId}`);
+  projectId = meeting.project_id;
   await refresh();
   setInterval(() => void refresh(), POLL_MS);
 }

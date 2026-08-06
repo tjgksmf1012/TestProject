@@ -161,14 +161,16 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **회의 요약·경고·정렬값 저장** | ✅ | `backend/teamflow/tasks/meeting_tasks.py` |
 | **로그 설정** (text/json, 개인정보 차단) | ✅ | `backend/teamflow/logging_config.py` |
 | **인증·세션** (scrypt · 세션 쿠키 · 구성원 확인) | ✅ | `backend/teamflow/auth/`, `services/auth_service.py` |
+| **기여도 화면** (구간·근거·측정 불가 표시, 순위 없음) | ✅ | `frontend/src/lib/contribution/`, `public/contributions.html` |
+| 칸반 화면 | ⬜ | 업무 목록 API 부터 필요합니다 |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 749 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 755 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 264 passed, 설치 불필요
+cd frontend && npm test                          # 297 passed, 설치 불필요
 cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
 
 cp .env.example .env                             # 시크릿 채우기
@@ -189,6 +191,7 @@ ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend --rel
 - `http://localhost:8000/?meeting=1` — 녹음 화면 (서버 트랙에 참가)
 - `http://localhost:8000/` — 녹음 화면 (서버 없이, 실기기 실험 5)
 - `http://localhost:8000/review.html?meeting=1` — 업무 후보 승인 화면
+- `http://localhost:8000/contributions.html?project=1&meeting=1` — **기여도**
 
 **주소에 자기가 누구인지 적지 않습니다.** 로그인 화면으로 넘어가고, 그
 뒤로는 서버가 세션 쿠키에서 신원을 읽습니다. 시연 계정은 `seed_demo.py` 가

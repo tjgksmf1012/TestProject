@@ -419,3 +419,91 @@ def test_the_demo_walkthrough_works_end_to_end(client: TestClient, seeded: dict)
     assert client.get(f"/api/meetings/{meeting_id}").json()["summary"]
     assert client.get(f"/api/meetings/{meeting_id}/candidates").json()
     assert client.get(f"/api/meetings/{meeting_id}/members").json()
+
+
+# ══════════════════════════════════════════════════════════════
+# 6. 기여도 화면
+# ══════════════════════════════════════════════════════════════
+
+
+def test_contributions_page_is_served(client: TestClient):
+    for path in ("/contributions.html", "/contributions.js"):
+        assert client.get(path).status_code == 200, f"{path} 가 안 열립니다"
+
+
+def test_contributions_response_has_the_fields_the_screen_reads(
+    client: TestClient, seeded: dict
+):
+    """⭐ `view.ts` 의 타입과 서버 응답이 어긋나면 화면이 조용히 빕니다.
+
+    화면 코드에는 자동 테스트가 없으므로 이 대조가 유일한 그물입니다.
+    """
+    body = client.get(f"/api/projects/{seeded['project_id']}/contributions").json()
+
+    assert {"algo_version", "computed_at", "members", "skipped_categories", "notice"} <= set(
+        body
+    )
+    for member in body["members"]:
+        assert {
+            "user_id",
+            "role",
+            "share",
+            "range_low",
+            "range_high",
+            "confidence",
+            "confidence_label",
+            "confidence_reasons",
+            "categories",
+            "integrity_flags",
+            "measurement_gaps",
+        } <= set(member)
+
+
+def test_contributions_never_ships_a_ranking(client: TestClient, seeded: dict):
+    """⭐ 순위는 서버에서도 만들지 않는다 (docs/07 E2).
+
+    화면이 정렬을 안 해도 응답에 rank 가 있으면 누군가는 그걸 씁니다.
+    """
+    import json as _json
+
+    body = client.get(f"/api/projects/{seeded['project_id']}/contributions").json()
+    flat = _json.dumps(body, ensure_ascii=False)
+
+    assert "rank" not in flat
+    assert "순위" not in flat
+
+
+def test_contributions_carry_a_range_not_just_a_number(client: TestClient, seeded: dict):
+    """단일 점수만 내려보내면 화면이 구간을 그릴 수 없습니다."""
+    body = client.get(f"/api/projects/{seeded['project_id']}/contributions").json()
+    for member in body["members"]:
+        assert member["range_low"] <= member["share"] <= member["range_high"]
+
+
+def test_seeded_contributions_show_the_case_this_screen_exists_for(
+    client: TestClient, seeded: dict
+):
+    """⭐ 시연 데이터에 **측정 불가**가 하나 있어야 한다.
+
+    "측정 불가는 0점이 아니다" 가 이 프로젝트의 주장인데, 시연 데이터에 그
+    경우가 없으면 화면을 열어도 주장할 거리가 없다 — 승인 화면에 확신도
+    0.34 짜리를 넣어 둔 것과 같은 이유다.
+    """
+    body = client.get(f"/api/projects/{seeded['project_id']}/contributions").json()
+
+    with_gap = [mem for mem in body["members"] if mem["measurement_gaps"]]
+    assert with_gap, "측정 불가인 팀원이 하나는 있어야 화면이 그 경우를 보여줍니다"
+
+    # 그리고 그 사람이 0% 가 아니어야 한다. 0 으로 처리하는 게 바로 그 결함이다.
+    for mem in with_gap:
+        assert mem["share"] > 0, "측정 불가를 0점으로 계산하고 있습니다"
+
+
+def test_seeded_members_have_different_shapes(client: TestClient, seeded: dict):
+    """전원이 똑같으면 이 화면이 무엇을 보여주는지 알 수 없다."""
+    body = client.get(f"/api/projects/{seeded['project_id']}/contributions").json()
+    shares = [mem["share"] for mem in body["members"]]
+
+    assert len(body["members"]) == 3
+    assert len(set(round(s, 1) for s in shares)) == 3, f"전부 같은 값입니다: {shares}"
+    assert all(mem["categories"] for mem in body["members"])

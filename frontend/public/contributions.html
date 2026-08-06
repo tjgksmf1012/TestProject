@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>기여도 — TeamFlow</title>
+<style>
+  :root { color-scheme: light dark; --line: #d8dbe0; --dim: #6b7280; --bad: #b91c1c; --warn: #b45309; --bar: #2563eb; }
+  @media (prefers-color-scheme: dark) { :root { --line: #3a3f47; --dim: #9aa2ad; --bad: #f87171; --warn: #fbbf24; --bar: #60a5fa; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 1rem; font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; max-width: 40rem; margin-inline: auto; }
+  h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
+  .sub { color: var(--dim); font-size: .875rem; margin: 0 0 .25rem; }
+
+  .warnings { margin: 1rem 0; padding: .75rem .9rem; border-radius: .5rem; font-size: .875rem; background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .warnings p { margin: .2rem 0; }
+
+  .card { border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; margin-bottom: .9rem; }
+  .card header { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .5rem; }
+  .who { font-weight: 700; font-size: 1.0625rem; }
+  .role { font-size: .75rem; color: var(--dim); }
+
+  /* 구간이 주인공이다. 단일 점수를 크게 띄우지 않는다. */
+  .range { font-size: 1.5rem; font-weight: 700; margin: 0; font-variant-numeric: tabular-nums; }
+  .track { position: relative; height: .5rem; border-radius: .25rem; background: color-mix(in srgb, currentColor 8%, transparent); margin: .4rem 0 .5rem; }
+  .track i { position: absolute; top: 0; bottom: 0; border-radius: .25rem; background: var(--bar); }
+  .conf { font-size: .8125rem; color: var(--dim); margin: 0; }
+
+  .empty { font-size: .8125rem; margin: .6rem 0 0; padding: .5rem .7rem; border-radius: .4rem; background: color-mix(in srgb, var(--warn) 12%, transparent); }
+
+  ul { list-style: none; padding: 0; margin: .6rem 0 0; }
+  .notes li { font-size: .8125rem; color: var(--warn); padding: .15rem 0; }
+  .notes li::before { content: "· "; }
+
+  .cats li { display: flex; align-items: center; gap: .5rem; font-size: .8125rem; padding: .2rem 0; }
+  .cat { min-width: 3.5rem; color: var(--dim); }
+  .catbar { flex: 1; height: .375rem; border-radius: .2rem; background: color-mix(in srgb, currentColor 8%, transparent); }
+  .catbar i { display: block; height: 100%; border-radius: .2rem; background: color-mix(in srgb, var(--bar) 65%, transparent); }
+  .catnum { min-width: 2.5rem; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  .flags li { font-size: .8125rem; color: var(--bad); padding: .15rem 0; }
+  .flags li::before { content: "⚑ "; }
+  .flagnote { font-size: .75rem; color: var(--dim); margin: .25rem 0 0; }
+
+  .note { font-size: .8125rem; color: var(--dim); margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+  <h1>기여도</h1>
+  <p class="sub" id="who"></p>
+  <p class="sub" id="meta"></p>
+
+  <div id="warnings" class="warnings" hidden></div>
+
+  <div id="members"></div>
+
+  <p class="note" id="notice"></p>
+  <p class="note">
+    <strong>순위는 제공하지 않습니다.</strong> 목록은 이름 순이고, 점수 순으로
+    정렬하지 않습니다 — 리더보드를 안 그려도 목록이 점수 순이면 사람들은 1등과
+    꼴찌를 읽습니다.
+    <br /><br />
+    숫자는 구간입니다. 신뢰도가 낮을수록 구간이 넓어지고, 그 넓이가 "이 값을
+    얼마나 믿을 수 있는가" 를 말합니다. <strong>측정하지 못한 영역은 0 이
+    아닙니다</strong> — 나머지 활동으로 추정한 값이고, 그 사실을 카드에
+    적어 둡니다.
+  </p>
+
+  <script type="module" src="/contributions.js"></script>
+</body>
+</html>

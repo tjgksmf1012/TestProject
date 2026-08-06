@@ -40,6 +40,7 @@ from sqlalchemy import create_engine, select
 
 from teamflow.auth import passwords
 from teamflow.config import get_settings
+from teamflow.contribution.events import CATEGORY_OF, EventType
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
@@ -259,6 +260,8 @@ def seed(*, reset: bool) -> dict:
             )
         )
 
+        _seed_contribution_events(s, project.id, user_ids)
+
         return {
             "project_id": project.id,
             "meeting_id": meeting.id,
@@ -266,6 +269,63 @@ def seed(*, reset: bool) -> dict:
             "emails": [u.email for u in users],
             "candidates": 3,
         }
+
+
+# 기여 이벤트. 기여도 화면이 보여줄 게 있어야 그 화면의 주장을 확인할 수 있다.
+#
+# 값을 일부러 이렇게 잡았다:
+#   · 김민수  코드 위주 — PR·리뷰가 많다
+#   · 이하늘  회의·업무 위주 — 코드는 적다. **역할이 다르면 분포도 다르다**
+#   · 박지원  폰이 죽어 회의 기여를 **측정하지 못한다**. 코드·업무는 정상
+#
+# 세 번째가 이 화면의 존재 이유다. 박지원의 회의 기여를 0 으로 처리하면
+# 기여도가 통째로 내려가는데, 그건 측정이 아니라 오답이다 (docs/04 §2.6).
+# 시연 데이터에 그 경우가 없으면 "측정 불가는 0점이 아니다" 를 주장할
+# 거리가 없다 — 승인 화면에서 확신도 0.34 짜리를 넣어 둔 것과 같은 이유다.
+_EVENTS: list[tuple[int, str, str, float, int]] = [
+    # (팀원 index, event_type, source_kind, magnitude, 회의 시작 후 며칠)
+    (0, "pr_merged", "github_event", 180.0, 1),
+    (0, "pr_merged", "github_event", 240.0, 3),
+    (0, "review_given", "github_event", 1.0, 2),
+    (0, "review_given", "github_event", 1.0, 4),
+    (0, "task_completed", "task", 1.0, 3),
+    (0, "utt_proposal", "utterance", 1.0, 0),
+    (0, "utt_decision", "utterance", 1.0, 0),
+    (1, "pr_merged", "github_event", 90.0, 2),
+    (1, "review_given", "github_event", 1.0, 3),
+    (1, "task_completed", "task", 1.0, 2),
+    (1, "task_completed", "task", 1.0, 5),
+    (1, "utt_question", "utterance", 1.0, 0),
+    (1, "utt_answer", "utterance", 1.0, 0),
+    (1, "utt_commitment", "utterance", 1.0, 0),
+    (2, "pr_merged", "github_event", 120.0, 4),
+    (2, "review_given", "github_event", 1.0, 5),
+    (2, "task_completed", "task", 1.0, 4),
+    # 박지원의 회의 발언은 없다 — 폰이 죽어서 **기록되지 않았다.**
+    # 트랙 커버리지 0.42 가 그 사실을 남기고, 기여도 엔진이 그걸 읽어
+    # 회의 카테고리를 "측정 불가" 로 뺀다.
+]
+
+
+def _seed_contribution_events(session, project_id: int, user_ids: list[int]) -> None:
+    for seq, (index, event_type, source_kind, magnitude, day) in enumerate(_EVENTS):
+        session.add(
+            m.ContributionEventRow(
+                project_id=project_id,
+                user_id=user_ids[index],
+                occurred_at=MEETING_START + timedelta(days=day),
+                category=CATEGORY_OF[EventType(event_type)].value,
+                event_type=event_type,
+                source_kind=source_kind,
+                # ⚠️ `(source_kind, source_id, event_type)` 이 유니크다 — 웹훅이
+                # 같은 이벤트를 두 번 보내도 한 번만 세도록 만든 중복 제거 키다.
+                # 전부 0 으로 두면 두 번째 이벤트부터 IntegrityError 가 난다.
+                # 시연 데이터라 실제 PR·업무 행을 가리키지는 않는다.
+                source_id=index * 1000 + seq,
+                magnitude=magnitude,
+                event_metadata={},
+            )
+        )
 
 
 def _delete_project(session, project_id: int) -> None:
@@ -308,7 +368,9 @@ def _delete_project(session, project_id: int) -> None:
                 session.delete(row)
         session.flush()
 
-    for model in (m.Task, m.Meeting, m.Member):
+    # ⚠️ 기여 이벤트를 빼먹으면 `--reset` 이 외래키 위반으로 터진다.
+    # 이벤트는 프로젝트를 가리키고, 프로젝트는 바로 아래에서 지워진다.
+    for model in (m.ContributionEventRow, m.Task, m.Meeting, m.Member):
         for row in session.scalars(
             select(model).where(model.project_id == project_id)
         ).all():
