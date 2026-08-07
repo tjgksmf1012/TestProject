@@ -193,6 +193,60 @@ function detailText(body, fallback) {
   return fallback;
 }
 
+// src/lib/ui/failure.ts
+function describeHttpStatus(status) {
+  if (status === 401) return "로그인이 풀렸습니다.";
+  if (status === 403) return "이 프로젝트의 구성원만 볼 수 있습니다.";
+  if (status === 404) return "찾을 수 없습니다 — 주소가 바뀌었거나 지워졌습니다.";
+  if (status === 429) return "요청이 너무 잦습니다. 잠시 뒤에 다시 해 보세요.";
+  if (status >= 500) return "서버 쪽 문제입니다. 팀이 고칠 수 있는 것이 아닙니다.";
+  return null;
+}
+function failureHtml(failure) {
+  const code = failure.code === void 0 || failure.code === "" ? "" : `<p class="code">오류 코드 ${escapeHtml(String(failure.code))}</p>`;
+  const help = failure.help ? `<p class="why">${escapeHtml(failure.help)}</p>` : "";
+  const retry = failure.retry ? '<button type="button" class="retry">다시 불러오기</button>' : "";
+  return `<div class="failure-state" role="alert"><p class="what">${escapeHtml(failure.what)}</p>` + help + retry + code + "</div>";
+}
+
+// src/lib/ui/pending.ts
+var LOADING_DELAY_MS = 200;
+var browserTimers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (id) => {
+    clearTimeout(id);
+  }
+};
+async function whileLoading(work, show, hide, timers = browserTimers, delayMs = LOADING_DELAY_MS) {
+  let shown = false;
+  const timer = timers.set(() => {
+    shown = true;
+    show();
+  }, delayMs);
+  try {
+    return await work;
+  } finally {
+    timers.clear(timer);
+    if (shown) hide();
+  }
+}
+
+// src/lib/ui/skeleton.ts
+var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
+var wrap = (inner) => `<div class="sk-wrap" aria-hidden="true">${inner}</div>`;
+function projectCards(count = 2) {
+  const one = '<section class="card">' + bar(52, "title") + bar(78, "line") + `<div class="sk-row">${bar(22, "btn")}${bar(22, "btn")}${bar(22, "btn")}</div></section>`;
+  return wrap(one.repeat(Math.max(1, count)));
+}
+function showSkeleton(element, html) {
+  element.setAttribute("aria-busy", "true");
+  element.innerHTML = html;
+}
+function clearSkeleton(element) {
+  element.removeAttribute("aria-busy");
+  if (element.innerHTML.includes('class="sk')) element.innerHTML = "";
+}
+
 // src/lib/nav/links.ts
 var LABEL = {
   home: "홈",
@@ -446,20 +500,13 @@ function projectHtml(project, meetings) {
   ${meetings.length ? `<ul class="meetings">${meetings.map(meetingHtml).join("")}</ul>` : '<p class="empty">회의를 열면 여기에 나옵니다.</p>'}
 </section>`;
 }
-async function load() {
+async function fetchAll() {
   const response = await get("/api/projects");
-  if (isSessionExpired(response.status)) {
-    goToLogin();
-    return;
-  }
-  if (!response.ok) {
-    $("projects").textContent = `불러오지 못했습니다 (HTTP ${response.status})`;
-    return;
-  }
+  if (isSessionExpired(response.status)) return { kind: "expired" };
+  if (!response.ok) return { kind: "failed", status: response.status };
   const projects = orderProjects(await response.json());
   if (projects.length === 0) {
-    $("projects").innerHTML = `<p class="empty">${escapeHtml(emptyProjectsMessage())}</p>`;
-    return;
+    return { kind: "ok", html: `<p class="empty">${escapeHtml(emptyProjectsMessage())}</p>` };
   }
   const meetings = await Promise.all(
     projects.map(
@@ -468,7 +515,34 @@ async function load() {
       )
     )
   );
-  $("projects").innerHTML = projects.map((project, index) => projectHtml(project, meetings[index] ?? [])).join("");
+  return {
+    kind: "ok",
+    html: projects.map((p, i) => projectHtml(p, meetings[i] ?? [])).join("")
+  };
+}
+async function load() {
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($("projects"), projectCards()),
+    () => clearSkeleton($("projects"))
+  );
+  if (result.kind === "expired") {
+    goToLogin();
+    return;
+  }
+  if (result.kind === "failed") {
+    $("projects").innerHTML = failureHtml({
+      what: "프로젝트 목록을 불러오지 못했습니다.",
+      help: describeHttpStatus(result.status) ?? void 0,
+      code: `HTTP ${result.status}`,
+      retry: true
+    });
+    $("projects").querySelector(".retry")?.addEventListener("click", () => {
+      void load();
+    });
+    return;
+  }
+  $("projects").innerHTML = result.html;
 }
 var input = (id) => $(id);
 function say(text) {

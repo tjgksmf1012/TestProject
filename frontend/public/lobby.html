@@ -49,7 +49,9 @@
 </head>
 <body>
   <h1 id="title">회의 로비</h1>
-  <p class="sub" id="sub">불러오는 중…</p>
+  <!-- 비워 둔다. 정적 "불러오는 중…" 은 **언제나** 한 번 깜빡입니다.
+       로딩 표시는 `src/lib/ui/pending.ts` 가 200ms 뒤에 켭니다. -->
+  <p class="sub" id="sub"></p>
   <p class="sub" id="who"></p>
 
   <section>

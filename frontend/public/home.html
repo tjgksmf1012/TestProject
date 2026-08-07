@@ -52,7 +52,10 @@
     <button id="logout" type="button">로그아웃</button>
   </header>
 
-  <div id="projects">불러오는 중…</div>
+  <!-- 비워 둔다. "불러오는 중…" 을 여기 적어 두면 **언제나** 한 번
+       깜빡입니다 — 대부분의 요청은 200ms 안에 끝나기 때문입니다.
+       로딩 표시는 `src/lib/ui/pending.ts` 가 늦게 켭니다. -->
+  <div id="projects"></div>
 
   <section class="card start">
     <h2>시작하기</h2>

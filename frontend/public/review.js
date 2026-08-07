@@ -175,6 +175,62 @@ function attr(value) {
   return `"${escapeHtml(String(value))}"`;
 }
 
+// src/lib/ui/empty.ts
+function emptyHtml(state) {
+  const action = state.action ? `<a class="btn btn-primary" href="${escapeHtml(state.action.href)}">${escapeHtml(state.action.label)}</a>` : "";
+  return `<div class="empty-state"><p class="what">${escapeHtml(state.what)}</p><p class="why">${escapeHtml(state.why)}</p><p class="how">${escapeHtml(state.how)}</p>` + action + "</div>";
+}
+
+// src/lib/ui/failure.ts
+function failureHtml(failure) {
+  const code = failure.code === void 0 || failure.code === "" ? "" : `<p class="code">오류 코드 ${escapeHtml(String(failure.code))}</p>`;
+  const help = failure.help ? `<p class="why">${escapeHtml(failure.help)}</p>` : "";
+  const retry = failure.retry ? '<button type="button" class="retry">다시 불러오기</button>' : "";
+  return `<div class="failure-state" role="alert"><p class="what">${escapeHtml(failure.what)}</p>` + help + retry + code + "</div>";
+}
+
+// src/lib/ui/pending.ts
+var LOADING_DELAY_MS = 200;
+var browserTimers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (id) => {
+    clearTimeout(id);
+  }
+};
+async function whileLoading(work, show, hide, timers = browserTimers, delayMs = LOADING_DELAY_MS) {
+  let shown = false;
+  const timer = timers.set(() => {
+    shown = true;
+    show();
+  }, delayMs);
+  try {
+    return await work;
+  } finally {
+    timers.clear(timer);
+    if (shown) hide();
+  }
+}
+
+// src/lib/ui/skeleton.ts
+var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
+var wrap = (inner) => `<div class="sk-wrap" aria-hidden="true">${inner}</div>`;
+var ROW_WIDTHS = [86, 64, 74, 58, 80];
+function rows(count = 3) {
+  const list = Array.from(
+    { length: Math.max(1, count) },
+    (_, i) => `<div class="sk-line">${bar(ROW_WIDTHS[i % ROW_WIDTHS.length] ?? 70, "line")}</div>`
+  ).join("");
+  return wrap(list);
+}
+function showSkeleton(element, html) {
+  element.setAttribute("aria-busy", "true");
+  element.innerHTML = html;
+}
+function clearSkeleton(element) {
+  element.removeAttribute("aria-busy");
+  if (element.innerHTML.includes('class="sk')) element.innerHTML = "";
+}
+
 // src/lib/nav/links.ts
 var LABEL = {
   home: "홈",
@@ -425,15 +481,14 @@ function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 var get = (path) => fetch(`${apiBase}${path}`, { credentials: "same-origin" });
-async function load() {
+async function fetchAll() {
   const [candidateRes, memberRes, meetingRes] = await Promise.all([
     get(`/api/meetings/${meetingId}/candidates`),
     get(`/api/meetings/${meetingId}/members`),
     get(`/api/meetings/${meetingId}`)
   ]);
   if ([candidateRes, memberRes, meetingRes].some((r) => isSessionExpired(r.status))) {
-    goToLogin();
-    return;
+    return "expired";
   }
   if (!candidateRes.ok) throw new Error(`후보 조회 실패 (HTTP ${candidateRes.status})`);
   if (!memberRes.ok) throw new Error(`팀원 조회 실패 (HTTP ${memberRes.status})`);
@@ -442,6 +497,18 @@ async function load() {
   members = await memberRes.json();
   meeting = await meetingRes.json();
   context = { memberIds: members.map((m) => m.user_id), today: todayIso() };
+  return "ok";
+}
+async function load() {
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($("list"), rows(3)),
+    () => clearSkeleton($("list"))
+  );
+  if (result === "expired") {
+    goToLogin();
+    return;
+  }
   render();
 }
 function render() {
@@ -455,8 +522,45 @@ function render() {
   $("blocked").hidden = summary.blocked === 0;
   $("blocked").textContent = `승인하려는 후보 ${summary.blocked}건에 빠진 정보가 있습니다.`;
   $("submit").disabled = !canSubmit(summary);
+  if (candidates.length === 0) {
+    $("list").innerHTML = emptyHtml(emptyReviewState());
+    return;
+  }
   $("list").innerHTML = candidates.map(cardHtml).join("");
   wireCards();
+}
+function emptyReviewState() {
+  const status = meeting?.status ?? "";
+  const what = "여기에는 회의에서 뽑은 업무 후보가 나옵니다.";
+  if (status === "queued" || status === "processing") {
+    return {
+      what,
+      why: "녹음을 아직 처리하는 중입니다.",
+      how: "끝나면 여기에 후보가 나옵니다. 잠시 뒤에 새로고침하세요."
+    };
+  }
+  if (status === "failed") {
+    return {
+      what,
+      why: "녹음 처리에 실패해서 후보를 만들지 못했습니다.",
+      how: "로비에서 트랙이 온전한지 확인하세요 — 끊긴 구간이 많으면 처리가 실패합니다.",
+      action: { label: "트랙 상태 보기", href: `/lobby.html?meeting=${meetingId}` }
+    };
+  }
+  if (status === "confirmed") {
+    return {
+      what,
+      why: "이 회의의 후보는 모두 검토를 마쳤습니다.",
+      how: "승인한 업무는 칸반에 있습니다.",
+      action: { label: "칸반 보기", href: `/kanban.html?meeting=${meetingId}` }
+    };
+  }
+  return {
+    what,
+    why: "처리는 끝났는데 업무로 뽑을 만한 발언이 없었습니다 — 고장이 아닙니다.",
+    how: "회의에서 누가·무엇을·언제까지 하기로 했는지 말하면 그 발언이 후보가 됩니다.",
+    action: { label: "칸반 보기", href: `/kanban.html?meeting=${meetingId}` }
+  };
 }
 function cardHtml(candidate) {
   const draft = draftOf(candidate.id);
@@ -584,8 +688,15 @@ async function start() {
   await load();
 }
 start().catch((error) => {
-  $("result").className = "bad";
-  $("result").textContent = error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  $("list").innerHTML = failureHtml({
+    what: "업무 후보를 불러오지 못했습니다.",
+    help: message,
+    retry: true
+  });
+  $("list").querySelector(".retry")?.addEventListener("click", () => {
+    void load();
+  });
 });
 renderNav("review");
 bootApp();

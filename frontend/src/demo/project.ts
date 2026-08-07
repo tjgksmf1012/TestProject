@@ -30,6 +30,8 @@ import {
   whatRemains,
   type RevokeResult,
 } from '../lib/privacy/deletion.ts';
+import { whileLoading } from '../lib/ui/pending.ts';
+import { clearSkeleton, rows, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -198,9 +200,16 @@ async function startBackfill(): Promise<void> {
 }
 
 async function loadHealth(): Promise<void> {
+  // ⚠️ 예전에는 HTML 에 "연결 상태를 확인하는 중…" 을 심어 뒀습니다.
+  // 이 요청은 거의 언제나 200ms 안에 끝나므로, 그 문구는 **화면을 열
+  // 때마다 한 번 깜빡이기만** 했습니다 (지시서 §4.7).
   let response: Response;
   try {
-    response = await call(`/api/projects/${projectId}/github`);
+    response = await whileLoading(
+      call(`/api/projects/${projectId}/github`),
+      () => showSkeleton($('gh-headline'), rows(1)),
+      () => clearSkeleton($('gh-headline')),
+    );
   } catch {
     // ⚠️ 여기서 조용히 넘어가면 진단 구역이 비고, **빈 구역은 사람 눈에
     // "문제 없음" 으로 보입니다.** 못 물어봤다는 것과 괜찮다는 것은 다릅니다.

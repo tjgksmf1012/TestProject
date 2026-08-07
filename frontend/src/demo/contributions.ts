@@ -26,6 +26,10 @@ import {
 } from '../lib/contribution/view.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { emptyHtml } from '../lib/ui/empty.ts';
+import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
+import { whileLoading } from '../lib/ui/pending.ts';
+import { clearSkeleton, scoreCards, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -127,10 +131,27 @@ function render(score: TeamScore): void {
     score.computed_at,
   ).toLocaleString('ko-KR')} 기준`;
 
+  // ⚠️ 사람이 하나도 안 오면 카드 자리가 통째로 빕니다. 그 화면은
+  // "아무도 아무것도 안 했다" 로 읽히는데, 실제로는 **아직 이을 활동이
+  // 없다** 입니다. 이 프로젝트에서 그 둘을 섞는 것은 오답입니다
+  // (docs/05 §5 — 측정 불가 ≠ 0점).
+  if (score.members.length === 0) {
+    $('members').innerHTML = emptyHtml({
+      what: '여기에는 팀원별 기여 구간과 그 근거가 나옵니다.',
+      why: '아직 이을 활동이 하나도 없습니다 — 아무도 안 했다는 뜻이 아닙니다.',
+      how: '회의를 녹음하거나 GitHub 저장소를 연결하면 활동이 여기로 이어집니다.',
+      action: { label: '프로젝트 설정', href: `/project.html?project=${projectId}` },
+    });
+    return;
+  }
+
   $('members').innerHTML = orderForDisplay(score.members, people).map(memberCard).join('');
 }
 
-async function load(): Promise<void> {
+/** 받아 오기만 한다. **그리지 않는다** — `load()` 의 주석 참고. */
+async function fetchAll(): Promise<
+  { kind: 'expired' } | { kind: 'failed'; status: number } | { kind: 'ok'; score: TeamScore }
+> {
   // ⭐ 명단은 **프로젝트** 단위. 회의 단위로 받던 동안에는 `?project=N`
   // 만으로 열면 이름이 전부 `사용자 #3` 이었고, 이름 순 정렬도 그 문자열
   // 순으로 바뀌었다 — 사람별 기여를 보여주는 화면에서 가장 나쁜 실패다.
@@ -139,21 +160,46 @@ async function load(): Promise<void> {
     get(`/api/projects/${projectId}/members`),
   ]);
 
-  if (isSessionExpired(scoreRes.status)) {
+  if (isSessionExpired(scoreRes.status)) return { kind: 'expired' };
+  if (!scoreRes.ok) return { kind: 'failed', status: scoreRes.status };
+
+  if (memberRes.ok) people = (await memberRes.json()) as Person[];
+  return { kind: 'ok', score: (await scoreRes.json()) as TeamScore };
+}
+
+async function load(): Promise<void> {
+  // ⚠️ 받아 오기와 그리기를 나눕니다. 스켈레톤을 걷는 것은
+  // `whileLoading` 의 `finally` 라, 그 안에서 그리면 방금 그린 것을
+  // 곧바로 지울 수 있습니다.
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($('members'), scoreCards()),
+    () => clearSkeleton($('members')),
+  );
+
+  if (result.kind === 'expired') {
     goToLogin();
     return;
   }
-  if (!scoreRes.ok) {
-    $('warnings').hidden = false;
-    $('warnings').textContent =
-      scoreRes.status === 403
-        ? '이 프로젝트의 구성원만 기여도를 볼 수 있습니다.'
-        : `기여도를 불러오지 못했습니다 (HTTP ${scoreRes.status})`;
+  if (result.kind === 'failed') {
+    // ⚠️ 카드 자리에 씁니다. 예전에는 위쪽 `#warnings` 에만 한 줄
+    // 남겼는데, 그러면 카드 영역이 **텅 빈 채**로 있고 사람은
+    // "아무도 아무것도 안 했구나" 로 읽습니다. 이 화면에서 그건
+    // 버그가 아니라 오답입니다.
+    $('members').innerHTML = failureHtml({
+      what: '기여도를 불러오지 못했습니다.',
+      help: describeHttpStatus(result.status) ?? undefined,
+      code: `HTTP ${result.status}`,
+      retry: true,
+    });
+    $('members')
+      .querySelector<HTMLButtonElement>('.retry')
+      ?.addEventListener('click', () => {
+        void load();
+      });
     return;
   }
-
-  if (memberRes.ok) people = (await memberRes.json()) as Person[];
-  render((await scoreRes.json()) as TeamScore);
+  render(result.score);
 }
 
 async function start(): Promise<void> {

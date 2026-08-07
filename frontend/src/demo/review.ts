@@ -29,6 +29,10 @@ import {
 } from '../lib/review/candidates.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { attr, escapeHtml } from '../lib/html.ts';
+import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
+import { failureHtml } from '../lib/ui/failure.ts';
+import { whileLoading } from '../lib/ui/pending.ts';
+import { clearSkeleton, rows, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -93,15 +97,15 @@ function goToLogin(): void {
 const get = (path: string): Promise<Response> =>
   fetch(`${apiBase}${path}`, { credentials: 'same-origin' });
 
-async function load(): Promise<void> {
+/** 받아 오기만 한다. **그리지 않는다** — `load()` 의 주석 참고. */
+async function fetchAll(): Promise<'expired' | 'ok'> {
   const [candidateRes, memberRes, meetingRes] = await Promise.all([
     get(`/api/meetings/${meetingId}/candidates`),
     get(`/api/meetings/${meetingId}/members`),
     get(`/api/meetings/${meetingId}`),
   ]);
   if ([candidateRes, memberRes, meetingRes].some((r) => isSessionExpired(r.status))) {
-    goToLogin();
-    return;
+    return 'expired';
   }
   if (!candidateRes.ok) throw new Error(`후보 조회 실패 (HTTP ${candidateRes.status})`);
   if (!memberRes.ok) throw new Error(`팀원 조회 실패 (HTTP ${memberRes.status})`);
@@ -111,6 +115,23 @@ async function load(): Promise<void> {
   members = (await memberRes.json()) as Member[];
   meeting = (await meetingRes.json()) as MeetingInfo;
   context = { memberIds: members.map((m) => m.user_id), today: todayIso() };
+  return 'ok';
+}
+
+async function load(): Promise<void> {
+  // ⚠️ 받아 오기와 그리기를 나눕니다. 스켈레톤을 걷는 것은
+  // `whileLoading` 의 `finally` 라, 그 안에서 그리면 방금 그린 것을
+  // 곧바로 지울 수 있습니다.
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($('list'), rows(3)),
+    () => clearSkeleton($('list')),
+  );
+
+  if (result === 'expired') {
+    goToLogin();
+    return;
+  }
   render();
 }
 
@@ -138,8 +159,57 @@ function render(): void {
   $('blocked').textContent = `승인하려는 후보 ${summary.blocked}건에 빠진 정보가 있습니다.`;
 
   ($('submit') as HTMLButtonElement).disabled = !canSubmit(summary);
+
+  // ⚠️ 후보가 0건이면 목록이 통째로 빕니다. 그 화면은 고장으로
+  // 읽히는데, 실제로는 셋 중 하나입니다 — 아직 처리 중이거나, 처리를
+  // 마쳤는데 뽑을 게 없었거나, 처리에 실패했거나. **사람이 할 일이
+  // 각각 다릅니다.** 앞은 기다리면 되고, 가운데는 기다려도 안 바뀌고,
+  // 뒤는 트랙을 봐야 합니다. 하나로 덮으면 영원히 새로고침합니다.
+  if (candidates.length === 0) {
+    $('list').innerHTML = emptyHtml(emptyReviewState());
+    return;
+  }
+
   $('list').innerHTML = candidates.map(cardHtml).join('');
   wireCards();
+}
+
+/** 후보가 0건일 때, **회의 상태에 따라** 다른 말을 한다. */
+function emptyReviewState(): EmptyState {
+  const status = meeting?.status ?? '';
+  const what = '여기에는 회의에서 뽑은 업무 후보가 나옵니다.';
+
+  if (status === 'queued' || status === 'processing') {
+    return {
+      what,
+      why: '녹음을 아직 처리하는 중입니다.',
+      how: '끝나면 여기에 후보가 나옵니다. 잠시 뒤에 새로고침하세요.',
+    };
+  }
+  if (status === 'failed') {
+    return {
+      what,
+      why: '녹음 처리에 실패해서 후보를 만들지 못했습니다.',
+      how: '로비에서 트랙이 온전한지 확인하세요 — 끊긴 구간이 많으면 처리가 실패합니다.',
+      action: { label: '트랙 상태 보기', href: `/lobby.html?meeting=${meetingId}` },
+    };
+  }
+  if (status === 'confirmed') {
+    return {
+      what,
+      why: '이 회의의 후보는 모두 검토를 마쳤습니다.',
+      how: '승인한 업무는 칸반에 있습니다.',
+      action: { label: '칸반 보기', href: `/kanban.html?meeting=${meetingId}` },
+    };
+  }
+  // needs_review 인데 0건 — 처리는 끝났고 뽑을 게 없었습니다.
+  // **고장이 아니라 결과입니다.** 그렇게 말해 줘야 합니다.
+  return {
+    what,
+    why: '처리는 끝났는데 업무로 뽑을 만한 발언이 없었습니다 — 고장이 아닙니다.',
+    how: '회의에서 누가·무엇을·언제까지 하기로 했는지 말하면 그 발언이 후보가 됩니다.',
+    action: { label: '칸반 보기', href: `/kanban.html?meeting=${meetingId}` },
+  };
 }
 
 function cardHtml(candidate: Candidate): string {
@@ -313,8 +383,20 @@ async function start(): Promise<void> {
 }
 
 start().catch((error: unknown) => {
-  $('result').className = 'bad';
-  $('result').textContent = error instanceof Error ? error.message : String(error);
+  // ⚠️ 목록 자리에 씁니다. 예전에는 화면 맨 아래 `#result` 에만 한 줄
+  // 남겼는데, 그러면 목록은 **텅 빈 채**로 있고 사람은 후보가 0건인
+  // 줄 압니다 — 실패와 0건이 같은 모양이 됩니다.
+  const message = error instanceof Error ? error.message : String(error);
+  $('list').innerHTML = failureHtml({
+    what: '업무 후보를 불러오지 못했습니다.',
+    help: message,
+    retry: true,
+  });
+  $('list')
+    .querySelector<HTMLButtonElement>('.retry')
+    ?.addEventListener('click', () => {
+      void load();
+    });
 });
 
 renderNav('review');

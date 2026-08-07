@@ -25,6 +25,9 @@ import {
 } from '../lib/project/setup.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { detailText } from '../lib/http/detail.ts';
+import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
+import { whileLoading } from '../lib/ui/pending.ts';
+import { clearSkeleton, projectCards, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -87,21 +90,17 @@ function projectHtml(project: Project, meetings: Meeting[]): string {
 </section>`;
 }
 
-async function load(): Promise<void> {
+/** 받아 오기만 한다. **그리지 않는다** — 아래 주석 참고. */
+async function fetchAll(): Promise<
+  { kind: 'expired' } | { kind: 'failed'; status: number } | { kind: 'ok'; html: string }
+> {
   const response = await get('/api/projects');
-  if (isSessionExpired(response.status)) {
-    goToLogin();
-    return;
-  }
-  if (!response.ok) {
-    $('projects').textContent = `불러오지 못했습니다 (HTTP ${response.status})`;
-    return;
-  }
+  if (isSessionExpired(response.status)) return { kind: 'expired' };
+  if (!response.ok) return { kind: 'failed', status: response.status };
 
   const projects = orderProjects((await response.json()) as Project[]);
   if (projects.length === 0) {
-    $('projects').innerHTML = `<p class="empty">${escapeHtml(emptyProjectsMessage())}</p>`;
-    return;
+    return { kind: 'ok', html: `<p class="empty">${escapeHtml(emptyProjectsMessage())}</p>` };
   }
 
   // 프로젝트마다 회의를 받아 옵니다. 한 사람이 속한 프로젝트는 많아야
@@ -115,9 +114,42 @@ async function load(): Promise<void> {
     ),
   );
 
-  $('projects').innerHTML = projects
-    .map((project, index) => projectHtml(project, meetings[index] ?? []))
-    .join('');
+  return {
+    kind: 'ok',
+    html: projects.map((p, i) => projectHtml(p, meetings[i] ?? [])).join(''),
+  };
+}
+
+async function load(): Promise<void> {
+  // ⚠️ **받아 오기와 그리기를 나눕니다.** 스켈레톤을 걷는 것은
+  // `whileLoading` 의 `finally` 이므로, 그 안에서 그리면 방금 그린
+  // 것을 곧바로 지울 수 있습니다. 순서는 언제나
+  // 받아 오기 → 스켈레톤 걷기 → 그리기 입니다.
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($('projects'), projectCards()),
+    () => clearSkeleton($('projects')),
+  );
+
+  if (result.kind === 'expired') {
+    goToLogin();
+    return;
+  }
+  if (result.kind === 'failed') {
+    $('projects').innerHTML = failureHtml({
+      what: '프로젝트 목록을 불러오지 못했습니다.',
+      help: describeHttpStatus(result.status) ?? undefined,
+      code: `HTTP ${result.status}`,
+      retry: true,
+    });
+    $('projects')
+      .querySelector<HTMLButtonElement>('.retry')
+      ?.addEventListener('click', () => {
+        void load();
+      });
+    return;
+  }
+  $('projects').innerHTML = result.html;
 }
 
 // ══════════════════════════════════════════════════════════════

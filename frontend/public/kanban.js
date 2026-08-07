@@ -158,6 +158,67 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/ui/empty.ts
+function emptyHtml(state) {
+  const action = state.action ? `<a class="btn btn-primary" href="${escapeHtml(state.action.href)}">${escapeHtml(state.action.label)}</a>` : "";
+  return `<div class="empty-state"><p class="what">${escapeHtml(state.what)}</p><p class="why">${escapeHtml(state.why)}</p><p class="how">${escapeHtml(state.how)}</p>` + action + "</div>";
+}
+
+// src/lib/ui/failure.ts
+function describeHttpStatus(status) {
+  if (status === 401) return "로그인이 풀렸습니다.";
+  if (status === 403) return "이 프로젝트의 구성원만 볼 수 있습니다.";
+  if (status === 404) return "찾을 수 없습니다 — 주소가 바뀌었거나 지워졌습니다.";
+  if (status === 429) return "요청이 너무 잦습니다. 잠시 뒤에 다시 해 보세요.";
+  if (status >= 500) return "서버 쪽 문제입니다. 팀이 고칠 수 있는 것이 아닙니다.";
+  return null;
+}
+function failureHtml(failure) {
+  const code = failure.code === void 0 || failure.code === "" ? "" : `<p class="code">오류 코드 ${escapeHtml(String(failure.code))}</p>`;
+  const help = failure.help ? `<p class="why">${escapeHtml(failure.help)}</p>` : "";
+  const retry = failure.retry ? '<button type="button" class="retry">다시 불러오기</button>' : "";
+  return `<div class="failure-state" role="alert"><p class="what">${escapeHtml(failure.what)}</p>` + help + retry + code + "</div>";
+}
+
+// src/lib/ui/pending.ts
+var LOADING_DELAY_MS = 200;
+var browserTimers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (id) => {
+    clearTimeout(id);
+  }
+};
+async function whileLoading(work, show, hide, timers = browserTimers, delayMs = LOADING_DELAY_MS) {
+  let shown = false;
+  const timer = timers.set(() => {
+    shown = true;
+    show();
+  }, delayMs);
+  try {
+    return await work;
+  } finally {
+    timers.clear(timer);
+    if (shown) hide();
+  }
+}
+
+// src/lib/ui/skeleton.ts
+var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
+var wrap = (inner) => `<div class="sk-wrap" aria-hidden="true">${inner}</div>`;
+function board(columns = 3, cardsPerColumn = 2) {
+  const card = `<div class="card">${bar(72, "line")}${bar(44, "line")}</div>`;
+  const column = `<section class="col">${bar(30, "title")}${card.repeat(Math.max(1, cardsPerColumn))}</section>`;
+  return wrap(column.repeat(Math.max(1, columns)));
+}
+function showSkeleton(element, html) {
+  element.setAttribute("aria-busy", "true");
+  element.innerHTML = html;
+}
+function clearSkeleton(element) {
+  element.removeAttribute("aria-busy");
+  if (element.innerHTML.includes('class="sk')) element.innerHTML = "";
+}
+
 // src/lib/nav/links.ts
 var LABEL = {
   home: "홈",
@@ -441,6 +502,15 @@ function render() {
   $("counts").textContent = `전체 ${summary.total} · 완료 ${summary.done} · 지연 ${summary.overdue} · 회의에서 나온 업무 ${summary.fromMeetings} · PR 이 붙은 업무 ${summary.withPulls}`;
   $("unassigned").hidden = summary.unassigned === 0;
   $("unassigned").textContent = `담당자가 없는 업무 ${summary.unassigned}건은 완료해도 기여도에 반영되지 않습니다.`;
+  if (summary.total === 0) {
+    $("board").innerHTML = emptyHtml({
+      what: "여기에는 팀의 업무 카드가 단계별로 놓입니다.",
+      why: "아직 등록된 업무가 하나도 없습니다 — 고장이 아닙니다.",
+      how: "회의를 열어 녹음하면 AI 가 업무 후보를 뽑고, 승인한 것이 여기로 옵니다. 직접 만들 수도 있습니다.",
+      action: { label: "회의 열기", href: `/project.html?project=${projectId}` }
+    });
+    return;
+  }
   $("board").innerHTML = toColumns(tasks, statuses).map(
     (column) => `
 <section class="col">
@@ -476,24 +546,45 @@ async function move(taskId, to) {
   $("result").textContent = "";
   render();
 }
-async function load() {
+async function fetchAll() {
   const [boardRes, memberRes] = await Promise.all([
     get(`/api/projects/${projectId}/tasks`),
     get(`/api/projects/${projectId}/members`)
   ]);
-  if (isSessionExpired(boardRes.status)) {
+  if (isSessionExpired(boardRes.status)) return { kind: "expired" };
+  if (!boardRes.ok) return { kind: "failed", status: boardRes.status };
+  const payload = await boardRes.json();
+  statuses = payload.statuses;
+  tasks = payload.tasks;
+  if (memberRes.ok) members = await memberRes.json();
+  return { kind: "ok" };
+}
+async function load() {
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($("board"), board(3)),
+    () => clearSkeleton($("board"))
+  );
+  if (result.kind === "expired") {
     goToLogin();
     return;
   }
-  if (!boardRes.ok) {
-    $("result").textContent = boardRes.status === 403 ? "이 프로젝트의 구성원만 볼 수 있습니다." : `불러오지 못했습니다 (HTTP ${boardRes.status})`;
+  if (result.kind === "failed") {
+    $("board").innerHTML = failureHtml({
+      what: "업무를 불러오지 못했습니다.",
+      help: describeHttpStatus(result.status) ?? void 0,
+      code: `HTTP ${result.status}`,
+      retry: true
+    });
+    wireRetry($("board"));
     return;
   }
-  const board = await boardRes.json();
-  statuses = board.statuses;
-  tasks = board.tasks;
-  if (memberRes.ok) members = await memberRes.json();
   render();
+}
+function wireRetry(container) {
+  container.querySelector(".retry")?.addEventListener("click", () => {
+    void load();
+  });
 }
 async function start() {
   const me = await get("/api/auth/me");

@@ -233,6 +233,48 @@ function describeRequestFailure(status, detail) {
   return (detail || `요청이 실패했습니다 (HTTP ${status})`) + ". 아무것도 지워지지 않았을 수 있습니다 — 다시 확인해 주세요.";
 }
 
+// src/lib/ui/pending.ts
+var LOADING_DELAY_MS = 200;
+var browserTimers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (id) => {
+    clearTimeout(id);
+  }
+};
+async function whileLoading(work, show, hide, timers = browserTimers, delayMs = LOADING_DELAY_MS) {
+  let shown = false;
+  const timer = timers.set(() => {
+    shown = true;
+    show();
+  }, delayMs);
+  try {
+    return await work;
+  } finally {
+    timers.clear(timer);
+    if (shown) hide();
+  }
+}
+
+// src/lib/ui/skeleton.ts
+var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
+var wrap = (inner) => `<div class="sk-wrap" aria-hidden="true">${inner}</div>`;
+var ROW_WIDTHS = [86, 64, 74, 58, 80];
+function rows(count = 3) {
+  const list = Array.from(
+    { length: Math.max(1, count) },
+    (_, i) => `<div class="sk-line">${bar(ROW_WIDTHS[i % ROW_WIDTHS.length] ?? 70, "line")}</div>`
+  ).join("");
+  return wrap(list);
+}
+function showSkeleton(element, html) {
+  element.setAttribute("aria-busy", "true");
+  element.innerHTML = html;
+}
+function clearSkeleton(element) {
+  element.removeAttribute("aria-busy");
+  if (element.innerHTML.includes('class="sk')) element.innerHTML = "";
+}
+
 // src/lib/nav/links.ts
 var LABEL = {
   home: "홈",
@@ -537,7 +579,11 @@ async function startBackfill() {
 async function loadHealth() {
   let response;
   try {
-    response = await call(`/api/projects/${projectId}/github`);
+    response = await whileLoading(
+      call(`/api/projects/${projectId}/github`),
+      () => showSkeleton($("gh-headline"), rows(1)),
+      () => clearSkeleton($("gh-headline"))
+    );
   } catch {
     return renderHealth(describeHealthFailure(0));
   }

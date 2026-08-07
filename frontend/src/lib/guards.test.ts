@@ -598,3 +598,159 @@ describe('CSS 토큰', () => {
     }
   });
 });
+
+describe('상태 화면 (지시서 §7)', () => {
+  /** 목록을 **비동기로 채우는** 그릇. 화면과 그 그릇의 id. */
+  const ASYNC_CONTAINERS: [string, string][] = [
+    ['home.ts', 'projects'],
+    ['contributions.ts', 'members'],
+    ['kanban.ts', 'board'],
+    ['review.ts', 'list'],
+    ['lobby.ts', 'roster'],
+  ];
+
+  /**
+   * "…중" 문구를 HTML 에 적어 두는 것이 **정당한** 자리.
+   *
+   * 규칙은 "요청 응답이 곧바로 덮어쓰는가" 입니다. 덮어쓰면 깜빡임이고,
+   * 사람이 기다려야 하는 진짜 상태면 적어 두는 것이 맞습니다.
+   */
+  const SLOW_ON_PURPOSE = new Map([
+    ['call.html#summary', 'WebRTC 연결은 실제로 몇 초 걸린다 — 요청 응답이 아니다'],
+    ['call.html#mic', '마이크 권한은 사람이 눌러야 끝난다'],
+    ['index.html#phase', '녹음기 상태 라벨이다 — 요청이 아니라 상태다'],
+  ]);
+
+  it('⭐ 정적 "불러오는 중…" 을 HTML 에 심어 두지 않는다', () => {
+    // 심어 두면 **언제나** 한 번 깜빡입니다 — 대부분의 요청은 200ms
+    // 안에 끝나기 때문입니다. 깜빡임은 아무것도 안 보여주는 것보다
+    // 나쁩니다 (지시서 §4.7).
+    //
+    // 실제로 홈·로비·프로젝트 설정이 그랬습니다. 화면을 열 때마다
+    // "불러오는 중…" 이 한 프레임 스쳤고, 아무도 버그로 세지 않았습니다.
+    const offenders: string[] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      const html = readFileSync(join(PUBLIC, name), 'utf8');
+      // 주석에 적어 둔 설명은 뺀다 — 왜 비웠는지가 거기 적혀 있다.
+      const markup = html.replace(/<!--[\s\S]*?-->/g, '');
+      // ⚠️ 끝에 `<` 를 **넣지 않습니다.** 넣으면 그 `<` 까지 먹어 버려서
+      // 바로 뒤에 붙은 요소가 검사에서 통째로 빠집니다. 실제로 그랬습니다 —
+      // `<div id="gh-health">` 가 뒤따르는 `<p id="gh-headline">` 의
+      // 여는 꺾쇠를 먹었고, 되돌려도 이 검사가 통과했습니다.
+      // (결함 49·57·이번 — 되돌림이 안 깨지면 내 검사를 먼저 의심할 것.)
+      for (const [, id, inner] of markup.matchAll(
+        /<(?:p|div|span|li)\b[^>]*\bid="([^"]+)"[^>]*>([^<]*)/g,
+      )) {
+        const text = (inner as string).trim();
+        if (!/(?:불러오|확인하|확인|로딩|연결하|여는|준비)는? ?중/.test(text)) continue;
+        if (SLOW_ON_PURPOSE.has(`${name}#${id as string}`)) continue;
+        offenders.push(`${name}#${id as string} → "${text}"`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '정적 로딩 문구는 언제나 한 번 깜빡입니다. 비우고 pending.ts 에 맡기세요',
+    );
+  });
+
+  it('예외 목록이 실재하는 자리를 가리킨다', () => {
+    // 화면이 바뀌어 그 요소가 사라져도 예외는 남습니다. 그러면 다음에
+    // 같은 이름을 쓰는 자리가 조용히 면제됩니다.
+    const dangling: string[] = [];
+    for (const key of SLOW_ON_PURPOSE.keys()) {
+      const [file, id] = key.split('#');
+      const html = readFileSync(join(PUBLIC, file as string), 'utf8');
+      if (!html.includes(`id="${id as string}"`)) dangling.push(key);
+    }
+    strictEqual(dangling.join(', '), '');
+  });
+
+  it('⭐ 목록을 비동기로 채우는 화면은 로딩 표시를 **켠다**', () => {
+    // 이 저장소의 대표 실패 방식: 맞는 모듈을 만들어 놓고 아무도
+    // 부르지 않는 것 (결함 47). 그러니 모듈이 있는지가 아니라
+    // **호출**을 셉니다.
+    const offenders: string[] = [];
+    for (const [name] of ASYNC_CONTAINERS) {
+      const code = codeOf(readFileSync(join(DEMO, name), 'utf8'));
+      if (!/whileLoading\(/.test(code)) offenders.push(`${name} → whileLoading 을 안 부름`);
+      if (!/showSkeleton\(/.test(code)) offenders.push(`${name} → showSkeleton 을 안 부름`);
+    }
+    strictEqual(offenders.join(', '), '');
+  });
+
+  it('⭐ 켠 스켈레톤을 **끄는 짝**이 있다', () => {
+    // 안 끄면 화면이 영원히 로딩 중으로 남습니다. 오류는 안 납니다.
+    const offenders: string[] = [];
+    for (const [name] of ASYNC_CONTAINERS) {
+      const code = codeOf(readFileSync(join(DEMO, name), 'utf8'));
+      const on = [...code.matchAll(/showSkeleton\(/g)].length;
+      const off = [...code.matchAll(/clearSkeleton\(/g)].length;
+      if (off < on) offenders.push(`${name} → 켬 ${on} · 끔 ${off}`);
+    }
+    strictEqual(offenders.join(', '), '');
+  });
+
+  it('⭐ 목록 그릇마다 **빈 상태나 오류 상태**를 그린다', () => {
+    // "데이터가 없습니다" 만 띄우는 것은 미완성으로 칩니다 (지시서 §7).
+    // 이 저장소가 반복해 당한 결함은 전부 같은 모양이었습니다 —
+    // 없는 것을 빈 것으로 답한다.
+    const offenders: string[] = [];
+    for (const [name] of ASYNC_CONTAINERS) {
+      const code = codeOf(readFileSync(join(DEMO, name), 'utf8'));
+      if (!/emptyHtml\(|failureHtml\(/.test(code)) offenders.push(name);
+    }
+    strictEqual(offenders.join(', '), '');
+  });
+
+  it('⭐ [다시 불러오기] 를 만든 화면은 그것을 **잇는다**', () => {
+    // `failureHtml({retry: true})` 는 버튼을 그리기만 합니다. 안 이으면
+    // 눌러도 아무 일이 안 일어나고, 사람은 화면이 더 고장 났다고
+    // 생각합니다 — 만들어 놓고 안 부르는 그 방식 그대로입니다.
+    const offenders: string[] = [];
+    for (const { name, source } of demoFiles()) {
+      const code = codeOf(source);
+      if (!/retry:\s*true/.test(code)) continue;
+      if (!/querySelector<HTMLButtonElement>\('\.retry'\)|\.retry'\)/.test(code)) {
+        offenders.push(name);
+      }
+    }
+    strictEqual(offenders.join(', '), '');
+  });
+
+  it('⭐ 스켈레톤이 쓰는 클래스가 공용 CSS 에 **정의돼 있다**', () => {
+    // 안 정의되면 회색 막대가 **높이 0** 으로 그려집니다. 눈에는
+    // 아무것도 안 보이고, 로딩 표시가 없는 것과 똑같아집니다.
+    // `--bar` 가 없어서 구간 막대가 투명이던 결함 42 와 같은 부류입니다.
+    //
+    // ⚠️ 처음에는 `class="..."` 만 훑었습니다. 그런데 막대의 클래스는
+    // `class="sk${kind && ` sk-${kind}`}"` 로 **조립**됩니다 — 그래서
+    // `.sk-track` 규칙을 지워도 이 검사가 통과했습니다. 되돌림이 안
+    // 깨지면 가드가 불필요한 게 아니라 **내가 잘못 세고 있는 것**입니다
+    // (결함 49·57 에서 두 번 배운 것). 조립되는 쪽도 같이 셉니다.
+    const source = codeOf(readFileSync(join(ROOT, 'src', 'lib', 'ui', 'skeleton.ts'), 'utf8'));
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+
+    const used = new Set<string>(['sk']); // 막대 자신
+    for (const [, group] of source.matchAll(/class="([^"$]+)"/g)) {
+      for (const name of (group as string).split(/\s+/)) {
+        if (name.startsWith('sk')) used.add(name);
+      }
+    }
+    // `bar(72, 'line')` 처럼 넘기는 변형 이름 → `.sk-line`
+    for (const [, kind] of source.matchAll(/\bbar\(\s*\d+\s*,\s*'([a-z-]+)'\s*\)/g)) {
+      used.add(`sk-${kind as string}`);
+    }
+
+    strictEqual(used.size >= 6, true, `세는 클래스가 너무 적습니다: ${[...used].join(', ')}`);
+    const missing = [...used].filter((c) => !new RegExp(`\\.${c}\\b`).test(css));
+    strictEqual(missing.join(', '), '', '공용 CSS 에 없는 스켈레톤 클래스');
+  });
+
+  it('⭐ 빈/오류 상태 클래스도 공용 CSS 에 있다', () => {
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    for (const selector of ['.empty-state', '.failure-state']) {
+      strictEqual(css.includes(selector), true, `${selector} 이 app.css 에 없습니다`);
+    }
+  });
+});

@@ -28,6 +28,9 @@ import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth
 import { escapeHtml } from '../lib/html.ts';
 import { axisTicks, buildDiagram, describeGap } from '../lib/track/diagram.ts';
 import { detailText } from '../lib/http/detail.ts';
+import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
+import { whileLoading } from '../lib/ui/pending.ts';
+import { clearSkeleton, rowItems, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -60,6 +63,26 @@ function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 
+/**
+ * 상태 코드를 들고 다니는 오류.
+ *
+ * ⚠️ 예전에는 `new Error(`${status} ${await response.text()}`)` 였습니다.
+ * 그러면 화면에 **서버 응답 본문이 통째로** 나옵니다 — 사람에게는
+ * `Error: 500 {"detail":...}` 처럼 보이고, 무엇을 해야 하는지는 어디에도
+ * 없습니다. 코드를 들고 다니면 `describeHttpStatus` 가 할 일을 말해 줍니다.
+ */
+class HttpError extends Error {
+  // ⚠️ 생성자 매개변수 속성(`constructor(readonly status)`)은 못 씁니다 —
+  // `erasableSyntaxOnly` 가 막습니다. 이 저장소는 타입을 **지우기만** 하고
+  // 변환하지 않는 실행 방식이라, 코드를 만들어 내는 문법은 전부 금지입니다.
+  status: number;
+
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.status = status;
+  }
+}
+
 async function getJson(path: string): Promise<unknown> {
   const response = await fetch(`${apiBase}${path}`, {
     cache: 'no-store',
@@ -69,25 +92,62 @@ async function getJson(path: string): Promise<unknown> {
     goToLogin();
     throw new Error('로그인이 필요합니다');
   }
-  if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+  if (!response.ok) throw new HttpError(response.status);
   return response.json();
 }
 
 async function refresh(): Promise<void> {
+  // ⚠️ 이 함수는 `POLL_MS` 마다 다시 돕니다. 스켈레톤을 **매번** 켜면
+  // 살아 있는 참가자 목록이 주기적으로 회색 막대로 바뀝니다 — 로딩
+  // 표시가 오히려 화면을 망가뜨립니다. 그래서 **첫 번째만** 켭니다.
+  const first = roster.length === 0;
   try {
-    const [consent, trackBody] = await Promise.all([
-      getJson(`/api/meetings/${meetingId}/consent`) as Promise<{
-        roster: RosterEntry[];
-        message: string;
-      }>,
-      getJson(`/api/meetings/${meetingId}/tracks`) as Promise<{ tracks: TrackHealth[] }>,
-    ]);
+    const [consent, trackBody] = await whileLoading(
+      Promise.all([
+        getJson(`/api/meetings/${meetingId}/consent`) as Promise<{
+          roster: RosterEntry[];
+          message: string;
+        }>,
+        getJson(`/api/meetings/${meetingId}/tracks`) as Promise<{ tracks: TrackHealth[] }>,
+      ]),
+      () => {
+        // ⚠️ `#roster` 는 `<ul>` 입니다. `<div>` 를 넣으면 낭독기가 세는
+        // 항목 수가 틀어집니다 — 그래서 `<li>` 판을 씁니다.
+        if (first) showSkeleton($('roster'), rowItems(3));
+      },
+      () => {
+        if (first) clearSkeleton($('roster'));
+      },
+    );
     roster = consent.roster;
     consentMessage = consent.message;
     tracks = trackBody.tracks;
     render();
   } catch (err) {
-    $('sub').textContent = `불러오지 못했습니다: ${String(err)}`;
+    // ⚠️ 목록 **바로 위**에도 씁니다. `#sub` 한 줄만 바꾸면 참가자
+    // 목록은 텅 빈 채로 남고, 사람은 아무도 안 들어온 줄 압니다.
+    //
+    // `#roster` 가 아니라 `#blockers` 에 넣는 이유: `#roster` 는
+    // `<ul>` 이라 `<div>` 오류 상자를 넣을 수 없습니다. `#blockers` 는
+    // 바로 위에 있고, 다음 성공에서 `renderRoster` 가 덮어씁니다.
+    $('sub').textContent = '불러오지 못했습니다';
+    if (first) {
+      clearSkeleton($('roster'));
+      const box = $('blockers');
+      box.hidden = false;
+      box.innerHTML = failureHtml({
+        what: '참가자 상태를 불러오지 못했습니다.',
+        help:
+          err instanceof HttpError
+            ? (describeHttpStatus(err.status) ?? undefined)
+            : '연결이 끊겼거나 서버에 닿지 못했습니다.',
+        code: err instanceof HttpError ? err.message : undefined,
+        retry: true,
+      });
+      box.querySelector<HTMLButtonElement>('.retry')?.addEventListener('click', () => {
+        void refresh();
+      });
+    }
   }
 }
 

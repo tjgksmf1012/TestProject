@@ -126,6 +126,66 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/ui/empty.ts
+function emptyHtml(state) {
+  const action = state.action ? `<a class="btn btn-primary" href="${escapeHtml(state.action.href)}">${escapeHtml(state.action.label)}</a>` : "";
+  return `<div class="empty-state"><p class="what">${escapeHtml(state.what)}</p><p class="why">${escapeHtml(state.why)}</p><p class="how">${escapeHtml(state.how)}</p>` + action + "</div>";
+}
+
+// src/lib/ui/failure.ts
+function describeHttpStatus(status) {
+  if (status === 401) return "로그인이 풀렸습니다.";
+  if (status === 403) return "이 프로젝트의 구성원만 볼 수 있습니다.";
+  if (status === 404) return "찾을 수 없습니다 — 주소가 바뀌었거나 지워졌습니다.";
+  if (status === 429) return "요청이 너무 잦습니다. 잠시 뒤에 다시 해 보세요.";
+  if (status >= 500) return "서버 쪽 문제입니다. 팀이 고칠 수 있는 것이 아닙니다.";
+  return null;
+}
+function failureHtml(failure) {
+  const code = failure.code === void 0 || failure.code === "" ? "" : `<p class="code">오류 코드 ${escapeHtml(String(failure.code))}</p>`;
+  const help = failure.help ? `<p class="why">${escapeHtml(failure.help)}</p>` : "";
+  const retry = failure.retry ? '<button type="button" class="retry">다시 불러오기</button>' : "";
+  return `<div class="failure-state" role="alert"><p class="what">${escapeHtml(failure.what)}</p>` + help + retry + code + "</div>";
+}
+
+// src/lib/ui/pending.ts
+var LOADING_DELAY_MS = 200;
+var browserTimers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (id) => {
+    clearTimeout(id);
+  }
+};
+async function whileLoading(work, show, hide, timers = browserTimers, delayMs = LOADING_DELAY_MS) {
+  let shown = false;
+  const timer = timers.set(() => {
+    shown = true;
+    show();
+  }, delayMs);
+  try {
+    return await work;
+  } finally {
+    timers.clear(timer);
+    if (shown) hide();
+  }
+}
+
+// src/lib/ui/skeleton.ts
+var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
+var wrap = (inner) => `<div class="sk-wrap" aria-hidden="true">${inner}</div>`;
+function scoreCards(count = 3) {
+  const one = '<article class="card">' + bar(40, "title") + bar(64, "line") + bar(100, "track") + bar(34, "line") + "</article>";
+  return wrap(one.repeat(Math.max(1, count)));
+}
+function showSkeleton(element, html) {
+  element.setAttribute("aria-busy", "true");
+  element.innerHTML = html;
+}
+function clearSkeleton(element) {
+  element.removeAttribute("aria-busy");
+  if (element.innerHTML.includes('class="sk')) element.innerHTML = "";
+}
+
 // src/lib/nav/links.ts
 var LABEL = {
   home: "홈",
@@ -361,7 +421,7 @@ function withEmphasis(text) {
   return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
 function memberCard(member) {
-  const bar = rangeBar(member);
+  const bar2 = rangeBar(member);
   const notes = readBeforeTheNumber(member);
   const flags = integrityNotes(member);
   const noEvidence = hasNoEvidence(member);
@@ -377,7 +437,7 @@ function memberCard(member) {
   </header>
 
   <p class="range">${escapeHtml(describeRange(member))}</p>
-  <div class="rangebar"><i style="left:${bar.left}%;width:${bar.width}%"></i></div>
+  <div class="rangebar"><i style="left:${bar2.left}%;width:${bar2.width}%"></i></div>
   <p class="conf">신뢰도 ${escapeHtml(member.confidence_label)}</p>
 
   ${noEvidence ? '<p class="empty">이 사람의 활동이 아직 하나도 연결되지 않았습니다 — 0 이라는 뜻이 아니라 <strong>연결이 없다</strong>는 뜻입니다.</p>' : ""}
@@ -399,24 +459,50 @@ function render(score) {
   $("meta").textContent = `${score.algo_version} · ${new Date(
     score.computed_at
   ).toLocaleString("ko-KR")} 기준`;
+  if (score.members.length === 0) {
+    $("members").innerHTML = emptyHtml({
+      what: "여기에는 팀원별 기여 구간과 그 근거가 나옵니다.",
+      why: "아직 이을 활동이 하나도 없습니다 — 아무도 안 했다는 뜻이 아닙니다.",
+      how: "회의를 녹음하거나 GitHub 저장소를 연결하면 활동이 여기로 이어집니다.",
+      action: { label: "프로젝트 설정", href: `/project.html?project=${projectId}` }
+    });
+    return;
+  }
   $("members").innerHTML = orderForDisplay(score.members, people).map(memberCard).join("");
 }
-async function load() {
+async function fetchAll() {
   const [scoreRes, memberRes] = await Promise.all([
     get(`/api/projects/${projectId}/contributions`),
     get(`/api/projects/${projectId}/members`)
   ]);
-  if (isSessionExpired(scoreRes.status)) {
+  if (isSessionExpired(scoreRes.status)) return { kind: "expired" };
+  if (!scoreRes.ok) return { kind: "failed", status: scoreRes.status };
+  if (memberRes.ok) people = await memberRes.json();
+  return { kind: "ok", score: await scoreRes.json() };
+}
+async function load() {
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($("members"), scoreCards()),
+    () => clearSkeleton($("members"))
+  );
+  if (result.kind === "expired") {
     goToLogin();
     return;
   }
-  if (!scoreRes.ok) {
-    $("warnings").hidden = false;
-    $("warnings").textContent = scoreRes.status === 403 ? "이 프로젝트의 구성원만 기여도를 볼 수 있습니다." : `기여도를 불러오지 못했습니다 (HTTP ${scoreRes.status})`;
+  if (result.kind === "failed") {
+    $("members").innerHTML = failureHtml({
+      what: "기여도를 불러오지 못했습니다.",
+      help: describeHttpStatus(result.status) ?? void 0,
+      code: `HTTP ${result.status}`,
+      retry: true
+    });
+    $("members").querySelector(".retry")?.addEventListener("click", () => {
+      void load();
+    });
     return;
   }
-  if (memberRes.ok) people = await memberRes.json();
-  render(await scoreRes.json());
+  render(result.score);
 }
 async function start() {
   const me = await get("/api/auth/me");

@@ -269,6 +269,62 @@ function detailText(body, fallback) {
   return fallback;
 }
 
+// src/lib/ui/failure.ts
+function describeHttpStatus(status) {
+  if (status === 401) return "로그인이 풀렸습니다.";
+  if (status === 403) return "이 프로젝트의 구성원만 볼 수 있습니다.";
+  if (status === 404) return "찾을 수 없습니다 — 주소가 바뀌었거나 지워졌습니다.";
+  if (status === 429) return "요청이 너무 잦습니다. 잠시 뒤에 다시 해 보세요.";
+  if (status >= 500) return "서버 쪽 문제입니다. 팀이 고칠 수 있는 것이 아닙니다.";
+  return null;
+}
+function failureHtml(failure) {
+  const code = failure.code === void 0 || failure.code === "" ? "" : `<p class="code">오류 코드 ${escapeHtml(String(failure.code))}</p>`;
+  const help = failure.help ? `<p class="why">${escapeHtml(failure.help)}</p>` : "";
+  const retry = failure.retry ? '<button type="button" class="retry">다시 불러오기</button>' : "";
+  return `<div class="failure-state" role="alert"><p class="what">${escapeHtml(failure.what)}</p>` + help + retry + code + "</div>";
+}
+
+// src/lib/ui/pending.ts
+var LOADING_DELAY_MS = 200;
+var browserTimers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (id) => {
+    clearTimeout(id);
+  }
+};
+async function whileLoading(work, show, hide, timers = browserTimers, delayMs = LOADING_DELAY_MS) {
+  let shown = false;
+  const timer = timers.set(() => {
+    shown = true;
+    show();
+  }, delayMs);
+  try {
+    return await work;
+  } finally {
+    timers.clear(timer);
+    if (shown) hide();
+  }
+}
+
+// src/lib/ui/skeleton.ts
+var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
+var ROW_WIDTHS = [86, 64, 74, 58, 80];
+function rowItems(count = 3) {
+  return Array.from(
+    { length: Math.max(1, count) },
+    (_, i) => `<li class="sk-line" aria-hidden="true">${bar(ROW_WIDTHS[i % ROW_WIDTHS.length] ?? 70, "line")}</li>`
+  ).join("");
+}
+function showSkeleton(element, html) {
+  element.setAttribute("aria-busy", "true");
+  element.innerHTML = html;
+}
+function clearSkeleton(element) {
+  element.removeAttribute("aria-busy");
+  if (element.innerHTML.includes('class="sk')) element.innerHTML = "";
+}
+
 // src/lib/nav/links.ts
 var LABEL = {
   home: "홈",
@@ -504,6 +560,16 @@ var consentMessage = "";
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
+var HttpError = class extends Error {
+  // ⚠️ 생성자 매개변수 속성(`constructor(readonly status)`)은 못 씁니다 —
+  // `erasableSyntaxOnly` 가 막습니다. 이 저장소는 타입을 **지우기만** 하고
+  // 변환하지 않는 실행 방식이라, 코드를 만들어 내는 문법은 전부 금지입니다.
+  status;
+  constructor(status) {
+    super(`HTTP ${status}`);
+    this.status = status;
+  }
+};
 async function getJson(path) {
   const response = await fetch(`${apiBase}${path}`, {
     cache: "no-store",
@@ -513,21 +579,44 @@ async function getJson(path) {
     goToLogin();
     throw new Error("로그인이 필요합니다");
   }
-  if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+  if (!response.ok) throw new HttpError(response.status);
   return response.json();
 }
 async function refresh() {
+  const first = roster.length === 0;
   try {
-    const [consent, trackBody] = await Promise.all([
-      getJson(`/api/meetings/${meetingId}/consent`),
-      getJson(`/api/meetings/${meetingId}/tracks`)
-    ]);
+    const [consent, trackBody] = await whileLoading(
+      Promise.all([
+        getJson(`/api/meetings/${meetingId}/consent`),
+        getJson(`/api/meetings/${meetingId}/tracks`)
+      ]),
+      () => {
+        if (first) showSkeleton($("roster"), rowItems(3));
+      },
+      () => {
+        if (first) clearSkeleton($("roster"));
+      }
+    );
     roster = consent.roster;
     consentMessage = consent.message;
     tracks = trackBody.tracks;
     render();
   } catch (err) {
-    $("sub").textContent = `불러오지 못했습니다: ${String(err)}`;
+    $("sub").textContent = "불러오지 못했습니다";
+    if (first) {
+      clearSkeleton($("roster"));
+      const box = $("blockers");
+      box.hidden = false;
+      box.innerHTML = failureHtml({
+        what: "참가자 상태를 불러오지 못했습니다.",
+        help: err instanceof HttpError ? describeHttpStatus(err.status) ?? void 0 : "연결이 끊겼거나 서버에 닿지 못했습니다.",
+        code: err instanceof HttpError ? err.message : void 0,
+        retry: true
+      });
+      box.querySelector(".retry")?.addEventListener("click", () => {
+        void refresh();
+      });
+    }
   }
 }
 async function submitConsent(consented) {
@@ -602,12 +691,12 @@ function renderMembers(statuses) {
   $("axis").hidden = ticks.length === 0;
   $("members").innerHTML = statuses.map((s) => {
     const spans = diagram.durationMs > 0 ? diagram.gaps.get(s.userId) ?? [] : null;
-    const bar = spans === null ? "" : `<span class="tl">${spans.map(
+    const bar2 = spans === null ? "" : `<span class="tl">${spans.map(
       (g) => `<i style="left:${g.left}%;width:${g.width}%" title="${escapeHtml(
         describeGap(g, diagram.durationMs)
       )}"></i>`
     ).join("")}</span>`;
-    return `<li class="${s.verdict}"><span class="name">${escapeHtml(s.name)}</span><span class="state">${escapeHtml(s.message)}</span>${bar}</li>`;
+    return `<li class="${s.verdict}"><span class="name">${escapeHtml(s.name)}</span><span class="state">${escapeHtml(s.message)}</span>${bar2}</li>`;
   }).join("");
 }
 function render() {
