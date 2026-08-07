@@ -37,6 +37,7 @@ import { escapeHtml } from '../lib/html.ts';
 import { renderNav } from './nav.ts';
 import type { SyncTransport } from '../lib/recording/client.ts';
 import type { PendingChunk, UploadTransport } from '../lib/recording/upload-queue.ts';
+import { bootApp } from './pwa.ts';
 
 const $ = (id: string): HTMLElement => {
   const el = document.getElementById(id);
@@ -344,3 +345,6 @@ $('copy').addEventListener('click', async () => {
 render();
 
 renderNav('record');
+
+// 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
+bootApp();

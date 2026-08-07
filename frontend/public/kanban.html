@@ -2,27 +2,32 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<!-- 홈 화면에 추가하면 주소창 없이 전체화면으로 뜬다. -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/app.css" />
 <title>칸반 — TeamFlow</title>
 <style>
-  :root { color-scheme: light dark; --line: #d8dbe0; --dim: #6b7280; --bad: #b91c1c; --warn: #b45309; --ok: #15803d; }
-  @media (prefers-color-scheme: dark) { :root { --line: #3a3f47; --dim: #9aa2ad; --bad: #f87171; --warn: #fbbf24; --ok: #4ade80; } }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 1rem; font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; max-width: 64rem; margin-inline: auto; }
-  h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
-  .sub { color: var(--dim); font-size: .875rem; margin: 0 0 .25rem; }
+
   #unassigned { margin: .75rem 0; padding: .625rem .875rem; border-radius: .5rem; font-size: .875rem; background: color-mix(in srgb, var(--warn) 12%, transparent); }
 
   /* 좁은 화면에서는 세로로 쌓인다. 폰에서 열어보는 게 기본이다. */
   #board { display: grid; gap: 1rem; margin-top: 1rem; }
   @media (min-width: 46rem) { #board { grid-template-columns: repeat(3, 1fr); align-items: start; } }
 
-  .col { border: 1px solid var(--line); border-radius: .75rem; padding: .75rem; }
+  .col { background: var(--surface); border-radius: var(--radius); padding: .875rem; }
   .col h2 { font-size: .8125rem; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 0 0 .625rem; }
   .col h2 .n { float: right; font-variant-numeric: tabular-nums; }
-  .empty { font-size: .8125rem; color: var(--dim); margin: .5rem 0; }
 
-  .task { border: 1px solid var(--line); border-radius: .5rem; padding: .625rem .75rem; margin-bottom: .625rem; }
+  .task { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .75rem; margin-bottom: .625rem; }
   .task .title { font-weight: 600; margin: 0 0 .25rem; font-size: .9375rem; }
   .task .meta { font-size: .8125rem; color: var(--dim); margin: 0; }
 
@@ -34,18 +39,17 @@
   .warn li::before { content: "⚠ "; }
 
   .moves { display: flex; gap: .375rem; margin-top: .5rem; flex-wrap: wrap; }
-  .moves button { font: inherit; font-size: .75rem; padding: .25rem .5rem; border: 1px solid var(--line); border-radius: .3rem; background: transparent; color: inherit; cursor: pointer; }
+  /* ⭐ 예전에는 높이 26px 이었다. 손가락 끝 접촉면이 대략 44px 이라
+     그보다 작으면 **옆 카드의 버튼을 누른다** — 칸반에서 그건 엉뚱한
+     업무를 완료 처리하는 것이고, 완료는 기여 이벤트를 만든다.
+     크기는 app.css 의 button 규칙(min-height: var(--tap))이 정하고,
+     여기서는 한 줄에 몇 개가 들어가는지만 정한다. */
+  .moves button { flex: 1 1 auto; font-size: .875rem; padding-inline: .625rem; }
 
   #result { font-size: .875rem; color: var(--bad); margin-top: 1rem; }
-  .note { font-size: .8125rem; color: var(--dim); margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-      nav#nav { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 1rem; font-size: .8125rem; }
-      nav#nav a { padding: .2rem .55rem; border: 1px solid var(--line, #d8dbe0); border-radius: .35rem; text-decoration: none; color: inherit; opacity: .85; }
-      nav#nav a:hover { opacity: 1; }
-      nav#nav .miss { color: var(--dim, #6b7280); }
     </style>
 </head>
 <body>
-    <nav id="nav"></nav>
   <h1>칸반</h1>
   <p class="sub" id="who"></p>
   <p class="sub" id="counts"></p>
@@ -65,5 +69,10 @@
   </p>
 
   <script type="module" src="/kanban.js"></script>
+
+  <!-- 아래 탭바. `src/demo/nav.ts` 가 채운다.
+       위쪽 링크 줄에 의존하면 전체화면 PWA·WebView 에서 갇힌다 —
+       거기에는 주소창도 뒤로가기도 없다. -->
+  <nav id="tabs" aria-label="주요 화면"></nav>
 </body>
 </html>

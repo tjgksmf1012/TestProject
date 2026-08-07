@@ -1,0 +1,100 @@
+/**
+ * 앱으로 설치하기 — 판단 부분.
+ *
+ * ## 왜 이게 로직인가
+ *
+ * "홈 화면에 추가" 는 브라우저마다 완전히 다릅니다.
+ *
+ *   · **안드로이드 크롬** — `beforeinstallprompt` 이벤트를 주고, 우리가
+ *     붙잡아 뒀다가 원하는 순간에 `prompt()` 를 부를 수 있습니다.
+ *   · **iOS 사파리** — 그런 이벤트가 **없습니다.** 사람이 공유 버튼 →
+ *     "홈 화면에 추가" 를 직접 눌러야 합니다. 그래서 안내 문구를
+ *     보여주는 것 말고 할 수 있는 게 없습니다.
+ *   · **이미 설치된 상태** — 안내를 또 보여주면 안 됩니다. 이미 앱
+ *     안에서 "앱으로 설치하세요" 를 읽는 셈입니다.
+ *   · **안드로이드 셸(WebView)** — 여기서는 설치가 아예 뜻이 없습니다.
+ *
+ * 화면 코드에 `if (isIOS)` 를 흩뿌리면 넷 중 하나가 반드시 어긋납니다.
+ * 어긋나도 예외가 안 나서 아무도 모릅니다 — 그냥 안내가 안 뜨거나
+ * 엉뚱하게 뜹니다.
+ */
+
+export type InstallState =
+  /** 이미 앱으로 실행 중. 아무것도 보여주지 않는다. */
+  | 'installed'
+  /** 안드로이드 셸 안. 설치라는 개념이 없다. */
+  | 'in-shell'
+  /** 브라우저가 설치를 제안할 수 있다. 버튼을 보여준다. */
+  | 'promptable'
+  /** iOS — 사람이 직접 해야 한다. 방법을 알려 준다. */
+  | 'manual-ios'
+  /** 설치할 방법이 없다(데스크톱 브라우저 등). 조용히 있는다. */
+  | 'unavailable';
+
+export interface InstallEnvironment {
+  /** `navigator.userAgent` */
+  userAgent: string;
+  /** `matchMedia('(display-mode: standalone)').matches` */
+  standalone: boolean;
+  /** iOS 사파리만 쓰는 옛 신호. `navigator.standalone` */
+  iosStandalone: boolean;
+  /** `beforeinstallprompt` 를 받아 뒀는가 */
+  hasPrompt: boolean;
+  /** 안드로이드 셸이 심어 주는 표식 */
+  inShell: boolean;
+}
+
+/** iOS 판별. iPad 는 iPadOS 13부터 맥이라고 말한다. */
+export function isIOS(userAgent: string): boolean {
+  if (/iPhone|iPod/.test(userAgent)) return true;
+  // iPadOS 13+ 는 `Macintosh` 로 위장한다. 진짜 맥과 구분하려면
+  // 터치를 봐야 하는데, 여기서는 순수 함수라 UA 만으로 판단한다.
+  if (/iPad/.test(userAgent)) return true;
+  return false;
+}
+
+export function installState(env: InstallEnvironment): InstallState {
+  // 셸을 먼저 본다. 셸 안에서도 standalone 일 수 있는데, 그때
+  // "설치됨" 이라고 하면 틀린 건 아니지만 할 말이 다르다.
+  if (env.inShell) return 'in-shell';
+  if (env.standalone || env.iosStandalone) return 'installed';
+  if (env.hasPrompt) return 'promptable';
+  if (isIOS(env.userAgent)) return 'manual-ios';
+  return 'unavailable';
+}
+
+/**
+ * 사람에게 할 말.
+ *
+ * ⭐ iOS 안내는 **어느 버튼인지** 말해야 합니다. "홈 화면에 추가하세요"
+ * 만으로는 어디를 눌러야 할지 모릅니다 — 공유 버튼은 사파리 아래쪽에
+ * 있고 크롬(iOS)에서는 주소창 옆에 있습니다.
+ */
+export function describeInstall(state: InstallState): string {
+  switch (state) {
+    case 'promptable':
+      return '앱으로 설치하면 주소창 없이 전체 화면으로 열리고, 홈 화면에서 바로 들어옵니다.';
+    case 'manual-ios':
+      return '아이폰에서는 공유 버튼(⬆️) → "홈 화면에 추가" 를 누르면 앱처럼 쓸 수 있습니다.';
+    case 'installed':
+      return '';
+    case 'in-shell':
+      return '';
+    case 'unavailable':
+      return '';
+  }
+}
+
+/**
+ * 왜 설치를 권하는가 — 이 앱에서는 이유가 하나 더 있습니다.
+ *
+ * 홈 화면에서 연 PWA 는 **화면 꺼짐 방지(Wake Lock)** 가 브라우저 탭보다
+ * 잘 듣습니다(iOS 는 18.4+ 부터 설치형 PWA 에서만). 녹음이 끊기는 것이
+ * 이 프로젝트의 1순위 위험이라, 설치는 겉모습 문제가 아닙니다.
+ */
+export function whyInstall(): string {
+  return (
+    '설치하면 녹음 중에 화면이 꺼지는 것을 더 잘 막습니다 — ' +
+    '브라우저 탭에서는 화면 꺼짐 방지가 잘 듣지 않습니다.'
+  );
+}

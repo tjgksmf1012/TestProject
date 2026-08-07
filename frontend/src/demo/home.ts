@@ -24,6 +24,7 @@ import {
   titleProblem,
 } from '../lib/project/setup.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { bootApp } from './pwa.ts';
 
 const params = new URLSearchParams(location.search);
 // ⚠️ 주소창의 `?api=` 를 그대로 쓰면 **비밀번호와 회의 음성이 어디로
@@ -56,8 +57,8 @@ function meetingHtml(meeting: Meeting): string {
      — ${escapeHtml(step.reason)}</p>
   ${
     step.href
-      ? `<a class="go${step.actionable ? ' primary' : ''}" href="${escapeHtml(step.href)}">
-           ${escapeHtml(step.label)}</a>`
+      ? `<a class="btn btn-block${step.actionable ? ' btn-primary' : ''}"
+             href="${escapeHtml(step.href)}">${escapeHtml(step.label)}</a>`
       : ''
   }
 </li>`;
@@ -65,14 +66,14 @@ function meetingHtml(meeting: Meeting): string {
 
 function projectHtml(project: Project, meetings: Meeting[]): string {
   const links =
-    `<a href="/kanban.html?project=${project.project_id}">칸반</a>` +
-    `<a href="/contributions.html?project=${project.project_id}">기여도</a>` +
+    `<a class="btn" href="/kanban.html?project=${project.project_id}">칸반</a>` +
+    `<a class="btn" href="/contributions.html?project=${project.project_id}">기여도</a>` +
     // 회의를 여는 곳·초대 코드를 보는 곳이 여기뿐이다. 이 링크가 없으면
     // 프로젝트를 만들어 놓고도 다음 단계로 갈 방법이 없다.
-    `<a href="/project.html?project=${project.project_id}">설정 · 회의 열기</a>`;
+    `<a class="btn" href="/project.html?project=${project.project_id}">설정</a>`;
 
   return `
-<section class="project">
+<section class="card project">
   <h2>${escapeHtml(project.title)}</h2>
   <p class="sub">${escapeHtml(describeProject(project))}</p>
   <div class="links">${links}</div>
@@ -207,3 +208,6 @@ async function start(): Promise<void> {
 }
 
 void start();
+
+// 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
+bootApp();

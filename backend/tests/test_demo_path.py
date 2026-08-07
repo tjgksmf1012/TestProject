@@ -846,25 +846,58 @@ def test_outsider_cannot_read_the_member_list(client: TestClient, seeded: dict):
     login_as(client, outsider_id)
     assert client.get(f"/api/projects/{seeded['project_id']}/members").status_code == 403
 
-
 def test_no_screen_is_a_dead_end(client: TestClient):
     """⭐ 화면 일곱 개 중 넷이 막다른 길이었다.
 
     녹음·승인·칸반·기여도에 들어가면 브라우저 뒤로가기 말고는 나올 방법이
-    없었습니다. 폰에서 주소창 없이 열면 갇힙니다.
+    없었습니다. **폰에서 앱으로 설치해 열면 주소창도 뒤로가기도 없어서**
+    그때는 정말 갇힙니다.
 
-    모든 화면에 `<nav id="nav">` 가 있는지를 봅니다 — 채우는 것은
+    이동 줄을 화면 위에서 **아래 탭바**로 옮겼습니다. 폰을 한 손으로 쥐면
+    위쪽 3분의 1은 엄지가 안 닿기 때문입니다. 채우는 것은
     `src/demo/nav.ts` 이고, 무엇을 채울지는 `src/lib/nav/links.ts` 가
-    정합니다(17개 테스트).
+    정합니다(27개 테스트).
     """
     from pathlib import Path as _Path
 
     public = _Path(__file__).resolve().parents[2] / "frontend" / "public"
+
+    # 로그인은 아직 신원이 없어 갈 곳이 정해지지 않았고, 오프라인 화면은
+    # 연결이 없어 어디로도 못 갑니다 — 둘 다 탭이 죽은 링크가 됩니다.
+    exempt = {"login.html", "offline.html"}
     missing = [
         page.name
         for page in sorted(public.glob("*.html"))
-        # 로그인·홈은 예외입니다. 로그인은 아직 신원이 없고, 홈이 그 목적지입니다.
-        if page.name not in {"login.html", "home.html"}
-        and 'id="nav"' not in page.read_text()
+        if page.name not in exempt and 'id="tabs"' not in page.read_text()
     ]
     assert not missing, f"빠져나올 길이 없는 화면: {missing}"
+
+
+def test_the_app_shell_is_actually_reachable(client: TestClient):
+    """⭐ 설치에 필요한 파일을 서버가 실제로 준다.
+
+    manifest·서비스 워커·아이콘이 저장소에 있는 것과 **서버가 주는 것**은
+    다릅니다. 하나라도 404 면 홈 화면에 추가했을 때 주소창이 그대로
+    남거나(manifest), 오프라인 화면이 안 뜨거나(sw.js), 아이콘 대신
+    화면 캡처가 박힙니다.
+
+    `sw.js` 는 특히 경로가 중요합니다. `/` 에서 서빙되지 않으면 스코프가
+    좁아져 **다른 화면을 캐시하지 못합니다.**
+    """
+    for path, kind in [
+        ("/manifest.webmanifest", None),
+        ("/sw.js", "javascript"),
+        ("/app.css", "css"),
+        ("/icon.svg", "svg"),
+        ("/icon-180.png", "png"),
+        ("/icon-192.png", "png"),
+        ("/icon-512.png", "png"),
+        ("/icon-maskable-512.png", "png"),
+        ("/offline.html", "html"),
+    ]:
+        response = client.get(path)
+        assert response.status_code == 200, f"{path} → {response.status_code}"
+        if kind:
+            assert kind in response.headers["content-type"], (
+                f"{path} → {response.headers['content-type']}"
+            )

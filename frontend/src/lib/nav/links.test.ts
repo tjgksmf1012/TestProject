@@ -6,6 +6,7 @@ import {
   labelOf,
   missingLinks,
   navLinks,
+  navTabs,
   type ScreenId,
 } from './links.ts';
 
@@ -138,5 +139,72 @@ describe('contextFromSearch', () => {
     const context = contextFromSearch('kanban', '?project=abc&meeting=0');
     strictEqual(context.projectId, null);
     strictEqual(context.meetingId, null);
+  });
+});
+
+describe('navTabs', () => {
+  it('⭐ 언제나 같은 순서로 넷 — 사람은 자리를 기억해서 누른다', () => {
+    // 상황에 따라 탭이 사라지면 같은 자리에 다른 것이 오고,
+    // 눌렀을 때 엉뚱한 화면으로 간다.
+    const withProject = navTabs({ current: 'home', projectId: 3 }).map((t) => t.screen);
+    const without = navTabs({ current: 'home' }).map((t) => t.screen);
+    deepStrictEqual(withProject, ['home', 'kanban', 'contributions', 'project']);
+    deepStrictEqual(without, withProject);
+  });
+
+  it('⭐ 못 가는 탭을 숨기지 않고 이유를 준다', () => {
+    // 숨기면 사람은 그 화면이 **없는 줄** 안다.
+    const tabs = navTabs({ current: 'home' });
+    const kanban = tabs.find((t) => t.screen === 'kanban');
+    strictEqual(kanban?.enabled, false);
+    strictEqual(typeof kanban?.blockedReason, 'string');
+    strictEqual(kanban?.blockedReason?.length ? true : false, true);
+  });
+
+  it('⭐ 못 가는 탭에는 주소를 주지 않는다', () => {
+    // 주면 눌렸을 때 `?project=null` 로 가고, 서버는 404 를 주고,
+    // 사람은 화면이 고장 났다고 읽는다.
+    const kanban = navTabs({ current: 'home' }).find((t) => t.screen === 'kanban');
+    strictEqual(kanban?.href, '');
+  });
+
+  it('홈은 언제나 갈 수 있다 — 어디서든 빠져나올 곳이 하나는 있어야 한다', () => {
+    strictEqual(navTabs({ current: 'kanban' }).find((t) => t.screen === 'home')?.enabled, true);
+  });
+
+  it('지금 화면을 표시한다 — 어디 있는지 보여야 한다', () => {
+    const tabs = navTabs({ current: 'contributions', projectId: 3 });
+    deepStrictEqual(
+      tabs.filter((t) => t.current).map((t) => t.screen),
+      ['contributions'],
+    );
+  });
+
+  it('회의 id 를 들고 간다 — 칸반에서 그 회의로 돌아올 수 있어야 한다', () => {
+    const tabs = navTabs({ current: 'home', projectId: 3, meetingId: 7 });
+    strictEqual(tabs.find((t) => t.screen === 'kanban')?.href.includes('meeting=7'), true);
+  });
+
+  it('설정 탭은 회의 id 를 들고 가지 않는다 — 프로젝트 단위 화면이다', () => {
+    const tabs = navTabs({ current: 'home', projectId: 3, meetingId: 7 });
+    strictEqual(tabs.find((t) => t.screen === 'project')?.href, '/project.html?project=3');
+  });
+
+  it('탭마다 그림이 있다 — 글자만 있으면 폰에서 잘 안 보인다', () => {
+    for (const tab of navTabs({ current: 'home', projectId: 1 })) {
+      strictEqual(tab.icon.length > 0, true, tab.screen);
+      strictEqual(tab.icon, tab.icon.trim());
+    }
+  });
+
+  it('⭐ 회의 화면은 탭이 아니다', () => {
+    // 로비·검토·녹음은 "지금 이 회의" 안에서만 뜻이 있다. 늘 보이는
+    // 자리에 두면 **어느 회의인지 모르는 채로** 눌린다.
+    const screens = navTabs({ current: 'home', projectId: 1, meetingId: 2 }).map(
+      (t) => t.screen,
+    );
+    for (const scoped of ['lobby', 'review', 'record']) {
+      strictEqual(screens.includes(scoped as never), false, scoped);
+    }
   });
 });

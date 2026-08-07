@@ -138,6 +138,76 @@ export function missingLinks(context: NavContext): string[] {
  * `?project=0` · `?project=NaN` 같은 주소가 만들어집니다 — 서버는 404 를
  * 주고 사용자는 화면이 고장 났다고 읽습니다.
  */
+/**
+ * 아래 탭바에 늘 보이는 자리들.
+ *
+ * ## 왜 `navLinks` 와 따로인가
+ *
+ * `navLinks` 는 **갈 수 있는 곳만** 줍니다. 그건 위쪽 링크 줄에는 맞지만
+ * 탭바에는 맞지 않습니다 — 탭이 상황에 따라 사라지면 같은 자리에 다른
+ * 것이 오고, 사람은 **자리를 기억해서** 누르므로 엉뚱한 화면으로 갑니다.
+ *
+ * 그래서 탭은 **항상 같은 순서로 넷**입니다. 못 가는 것은 흐리게 두고
+ * 왜 못 가는지 이유를 함께 줍니다. 숨기면 그 화면이 없는 줄 압니다.
+ *
+ * 회의 화면(로비·검토·녹음)은 탭이 아닙니다. 그건 "지금 이 회의" 안에서만
+ * 뜻이 있는 화면이라, 늘 보이는 자리에 두면 **어느 회의인지 모르는 채로**
+ * 눌리게 됩니다.
+ */
+export interface NavTab {
+  screen: ScreenId;
+  label: string;
+  /** 탭바에 그릴 그림. 이모지를 쓰는 이유는 아이콘 파일이 0개이기 때문. */
+  icon: string;
+  href: string;
+  current: boolean;
+  /** 지금 갈 수 있는가. 못 가면 흐리게 그린다. */
+  enabled: boolean;
+  /** 못 가는 이유. 없으면 갈 수 있다는 뜻. */
+  blockedReason: string | null;
+}
+
+const TAB_ICON: Record<string, string> = {
+  home: '🏠',
+  kanban: '📋',
+  contributions: '📊',
+  project: '⚙️',
+};
+
+/** 탭 순서. **바꾸지 마세요** — 사람은 자리를 기억해서 누릅니다. */
+const TAB_ORDER: ScreenId[] = ['home', 'kanban', 'contributions', 'project'];
+
+export function navTabs(context: NavContext): NavTab[] {
+  const project = positive(context.projectId);
+  const meeting = positive(context.meetingId);
+  const suffix = meeting !== null ? `&meeting=${meeting}` : '';
+
+  return TAB_ORDER.map((screen) => {
+    const needsProject = screen !== 'home';
+    const enabled = !needsProject || project !== null;
+
+    let href = '/home.html';
+    if (screen === 'kanban') href = `/kanban.html?project=${project}${suffix}`;
+    if (screen === 'contributions') {
+      href = `/contributions.html?project=${project}${suffix}`;
+    }
+    if (screen === 'project') href = `/project.html?project=${project}`;
+
+    return {
+      screen,
+      label: LABEL[screen],
+      icon: TAB_ICON[screen] ?? '•',
+      // 못 가는 탭에 주소를 주면 눌렸을 때 `?project=null` 로 간다.
+      href: enabled ? href : '',
+      current: context.current === screen,
+      enabled,
+      blockedReason: enabled
+        ? null
+        : '프로젝트를 고르면 열립니다 — 홈에서 프로젝트를 누르세요',
+    };
+  });
+}
+
 export function contextFromSearch(current: ScreenId, search: string): NavContext {
   const params = new URLSearchParams(search);
   const read = (key: string): number | null => {

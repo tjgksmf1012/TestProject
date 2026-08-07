@@ -97,3 +97,213 @@ describe('화면 코드 규칙', () => {
     strictEqual(offenders.join(', '), '');
   });
 });
+
+describe('모바일 규칙', () => {
+  const screens = (): { name: string; html: string }[] =>
+    readdirSync(PUBLIC)
+      .filter((name) => name.endsWith('.html'))
+      .map((name) => ({ name, html: readFileSync(join(PUBLIC, name), 'utf8') }));
+
+  it('테스트가 볼 화면이 실제로 있다', () => {
+    strictEqual(screens().length >= 8, true);
+  });
+
+  it('⭐ 모든 화면이 공통 스타일을 가져온다', () => {
+    // 안 가져오면 그 화면만 데스크톱 값으로 돌아간다 — 터치 타깃도,
+    // safe-area 도, 탭바 자리도 없어진다.
+    const missing = screens()
+      .filter(({ html }) => !html.includes('href="/app.css"'))
+      .map(({ name }) => name);
+    strictEqual(missing.join(', '), '');
+  });
+
+  it('⭐ 모든 화면이 노치 뒤까지 그린다 (viewport-fit=cover)', () => {
+    // 이게 없으면 `env(safe-area-inset-*)` 가 전부 0 이 되고, 아래 고정
+    // 버튼이 홈 인디케이터에 가려 **안 눌린다.**
+    const missing = screens()
+      .filter(({ html }) => !html.includes('viewport-fit=cover'))
+      .map(({ name }) => name);
+    strictEqual(missing.join(', '), '');
+  });
+
+  it('⭐ 로그인 말고는 전부 아래 탭바가 있다', () => {
+    // 전체화면 PWA·WebView 에는 주소창도 뒤로가기도 없다. 탭바가 없으면
+    // 그 화면은 정말 막다른 길이 된다.
+    // 로그인은 아직 어느 프로젝트 사람인지도 모르고, 오프라인 화면은
+    // 연결이 없어서 어디로도 갈 수 없다 — 둘 다 탭이 죽은 링크가 된다.
+    const exempt = new Set(['login.html', 'offline.html']);
+    const missing = screens()
+      .filter(({ name }) => !exempt.has(name))
+      .filter(({ html }) => !html.includes('id="tabs"'))
+      .map(({ name }) => name);
+    strictEqual(missing.join(', '), '');
+  });
+
+  it('⭐ 화면이 공통 토큰을 다시 정의하지 않는다', () => {
+    // app.css 보다 뒤에 오므로 다시 정의하면 **공통 값이 통째로 덮인다.**
+    // 폰 기준으로 짠 색·간격이 화면마다 제각각으로 돌아간다.
+    const owned = ['--line', '--dim', '--accent', '--bg', '--surface', '--text'];
+    const offenders: string[] = [];
+    for (const { name, html } of screens()) {
+      const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+      for (const block of style.matchAll(/:root\s*\{([^}]*)\}/g)) {
+        for (const token of owned) {
+          if (new RegExp(`${token}\\s*:`).test(block[1] ?? '')) {
+            offenders.push(`${name} → ${token}`);
+          }
+        }
+      }
+    }
+    strictEqual(offenders.join(', '), '');
+  });
+
+  it('⭐ 입력 칸 글자를 16px 밑으로 내리지 않는다', () => {
+    // iOS Safari 는 글자가 16px 보다 작은 입력 칸에 포커스가 가면 화면을
+    // 확대하고, **확대된 채로 돌아오지 않는다.** 사람은 앱이 깨졌다고
+    // 느낀다. 0.9375rem = 15px 이 딱 그 함정이다.
+    const offenders: string[] = [];
+    for (const { name, html } of screens()) {
+      const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+      for (const rule of style.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+        const selector = (rule[1] ?? '').trim();
+        if (!/\binput\b|\btextarea\b|\bselect\b/.test(selector)) continue;
+        const size = (rule[2] ?? '').match(/font-size:\s*([\d.]+)(rem|px|em)/);
+        if (!size) continue;
+        const px = size[2] === 'px' ? Number(size[1]) : Number(size[1]) * 16;
+        if (px < 16) offenders.push(`${name} → ${selector} (${px}px)`);
+      }
+    }
+    strictEqual(offenders.join(', '), '');
+  });
+});
+
+describe('아래 고정 요소', () => {
+  it('⭐ 탭바와 겹치는 고정 요소가 없다', () => {
+    // `position: fixed; bottom: 0` 을 쓰면 탭바 **밑에** 깔린다.
+    // 승인 화면의 제출 버튼이 그랬다 — 화면에 보이는데 안 눌린다.
+    // 아래에 붙이는 것은 app.css 의 `.actionbar` 를 써야 한다.
+    const offenders: string[] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      const style =
+        readFileSync(join(PUBLIC, name), 'utf8').match(/<style>([\s\S]*?)<\/style>/)?.[1] ??
+        '';
+      for (const rule of style.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+        const body = rule[2] ?? '';
+        if (!/position:\s*fixed/.test(body)) continue;
+        if (/bottom:\s*0/.test(body)) {
+          offenders.push(`${name} → ${(rule[1] ?? '').trim()}`);
+        }
+      }
+    }
+    strictEqual(offenders.join(', '), '');
+  });
+
+  it('⭐ 아래 고정 막대를 쓰는 화면은 본문 여백을 확보한다', () => {
+    // 안 하면 마지막 카드가 막대에 가려 **영원히 안 보인다.**
+    const offenders: string[] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      const html = readFileSync(join(PUBLIC, name), 'utf8');
+      if (!/class="actionbar"/.test(html)) continue;
+      if (!/<body[^>]*class="[^"]*has-actionbar/.test(html)) offenders.push(name);
+    }
+    strictEqual(offenders.join(', '), '');
+  });
+});
+
+describe('앱 껍데기 배선', () => {
+  /** 화면 진입점 — HTML 이 `<script>` 로 부르는 모듈들. */
+  const entries = (): { name: string; source: string }[] =>
+    demoFiles().filter(({ name }) => htmlFor(name) !== null);
+
+  it('진입점을 실제로 찾았다', () => {
+    strictEqual(entries().length >= 8, true);
+  });
+
+  it('⭐ 모든 진입점이 bootApp 을 부른다', () => {
+    // 안 부르면 서비스 워커가 등록되지 않고 `sw.js` 는 그냥 저장소에
+    // 놓인 파일이 된다. 오프라인 화면도, 설치 안내도 안 뜬다 —
+    // 그런데 **오류는 하나도 안 난다.**
+    const missing = entries()
+      .filter(({ source }) => !/\bbootApp\(\)/.test(source))
+      .map(({ name }) => name);
+    strictEqual(missing.join(', '), '');
+  });
+
+  it('⭐ 서비스 워커가 캐시하는 파일이 전부 실재한다', () => {
+    // 없는 파일을 캐시 목록에 두면 그 항목만 조용히 실패한다.
+    // 특히 **오프라인 화면이 없으면** 지하철에서 흰 화면이 뜨고,
+    // 사람은 앱이 죽었다고 생각한다.
+    const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
+    const list = sw.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] ?? '';
+    const urls = [...list.matchAll(/'([^']+)'/g)].map((m) => m[1] ?? '');
+    strictEqual(urls.length > 0, true);
+
+    const missing = urls.filter((url) => {
+      try {
+        readFileSync(join(PUBLIC, url.replace(/^\//, '')));
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    strictEqual(missing.join(', '), '');
+  });
+
+  it('⭐ 서비스 워커가 API 응답을 캐시하지 않는다', () => {
+    // 이건 성능이 아니라 안전이다. 동의를 철회하면 서버가 회의 자료를
+    // 지우는데(docs/07 P6), 캐시에 남아 있으면 **지운 뒤에도 폰에서
+    // 계속 보인다.** 기여도도 지난 값을 지금 값처럼 보여주면 안 된다.
+    const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
+    strictEqual(/startsWith\('\/api\/'\)/.test(sw), true);
+    // 캐시 목록에 API 경로가 섞여 있으면 위 검사를 지나도 소용없다.
+    const list = sw.match(/const SHELL = \[([\s\S]*?)\];/)?.[1] ?? '';
+    strictEqual(list.includes('/api/'), false);
+  });
+
+  it('⭐ manifest 가 가리키는 아이콘이 전부 실재한다', () => {
+    // 없으면 홈 화면에 추가했을 때 **화면 캡처가 아이콘이 된다.**
+    const manifest = JSON.parse(
+      readFileSync(join(PUBLIC, 'manifest.webmanifest'), 'utf8'),
+    ) as { icons: { src: string }[]; start_url: string };
+
+    const missing = manifest.icons
+      .map((icon) => icon.src)
+      .filter((src) => {
+        try {
+          readFileSync(join(PUBLIC, src.replace(/^\//, '')));
+          return false;
+        } catch {
+          return true;
+        }
+      });
+    strictEqual(missing.join(', '), '');
+  });
+
+  it('⭐ manifest 의 start_url 이 실재하는 화면이다', () => {
+    // 없는 곳을 가리키면 설치한 앱이 **404 로 열린다.**
+    const manifest = JSON.parse(
+      readFileSync(join(PUBLIC, 'manifest.webmanifest'), 'utf8'),
+    ) as { start_url: string };
+    readFileSync(join(PUBLIC, manifest.start_url.replace(/^\//, '')));
+  });
+
+  it('⭐ 화면이 가리키는 apple-touch-icon 이 실재한다', () => {
+    // iOS 는 SVG 를 받지 않는다. PNG 가 없으면 홈 화면 아이콘이 없다.
+    const problems: string[] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      const html = readFileSync(join(PUBLIC, name), 'utf8');
+      const icon = html.match(/rel="apple-touch-icon"\s+href="([^"]+)"/)?.[1];
+      if (!icon) {
+        problems.push(`${name} → 없음`);
+        continue;
+      }
+      if (!icon.endsWith('.png')) problems.push(`${name} → ${icon} (PNG 아님)`);
+      try {
+        readFileSync(join(PUBLIC, icon.replace(/^\//, '')));
+      } catch {
+        problems.push(`${name} → ${icon} (파일 없음)`);
+      }
+    }
+    strictEqual(problems.join(', '), '');
+  });
+});

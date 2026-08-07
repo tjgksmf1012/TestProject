@@ -30,6 +30,7 @@ import {
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { attr, escapeHtml } from '../lib/html.ts';
 import { renderNav } from './nav.ts';
+import { bootApp } from './pwa.ts';
 
 interface Member {
   user_id: number;
@@ -317,3 +318,6 @@ start().catch((error: unknown) => {
 });
 
 renderNav('review');
+
+// 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
+bootApp();

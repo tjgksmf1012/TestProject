@@ -73,6 +73,89 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/pwa/install.ts
+function isIOS(userAgent) {
+  if (/iPhone|iPod/.test(userAgent)) return true;
+  if (/iPad/.test(userAgent)) return true;
+  return false;
+}
+function installState(env) {
+  if (env.inShell) return "in-shell";
+  if (env.standalone || env.iosStandalone) return "installed";
+  if (env.hasPrompt) return "promptable";
+  if (isIOS(env.userAgent)) return "manual-ios";
+  return "unavailable";
+}
+function describeInstall(state) {
+  switch (state) {
+    case "promptable":
+      return "앱으로 설치하면 주소창 없이 전체 화면으로 열리고, 홈 화면에서 바로 들어옵니다.";
+    case "manual-ios":
+      return '아이폰에서는 공유 버튼(⬆️) → "홈 화면에 추가" 를 누르면 앱처럼 쓸 수 있습니다.';
+    case "installed":
+      return "";
+    case "in-shell":
+      return "";
+    case "unavailable":
+      return "";
+  }
+}
+function whyInstall() {
+  return "설치하면 녹음 중에 화면이 꺼지는 것을 더 잘 막습니다 — 브라우저 탭에서는 화면 꺼짐 방지가 잘 듣지 않습니다.";
+}
+
+// src/demo/pwa.ts
+var deferredPrompt = null;
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    console.info("[pwa] 이 브라우저는 서비스 워커를 지원하지 않습니다");
+    return;
+  }
+  if (window.TeamFlowShell) return;
+  navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((error) => {
+    console.warn(
+      "[pwa] 서비스 워커를 등록하지 못했습니다 — 오프라인 화면이 뜨지 않습니다.",
+      "https:// 또는 localhost 에서만 등록됩니다.",
+      error
+    );
+  });
+}
+function renderInstallHint() {
+  const host = document.getElementById("install");
+  if (!host) return;
+  const state = installState({
+    userAgent: navigator.userAgent,
+    standalone: matchMedia("(display-mode: standalone)").matches,
+    iosStandalone: navigator.standalone === true,
+    hasPrompt: deferredPrompt !== null,
+    inShell: window.TeamFlowShell !== void 0
+  });
+  const text = describeInstall(state);
+  host.textContent = text;
+  host.hidden = text === "";
+  const card = document.getElementById("install-card");
+  if (card) card.hidden = text === "";
+  const why = document.getElementById("install-why");
+  if (why) why.textContent = text === "" ? "" : whyInstall();
+  const button = document.getElementById("install-now");
+  if (!button) return;
+  button.hidden = state !== "promptable";
+  button.onclick = () => {
+    void deferredPrompt?.prompt();
+    deferredPrompt = null;
+    button.hidden = true;
+  };
+}
+addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredPrompt = event;
+  renderInstallHint();
+});
+function bootApp() {
+  registerServiceWorker();
+  renderInstallHint();
+}
+
 // src/demo/login.ts
 var params = new URLSearchParams(location.search);
 var apiBase = safeApiBase(params.get("api"), location.origin);
@@ -148,3 +231,4 @@ void fetch(`${apiBase}/api/auth/me`, { credentials: "same-origin" }).then((r) =>
   if (r.ok) location.href = next;
 });
 render();
+bootApp();

@@ -17,6 +17,7 @@ import {
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { renderNav } from './nav.ts';
+import { bootApp } from './pwa.ts';
 
 const params = new URLSearchParams(location.search);
 // ⚠️ 주소창의 `?api=` 를 그대로 쓰면 **비밀번호와 회의 음성이 어디로
@@ -189,3 +190,6 @@ async function start(): Promise<void> {
 void start();
 
 renderNav('kanban');
+
+// 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
+bootApp();

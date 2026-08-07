@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/app.css" />
+<title>연결이 없습니다 — TeamFlow</title>
+</head>
+<body class="no-tabs has-actionbar">
+  <div class="wrap">
+    <h1>연결이 없습니다</h1>
+    <p class="sub">인터넷이 닿으면 다시 열립니다.</p>
+
+    <div class="card">
+      <h2>녹음 중이었다면</h2>
+      <p>
+        <strong>앱을 닫지 마세요.</strong> 올리지 못한 조각은 폰에 남아 있고,
+        연결이 돌아오면 이어서 올라갑니다. 지금 닫으면 그 구간이 회의록에서
+        빕니다.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>왜 저장된 내용을 안 보여주나요</h2>
+      <p>
+        회의 녹취와 기여도는 <strong>일부러 저장해 두지 않습니다.</strong>
+        동의를 철회하면 서버가 자료를 지우는데, 폰에 사본이 남아 있으면
+        지웠다는 말이 거짓이 됩니다. 기여도도 마찬가지로, 지난 값을
+        지금 값처럼 보여주면 안 됩니다.
+      </p>
+    </div>
+  </div>
+
+  <div class="actionbar">
+    <div class="inner">
+      <button type="button" class="primary" onclick="location.reload()">
+        다시 시도
+      </button>
+    </div>
+  </div>
+  <script>
+    // 연결이 돌아오면 사람이 누르기 전에 알아서 돌아간다.
+    addEventListener('online', () => location.reload());
+  </script>
+</body>
+</html>
