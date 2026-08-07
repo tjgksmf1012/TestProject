@@ -7,8 +7,8 @@
 기여도 엔진, 회의 처리 파이프라인, 녹음 수집(클라이언트·서버), 화면 아홉 개까지
 동작하고 테스트로 고정돼 있습니다.
 
-**남은 것 셋** — ① 아직 안 이어진 곳(**회의 발화 → 기여 이벤트**),
-② 브라우저 통화(WebRTC), ③ 모델 구현(GPU 필요).
+**남은 것 둘** — ① 브라우저 통화(WebRTC), ② 모델 구현(GPU 필요).
+회의 → 업무 → GitHub → 기여도 경로는 **끝까지 이어졌습니다.**
 지금 순서와 근거는 [`docs/08` §4.1](docs/08-MVP-로드맵.md) 에 있습니다.
 
 > ⚠️ **2026-08-07 방향 전환** — 주력이 **PC 브라우저 + 통화**가 됐습니다
@@ -131,6 +131,8 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **GitHub 웹훅 (HMAC 서명 검증)** | ✅ | `backend/teamflow/github/webhook.py` |
 | **GitHub 연결 진단** (배달이 오는지·이름 오타·팀원 계정) | ✅ | `backend/teamflow/github/connection.py` |
 | **업무 ↔ PR 연결** (확정/추정 구분·근거 표시) | ✅ | `backend/teamflow/github/linking.py` |
+| **발언 유형 분류** (8라벨·규칙 기준선·확신 하한) | ✅ | `backend/teamflow/meeting/utterance_types.py` |
+| **회의 발화 → 기여 이벤트** | ✅ | `backend/teamflow/services/meeting_contribution_service.py` |
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
 | docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
 | **Dockerfile (api·gpu, ffmpeg 포함)** | ⚠️ 빌드 미검증 | `docker/` |

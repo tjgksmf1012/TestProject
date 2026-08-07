@@ -24,6 +24,7 @@ from teamflow.db.session import session_scope
 from teamflow.jobs.gpu_lock import GpuBusy
 from teamflow.meeting.resolve import TeamMemberName
 from teamflow.pipeline.meeting_pipeline import PipelineResult, Stage, process_meeting
+from teamflow.services import meeting_contribution_service
 from teamflow.tasks import app
 
 logger = logging.getLogger(__name__)
@@ -314,6 +315,13 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
                 "reviewed": len(reviewed),
             }
 
+        # ⚠️ **발화를 지우기 전에** 그 발화에서 나온 기여 이벤트를 지운다.
+        #
+        # 발화가 사라진 뒤에는 어떤 이벤트가 이 회의 것이었는지 알 방법이
+        # 없다. 안 지우면 재처리할 때마다 같은 회의가 한 번씩 더 계산돼
+        # **점수가 누적된다.**
+        meeting_contribution_service.forget_meeting_events(session, meeting_id)
+
         for model in (m.Utterance, m.MeetingTaskCandidate, m.Decision):
             for row in session.scalars(
                 select(model).where(model.meeting_id == meeting_id)
@@ -455,9 +463,21 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
         # 승인 전에는 절대 tasks 로 넘어가지 않는다.
         meeting.status = "needs_review"
 
+        # ── 회의 → 기여 이벤트 ────────────────────────────────
+        #
+        # 기여도의 세 다리 중 마지막. 그 전까지 **운영 코드에 0곳**이라
+        # 운영에서 회의 기여도는 언제나 0이었다.
+        #
+        # 승인 전에 만드는 이유: 이건 **업무**가 아니라 **발언 기록**이다.
+        # 업무 후보는 사람이 승인해야 칸반에 올라가지만, "누가 무엇을
+        # 말했는가" 는 승인을 기다릴 성질이 아니다 — 회의록에 이미 있는
+        # 사실이고, 틀린 라벨은 발화 자체를 고쳐서 바로잡는다.
+        contribution = meeting_contribution_service.record_meeting(session, meeting)
+
     return {
         "meeting_id": meeting_id,
         "status": "needs_review",
         "utterances": len(payload["segments"]),
         "candidates": len(payload["candidates"]),
+        "contribution": contribution,
     }

@@ -583,3 +583,54 @@ def test_no_hint_leaves_both_fields_empty(seeded):
         new = s.scalars(select(m.Decision)).one()
         assert new.supersedes_id is None
         assert new.supersedes_hint is None
+
+
+# ══════════════════════════════════════════════════════════════
+# 회의 → 기여 이벤트 (기여도 세 다리 중 마지막)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_processing_a_meeting_creates_contribution_events(seeded):
+    """⭐ **그 전까지 운영 코드에 0곳이었습니다.**
+
+    `scoring.py` 는 발언 유형별 가중치를 정확히 알고 있었는데 그 이벤트를
+    만드는 코드가 없었습니다. 즉 운영에서 회의 기여도는 언제나 0이었고,
+    시연 화면의 숫자는 손으로 넣은 것이었습니다.
+    """
+    persist_results_task(seeded["meeting_id"], payload(seeded))
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(
+            select(m.ContributionEventRow).where(
+                m.ContributionEventRow.source_kind == "utterance"
+            )
+        ).all()
+    assert rows, "발화에서 기여 이벤트가 하나도 나오지 않았습니다"
+
+
+def test_reprocessing_a_meeting_does_not_double_the_contribution(seeded):
+    """⭐ **재처리할 때마다 점수가 누적되면 안 됩니다.**
+
+    `persist_results_task` 는 발화를 지우고 새로 만듭니다. 옛 발화에 딸린
+    기여 이벤트를 같이 지우지 않으면 같은 회의가 두 번 계산됩니다.
+    화면에는 아무 오류도 안 뜨고 점수만 두 배가 됩니다.
+    """
+    persist_results_task(seeded["meeting_id"], payload(seeded))
+    with db_session.session_scope() as s:
+        first = s.query(m.ContributionEventRow).count()
+
+    persist_results_task(seeded["meeting_id"], payload(seeded))
+    with db_session.session_scope() as s:
+        second = s.query(m.ContributionEventRow).count()
+
+    assert second == first
+
+
+def test_the_utterance_type_column_is_filled_by_the_pipeline(seeded):
+    """스키마에 처음부터 있었지만 저장 단계에서 **한 번도 채워지지 않았습니다.**"""
+    persist_results_task(seeded["meeting_id"], payload(seeded))
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(select(m.Utterance)).all()
+    assert rows
+    assert all(row.utterance_type is not None for row in rows)

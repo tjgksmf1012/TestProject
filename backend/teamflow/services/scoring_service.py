@@ -31,6 +31,7 @@ from teamflow.contribution.profiles import (
 from teamflow.contribution.scoring import MeasurementGap, TeamScoreResult, score_team
 from teamflow.db import models as m
 from teamflow.jobs import retention
+from teamflow.meeting.utterance_types import CLASSIFIER_MODEL
 
 
 def load_events(session: Session, project_id: int) -> dict[int, list[ContributionEvent]]:
@@ -142,6 +143,28 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         or 0
     )
 
+    # 점수가 매겨진 발화를 무엇이 분류했는가.
+    #
+    # ⚠️ 분모가 **점수 매겨진 발화**인 이유: `social`·`other` 는 0점이라
+    # 분류가 틀려도 점수가 안 움직입니다. 그것까지 세면 잡담이 많은 회의가
+    # 분류 신뢰도를 끌어내립니다 — 잡담을 잡담으로 맞게 분류한 것인데도.
+    scored_events = session.execute(
+        select(
+            m.ContributionEventRow.event_metadata, m.ContributionEventRow.event_type
+        ).where(
+            m.ContributionEventRow.project_id == project_id,
+            m.ContributionEventRow.source_kind == "utterance",
+        )
+    ).all()
+    utterances_scored = 0
+    utterances_model = 0
+    for metadata, event_type in scored_events:
+        if event_type in ("utt_social", "utt_other"):
+            continue
+        utterances_scored += 1
+        if (metadata or {}).get("classifier") == CLASSIFIER_MODEL:
+            utterances_model += 1
+
     project = session.get(m.Project, project_id)
     project_days = 0
     github_days = 0
@@ -185,6 +208,8 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         utterances_speaker_certain=utterances_certain,
         tracks_total=tracks_total,
         tracks_usable=tracks_usable,
+        utterances_scored=utterances_scored,
+        utterances_model_classified=utterances_model,
         project_days=project_days,
         github_connected_days=min(github_days, project_days) if project_days else 0,
         peer_reviews_expected=peer_expected,

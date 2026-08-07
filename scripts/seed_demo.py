@@ -43,6 +43,7 @@ from teamflow.config import get_settings
 from teamflow.contribution.events import CATEGORY_OF, EventType
 from teamflow.db import models as m
 from teamflow.db import session as db_session
+from teamflow.services import meeting_contribution_service
 
 PROJECT_TITLE = "TeamFlow 시연 프로젝트"
 
@@ -282,6 +283,14 @@ def seed(*, reset: bool) -> dict:
         )
 
         _seed_contribution_events(s, project.id, user_ids)
+
+        # ⭐ 회의 발화 → 기여 이벤트. **운영 코드와 같은 함수**를 부릅니다.
+        #
+        # 시연 데이터를 손으로 만들면 시연과 운영이 갈라집니다. 실제로
+        # 그랬습니다 — 배선이 0곳인 동안에도 시연 화면에는 회의 기여도가
+        # 멀쩡히 떠 있어서, 운영에서 언제나 0이라는 사실이 가려졌습니다.
+        meeting_contribution_service.record_meeting(s, meeting)
+
         _seed_tasks(s, project.id, user_ids, meeting.id)
 
         return {
@@ -324,21 +333,23 @@ _EVENTS: list[tuple[int, str, str, float, int]] = [
     (0, "review_given", "github_event", 1.0, 2),
     (0, "review_given", "github_event", 1.0, 4),
     (0, "task_completed", "task", 1.0, 3),
-    (0, "utt_proposal", "utterance", 1.0, 0),
-    (0, "utt_decision", "utterance", 1.0, 0),
     (1, "pr_merged", "github_event", 90.0, 2),
     (1, "review_given", "github_event", 1.0, 3),
     (1, "task_completed", "task", 1.0, 2),
     (1, "task_completed", "task", 1.0, 5),
-    (1, "utt_question", "utterance", 1.0, 0),
-    (1, "utt_answer", "utterance", 1.0, 0),
-    (1, "utt_commitment", "utterance", 1.0, 0),
     (2, "pr_merged", "github_event", 120.0, 4),
     (2, "review_given", "github_event", 1.0, 5),
     (2, "task_completed", "task", 1.0, 4),
-    # 박지원의 회의 발언은 없다 — 폰이 죽어서 **기록되지 않았다.**
-    # 트랙 커버리지 0.42 가 그 사실을 남기고, 기여도 엔진이 그걸 읽어
-    # 회의 카테고리를 "측정 불가" 로 뺀다.
+    # ⚠️ `utt_*` 는 **여기 없습니다.** 예전에는 손으로 넣었는데, 이제
+    # 회의 발화에서 진짜로 만들어집니다(`meeting_contribution_service`).
+    #
+    # 손으로 넣으면 시연은 되는데 실제 파이프라인에서는 안 되는 상태를
+    # 못 알아챕니다 — 실제로 그랬습니다. 배선이 0곳인 동안에도 시연
+    # 화면에는 회의 기여도가 멀쩡히 떠 있었습니다.
+    #
+    # 박지원의 회의 기여는 트랙 커버리지 0.42 때문에 **측정 불가**로
+    # 빠집니다. 발언은 기록됐지만(폰이 10분 뒤에 죽었다) 그 사람의
+    # 발언량을 비교에 쓸 수 없기 때문입니다.
 ]
 
 

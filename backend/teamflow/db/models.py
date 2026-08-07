@@ -576,8 +576,20 @@ class ContributionEventRow(Base):
 
     __table_args__ = (
         # 웹훅 재전송·백필 중복 방어. 이게 없으면 점수가 부풀려진다.
+        #
+        # ⚠️ `user_id` 가 **들어가 있어야 합니다.** 없으면 하나의 근거에서
+        # 여러 사람의 이벤트가 나올 수 없습니다 — 회의 하나에 참석자가
+        # 셋이면 `meeting_attended` 가 **한 명만 기록되고 나머지 둘은
+        # IntegrityError 로 조용히 사라집니다.**
+        #
+        # 웹훅 중복 방어는 그대로입니다. GitHub 이벤트는 행위자가 하나라
+        # `user_id` 가 붙어도 같은 행으로 막힙니다.
         UniqueConstraint(
-            "source_kind", "source_id", "event_type", name="uq_contribution_source"
+            "source_kind",
+            "source_id",
+            "event_type",
+            "user_id",
+            name="uq_contribution_source",
         ),
         Index("ix_contrib_project_user_time", "project_id", "user_id", "occurred_at"),
     )

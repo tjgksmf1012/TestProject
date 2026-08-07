@@ -56,11 +56,15 @@ def persist_events(
     """
     written = 0
     for event in events:
+        # ⚠️ `user_id` 까지 봐야 합니다. DB 유니크 제약이 그렇게 돼 있고,
+        # 여기서 빼면 **다른 사람의 같은 유형 이벤트를 보고 건너뜁니다** —
+        # 그 사람의 기여가 조용히 사라집니다.
         exists = session.scalar(
             select(m.ContributionEventRow.id).where(
                 m.ContributionEventRow.source_kind == event.source_kind.value,
                 m.ContributionEventRow.source_id == event.source_id,
                 m.ContributionEventRow.event_type == event.event_type.value,
+                m.ContributionEventRow.user_id == event.user_id,
             )
         )
         if exists:
