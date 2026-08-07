@@ -1057,3 +1057,132 @@ def test_the_purge_job_leaves_unexpired_recordings_alone(
 
     assert report.deleted_assets == []
     assert (audio_root / asset["storage_key"]).is_dir()
+
+
+# ══════════════════════════════════════════════════════════════
+# 개인 삭제 요청 (docs/07 P6) — 구현체는 있는데 부를 방법이 없던 것
+# ══════════════════════════════════════════════════════════════
+
+
+def _project_id(meeting_id: int) -> int:
+    with db_session.session_scope() as s:
+        return s.get(m.Meeting, meeting_id).project_id
+
+
+def test_i_can_delete_my_own_recording(
+    client: TestClient, track: dict, engine, audio_root: Path
+):
+    """⭐ 개인정보보호법상 삭제 요청권을 실행할 방법이 있어야 한다.
+
+    `revoke_user_data` 는 구현돼 있고 테스트도 있었는데 **부르는 곳이
+    한 곳도 없었다.** 요청이 들어오면 사람이 DB 를 직접 손봐야 했다.
+    """
+    for seq in range(3):
+        put_chunk(client, track["meeting_id"], track["track_id"], seq)
+    assert complete(client, track, slices=3).status_code == 200
+
+    asset = _assets(track["track_id"])[0]
+    target = audio_root / asset["storage_key"]
+    assert target.is_dir()
+
+    project_id = _project_id(track["meeting_id"])
+    response = client.post(f"/api/projects/{project_id}/me/data")
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+    assert body["deleted_assets"] == 1
+    assert body["failed"] == {}
+    assert not target.exists(), "파일이 아직 디스크에 있습니다"
+    assert _assets(track["track_id"])[0]["deleted_at"] is not None
+
+
+def test_nobody_else_can_delete_my_recording(
+    client: TestClient, track: dict, meeting: dict, engine, audio_root: Path
+):
+    """⭐ 남이 대신 지울 수 없다 — 기여도 근거를 남이 없앨 수 있다.
+
+    동의와 같은 성격이다. `ConsentIn` 에서 `user_id` 를 뺀 것과 같은 이유다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+    asset = _assets(track["track_id"])[0]
+
+    # 같은 팀의 **다른 사람**으로 로그인한다.
+    login_as(client, meeting["user_ids"][1])
+    project_id = _project_id(track["meeting_id"])
+    response = client.post(f"/api/projects/{project_id}/me/data")
+
+    # 요청 자체는 성공하지만 **자기 것만** 지운다 — 그 사람은 녹음이 없다.
+    assert response.status_code == 200, response.text
+    assert response.json()["deleted_assets"] == 0
+    assert (audio_root / asset["storage_key"]).is_dir(), "남의 녹음이 지워졌습니다"
+    assert _assets(track["track_id"])[0]["deleted_at"] is None
+
+
+def test_outsiders_cannot_touch_the_project_at_all(
+    client: TestClient, track: dict, engine
+):
+    """외부인은 403. 프로젝트 존재 여부조차 알려 주지 않는다."""
+    with db_session.session_scope() as s:
+        outsider = m.User(name="외부인", email="out@example.com")
+        s.add(outsider)
+        s.flush()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    project_id = _project_id(track["meeting_id"])
+    assert client.post(f"/api/projects/{project_id}/me/data").status_code == 403
+
+
+def test_deleting_leaves_the_transcript_and_says_so(
+    client: TestClient, track: dict, engine
+):
+    """⭐ 전사 텍스트는 남기고, **남는다고 말한다.**
+
+    그건 다른 참석자의 회의록이기도 하다 — 한 사람의 요청으로 팀 전체의
+    회의 기록이 사라지면 안 된다. 다만 사람이 "다 지워졌다" 고 오해하면
+    안 되므로 무엇이 남는지 응답에 적는다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+
+    project_id = _project_id(track["meeting_id"])
+    body = client.post(f"/api/projects/{project_id}/me/data").json()
+
+    assert body["kept"], "무엇이 남는지 말하지 않습니다"
+    assert any("전사" in item for item in body["kept"])
+
+
+def test_deleting_nothing_does_not_claim_success(
+    client: TestClient, track: dict, engine
+):
+    """⭐ "0건 삭제" 를 성공으로만 답하면 사람은 지워진 줄 안다.
+
+    이 저장소에서 반복해서 나온 "없는 것을 빈 것으로 답하는" 결함이다.
+    """
+    project_id = _project_id(track["meeting_id"])
+    body = client.post(f"/api/projects/{project_id}/me/data").json()
+
+    assert body["deleted_assets"] == 0
+    assert "없습니다" in body["message"]
+
+
+def test_deletion_leaves_an_audit_trail(client: TestClient, track: dict, engine):
+    """⭐ 삭제는 감사 대상이다.
+
+    원본이 지워지면 그 사람의 회의 기여가 **측정 불가**가 되는데, 화면에서
+    그건 "폰이 죽어서 못 쟀다" 와 똑같이 보인다. 감사 로그가 그 둘을
+    구분할 수 있는 유일한 흔적이다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+
+    project_id = _project_id(track["meeting_id"])
+    assert client.post(f"/api/projects/{project_id}/me/data").status_code == 200
+
+    with db_session.session_scope() as s:
+        logs = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "user_data_revoked")
+        ).all()
+        assert len(logs) == 1
+        assert logs[0].project_id == project_id

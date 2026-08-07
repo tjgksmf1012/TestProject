@@ -455,37 +455,93 @@ def test_duplicate_signup_is_409(client: TestClient, engine):
 # 보호되는가 — 이 파일의 본론
 # ══════════════════════════════════════════════════════════════
 
-PROTECTED = [
-    ("get", "/api/auth/me"),
-    ("get", "/api/meetings/{meeting}/consent"),
-    ("post", "/api/meetings/{meeting}/consent"),
-    ("get", "/api/meetings/{meeting}"),
-    ("get", "/api/meetings/{meeting}/tracks"),
-    ("post", "/api/meetings/{meeting}/tracks"),
-    ("post", "/api/meetings/{meeting}/finish"),
-    ("get", "/api/meetings/{meeting}/members"),
-    ("get", "/api/meetings/{meeting}/candidates"),
-    ("post", "/api/meetings/{meeting}/candidates/review"),
-    ("post", "/api/projects"),
-    ("post", "/api/projects/{project}/meetings"),
-    ("get", "/api/projects/{project}/contributions"),
-]
+# ⭐ **로그인 없이 열려 있어도 되는 것들.** 여기 없는 `/api/*` 는 전부
+# 401 이어야 하고, 아래 테스트가 앱의 라우트를 훑어서 확인합니다.
+#
+# 예전에는 보호 대상을 **손으로 나열**했습니다. 그때 13개를 적어 뒀는데
+# 실제 보호 대상은 25개였습니다 — 12개가 한 번도 검사된 적이 없었습니다.
+# 목록을 손으로 관리하면 새 엔드포인트가 조용히 빠집니다. 그래서 방향을
+# 뒤집었습니다: **열린 것만 적고, 나머지는 전부 닫혀 있어야 한다.**
+PUBLIC: set[tuple[str, str]] = {
+    # 시각 동기화는 로그인 전에도 돌아야 하고, 개인정보가 없습니다.
+    ("GET", "/api/time"),
+    ("GET", "/health"),
+    # 로그인·가입은 당연히 열려 있어야 합니다.
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/signup"),
+    # 로그아웃은 세션이 없으면 할 일이 없습니다. 401 로 막으면
+    # 만료된 쿠키를 든 사람이 로그아웃도 못 합니다.
+    ("POST", "/api/auth/logout"),
+    # 웹훅은 **세션이 아니라 HMAC 서명**으로 인증합니다. GitHub 은
+    # 우리 쿠키를 갖고 있지 않습니다.
+    ("POST", "/api/github/webhook"),
+}
+
+#: 경로 파라미터에 넣을 값. 실제로 존재하는 id 를 넣어야 "없어서 404"
+#: 와 "인증이 없어서 401" 을 구분할 수 있습니다.
+def _fill(path: str, team: dict) -> str:
+    return (
+        path.replace("{meeting_id}", str(team["meeting_id"]))
+        .replace("{project_id}", str(team["project_id"]))
+        .replace("{track_id}", "1")
+        .replace("{task_id}", "1")
+        .replace("{seq}", "0")
+    )
 
 
-@pytest.mark.parametrize(("method", "path"), PROTECTED)
-def test_every_protected_endpoint_refuses_anonymous_requests(
+def _api_routes() -> list[tuple[str, str]]:
+    from teamflow.api.main import app
+
+    routes: list[tuple[str, str]] = []
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        if not path.startswith("/api") and path != "/health":
+            continue
+        for method in sorted(getattr(route, "methods", None) or []):
+            if method in {"HEAD", "OPTIONS"}:
+                continue
+            routes.append((method, path))
+    return sorted(set(routes))
+
+
+def test_the_route_list_is_not_empty():
+    """경로가 0개면 아래 테스트가 조용히 통과합니다."""
+    assert len(_api_routes()) > 20
+
+
+@pytest.mark.parametrize(("method", "path"), _api_routes())
+def test_every_endpoint_is_either_public_on_purpose_or_refuses_anonymous(
     client: TestClient, team: dict, method: str, path: str
 ):
-    """⭐ 하나라도 빠지면 그 경로로 전부 새어 나간다.
+    """⭐ 앱의 **모든** 경로를 훑는다. 하나라도 빠지면 그리로 전부 새어 나간다.
 
-    목록으로 도는 이유: 엔드포인트를 새로 추가할 때 인증을 빠뜨리는 것이
-    가장 흔한 사고인데, 개별 테스트로 흩어 두면 새 엔드포인트에는 아무도
-    테스트를 안 붙인다.
+    엔드포인트를 새로 추가할 때 인증을 빠뜨리는 것이 가장 흔한 사고인데,
+    개별 테스트로 흩어 두면 새 엔드포인트에는 아무도 테스트를 안 붙인다.
+    목록을 손으로 관리하는 것도 같은 문제였다 — 13개를 적어 두는 동안
+    실제 보호 대상은 25개였다.
+
+    새 엔드포인트를 열어 두려면 `PUBLIC` 에 **이유와 함께** 적어야 한다.
     """
-    url = path.format(meeting=team["meeting_id"], project=team["project_id"])
-    call = getattr(client, method)
-    response = call(url, json={}) if method == "post" else call(url)
-    assert response.status_code == 401, f"{method.upper()} {url} 가 열려 있습니다"
+    if (method, path) in PUBLIC:
+        return
+
+    url = _fill(path, team)
+    response = client.request(method, url, json={} if method != "GET" else None)
+
+    assert response.status_code == 401, (
+        f"{method} {url} 가 로그인 없이 {response.status_code} 를 돌려줍니다. "
+        "일부러 연 것이라면 PUBLIC 에 이유와 함께 적으세요."
+    )
+
+
+def test_public_entries_all_point_at_real_routes():
+    """⭐ `PUBLIC` 에 오타가 있으면 그 경로가 **조용히 검사에서 빠진다.**
+
+    경로 이름이 바뀌었을 때도 마찬가지다 — 옛 이름이 남아 있으면
+    새 경로는 아무도 안 본다.
+    """
+    stale = sorted(PUBLIC - set(_api_routes()))
+    assert not stale, f"PUBLIC 에 실재하지 않는 경로가 있습니다: {stale}"
 
 
 def test_time_and_health_stay_open(client: TestClient):

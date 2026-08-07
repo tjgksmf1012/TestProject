@@ -26,6 +26,7 @@ from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
 from teamflow.db.session import get_db
 from teamflow.github import webhook as gh
+from teamflow.jobs import retention
 from teamflow.logging_config import configure_logging
 from teamflow.meeting.approval import ApprovalRequest
 from teamflow.projects import invites
@@ -1142,6 +1143,110 @@ def complete_track(
             else f"커버리지 {coverage:.0%} — 이 트랙으로는 발화량을 판단할 수 없습니다. "
             "회의록에서 이 팀원의 발언은 확인이 필요합니다"
         ),
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 개인 삭제 요청 (docs/07 P6)
+# ══════════════════════════════════════════════════════════════
+
+
+class RevokeOut(BaseModel):
+    #: 지운 원본 오디오 자산 수
+    deleted_assets: int
+    #: 폐기한 성문 수
+    revoked_voiceprints: int
+    #: 확보한 디스크 (바이트)
+    freed_bytes: int
+    #: 지우지 못한 것. 비어 있지 않으면 **다시 요청해야 한다.**
+    failed: dict[int, str]
+    #: 남은 것과 그 이유. 사람이 "다 지워졌다" 고 오해하면 안 된다.
+    kept: list[str]
+    message: str
+
+
+@app.post("/api/projects/{project_id}/me/data", response_model=RevokeOut)
+def revoke_my_data(
+    project_id: int, session: DbSession, settings: AppSettings, user: CurrentUser
+) -> RevokeOut:
+    """내 녹음 원본과 성문을 지운다 (docs/07 P6 — 개인 삭제 요청).
+
+    ## 왜 이 엔드포인트가 필요했는가
+
+    ⚠️ `revoke_user_data` 는 구현돼 있고 테스트도 있는데 **부르는 곳이
+    한 곳도 없었습니다.** 즉 개인정보보호법상 삭제 요청권을 실행할 방법이
+    시스템에 없었습니다 — 요청이 들어오면 사람이 DB 를 직접 손봐야 했습니다.
+
+    ## 본인만
+
+    남이 대신 요청할 수 없습니다. 이건 동의와 같은 성격입니다 —
+    `ConsentIn` 에서 `user_id` 를 뺀 것과 같은 이유입니다. 남의 자료를
+    지울 수 있으면 **기여도 근거를 남이 없앨 수 있습니다.**
+
+    관리자 대행 경로도 두지 않습니다. 이 시스템에 관리자 등급이 없고,
+    있는 척하면 그게 곧 우회로입니다.
+
+    ## 무엇이 남는가
+
+    전사 텍스트는 **남깁니다.** 그건 다른 참석자의 회의록이기도 합니다 —
+    한 사람의 요청으로 팀 전체의 회의 기록이 사라지면 안 됩니다.
+    발화에서 화자 연결만 끊는 것은 별도 정책이고, 지금은 하지 않습니다.
+
+    ## ⚠️ 남은 문제 — 기여도 화면이 이 둘을 구분하지 못한다
+
+    원본이 지워지면 그 사람의 회의 기여는 **측정 불가**가 됩니다
+    (`docs/05` §5 — 측정 불가는 0점이 아니다). 그건 맞는 처리지만,
+    화면에서 이게 **"폰이 죽어서 못 쟀다" 와 똑같이 보입니다.**
+
+    그래서 이론상 "회의에서 말을 안 했다" 를 감추는 데 쓸 수 있습니다.
+    삭제는 법적 권리라 막을 수 없고, 대신 **감사 로그에 남습니다**
+    (`user_data_revoked`). 화면이 그 둘을 구분해 말하도록 만드는 것은
+    아직 안 했습니다 — PR 본문 C 절에 적어 두었습니다.
+    """
+    _require_project_member(session, project_id, user)
+
+    report = retention.revoke_user_data(
+        session,
+        user_id=user.id,
+        project_id=project_id,
+        storage_root=settings.audio_storage_root,
+    )
+
+    kept = [
+        "전사 텍스트 — 다른 참석자의 회의록이기도 하므로 남깁니다",
+        "칸반 업무와 GitHub 활동 기록 — 음성이 아니라 작업 기록입니다",
+    ]
+
+    if report.failed:
+        message = (
+            f"일부를 지우지 못했습니다 ({len(report.failed)}건). "
+            "다시 요청해 주세요 — 남아 있는 것은 그대로입니다."
+        )
+    elif not report.deleted_assets and not report.revoked_voiceprints:
+        # ⭐ "0건 삭제" 를 성공으로만 답하면 사람은 지워진 줄 압니다.
+        message = "지울 녹음이 없습니다. 이 프로젝트에 남아 있던 음성 자료가 없습니다."
+    else:
+        message = (
+            f"녹음 원본 {len(report.deleted_assets)}건과 "
+            f"성문 {len(report.revoked_voiceprints)}건을 지웠습니다."
+        )
+
+    logger.info(
+        "개인 삭제 요청 user=%s project=%s — 오디오 %d건, 성문 %d건, 실패 %d건",
+        user.id,
+        project_id,
+        len(report.deleted_assets),
+        len(report.revoked_voiceprints),
+        len(report.failed),
+    )
+
+    return RevokeOut(
+        deleted_assets=len(report.deleted_assets),
+        revoked_voiceprints=len(report.revoked_voiceprints),
+        freed_bytes=report.freed_bytes,
+        failed=report.failed,
+        kept=kept,
+        message=message,
     )
 
 
