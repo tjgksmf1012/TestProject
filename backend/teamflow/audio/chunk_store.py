@@ -42,6 +42,42 @@ class ChunkStore:
         # int 로 강제한다. 문자열이 들어오면 여기서 터지는 게 맞다.
         return self.root / "meetings" / str(int(meeting_id)) / "tracks" / str(int(track_id))
 
+    def storage_key(self, meeting_id: int, track_id: int) -> str:
+        """`audio_assets.storage_key` 에 넣을 값. 루트 기준 상대 경로.
+
+        보존기간 삭제(`jobs/retention.py`)가 이 문자열로 지울 대상을
+        찾습니다. 절대 경로를 넣으면 루트가 바뀌었을 때 **엉뚱한 곳을
+        지우거나 아무것도 못 지웁니다** — 둘 다 조용합니다.
+
+        트랙 하나가 한 자산입니다. 청크 파일 하나하나를 등록하면 1시간
+        회의 한 트랙에 720행이 생기는데, 보존 정책의 단위는 청크가 아니라
+        "원본 오디오" 입니다 (docs/07 §2.4).
+        """
+        return f"meetings/{int(meeting_id)}/tracks/{int(track_id)}"
+
+    def delete_track(self, meeting_id: int, track_id: int) -> int:
+        """트랙의 청크를 전부 지운다. 지운 바이트를 돌려준다.
+
+        보존기간이 지난 원본을 실제로 없애는 유일한 경로입니다. 이게
+        없어서 `ChunkStore` 에는 **삭제 메서드 자체가 없었고**, 결국
+        음성이 무기한 남았습니다.
+
+        디렉터리가 없어도 오류가 아닙니다 — 이미 지워진 것뿐입니다.
+        """
+        directory = self.track_dir(meeting_id, track_id)
+        if not directory.is_dir():
+            return 0
+
+        freed = 0
+        for path in sorted(directory.iterdir()):
+            if path.is_file():
+                freed += path.stat().st_size
+                path.unlink()
+        # 빈 디렉터리를 남기지 않는다. 남기면 다음 실행에서 "있다" 로
+        # 보이고, 사람이 저장소를 들여다볼 때 아직 있는 줄 안다.
+        directory.rmdir()
+        return freed
+
     def chunk_path(self, meeting_id: int, track_id: int, seq: int) -> Path:
         if seq < 0:
             raise ValueError("seq 는 0 이상이어야 합니다")

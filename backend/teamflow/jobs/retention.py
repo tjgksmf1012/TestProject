@@ -52,19 +52,45 @@ class PurgeReport:
         )
 
 
-def _safe_unlink(root: Path, storage_key: str) -> tuple[bool, int, str | None]:
+def _safe_remove(root: Path, storage_key: str) -> tuple[bool, int, str | None]:
     """저장 루트 밖의 경로는 건드리지 않는다.
 
     `storage_key` 가 DB에서 오므로 `../../etc/passwd` 같은 값이 들어올 수 있다.
     삭제 잡에서 경로 탈출은 곧 임의 파일 삭제다.
+
+    **파일과 디렉터리를 둘 다 받는다.** 멀티트랙 녹음의 원본은 트랙 하나가
+    청크 파일 수백 개이고, 보존 정책의 단위는 청크가 아니라 "원본 오디오"
+    (docs/07 §2.4)이므로 `audio_assets` 한 행이 **트랙 디렉터리 하나**를
+    가리킨다. 파일만 지울 줄 알면 그 행은 영원히 안 지워지는데, 잡은
+    "이미 없음" 으로 읽고 **매일 성공한다.**
+
+    디렉터리는 한 겹만 지운다 — 청크 디렉터리에는 하위 디렉터리가 없다.
+    재귀 삭제(`rmtree`)를 쓰지 않는 이유는, `storage_key` 가 잘못됐을 때
+    지우는 범위가 걷잡을 수 없어지기 때문이다.
     """
     try:
         target = (root / storage_key).resolve()
         root_resolved = root.resolve()
         if not target.is_relative_to(root_resolved):
             return False, 0, f"저장 루트 밖의 경로: {storage_key}"
+        # 루트 자체를 가리키면 거부한다. `storage_key=""` 나 `"."` 이면
+        # 저장소 전체가 대상이 된다.
+        if target == root_resolved:
+            return False, 0, f"저장 루트 자체는 지울 수 없습니다: {storage_key}"
         if not target.exists():
             return False, 0, None  # 이미 없음 — 실패는 아니다
+
+        if target.is_dir():
+            freed = 0
+            for path in sorted(target.iterdir()):
+                if path.is_dir():
+                    return False, 0, f"하위 디렉터리가 있습니다: {path.name}"
+            for path in sorted(target.iterdir()):
+                freed += path.stat().st_size
+                path.unlink()
+            target.rmdir()
+            return True, freed, None
+
         size = target.stat().st_size
         target.unlink()
         return True, size, None
@@ -99,7 +125,7 @@ def purge_expired_audio(
             report.freed_bytes += asset.bytes or 0
             continue
 
-        removed, size, error = _safe_unlink(storage_root, asset.storage_key)
+        removed, size, error = _safe_remove(storage_root, asset.storage_key)
         if error:
             report.failed[asset.id] = error
             logger.error("오디오 삭제 실패 asset=%s: %s", asset.id, error)
@@ -199,7 +225,7 @@ def revoke_user_data(
             )
         ).all()
         for asset in assets:
-            removed, size, error = _safe_unlink(storage_root, asset.storage_key)
+            removed, size, error = _safe_remove(storage_root, asset.storage_key)
             if error:
                 report.failed[asset.id] = error
                 continue

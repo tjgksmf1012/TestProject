@@ -863,3 +863,197 @@ def test_broker_failure_does_not_fail_the_request(client: TestClient, meeting: d
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
     assert response.json()["meeting_queued"] is True
+
+
+# ══════════════════════════════════════════════════════════════
+# 보존기간 — 지울 대상을 아무도 만들지 않던 문제
+# ══════════════════════════════════════════════════════════════
+#
+# 매일 04:00 에 도는 `purge-expired-audio` 는 이 저장소에서 유일하게
+# "법적 요구사항" 이라고 명시된 잡이다(docs/07 P5). 그런데 그 잡은
+# `audio_assets` 만 훑는데 **운영 코드 어디에서도 그 행이 만들어지지
+# 않았다.** 잡은 매일 성공하고 `"오디오 0건 삭제"` 를 남긴다 — 로그를
+# 보는 사람에게는 "지울 게 없었다" 로 읽힌다. 실제로는 생체인식정보인
+# 음성이 30일이 아니라 **무기한** 남아 있었다.
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _assets(track_id: int | None = None) -> list[m.AudioAsset]:
+    with db_session.session_scope() as s:
+        rows = s.scalars(select(m.AudioAsset)).all()
+        return [
+            {
+                "id": r.id,
+                "track_id": r.track_id,
+                "storage_key": r.storage_key,
+                "kind": r.kind,
+                "bytes": r.bytes,
+                # SQLite 는 `DateTime(timezone=True)` 를 naive 로 돌려준다
+                # (PostgreSQL 은 aware). 테스트에서 산술을 하므로 여기서
+                # 맞춰 둔다 — 운영 코드는 SQL 비교만 쓰므로 영향이 없다.
+                "retention_until": _aware(r.retention_until),
+                "deleted_at": _aware(r.deleted_at),
+            }
+            for r in rows
+            if track_id is None or r.track_id == track_id
+        ]
+
+
+def test_completing_a_track_registers_it_for_deletion(
+    client: TestClient, track: dict, engine, audio_root: Path
+):
+    """⭐ 녹음이 끝나면 **보존기간 관리 대상이 되어야** 한다.
+
+    등록되지 않으면 삭제 잡이 그 파일에 영영 닿지 않는다. 그런데 잡은
+    매일 성공하므로 아무도 모른다.
+    """
+    for seq in range(4):
+        put_chunk(client, track["meeting_id"], track["track_id"], seq)
+    assert complete(client, track, slices=4).status_code == 200
+
+    rows = _assets(track["track_id"])
+    assert len(rows) == 1, "녹음 원본이 보존 대상으로 등록되지 않았습니다"
+
+    asset = rows[0]
+    assert asset["kind"] == "raw"
+    assert asset["bytes"] == len(CHUNK) * 4
+    assert asset["deleted_at"] is None
+
+    # ⭐ storage_key 가 **실제 파일이 있는 곳**을 가리켜야 한다.
+    # 안 그러면 삭제 잡이 "이미 없음" 으로 읽고 매일 조용히 성공한다.
+    target = audio_root / asset["storage_key"]
+    assert target.is_dir(), f"{target} 이 없습니다"
+    assert sorted(p.name for p in target.iterdir()) == [
+        "000000.chunk",
+        "000001.chunk",
+        "000002.chunk",
+        "000003.chunk",
+    ]
+
+
+def test_retention_clock_uses_the_configured_days(
+    client: TestClient, track: dict, engine
+):
+    """⭐ `raw_audio_retention_days` 를 실제로 읽어야 한다.
+
+    설정값이 선언만 되고 읽는 코드가 0곳이었다 — 값을 바꿔도 아무
+    효과가 없었다는 뜻이다.
+    """
+    from teamflow.config import get_settings
+
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+
+    asset = _assets(track["track_id"])[0]
+    days = (asset["retention_until"] - datetime.now(UTC)).days
+    expected = get_settings().raw_audio_retention_days
+    # 하루 오차는 허용한다 — 지금 시각과 등록 시각이 다르다.
+    assert expected - 1 <= days <= expected, f"{days}일 (설정: {expected}일)"
+
+
+def test_registering_twice_does_not_create_two_expiry_clocks(
+    client: TestClient, track: dict, engine
+):
+    """⭐ 종료 요청은 재시도된다 — 두 번 등록되면 안 된다.
+
+    두 행이 같은 디렉터리를 가리키면 **먼저 온 쪽이 지운 뒤 나중 것이
+    실패로 남는다.** 잡의 실패 카운트가 매일 올라가는데 원인은 자기
+    자신이다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+    first = _assets(track["track_id"])
+
+    # 프런트가 응답을 못 받아 다시 보낸 경우.
+    complete(client, track, slices=1)
+
+    second = _assets(track["track_id"])
+    assert len(second) == 1
+    assert second[0]["id"] == first[0]["id"]
+
+
+def test_a_track_with_no_chunks_is_not_registered(
+    client: TestClient, track: dict, engine
+):
+    """청크가 하나도 안 올라온 트랙은 지울 것이 없다.
+
+    등록하면 삭제 잡이 매번 "파일 없음" 을 세고, 그 숫자가 진짜 유실과
+    섞인다.
+    """
+    assert complete(client, track, slices=1).status_code == 200
+    assert _assets(track["track_id"]) == []
+
+
+def test_force_finished_tracks_are_registered_too(
+    client: TestClient, meeting: dict, engine
+):
+    """⭐ 강제 종료한 트랙도 등록해야 한다.
+
+    쓸 수 없는 녹음이어도 **파일은 디스크에 있고, 그건 지워야 할
+    개인정보다.** 브라우저를 그냥 닫은 사람이 딱 이 경우다.
+    """
+    grant_consent(meeting["user_ids"], meeting["meeting_id"])
+    joined = join(client, meeting["meeting_id"], meeting["user_ids"][0]).json()
+    put_chunk(client, meeting["meeting_id"], joined["track_id"], 0)
+
+    login_as(client, meeting["user_ids"][0])
+    response = client.post(f"/api/meetings/{meeting['meeting_id']}/finish")
+    assert response.status_code == 200, response.text
+    assert joined["track_id"] in response.json()["aborted_track_ids"]
+
+    rows = _assets(joined["track_id"])
+    assert len(rows) == 1, "강제 종료한 트랙의 원본이 등록되지 않았습니다"
+
+
+def test_the_purge_job_actually_deletes_what_recording_registered(
+    client: TestClient, track: dict, engine, audio_root: Path
+):
+    """⭐ 녹음 → 등록 → 삭제가 **한 줄로 이어져야** 한다.
+
+    이 테스트가 이 파일에서 가장 중요하다. 기존 삭제 테스트들은
+    `m.AudioAsset(...)` 을 손으로 만들어 넣고 검증했으므로, **녹음이
+    실제로 그 행을 만드는지는 한 번도 확인하지 않았다.** 구간별로는
+    전부 맞는데 사이가 끊겨 있던, 이 저장소의 대표적인 결함 유형이다.
+    """
+    from teamflow.jobs.retention import purge_expired_audio
+
+    for seq in range(3):
+        put_chunk(client, track["meeting_id"], track["track_id"], seq)
+    assert complete(client, track, slices=3).status_code == 200
+
+    asset = _assets(track["track_id"])[0]
+    target = audio_root / asset["storage_key"]
+    assert target.is_dir()
+
+    # 보존기간이 지난 뒤로 시계를 옮긴다.
+    later = asset["retention_until"] + timedelta(seconds=1)
+    with db_session.session_scope() as s:
+        report = purge_expired_audio(s, storage_root=audio_root, now=later)
+
+    assert report.failed == {}, report.failed
+    assert report.deleted_assets == [asset["id"]]
+    assert report.freed_bytes == len(CHUNK) * 3
+    assert not target.exists(), "파일이 아직 디스크에 있습니다"
+    assert _assets(track["track_id"])[0]["deleted_at"] is not None
+
+
+def test_the_purge_job_leaves_unexpired_recordings_alone(
+    client: TestClient, track: dict, engine, audio_root: Path
+):
+    """아직 안 지난 것은 건드리지 않는다 — 회의 중에 지워지면 안 된다."""
+    from teamflow.jobs.retention import purge_expired_audio
+
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+    asset = _assets(track["track_id"])[0]
+
+    with db_session.session_scope() as s:
+        report = purge_expired_audio(s, storage_root=audio_root, now=datetime.now(UTC))
+
+    assert report.deleted_assets == []
+    assert (audio_root / asset["storage_key"]).is_dir()

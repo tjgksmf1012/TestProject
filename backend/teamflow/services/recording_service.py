@@ -24,15 +24,19 @@ docs/04-회의-처리-파이프라인.md §2, docs/07-법적-윤리-요구사항
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from teamflow.audio import assembly
 from teamflow.audio.chunk_store import ChunkStore
+from teamflow.config import get_settings
 from teamflow.db import models as m
+
+logger = logging.getLogger(__name__)
 
 RECORDING_CONSENT = "recording"
 
@@ -486,8 +490,103 @@ def complete_track(
     track.capture_warnings = summary.capture_warnings
     track.stop_reason = summary.stop_reason
     track.status = "completed" if coverage >= MIN_USABLE_COVERAGE else "unusable"
+
+    register_audio_asset(session, store, meeting_id=meeting_id, track_id=track_id)
+
     session.flush()
     return track
+
+
+def register_audio_asset(
+    session: Session,
+    store: ChunkStore,
+    *,
+    meeting_id: int,
+    track_id: int,
+    retention_days: int | None = None,
+    encryption_key_id: str | None = None,
+    now: datetime | None = None,
+) -> m.AudioAsset | None:
+    """녹음 원본을 **보존기간 관리 대상으로 등록한다.**
+
+    ## 왜 이게 필요한가
+
+    ⚠️ 이걸 부르는 코드가 저장소에 **하나도 없었습니다.**
+
+    매일 04:00 에 도는 `purge-expired-audio` 는 이 저장소에서 유일하게
+    "법적 요구사항" 이라고 명시된 잡입니다(docs/07 P5). 그런데 그 잡은
+    `audio_assets` 테이블만 훑는데, **운영 코드 어디에서도 그 행이
+    만들어지지 않았습니다.**
+
+    결과: 잡은 매일 성공하고 `"오디오 0건 삭제 (0.0MB 확보)"` 를 남깁니다.
+    로그를 보는 사람에게는 "지울 게 없었다" 로 읽힙니다. 실제로는
+    **생체인식정보(음성)가 30일이 아니라 무기한** 남아 있었습니다.
+    `raw_audio_retention_days` 설정값도 읽는 코드가 0곳이라 값을 바꿔도
+    아무 효과가 없었습니다.
+
+    `revoke_user_data`(P6, 개인 삭제 요청)도 같은 테이블을 보므로,
+    삭제 요청이 들어와도 그 사람의 청크 파일은 그대로 남았습니다.
+
+    ## 언제 부르는가
+
+    **트랙이 끝날 때**입니다. 그때부터 보존기간 시계가 돕니다. 녹음
+    중에 등록하면 아직 자라고 있는 것에 만료 시각을 붙이는 셈이고,
+    회의가 길어지면 회의 도중에 만료될 수 있습니다.
+
+    강제 종료(`force_finish_tracks`)한 트랙도 등록합니다 — 쓸 수 없는
+    녹음이어도 **파일은 디스크에 있고, 그건 지워야 할 개인정보입니다.**
+
+    Returns:
+        만든(또는 이미 있던) 행. 청크가 하나도 없으면 None.
+    """
+    settings = get_settings()
+    now = now or datetime.now(UTC)
+    days = settings.raw_audio_retention_days if retention_days is None else retention_days
+    key_id = (
+        settings.audio_encryption_key_id
+        if encryption_key_id is None
+        else encryption_key_id
+    )
+    storage_key = store.storage_key(meeting_id, track_id)
+
+    # 멱등하게. 종료 요청은 재시도될 수 있고, 두 번 등록하면 같은 파일에
+    # 만료 시각이 둘 생겨 **먼저 온 쪽이 지운 뒤 나중 것이 실패로 남습니다.**
+    existing = session.scalars(
+        select(m.AudioAsset).where(
+            m.AudioAsset.track_id == track_id,
+            m.AudioAsset.kind == "raw",
+        )
+    ).one_or_none()
+    if existing is not None:
+        return existing
+
+    stored_bytes = store.total_bytes(meeting_id, track_id)
+    if stored_bytes == 0:
+        # 올라온 청크가 없다. 지울 것도 없으므로 등록하지 않는다 —
+        # 등록하면 삭제 잡이 매번 "파일 없음" 을 세게 된다.
+        logger.info(
+            "track=%s 는 저장된 청크가 없어 보존 대상으로 등록하지 않습니다", track_id
+        )
+        return None
+
+    asset = m.AudioAsset(
+        meeting_id=meeting_id,
+        track_id=track_id,
+        storage_key=storage_key,
+        encryption_key_id=key_id,
+        kind="raw",
+        bytes=stored_bytes,
+        retention_until=now + timedelta(days=days),
+    )
+    session.add(asset)
+    session.flush()
+    logger.info(
+        "track=%s 원본 %.1fMB 를 보존 대상으로 등록 — %s 이후 삭제",
+        track_id,
+        stored_bytes / 1_048_576,
+        asset.retention_until.date().isoformat(),
+    )
+    return asset
 
 
 def track_health(session: Session, meeting_id: int) -> list[dict]:
@@ -628,7 +727,12 @@ def try_finalize_meeting(
 
 
 def force_finish_tracks(
-    session: Session, meeting_id: int, *, ended_at: datetime, reason: str = "aborted"
+    session: Session,
+    meeting_id: int,
+    *,
+    ended_at: datetime,
+    reason: str = "aborted",
+    store: ChunkStore | None = None,
 ) -> list[int]:
     """아직 녹음 중인 트랙을 강제로 종료한다.
 
@@ -653,5 +757,11 @@ def force_finish_tracks(
         track.ended_at = ended_at
         track.status = "aborted"
         track.stop_reason = reason
+        # 쓸 수 없는 녹음이어도 **파일은 디스크에 있고, 그건 지워야 할
+        # 개인정보다.** 등록하지 않으면 보존기간 삭제가 영영 안 닿는다.
+        if store is not None:
+            register_audio_asset(
+                session, store, meeting_id=meeting_id, track_id=track.id, now=ended_at
+            )
     session.flush()
     return [t.id for t in live]

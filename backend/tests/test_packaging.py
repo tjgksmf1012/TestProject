@@ -180,6 +180,69 @@ def test_scheduled_jobs_actually_have_a_scheduler():
     assert beat_services, "compose 에 celery beat 서비스가 없습니다"
 
 
+def test_the_worker_actually_knows_the_tasks_beat_sends():
+    """⭐ 스케줄러가 **이름으로** 보낸 잡을 워커가 알아야 한다.
+
+    `autodiscover_tasks(["teamflow.tasks"], force=True)` 를 부르고 있었는데,
+    `related_name` 기본값이 `"tasks"` 라 그건 **`teamflow.tasks.tasks`**
+    모듈을 찾는다. 그런 모듈은 없다. 그래서 워커의 태스크 레지스트리가
+    **비어 있었다.**
+
+    결과: beat 가 04:00 에 `purge_expired_audio_task` 를 보내면 워커는
+    unregistered 로 버린다. 문서대로 정확히 띄워도 **원본 음성(생체인식
+    정보)이 무기한 남는다.** 회의 처리 전 구간도 같은 이유로 조용히 멈춘다.
+
+    ⭐ 여기서 중요한 건 **워커의 기동 경로를 그대로 쓰는 것**이다.
+    `from teamflow.tasks import maintenance` 로 import 하면 데코레이터가
+    그때 실행돼 등록되므로, 그렇게 검사하면 이 구멍을 통과시킨다.
+    기존 테스트들이 초록이던 이유가 정확히 그것이다.
+    """
+    from teamflow.tasks import app
+
+    # celery worker 가 기동할 때 실제로 부르는 그 함수.
+    app.loader.import_default_modules()
+
+    missing = [
+        f"{name} → {config['task']}"
+        for name, config in app.conf.beat_schedule.items()
+        if config["task"] not in app.tasks
+    ]
+    assert not missing, (
+        "beat 가 보내는데 워커가 모르는 태스크입니다. "
+        "`app.conf.imports` 에 그 모듈을 추가해야 합니다:\n"
+        + "\n".join(f"  {m}" for m in missing)
+    )
+
+
+def test_every_task_module_is_imported_by_the_worker():
+    """⭐ 태스크를 정의해 놓고 워커가 import 하지 않으면 부를 수 없다.
+
+    `imports` 를 손으로 적으므로 모듈이 늘면 빠뜨릴 수 있다. 빠뜨리면
+    그 태스크를 보낸 쪽은 성공한 줄 알고, 워커는 unregistered 로 버린다.
+    """
+    import pkgutil
+    import re
+
+    from teamflow import tasks as tasks_package
+    from teamflow.tasks import app
+
+    declared = set(app.conf.imports or ())
+    missing = []
+    for module in pkgutil.iter_modules(tasks_package.__path__):
+        name = f"teamflow.tasks.{module.name}"
+        source = (
+            Path(tasks_package.__path__[0]) / f"{module.name}.py"
+        ).read_text()
+        # 태스크가 하나라도 있는 모듈만 본다. dispatch.py 처럼 태스크가
+        # 없는 모듈은 import 할 이유가 없다.
+        if not re.search(r"@(app|shared)\.task|@app\.task", source):
+            continue
+        if name not in declared:
+            missing.append(name)
+
+    assert not missing, f"`app.conf.imports` 에 빠진 태스크 모듈: {missing}"
+
+
 def test_beat_schedule_survives_a_restart():
     """스케줄 파일이 컨테이너 안에만 있으면 재생성마다 초기화된다."""
     body = _compose_services()["beat"]

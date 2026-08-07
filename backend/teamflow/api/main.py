@@ -1166,7 +1166,12 @@ def finish_meeting(
     """
     _load_meeting_for(session, meeting_id, user)
     aborted = recording_service.force_finish_tracks(
-        session, meeting_id, ended_at=datetime.now(UTC)
+        session,
+        meeting_id,
+        ended_at=datetime.now(UTC),
+        # 쓸 수 없는 녹음이어도 파일은 디스크에 있다. 보존 대상으로
+        # 등록해야 삭제 잡이 닿는다.
+        store=_chunk_store(settings),
     )
     # force=True — 참가하지 않은 사람을 더 기다리지 않는다. 그게 이 엔드포인트의 존재 이유다.
     finalize = recording_service.try_finalize_meeting(session, meeting_id, force=True)
