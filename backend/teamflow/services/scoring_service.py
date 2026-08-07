@@ -31,7 +31,84 @@ from teamflow.contribution.profiles import (
 from teamflow.contribution.scoring import MeasurementGap, TeamScoreResult, score_team
 from teamflow.db import models as m
 from teamflow.jobs import retention
+from teamflow.meeting import utterance_types as ut
 from teamflow.meeting.utterance_types import CLASSIFIER_MODEL
+from teamflow.services import task_service
+
+
+def kept_promises(session: Session, project_id: int) -> set[tuple[int, int]]:
+    """지켜진 약속 — `(발화 id, 사람 id)`.
+
+    ## 왜 이게 저장이 아니라 계산인가
+
+    `scoring.py` 는 약속을 지켰으면 6.0, 아니면 1.5 를 줍니다. 그런데
+    약속을 **지켰는지는 회의가 끝난 뒤에 정해집니다.** 회의를 처리하는
+    시점에 판정해서 메타데이터에 얼려 두면, 다음 주에 그 업무를 끝내도
+    점수가 1.5 에 머뭅니다 — 지킨 사람이 안 지킨 사람과 같아집니다.
+
+    그래서 산정할 때마다 다시 봅니다. 이 파일 맨 위의 원칙 그대로입니다.
+
+        점수 = f(불변 이벤트 로그, 가중치 버전, 역할)
+
+    ## 무엇을 근거로 지켰다고 하는가
+
+        약속 발화 → 그 발화를 근거로 인용한 업무 후보
+                  → 승인되어 만들어진 업무 → **완료**
+
+    이 프로젝트가 주장하는 사슬 그대로입니다. 그래서 6.0 을 받은 사람은
+    **어느 말이 어느 업무가 됐는지** 화면에서 되짚을 수 있습니다.
+
+    ⚠️ **담당자가 약속한 본인이어야 합니다.** 민수가 하겠다고 한 일을
+    하늘이 끝냈으면 민수는 약속을 지킨 게 아닙니다. 이걸 안 보면
+    "말만 하고 남이 하게 두는" 쪽이 가장 이득을 봅니다.
+
+    ⚠️ **업무 하나가 약속 하나를 지웁니다.** 같은 회의에서 "제가
+    하겠습니다" 를 세 번 말하면 근거 발화가 셋이 될 수 있고, 그걸 다
+    인정하면 4.5 가 18 이 됩니다 — **반복이 점수가 됩니다.** 가장
+    이른 약속 하나만 인정합니다.
+    """
+    rows = session.execute(
+        select(
+            m.MeetingTaskCandidate.evidence_utterance_ids,
+            m.Task.id,
+            m.Task.assignee_id,
+        )
+        .join(m.Task, m.Task.id == m.MeetingTaskCandidate.created_task_id)
+        .where(
+            m.Task.project_id == project_id,
+            m.Task.status == task_service.DONE,
+            m.Task.assignee_id.is_not(None),
+        )
+    ).all()
+
+    cited: set[int] = set()
+    for evidence, _task_id, _assignee in rows:
+        cited.update(evidence or ())
+    if not cited:
+        return set()
+
+    # 인용된 발화 중 **약속**인 것만. 결정·질문이 근거로 붙어 있어도
+    # 그건 약속을 지킨 근거가 아닙니다.
+    promises = {
+        row.id: (row.speaker_id, row.start_ms)
+        for row in session.scalars(
+            select(m.Utterance).where(
+                m.Utterance.id.in_(cited),
+                m.Utterance.utterance_type == ut.COMMITMENT,
+            )
+        )
+    }
+
+    kept: set[tuple[int, int]] = set()
+    for evidence, _task_id, assignee in rows:
+        mine = [
+            (promises[uid][1], uid)
+            for uid in (evidence or ())
+            if uid in promises and promises[uid][0] == assignee
+        ]
+        if mine:
+            kept.add((min(mine)[1], assignee))
+    return kept
 
 
 def load_events(session: Session, project_id: int) -> dict[int, list[ContributionEvent]]:
@@ -41,8 +118,17 @@ def load_events(session: Session, project_id: int) -> dict[int, list[Contributio
         )
     ).all()
 
+    kept = kept_promises(session, project_id)
+
     by_user: dict[int, list[ContributionEvent]] = {}
     for row in rows:
+        metadata = dict(row.event_metadata or {})
+
+        # ⭐ 저장된 값이 있어도 **덮어씁니다.** 얼려 둔 판정은 낡은
+        # 판정이고, 낡은 쪽이 이기면 위 docstring 의 이유가 무너집니다.
+        if row.event_type == EventType.UTT_COMMITMENT.value:
+            metadata["fulfilled"] = (row.source_id, row.user_id) in kept
+
         by_user.setdefault(row.user_id, []).append(
             ContributionEvent(
                 user_id=row.user_id,
@@ -51,7 +137,7 @@ def load_events(session: Session, project_id: int) -> dict[int, list[Contributio
                 source_kind=SourceKind(row.source_kind),
                 source_id=row.source_id,
                 magnitude=float(row.magnitude or 0.0),
-                metadata=dict(row.event_metadata or {}),
+                metadata=metadata,
             )
         )
     return by_user
