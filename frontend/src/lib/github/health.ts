@@ -34,6 +34,10 @@ export interface GithubHealth {
   verified_at: string | null;
   delivery_count: number;
   last_delivery_at: string | null;
+  /** "이 수치는 언제부터의 활동인가" 한 줄. 서버가 정합니다. */
+  coverage?: string;
+  /** 백필을 마지막으로 돌린 시각. null 이면 **한 번도 안 돌렸습니다.** */
+  backfilled_at?: string | null;
 }
 
 /** 화면이 그리는 데 필요한 것만. */
@@ -46,6 +50,20 @@ export interface HealthView {
   warnings: string[];
   /** "배달 12건 · 마지막 3분 전" 같은 한 줄. 없으면 빈 문자열. */
   activity: string;
+  /**
+   * "이 수치는 언제부터의 활동인가". 없으면 빈 문자열.
+   *
+   * ⚠️ 범위를 안 밝힌 숫자는 **전부를 센 것처럼** 읽힙니다.
+   */
+  coverage: string;
+  /**
+   * 지난 활동 가져오기 버튼을 보일 것인가.
+   *
+   * 배달이 온 적이 있는데 백필을 한 적이 없을 때만입니다. 배달이 0건인
+   * 상태에서 보이면, 연결도 안 됐는데 "가져오기" 를 누르게 만듭니다 —
+   * 눌러도 아무 일이 없고, 사람은 그게 고장인 줄 압니다.
+   */
+  canBackfill: boolean;
 }
 
 const TONES = new Set(['ok', 'warn', 'bad']);
@@ -94,6 +112,8 @@ export function describeHealth(health: GithubHealth, now: Date): HealthView {
     nextStep: health.next_step,
     warnings: health.warnings ?? [],
     activity: describeActivity(health, now),
+    coverage: health.coverage ?? '',
+    canBackfill: health.delivery_count > 0 && !health.backfilled_at,
   };
 }
 
@@ -112,6 +132,8 @@ export function describeHealthFailure(status: number): HealthView {
       nextStep: null,
       warnings: [],
       activity: '',
+      coverage: '',
+      canBackfill: false,
     };
   }
   if (status === 0) {
@@ -122,6 +144,8 @@ export function describeHealthFailure(status: number): HealthView {
       nextStep: '잠시 뒤 새로고침하세요.',
       warnings: [],
       activity: '',
+      coverage: '',
+      canBackfill: false,
     };
   }
   return {
@@ -131,5 +155,7 @@ export function describeHealthFailure(status: number): HealthView {
     nextStep: '잠시 뒤 새로고침하세요.',
     warnings: [],
     activity: '',
+    coverage: '',
+    canBackfill: false,
   };
 }

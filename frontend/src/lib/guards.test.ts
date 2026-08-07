@@ -29,6 +29,17 @@ const demoFiles = (): { name: string; source: string }[] =>
     .map((name) => ({ name, source: readFileSync(join(DEMO, name), 'utf8') }));
 
 /**
+ * 주석을 뺀 코드.
+ *
+ * ⚠️ 이게 없으면 **틀린 예를 적어 둔 주석이 규칙 위반으로 잡힙니다.**
+ * 이 저장소의 주석은 대개 "예전에는 이랬다" 를 그대로 적어 두므로,
+ * 나쁜 모양을 찾는 규칙은 거의 전부 자기 설명에 걸립니다. 그러면
+ * 사람은 규칙을 느슨하게 만들고, 느슨해진 규칙은 진짜를 놓칩니다.
+ */
+const codeOf = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+/**
  * 이 모듈이 실제로 붙는 HTML. 진입점이 아니면 null.
  *
  * `main.ts` 만 이름이 다릅니다 — 녹음 화면이 `index.html` 이라서.
@@ -160,6 +171,44 @@ describe('모바일 규칙', () => {
       const source = readFileSync(join(DEMO, `${script}.ts`), 'utf8');
       if (!/renderNav\(/.test(source)) offenders.push(`${name} → ${script}.ts`);
     }
+    strictEqual(offenders.join(', '), '');
+  });
+
+  it('⭐ 서버 오류를 `detail` 째로 화면에 넣지 않는다 (결함 51)', () => {
+    // FastAPI 는 `detail` 을 두 모양으로 줍니다.
+    //
+    //     HTTPException  → "저장소가 연결되지 않았습니다"   ← 문자열
+    //     검증 실패(422) → [{loc, msg, type}, ...]          ← **객체 배열**
+    //
+    // 화면 여섯 곳이 `as { detail?: string }` 로 단언하고 그대로
+    // `textContent` 에 넣고 있었습니다. 422 가 오면 전부
+    // **`[object Object]`** 가 됩니다. 타입 단언은 런타임에 아무것도
+    // 확인하지 않으므로 `tsc` 는 조용합니다.
+    //
+    // 실제 브라우저에서 422 를 받아 보기 전에는 아무 데도 티가 안 났습니다.
+    const offenders = demoFiles()
+      .filter(({ source }) => /detail\?\s*:\s*string/.test(codeOf(source)))
+      .map(({ name }) => name);
+    strictEqual(offenders.join(', '), '');
+  });
+
+  it('⭐ 헤더를 객체로 겹쳐 쓰지 않는다 (결함 50)', () => {
+    // 자바스크립트 객체 키는 대소문자를 구분하고 **HTTP 헤더는 안
+    // 합니다.** 이 모양이 그래서 위험합니다.
+    //
+    //     headers: { 'Content-Type': 'application/json', ...init?.headers }
+    //
+    // 호출부가 `content-type`(소문자)을 주면 두 키가 **둘 다 살아남아**
+    // `Content-Type: application/json, application/json` 이 나갑니다.
+    // FastAPI 는 그걸 JSON 으로 안 보고 422 를 줍니다.
+    //
+    // 규칙을 사람이 지키게 하는 대신 `new Headers()` 를 쓰게 합니다 —
+    // 그건 이름을 대소문자 무시로 다루므로 겹칠 수가 없습니다.
+    const offenders = demoFiles()
+      .filter(({ source }) =>
+        /headers:\s*\{[^}]*\.\.\.\s*\(?\s*init\?\.headers/.test(codeOf(source)),
+      )
+      .map(({ name }) => name);
     strictEqual(offenders.join(', '), '');
   });
 

@@ -167,6 +167,32 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/http/detail.ts
+function isValidationList(value) {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "object" && item !== null);
+}
+function fieldOf(items) {
+  for (const item of items) {
+    if (!Array.isArray(item.loc)) continue;
+    const named = item.loc.filter(
+      (part) => typeof part === "string" && part !== "body"
+    );
+    if (named.length > 0) return named[named.length - 1];
+  }
+  return "";
+}
+function detailText(body, fallback) {
+  if (typeof body !== "object" || body === null) return fallback;
+  const detail = body.detail;
+  if (typeof detail === "string" && detail.trim() !== "") return detail;
+  if (isValidationList(detail)) {
+    const field = fieldOf(detail);
+    const where = field ? ` (${field})` : "";
+    return `보낸 값이 올바르지 않습니다${where} — 화면 문제입니다. 새로고침해도 같으면 알려 주세요.`;
+  }
+  return fallback;
+}
+
 // src/lib/nav/links.ts
 var LABEL = {
   home: "홈",
@@ -462,8 +488,8 @@ $("create").addEventListener("click", () => {
   }).then(async (response) => {
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
-      const body = await response.json().catch(() => ({}));
-      return say(body.detail ?? `만들지 못했습니다 (HTTP ${response.status})`);
+      const body = await response.json().catch(() => null);
+      return say(detailText(body, `만들지 못했습니다 (HTTP ${response.status})`));
     }
     const created = await response.json();
     location.href = `/project.html?project=${created.project_id}`;
@@ -482,8 +508,8 @@ $("join").addEventListener("click", () => {
   }).then(async (response) => {
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
-      const body = await response.json().catch(() => ({}));
-      return say(body.detail ?? `참가하지 못했습니다 (HTTP ${response.status})`);
+      const body = await response.json().catch(() => null);
+      return say(detailText(body, `참가하지 못했습니다 (HTTP ${response.status})`));
     }
     const joined = await response.json();
     location.href = `/project.html?project=${joined.project_id}`;

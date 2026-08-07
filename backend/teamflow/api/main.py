@@ -39,6 +39,7 @@ from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 from teamflow.db.session import get_db
+from teamflow.github import backfill as gh_backfill
 from teamflow.github import connection as gh_connection
 from teamflow.github import linking as gh_linking
 from teamflow.github import webhook as gh
@@ -467,6 +468,20 @@ def _enqueue_github_after_commit(session: Session, event_id: int) -> None:
         dispatch.enqueue_github_ingest(event_id)
 
 
+def _enqueue_backfill_after_commit(
+    session: Session, project_id: int, limit: int
+) -> None:
+    """커밋 뒤에 백필을 큐에 넣는다.
+
+    같은 이유입니다 — 워커가 커밋보다 먼저 도착하면 방금 정한 상한도,
+    저장소 이름 변경도 못 본 채로 시작합니다.
+    """
+
+    @event.listens_for(session, "after_commit", once=True)
+    def _fire(_session: Session) -> None:  # pragma: no cover - 커밋 시점에 실행된다
+        dispatch.enqueue_github_backfill(project_id, limit)
+
+
 # ══════════════════════════════════════════════════════════════
 # 프로젝트·회의 생성
 # ══════════════════════════════════════════════════════════════
@@ -828,6 +843,12 @@ class GithubHealthOut(BaseModel):
     delivery_count: int
     last_delivery_at: datetime | None
 
+    #: "이 수치는 언제부터의 활동인가" 한 줄. 범위를 안 밝힌 숫자는
+    #: **전부를 센 것처럼** 읽힙니다.
+    coverage: str
+    backfilled_at: datetime | None
+    backfilled_to: datetime | None
+
 
 @app.get("/api/projects/{project_id}/github", response_model=GithubHealthOut)
 def github_health(
@@ -866,7 +887,63 @@ def github_health(
         verified_at=facts.verified_at,
         delivery_count=facts.delivery_count,
         last_delivery_at=facts.last_delivery_at,
+        coverage=gh_connection.describe_coverage(facts),
+        backfilled_at=facts.backfilled_at,
+        backfilled_to=facts.backfilled_to,
     )
+
+
+class BackfillIn(BaseModel):
+    """가져올 상한. 안 주면 기본값(200)."""
+
+    limit: int | None = Field(default=None, ge=1, le=gh_backfill.MAX_LIMIT)
+
+
+@app.post(
+    "/api/projects/{project_id}/github/backfill",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_github_backfill(
+    project_id: int,
+    body: BackfillIn,
+    session: DbSession,
+    user: CurrentUser,
+    settings: AppSettings,
+) -> dict:
+    """연결 **전**의 병합 PR 을 가져온다.
+
+    ⚠️ 구성원만입니다. 아무나 부를 수 있으면 남의 저장소를 향해 GitHub
+    API 를 대신 두들기게 만들 수 있고, 그건 그 팀의 rate limit 을 태웁니다.
+
+    202 를 돌려주고 워커가 합니다. PR 하나에 API 를 네 번 부르므로 200건
+    이면 800 요청이고, HTTP 요청 하나가 그걸 기다릴 수는 없습니다.
+    """
+    project = session.get(m.Project, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    if not project.github_repo:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "저장소가 연결되지 않았습니다. 먼저 owner/repo 를 저장하세요.",
+        )
+    # 자격 증명이 없으면 워커가 아무것도 못 합니다. 202 로 받아 두고
+    # 조용히 아무 일도 안 일어나면, 사람은 화면만 보고 기다립니다.
+    if not (
+        getattr(settings, "github_app_id", None)
+        and getattr(settings, "github_private_key", None)
+        and project.github_installation_id
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "서버에 GitHub App 자격 증명이 없거나 App 이 아직 이 저장소에 "
+            "설치되지 않았습니다. 지난 활동을 가져오려면 그것부터 필요합니다.",
+        )
+
+    limit = gh_backfill.clamp_limit(body.limit)
+    _enqueue_backfill_after_commit(session, project_id, limit)
+    return {"status": "queued", "project_id": project_id, "limit": limit}
 
 
 # ══════════════════════════════════════════════════════════════

@@ -26,6 +26,7 @@ import {
 } from '../lib/lobby/room.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -105,7 +106,10 @@ async function submitConsent(consented: boolean): Promise<void> {
     }
     const body = await response.json();
     if (!response.ok) {
-      $('consent-message').textContent = body.detail ?? '동의를 제출하지 못했습니다';
+      $('consent-message').textContent = detailText(
+        body,
+        '동의를 제출하지 못했습니다',
+      );
       return;
     }
     roster = body.roster;

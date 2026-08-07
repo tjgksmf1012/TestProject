@@ -24,6 +24,7 @@ import {
   titleProblem,
 } from '../lib/project/setup.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -150,8 +151,8 @@ $('create').addEventListener('click', () => {
   }).then(async (response) => {
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
-      const body = (await response.json().catch(() => ({}))) as { detail?: string };
-      return say(body.detail ?? `만들지 못했습니다 (HTTP ${response.status})`);
+      const body = await response.json().catch(() => null);
+      return say(detailText(body, `만들지 못했습니다 (HTTP ${response.status})`));
     }
     // 만든 직후에는 혼자다. 목록으로 돌려보내면 초대 코드를 한 번 더
     // 찾아가야 하므로, 코드가 있는 화면으로 바로 보낸다.
@@ -174,8 +175,8 @@ $('join').addEventListener('click', () => {
   }).then(async (response) => {
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
-      const body = (await response.json().catch(() => ({}))) as { detail?: string };
-      return say(body.detail ?? `참가하지 못했습니다 (HTTP ${response.status})`);
+      const body = await response.json().catch(() => null);
+      return say(detailText(body, `참가하지 못했습니다 (HTTP ${response.status})`));
     }
     // 이미 구성원이어도 성공이다 — 그때는 그냥 그 프로젝트로 간다.
     const joined = (await response.json()) as { project_id: number };

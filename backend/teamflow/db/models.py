@@ -161,6 +161,19 @@ class Project(Base):
     # 이름을 적었다는 사실만으로 신뢰도가 오르면, GitHub 데이터가 0건인
     # 프로젝트가 "근거가 충분한 점수" 로 보입니다.
     github_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 백필을 **마지막으로 돌린** 시각. NULL 이면 한 번도 안 돌렸다는 뜻입니다.
+    github_backfilled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    # ⚠️ **이 시각 이후는 GitHub 에 물어봤다**는 뜻입니다.
+    #
+    # 이 한 칸이 "기여도가 빈 것" 과 "활동이 없던 것" 을 가릅니다.
+    # 없으면 화면은 둘을 구분해서 말할 수 없고, 연결 전에 제일 많이
+    # 일한 사람이 제일 적게 일한 것으로 보입니다 — 오류는 어디에도
+    # 안 납니다.
+    github_backfilled_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = _now()
 
     # 유니크 **제약**이 아니라 유니크 **인덱스**입니다. SQLite 는

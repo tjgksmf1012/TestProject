@@ -6,6 +6,7 @@
  * 여기는 DOM 배선일 뿐입니다.
  */
 
+import { detailText } from '../lib/http/detail.ts';
 import { describeAuthFailure, safeApiBase, safeRedirect, validateLogin, validateSignup, type FormProblem } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { bootApp } from './pwa.ts';
@@ -80,10 +81,10 @@ async function submit(): Promise<void> {
     });
 
     if (!response.ok) {
-      const detail = await response
-        .json()
-        .then((b: { detail?: string }) => b.detail)
-        .catch(() => undefined);
+      // 422 는 `detail` 이 **객체 배열**입니다. 그대로 넘기면 로그인
+      // 실패 문구 자리에 `[object Object]` 가 나옵니다.
+      const body = await response.json().catch(() => null);
+      const detail = detailText(body, '') || undefined;
       showMessage(describeAuthFailure(response.status, detail));
       return;
     }

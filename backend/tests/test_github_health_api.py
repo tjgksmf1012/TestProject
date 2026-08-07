@@ -403,3 +403,94 @@ def test_confidence_rises_only_after_a_delivery_proves_the_link(
         stats = scoring_service.load_coverage(s, seeded["project_id"])
 
     assert stats.github_connected_days > 0
+
+
+# ══════════════════════════════════════════════════════════════
+# 백필 — 연결 전의 활동을 가져오기
+# ══════════════════════════════════════════════════════════════
+
+
+def test_backfill_needs_membership(client: TestClient, seeded):
+    """⚠️ 아무나 부를 수 있으면 **남의 저장소를 향해 GitHub API 를 대신
+    두들기게** 만들 수 있고, 그건 그 팀의 rate limit 을 태웁니다."""
+    with db_session.session_scope() as s:
+        outsider = m.User(name="남", email="outsider2@example.com")
+        s.add(outsider)
+        s.flush()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    response = client.post(
+        f"/api/projects/{seeded['project_id']}/github/backfill", json={}
+    )
+    assert response.status_code == 403
+
+
+def test_backfill_without_a_repo_is_refused(client: TestClient, seeded):
+    response = client.post(
+        f"/api/projects/{seeded['project_id']}/github/backfill", json={}
+    )
+    assert response.status_code == 409
+    assert "저장소" in response.json()["detail"]
+
+
+def test_backfill_without_credentials_says_so_instead_of_pretending(
+    client: TestClient, seeded
+):
+    """⭐ 202 로 받아 두고 조용히 아무 일도 안 일어나면, 사람은 화면만
+    보고 기다립니다. **되는 척하지 않습니다.**"""
+    set_repo(seeded["project_id"], "team/teamflow")
+
+    response = client.post(
+        f"/api/projects/{seeded['project_id']}/github/backfill", json={}
+    )
+    assert response.status_code == 409
+    assert "자격 증명" in response.json()["detail"]
+
+
+def test_backfill_is_queued_when_everything_is_ready(
+    configured_client: TestClient, seeded
+):
+    set_repo(seeded["project_id"], "team/teamflow")
+    post_webhook(configured_client, ping_payload(repo="team/teamflow"))
+
+    response = configured_client.post(
+        f"/api/projects/{seeded['project_id']}/github/backfill", json={"limit": 25}
+    )
+    assert response.status_code == 202
+    assert response.json() == {
+        "status": "queued",
+        "project_id": seeded["project_id"],
+        "limit": 25,
+    }
+
+
+def test_backfill_limit_is_clamped_by_the_api(configured_client: TestClient, seeded):
+    """⚠️ 상한이 없으면 저장소 하나가 rate limit 창을 통째로 먹습니다."""
+    set_repo(seeded["project_id"], "team/teamflow")
+    post_webhook(configured_client, ping_payload(repo="team/teamflow"))
+
+    too_big = configured_client.post(
+        f"/api/projects/{seeded['project_id']}/github/backfill", json={"limit": 999_999}
+    )
+    # 스키마가 먼저 거절하거나, 통과했다면 서비스가 잘라야 합니다.
+    assert too_big.status_code in (202, 422)
+    if too_big.status_code == 202:
+        from teamflow.github import backfill as bf
+
+        assert too_big.json()["limit"] <= bf.MAX_LIMIT
+
+
+def test_health_tells_the_truth_about_what_period_it_covers(
+    client: TestClient, seeded
+):
+    """⭐ 범위를 안 밝힌 숫자는 **전부를 센 것처럼** 읽힙니다."""
+    set_repo(seeded["project_id"], "team/teamflow")
+    post_webhook(client, pr_merged_payload(repo="team/teamflow"))
+
+    body = client.get(f"/api/projects/{seeded['project_id']}/github").json()
+
+    assert body["backfilled_at"] is None
+    assert "아직 가져오지 않았습니다" in body["coverage"]
+    # 그리고 무엇을 하라고 말해야 합니다.
+    assert any("가져오기" in w for w in body["warnings"]), body["warnings"]

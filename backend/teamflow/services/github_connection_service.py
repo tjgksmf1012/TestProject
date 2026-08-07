@@ -184,6 +184,8 @@ def collect_facts(
         members_without_login=members_without_login,
         actor_logins=actor_logins,
         near_misses=_near_misses(session, project.github_repo),
+        backfilled_at=project.github_backfilled_at,
+        backfilled_to=project.github_backfilled_to,
     )
 
 

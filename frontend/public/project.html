@@ -105,6 +105,13 @@
       <ul id="gh-warnings" class="plain health-warnings"></ul>
       <p id="gh-activity" class="health-activity" hidden></p>
     </div>
+
+    <!-- 연결 **전**의 PR 을 가져온다.
+         웹훅은 연결한 순간부터 오므로, 그 전에 제일 많이 일한 사람이
+         제일 적게 일한 것으로 보인다. 오류는 어디에도 안 난다. -->
+    <p id="gh-coverage" class="sub" hidden></p>
+    <button id="gh-backfill" type="button" hidden>지난 활동 가져오기</button>
+    <p id="gh-backfill-status" class="sub" hidden></p>
   </section>
 
   <!-- ══════════════════════════════════════════════════════

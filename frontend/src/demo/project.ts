@@ -20,6 +20,7 @@ import {
   type HealthView,
 } from '../lib/github/health.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { detailText } from '../lib/http/detail.ts';
 import {
   confirmPrompt,
   describeOutcome,
@@ -59,10 +60,34 @@ function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 
+/**
+ * `Content-Type` 을 붙이되 **겹치지 않게.**
+ *
+ * ⚠️ 예전에는 이랬습니다.
+ *
+ *     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) }
+ *
+ * 자바스크립트 객체 키는 대소문자를 구분하고 **HTTP 헤더는 안 합니다.**
+ * 호출부가 `content-type`(소문자)을 주면 두 키가 **둘 다 살아남아**
+ *
+ *     Content-Type: application/json, application/json
+ *
+ * 이 나갑니다. FastAPI 는 그걸 JSON 으로 안 보고 422 를 주는데, 화면에는
+ * 그냥 "실패" 로만 보입니다. 브라우저에서 버튼을 눌러 보고 나서야
+ * 찾았습니다.
+ *
+ * `Headers` 는 이름을 대소문자 무시로 다루므로 겹칠 수가 없습니다.
+ */
+function withJsonType(given: HeadersInit | undefined): Headers {
+  const headers = new Headers(given);
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  return headers;
+}
+
 async function call(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(`${apiBase}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers: withJsonType(init?.headers),
     credentials: 'same-origin',
     cache: 'no-store',
   });
@@ -117,6 +142,59 @@ function renderHealth(view: HealthView): void {
 
   $('gh-activity').textContent = view.activity;
   $('gh-activity').hidden = view.activity === '';
+
+  // "이 수치는 언제부터의 활동인가". 범위를 안 밝힌 숫자는 **전부를 센
+  // 것처럼** 읽힙니다.
+  $('gh-coverage').textContent = view.coverage;
+  $('gh-coverage').hidden = view.coverage === '';
+
+  // ⚠️ 배달이 0건일 때는 안 보입니다. 연결도 안 됐는데 "가져오기" 를
+  // 누르면 아무 일이 없고, 사람은 그게 고장인 줄 압니다.
+  $('gh-backfill').hidden = !view.canBackfill;
+}
+
+async function startBackfill(): Promise<void> {
+  const button = $('gh-backfill') as HTMLButtonElement;
+  const status = $('gh-backfill-status');
+  button.disabled = true;
+  status.hidden = false;
+  status.textContent = '가져오는 중…';
+
+  let response: Response;
+  try {
+    // ⚠️ `headers` 를 다시 주지 않습니다. `call()` 이 이미
+    // `Content-Type` 을 넣는데, 여기서 `content-type` 을 또 주면
+    // **자바스크립트 객체 키는 대소문자를 구분하고 HTTP 헤더는 안
+    // 하므로** 둘 다 살아남아 `application/json, application/json` 이
+    // 나갑니다. FastAPI 는 그걸 JSON 으로 안 보고 422 를 줍니다.
+    response = await call(`/api/projects/${projectId}/github/backfill`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  } catch {
+    button.disabled = false;
+    status.textContent = '서버에 닿지 못했습니다. 잠시 뒤 다시 누르세요.';
+    return;
+  }
+
+  if (!response.ok) {
+    button.disabled = false;
+    // 409 는 "왜 안 되는지" 를 서버가 문장으로 줍니다 — 저장소가 없거나
+    // App 자격 증명이 없거나. 그대로 보여 줍니다.
+    const body = await response.json().catch(() => null);
+    status.textContent = detailText(
+      body,
+      `가져오지 못했습니다 (HTTP ${response.status})`,
+    );
+    return;
+  }
+
+  // ⚠️ **"완료" 라고 말하지 않습니다.** 서버는 큐에 넣었을 뿐이고 워커가
+  // 실제로 가져오는 데는 시간이 걸립니다. 여기서 완료라고 하면 사람은
+  // 바로 기여도를 보러 가서 "안 늘었네" 라고 읽습니다.
+  status.textContent =
+    '가져오기를 시작했습니다. PR 수에 따라 몇 분 걸립니다 — ' +
+    '잠시 뒤 이 화면을 새로고침하면 반영된 범위가 바뀝니다.';
 }
 
 async function loadHealth(): Promise<void> {
@@ -182,6 +260,10 @@ $('save-repo').addEventListener('click', () => {
   });
 });
 
+$('gh-backfill').addEventListener('click', () => {
+  void startBackfill();
+});
+
 $('rotate').addEventListener('click', () => {
   const ok = confirm(
     '초대 코드를 새로 만듭니다.\n지금 코드는 그 즉시 통하지 않습니다. 계속할까요?',
@@ -208,8 +290,11 @@ $('open-meeting').addEventListener('click', () => {
     body: JSON.stringify({ title: title || null }),
   }).then(async (r) => {
     if (!r.ok) {
-      const body = (await r.json().catch(() => ({}))) as { detail?: string };
-      return say('error', body.detail ?? `회의를 열지 못했습니다 (HTTP ${r.status})`);
+      const body = await r.json().catch(() => null);
+      return say(
+        'error',
+        detailText(body, `회의를 열지 못했습니다 (HTTP ${r.status})`),
+      );
     }
     const created = (await r.json()) as { meeting_id: number };
     location.href = `/lobby.html?meeting=${created.meeting_id}`;
@@ -249,9 +334,12 @@ $('del-run').addEventListener('click', () => {
   void call(`/api/projects/${projectId}/me/data`, { method: 'POST' })
     .then(async (response) => {
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { detail?: string };
+        const body = await response.json().catch(() => null);
         $('del-result').className = 'bad';
-        say('del-result', describeRequestFailure(response.status, body.detail));
+        say(
+          'del-result',
+          describeRequestFailure(response.status, detailText(body, '') || undefined),
+        );
         button.disabled = false;
         return;
       }

@@ -1082,6 +1082,32 @@ function isSessionExpired(status) {
   return status === 401;
 }
 
+// src/lib/http/detail.ts
+function isValidationList(value) {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "object" && item !== null);
+}
+function fieldOf(items) {
+  for (const item of items) {
+    if (!Array.isArray(item.loc)) continue;
+    const named = item.loc.filter(
+      (part) => typeof part === "string" && part !== "body"
+    );
+    if (named.length > 0) return named[named.length - 1];
+  }
+  return "";
+}
+function detailText(body, fallback) {
+  if (typeof body !== "object" || body === null) return fallback;
+  const detail = body.detail;
+  if (typeof detail === "string" && detail.trim() !== "") return detail;
+  if (isValidationList(detail)) {
+    const field = fieldOf(detail);
+    const where = field ? ` (${field})` : "";
+    return `보낸 값이 올바르지 않습니다${where} — 화면 문제입니다. 새로고침해도 같으면 알려 주세요.`;
+  }
+  return fallback;
+}
+
 // src/lib/html.ts
 var ESCAPES = {
   "&": "&amp;",
@@ -1448,10 +1474,10 @@ async function tellServerWeAreDone(result) {
     return;
   }
   if (!response.ok) {
-    const detail = await response.json().catch(() => ({}));
+    const body2 = await response.json().catch(() => null);
     $("finish-state").textContent = describeCompletionFailure(
       response.status,
-      detail.detail
+      detailText(body2, "")
     );
     if (isSessionExpired(response.status)) {
       location.href = loginUrlFor(location.pathname + location.search);

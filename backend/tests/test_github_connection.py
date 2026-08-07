@@ -295,3 +295,126 @@ def test_no_warning_when_everyone_is_linked():
         ConnectionFacts(repo="team/teamflow", webhook_secret_present=True)
     )
     assert state.warnings == []
+
+
+# ══════════════════════════════════════════════════════════════
+# 커버리지 — "이 수치는 언제부터의 활동인가"
+# ══════════════════════════════════════════════════════════════
+
+
+def test_connected_but_never_backfilled_says_history_is_missing():
+    """⭐ **연결 전의 활동은 아무 데도 없습니다.**
+
+    웹훅은 연결한 순간부터 옵니다. 팀은 대개 몇 주 코드를 짜다가 이
+    시스템을 붙이므로 그 전의 PR 은 통째로 빠집니다. 그런데 진단은
+    "연결됨" 이라고 말하고 기여도 화면은 그 뒤의 것만 보여 줍니다 —
+    **어디에도 오류가 없습니다.**
+
+    연결 전에 제일 많이 일한 사람이 제일 적게 일한 것으로 보이고,
+    본인도 이유를 알 방법이 없습니다.
+    """
+    state = diagnose(
+        ConnectionFacts(
+            repo="team/teamflow",
+            webhook_secret_present=True,
+            app_credentials_present=True,
+            verified_at=AT,
+            delivery_count=12,
+            member_logins=frozenset({"minsu"}),
+            actor_logins=frozenset({"minsu"}),
+            backfilled_at=None,
+        )
+    )
+    assert state.code == "connected"
+    assert any("전" in w and "가져오기" in w for w in state.warnings), state.warnings
+
+
+def test_after_a_backfill_the_warning_goes_away():
+    state = diagnose(
+        ConnectionFacts(
+            repo="team/teamflow",
+            webhook_secret_present=True,
+            app_credentials_present=True,
+            verified_at=AT,
+            delivery_count=12,
+            member_logins=frozenset({"minsu"}),
+            actor_logins=frozenset({"minsu"}),
+            backfilled_at=AT,
+            backfilled_to=AT,
+        )
+    )
+    assert not any("가져오기" in w for w in state.warnings), state.warnings
+
+
+def test_no_deliveries_means_the_headline_already_said_it():
+    """배달이 0건이면 더 급한 것을 headline 이 말하고 있습니다.
+    여기서 또 말하면 어느 쪽을 고쳐야 하는지 흐려집니다."""
+    state = diagnose(
+        ConnectionFacts(
+            repo="team/teamflow",
+            webhook_secret_present=True,
+            app_credentials_present=True,
+            delivery_count=0,
+        )
+    )
+    assert not any("가져오기" in w for w in state.warnings), state.warnings
+
+
+def test_coverage_says_when_the_numbers_start():
+    """범위를 안 밝힌 숫자는 **전부를 센 것처럼** 읽힙니다."""
+    from teamflow.github.connection import describe_coverage
+
+    never = ConnectionFacts(repo="team/teamflow", verified_at=AT, delivery_count=9)
+    assert "2026-09-01" in describe_coverage(never)
+    assert "아직 가져오지 않았습니다" in describe_coverage(never)
+
+    done = ConnectionFacts(
+        repo="team/teamflow",
+        verified_at=AT,
+        delivery_count=9,
+        backfilled_at=AT,
+        backfilled_to=datetime(2026, 3, 2, tzinfo=UTC),
+    )
+    assert "2026-03-02" in describe_coverage(done)
+    assert "아직" not in describe_coverage(done)
+
+
+def test_coverage_does_not_pretend_when_there_is_no_repo():
+    from teamflow.github.connection import describe_coverage
+
+    assert "들어 있지 않습니다" in describe_coverage(ConnectionFacts())
+
+
+def test_no_warning_smuggles_markdown_onto_the_screen():
+    """⚠️ **결함 44 와 같은 부류입니다.**
+
+    경고 줄은 화면에서 `escapeHtml` 로만 지나갑니다 — `withCode` 를 거치는
+    headline·detail 과 다릅니다. 그래서 `**굵게**` 를 적으면 별표가 그대로
+    보입니다. 실제로 한 번 그랬습니다.
+
+    손으로 문구를 훑는 대신 **모든 상태를 만들어서** 확인합니다.
+    """
+    import itertools
+
+    seen: list[str] = []
+    for verified, count, backfilled, no_login in itertools.product(
+        (None, AT), (0, 12), (None, AT), (False, True)
+    ):
+        state = diagnose(
+            ConnectionFacts(
+                repo="team/teamflow",
+                webhook_secret_present=True,
+                app_credentials_present=True,
+                verified_at=verified,
+                delivery_count=count,
+                member_logins=frozenset({"minsu"}),
+                actor_logins=frozenset({"minsu"}),
+                members_without_login=("하늘",) if no_login else (),
+                backfilled_at=backfilled,
+            )
+        )
+        seen.extend(state.warnings)
+
+    assert seen, "경고를 하나도 안 만드는 조합만 돌았습니다 — 테스트가 헛돕니다"
+    offenders = [w for w in seen if "**" in w or "`" in w]
+    assert offenders == [], offenders

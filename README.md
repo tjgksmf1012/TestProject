@@ -186,6 +186,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **안드로이드 셸** (화면 꺼도 녹음 유지) | 🔨 빌드 미확인 (보류) | `android/`, [docs/14](docs/14-모바일.md) |
 | **브라우저 통화로 회의** (WebRTC 메시 5명 · 헤드폰 확인) | ✅ 같은 기기 3인 통화로 확인 / **실제 네트워크는 미검증** | `backend/teamflow/call/`, `frontend/src/lib/call/`, `public/call.html` |
 | **PC 화면** (48rem↑ 상단 탭·칸반 3열 가로) | ✅ | `frontend/public/app.css`, [docs/15](docs/15-PC-우선-방향.md) §4.7 |
+| **GitHub 백필** (연결 전 활동 + 커버리지 표시) | ✅ 배선·멱등·잘림 처리 / **실제 HTTP 미검증** | `backend/teamflow/github/backfill.py`, [docs/15](docs/15-PC-우선-방향.md) §4.8 |
 | 프로젝트 만들기·회의 열기 **화면** | ⬜ | API 는 있음. 가입 후 첫 사용자가 할 게 없습니다 |
 | **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
 | **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ⚠️ 실측 미검증 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |

@@ -40,6 +40,7 @@ import {
 } from '../lib/shell/bridge.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { renderNav } from './nav.ts';
 import type { SyncTransport } from '../lib/recording/client.ts';
@@ -281,10 +282,12 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
   }
 
   if (!response.ok) {
-    const detail = (await response.json().catch(() => ({}))) as { detail?: string };
+    // `detail` 은 문자열일 수도 있고 422 의 **객체 배열**일 수도 있습니다.
+    // 그대로 넘기면 화면에 `[object Object]` 가 나옵니다.
+    const body = await response.json().catch(() => null);
     $('finish-state').textContent = describeCompletionFailure(
       response.status,
-      detail.detail,
+      detailText(body, ''),
     );
     // 401 은 다시 눌러도 똑같다 — 로그인 화면으로 보낸다.
     if (isSessionExpired(response.status)) {

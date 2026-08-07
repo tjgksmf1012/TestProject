@@ -94,7 +94,9 @@ function describeHealth(health, now) {
     tone: TONES.has(health.severity) ? health.severity : "warn",
     nextStep: health.next_step,
     warnings: health.warnings ?? [],
-    activity: describeActivity(health, now)
+    activity: describeActivity(health, now),
+    coverage: health.coverage ?? "",
+    canBackfill: health.delivery_count > 0 && !health.backfilled_at
   };
 }
 function describeHealthFailure(status) {
@@ -105,7 +107,9 @@ function describeHealthFailure(status) {
       tone: "warn",
       nextStep: null,
       warnings: [],
-      activity: ""
+      activity: "",
+      coverage: "",
+      canBackfill: false
     };
   }
   if (status === 0) {
@@ -115,7 +119,9 @@ function describeHealthFailure(status) {
       tone: "warn",
       nextStep: "잠시 뒤 새로고침하세요.",
       warnings: [],
-      activity: ""
+      activity: "",
+      coverage: "",
+      canBackfill: false
     };
   }
   return {
@@ -124,7 +130,9 @@ function describeHealthFailure(status) {
     tone: "warn",
     nextStep: "잠시 뒤 새로고침하세요.",
     warnings: [],
-    activity: ""
+    activity: "",
+    coverage: "",
+    canBackfill: false
   };
 }
 
@@ -138,6 +146,32 @@ var ESCAPES = {
 };
 function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
+}
+
+// src/lib/http/detail.ts
+function isValidationList(value) {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "object" && item !== null);
+}
+function fieldOf(items) {
+  for (const item of items) {
+    if (!Array.isArray(item.loc)) continue;
+    const named = item.loc.filter(
+      (part) => typeof part === "string" && part !== "body"
+    );
+    if (named.length > 0) return named[named.length - 1];
+  }
+  return "";
+}
+function detailText(body, fallback) {
+  if (typeof body !== "object" || body === null) return fallback;
+  const detail = body.detail;
+  if (typeof detail === "string" && detail.trim() !== "") return detail;
+  if (isValidationList(detail)) {
+    const field = fieldOf(detail);
+    const where = field ? ` (${field})` : "";
+    return `보낸 값이 올바르지 않습니다${where} — 화면 문제입니다. 새로고침해도 같으면 알려 주세요.`;
+  }
+  return fallback;
 }
 
 // src/lib/privacy/deletion.ts
@@ -429,10 +463,15 @@ var input = (id) => $(id);
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
+function withJsonType(given) {
+  const headers = new Headers(given);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  return headers;
+}
 async function call(path, init) {
   const response = await fetch(`${apiBase}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers ?? {} },
+    headers: withJsonType(init?.headers),
     credentials: "same-origin",
     cache: "no-store"
   });
@@ -463,6 +502,37 @@ function renderHealth(view) {
   $("gh-warnings").innerHTML = view.warnings.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
   $("gh-activity").textContent = view.activity;
   $("gh-activity").hidden = view.activity === "";
+  $("gh-coverage").textContent = view.coverage;
+  $("gh-coverage").hidden = view.coverage === "";
+  $("gh-backfill").hidden = !view.canBackfill;
+}
+async function startBackfill() {
+  const button = $("gh-backfill");
+  const status = $("gh-backfill-status");
+  button.disabled = true;
+  status.hidden = false;
+  status.textContent = "가져오는 중…";
+  let response;
+  try {
+    response = await call(`/api/projects/${projectId}/github/backfill`, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+  } catch {
+    button.disabled = false;
+    status.textContent = "서버에 닿지 못했습니다. 잠시 뒤 다시 누르세요.";
+    return;
+  }
+  if (!response.ok) {
+    button.disabled = false;
+    const body = await response.json().catch(() => null);
+    status.textContent = detailText(
+      body,
+      `가져오지 못했습니다 (HTTP ${response.status})`
+    );
+    return;
+  }
+  status.textContent = "가져오기를 시작했습니다. PR 수에 따라 몇 분 걸립니다 — 잠시 뒤 이 화면을 새로고침하면 반영된 범위가 바뀝니다.";
 }
 async function loadHealth() {
   let response;
@@ -513,6 +583,9 @@ $("save-repo").addEventListener("click", () => {
     void loadHealth();
   });
 });
+$("gh-backfill").addEventListener("click", () => {
+  void startBackfill();
+});
 $("rotate").addEventListener("click", () => {
   const ok = confirm(
     "초대 코드를 새로 만듭니다.\n지금 코드는 그 즉시 통하지 않습니다. 계속할까요?"
@@ -537,8 +610,11 @@ $("open-meeting").addEventListener("click", () => {
     body: JSON.stringify({ title: title || null })
   }).then(async (r) => {
     if (!r.ok) {
-      const body = await r.json().catch(() => ({}));
-      return say("error", body.detail ?? `회의를 열지 못했습니다 (HTTP ${r.status})`);
+      const body = await r.json().catch(() => null);
+      return say(
+        "error",
+        detailText(body, `회의를 열지 못했습니다 (HTTP ${r.status})`)
+      );
     }
     const created = await r.json();
     location.href = `/lobby.html?meeting=${created.meeting_id}`;
@@ -561,9 +637,12 @@ $("del-run").addEventListener("click", () => {
   say("del-result", "지우는 중…");
   void call(`/api/projects/${projectId}/me/data`, { method: "POST" }).then(async (response) => {
     if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
+      const body = await response.json().catch(() => null);
       $("del-result").className = "bad";
-      say("del-result", describeRequestFailure(response.status, body.detail));
+      say(
+        "del-result",
+        describeRequestFailure(response.status, detailText(body, "") || void 0)
+      );
       button.disabled = false;
       return;
     }

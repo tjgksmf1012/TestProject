@@ -111,6 +111,10 @@ class ConnectionFacts:
     actor_logins: frozenset[str] = frozenset()
     #: 비슷한 이름으로 도착한, 안 붙은 배달들.
     near_misses: tuple[NearMiss, ...] = ()
+    #: 백필을 마지막으로 돌린 시각. None 이면 **한 번도 안 돌렸습니다.**
+    backfilled_at: datetime | None = None
+    #: 이 시각 이후는 GitHub 에 물어봤다. None 이면 연결 이후만 있습니다.
+    backfilled_to: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,13 +149,73 @@ def _unlinked_members_warning(facts: ConnectionFacts) -> str | None:
     )
 
 
+def _missing_history_warning(facts: ConnectionFacts) -> str | None:
+    """⭐ **연결 전의 활동은 아무 데도 없습니다.**
+
+    웹훅은 연결한 순간부터 옵니다. 팀은 대개 몇 주 코드를 짜다가 이
+    시스템을 붙이므로 그 전의 PR 은 통째로 빠집니다.
+
+        3월~4월  PR 40개 병합   ← 기여도에 **없음**
+        5월 1일  연결
+        5월~     PR 5개 병합    ← 기여도에 있음
+
+    그런데 이 화면은 "연결됨" 이라고 말하고 기여도 화면은 5건을
+    보여 줍니다. **어디에도 오류가 없습니다.** 3월에 제일 많이 일한
+    사람이 제일 적게 일한 것으로 보이고, 본인도 이유를 알 수 없습니다.
+
+    ⚠️ 배달이 하나도 없으면 말하지 않습니다 — 그때는 위쪽 headline 이
+    이미 더 급한 것을 말하고 있고, 여기서 또 말하면 어느 쪽을 고쳐야
+    하는지 흐려집니다.
+    """
+    if facts.delivery_count <= 0:
+        return None
+    if facts.backfilled_at is not None:
+        return None
+    # ⚠️ 마크다운을 쓰지 않습니다. 경고 줄은 화면에서 `escapeHtml` 로만
+    # 지나가므로 별표가 그대로 보입니다 (결함 44 와 같은 부류).
+    return (
+        "연결하기 전의 PR 은 기여도에 들어가 있지 않습니다. "
+        "웹훅은 연결한 순간부터 오기 때문입니다. "
+        "아래 ‘지난 활동 가져오기’ 를 누르면 채웁니다."
+    )
+
+
+def describe_coverage(facts: ConnectionFacts) -> str:
+    """"이 수치는 언제부터의 활동인가" 를 한 줄로.
+
+    기여도 화면이 그대로 씁니다. 범위를 안 밝힌 숫자는 **전부를 센 것처럼**
+    읽힙니다.
+    """
+    if not facts.repo:
+        return "GitHub 활동은 이 계산에 들어 있지 않습니다."
+    if facts.delivery_count <= 0:
+        return "이 저장소에서 받은 활동이 아직 없습니다."
+    if facts.backfilled_to is not None:
+        when = facts.backfilled_to.date().isoformat()
+        return f"{when} 이후의 GitHub 활동이 반영돼 있습니다."
+    if facts.verified_at is not None:
+        when = facts.verified_at.date().isoformat()
+        return (
+            f"{when}(연결한 날) 이후의 활동만 반영돼 있습니다 — "
+            "그 전의 PR 은 아직 가져오지 않았습니다."
+        )
+    return "연결 이후의 활동만 반영돼 있습니다 — 그 전의 PR 은 아직 가져오지 않았습니다."
+
+
 def diagnose(facts: ConnectionFacts) -> ConnectionState:
     """연결 상태를 사람이 고칠 수 있는 말로 바꾼다.
 
     순서가 중요합니다. **지금 고쳐야 할 것 하나**를 맨 앞에 놓습니다 —
     문제를 다섯 개 늘어놓으면 사람은 아무것도 안 고칩니다.
     """
-    warnings = [w for w in (_unlinked_members_warning(facts),) if w]
+    warnings = [
+        w
+        for w in (
+            _unlinked_members_warning(facts),
+            _missing_history_warning(facts),
+        )
+        if w
+    ]
 
     if not facts.repo:
         return ConnectionState(
