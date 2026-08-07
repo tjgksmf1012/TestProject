@@ -67,6 +67,77 @@ function isSessionExpired(status) {
   return status === 401;
 }
 
+// src/lib/html.ts
+var ESCAPES = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;"
+};
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
+}
+
+// src/lib/privacy/deletion.ts
+function whatGetsDeleted() {
+  return [
+    "내 목소리가 녹음된 원본 파일 (이 프로젝트의 모든 회의)",
+    "내 성문 — 목소리로 나를 알아보는 데 쓰는 데이터"
+  ];
+}
+function whatRemains() {
+  return [
+    "회의록의 발화 텍스트 — 다른 참석자의 회의록이기도 합니다",
+    "칸반 업무와 GitHub 활동 기록 — 음성이 아니라 작업 기록입니다"
+  ];
+}
+function whatHappensToMyScore() {
+  return "아직 처리되지 않은 회의는 발언량을 잴 수 없게 되어 내 회의 기여가 **측정 불가**로 표시됩니다. 0점이 되는 것은 아니고, 나머지 활동으로 기여도를 계산합니다. 이미 회의록이 만들어진 회의는 그 텍스트가 남아 있어 그대로 계산됩니다.";
+}
+function confirmPrompt() {
+  return "내 녹음 원본과 성문을 지웁니다.\n\n되돌릴 수 없습니다. 회의록의 발화 텍스트는 남습니다.\n\n계속할까요?";
+}
+function describeFreed(bytes) {
+  if (bytes <= 0) return "없음";
+  if (bytes < 1024) return `${bytes}바이트`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+function describeOutcome(result) {
+  const failedCount = Object.keys(result.failed ?? {}).length;
+  if (failedCount > 0) {
+    return {
+      text: `${failedCount}건을 지우지 못했습니다. 남아 있는 것은 그대로입니다 — 다시 시도해 주세요. 계속 실패하면 팀에 알려 주세요.`,
+      needsRetry: true,
+      deletedSomething: result.deleted_assets > 0
+    };
+  }
+  if (result.deleted_assets === 0 && result.revoked_voiceprints === 0) {
+    return {
+      text: "지울 녹음이 없습니다. 이 프로젝트에 남아 있던 내 음성 자료가 없습니다.",
+      needsRetry: false,
+      deletedSomething: false
+    };
+  }
+  const parts = [];
+  if (result.deleted_assets > 0) parts.push(`녹음 원본 ${result.deleted_assets}건`);
+  if (result.revoked_voiceprints > 0) {
+    parts.push(`성문 ${result.revoked_voiceprints}건`);
+  }
+  return {
+    text: `${parts.join("과 ")}을 지웠습니다 (${describeFreed(result.freed_bytes)} 확보). 되돌릴 수 없습니다.`,
+    needsRetry: false,
+    deletedSomething: true
+  };
+}
+function describeRequestFailure(status, detail) {
+  if (status === 401) return "로그인이 풀렸습니다. 다시 로그인한 뒤 시도하세요.";
+  if (status === 403) return "이 프로젝트의 구성원만 요청할 수 있습니다.";
+  if (status === 0) return "서버에 연결하지 못했습니다. 아무것도 지워지지 않았습니다.";
+  return (detail || `요청이 실패했습니다 (HTTP ${status})`) + ". 아무것도 지워지지 않았을 수 있습니다 — 다시 확인해 주세요.";
+}
+
 // src/lib/nav/links.ts
 var LABEL = {
   home: "홈",
@@ -166,18 +237,6 @@ function contextFromSearch(current, search) {
     return positive(Number(raw));
   };
   return { current, projectId: read("project"), meetingId: read("meeting") };
-}
-
-// src/lib/html.ts
-var ESCAPES = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;"
-};
-function escapeHtml(text) {
-  return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
 // src/demo/nav.ts
@@ -398,6 +457,39 @@ $("open-meeting").addEventListener("click", () => {
     }
     const created = await r.json();
     location.href = `/lobby.html?meeting=${created.meeting_id}`;
+  });
+});
+function bullets(id, lines) {
+  $(id).innerHTML = lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+}
+bullets("del-gone", whatGetsDeleted());
+bullets("del-kept", whatRemains());
+$("del-score").innerHTML = escapeHtml(whatHappensToMyScore()).replace(
+  /\*\*([^*]+)\*\*/g,
+  "<strong>$1</strong>"
+);
+$("del-run").addEventListener("click", () => {
+  if (!confirm(confirmPrompt())) return;
+  const button = $("del-run");
+  button.disabled = true;
+  $("del-result").className = "";
+  say("del-result", "지우는 중…");
+  void call(`/api/projects/${projectId}/me/data`, { method: "POST" }).then(async (response) => {
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      $("del-result").className = "bad";
+      say("del-result", describeRequestFailure(response.status, body.detail));
+      button.disabled = false;
+      return;
+    }
+    const outcome = describeOutcome(await response.json());
+    $("del-result").className = outcome.needsRetry ? "bad" : "";
+    say("del-result", outcome.text);
+    button.disabled = !outcome.needsRetry;
+  }).catch(() => {
+    $("del-result").className = "bad";
+    say("del-result", describeRequestFailure(0));
+    button.disabled = false;
   });
 });
 renderNav("project");

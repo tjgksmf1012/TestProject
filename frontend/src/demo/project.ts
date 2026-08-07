@@ -13,6 +13,16 @@ import {
   titleProblem,
 } from '../lib/project/setup.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
+import { escapeHtml } from '../lib/html.ts';
+import {
+  confirmPrompt,
+  describeOutcome,
+  describeRequestFailure,
+  whatGetsDeleted,
+  whatHappensToMyScore,
+  whatRemains,
+  type RevokeResult,
+} from '../lib/privacy/deletion.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -151,6 +161,61 @@ $('open-meeting').addEventListener('click', () => {
     const created = (await r.json()) as { meeting_id: number };
     location.href = `/lobby.html?meeting=${created.meeting_id}`;
   });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 내 녹음 지우기 (docs/07 P6)
+//
+// ⚠️ 엔드포인트를 만들고 **부르는 화면이 없었습니다.** 엔드포인트가 있는
+// 것과 사람이 권리를 행사할 수 있는 것은 다릅니다 — 화면이 없으면 여전히
+// 개발자에게 부탁해야 합니다.
+//
+// 판단은 전부 `src/lib/privacy/deletion.ts` 에 있고 20개 테스트가 붙습니다.
+// ══════════════════════════════════════════════════════════════
+
+function bullets(id: string, lines: string[]): void {
+  $(id).innerHTML = lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('');
+}
+
+bullets('del-gone', whatGetsDeleted());
+bullets('del-kept', whatRemains());
+// 마크다운 강조(`**측정 불가**`)만 굵게 바꾼다. 문구 자체는 lib 이 정한다.
+$('del-score').innerHTML = escapeHtml(whatHappensToMyScore()).replace(
+  /\*\*([^*]+)\*\*/g,
+  '<strong>$1</strong>',
+);
+
+$('del-run').addEventListener('click', () => {
+  if (!confirm(confirmPrompt())) return;
+
+  const button = $('del-run') as HTMLButtonElement;
+  button.disabled = true;
+  $('del-result').className = '';
+  say('del-result', '지우는 중…');
+
+  void call(`/api/projects/${projectId}/me/data`, { method: 'POST' })
+    .then(async (response) => {
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { detail?: string };
+        $('del-result').className = 'bad';
+        say('del-result', describeRequestFailure(response.status, body.detail));
+        button.disabled = false;
+        return;
+      }
+
+      const outcome = describeOutcome((await response.json()) as RevokeResult);
+      $('del-result').className = outcome.needsRetry ? 'bad' : '';
+      say('del-result', outcome.text);
+
+      // 다시 시도해야 하면 버튼을 살려 둔다. 성공했으면 되돌릴 수 없으므로
+      // 다시 누를 이유가 없다 — 눌러도 "지울 녹음이 없습니다" 가 나온다.
+      button.disabled = !outcome.needsRetry;
+    })
+    .catch(() => {
+      $('del-result').className = 'bad';
+      say('del-result', describeRequestFailure(0));
+      button.disabled = false;
+    });
 });
 
 renderNav('project');

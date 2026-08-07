@@ -16,6 +16,15 @@
 <link rel="stylesheet" href="/app.css" />
 <title>프로젝트 설정 — TeamFlow</title>
 <style>
+  /* 되돌릴 수 없는 동작. 다른 구역과 눈에 띄게 달라야 하지만,
+     겁주는 붉은 상자로 만들지는 않는다 — 이건 권리 행사다. */
+  .danger { border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
+  .danger .label { font-size: .8125rem; font-weight: 600; color: var(--dim); margin: .875rem 0 .25rem; }
+  .danger ul.plain li { font-size: .875rem; color: var(--dim); padding: .125rem 0; }
+  .danger ul.plain li::before { content: "· "; }
+  .danger-btn { margin-top: 1rem; border-color: var(--bad); color: var(--bad); }
+  #del-result { font-size: .9375rem; margin-top: .75rem; }
+  #del-result.bad { color: var(--bad); }
 
   section { border: 1px solid var(--line); border-radius: .625rem; padding: .875rem 1rem; margin-bottom: 1rem; }
 
@@ -60,6 +69,35 @@
     </label>
     <button id="save-repo" type="button">저장소 연결</button>
     <p id="gh-state"></p>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════
+       내 녹음 지우기 (docs/07 P6 — 개인정보 삭제 요청)
+
+       ⚠️ 이건 **법적 권리**입니다. 위험한 관리자 동작이 아닙니다.
+       마찰을 넣지 않되, 되돌릴 수 없다는 것과 기여도에 무슨 일이
+       일어나는지를 누르기 **전에** 말합니다.
+       ══════════════════════════════════════════════════════ -->
+  <section class="danger">
+    <h2>내 녹음 지우기</h2>
+    <p class="sub">
+      이 프로젝트에 남아 있는 <strong>내 목소리</strong>를 지웁니다.
+      개인정보 삭제 요청권(개인정보보호법 제36조)입니다.
+    </p>
+
+    <p class="label">지워지는 것</p>
+    <ul id="del-gone" class="plain"></ul>
+
+    <p class="label">남는 것</p>
+    <ul id="del-kept" class="plain"></ul>
+
+    <p class="label">기여도는 어떻게 되나요</p>
+    <p id="del-score" class="sub"></p>
+
+    <button id="del-run" type="button" class="btn-block danger-btn">
+      내 녹음과 성문 지우기
+    </button>
+    <p id="del-result" hidden></p>
   </section>
 
   <p id="error" hidden></p>
