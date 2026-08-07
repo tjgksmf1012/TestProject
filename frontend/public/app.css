@@ -27,61 +27,80 @@
  */
 
 /* ══════════════════════════════════════════════════════════════
-   토큰
-   ══════════════════════════════════════════════════════════════ */
+   토큰 — `tokens.css` 가 원본입니다
+   ══════════════════════════════════════════════════════════════
+
+   ⚠️ **여기서 색·간격·radius 를 새로 정의하지 않습니다.**
+   전부 `public/tokens.css` 의 Layer 2 를 참조합니다. 근거와 실측
+   대비는 그 파일과 `docs/16` 에 있습니다.
+
+   아래 블록은 **옛 이름을 새 이름으로 잇는 다리**입니다. 화면 열 개가
+   `--dim` `--accent` 같은 이름을 쓰고 있어서, 한 번에 다 바꾸면 그
+   커밋에서 무엇이 깨졌는지 알 수 없게 됩니다. 화면을 하나씩 옮기면서
+   이 다리를 줄여 갑니다. */
 
 :root {
-  color-scheme: light dark;
-
-  --bg: #ffffff;
-  --surface: #f6f7f9;
-  --line: #e3e6ea;
-  --text: #16181d;
-  --dim: #6b7280;
-  --accent: #2563eb;
-  --on-accent: #ffffff;
-  --ok: #15803d;
-  --warn: #b45309;
-  --bad: #b91c1c;
-  /* 막대·게이지 채움. 기여도 화면의 구간 막대가 이 색으로 그려집니다.
-     ⚠️ 이 토큰이 없던 동안 `background: var(--bar)` 가 통째로 무효가 되어
-     **구간 막대가 전부 투명**이었습니다 — 그 화면의 주인공인데도요.
-     브라우저로 띄워 보고서야 알았습니다. */
-  --bar: #2563eb;
-
-  --radius: 0.875rem;
-  --radius-sm: 0.5rem;
-
-  /* 노치·홈 인디케이터. 브라우저에서 열면 전부 0 이라 그대로 써도 된다. */
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-
-  /* 하단 탭바 높이 + 홈 인디케이터. 본문 아래 여백이 이만큼 필요하다. */
-  --tabbar: calc(3.5rem + var(--safe-bottom));
-
-  --tap: 2.75rem; /* 44px — 손가락 끝 접촉면 */
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14161a;
-    --surface: #1c1f25;
-    --line: #2f343c;
-    --text: #e8eaee;
-    --dim: #9aa2ad;
-    --accent: #60a5fa;
-    --on-accent: #0b1220;
-    --ok: #4ade80;
-    --warn: #fbbf24;
-    --bad: #fca5a5;
-    --bar: #60a5fa;
-  }
+  /* 옛 이름 → 새 이름. 화면을 옮길 때마다 하나씩 지웁니다. */
+  --dim: var(--text-subtle);
+  --accent: var(--primary);
+  --on-accent: var(--primary-fg);
+  --bar: var(--primary);
+  --radius: var(--r-card);
+  --radius-sm: var(--r-ctrl);
+  --topnav: 3.25rem;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   타이포 — 디스플레이 역할을 **자간과 굵기로** 만든다
+   ══════════════════════════════════════════════════════════════
+
+   웹폰트를 받지 않습니다(비용 0원 · 오프라인 PWA). 그래서 서체를
+   둘로 나눌 수 없는데, 그렇다고 제목과 본문이 같은 대역이면 개성이
+   생길 자리가 없습니다 — 감사에서 지적한 것이 그것이었습니다.
+
+   대신 **자간**으로 만듭니다. 한글은 큰 사이즈에서 자간을 조이지
+   않으면 반드시 성기게 보이고, 조이면 그 자체가 디스플레이 성격이
+   됩니다. 크기가 커질수록 더 조입니다 (지시서 §4.2). */
+
+h1, h2, h3 {
+  /* 제목 행간을 넓히지 않는다 — 넓으면 힘이 빠진다 */
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: var(--fs-display);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: var(--ls-display);
+  margin: 0 0 var(--sp-1);
+}
+
+h2 {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: var(--ls-title);
+}
+
+h3 {
+  font-size: var(--fs-item);
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: var(--ls-item);
+}
+
+p {
+  /* 마지막 줄에 한 단어만 남는 것을 막는다 */
+  text-wrap: pretty;
+}
+
+/* 숫자가 자리를 옮기지 않게. 기여도·커버리지·시각이 전부 숫자다. */
+.num, time, [data-num] {
+  font-variant-numeric: tabular-nums;
 }
 
 html {
@@ -93,8 +112,22 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 1rem/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
-    "Noto Sans KR", "Segoe UI", sans-serif;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  letter-spacing: var(--ls-body);
+
+  /* ⚠️ **한글 가독성의 핵심입니다** (지시서 §4.2).
+   *
+   * 없으면 한글이 **단어 중간에서 줄바꿈**됩니다. "측정하지 못했습니다"
+   * 가 "측정하지 못했습/니다" 로 끊깁니다. 영문은 공백에서만 끊기지만
+   * 한글은 기본값(`break-word` 계열)이 어절을 무시합니다.
+   *
+   * `overflow-wrap` 은 그 예외입니다 — 긴 URL 이나 `owner/repository`
+   * 같은 영문 덩어리는 끊어야 가로로 안 밀립니다. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
+
   /* 본문은 절대 가로로 밀리지 않는다. */
   overflow-x: hidden;
   /* 탭바가 마지막 내용을 가리지 않게 한다. */
@@ -206,11 +239,15 @@ time {
 button,
 .btn {
   font: inherit;
-  font-size: 0.9375rem;
+  font-size: var(--fs-item);
   font-weight: 600;
   min-height: var(--tap);
-  padding: 0.6rem 1rem;
-  border: 1px solid var(--line);
+  padding: var(--sp-2) var(--sp-4);
+  /* ⚠️ 버튼은 **컨트롤**입니다 — 경계가 3:1 이어야 합니다 (WCAG 1.4.11).
+     이 저장소는 box-shadow 가 0건이라 버튼의 존재를 알리는 것이 이 선
+     하나뿐입니다. 예전에는 장식용 `--line`(1.25:1) 을 써서 거의
+     안 보였습니다. */
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
@@ -284,7 +321,7 @@ textarea {
   width: 100%;
   min-height: var(--tap);
   padding: 0.6rem 0.75rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
@@ -308,9 +345,28 @@ label {
   align-items: stretch;
 }
 
-.row > input {
-  flex: 1;
+/* ⚠️ **모든** 자식에 `min-width: 0` 이 필요합니다.
+ *
+ * flex 자식의 기본값은 `min-width: auto` 라 **내용보다 작아지지
+ * 못합니다.** 예전에는 `input` 에만 걸려 있어서, 입력을 감싼
+ * `<label>` 은 줄어들지 못하고 그대로 넘쳤습니다 — 승인 화면이
+ * 360px 에서 74px 밀린 원인입니다.
+ *
+ * 넘치는 것은 `input` 이 아니라 그것을 감싼 요소였습니다. */
+.row > * {
   min-width: 0;
+}
+
+.row > input,
+.row > label {
+  flex: 1;
+}
+
+/* 줄바꿈을 허용합니다. 폭이 모자라면 아래로 내려가는 편이
+   가로로 미는 것보다 낫습니다 — 가로로 밀리면 사람은 화면이
+   깨졌다고 읽습니다. */
+.row.wrap {
+  flex-wrap: wrap;
 }
 
 @media (max-width: 22rem) {
@@ -341,16 +397,25 @@ label {
   color: var(--dim);
 }
 
+/* ⚠️ 배경을 `transparent` 와 섞지 않습니다.
+ *
+ * `color-mix(..., transparent)` 는 **투명한 색**을 만듭니다. 밝은
+ * 모드에서는 흰 배경 위라 괜찮아 보이지만, 어두운 모드에서는 뒤의
+ * 검정이 비쳐 탁한 올리브색이 됩니다. 실제로 그랬습니다.
+ *
+ * 표면색과 섞으면 두 모드 모두에서 **불투명한 한 색**이 나옵니다. */
 .banner {
-  border-radius: var(--radius-sm);
-  padding: 0.75rem 0.875rem;
-  font-size: 0.9375rem;
-  margin: 0 0 1rem;
-  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border-radius: var(--r-ctrl);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-body);
+  margin: 0 0 var(--sp-4);
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+  border-left: 3px solid var(--warn);
 }
 
 .banner.bad {
-  background: color-mix(in srgb, var(--bad) 14%, transparent);
+  background: color-mix(in srgb, var(--bad) 12%, var(--surface));
+  border-left-color: var(--bad);
 }
 
 /* ══════════════════════════════════════════════════════════════

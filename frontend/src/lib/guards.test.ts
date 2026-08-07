@@ -485,9 +485,14 @@ describe('CSS 토큰', () => {
     // `background: var(--bar)` 가 통째로 무시됐고, **기여도 화면의 구간
     // 막대가 전부 투명**이었습니다 — 그 화면의 주인공인데도요.
     // 브라우저로 띄워 보고서야 알았습니다.
-    const appCss = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    // ⚠️ 토큰의 원본은 `tokens.css` 입니다. `app.css` 만 읽으면
+    // 정의된 것을 못 찾아 전부 위반으로 잡힙니다.
     const defined = new Set(
-      [...appCss.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] as string),
+      ['tokens.css', 'app.css'].flatMap((file) =>
+        [...readFileSync(join(PUBLIC, file), 'utf8').matchAll(/(--[a-z0-9-]+)\s*:/g)].map(
+          (m) => m[1] as string,
+        ),
+      ),
     );
 
     const problems: string[] = [];
@@ -510,29 +515,53 @@ describe('CSS 토큰', () => {
     );
   });
 
-  it('⭐ app.css 스스로도 없는 변수를 쓰지 않는다', () => {
-    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
-    const defined = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] as string));
+  it('⭐ 공용 CSS 스스로도 없는 변수를 쓰지 않는다', () => {
+    const files = ['tokens.css', 'app.css'].map((f) => readFileSync(join(PUBLIC, f), 'utf8'));
+    const defined = new Set(
+      files.flatMap((css) =>
+        [...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] as string),
+      ),
+    );
     const missing = [
       ...new Set(
-        [...css.matchAll(/var\((--[a-z0-9-]+)/g)]
-          .map((m) => m[1] as string)
-          .filter((name) => !defined.has(name)),
+        files.flatMap((css) =>
+          [...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1] as string),
+        ).filter((name) => !defined.has(name)),
       ),
     ];
     strictEqual(missing.join(', '), '');
   });
 
+  it('⭐ 화면이 tokens.css 를 app.css 보다 **먼저** 불러온다', () => {
+    // 순서가 뒤집히면 app.css 의 별칭(`--dim: var(--text-subtle)`)이
+    // 아직 없는 값을 참조합니다. CSS 변수는 선언 시점이 아니라 사용
+    // 시점에 풀리므로 대부분 살아남지만, 캐스케이드가 얽히면
+    // **조용히 빈 값**이 됩니다.
+    const problems: string[] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      const html = readFileSync(join(PUBLIC, name), 'utf8');
+      const t = html.indexOf('tokens.css');
+      const a = html.indexOf('app.css');
+      if (t === -1) problems.push(`${name} → tokens.css 를 안 부름`);
+      else if (a !== -1 && t > a) problems.push(`${name} → 순서가 뒤집힘`);
+    }
+    strictEqual(problems.join(', '), '');
+  });
+
   it('⭐ 어두운 모드에서도 같은 토큰이 정의된다', () => {
     // 밝은 쪽에만 있는 색이 있으면 어두운 모드에서 그 자리가 사라집니다.
-    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const css = readFileSync(join(PUBLIC, 'tokens.css'), 'utf8');
     const dark = css.slice(css.indexOf('prefers-color-scheme: dark'));
     const darkTokens = new Set(
       [...dark.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] as string),
     );
-    // 색 토큰만 본다 — 치수(--radius 등)는 모드와 무관하다.
-    for (const name of ['--bg', '--surface', '--line', '--text', '--dim',
-                        '--accent', '--on-accent', '--ok', '--warn', '--bad', '--bar']) {
+    // ⚠️ **Layer 1 원시값만** 봅니다. Layer 2 의미 이름은 모드마다
+    // 바뀌면 안 됩니다 — 바뀌면 화면 코드가 모드별로 갈라지고,
+    // 그러면 한쪽에서만 깨집니다.
+    for (const name of ['--ink-900', '--ink-700', '--ink-500', '--ink-300',
+                        '--ink-200', '--ink-100', '--ink-050', '--ink-000',
+                        '--teal-700', '--teal-100', '--clay-600', '--clay-100',
+                        '--green-700', '--amber-800', '--red-700']) {
       strictEqual(darkTokens.has(name), true, `어두운 모드에 ${name} 이 없습니다`);
     }
   });
