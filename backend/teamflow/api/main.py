@@ -13,8 +13,19 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import event, func, select
@@ -22,8 +33,11 @@ from sqlalchemy.orm import Session
 
 from teamflow.audio.chunk_store import ChunkStore
 from teamflow.auth import passwords
+from teamflow.call import rooms as call_rooms
+from teamflow.call import signaling as call_signaling_module
 from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
+from teamflow.db import session as db_session
 from teamflow.db.session import get_db
 from teamflow.github import connection as gh_connection
 from teamflow.github import linking as gh_linking
@@ -853,6 +867,102 @@ def github_health(
         delivery_count=facts.delivery_count,
         last_delivery_at=facts.last_delivery_at,
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 통화 시그널링 (docs/15 §3)
+# ══════════════════════════════════════════════════════════════
+#
+# 목소리는 여기를 지나가지 않습니다. SDP·ICE 만 오가고, 그 다음부터
+# 사람들끼리 직접 연결합니다. 막는 규칙은 `call/signaling.py` 에 있고
+# 36개 테스트가 붙습니다.
+#
+# ⚠️ **이 환경에서 실제 통화를 해 볼 수 없습니다** — 네트워크가 없습니다.
+# 여기서 확인되는 것은 주선 규칙까지이고, 목소리가 실제로 오가는지는
+# `docs/09` 실험 6 에서 확인합니다.
+
+
+@app.websocket("/api/meetings/{meeting_id}/call")
+async def call_signaling(websocket: WebSocket, meeting_id: int) -> None:
+    """통화 주선 통로.
+
+    ⚠️ **인증과 구성원 확인을 `accept()` 앞에서** 합니다. 받아 놓고
+    나중에 끊으면 그 사이에 명단이 이미 샙니다 — 이 소켓이 붙자마자
+    받는 첫 메시지가 "지금 누가 회의에 있는가" 입니다.
+    """
+    with db_session.session_scope() as session:
+        user = auth_service.resolve_session(
+            session, websocket.cookies.get(auth_service.COOKIE_NAME)
+        )
+        if user is None:
+            # 1008 = policy violation. WS 에는 401 이 없습니다.
+            await websocket.close(code=1008, reason="로그인이 필요합니다")
+            return
+
+        meeting = session.get(m.Meeting, meeting_id)
+        if meeting is None:
+            await websocket.close(code=1008, reason="회의를 찾을 수 없습니다")
+            return
+
+        member = session.scalar(
+            select(m.Member.id).where(
+                m.Member.project_id == meeting.project_id,
+                m.Member.user_id == user.id,
+            )
+        )
+        if member is None:
+            await websocket.close(code=1008, reason="이 프로젝트의 구성원이 아닙니다")
+            return
+
+        user_id, user_name = user.id, user.name
+
+    # 헤드폰은 **자기 신고**입니다(docs/15 §2.3). 브라우저가 확인할 방법이
+    # 없어서 막지는 못하고, 대신 방에 있는 전원이 지금 보게 합니다.
+    headphones = websocket.query_params.get("headphones") != "no"
+
+    await websocket.accept()
+    peer = call_signaling_module.Peer(
+        user_id=user_id,
+        name=user_name,
+        connection_id=uuid4().hex,
+        joined_at=datetime.now(UTC),
+        headphones=headphones,
+    )
+
+    async def send(body: dict[str, Any]) -> None:
+        await websocket.send_json(body)
+
+    decision = await call_rooms.rooms.try_join(peer, meeting_id, send)
+    if not decision.allowed:
+        await websocket.send_json(
+            {"kind": "rejected", "code": decision.code, "reason": decision.reason}
+        )
+        await websocket.close(code=1008, reason=decision.code)
+        return
+
+    await call_rooms.rooms.announce(meeting_id)
+    try:
+        while True:
+            message = await websocket.receive_json()
+            if not isinstance(message, dict):
+                continue
+            current = call_rooms.rooms.state(meeting_id).by_connection(
+                peer.connection_id
+            )
+            if current is None:
+                # 다른 연결에 밀려났습니다(같은 사람이 새로고침). 조용히 끝냅니다.
+                break
+            outcome = await call_rooms.rooms.relay(meeting_id, current, message)
+            if not outcome.allowed:
+                # ⚠️ 조용히 버리면 화면은 상대가 안 받은 줄 모르고 기다립니다.
+                await websocket.send_json(
+                    {"kind": "refused", "code": outcome.code, "reason": outcome.reason}
+                )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await call_rooms.rooms.part(meeting_id, peer.connection_id)
+        await call_rooms.rooms.announce(meeting_id)
 
 
 class MeetingIn(BaseModel):

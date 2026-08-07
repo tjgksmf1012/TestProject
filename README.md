@@ -133,6 +133,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **업무 ↔ PR 연결** (확정/추정 구분·근거 표시) | ✅ | `backend/teamflow/github/linking.py` |
 | **발언 유형 분류** (8라벨·규칙 기준선·확신 하한) | ✅ | `backend/teamflow/meeting/utterance_types.py` |
 | **회의 발화 → 기여 이벤트** | ✅ | `backend/teamflow/services/meeting_contribution_service.py` |
+| **통화 시그널링** (인증·중계 규칙·메시 상한) | 🟡 서버만, 실측 불가 | `backend/teamflow/call/` |
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
 | docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
 | **Dockerfile (api·gpu, ffmpeg 포함)** | ⚠️ 빌드 미검증 | `docker/` |

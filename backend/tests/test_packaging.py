@@ -458,3 +458,29 @@ def test_the_allowlist_itself_stays_honest():
     declared = _requirement_names(_pyproject()["project"]["dependencies"])
     stale = sorted(set(_NOT_IMPORTED_BUT_NEEDED) - declared)
     assert not stale, f"면제 목록에 이제 없는 의존성이 있습니다: {stale}"
+
+
+# ══════════════════════════════════════════════════════════════
+# 통화 시그널링이 조용히 깨지지 않게
+# ══════════════════════════════════════════════════════════════
+
+
+def test_the_api_runs_as_a_single_worker():
+    """⭐ 워커를 늘리면 **통화가 조용히 깨집니다.**
+
+    시그널링 방은 프로세스 메모리에 있습니다(`call/rooms.py`). 워커가
+    둘이면 같은 회의의 두 사람이 각자 다른 워커에 붙고, 서로 다른 방에
+    들어갑니다. offer 를 보내도 상대가 그 워커에 없어서 버려지고
+    **아무 오류도 안 납니다.**
+
+    성능 때문에 `--workers` 를 붙이는 것은 자연스러운 변경이라, 이 그물이
+    없으면 언젠가 붙습니다. 늘리려면 방을 Redis pub/sub 으로 옮기고 이
+    테스트를 그 근거와 함께 고치세요.
+    """
+    cmd = (REPO_ROOT / "docker" / "Dockerfile.api").read_text(encoding="utf-8")
+    for flag in ("--workers", "-w "):
+        assert flag not in cmd, (
+            f"Dockerfile.api 가 {flag} 를 씁니다. 통화 시그널링 방이 프로세스 "
+            "메모리에 있어 워커가 둘 이상이면 같은 회의의 사람들이 서로를 "
+            "못 봅니다 (backend/teamflow/call/rooms.py 모듈 주석)."
+        )
