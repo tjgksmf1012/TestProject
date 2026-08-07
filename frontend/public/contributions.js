@@ -377,7 +377,7 @@ function memberCard(member) {
   </header>
 
   <p class="range">${escapeHtml(describeRange(member))}</p>
-  <div class="track"><i style="left:${bar.left}%;width:${bar.width}%"></i></div>
+  <div class="rangebar"><i style="left:${bar.left}%;width:${bar.width}%"></i></div>
   <p class="conf">신뢰도 ${escapeHtml(member.confidence_label)}</p>
 
   ${noEvidence ? '<p class="empty">이 사람의 활동이 아직 하나도 연결되지 않았습니다 — 0 이라는 뜻이 아니라 <strong>연결이 없다</strong>는 뜻입니다.</p>' : ""}

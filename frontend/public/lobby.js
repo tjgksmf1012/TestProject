@@ -171,6 +171,20 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/track/bar.ts
+var clamp = (value, lo = 0, hi = 100) => Number.isFinite(value) ? Math.min(hi, Math.max(lo, value)) : lo;
+function coverageBar(coverage) {
+  if (coverage === null || coverage === void 0 || !Number.isFinite(coverage)) {
+    return [];
+  }
+  const filled = clamp(coverage * 100);
+  const missing = 100 - filled;
+  const bars = [];
+  if (filled > 0) bars.push({ kind: "talk", left: 0, width: filled });
+  if (missing > 0.5) bars.push({ kind: "gap", left: filled, width: missing });
+  return bars;
+}
+
 // src/lib/http/detail.ts
 function isValidationList(value) {
   return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "object" && item !== null);
@@ -517,9 +531,13 @@ function renderRoster() {
   $("consent-message").textContent = consentMessage;
 }
 function renderMembers(statuses) {
-  $("members").innerHTML = statuses.map(
-    (s) => `<li class="${s.verdict}"><span class="name">${escapeHtml(s.name)}</span><span class="state">${escapeHtml(s.message)}</span></li>`
-  ).join("");
+  $("members").innerHTML = statuses.map((s) => {
+    const bars = coverageBar(s.coverage);
+    const bar = bars.length ? `<span class="cov">` + bars.map(
+      (b) => `<i data-kind="${b.kind}" style="left:${b.left}%;width:${b.width}%"></i>`
+    ).join("") + `</span>` : "";
+    return `<li class="${s.verdict}"><span class="name">${escapeHtml(s.name)}</span><span class="state">${escapeHtml(s.message)}</span>${bar}</li>`;
+  }).join("");
 }
 function render() {
   const statuses = memberStatuses(roster, tracks);

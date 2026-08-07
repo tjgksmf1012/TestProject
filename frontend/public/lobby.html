@@ -20,10 +20,15 @@
 
   section { border: 1px solid var(--line); border-radius: .625rem; padding: .875rem 1rem; margin-bottom: 1rem; }
 
-  li { display: flex; align-items: baseline; gap: .5rem; padding: .5rem 0; border-top: 1px solid var(--line); }
+  /* 참가자 한 명 = 한 줄. 이름·상태가 위, 커버리지 막대가 아래.
+     막대는 **한 줄을 통째로** 써야 42% 와 98% 의 차이가 보입니다. */
+  li { display: grid; grid-template-columns: 6rem 1fr; gap: .25rem .5rem;
+       padding: .5rem 0; border-top: 1px solid var(--line); align-items: baseline; }
   li:first-child { border-top: 0; }
-  .name { font-weight: 600; min-width: 4.5rem; }
-  .state { font-size: .8125rem; color: var(--dim); flex: 1; }
+  .name { font-weight: 600; }
+  .state { font-size: .8125rem; color: var(--dim); }
+  /* 막대와 그 밑 문구는 이름 칸 아래가 아니라 **상태 칸 아래**로. */
+  li .cov, li .track-label { grid-column: 2; }
   .granted { color: var(--ok); } .refused { color: var(--bad); } .pending { color: var(--warn); }
   .broken .state, .at_risk .state { color: var(--warn); }
   .broken .state { color: var(--bad); }

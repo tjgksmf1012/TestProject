@@ -28,8 +28,10 @@
 
   /* 구간이 주인공이다. 단일 점수를 크게 띄우지 않는다. */
   .range { font-size: 1.5rem; font-weight: 700; margin: 0; font-variant-numeric: tabular-nums; }
-  .track { position: relative; height: .5rem; border-radius: .25rem; background: color-mix(in srgb, currentColor 8%, transparent); margin: .4rem 0 .5rem; }
-  .track i { position: absolute; top: 0; bottom: 0; border-radius: .25rem; background: var(--bar); }
+  /* 구간 막대는 공용 `.range` 로 옮겼습니다 (app.css).
+     캡이 구간의 양끝을 가리켜야 하는데, 여기 있던 규칙은 캡이
+     없어서 "19~29%" 가 그냥 채워진 막대로 보였습니다. */
+  .rangebar { margin: .4rem 0 .5rem; }
   .conf { font-size: .8125rem; color: var(--dim); margin: 0; }
 
   /* ⚠️ `::before` 로 마커를 찍으므로 목록 기본 불릿을 꺼야 한다.
@@ -57,7 +59,7 @@
 
   <div id="warnings" class="warnings" hidden></div>
 
-  <div id="members"></div>
+  <div id="members" class="score-grid"></div>
 
   <p class="note" id="notice"></p>
   <p class="note">

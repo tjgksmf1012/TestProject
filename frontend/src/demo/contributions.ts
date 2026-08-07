@@ -89,7 +89,7 @@ function memberCard(member: MemberScore): string {
   </header>
 
   <p class="range">${escapeHtml(describeRange(member))}</p>
-  <div class="track"><i style="left:${bar.left}%;width:${bar.width}%"></i></div>
+  <div class="rangebar"><i style="left:${bar.left}%;width:${bar.width}%"></i></div>
   <p class="conf">신뢰도 ${escapeHtml(member.confidence_label)}</p>
 
   ${

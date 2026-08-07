@@ -26,6 +26,7 @@ import {
 } from '../lib/lobby/room.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { coverageBar } from '../lib/track/bar.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
@@ -161,11 +162,26 @@ function renderRoster(): void {
 
 function renderMembers(statuses: MemberStatus[]): void {
   $('members').innerHTML = statuses
-    .map(
-      (s) =>
+    .map((s) => {
+      // ⚠️ 커버리지 막대는 **양만** 말합니다. 어디가 끊겼는지는 서버가
+      // 주지 않으므로(총량 `coverage` 뿐) 위치를 지어내지 않습니다.
+      // 자세한 이유는 `src/lib/track/bar.ts` 머리말에 있습니다.
+      const bars = coverageBar(s.coverage);
+      const bar = bars.length
+        ? `<span class="cov">` +
+          bars
+            .map(
+              (b) =>
+                `<i data-kind="${b.kind}" style="left:${b.left}%;width:${b.width}%"></i>`,
+            )
+            .join('') +
+          `</span>`
+        : '';
+      return (
         `<li class="${s.verdict}"><span class="name">${escapeHtml(s.name)}</span>` +
-        `<span class="state">${escapeHtml(s.message)}</span></li>`
-    )
+        `<span class="state">${escapeHtml(s.message)}</span>${bar}</li>`
+      );
+    })
     .join('');
 }
 
