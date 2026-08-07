@@ -91,6 +91,7 @@
 | [11. 비용 제로 구성](docs/11-비용-제로-구성.md) | 전 구성요소 비용 감사, 함정 4개, 학생 무료 리소스 |
 | [12. CCTV 영상 기반 화자판정](docs/12-CCTV-영상-기반-화자판정.md) | 모드 C 법적·기술 검토, 모드 비교, 융합 설계 |
 | [13. 화면 구조 (IA)](docs/13-화면-구조.md) | 화면 일곱 개가 어떻게 이어지는가, 각 화면의 책임, 아직 없는 화면 |
+| [15. PC 우선 방향](docs/15-PC-우선-방향.md) | **지금 방향** — 브라우저 통화로 회의, GitHub 최우선, 모바일은 보류 |
 | [14. 모바일](docs/14-모바일.md) | 왜 앱이어야 하는가, PWA + 안드로이드 셸, 폰 기준 UI/UX, 비용 근거 |
 | [원본 자료](docs/원본자료/) | ChatGPT 대화 전문, 제안서 텍스트 추출본 |
 
@@ -167,8 +168,9 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **칸반 화면 + 업무 API** (회의 근거 표시) | ✅ | `frontend/src/lib/kanban/`, `public/kanban.html` |
 | **첫 화면** (내 프로젝트·회의·다음 할 일) | ✅ | `frontend/src/lib/home/`, `public/home.html` |
 | **화면 간 이동** (막다른 길 없음) | ✅ | `frontend/src/lib/nav/`, [docs/13](docs/13-화면-구조.md) |
-| **모바일 우선 화면 + 앱 설치(PWA)** | ✅ | `frontend/public/app.css`·`sw.js`, [docs/14](docs/14-모바일.md) |
-| **안드로이드 셸** (화면 꺼도 녹음 유지) | 🔨 빌드 미확인 | `android/`, [docs/14](docs/14-모바일.md) |
+| **모바일 우선 화면 + 앱 설치(PWA)** | ✅ (보류) | `frontend/public/app.css`·`sw.js`, [docs/14](docs/14-모바일.md) |
+| **안드로이드 셸** (화면 꺼도 녹음 유지) | 🔨 빌드 미확인 (보류) | `android/`, [docs/14](docs/14-모바일.md) |
+| **브라우저 통화로 회의** (WebRTC) | ❌ 다음 작업 | [docs/15](docs/15-PC-우선-방향.md) |
 | 프로젝트 만들기·회의 열기 **화면** | ⬜ | API 는 있음. 가입 후 첫 사용자가 할 게 없습니다 |
 | **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
 | **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ⚠️ 실측 미검증 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
