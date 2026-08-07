@@ -813,3 +813,33 @@ pre {
   color: var(--text-subtle);
   margin-top: var(--sp-1);
 }
+
+/* ── 운행도표: 한 사람의 트랙 ─────────────────────────────
+   `.cov`(비율)와 달리 **위치가 뜻을 가집니다.** 그래서 눈금을
+   그립니다 — 눈금이 있어야 "12분쯤" 을 읽을 수 있습니다.
+   판단은 `src/lib/track/diagram.ts`, 18개 테스트가 축을 고정합니다. */
+.tl {
+  position: relative;
+  display: block;
+  height: var(--track-h);
+  border-radius: 3px;
+  background: var(--primary);
+  /* 세로 눈금 — 반복 모티프. 6칸으로 나눈다 (축 눈금과 같은 수). */
+  background-image: repeating-linear-gradient(
+    to right,
+    color-mix(in srgb, var(--primary-fg) 22%, transparent) 0 1px,
+    transparent 1px calc(100% / 6));
+  overflow: hidden;
+}
+
+/* 구멍. **색만으로 구분하지 않습니다** — 빗금이 있어야 색각 이상에서도
+   읽힙니다. 흙빛인 이유는 빨강이 아니어야 하기 때문입니다: 녹음이
+   끊긴 것은 오류가 아니라 결측입니다. */
+.tl i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--gap-tint);
+  background-image: repeating-linear-gradient(
+    -45deg, var(--gap) 0 1px, transparent 1px 5px);
+}

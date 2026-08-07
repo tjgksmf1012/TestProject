@@ -171,18 +171,76 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
-// src/lib/track/bar.ts
-var clamp = (value, lo = 0, hi = 100) => Number.isFinite(value) ? Math.min(hi, Math.max(lo, value)) : lo;
-function coverageBar(coverage) {
-  if (coverage === null || coverage === void 0 || !Number.isFinite(coverage)) {
-    return [];
+// src/lib/track/diagram.ts
+var at = (iso) => {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
+};
+function meetingWindow(tracks2) {
+  const starts = [];
+  const ends = [];
+  for (const t of tracks2) {
+    const s = at(t.startedAt);
+    if (s === null) continue;
+    starts.push(s);
+    const e = at(t.endedAt);
+    if (e !== null && e > s) ends.push(e);
   }
-  const filled = clamp(coverage * 100);
-  const missing = 100 - filled;
-  const bars = [];
-  if (filled > 0) bars.push({ kind: "talk", left: 0, width: filled });
-  if (missing > 0.5) bars.push({ kind: "gap", left: filled, width: missing });
-  return bars;
+  if (starts.length === 0 || ends.length === 0) return null;
+  const startMs = Math.min(...starts);
+  const endMs = Math.max(...ends);
+  return endMs > startMs ? { startMs, endMs } : null;
+}
+function buildDiagram(tracks2) {
+  const window2 = meetingWindow(tracks2);
+  if (window2 === null) return { durationMs: 0, gaps: /* @__PURE__ */ new Map() };
+  const total = window2.endMs - window2.startMs;
+  const gaps = /* @__PURE__ */ new Map();
+  for (const track of tracks2) {
+    const trackStart = at(track.startedAt);
+    if (trackStart === null) continue;
+    const offset = trackStart - window2.startMs;
+    const spans = [];
+    for (const gap of track.gaps ?? []) {
+      const from = offset + gap.startMs;
+      const to = offset + gap.endMs;
+      if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) continue;
+      const left = Math.max(from, 0) / total * 100;
+      const right = Math.min(to, total) / total * 100;
+      if (right <= 0 || left >= 100) continue;
+      spans.push({
+        left,
+        // 아주 짧은 구멍도 보여야 합니다 — 1초 끊긴 것과 안 끊긴 것은
+        // 다릅니다. 다만 최소 폭을 주면 **길이가 과장**되므로 아주
+        // 작게만 줍니다.
+        width: Math.max(right - left, 0.4),
+        reason: gap.reason ?? "unknown"
+      });
+    }
+    if (spans.length > 0) gaps.set(track.userId, spans);
+  }
+  return { durationMs: total, gaps };
+}
+function axisTicks(durationMs, count = 6) {
+  if (durationMs <= 0) return [];
+  const totalMin = durationMs / 6e4;
+  return Array.from({ length: count + 1 }, (_, i) => {
+    const minute = Math.round(totalMin * i / count);
+    return i === 0 ? "0분" : i === count ? `${minute}분` : String(minute);
+  });
+}
+var REASON_TEXT = {
+  recorder_stalled: "녹음이 멈춰 있었습니다 — 화면이 꺼졌거나 앱이 내려갔습니다",
+  chunk_lost: "조각이 서버에 도착하지 않았습니다",
+  track_muted: "마이크가 꺼져 있었습니다"
+};
+function describeGap(span, durationMs) {
+  const fromMin = Math.round(span.left / 100 * durationMs / 6e4);
+  const toMin = Math.round((span.left + span.width) / 100 * durationMs / 6e4);
+  const when = fromMin === toMin ? `${fromMin}분쯤` : `${fromMin}~${toMin}분`;
+  const why = REASON_TEXT[span.reason] ?? "녹음이 끊겼습니다";
+  return `${when} · ${why}`;
 }
 
 // src/lib/http/detail.ts
@@ -531,11 +589,24 @@ function renderRoster() {
   $("consent-message").textContent = consentMessage;
 }
 function renderMembers(statuses) {
+  const diagram = buildDiagram(
+    tracks.map((t) => ({
+      userId: t.user_id,
+      startedAt: t.started_at ?? null,
+      endedAt: t.ended_at ?? null,
+      gaps: t.gaps ?? []
+    }))
+  );
+  const ticks = axisTicks(diagram.durationMs);
+  $("axis").innerHTML = ticks.length ? `<span></span><span class="marks">${ticks.map((t) => `<span>${escapeHtml(t)}</span>`).join("")}</span>` : "";
+  $("axis").hidden = ticks.length === 0;
   $("members").innerHTML = statuses.map((s) => {
-    const bars = coverageBar(s.coverage);
-    const bar = bars.length ? `<span class="cov">` + bars.map(
-      (b) => `<i data-kind="${b.kind}" style="left:${b.left}%;width:${b.width}%"></i>`
-    ).join("") + `</span>` : "";
+    const spans = diagram.durationMs > 0 ? diagram.gaps.get(s.userId) ?? [] : null;
+    const bar = spans === null ? "" : `<span class="tl">${spans.map(
+      (g) => `<i style="left:${g.left}%;width:${g.width}%" title="${escapeHtml(
+        describeGap(g, diagram.durationMs)
+      )}"></i>`
+    ).join("")}</span>`;
     return `<li class="${s.verdict}"><span class="name">${escapeHtml(s.name)}</span><span class="state">${escapeHtml(s.message)}</span>${bar}</li>`;
   }).join("");
 }

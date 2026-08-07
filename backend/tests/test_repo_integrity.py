@@ -366,3 +366,52 @@ def test_the_recording_screen_actually_tells_the_shell():
     screen = (REPO_ROOT / "frontend" / "src" / "demo" / "main.ts").read_text()
     assert "tellShellRecordingStarted(window)" in screen
     assert "tellShellRecordingStopped(window)" in screen
+
+
+def test_the_seed_writes_gaps_in_the_same_shape_production_does():
+    """⭐ **시연 데이터가 운영과 다른 모양이면 시연에서만 안 나옵니다.**
+
+    운영은 `recording_service._finalize` 에서 이렇게 씁니다.
+
+        {"reason": ..., "startMs": ..., "endMs": ..., "durationMs": ...}
+
+    시드는 `start_ms`(스네이크)였습니다. 화면이 `startMs` 를 읽으면
+    `undefined` 가 나오고, 그 구멍은 **조용히 안 그려집니다.** 오류도
+    안 납니다 — 시연에서 "왜 아무것도 안 보이지" 만 남습니다.
+
+    이 저장소가 반복해서 당한 부류의 거울상입니다: 보통은 시연 데이터가
+    손으로 채워져 결함을 가렸는데, 여기서는 시연 데이터가 운영과 달라
+    **멀쩡한 코드가 안 도는 것처럼** 보였습니다.
+    """
+    import re
+
+    seed = (REPO_ROOT / "scripts" / "seed_demo.py").read_text()
+    service = (
+        REPO_ROOT / "backend" / "teamflow" / "services" / "recording_service.py"
+    ).read_text()
+
+    # 운영이 쓰는 키를 코드에서 **읽어 옵니다** — 손으로 적으면 한쪽만 바뀝니다.
+    written = re.search(
+        r'server_gaps = \[\s*\{([^}]*)\}', service, re.S
+    )
+    assert written, "recording_service 에서 gap 을 쓰는 곳을 못 찾았습니다"
+    keys = set(re.findall(r'"([a-zA-Z_]+)":', written.group(1)))
+    assert keys, "gap 키를 못 읽었습니다"
+
+    # 시드의 gaps= 블록만 본다.
+    block = re.search(r"gaps=\[\]\s*if usable\s*else \[(.*?)\n                    \],", seed, re.S)
+    assert block, "seed_demo 에서 gaps 블록을 못 찾았습니다"
+
+    # ⚠️ **항목마다** 봅니다. 합집합으로 보면 둘 중 하나만 틀렸을 때
+    # 통과합니다 — 실제로 그렇게 짰다가 되돌림 검증에서 안 잡혔습니다.
+    entries = re.findall(r"\{([^}]*)\}", block.group(1), re.S)
+    assert entries, "gap 항목을 못 찾았습니다"
+
+    problems = []
+    for i, entry in enumerate(entries):
+        entry_keys = set(re.findall(r'"([a-zA-Z_]+)":', entry))
+        missing = keys - entry_keys
+        if missing:
+            problems.append(f"{i}번째 항목에 {sorted(missing)} 없음 (쓴 것: {sorted(entry_keys)})")
+
+    assert not problems, "시드가 운영과 다른 키를 씁니다:\n  " + "\n  ".join(problems)

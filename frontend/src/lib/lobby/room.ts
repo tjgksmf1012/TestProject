@@ -35,6 +35,12 @@ export interface TrackHealth {
   capture_confidence: number | null;
   warnings: unknown[];
   stop_reason: string | null;
+  /* ── 아래 셋은 **구멍이 언제 생겼는지** 그리기 위한 값입니다.
+     "42% 가 비었다" 와 "12분에 끊겼다" 는 다른 말이고, 뒤쪽이라야
+     사람이 무엇을 확인할지 압니다 (docs/16 Stage E). */
+  gaps?: { reason?: string; startMs: number; endMs: number }[];
+  started_at?: string | null;
+  ended_at?: string | null;
 }
 
 export type ConsentState = 'granted' | 'refused' | 'pending';

@@ -235,9 +235,29 @@ def seed(*, reset: bool) -> dict:
                     coverage=coverage,
                     total_gap_ms=0 if usable else 1_392_000,
                     longest_gap_ms=0 if usable else 1_200_000,
+                    # ⚠️ **운영 코드와 같은 키**를 씁니다 (카멜).
+                    # `recording_service._finalize` 가 이렇게 씁니다:
+                    #     {"reason", "startMs", "endMs", "durationMs"}
+                    # 예전 시드는 `start_ms`(스네이크)였고, 그래서 화면이
+                    # 이 값을 읽으면 **조용히 아무것도 안 그렸습니다** —
+                    # 시연에서는 멀쩡해 보이는데 운영에서만 나오는 부류의
+                    # 반대, 즉 시연에서만 안 나오는 결함이었습니다.
                     gaps=[]
                     if usable
-                    else [{"start_ms": 600_000, "end_ms": 1_800_000, "reason": "recorder_stalled"}],
+                    else [
+                        {
+                            "reason": "recorder_stalled",
+                            "startMs": 600_000,
+                            "endMs": 1_200_000,
+                            "durationMs": 600_000,
+                        },
+                        {
+                            "reason": "chunk_lost",
+                            "startMs": 1_500_000,
+                            "endMs": 1_800_000,
+                            "durationMs": 300_000,
+                        },
+                    ],
                 )
             )
         s.flush()

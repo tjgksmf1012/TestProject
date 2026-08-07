@@ -89,21 +89,21 @@ export function describeCoverage(coverage: number | null | undefined): string {
  * ⚠️ **"셀 수 있는가" 는 여기서 정하지 않습니다.**
  *
  * 처음에 이 파일에 `MIN_USABLE_COVERAGE = 0.6` 을 두고 "서버의
- * `confidence.py` 와 같은 값" 이라고 주석을 달았습니다. **둘 다
- * 틀렸습니다.**
+ * `confidence.py` 와 같은 값" 이라고 적었습니다. **틀렸습니다** —
+ * `confidence.py` 의 0.60 은 커버리지가 아니라 **신뢰도 라벨** 경계
+ * ("보통")입니다.
  *
- *   · `confidence.py` 의 0.60 은 커버리지가 아니라 **신뢰도 라벨**
- *     경계였습니다 ("보통")
- *   · 서버는 커버리지를 기준선으로 **쓰지 않습니다.** `tracks_usable`
- *     은 `status == "completed"` 로 세고, 측정 불가 판정도 트랙 비율
- *     입니다 (`load_measurement_gaps`)
- *   · 프런트에는 이미 0.8 이 두 곳에 있습니다
- *     (`lobby/room.ts`, `recording/timeline.ts`)
+ * 그래서 "서버는 커버리지를 기준선으로 안 쓴다" 고 결론지었는데,
+ * **그것도 틀렸습니다.** `recording_service.py` 를 안 봤습니다.
+ *
+ *     recording_service.py         MIN_USABLE_COVERAGE = 0.8
+ *     recording/timeline.ts        0.8
+ *     lobby/room.ts                0.8
+ *
+ * **세 곳이 전부 일치합니다.** 사슬은 이렇습니다 —
+ * `coverage >= 0.8` → `status = "completed"` → `tracks_usable` 에 셈.
  *
  * 즉 제가 **근거 없는 네 번째 값**을 만들 뻔했습니다. 이 파일은
  * **그리기만** 하고, 판정은 이미 그 일을 하는 `lobby/room.ts` 에
  * 맡깁니다.
- *
- * (서버의 "못 잰다" 와 화면의 "못 쓴다" 가 다른 기준이라는 것 자체는
- *  따로 볼 문제입니다 — PR 본문 C 절에 적었습니다.)
  */

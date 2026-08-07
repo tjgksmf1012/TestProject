@@ -1218,3 +1218,64 @@ def test_deleting_my_recording_shows_up_as_unmeasurable_not_zero(
     reason = flagged[0]["measurement_gaps"][0]["reason"]
     assert "본인 요청" in reason, reason
     assert "끊" not in reason, reason
+
+
+def test_track_health_carries_where_the_recording_dropped(engine, meeting):
+    """⭐ **"42% 가 비었다" 와 "12분에 끊겼다" 는 다른 말입니다.**
+
+    화면이 운행도표를 그리려면 구멍의 **위치**가 필요합니다. 총량만
+    주면 비율 막대밖에 못 그리고, 사람은 언제 확인해야 하는지 알 수
+    없습니다.
+
+    ⚠️ 새 계산이 아니라 **이미 저장돼 있던 값을 내보내는 것**입니다.
+    """
+    from teamflow.services import recording_service
+
+    gap = {
+        "reason": "recorder_stalled",
+        "startMs": 700_000,
+        "endMs": 1_100_000,
+        "durationMs": 400_000,
+    }
+    with db_session.session_scope() as s:
+        track = m.MeetingTrack(
+            meeting_id=meeting["meeting_id"],
+            user_id=meeting["user_ids"][0],
+            started_at=NOW,
+            ended_at=NOW + timedelta(minutes=30),
+            status="unusable",
+            coverage=0.42,
+            total_gap_ms=400_000,
+            gaps=[gap],
+        )
+        s.add(track)
+
+    with db_session.session_scope() as s:
+        rows = recording_service.track_health(s, meeting["meeting_id"])
+
+    mine = next(r for r in rows if r["user_id"] == meeting["user_ids"][0])
+    assert mine["gaps"] == [gap]
+    # 위치를 백분율로 바꾸려면 트랙이 언제 시작·종료했는지도 필요합니다.
+    assert mine["started_at"] is not None
+    assert mine["ended_at"] is not None
+
+
+def test_track_health_gives_an_empty_list_not_null_when_there_are_no_gaps(engine, meeting):
+    """⚠️ `null` 을 주면 화면이 `.map` 에서 죽습니다. 끊긴 적이 없는
+    트랙은 **빈 목록**이지 모르는 것이 아닙니다."""
+    from teamflow.services import recording_service
+
+    with db_session.session_scope() as s:
+        s.add(
+            m.MeetingTrack(
+                meeting_id=meeting["meeting_id"],
+                user_id=meeting["user_ids"][1],
+                started_at=NOW,
+                status="recording",
+            )
+        )
+
+    with db_session.session_scope() as s:
+        rows = recording_service.track_health(s, meeting["meeting_id"])
+    assert rows
+    assert all(isinstance(r["gaps"], list) for r in rows)

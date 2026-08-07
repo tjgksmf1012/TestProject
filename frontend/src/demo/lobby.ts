@@ -26,7 +26,7 @@ import {
 } from '../lib/lobby/room.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
-import { coverageBar } from '../lib/track/bar.ts';
+import { axisTicks, buildDiagram, describeGap } from '../lib/track/diagram.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
@@ -161,22 +161,45 @@ function renderRoster(): void {
 }
 
 function renderMembers(statuses: MemberStatus[]): void {
+  // ⭐ 운행도표 — 사람마다 한 줄, 구멍이 **제자리에** 찍힙니다.
+  //
+  // 축은 `buildDiagram` 이 정합니다. 트랙마다 녹음 시작 시각이 다르므로
+  // 오프셋을 맞추지 않으면 늦게 들어온 사람의 구멍이 회의 앞쪽으로
+  // 밀려옵니다 — 그러면 "그 결정이 나올 때 이 사람이 끊겨 있었다" 가
+  // 통째로 거짓이 됩니다. 18개 테스트가 그 축을 고정합니다.
+  const diagram = buildDiagram(
+    tracks.map((t) => ({
+      userId: t.user_id,
+      startedAt: t.started_at ?? null,
+      endedAt: t.ended_at ?? null,
+      gaps: t.gaps ?? [],
+    })),
+  );
+
+  const ticks = axisTicks(diagram.durationMs);
+  $('axis').innerHTML = ticks.length
+    ? `<span></span><span class="marks">${ticks
+        .map((t) => `<span>${escapeHtml(t)}</span>`)
+        .join('')}</span>`
+    : '';
+  $('axis').hidden = ticks.length === 0;
+
   $('members').innerHTML = statuses
     .map((s) => {
-      // ⚠️ 커버리지 막대는 **양만** 말합니다. 어디가 끊겼는지는 서버가
-      // 주지 않으므로(총량 `coverage` 뿐) 위치를 지어내지 않습니다.
-      // 자세한 이유는 `src/lib/track/bar.ts` 머리말에 있습니다.
-      const bars = coverageBar(s.coverage);
-      const bar = bars.length
-        ? `<span class="cov">` +
-          bars
-            .map(
-              (b) =>
-                `<i data-kind="${b.kind}" style="left:${b.left}%;width:${b.width}%"></i>`,
-            )
-            .join('') +
-          `</span>`
-        : '';
+      // 축을 못 정했으면 트랙을 안 그립니다. 거짓 위치는 안 그리는
+      // 것보다 나쁩니다.
+      const spans = diagram.durationMs > 0 ? (diagram.gaps.get(s.userId) ?? []) : null;
+      const bar =
+        spans === null
+          ? ''
+          : `<span class="tl">${spans
+              .map(
+                (g) =>
+                  `<i style="left:${g.left}%;width:${g.width}%" title="${escapeHtml(
+                    describeGap(g, diagram.durationMs),
+                  )}"></i>`,
+              )
+              .join('')}</span>`;
       return (
         `<li class="${s.verdict}"><span class="name">${escapeHtml(s.name)}</span>` +
         `<span class="state">${escapeHtml(s.message)}</span>${bar}</li>`

@@ -608,6 +608,18 @@ def track_health(session: Session, meeting_id: int) -> list[dict]:
             ),
             "warnings": t.capture_warnings,
             "stop_reason": t.stop_reason,
+            # ── 아래 셋은 **화면이 어디가 끊겼는지 그리기 위한** 읽기
+            #    전용 값입니다 (docs/16 Stage E).
+            #
+            #    이게 없는 동안 화면은 "42% 가 비었다" 까지만 말할 수
+            #    있었습니다. 사람이 정말 알아야 하는 것은 **언제** 끊겼나
+            #    입니다 — 회의 중이면 지금 폰을 확인하면 되고, 끝난 뒤면
+            #    어느 결정이 그 구간에 있었는지 되짚을 수 있습니다.
+            #
+            #    ⚠️ 새 계산이 아닙니다. 전부 이미 저장돼 있던 값입니다.
+            "gaps": t.gaps or [],
+            "started_at": t.started_at,
+            "ended_at": t.ended_at,
         }
         for t in tracks
     ]
