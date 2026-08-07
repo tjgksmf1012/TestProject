@@ -159,14 +159,82 @@ def test_login_matching_ignores_case(engine, project: dict):
     assert [e["user_id"] for e in stored_events()] == [project["minsu"]]
 
 
-def test_an_unmapped_author_creates_nothing(engine, project: dict):
+def test_an_unmapped_author_creates_no_code_event(engine, project: dict):
     """⭐ 외부 기여자·봇의 PR 을 아무에게나 붙이지 않는다.
 
     0번 사용자로 만들거나 첫 팀원에게 붙이면 그게 곧 잘못된 기여도다.
     """
     result = ingest(project, details(author_login="dependabot[bot]"))
 
+    assert result["status"] == "reviews_only"
+    assert result["reason"] == "unmapped_author"
+    assert stored_events() == []
+
+
+def test_a_review_survives_an_unmapped_author(engine, project: dict):
+    """⭐⭐ **작성자를 못 붙였다고 남의 리뷰까지 버리지 않는다** (결함 62).
+
+    봇이나 외부 기여자의 PR 을 팀원이 리뷰하는 것은 흔한 일이다. 팀원이
+    GitHub 로그인을 아직 등록 안 한 동안에도 같은 일이 벌어진다.
+
+    예전에는 `to_pull_request` 가 None 을 돌려주는 순간 그 PR 이 통째로
+    버려졌고, **거기 달린 우리 팀원의 리뷰도 같이 사라졌다.** 오류는
+    어디에도 안 났다 — 그 사람의 기여도만 조용히 비었다.
+
+    리뷰는 작성자가 누구든 **리뷰어 자신의 기여**다.
+    """
+    result = ingest(
+        project,
+        details(
+            author_login="dependabot[bot]",
+            reviews=[
+                {
+                    "id": 7001,
+                    "user": {"login": "haneul-design"},
+                    "submitted_at": MERGED_AT,
+                    "state": "CHANGES_REQUESTED",
+                    "body": "이 버전 올리면 로그인 화면이 깨집니다",
+                }
+            ],
+            review_comments=[],
+        ),
+    )
+
+    assert result["status"] == "reviews_only"
+    events = stored_events()
+    assert [e["event_type"] for e in events] == ["review_given"]
+    assert events[0]["user_id"] == project["haneul"]
+    # 코드 기여는 여전히 아무에게도 안 붙는다 — 작성자를 모르기 때문이다.
+    assert not [e for e in events if e["event_type"] == "pr_merged"]
+
+
+def test_an_unmerged_pr_by_an_unmapped_author_stays_silent(engine, project: dict):
+    """⚠️ 병합 안 된 것과 작성자를 못 붙인 것은 **다른 상황**이다 (결함 62).
+
+    예전에는 `unmapped_author_or_not_merged` 한 이유로 묶여 있었다.
+    묶여 있으면 위 테스트가 잡는 결함을 이 테스트가 가려 준다 — 둘 다
+    "skipped" 니까.
+    """
+    result = ingest(
+        project,
+        details(
+            merged_at=None,
+            author_login="dependabot[bot]",
+            reviews=[
+                {
+                    "id": 7002,
+                    "user": {"login": "haneul-design"},
+                    "submitted_at": MERGED_AT,
+                    "state": "COMMENTED",
+                    "body": "아직 안 봤습니다",
+                }
+            ],
+        ),
+    )
+
+    # 열려만 있는 PR 의 리뷰는 세지 않는다. 병합돼야 그 PR 이 실재한 일이다.
     assert result["status"] == "skipped"
+    assert result["reason"] == "not_merged"
     assert stored_events() == []
 
 

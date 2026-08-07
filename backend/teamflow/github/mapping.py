@@ -127,6 +127,38 @@ def parse_closing_issue_numbers(body: str | None) -> list[int]:
     return seen
 
 
+def to_reviews(details: PullRequestDetails, *, logins: dict[str, int]) -> list[Review]:
+    """이 PR 에 달린 리뷰 중 **팀원이 준 것**만.
+
+    ⚠️ **작성자와 따로 뽑을 수 있어야 합니다** (결함 62).
+
+    예전에는 이 루프가 `to_pull_request` 안에 있었습니다. 그런데 그 함수는
+    작성자를 팀원에게 못 붙이면 `None` 을 돌려주므로, **외부 기여자나
+    봇의 PR 에 우리 팀원이 준 리뷰가 통째로 사라졌습니다.**
+
+    리뷰는 작성자가 누구든 **리뷰어 자신의 기여**입니다. 남의 PR 을
+    읽고 문제를 짚는 것이 그 사람이 한 일이지, PR 작성자가 누구인지와는
+    상관이 없습니다.
+    """
+    comment_counts = count_review_comments(details.reviews, details.review_comments)
+    reviews: list[Review] = []
+    for row in details.reviews:
+        reviewer_login = ((row.get("user") or {}).get("login") or "").lower()
+        reviewer_id = logins.get(reviewer_login)
+        submitted_at = parse_time(row.get("submitted_at"))
+        if reviewer_id is None or submitted_at is None:
+            continue
+        reviews.append(
+            Review(
+                reviewer_id=reviewer_id,
+                submitted_at=submitted_at,
+                comment_count=comment_counts.get(int(row.get("id") or 0), 0),
+                state=row.get("state", "COMMENTED"),
+            )
+        )
+    return reviews
+
+
 def to_pull_request(
     details: PullRequestDetails,
     *,
@@ -157,29 +189,12 @@ def to_pull_request(
         )
         return None
 
-    comment_counts = count_review_comments(details.reviews, details.review_comments)
-    reviews: list[Review] = []
-    for row in details.reviews:
-        reviewer_login = ((row.get("user") or {}).get("login") or "").lower()
-        reviewer_id = logins.get(reviewer_login)
-        submitted_at = parse_time(row.get("submitted_at"))
-        if reviewer_id is None or submitted_at is None:
-            continue
-        reviews.append(
-            Review(
-                reviewer_id=reviewer_id,
-                submitted_at=submitted_at,
-                comment_count=comment_counts.get(int(row.get("id") or 0), 0),
-                state=row.get("state", "COMMENTED"),
-            )
-        )
-
     return PullRequest(
         id=int(details.id),
         number=int(details.number),
         author_id=author_id,
         merged_at=merged_at,
         files=to_changed_files(details.files),
-        reviews=reviews,
+        reviews=to_reviews(details, logins=logins),
         closes_issue_ids=list(closed_issue_ids or []),
     )

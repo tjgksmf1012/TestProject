@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from teamflow.contribution.events import ContributionEvent
-from teamflow.contribution.github_ingest import pr_to_events
+from teamflow.contribution.github_ingest import pr_to_events, reviews_to_events
 from teamflow.db import models as m
 from teamflow.github import mapping
 from teamflow.github.client import GitHubClient, GitHubError
@@ -115,11 +115,44 @@ def ingest_merged_pull_request(
             if issue_id is not None:
                 issue_ids.append(issue_id)
 
-    pull = mapping.to_pull_request(
-        details, logins=member_logins(session, project_id), closed_issue_ids=issue_ids
-    )
+    logins = member_logins(session, project_id)
+    pull = mapping.to_pull_request(details, logins=logins, closed_issue_ids=issue_ids)
+
     if pull is None:
-        return {"status": "skipped", "reason": "unmapped_author_or_not_merged"}
+        # ⚠️ **두 가지 다른 상황입니다** (결함 62). 예전에는 한 이유
+        # (`unmapped_author_or_not_merged`)로 묶어 둘 다 조용히 버렸습니다.
+        #
+        #   병합 안 됨      → 이벤트가 없는 게 맞습니다
+        #   작성자 못 붙임  → 코드 기여는 못 세지만, **우리 팀원이 그 PR 에
+        #                     준 리뷰는 그 사람의 기여**입니다
+        #
+        # 외부 기여자·봇의 PR 을 팀원이 리뷰하는 것은 흔한 일이고, 팀원이
+        # GitHub 로그인을 아직 등록 안 한 동안에도 같은 일이 벌어집니다.
+        # 그 리뷰를 버리면 **오류 없이 기여도만 빕니다.**
+        if mapping.parse_time(details.merged_at) is None:
+            return {"status": "skipped", "reason": "not_merged"}
+
+        review_events = reviews_to_events(
+            mapping.to_reviews(details, logins=logins),
+            pr_id=int(details.id),
+            pr_number=int(details.number),
+            author_id=None,
+        )
+        written = persist_events(session, project_id, review_events)
+        logger.info(
+            "project=%s %s#%s 작성자 %r 를 못 붙였지만 리뷰 %d건은 살렸습니다",
+            project_id,
+            repo,
+            number,
+            details.author_login,
+            len(review_events),
+        )
+        return {
+            "status": "reviews_only",
+            "reason": "unmapped_author",
+            "events": len(review_events),
+            "written": written,
+        }
 
     events = pr_to_events(pull)
     written = persist_events(session, project_id, events)
