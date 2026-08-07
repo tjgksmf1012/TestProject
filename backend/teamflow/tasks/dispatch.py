@@ -46,3 +46,27 @@ def enqueue_meeting_processing(meeting_id: int) -> str | None:
     except Exception:  # 브로커 장애 종류를 여기서 나열할 수 없다
         logger.exception("회의 %s 처리를 큐에 넣지 못했습니다", meeting_id)
         return None
+
+
+def enqueue_github_ingest(event_id: int) -> str | None:
+    """웹훅 이벤트를 기여 이벤트로 옮기는 잡을 CPU 큐에 넣는다.
+
+    회의 처리와 같은 이유로 `retry=False` 입니다 — 브로커가 죽었을 때
+    **GitHub 의 웹훅 요청을 붙잡으면 안 됩니다.** GitHub 은 응답을 10초 안에
+    기대하고, 늦으면 배달 실패로 보고 재전송합니다. 재전송은 `GithubEvent`
+    의 `delivery_id` 중복 검사가 막지만, 그 전에 우리 워커가 요청 슬롯을
+    붙잡고 있는 상태가 됩니다.
+
+    큐에 못 넣어도 잃지 않습니다 — 웹훅 본문은 이미 DB 에 저장돼 있으므로
+    나중에 이 잡을 event_id 로 다시 걸면 됩니다.
+    """
+    try:
+        from teamflow.tasks.github_tasks import ingest_github_event_task
+
+        result = ingest_github_event_task.apply_async(
+            args=[event_id], retry=False, ignore_result=True
+        )
+        return str(result.id)
+    except Exception:
+        logger.exception("github_event %s 수집을 큐에 넣지 못했습니다", event_id)
+        return None

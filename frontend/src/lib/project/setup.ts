@@ -1,0 +1,106 @@
+/**
+ * 프로젝트 만들기·참가·설정의 판단 로직.
+ *
+ * 이 화면들이 없던 동안 **가입한 첫 사용자는 아무것도 할 수 없었습니다.**
+ * "팀원이 넣어 주기를 기다리세요" 로 끝나는데 그 팀원도 같은 처지였습니다.
+ *
+ * 서버가 최종 판정을 하고 화면은 그걸 반복하지 않습니다 — 규칙이 두 곳에
+ * 있으면 반드시 갈라집니다. 여기서 막는 것은 **왕복이 명백히 낭비인 경우**와,
+ * 서버 응답만으로는 사람이 무엇을 고쳐야 할지 알 수 없는 경우뿐입니다.
+ */
+
+/** 서버 `projects/invites.py` 와 같아야 한다. */
+export const CODE_LENGTH = 8;
+export const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/**
+ * 사람이 입력한 초대 코드를 서버가 받는 형태로.
+ *
+ * 화면이 `ABCD-EFGH` 로 보여주므로 사람은 하이픈을 칩니다. 카톡에서
+ * 복사하면 앞뒤 공백도 붙습니다. 그걸 "틀린 코드" 로 처리하면 **맞는
+ * 코드를 들고도 못 들어옵니다.**
+ */
+export function normalizeCode(raw: string): string {
+  return raw.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+}
+
+export function formatCode(raw: string): string {
+  const clean = normalizeCode(raw);
+  return clean.length === CODE_LENGTH ? `${clean.slice(0, 4)}-${clean.slice(4)}` : clean;
+}
+
+/**
+ * 서버에 물어보기 전에 걸러낼 수 있는가.
+ *
+ * ⭐ 형식이 틀린 것을 그대로 보내면 **"없는 코드" 와 "잘못 친 코드" 가 같은
+ * 답을 받습니다.** 사람은 그 둘을 다르게 고쳐야 합니다 — 앞은 상대에게
+ * 다시 묻는 것이고 뒤는 자기가 다시 치는 것입니다.
+ */
+export function codeProblem(raw: string): string | null {
+  const clean = normalizeCode(raw);
+  if (clean.length === 0) return '초대 코드를 입력하세요';
+  if (clean.length !== CODE_LENGTH) {
+    return `초대 코드는 ${CODE_LENGTH}자입니다 (지금 ${clean.length}자)`;
+  }
+  const bad = [...clean].filter((ch) => !CODE_ALPHABET.includes(ch));
+  if (bad.length > 0) {
+    // 어떤 글자가 문제인지 말합니다. "형식이 틀렸습니다" 만으로는
+    // 여덟 글자 중 어디를 고쳐야 하는지 알 수 없습니다.
+    return `코드에 쓰지 않는 글자가 있습니다: ${[...new Set(bad)].join(', ')} — 0·O·1·I·L 은 쓰지 않습니다`;
+  }
+  return null;
+}
+
+export function titleProblem(raw: string): string | null {
+  const title = raw.trim();
+  if (title.length === 0) return '프로젝트 이름을 입력하세요';
+  if (title.length > 200) return '이름이 너무 깁니다 (200자까지)';
+  return null;
+}
+
+/**
+ * GitHub 저장소는 `owner/repo` 여야 한다.
+ *
+ * ⭐ 웹훅은 `repository.full_name` 으로 프로젝트를 찾습니다. 주소 전체를
+ * 넣으면 **웹훅이 영원히 이 프로젝트를 못 찾습니다** — 오류도 안 나고
+ * 기여도만 이유 없이 빕니다.
+ *
+ * 주소를 붙여넣는 건 흔한 일이라, 거절만 하지 않고 **고쳐 줄 수 있으면
+ * 고쳐서 보여줍니다.**
+ */
+const REPO = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+export function normalizeRepo(raw: string): string {
+  let value = raw.trim();
+  if (value === '') return '';
+
+  // https://github.com/owner/repo(.git)(/) → owner/repo
+  value = value.replace(/^https?:\/\/(www\.)?github\.com\//i, '');
+  value = value.replace(/^git@github\.com:/i, '');
+  value = value.replace(/\.git$/i, '');
+  value = value.replace(/\/+$/, '');
+  return value;
+}
+
+export function repoProblem(raw: string): string | null {
+  const value = normalizeRepo(raw);
+  if (value === '') return null; // 비우는 건 "연결 끊기" 라 정상이다
+  if (!REPO.test(value)) {
+    return '저장소는 `owner/repo` 형식이어야 합니다';
+  }
+  return null;
+}
+
+/**
+ * 만들고 나서 무엇을 하라고 할 것인가.
+ *
+ * ⭐ 프로젝트를 만들면 **혼자입니다.** 그 상태에서 "회의 열기" 만 보여주면
+ * 혼자 회의를 열고, 동의는 혼자 하고, 녹음도 혼자 하게 됩니다 — 그건
+ * 이 시스템이 하려는 일이 아닙니다. 팀원을 먼저 부르라고 말해야 합니다.
+ */
+export function nextStepAfterCreate(memberCount: number): string {
+  if (memberCount <= 1) {
+    return '아직 혼자입니다. 아래 초대 코드를 팀원에게 알려 주세요 — 다 모인 뒤에 회의를 여는 게 좋습니다.';
+  }
+  return '팀원이 모였습니다. 회의를 열면 로비에서 동의를 받고 녹음을 시작할 수 있습니다.';
+}

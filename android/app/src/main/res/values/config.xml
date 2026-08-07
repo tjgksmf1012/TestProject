@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      셸이 여는 주소.
+
+      기본값은 에뮬레이터에서 보는 호스트 PC 입니다. 실제 폰에서 쓰려면
+      Cloudflare Tunnel 주소로 바꾸세요.
+
+      ⚠️ **https:// 를 쓰세요.** http:// 로 두면 아래
+      `network_security_config.xml` 이 막습니다 — 막히는 것이 회의
+      음성이고, 세션 쿠키에 Secure 도 안 붙습니다.
+    -->
+    <string name="server_url" translatable="false">http://10.0.2.2:8000/home.html</string>
+</resources>

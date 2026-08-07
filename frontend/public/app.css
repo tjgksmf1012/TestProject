@@ -1,0 +1,484 @@
+/*
+ * TeamFlow 공통 스타일 — **폰이 기준입니다.**
+ *
+ * ## 왜 모바일 우선인가
+ *
+ * 이 시스템의 핵심 동작은 **팀원 각자가 자기 폰으로 녹음하는 것**입니다
+ * (멀티트랙, 모드 A). 회의 로비에서 동의하고, 녹음하고, 끝나고 나서
+ * 승인 화면을 보는 흐름 전체가 회의실 책상 위가 아니라 **손 안**에서
+ * 일어납니다. 그런데 화면들은 데스크톱에서 만들어졌습니다 — 위쪽 링크 줄,
+ * 12px 버튼, `max-width: 64rem`. 폰에서 열면 되기는 되는데 **쓰기 어렵습니다.**
+ *
+ * ## 여기서 정한 것
+ *
+ *   1. **엄지 영역에 주요 동작을 둔다.** 폰을 한 손으로 쥐면 화면 위쪽
+ *      3분의 1은 엄지가 안 닿습니다. 그래서 이동은 아래 탭바로, 각 화면의
+ *      주요 버튼은 아래 고정 막대로 내렸습니다.
+ *   2. **터치 타깃 44px.** 예전 `.moves button` 은 높이가 26px 이었습니다.
+ *      손가락 끝 접촉면이 대략 10mm(≈44px)라, 그보다 작으면 옆 것을 누릅니다.
+ *      칸반에서 그건 **엉뚱한 업무를 완료 처리하는 것**입니다.
+ *   3. **safe-area 를 존중한다.** 노치와 홈 인디케이터 뒤로 내용이 들어가면
+ *      아래 고정 버튼이 홈 바에 가려 안 눌립니다. 전체화면 PWA·WebView 로
+ *      띄우면 브라우저 크롬이 없어져서 더 심해집니다.
+ *   4. **hover 에 의존하지 않는다.** 폰에는 hover 가 없습니다. 눌린 상태
+ *      (`:active`)로 피드백을 줍니다.
+ *   5. **가로 스크롤을 만들지 않는다.** 표와 코드 블록만 자기 안에서
+ *      가로로 넘깁니다. 본문이 가로로 밀리면 사람은 화면이 깨졌다고 읽습니다.
+ */
+
+/* ══════════════════════════════════════════════════════════════
+   토큰
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #ffffff;
+  --surface: #f6f7f9;
+  --line: #e3e6ea;
+  --text: #16181d;
+  --dim: #6b7280;
+  --accent: #2563eb;
+  --on-accent: #ffffff;
+  --ok: #15803d;
+  --warn: #b45309;
+  --bad: #b91c1c;
+
+  --radius: 0.875rem;
+  --radius-sm: 0.5rem;
+
+  /* 노치·홈 인디케이터. 브라우저에서 열면 전부 0 이라 그대로 써도 된다. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* 하단 탭바 높이 + 홈 인디케이터. 본문 아래 여백이 이만큼 필요하다. */
+  --tabbar: calc(3.5rem + var(--safe-bottom));
+
+  --tap: 2.75rem; /* 44px — 손가락 끝 접촉면 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --surface: #1c1f25;
+    --line: #2f343c;
+    --text: #e8eaee;
+    --dim: #9aa2ad;
+    --accent: #60a5fa;
+    --on-accent: #0b1220;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #fca5a5;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  /* iOS 에서 가로로 돌렸다가 세로로 돌아올 때 글자가 커지는 것을 막는다. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 1rem/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Noto Sans KR", "Segoe UI", sans-serif;
+  /* 본문은 절대 가로로 밀리지 않는다. */
+  overflow-x: hidden;
+  /* 탭바가 마지막 내용을 가리지 않게 한다. */
+  padding: calc(var(--safe-top) + 1rem) calc(var(--safe-right) + 1rem)
+    calc(var(--tabbar) + 1rem) calc(var(--safe-left) + 1rem);
+}
+
+/* 탭바가 없는 화면(로그인)은 아래 여백이 필요 없다. */
+body.no-tabs {
+  padding-bottom: calc(var(--safe-bottom) + 1.5rem);
+}
+
+/* 큰 화면에서는 가운데로 모은다. 폰 기준으로 짠 값을 그대로 늘리면
+   한 줄이 너무 길어져 읽기 어렵다. */
+.wrap {
+  max-width: 34rem;
+  margin-inline: auto;
+}
+
+.wrap.wide {
+  max-width: 60rem;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   글
+   ══════════════════════════════════════════════════════════════ */
+
+h1 {
+  /* 앱 상단 막대 대신 **본문 안의 큰 제목**을 씁니다. 상단 막대는
+     세로 공간을 먹는데 폰에서는 그게 제일 아깝습니다. */
+  font-size: 1.5rem;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.25rem;
+}
+
+h2 {
+  font-size: 1.0625rem;
+  margin: 0 0 0.5rem;
+}
+
+.sub {
+  color: var(--dim);
+  font-size: 0.9375rem;
+  margin: 0 0 1rem;
+}
+
+.note {
+  font-size: 0.875rem;
+  color: var(--dim);
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+/* 숫자는 자리를 고정한다. 갱신될 때마다 폭이 흔들리면 눈이 따라간다. */
+.num,
+dd,
+time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   카드
+   ══════════════════════════════════════════════════════════════ */
+
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+/* 테두리 대신 배경으로 구분합니다. 폰에서는 1px 선이 여러 개 겹치면
+   화면이 빽빽해 보입니다. 다만 카드 안에 카드가 들어갈 때는 배경이
+   같아져 버려서 그때만 선을 씁니다. */
+.card .card {
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   누르는 것 — 전부 최소 44px
+   ══════════════════════════════════════════════════════════════ */
+
+button,
+.btn {
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  /* 탭 했을 때 파란 사각형이 번쩍이는 것을 없앤다. */
+  -webkit-tap-highlight-color: transparent;
+  /* 더블탭 확대를 끄면 탭 반응이 300ms 빨라진다. */
+  touch-action: manipulation;
+  transition: transform 0.08s ease, background 0.12s ease;
+}
+
+/* 폰에는 hover 가 없다. 눌린 상태로 피드백을 준다. */
+button:active,
+.btn:active {
+  transform: scale(0.97);
+}
+
+button:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+.btn-primary,
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn-block {
+  display: flex;
+  width: 100%;
+}
+
+/* 마우스가 있는 환경에서만 hover 를 준다. */
+@media (hover: hover) {
+  button:hover:not(:disabled),
+  .btn:hover {
+    background: color-mix(in srgb, var(--text) 6%, var(--bg));
+  }
+  button.primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 88%, black);
+  }
+}
+
+/* 키보드로 옮겨 다니는 사람이 지금 어디 있는지 보여야 한다. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   입력
+   ══════════════════════════════════════════════════════════════ */
+
+input,
+select,
+textarea {
+  font: inherit;
+  /* ⚠️ **16px 밑으로 내리지 않습니다.** iOS Safari 는 글자가 16px 보다
+     작은 입력 칸에 포커스가 가면 화면을 확대합니다. 확대된 채로 돌아오지
+     않아서, 사람은 앱이 깨졌다고 느낍니다. */
+  font-size: 1rem;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+}
+
+label {
+  display: block;
+  font-size: 0.875rem;
+  color: var(--dim);
+  margin-bottom: 0.375rem;
+}
+
+.field {
+  margin-bottom: 1rem;
+}
+
+/* 입력 칸 + 버튼을 한 줄에. 폰에서 좁아지면 버튼이 아래로 내려간다. */
+.row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.row > input {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 22rem) {
+  .row {
+    flex-direction: column;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   상태 문구
+   ══════════════════════════════════════════════════════════════ */
+
+.error,
+.bad {
+  color: var(--bad);
+  font-size: 0.9375rem;
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.ok {
+  color: var(--ok);
+}
+
+.dim {
+  color: var(--dim);
+}
+
+.banner {
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 0.875rem;
+  font-size: 0.9375rem;
+  margin: 0 0 1rem;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+
+.banner.bad {
+  background: color-mix(in srgb, var(--bad) 14%, transparent);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   아래 고정 동작 막대
+   ══════════════════════════════════════════════════════════════
+
+   화면의 **주요 동작 하나**를 여기 둡니다. 목록이 길어져도 스크롤을
+   끝까지 내리지 않고 누를 수 있고, 엄지가 닿는 자리입니다.
+   탭바가 있는 화면에서는 탭바 바로 위에 놓입니다. */
+
+.actionbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--tabbar);
+  z-index: 20;
+  padding: 0.75rem calc(var(--safe-right) + 1rem) 0.75rem
+    calc(var(--safe-left) + 1rem);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line);
+}
+
+body.no-tabs .actionbar {
+  bottom: 0;
+  padding-bottom: calc(var(--safe-bottom) + 0.75rem);
+}
+
+.actionbar .inner {
+  max-width: 34rem;
+  margin-inline: auto;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.actionbar .inner > * {
+  flex: 1;
+}
+
+/* 고정 막대가 마지막 내용을 가리지 않게 한다. */
+body.has-actionbar {
+  padding-bottom: calc(var(--tabbar) + 5rem);
+}
+
+body.no-tabs.has-actionbar {
+  padding-bottom: calc(var(--safe-bottom) + 5.5rem);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   하단 탭바
+   ══════════════════════════════════════════════════════════════
+
+   위쪽 링크 줄을 아래로 내렸습니다. 예전에는 화면 넷이 막다른 길이라
+   브라우저 뒤로가기 말고는 나올 방법이 없었는데, 전체화면 PWA·WebView 로
+   띄우면 **주소창도 뒤로가기도 없어서** 그때는 정말 갇힙니다. */
+
+#tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line);
+  padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left);
+}
+
+#tabs a {
+  flex: 1;
+  min-height: 3.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.125rem;
+  text-decoration: none;
+  color: var(--dim);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+#tabs a .ico {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+#tabs a[aria-current="page"] {
+  color: var(--accent);
+}
+
+/* ⭐ **갈 수 없는 탭을 숨기지 않습니다.** 숨기면 사람은 그 화면이 없는
+   줄 압니다. 흐리게 두고 왜 못 가는지는 각 화면이 말합니다. */
+#tabs a[aria-disabled="true"] {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   목록
+   ══════════════════════════════════════════════════════════════ */
+
+ul.plain {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+dl.stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 0 0;
+  font-size: 0.9375rem;
+}
+
+dl.stats dt {
+  color: var(--dim);
+}
+
+dl.stats dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 600;
+}
+
+/* 표·코드처럼 좁힐 수 없는 것만 **자기 안에서** 가로로 넘긴다. */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+code,
+pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   접근성
+   ══════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

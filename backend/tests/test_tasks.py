@@ -412,3 +412,91 @@ def test_loader_skips_deleted_assets(seeded, tmp_path: Path):
         )
 
     assert FileSystemAudioLoader(storage_root=storage).load(seeded["meeting_id"]) == []
+
+
+# ══════════════════════════════════════════════════════════════
+# 재처리 — 발화만 지우면 나머지가 중복되고 근거가 고아가 된다
+# ══════════════════════════════════════════════════════════════
+
+
+def test_reprocessing_does_not_duplicate_candidates(seeded):
+    """⭐ 예전에는 발화만 지워서 후보와 결정이 그대로 두 배가 됐다."""
+    data = payload(user_ids=seeded["user_ids"])
+    persist_results_task(seeded["meeting_id"], data)
+    persist_results_task(seeded["meeting_id"], data)
+
+    with db_session.session_scope() as s:
+        candidates = s.scalars(
+            select(m.MeetingTaskCandidate).where(
+                m.MeetingTaskCandidate.meeting_id == seeded["meeting_id"]
+            )
+        ).all()
+        decisions = s.scalars(
+            select(m.Decision).where(m.Decision.meeting_id == seeded["meeting_id"])
+        ).all()
+
+        assert len(candidates) == len(data["candidates"])
+        assert len(decisions) == len(data["decisions"])
+
+
+def test_reprocessing_keeps_evidence_pointing_at_live_rows(seeded):
+    """⭐ 근거 ID 가 삭제된 발화를 가리키면 안 된다.
+
+    SQLite 는 rowid 를 재사용해 우연히 맞을 수 있으므로, "우연히 맞는가" 가
+    아니라 **살아 있는 행을 가리키는가** 를 본다.
+    """
+    data = payload(user_ids=seeded["user_ids"])
+    persist_results_task(seeded["meeting_id"], data)
+    persist_results_task(seeded["meeting_id"], data)
+
+    with db_session.session_scope() as s:
+        live = set(
+            s.scalars(
+                select(m.Utterance.id).where(
+                    m.Utterance.meeting_id == seeded["meeting_id"]
+                )
+            ).all()
+        )
+        for row in s.scalars(
+            select(m.MeetingTaskCandidate).where(
+                m.MeetingTaskCandidate.meeting_id == seeded["meeting_id"]
+            )
+        ).all():
+            assert row.evidence_utterance_ids
+            assert set(row.evidence_utterance_ids) <= live, "근거가 고아입니다"
+
+
+def test_reprocessing_refuses_when_a_human_already_decided(seeded):
+    """⭐ 승인된 후보가 있으면 재처리하지 않는다.
+
+    발화를 새로 만들면 이미 칸반에 올라간 업무의 근거가 끊어진다.
+    데이터 정정이 아니라 분쟁 근거의 훼손이다.
+    """
+    data = payload(user_ids=seeded["user_ids"])
+    persist_results_task(seeded["meeting_id"], data)
+
+    with db_session.session_scope() as s:
+        candidate = s.scalars(
+            select(m.MeetingTaskCandidate).where(
+                m.MeetingTaskCandidate.meeting_id == seeded["meeting_id"]
+            )
+        ).first()
+        candidate.review_status = "approved"
+        approved_id = candidate.id
+        kept_evidence = list(candidate.evidence_utterance_ids)
+
+    result = persist_results_task(seeded["meeting_id"], data)
+
+    assert result["status"] == "already_reviewed"
+    with db_session.session_scope() as s:
+        still = s.get(m.MeetingTaskCandidate, approved_id)
+        assert still is not None, "승인된 후보가 지워졌습니다"
+        assert list(still.evidence_utterance_ids) == kept_evidence
+        live = set(
+            s.scalars(
+                select(m.Utterance.id).where(
+                    m.Utterance.meeting_id == seeded["meeting_id"]
+                )
+            ).all()
+        )
+        assert set(kept_evidence) <= live, "승인된 후보의 근거가 끊어졌습니다"

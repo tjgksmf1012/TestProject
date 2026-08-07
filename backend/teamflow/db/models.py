@@ -73,7 +73,48 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     # 시스템 권한: student | instructor | admin
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="student")
+    # scrypt 해시. 형식은 `auth/passwords.py` 참조.
+    #
+    # nullable 인 이유: 인증이 생기기 전에 만들어진 사용자가 있고, 그 사람들은
+    # 비밀번호를 설정하기 전까지 **로그인할 수 없어야** 합니다. NULL 을
+    # "비밀번호 없음 = 통과" 로 읽으면 그 계정 전부가 무인증으로 열립니다 —
+    # `verify_password` 가 None 에서 False 를 돌려주는 이유입니다.
+    password_hash: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = _now()
+
+
+class UserSession(Base):
+    """로그인 세션 하나.
+
+    JWT 를 쓰지 않는 이유: **로그아웃이 안 되기 때문**입니다. 서명만으로
+    검증하는 토큰은 만료 전까지 서버가 취소할 수 없습니다. 회의 녹음에
+    접근하는 자격이라 "지금 당장 끊는다" 가 되어야 합니다 — 동의 철회와
+    같은 성격입니다(docs/07 P1).
+
+    DB 조회 한 번이 늘지만 이 규모에서는 문제가 되지 않습니다.
+    """
+
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = _pk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # ⚠️ 토큰 **원문이 아니라 해시**를 저장합니다.
+    #
+    # 원문을 저장하면 DB 를 한 번 읽은 사람이 그 순간부터 모든 사용자로
+    # 로그인할 수 있습니다. 비밀번호를 해싱하면서 세션 토큰을 평문으로
+    # 두면 앞의 노력이 무의미해집니다 — 토큰이 곧 그 계정이기 때문입니다.
+    #
+    # 토큰은 이미 무작위 32바이트라 사전 공격이 불가능하므로 scrypt 가
+    # 아니라 sha256 이면 충분합니다(느리게 만들 이유가 없습니다).
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    created_at: Mapped[datetime] = _now()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # 로그아웃 시각. 행을 지우지 않는 이유는 감사 때문입니다 — "누가 언제
+    # 로그인해 있었는가" 는 기여도 분쟁에서 확인할 거리가 됩니다.
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    user_agent: Mapped[str | None] = mapped_column(String(300))
+
+    __table_args__ = (Index("ix_user_sessions_user", "user_id"),)
 
 
 class Project(Base):
@@ -84,6 +125,14 @@ class Project(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # 팀원을 넣는 방법. `member_ids` 를 요청으로 받던 동안에는 **화면에서
+    # 채울 수가 없었습니다** — 사용자는 남의 user_id 를 모릅니다.
+    # 이메일 초대를 안 쓴 이유는 `projects/invites.py` 모듈 주석에 있습니다.
+    #
+    # nullable 인 이유: 이 컬럼이 생기기 전에 만들어진 프로젝트가 있고,
+    # 그 프로젝트는 코드를 발급받기 전까지 **참가할 수 없어야** 합니다.
+    # 빈 코드를 "아무나 통과" 로 읽으면 안 됩니다.
+    invite_code: Mapped[str | None] = mapped_column(String(16), unique=True)
     github_repo: Mapped[str | None] = mapped_column(String(255))
     github_installation_id: Mapped[int | None] = mapped_column(BigInteger)
     # GitHub 연결 시각. 이 이전 기간은 백필로 채우며, 신뢰도 계산에 쓰인다.
@@ -218,6 +267,19 @@ class Meeting(Base):
     # queued    : 전원 종료 → 처리 대기 (이 전이가 중복 큐잉을 막는 자물쇠다)
     # processing | needs_review | confirmed | failed
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # LLM이 만든 회의 요약. 근거는 utterances 에 남아 있고 여기엔 본문만 둔다.
+    #
+    # 이게 없던 동안 파이프라인은 요약을 만들어 Celery 페이로드에 실어 보낸 뒤
+    # **저장하지 않고 버렸다.** 회의록은 이 시스템의 대표 산출물인데 어디에도
+    # 남지 않았다. 재생성하려면 회의를 통째로 다시 처리해야 하고, 그건 이미
+    # 사람이 검토한 회의에서는 거부된다 — 즉 영구 손실이었다.
+    summary: Mapped[str | None] = mapped_column(Text)
+    # 다음 회의에서 다룰 안건. LLM 이 만들고 검증까지 통과한 산출물인데
+    # **`_serialize` 에 없어서** 파이프라인 밖으로 나온 적이 없었다.
+    #
+    # 근거 발화가 없는 값이라 `MeetingEvent` 가 아니라 회의에 붙인다 —
+    # "다음에 뭘 하기로 했더라" 는 회의 하나의 성질이다.
+    next_agenda: Mapped[list | None] = mapped_column(JSONType)
     # 녹음을 시작한 사람. 통신비밀보호법상 반드시 회의 참석자여야 한다 (docs/07 L1).
     started_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = _now()
@@ -334,6 +396,17 @@ class Decision(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     # 이 결정이 뒤집은 이전 결정 (제안서 5장의 결정 번복 추적)
     supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("decisions.id"))
+    # LLM 이 "이 결정을 뒤집었다" 고 적어 보낸 **원문**.
+    #
+    # ⚠️ 이 컬럼이 없던 동안 `supersedes` 는 Celery 페이로드까지 실려 오고
+    # 저장 단계에서 버려졌습니다 — `supersedes_id` 는 **영원히 NULL** 이었고,
+    # 결정 번복 추적은 표만 있고 데이터가 없는 기능이었습니다.
+    #
+    # id 를 못 찾았을 때 힌트를 지우지 않고 남기는 이유: LLM 에게 넘긴
+    # `prior_decisions` 는 우리가 준 원문 목록이라 대개 정확히 일치하지만,
+    # 바꿔 쓰면 못 찾습니다. 그때 **추측해서 아무 결정이나 뒤집힌 것으로
+    # 표시하면** 회의 기록이 틀려집니다. 사람이 보고 고칠 수 있게 남깁니다.
+    supersedes_hint: Mapped[str | None] = mapped_column(Text)
     evidence_utterance_ids: Mapped[list | None] = mapped_column(BigIntArray)
     confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = _now()
@@ -360,6 +433,13 @@ class MeetingTaskCandidate(Base):
     evidence_utterance_ids: Mapped[list] = mapped_column(
         BigIntArray, nullable=False
     )
+    # 확신도를 **깎은 이유**. validation 이 후보마다 만든다.
+    #
+    # 확신도 0.34 만 보여주면 사람은 무엇을 확인해야 할지 모른다. "담당자
+    # 미확정 — 이름이 두 명과 일치" 와 "마감일이 회의일보다 이전" 은 손봐야
+    # 할 곳이 전혀 다르다. 검토 화면은 사람이 개입하는 유일한 지점이라,
+    # 여기서 이유를 잃으면 사람은 근거 없이 승인하게 된다.
+    warnings: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     # pending | approved | rejected
     review_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
@@ -579,6 +659,18 @@ class AudioAsset(Base):
         DateTime(timezone=True), nullable=False
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ⚠️ **왜 지웠는가.** `deleted_at` 만으로는 구분할 수 없다.
+    #
+    #   retention_expired  보존기간 30일이 지나 자동으로 지웠다
+    #   user_request       본인이 삭제를 요청했다 (docs/07 P6)
+    #
+    # 이 구분이 필요한 이유는 기여도 화면에 있다. 원본이 없어진 트랙은
+    # 재처리해도 발화가 안 나오는데, 그 상태를 "말을 안 한 사람" 으로
+    # 처리하면 측정이 아니라 오답이다 (docs/04 §2.6). 그런데 **왜 없어졌는지에
+    # 따라 사람이 할 일이 다르다** — 만료는 정상이고, 삭제 요청은 권리
+    # 행사이며, 어느 쪽도 "다음엔 화면을 켜 두자" 로 고칠 수 없다.
+    # 녹음이 끊긴 것과는 다른 문구가 나가야 한다.
+    deleted_reason: Mapped[str | None] = mapped_column(String(30))
     created_at: Mapped[datetime] = _now()
 
     __table_args__ = (

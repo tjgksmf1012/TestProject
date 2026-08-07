@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 웹 쪽 app.css 의 --accent 와 같은 값. 앱 아이콘과 화면이
+         다른 파랑이면 같은 앱으로 안 보입니다. -->
+    <color name="ic_launcher_background">#2563EB</color>
+</resources>

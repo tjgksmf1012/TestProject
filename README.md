@@ -90,6 +90,9 @@
 | [10. 열린 질문](docs/10-열린-질문.md) | 결정이 필요한 10가지 |
 | [11. 비용 제로 구성](docs/11-비용-제로-구성.md) | 전 구성요소 비용 감사, 함정 4개, 학생 무료 리소스 |
 | [12. CCTV 영상 기반 화자판정](docs/12-CCTV-영상-기반-화자판정.md) | 모드 C 법적·기술 검토, 모드 비교, 융합 설계 |
+| [13. 화면 구조 (IA)](docs/13-화면-구조.md) | 화면 일곱 개가 어떻게 이어지는가, 각 화면의 책임, 아직 없는 화면 |
+| [15. PC 우선 방향](docs/15-PC-우선-방향.md) | **지금 방향** — 브라우저 통화로 회의, GitHub 최우선, 모바일은 보류 |
+| [14. 모바일](docs/14-모바일.md) | 왜 앱이어야 하는가, PWA + 안드로이드 셸, 폰 기준 UI/UX, 비용 근거 |
 | [원본 자료](docs/원본자료/) | ChatGPT 대화 전문, 제안서 텍스트 추출본 |
 
 ---
@@ -153,15 +156,36 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 팀원 명단 API (승인 화면용) | ✅ | `backend/teamflow/api/main.py` |
 | **녹음 종료 → 회의 처리 큐잉** | ✅ | `backend/teamflow/tasks/dispatch.py` |
 | 녹음 방식별 로더 선택 (모드 A/B) | ✅ | `backend/teamflow/pipeline/runtime.py` |
+| **동의 제출·철회 API + 3중 게이트** | ✅ | `backend/teamflow/services/recording_service.py` |
+| **프로젝트·회의 생성 API** | ✅ | `backend/teamflow/api/main.py` |
+| **시연 데이터 + 가짜 ASR** | ✅ | `scripts/seed_demo.py`, `ASR_BACKEND=fake` |
+| 화면·API 한 오리진 (StaticFiles 마운트) | ✅ | `backend/teamflow/api/main.py` |
+| **회의 로비 화면** (동의·트랙 상태·강제 종료) | ✅ | `frontend/src/lib/lobby/`, `public/lobby.html` |
+| **회의 요약·경고·정렬값 저장** | ✅ | `backend/teamflow/tasks/meeting_tasks.py` |
+| **로그 설정** (text/json, 개인정보 차단) | ✅ | `backend/teamflow/logging_config.py` |
+| **인증·세션** (scrypt · 세션 쿠키 · 구성원 확인) | ✅ | `backend/teamflow/auth/`, `services/auth_service.py` |
+| **기여도 화면** (구간·근거·측정 불가 표시, 순위 없음) | ✅ | `frontend/src/lib/contribution/`, `public/contributions.html` |
+| **칸반 화면 + 업무 API** (회의 근거 표시) | ✅ | `frontend/src/lib/kanban/`, `public/kanban.html` |
+| **첫 화면** (내 프로젝트·회의·다음 할 일) | ✅ | `frontend/src/lib/home/`, `public/home.html` |
+| **화면 간 이동** (막다른 길 없음) | ✅ | `frontend/src/lib/nav/`, [docs/13](docs/13-화면-구조.md) |
+| **모바일 우선 화면 + 앱 설치(PWA)** | ✅ (보류) | `frontend/public/app.css`·`sw.js`, [docs/14](docs/14-모바일.md) |
+| **안드로이드 셸** (화면 꺼도 녹음 유지) | 🔨 빌드 미확인 (보류) | `android/`, [docs/14](docs/14-모바일.md) |
+| **브라우저 통화로 회의** (WebRTC) | ❌ 다음 작업 | [docs/15](docs/15-PC-우선-방향.md) |
+| 프로젝트 만들기·회의 열기 **화면** | ⬜ | API 는 있음. 가입 후 첫 사용자가 할 게 없습니다 |
+| **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
+| **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ⚠️ 실측 미검증 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 592 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 937 passed
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 198 passed, 설치 불필요
+cd frontend && npm test                          # 472 passed, 설치 불필요
 cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
+.venv/bin/python scripts/make_icons.py           # 앱 아이콘 (stdlib 만 씀)
+
+cd android && ./gradlew assembleDebug             # 안드로이드 셸 APK — docs/14
 
 cp .env.example .env                             # 시크릿 채우기
 docker compose up -d postgres redis              # 인프라
@@ -170,10 +194,49 @@ DATABASE_URL=... .venv/bin/alembic upgrade head   # 스키마 생성
 docker compose --profile app --profile llm up -d  # 앱 + LLM
 ```
 
+### 지금 바로 열어보기 (GPU 없이)
+
+```bash
+.venv/bin/python scripts/seed_demo.py            # 시연용 회의 하나 만들기
+ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend --reload
+```
+
+- `http://localhost:8000/home.html` — **여기부터.** 내 프로젝트와 회의, 다음에 할 일
+- `http://localhost:8000/lobby.html?meeting=1` — **회의 로비** (동의 → 상태 → 종료)
+- `http://localhost:8000/?meeting=1` — 녹음 화면 (서버 트랙에 참가)
+- `http://localhost:8000/` — 녹음 화면 (서버 없이, 실기기 실험 5)
+- `http://localhost:8000/review.html?meeting=1` — 업무 후보 승인 화면
+- `http://localhost:8000/kanban.html?project=1&meeting=1` — **칸반** (회의 근거가 붙은 업무)
+- `http://localhost:8000/contributions.html?project=1&meeting=1` — **기여도**
+
+**주소에 자기가 누구인지 적지 않습니다.** 로그인 화면으로 넘어가고, 그
+뒤로는 서버가 세션 쿠키에서 신원을 읽습니다. 시연 계정은 `seed_demo.py` 가
+찍어 줍니다 (비밀번호 `teamflow-demo`).
+
+로비부터 여세요. 팀원마다 다른 브라우저(또는 시크릿 창)로 각자 로그인해
+동의하면 녹음 버튼이 열립니다. 회의 중에는 **누구의 폰이 끊기고 있는지**가
+여기 뜹니다 — 끝난 뒤에 알면 그 발언은 이미 사라진 뒤입니다.
+
+**화면과 API 가 같은 오리진에서 나옵니다.** FastAPI 가 `frontend/public` 을
+`/` 에 마운트하므로 터널 하나로 끝나고 CORS 설정이 필요 없습니다 — 폰에서
+`getUserMedia()` 를 열려면 페이지와 API 를 둘 다 HTTPS 로 잡아야 하는데,
+화면을 별도 서버에 두면 터널이 둘 필요합니다.
+
+승인 화면의 후보 3건은 성격이 일부러 다릅니다 — 바로 승인 가능한 것,
+담당자가 안 풀린 것, 확신도 0.34 짜리. **이 화면의 값어치는 "전부 승인"이
+아니라 사람이 고쳐야 할 것을 골라내는 데** 있습니다.
+
+> ⚠️ `ASR_BACKEND=fake` 는 오디오를 읽지 않고 대본을 돌려줍니다. 시연·개발
+> 전용이며 `/health` 에 그대로 노출되므로 켜져 있으면 바로 보입니다.
+
 > ⚠️ `--profile llm` 을 빼면 회의 처리가 **분석 단계에서 전부 실패합니다.**
 > ASR 까지는 돌고 요약·업무추출에서 연결 거부가 납니다.
 > `app` 프로필에는 `beat` 도 들어 있습니다 — 이게 없으면 보존기간이 지난
 > 원본 오디오가 **영영 삭제되지 않습니다** (법적 요구사항, docs/07 P5).
+>
+> GPU 가 있으면 `--profile gpu` 를 더합니다. 없어도 `app` 의 워커가 `gpu`
+> 큐까지 읽으므로 전 구간이 돕니다 — 다만 ASR·화자분리는 CPU 로 돌아
+> 느립니다.
 
 **핵심 흐름이 전 구간 테스트로 검증됩니다.** `test_end_to_end.py` 는 **폰이 HTTP로 올린
 청크가 칸반 업무가 될 때까지**를 한 번에 돌립니다 — 가짜로 바꾸는 건 이 환경에 없는 셋

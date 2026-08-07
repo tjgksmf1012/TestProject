@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<!-- 홈 화면에 추가하면 주소창 없이 전체화면으로 뜬다. -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/app.css" />
+<title>로그인 — TeamFlow</title>
+<style>
+
+  #submit { background: #2563eb; color: #fff; border-color: #2563eb; font-weight: 600; margin-top: .5rem; }
+  #submit:disabled { opacity: .6; cursor: progress; }
+  #toggle { border: 0; color: var(--dim); margin-top: .75rem; text-decoration: underline; }
+
+  .error p { margin: .125rem 0; }
+
+</style>
+</head>
+<body class="no-tabs">
+  <h1 id="title">로그인</h1>
+  <p class="sub">회의 녹음과 기여도는 팀 내부 자료라 로그인이 필요합니다.</p>
+
+  <div id="error" class="error" hidden></div>
+
+  <form id="form">
+    <label id="name-row" hidden>이름
+      <input id="name" type="text" autocomplete="name" />
+    </label>
+    <label>이메일
+      <input id="email" type="email" autocomplete="email" inputmode="email" />
+    </label>
+    <label>비밀번호
+      <input id="password" type="password" autocomplete="current-password" />
+    </label>
+    <button id="submit" type="submit">로그인</button>
+  </form>
+  <button id="toggle" type="button">처음이신가요? 가입하기</button>
+
+  <p class="note">
+    비밀번호는 scrypt 로 해싱해 저장하고, 세션 토큰은 원문이 아니라
+    해시만 남깁니다. 로그아웃하면 서버에서 세션을 끊습니다.
+  </p>
+
+  <script type="module" src="/login.js"></script>
+</body>
+</html>

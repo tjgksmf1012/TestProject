@@ -8,7 +8,7 @@
 
 ```bash
 cd frontend
-npm test          # 설치 없이 바로 돌아갑니다
+npm test          # 235개, 설치 없이 바로 돌아갑니다
 ```
 
 **테스트는 의존성 0개입니다.** Node 22.18+ 가 TypeScript 를 그대로 실행하고
@@ -33,9 +33,19 @@ npm run check     # 타입 검사 + 테스트
 
 ```bash
 npm install && npm run build:demo
-npm run serve                                  # localhost:3000
-cloudflared tunnel --url http://localhost:3000  # → https 주소 (무료)
 ```
+
+그다음 **백엔드를 띄웁니다.** FastAPI 가 `public/` 을 `/` 에 마운트하므로
+터널 하나로 끝납니다 — 화면을 별도 서버에 두면 API 와 오리진이 달라져
+CORS 설정과 터널 둘이 필요합니다.
+
+```bash
+cd .. && ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend
+cloudflared tunnel --url http://localhost:8000  # → https 주소 (무료)
+```
+
+`npm run serve` 로 정적 서버만 띄울 수도 있지만, 그건 서버 없이 도는
+녹음 화면(`/`)만 볼 때 얘기입니다. 승인 화면은 API 가 필요합니다.
 
 폰에서 그 https 주소를 열면 됩니다. **서버 없이도 동작합니다** — 시각
 동기화와 업로드를 로컬에서 흉내 내므로 폰만 있으면 커버리지와 공백 원인을
@@ -124,12 +134,16 @@ WebKit 의 제약입니다. Screen Wake Lock(iOS 16.4+)으로 완화할 수 있�
 |---|---|
 | clock / timeline / upload-queue / session / capture / client | ✅ 160개 테스트 |
 | review/candidates (승인 규칙·페이로드) | ✅ 38개 테스트 |
+| html (속성 자리 이스케이프) | ✅ 12개 테스트 |
+| lobby/room (동의 판정·트랙 건강도·종료 가능 여부) | ✅ 25개 테스트 |
 | browser-adapter.ts — HTTP 전송기 | ✅ fetch 를 갈아끼워 검증 |
 | browser-adapter.ts — 미디어 어댑터 | ⚠️ 문법 로딩만 확인. 실기기 확인 필요 |
 | iOS Safari 실제 중단 동작 | ⚠️ 문헌 근거만. 실측 필요 |
 | 타입 검사 (`tsc --noEmit`, strict) | ✅ 통과 |
 | 실기기 테스트 페이지 (`src/demo/`) | ⚠️ 화면 코드라 자동 테스트 없음 |
 | 승인 화면 (`public/review.html`) | ⚠️ 화면 코드라 자동 테스트 없음 |
+| 회의 로비 (`public/lobby.html`) | ⚠️ 화면 코드라 자동 테스트 없음. API 계약은 백엔드에서 대조 |
+| 화면·API 한 오리진 (FastAPI 가 `public/` 을 `/` 에 마운트) | ✅ 백엔드 테스트로 고정 |
 
 실기기에서 확인해야 하는 항목은 [docs/09 §C](../docs/09-리스크와-검증-실험.md)에
 있습니다.

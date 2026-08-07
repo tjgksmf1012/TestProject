@@ -12,6 +12,7 @@
 import {
   LOW_CONFIDENCE,
   approvalBlockers,
+  attentionReasons,
   buildReviewPayload,
   canSubmit,
   describeBlocker,
@@ -26,7 +27,10 @@ import {
   type Draft,
   type ReviewContext,
 } from '../lib/review/candidates.ts';
+import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { attr, escapeHtml } from '../lib/html.ts';
+import { renderNav } from './nav.ts';
+import { bootApp } from './pwa.ts';
 
 interface Member {
   user_id: number;
@@ -34,14 +38,23 @@ interface Member {
   role_shares: Record<string, number>;
 }
 
+interface MeetingInfo {
+  title: string | null;
+  status: string;
+  summary: string | null;
+}
+
 const params = new URLSearchParams(location.search);
-const apiBase = params.get('api') ?? '';
+// ⚠️ 주소창의 `?api=` 를 그대로 쓰면 **비밀번호와 회의 음성이 어디로
+// 가는지**를 링크 하나로 바꿀 수 있다. safeApiBase 가 진짜 도메인에서는
+// 무시하고, 로컬 화면에서 로컬 서버일 때만 통과시킨다.
+const apiBase = safeApiBase(params.get('api'), location.origin);
 const meetingId = Number(params.get('meeting') ?? '1');
-const reviewerId = Number(params.get('reviewer') ?? '1');
 
 const drafts = new Map<number, Draft>();
 let candidates: Candidate[] = [];
 let members: Member[] = [];
+let meeting: MeetingInfo | null = null;
 let context: ReviewContext = { memberIds: [], today: todayIso() };
 
 /** 로컬 자정 기준 오늘. `toISOString()` 은 UTC 라 한국에서 하루 어긋난다. */
@@ -73,16 +86,30 @@ function update(id: number, patch: Partial<Draft>): void {
 
 // ── 불러오기 ────────────────────────────────────────────────
 
+function goToLogin(): void {
+  location.href = loginUrlFor(location.pathname + location.search);
+}
+
+const get = (path: string): Promise<Response> =>
+  fetch(`${apiBase}${path}`, { credentials: 'same-origin' });
+
 async function load(): Promise<void> {
-  const [candidateRes, memberRes] = await Promise.all([
-    fetch(`${apiBase}/api/meetings/${meetingId}/candidates`),
-    fetch(`${apiBase}/api/meetings/${meetingId}/members`),
+  const [candidateRes, memberRes, meetingRes] = await Promise.all([
+    get(`/api/meetings/${meetingId}/candidates`),
+    get(`/api/meetings/${meetingId}/members`),
+    get(`/api/meetings/${meetingId}`),
   ]);
+  if ([candidateRes, memberRes, meetingRes].some((r) => isSessionExpired(r.status))) {
+    goToLogin();
+    return;
+  }
   if (!candidateRes.ok) throw new Error(`후보 조회 실패 (HTTP ${candidateRes.status})`);
   if (!memberRes.ok) throw new Error(`팀원 조회 실패 (HTTP ${memberRes.status})`);
+  if (!meetingRes.ok) throw new Error(`회의 조회 실패 (HTTP ${meetingRes.status})`);
 
   candidates = sortForReview((await candidateRes.json()) as Candidate[]);
   members = (await memberRes.json()) as Member[];
+  meeting = (await meetingRes.json()) as MeetingInfo;
   context = { memberIds: members.map((m) => m.user_id), today: todayIso() };
   render();
 }
@@ -91,6 +118,12 @@ async function load(): Promise<void> {
 
 function render(): void {
   const summary = summarize(candidates, drafts, context);
+
+  // 요약은 후보를 판단하는 맥락이다. 후보만 보고 승인하면 회의에서
+  // 무슨 얘기가 오갔는지 모른 채 제목만 보고 누르게 된다.
+  const text = meeting?.summary ?? '';
+  $('meeting-summary').hidden = text === '';
+  $('meeting-summary').textContent = text;
 
   $('counts').textContent =
     `전체 ${summary.total} · 승인 ${summary.approving} · 거절 ${summary.rejecting} · ` +
@@ -112,6 +145,7 @@ function render(): void {
 function cardHtml(candidate: Candidate): string {
   const draft = draftOf(candidate.id);
   const blockers = approvalBlockers(candidate, draft, context);
+  const reasons = attentionReasons(candidate);
   const decided = candidate.review_status !== 'pending';
   const low = candidate.confidence < LOW_CONFIDENCE;
 
@@ -146,6 +180,15 @@ function cardHtml(candidate: Candidate): string {
            value="${effectiveDeadline(candidate, draft) ?? ''}" ${decided ? 'disabled' : ''} /></label>
   </div>
 
+  ${
+    // 회의에서 부른 이름을 명단에서 못 찾았을 때만 보여준다. 이미 풀린
+    // 담당자 옆에 원문을 또 띄우면 읽을 게 늘 뿐이다.
+    candidate.assignee_hint && assignee === null
+      ? `<p class="hint">회의에서는 <strong>${escapeHtml(candidate.assignee_hint)}</strong>
+           라고 했습니다 — 명단에서 찾지 못했습니다</p>`
+      : ''
+  }
+
   <p class="evidence">
     근거 발화 ${candidate.evidence_utterance_ids.length}건
     ${
@@ -154,6 +197,16 @@ function cardHtml(candidate: Candidate): string {
         : '<strong class="bad">— 회의에 없던 내용일 수 있습니다</strong>'
     }
   </p>
+
+  ${
+    // 서버가 무엇을 확신하지 못했는가. 사람이 화면에서 고쳐도 남는다 —
+    // blockers 와 달리 이건 판정이 아니라 기록이다.
+    reasons.length
+      ? `<ul class="warnings">${reasons
+          .map((r) => `<li>${escapeHtml(r)}</li>`)
+          .join('')}</ul>`
+      : ''
+  }
 
   ${
     blockers.length
@@ -207,7 +260,7 @@ function wireCards(): void {
 $('submit').addEventListener('click', async () => {
   let payload;
   try {
-    payload = buildReviewPayload(reviewerId, candidates, drafts, context);
+    payload = buildReviewPayload(candidates, drafts, context);
   } catch (error) {
     alert(error instanceof Error ? error.message : String(error));
     return;
@@ -217,7 +270,13 @@ $('submit').addEventListener('click', async () => {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    credentials: 'same-origin',
   });
+
+  if (isSessionExpired(response.status)) {
+    goToLogin();
+    return;
+  }
 
   if (!response.ok) {
     $('result').textContent = `제출 실패 (HTTP ${response.status})`;
@@ -242,7 +301,23 @@ $('submit').addEventListener('click', async () => {
   await load();
 });
 
-load().catch((error: unknown) => {
+async function start(): Promise<void> {
+  const response = await get('/api/auth/me');
+  if (!response.ok) {
+    goToLogin();
+    return;
+  }
+  const me = (await response.json()) as Me;
+  $('who').textContent = `${me.name} 님이 검토하고 있습니다`;
+  await load();
+}
+
+start().catch((error: unknown) => {
   $('result').className = 'bad';
   $('result').textContent = error instanceof Error ? error.message : String(error);
 });
+
+renderNav('review');
+
+// 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
+bootApp();

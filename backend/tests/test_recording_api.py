@@ -24,6 +24,8 @@ from teamflow.config import Settings, get_settings
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
+from .conftest import login_as
+
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 NOW_MS = int(NOW.timestamp() * 1000)
 TIMESLICE = 5_000
@@ -194,6 +196,15 @@ def meeting(engine) -> dict[str, int]:
         s.add(project)
         s.flush()
 
+        # 프로젝트 구성원으로 등록한다. 예전 픽스처는 이걸 빠뜨렸고, 그래서
+        # "동의만 있으면 남의 회의에도 들어갈 수 있다" 는 구멍이 보이지 않았다.
+        for user in users:
+            s.add(
+                m.Member(
+                    project_id=project.id, user_id=user.id, role_shares={"developer": 1.0}
+                )
+            )
+
         meeting = m.Meeting(
             project_id=project.id, started_at=NOW, started_by=users[0].id
         )
@@ -216,9 +227,12 @@ def grant_consent(user_ids: list[int], meeting_id: int, *, consented: bool = Tru
 
 
 def join(client: TestClient, meeting_id: int, user_id: int):
+    # 이제 서버가 "누가 요청했는가" 를 세션에서 읽는다. 트랙 주인을 요청
+    # 본문으로 정할 수 없으므로, 그 사람으로 로그인한 뒤 참가한다.
+    login_as(client, user_id)
     return client.post(
         f"/api/meetings/{meeting_id}/tracks",
-        json={"user_id": user_id, "started_at": NOW.isoformat(), "device_label": "iPhone"},
+        json={"started_at": NOW.isoformat(), "device_label": "iPhone"},
     )
 
 
@@ -661,6 +675,7 @@ def test_track_list_shows_consent_and_health(
 
 
 def test_track_list_exposes_refusals(client: TestClient, meeting: dict):
+    login_as(client, meeting["user_ids"][0])
     grant_consent(meeting["user_ids"][:2], meeting["meeting_id"])
     grant_consent(meeting["user_ids"][2:], meeting["meeting_id"], consented=False)
 
@@ -827,6 +842,7 @@ def test_finish_is_harmless_when_everyone_already_stopped(
 
 
 def test_finish_on_unknown_meeting_is_404(client: TestClient, meeting: dict):
+    login_as(client, meeting["user_ids"][0])
     assert client.post("/api/meetings/99999/finish").status_code == 404
 
 
@@ -847,3 +863,358 @@ def test_broker_failure_does_not_fail_the_request(client: TestClient, meeting: d
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
     assert response.json()["meeting_queued"] is True
+
+
+# ══════════════════════════════════════════════════════════════
+# 보존기간 — 지울 대상을 아무도 만들지 않던 문제
+# ══════════════════════════════════════════════════════════════
+#
+# 매일 04:00 에 도는 `purge-expired-audio` 는 이 저장소에서 유일하게
+# "법적 요구사항" 이라고 명시된 잡이다(docs/07 P5). 그런데 그 잡은
+# `audio_assets` 만 훑는데 **운영 코드 어디에서도 그 행이 만들어지지
+# 않았다.** 잡은 매일 성공하고 `"오디오 0건 삭제"` 를 남긴다 — 로그를
+# 보는 사람에게는 "지울 게 없었다" 로 읽힌다. 실제로는 생체인식정보인
+# 음성이 30일이 아니라 **무기한** 남아 있었다.
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+def _assets(track_id: int | None = None) -> list[m.AudioAsset]:
+    with db_session.session_scope() as s:
+        rows = s.scalars(select(m.AudioAsset)).all()
+        return [
+            {
+                "id": r.id,
+                "track_id": r.track_id,
+                "storage_key": r.storage_key,
+                "kind": r.kind,
+                "bytes": r.bytes,
+                # SQLite 는 `DateTime(timezone=True)` 를 naive 로 돌려준다
+                # (PostgreSQL 은 aware). 테스트에서 산술을 하므로 여기서
+                # 맞춰 둔다 — 운영 코드는 SQL 비교만 쓰므로 영향이 없다.
+                "retention_until": _aware(r.retention_until),
+                "deleted_at": _aware(r.deleted_at),
+            }
+            for r in rows
+            if track_id is None or r.track_id == track_id
+        ]
+
+
+def test_completing_a_track_registers_it_for_deletion(
+    client: TestClient, track: dict, engine, audio_root: Path
+):
+    """⭐ 녹음이 끝나면 **보존기간 관리 대상이 되어야** 한다.
+
+    등록되지 않으면 삭제 잡이 그 파일에 영영 닿지 않는다. 그런데 잡은
+    매일 성공하므로 아무도 모른다.
+    """
+    for seq in range(4):
+        put_chunk(client, track["meeting_id"], track["track_id"], seq)
+    assert complete(client, track, slices=4).status_code == 200
+
+    rows = _assets(track["track_id"])
+    assert len(rows) == 1, "녹음 원본이 보존 대상으로 등록되지 않았습니다"
+
+    asset = rows[0]
+    assert asset["kind"] == "raw"
+    assert asset["bytes"] == len(CHUNK) * 4
+    assert asset["deleted_at"] is None
+
+    # ⭐ storage_key 가 **실제 파일이 있는 곳**을 가리켜야 한다.
+    # 안 그러면 삭제 잡이 "이미 없음" 으로 읽고 매일 조용히 성공한다.
+    target = audio_root / asset["storage_key"]
+    assert target.is_dir(), f"{target} 이 없습니다"
+    assert sorted(p.name for p in target.iterdir()) == [
+        "000000.chunk",
+        "000001.chunk",
+        "000002.chunk",
+        "000003.chunk",
+    ]
+
+
+def test_retention_clock_uses_the_configured_days(
+    client: TestClient, track: dict, engine
+):
+    """⭐ `raw_audio_retention_days` 를 실제로 읽어야 한다.
+
+    설정값이 선언만 되고 읽는 코드가 0곳이었다 — 값을 바꿔도 아무
+    효과가 없었다는 뜻이다.
+    """
+    from teamflow.config import get_settings
+
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+
+    asset = _assets(track["track_id"])[0]
+    days = (asset["retention_until"] - datetime.now(UTC)).days
+    expected = get_settings().raw_audio_retention_days
+    # 하루 오차는 허용한다 — 지금 시각과 등록 시각이 다르다.
+    assert expected - 1 <= days <= expected, f"{days}일 (설정: {expected}일)"
+
+
+def test_registering_twice_does_not_create_two_expiry_clocks(
+    client: TestClient, track: dict, engine
+):
+    """⭐ 종료 요청은 재시도된다 — 두 번 등록되면 안 된다.
+
+    두 행이 같은 디렉터리를 가리키면 **먼저 온 쪽이 지운 뒤 나중 것이
+    실패로 남는다.** 잡의 실패 카운트가 매일 올라가는데 원인은 자기
+    자신이다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+    first = _assets(track["track_id"])
+
+    # 프런트가 응답을 못 받아 다시 보낸 경우.
+    complete(client, track, slices=1)
+
+    second = _assets(track["track_id"])
+    assert len(second) == 1
+    assert second[0]["id"] == first[0]["id"]
+
+
+def test_a_track_with_no_chunks_is_not_registered(
+    client: TestClient, track: dict, engine
+):
+    """청크가 하나도 안 올라온 트랙은 지울 것이 없다.
+
+    등록하면 삭제 잡이 매번 "파일 없음" 을 세고, 그 숫자가 진짜 유실과
+    섞인다.
+    """
+    assert complete(client, track, slices=1).status_code == 200
+    assert _assets(track["track_id"]) == []
+
+
+def test_force_finished_tracks_are_registered_too(
+    client: TestClient, meeting: dict, engine
+):
+    """⭐ 강제 종료한 트랙도 등록해야 한다.
+
+    쓸 수 없는 녹음이어도 **파일은 디스크에 있고, 그건 지워야 할
+    개인정보다.** 브라우저를 그냥 닫은 사람이 딱 이 경우다.
+    """
+    grant_consent(meeting["user_ids"], meeting["meeting_id"])
+    joined = join(client, meeting["meeting_id"], meeting["user_ids"][0]).json()
+    put_chunk(client, meeting["meeting_id"], joined["track_id"], 0)
+
+    login_as(client, meeting["user_ids"][0])
+    response = client.post(f"/api/meetings/{meeting['meeting_id']}/finish")
+    assert response.status_code == 200, response.text
+    assert joined["track_id"] in response.json()["aborted_track_ids"]
+
+    rows = _assets(joined["track_id"])
+    assert len(rows) == 1, "강제 종료한 트랙의 원본이 등록되지 않았습니다"
+
+
+def test_the_purge_job_actually_deletes_what_recording_registered(
+    client: TestClient, track: dict, engine, audio_root: Path
+):
+    """⭐ 녹음 → 등록 → 삭제가 **한 줄로 이어져야** 한다.
+
+    이 테스트가 이 파일에서 가장 중요하다. 기존 삭제 테스트들은
+    `m.AudioAsset(...)` 을 손으로 만들어 넣고 검증했으므로, **녹음이
+    실제로 그 행을 만드는지는 한 번도 확인하지 않았다.** 구간별로는
+    전부 맞는데 사이가 끊겨 있던, 이 저장소의 대표적인 결함 유형이다.
+    """
+    from teamflow.jobs.retention import purge_expired_audio
+
+    for seq in range(3):
+        put_chunk(client, track["meeting_id"], track["track_id"], seq)
+    assert complete(client, track, slices=3).status_code == 200
+
+    asset = _assets(track["track_id"])[0]
+    target = audio_root / asset["storage_key"]
+    assert target.is_dir()
+
+    # 보존기간이 지난 뒤로 시계를 옮긴다.
+    later = asset["retention_until"] + timedelta(seconds=1)
+    with db_session.session_scope() as s:
+        report = purge_expired_audio(s, storage_root=audio_root, now=later)
+
+    assert report.failed == {}, report.failed
+    assert report.deleted_assets == [asset["id"]]
+    assert report.freed_bytes == len(CHUNK) * 3
+    assert not target.exists(), "파일이 아직 디스크에 있습니다"
+    assert _assets(track["track_id"])[0]["deleted_at"] is not None
+
+
+def test_the_purge_job_leaves_unexpired_recordings_alone(
+    client: TestClient, track: dict, engine, audio_root: Path
+):
+    """아직 안 지난 것은 건드리지 않는다 — 회의 중에 지워지면 안 된다."""
+    from teamflow.jobs.retention import purge_expired_audio
+
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+    asset = _assets(track["track_id"])[0]
+
+    with db_session.session_scope() as s:
+        report = purge_expired_audio(s, storage_root=audio_root, now=datetime.now(UTC))
+
+    assert report.deleted_assets == []
+    assert (audio_root / asset["storage_key"]).is_dir()
+
+
+# ══════════════════════════════════════════════════════════════
+# 개인 삭제 요청 (docs/07 P6) — 구현체는 있는데 부를 방법이 없던 것
+# ══════════════════════════════════════════════════════════════
+
+
+def _project_id(meeting_id: int) -> int:
+    with db_session.session_scope() as s:
+        return s.get(m.Meeting, meeting_id).project_id
+
+
+def test_i_can_delete_my_own_recording(
+    client: TestClient, track: dict, engine, audio_root: Path
+):
+    """⭐ 개인정보보호법상 삭제 요청권을 실행할 방법이 있어야 한다.
+
+    `revoke_user_data` 는 구현돼 있고 테스트도 있었는데 **부르는 곳이
+    한 곳도 없었다.** 요청이 들어오면 사람이 DB 를 직접 손봐야 했다.
+    """
+    for seq in range(3):
+        put_chunk(client, track["meeting_id"], track["track_id"], seq)
+    assert complete(client, track, slices=3).status_code == 200
+
+    asset = _assets(track["track_id"])[0]
+    target = audio_root / asset["storage_key"]
+    assert target.is_dir()
+
+    project_id = _project_id(track["meeting_id"])
+    response = client.post(f"/api/projects/{project_id}/me/data")
+    assert response.status_code == 200, response.text
+
+    body = response.json()
+    assert body["deleted_assets"] == 1
+    assert body["failed"] == {}
+    assert not target.exists(), "파일이 아직 디스크에 있습니다"
+    assert _assets(track["track_id"])[0]["deleted_at"] is not None
+
+
+def test_nobody_else_can_delete_my_recording(
+    client: TestClient, track: dict, meeting: dict, engine, audio_root: Path
+):
+    """⭐ 남이 대신 지울 수 없다 — 기여도 근거를 남이 없앨 수 있다.
+
+    동의와 같은 성격이다. `ConsentIn` 에서 `user_id` 를 뺀 것과 같은 이유다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+    asset = _assets(track["track_id"])[0]
+
+    # 같은 팀의 **다른 사람**으로 로그인한다.
+    login_as(client, meeting["user_ids"][1])
+    project_id = _project_id(track["meeting_id"])
+    response = client.post(f"/api/projects/{project_id}/me/data")
+
+    # 요청 자체는 성공하지만 **자기 것만** 지운다 — 그 사람은 녹음이 없다.
+    assert response.status_code == 200, response.text
+    assert response.json()["deleted_assets"] == 0
+    assert (audio_root / asset["storage_key"]).is_dir(), "남의 녹음이 지워졌습니다"
+    assert _assets(track["track_id"])[0]["deleted_at"] is None
+
+
+def test_outsiders_cannot_touch_the_project_at_all(
+    client: TestClient, track: dict, engine
+):
+    """외부인은 403. 프로젝트 존재 여부조차 알려 주지 않는다."""
+    with db_session.session_scope() as s:
+        outsider = m.User(name="외부인", email="out@example.com")
+        s.add(outsider)
+        s.flush()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    project_id = _project_id(track["meeting_id"])
+    assert client.post(f"/api/projects/{project_id}/me/data").status_code == 403
+
+
+def test_deleting_leaves_the_transcript_and_says_so(
+    client: TestClient, track: dict, engine
+):
+    """⭐ 전사 텍스트는 남기고, **남는다고 말한다.**
+
+    그건 다른 참석자의 회의록이기도 하다 — 한 사람의 요청으로 팀 전체의
+    회의 기록이 사라지면 안 된다. 다만 사람이 "다 지워졌다" 고 오해하면
+    안 되므로 무엇이 남는지 응답에 적는다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+
+    project_id = _project_id(track["meeting_id"])
+    body = client.post(f"/api/projects/{project_id}/me/data").json()
+
+    assert body["kept"], "무엇이 남는지 말하지 않습니다"
+    assert any("전사" in item for item in body["kept"])
+
+
+def test_deleting_nothing_does_not_claim_success(
+    client: TestClient, track: dict, engine
+):
+    """⭐ "0건 삭제" 를 성공으로만 답하면 사람은 지워진 줄 안다.
+
+    이 저장소에서 반복해서 나온 "없는 것을 빈 것으로 답하는" 결함이다.
+    """
+    project_id = _project_id(track["meeting_id"])
+    body = client.post(f"/api/projects/{project_id}/me/data").json()
+
+    assert body["deleted_assets"] == 0
+    assert "없습니다" in body["message"]
+
+
+def test_deletion_leaves_an_audit_trail(client: TestClient, track: dict, engine):
+    """⭐ 삭제는 감사 대상이다.
+
+    원본이 지워지면 그 사람의 회의 기여가 **측정 불가**가 되는데, 화면에서
+    그건 "폰이 죽어서 못 쟀다" 와 똑같이 보인다. 감사 로그가 그 둘을
+    구분할 수 있는 유일한 흔적이다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+
+    project_id = _project_id(track["meeting_id"])
+    assert client.post(f"/api/projects/{project_id}/me/data").status_code == 200
+
+    with db_session.session_scope() as s:
+        logs = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "user_data_revoked")
+        ).all()
+        assert len(logs) == 1
+        assert logs[0].project_id == project_id
+
+
+def test_deleting_my_recording_shows_up_as_unmeasurable_not_zero(
+    client: TestClient, track: dict, engine
+):
+    """⭐ 삭제 → 기여도 화면이 **한 줄로 이어져야** 한다.
+
+    원본을 지워도 트랙 행은 `completed` 로 남는다. 그래서 기여도 계산은
+    그걸 **정상 측정된 트랙으로 센다** — 재처리하면 발화가 0건이라
+    "말을 안 한 사람" 이 된다. 이 시스템이 가장 하지 말아야 할 일이다.
+
+    그리고 사유가 **구분돼야** 한다. "녹음이 끊겼습니다" 는 다음 회의에
+    화면을 켜 두면 고쳐지지만, 삭제 요청은 그렇지 않다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+
+    project_id = _project_id(track["meeting_id"])
+
+    # 삭제 전에는 아무 표시도 없다.
+    before = client.get(f"/api/projects/{project_id}/contributions").json()
+    assert all(not member["measurement_gaps"] for member in before["members"])
+
+    assert client.post(f"/api/projects/{project_id}/me/data").status_code == 200
+
+    after = client.get(f"/api/projects/{project_id}/contributions").json()
+    flagged = [mem for mem in after["members"] if mem["measurement_gaps"]]
+    assert flagged, "삭제한 사람이 측정 불가로 표시되지 않았습니다"
+
+    reason = flagged[0]["measurement_gaps"][0]["reason"]
+    assert "본인 요청" in reason, reason
+    assert "끊" not in reason, reason

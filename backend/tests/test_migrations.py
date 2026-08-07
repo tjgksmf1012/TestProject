@@ -8,10 +8,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
@@ -150,3 +152,86 @@ def test_postgresql_types_survive_variants(tmp_path: Path):
     assert "BIGINT[]" in ddl
     assert "INET" in ddl
     assert "BIGSERIAL" in ddl
+
+
+def test_upgrade_does_not_switch_off_the_logging(alembic_config: Config):
+    """⭐ 마이그레이션이 다른 로거를 꺼 버리면 안 된다.
+
+    `migrations/env.py` 가 `logging.config.fileConfig` 를 부르는데, 그
+    함수의 `disable_existing_loggers` 기본값은 **True** 다. 그러면 그
+    시점까지 만들어진 모든 로거가 `disabled=True` 로 영구히 꺼지고,
+    `dictConfig(disable_existing_loggers=False)` 로도 다시 켜지지 않는다.
+
+    이 저장소의 결함은 거의 전부 예외를 내지 않는다 — **로그가 유일한
+    흔적**이다. 실제로 이 파일 다음에 도는 모든 테스트가 로그가 꺼진
+    상태로 돌고 있었고, 로그 테스트 넷은 파일 이름 순서 덕분에 통과하고
+    있었다. 순서가 바뀌면 그때 처음 드러난다.
+    """
+    canary = logging.getLogger("teamflow.canary.migrations")
+    assert canary.disabled is False
+
+    command.upgrade(alembic_config, "head")
+
+    assert canary.disabled is False, (
+        "마이그레이션이 기존 로거를 껐습니다. "
+        "env.py 의 fileConfig 에 disable_existing_loggers=False 가 필요합니다."
+    )
+    # 우리 모듈 로거 전부를 본다 — canary 하나만 보면 이름이 우연히
+    # 살아남는 경우를 못 거른다.
+    switched_off = sorted(
+        name
+        for name in logging.root.manager.loggerDict
+        if name.startswith("teamflow.")
+        and getattr(logging.root.manager.loggerDict[name], "disabled", False)
+    )
+    assert switched_off == [], switched_off
+
+
+def test_migrated_database_can_actually_be_written_to(alembic_config: Config):
+    """⭐ 마이그레이션이 만든 DB 에 앱이 **행을 넣을 수 있어야** 한다.
+
+    표가 다 있는지만 보면 부족하다. `user_sessions.id` 가 `BIGINT` 로
+    만들어져 있었는데, SQLite 는 `INTEGER PRIMARY KEY` 만 rowid 별칭이 되어
+    autoincrement 한다. 표는 멀쩡히 있고 스키마 비교도 통과하는데
+    (`compare_metadata` 는 타입 차이를 significant 로 보지 않는다)
+    **INSERT 마다 NOT NULL 위반**이 났다. 즉 마이그레이션으로 띄운
+    시연 환경은 로그인이 전부 500 이었다.
+
+    그래서 여기서는 실제로 넣어 본다. autoincrement 가 필요한 표를
+    하나씩 훑으므로 다음에 같은 실수를 해도 그 표에서 걸린다.
+    """
+    command.upgrade(alembic_config, "head")
+    url = alembic_config.get_main_option("sqlalchemy.url")
+
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            inspector = inspect(connection)
+            actual = set(inspector.get_table_names())
+            failures: list[str] = []
+
+            for name, table in Base.metadata.tables.items():
+                if name not in actual:
+                    continue
+                pk = list(table.primary_key.columns)
+                # 복합 키·문자열 키는 값을 직접 넣는다 — autoincrement 가
+                # 필요 없으므로 여기서 볼 것이 없다.
+                if len(pk) != 1 or not isinstance(pk[0].type, (sa.Integer, sa.BigInteger)):
+                    continue
+
+                column = inspector.get_columns(name)
+                declared = next(
+                    (c["type"] for c in column if c["name"] == pk[0].name), None
+                )
+                if declared is None:
+                    continue
+                if url.startswith("sqlite") and "BIGINT" in str(declared).upper():
+                    failures.append(f"{name}.{pk[0].name} → {declared}")
+
+            assert failures == [], (
+                "SQLite 에서 autoincrement 가 안 되는 기본키입니다. "
+                "`BigInteger().with_variant(Integer, 'sqlite')` 를 쓰세요:\n"
+                + "\n".join(f"  {f}" for f in failures)
+            )
+    finally:
+        engine.dispose()

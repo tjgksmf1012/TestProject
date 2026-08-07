@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<!-- 홈 화면에 추가하면 주소창 없이 전체화면으로 뜬다. -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/app.css" />
+<title>회의 로비 — TeamFlow</title>
+<style>
+
+  section { border: 1px solid var(--line); border-radius: .625rem; padding: .875rem 1rem; margin-bottom: 1rem; }
+
+  li { display: flex; align-items: baseline; gap: .5rem; padding: .5rem 0; border-top: 1px solid var(--line); }
+  li:first-child { border-top: 0; }
+  .name { font-weight: 600; min-width: 4.5rem; }
+  .state { font-size: .8125rem; color: var(--dim); flex: 1; }
+  .granted { color: var(--ok); } .refused { color: var(--bad); } .pending { color: var(--warn); }
+  .broken .state, .at_risk .state { color: var(--warn); }
+  .broken .state { color: var(--bad); }
+
+  button.primary:disabled { background: transparent; color: var(--dim); border-color: var(--line); font-weight: 400; cursor: not-allowed; }
+  button + button { margin-top: .5rem; }
+ .row button { margin-top: 0; }
+  .blockers { margin: 0 0 .75rem; padding: .625rem .875rem; border-radius: .5rem; background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: .875rem; }
+  .blockers p { margin: .125rem 0; }
+  .status { font-size: .875rem; color: var(--dim); margin: .75rem 0 0; }
+    </style>
+</head>
+<body>
+  <h1 id="title">회의 로비</h1>
+  <p class="sub" id="sub">불러오는 중…</p>
+  <p class="sub" id="who"></p>
+
+  <section>
+    <h2>동의</h2>
+    <div id="blockers" class="blockers" hidden></div>
+    <ul id="roster"></ul>
+    <div class="row" style="margin-top:.75rem">
+      <button id="agree" class="primary">동의합니다</button>
+      <button id="refuse">거부</button>
+    </div>
+    <p class="status" id="consent-message"></p>
+  </section>
+
+  <section>
+    <h2>참가자 상태</h2>
+    <ul id="members"></ul>
+    <p class="status" id="room-message"></p>
+  </section>
+
+  <section>
+    <button id="record" class="primary" disabled>녹음 화면으로</button>
+    <button id="finish" hidden>강제 종료</button>
+    <button id="review" hidden>업무 후보 검토</button>
+    <button id="kanban">칸반 보기</button>
+    <button id="contrib">기여도 보기</button>
+    <button id="logout">로그아웃</button>
+  </section>
+
+  <p class="note">
+    주소에는 <code>?meeting=1</code> 만 붙습니다. <strong>내가 누구인지는
+    서버가 세션에서 읽습니다</strong> — 예전에는 <code>?me=1</code> 로
+    스스로 선언했고, 그래서 누구나 남을 사칭할 수 있었습니다.
+  </p>
+
+  <script type="module" src="/lobby.js"></script>
+
+  <!-- 아래 탭바. `src/demo/nav.ts` 가 채운다.
+       위쪽 링크 줄에 의존하면 전체화면 PWA·WebView 에서 갇힌다 —
+       거기에는 주소창도 뒤로가기도 없다. -->
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
+</html>

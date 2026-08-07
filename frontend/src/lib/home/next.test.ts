@@ -1,0 +1,190 @@
+import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import {
+  describeMeetingStatus,
+  describeProject,
+  emptyProjectsMessage,
+  formatMeetingTime,
+  nextStepFor,
+  orderProjects,
+  type Meeting,
+  type Project,
+} from './next.ts';
+
+function meeting(over: Partial<Meeting> = {}): Meeting {
+  return {
+    meeting_id: 7,
+    title: '1주차 정기회의',
+    status: 'needs_review',
+    started_at: '2026-09-01T01:00:00Z',
+    pending_candidates: 3,
+    ...over,
+  };
+}
+
+function project(over: Partial<Project> = {}): Project {
+  return {
+    project_id: 1,
+    title: 'TeamFlow',
+    member_count: 3,
+    meeting_count: 2,
+    needs_review: 0,
+    ...over,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+// 어디로 보낼 것인가
+// ══════════════════════════════════════════════════════════════
+
+describe('nextStepFor', () => {
+  it('녹음 전이면 로비로', () => {
+    const step = nextStepFor(meeting({ status: 'pending' }));
+    strictEqual(step.href, '/lobby.html?meeting=7');
+    strictEqual(step.actionable, true);
+  });
+
+  it('검토할 후보가 있으면 승인 화면으로 — 몇 건인지 같이', () => {
+    const step = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 3 }));
+    strictEqual(step.href, '/review.html?meeting=7');
+    strictEqual(step.label.includes('3건'), true);
+    strictEqual(step.actionable, true);
+  });
+
+  it('⭐ needs_review 인데 후보가 0건이면 승인 화면으로 보내지 않는다', () => {
+    // 보내면 빈 목록이 뜨고 사용자는 화면이 고장 났다고 생각한다.
+    // 실제로는 "AI 가 업무로 뽑을 만한 게 없었다" 이고 그건 정상이다.
+    const step = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 0 }));
+    strictEqual(step.href.includes('review.html'), false);
+    strictEqual(step.actionable, false);
+    strictEqual(step.reason.includes('업무가 나오지 않았습니다'), true);
+  });
+
+  it('⭐ 처리 중이면 버튼을 만들지 않는다', () => {
+    // 눌러도 아직 아무것도 없는 곳으로 갈 뿐이다.
+    for (const status of ['queued', 'processing']) {
+      const step = nextStepFor(meeting({ status }));
+      strictEqual(step.href, '', status);
+      strictEqual(step.actionable, false, status);
+      strictEqual(step.reason.includes('처리 중'), true, status);
+    }
+  });
+
+  it('검토를 마쳤으면 칸반으로', () => {
+    strictEqual(nextStepFor(meeting({ status: 'confirmed' })).href, '/kanban.html?meeting=7');
+  });
+
+  it('⭐ 실패한 회의는 트랙을 확인하게 보낸다', () => {
+    // 실패의 가장 흔한 원인이 트랙이 비었거나 망가진 것이다.
+    const step = nextStepFor(meeting({ status: 'failed' }));
+    strictEqual(step.href.includes('lobby.html'), true);
+    strictEqual(step.reason.includes('트랙'), true);
+  });
+
+  it('⭐ 모르는 상태를 숨기지 않는다', () => {
+    // 숨기면 그 회의가 화면에서 사라진다. 상태 값이 늘거나 데이터가
+    // 손상됐을 때 가장 확인이 필요한 회의가 바로 그것이다.
+    const step = nextStepFor(meeting({ status: 'archived' }));
+    strictEqual(step.reason.includes('archived'), true);
+    strictEqual(step.href.length > 0, true);
+  });
+
+  it('버튼이 없어도 이유는 항상 있다', () => {
+    for (const status of ['pending', 'queued', 'processing', 'needs_review', 'confirmed', 'failed', '무엇']) {
+      strictEqual(nextStepFor(meeting({ status })).reason.length > 0, true, status);
+    }
+  });
+});
+
+describe('describeMeetingStatus', () => {
+  it('아는 상태는 한국어로', () => {
+    strictEqual(describeMeetingStatus('needs_review'), '검토 필요');
+  });
+
+  it('모르는 것은 그대로 — 삼키면 원인을 못 본다', () => {
+    strictEqual(describeMeetingStatus('archived'), 'archived');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 프로젝트 목록
+// ══════════════════════════════════════════════════════════════
+
+describe('orderProjects', () => {
+  it('⭐ 할 일이 있는 프로젝트를 위로', () => {
+    const ordered = orderProjects([
+      project({ project_id: 1, needs_review: 0 }),
+      project({ project_id: 2, needs_review: 2 }),
+    ]);
+    deepStrictEqual(ordered.map((p) => p.project_id), [2, 1]);
+  });
+
+  it('같은 조건이면 id 순 — 순서가 흔들리면 안 된다', () => {
+    const ordered = orderProjects([
+      project({ project_id: 5, needs_review: 1 }),
+      project({ project_id: 2, needs_review: 3 }),
+    ]);
+    deepStrictEqual(ordered.map((p) => p.project_id), [2, 5]);
+  });
+
+  it('원본을 바꾸지 않는다', () => {
+    const projects = [project({ project_id: 1 }), project({ project_id: 2, needs_review: 1 })];
+    orderProjects(projects);
+    deepStrictEqual(projects.map((p) => p.project_id), [1, 2]);
+  });
+});
+
+describe('describeProject', () => {
+  it('회의가 없으면 그렇게 말한다', () => {
+    strictEqual(
+      describeProject(project({ meeting_count: 0 })).includes('아직 회의가 없습니다'),
+      true,
+    );
+  });
+
+  it('⭐ 할 일이 있으면 그 숫자를 말한다', () => {
+    const text = describeProject(project({ needs_review: 2 }));
+    strictEqual(text.includes('검토할 회의 2개'), true);
+  });
+
+  it('할 일이 없으면 검토 문구를 붙이지 않는다', () => {
+    strictEqual(describeProject(project({ needs_review: 0 })).includes('검토할'), false);
+  });
+});
+
+describe('emptyProjectsMessage', () => {
+  it('⭐ "없습니다" 로 끝내지 않고 다음 할 일을 말한다', () => {
+    const text = emptyProjectsMessage();
+    strictEqual(text.includes('없습니다'), true);
+    strictEqual(text.includes('만들'), true);
+  });
+
+  it('⭐ 남을 기다리라고 하지 않는다 — 그 남도 같은 화면을 보고 있다', () => {
+    // 예전 문구는 "팀원 중 한 명이 만들고 당신을 넣어야 합니다" 였다.
+    // 모두가 서로를 기다리다 아무도 시작하지 못한다.
+    const text = emptyProjectsMessage();
+    strictEqual(/기다|팀원 중 한 명/.test(text), false);
+    strictEqual(text.includes('초대 코드'), true);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 시각
+// ══════════════════════════════════════════════════════════════
+
+describe('formatMeetingTime', () => {
+  it('⭐ 로컬 시간대로 보여준다', () => {
+    // 서버는 UTC 로 준다. 그대로 쓰면 한국에서 9시간 어긋나 오전 회의가
+    // 전날로 보인다. 이 테스트는 시간대가 무엇이든 "UTC 문자열 그대로가
+    // 아니다" 만 확인한다 — CI 시간대에 흔들리면 안 된다.
+    const shown = formatMeetingTime('2026-09-01T01:00:00Z');
+    strictEqual(shown.includes('T'), false);
+    strictEqual(shown.includes('Z'), false);
+    strictEqual(shown.length > 0, true);
+  });
+
+  it('망가진 값은 그대로 보여준다 — 삼키지 않는다', () => {
+    strictEqual(formatMeetingTime('어제'), '어제');
+  });
+});

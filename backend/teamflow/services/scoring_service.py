@@ -30,6 +30,7 @@ from teamflow.contribution.profiles import (
 )
 from teamflow.contribution.scoring import MeasurementGap, TeamScoreResult, score_team
 from teamflow.db import models as m
+from teamflow.jobs import retention
 
 
 def load_events(session: Session, project_id: int) -> dict[int, list[ContributionEvent]]:
@@ -229,7 +230,115 @@ def load_measurement_gaps(
                 detail={"tracks_total": total, "tracks_usable": usable},
             )
         ]
+
+    for user_id, gap in _gaps_from_deleted_audio(session, project_id).items():
+        # 녹음이 끊긴 사람이 삭제까지 했으면 둘 다 적는다. 둘은 다른
+        # 사실이고, 화면이 한쪽만 보여주면 나머지 하나가 사라진다.
+        gaps.setdefault(user_id, []).append(gap)
     return gaps
+
+
+#: `deleted_reason` 별 문구.
+#:
+#: ⭐ **"녹음이 끊겼습니다" 와 같은 말을 쓰면 안 된다.** 끊긴 것은 다음 회의에
+#: 화면을 켜 두면 고쳐지지만, 만료와 삭제 요청은 그렇지 않다. 같은 문구가
+#: 나가면 팀이 엉뚱한 대응을 하고, 삭제를 요청한 사람은 자기 권리 행사가
+#: 사고처럼 적힌 것을 보게 된다.
+_DELETION_REASON_TEXT = {
+    retention.REASON_USER_REQUEST: (
+        "본인 요청으로 녹음 원본을 삭제했습니다 (개인정보 삭제 요청). "
+        "발언량을 측정할 수 없어 회의 기여도를 계산에서 제외했습니다"
+    ),
+    retention.REASON_RETENTION_EXPIRED: (
+        "보존기간이 지나 녹음 원본이 삭제됐습니다. "
+        "발언량을 측정할 수 없어 회의 기여도를 계산에서 제외했습니다"
+    ),
+}
+
+_DELETION_REASON_UNKNOWN = (
+    "녹음 원본이 삭제됐습니다 (사유 미기록). "
+    "발언량을 측정할 수 없어 회의 기여도를 계산에서 제외했습니다"
+)
+
+
+def _gaps_from_deleted_audio(
+    session: Session, project_id: int
+) -> dict[int, MeasurementGap]:
+    """원본이 지워져 **다시는 잴 수 없는** 회의 기여를 찾는다.
+
+    ## 왜 필요한가
+
+    ⚠️ 원본을 지워도 트랙 행은 `status='completed'` 로 남습니다. 그래서
+    위쪽 검사는 그걸 **정상 측정된 트랙으로 셉니다.** 아직 처리되지 않은
+    회의였다면 그 사람의 발화는 0건이 되고, 결과는 측정 불가가 아니라
+    **사실상 0점**입니다 — "말을 안 한 사람" 과 구분되지 않습니다.
+
+    이건 이 시스템이 가장 하지 말아야 할 일입니다 (docs/04 §2.6,
+    docs/05 §5 — 측정 불가는 0점이 아니다).
+
+    ## 이미 처리된 회의는 건드리지 않는다
+
+    전사 텍스트가 남아 있으면 회의 기여는 **측정된 것**입니다. 원본만
+    없을 뿐입니다. 그걸 측정 불가로 만들면 정당하게 잰 값을 지우는 셈이고,
+    그건 반대 방향의 오답입니다.
+
+    그래서 **발화가 하나도 없는 트랙만** 대상입니다. 판단 기준을 "삭제
+    여부" 가 아니라 "잴 수 있는 근거가 남아 있는가" 로 둡니다.
+
+    ## 사유를 구분해서 돌려준다
+
+    만료·삭제 요청·녹음 끊김은 사람이 할 일이 전부 다릅니다. `reason`
+    문자열이 화면까지 그대로 갑니다 (`contribution/view.ts`).
+    """
+    deleted = session.execute(
+        select(
+            m.MeetingTrack.user_id,
+            m.AudioAsset.track_id,
+            m.AudioAsset.deleted_reason,
+        )
+        .join(m.MeetingTrack, m.MeetingTrack.id == m.AudioAsset.track_id)
+        .join(m.Meeting, m.Meeting.id == m.MeetingTrack.meeting_id)
+        .where(
+            m.Meeting.project_id == project_id,
+            m.AudioAsset.kind == "raw",
+            m.AudioAsset.deleted_at.is_not(None),
+        )
+    ).all()
+    if not deleted:
+        return {}
+
+    # 근거가 남아 있는 트랙(발화가 있는 트랙)은 제외한다.
+    track_ids = {row.track_id for row in deleted}
+    with_evidence = set(
+        session.scalars(
+            select(m.Utterance.track_id).where(m.Utterance.track_id.in_(track_ids))
+        ).all()
+    )
+
+    #: 사람마다 사유가 섞일 수 있다(하나는 만료, 하나는 삭제 요청).
+    #: 그때는 **본인 요청을 우선**한다 — 사람이 직접 한 일이 더 중요한
+    #: 사실이고, 만료는 시간이 지나면 어차피 전부에게 일어난다.
+    priority = {retention.REASON_USER_REQUEST: 0, retention.REASON_RETENTION_EXPIRED: 1}
+    chosen: dict[int, tuple[int, str | None, int]] = {}
+    for row in deleted:
+        if row.track_id in with_evidence:
+            continue
+        rank = priority.get(row.deleted_reason or "", 2)
+        current = chosen.get(row.user_id)
+        count = (current[2] if current else 0) + 1
+        if current is None or rank < current[0]:
+            chosen[row.user_id] = (rank, row.deleted_reason, count)
+        else:
+            chosen[row.user_id] = (current[0], current[1], count)
+
+    return {
+        user_id: MeasurementGap(
+            category=Category.MEETING,
+            reason=_DELETION_REASON_TEXT.get(reason or "", _DELETION_REASON_UNKNOWN),
+            detail={"tracks_deleted": count, "deleted_reason": reason or "unknown"},
+        )
+        for user_id, (_, reason, count) in chosen.items()
+    }
 
 
 def compute(session: Session, project_id: int) -> TeamScoreResult:

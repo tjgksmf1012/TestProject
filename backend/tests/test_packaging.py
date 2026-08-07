@@ -180,11 +180,127 @@ def test_scheduled_jobs_actually_have_a_scheduler():
     assert beat_services, "compose 에 celery beat 서비스가 없습니다"
 
 
+def test_the_worker_actually_knows_the_tasks_beat_sends():
+    """⭐ 스케줄러가 **이름으로** 보낸 잡을 워커가 알아야 한다.
+
+    `autodiscover_tasks(["teamflow.tasks"], force=True)` 를 부르고 있었는데,
+    `related_name` 기본값이 `"tasks"` 라 그건 **`teamflow.tasks.tasks`**
+    모듈을 찾는다. 그런 모듈은 없다. 그래서 워커의 태스크 레지스트리가
+    **비어 있었다.**
+
+    결과: beat 가 04:00 에 `purge_expired_audio_task` 를 보내면 워커는
+    unregistered 로 버린다. 문서대로 정확히 띄워도 **원본 음성(생체인식
+    정보)이 무기한 남는다.** 회의 처리 전 구간도 같은 이유로 조용히 멈춘다.
+
+    ⭐ 여기서 중요한 건 **워커의 기동 경로를 그대로 쓰는 것**이다.
+    `from teamflow.tasks import maintenance` 로 import 하면 데코레이터가
+    그때 실행돼 등록되므로, 그렇게 검사하면 이 구멍을 통과시킨다.
+    기존 테스트들이 초록이던 이유가 정확히 그것이다.
+    """
+    from teamflow.tasks import app
+
+    # celery worker 가 기동할 때 실제로 부르는 그 함수.
+    app.loader.import_default_modules()
+
+    missing = [
+        f"{name} → {config['task']}"
+        for name, config in app.conf.beat_schedule.items()
+        if config["task"] not in app.tasks
+    ]
+    assert not missing, (
+        "beat 가 보내는데 워커가 모르는 태스크입니다. "
+        "`app.conf.imports` 에 그 모듈을 추가해야 합니다:\n"
+        + "\n".join(f"  {m}" for m in missing)
+    )
+
+
+def test_every_task_module_is_imported_by_the_worker():
+    """⭐ 태스크를 정의해 놓고 워커가 import 하지 않으면 부를 수 없다.
+
+    `imports` 를 손으로 적으므로 모듈이 늘면 빠뜨릴 수 있다. 빠뜨리면
+    그 태스크를 보낸 쪽은 성공한 줄 알고, 워커는 unregistered 로 버린다.
+    """
+    import pkgutil
+    import re
+
+    from teamflow import tasks as tasks_package
+    from teamflow.tasks import app
+
+    declared = set(app.conf.imports or ())
+    missing = []
+    for module in pkgutil.iter_modules(tasks_package.__path__):
+        name = f"teamflow.tasks.{module.name}"
+        source = (
+            Path(tasks_package.__path__[0]) / f"{module.name}.py"
+        ).read_text()
+        # 태스크가 하나라도 있는 모듈만 본다. dispatch.py 처럼 태스크가
+        # 없는 모듈은 import 할 이유가 없다.
+        if not re.search(r"@(app|shared)\.task|@app\.task", source):
+            continue
+        if name not in declared:
+            missing.append(name)
+
+    assert not missing, f"`app.conf.imports` 에 빠진 태스크 모듈: {missing}"
+
+
 def test_beat_schedule_survives_a_restart():
     """스케줄 파일이 컨테이너 안에만 있으면 재생성마다 초기화된다."""
     body = _compose_services()["beat"]
     assert "--schedule" in body
     assert "volumes:" in body
+
+
+def test_every_routed_queue_has_a_consumer_in_the_app_profile():
+    """⭐ 라우팅한 큐를 아무도 안 읽으면 회의가 'queued' 에서 영원히 멈춘다.
+
+    `process_meeting_task` 는 gpu 큐로 간다. 그런데 gpu 큐 소비자가
+    `gpu` 프로필에만 있으면, 문서가 안내하는 `--profile app --profile llm`
+    으로 띄운 사람은 **아무 오류도 로그도 없이** 회의가 안 도는 걸 본다.
+
+    GPU 가 없는 개발 환경이 기본 경로이므로, `app` 프로필만으로 전 구간이
+    돌아야 한다.
+    """
+    import re
+
+    routed = set(
+        re.findall(
+            r'"queue":\s*"(\w+)"',
+            (REPO_ROOT / "backend" / "teamflow" / "tasks" / "__init__.py").read_text("utf-8"),
+        )
+    )
+    assert routed, "task_routes 를 못 찾았습니다 — 패턴이 바뀌었나요?"
+
+    consumed: set[str] = set()
+    for _name, body in _compose_services().items():
+        if '"app"' not in body and "'app'" not in body:
+            continue
+        for match in re.finditer(r"-Q\s+(\S+)", body):
+            consumed.update(match.group(1).split(","))
+
+    missing = routed - consumed
+    assert not missing, (
+        f"app 프로필에 소비자가 없는 큐: {sorted(missing)} — "
+        "회의가 큐에 들어간 채로 영영 처리되지 않습니다"
+    )
+
+
+def test_env_file_targets_exist_or_are_optional():
+    """⭐ `env_file: .env` 는 파일이 없으면 **파싱 단계에서** 실패한다.
+
+    `.env` 는 `.gitignore` 대상이라 clone 직후에는 없다. README 가
+    `cp .env.example .env` 를 먼저 시키긴 하지만, 그 순서를 건너뛴 사람은
+    `docker compose --profile app up` 이 서비스 하나 뜨기 전에 죽는 걸 본다.
+
+    이 저장소가 `.env.example` 을 제공하므로 여기서는 그 존재를 확인한다 —
+    적어도 복사할 원본은 있어야 한다.
+    """
+    text = COMPOSE.read_text("utf-8")
+    if "env_file" not in text:
+        pytest.skip("compose 가 env_file 을 쓰지 않습니다")
+
+    assert (REPO_ROOT / ".env.example").is_file(), (
+        "compose 가 .env 를 요구하는데 복사할 .env.example 이 없습니다"
+    )
 
 
 def test_compose_header_documents_the_llm_profile():
@@ -207,6 +323,24 @@ def _top_level_imports(path: Path) -> set[str]:
     tree = ast.parse(path.read_text("utf-8"), filename=str(path))
     names: set[str] = set()
     for node in tree.body:  # 최상위만 본다
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module.split(".")[0])
+    return names
+
+
+def _all_imports(path: Path) -> set[str]:
+    """지연 import 까지 포함한 **모든** import.
+
+    `_top_level_imports` 와 나눈 이유: "기본 설치로 import 되는가" 는 최상위만
+    보면 되지만, "이 의존성이 쓰이긴 하는가" 는 함수 안의 import 도 세야
+    합니다. `github/client.py` 가 `jwt` 를 함수 안에서 부릅니다 — Fake 만
+    쓰는 경로에서는 서명이 필요 없기 때문입니다.
+    """
+    tree = ast.parse(path.read_text("utf-8"), filename=str(path))
+    names: set[str] = set()
+    for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
@@ -281,3 +415,46 @@ def test_python_version_matches_the_dockerfiles():
 @pytest.mark.parametrize("extra", ["ai", "dev"])
 def test_extras_are_declared(extra: str):
     assert extra in _pyproject()["project"]["optional-dependencies"]
+
+
+# 직접 import 하지 않지만 필요한 것들. 이유를 적어 둡니다 — 적지 않으면
+# 다음 사람이 "안 쓰네" 하고 지웁니다.
+_NOT_IMPORTED_BUT_NEEDED = {
+    "uvicorn": "ASGI 서버. 명령줄로 실행합니다 (Dockerfile CMD)",
+    "alembic": "마이그레이션 CLI. 코드에서 부르지 않습니다",
+    "psycopg": "SQLAlchemy 가 DATABASE_URL 로 고르는 드라이버입니다",
+    "pydantic-settings": "teamflow.config 가 pydantic_settings 로 import 합니다",
+}
+
+
+def test_no_dependency_sits_unused():
+    """⭐ 선언만 해 놓고 아무도 안 쓰는 의존성을 잡는다.
+
+    `pyjwt[crypto]` 가 이 저장소에 그렇게 있었습니다 — GitHub App 인증
+    경로를 만들려고 넣어 두고 **그 경로를 만들지 않은 채로** 남아 있었습니다.
+    운영 이미지에 이유 없는 패키지가 들어가고, 더 나쁘게는 "그 기능이 있다"
+    는 인상을 줍니다.
+
+    위 `test_every_runtime_import_is_declared` 는 반대 방향(import → 선언)만
+    봅니다. 이 방향을 아무도 보지 않았습니다.
+    """
+    declared = _requirement_names(_pyproject()["project"]["dependencies"])
+
+    imported: set[str] = set()
+    for path in sorted(PACKAGE.rglob("*.py")):
+        for module in _all_imports(path):
+            imported.add(_MODULE_TO_DISTRIBUTION.get(module, module).lower())
+
+    unused = sorted(declared - imported - set(_NOT_IMPORTED_BUT_NEEDED))
+    assert not unused, (
+        "기본 의존성에 선언됐는데 teamflow 어디에서도 import 하지 않습니다. "
+        "쓰거나, 빼거나, _NOT_IMPORTED_BUT_NEEDED 에 이유를 적으세요:\n"
+        + "\n".join(f"  {name}" for name in unused)
+    )
+
+
+def test_the_allowlist_itself_stays_honest():
+    """면제 목록에 없는 이름이 쌓이면 위 테스트가 무력해진다."""
+    declared = _requirement_names(_pyproject()["project"]["dependencies"])
+    stale = sorted(set(_NOT_IMPORTED_BUT_NEEDED) - declared)
+    assert not stale, f"면제 목록에 이제 없는 의존성이 있습니다: {stale}"

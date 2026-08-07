@@ -251,21 +251,71 @@ def build_audio_loader(settings: Settings, capture_mode: str):
     return build_loader(settings)
 
 
+#: 가짜 ASR 이 돌려주는 대본. 회의 하나 분량.
+#:
+#: 실제 회의에서 나올 법한 문장으로 골랐다 — 담당자 지목("민수가"), 마감
+#: 표현("금요일까지"), 그리고 근거로 쓸 만한 결정 문장. 이걸 바꾸면
+#: 시연에서 뽑히는 업무 후보가 바뀐다.
+FAKE_SCRIPT: tuple[tuple[int, int, str, float], ...] = (
+    (1_000, 8_000, "로그인 API는 민수가 금요일까지 만들기로 하죠", 0.95),
+    (9_000, 15_000, "네 저는 회원가입 화면을 맡을게요", 0.93),
+    (16_000, 23_000, "인증 방식은 JWT로 가는 게 좋겠습니다", 0.94),
+    (24_000, 31_000, "그럼 저는 DB 스키마를 다음 주 화요일까지 정리하겠습니다", 0.91),
+    (32_000, 38_000, "배포는 아직 정하지 말고 다음 회의에서 다시 얘기해요", 0.89),
+)
+
+
+@dataclass
+class ScriptedTranscriber:
+    """오디오를 보지 않고 대본을 돌려주는 가짜 ASR.
+
+    ⚠️ **시연·개발 전용이다.** 운영에서 켜면 회의 내용과 무관한 회의록이
+    나온다. `/health` 가 `asr_backend` 를 노출하므로 켜져 있으면 바로 보인다.
+
+    이게 있어야 GPU 없이 **업로드부터 칸반 등록까지** 실제로 돌려볼 수 있다.
+    지금까지는 pytest 안에서만 전 구간이 돌았고, 사람이 눈으로 확인할
+    방법이 없었다 (scripts/seed_demo.py 참조).
+
+    트랙마다 대본을 나눠 준다 — 트랙 하나가 대본 전체를 말한 것으로
+    나오면 화자별 회의록이라는 게 보이지 않는다.
+    """
+
+    script: tuple[tuple[int, int, str, float], ...] = FAKE_SCRIPT
+    _calls: int = 0
+
+    def transcribe(
+        self, samples: np.ndarray, sample_rate: int, *, language: str = "ko"
+    ) -> list[tuple[int, int, str, float]]:
+        index = self._calls
+        self._calls += 1
+        # 트랙 index 가 대본에서 맡는 줄들 — 라운드로빈으로 돌려 준다.
+        return [line for i, line in enumerate(self.script) if i % 3 == index % 3]
+
+
 def build_transcriber(settings: Settings):
     """ASR 구현을 고른다.
 
-    ⚠️ 아직 구현되지 않았습니다. `docs/09` 실험 1로 모델을 확정한 뒤
+    ⚠️ 실제 모델 구현은 아직 없습니다. `docs/09` 실험 1로 모델을 확정한 뒤
     실제 머신에서 붙이세요.
 
     확정된 1순위: `Qwen/Qwen3-ASR-1.7B` (Apache 2.0, 타임스탬프 내장,
     Transformers v5.13+ 네이티브, 공식 vLLM 툴킷).
     """
+    if settings.asr_backend == "fake":
+        logger.warning(
+            "가짜 ASR 로 회의를 처리합니다 — 오디오를 읽지 않고 대본을 씁니다. "
+            "시연·개발 전용입니다 (asr_backend=fake)."
+        )
+        return ScriptedTranscriber()
+
     raise NotImplementedError(
         f"ASR 구현이 아직 없습니다 (설정: {settings.asr_model}).\n"
         "1. python3 scripts/check_env.py 로 GPU 환경 확인\n"
         '2. pip install -e ".[ai]"\n'
         "3. backend/teamflow/pipeline/runtime.py 의 build_transcriber 구현\n"
-        "4. docs/09 실험 1(한국어 ASR 비교)로 모델 확정"
+        "4. docs/09 실험 1(한국어 ASR 비교)로 모델 확정\n"
+        "\n"
+        "GPU 없이 전 구간을 돌려 보려면 ASR_BACKEND=fake 로 두세요."
     )
 
 

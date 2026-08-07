@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<!-- 홈 화면에 추가하면 주소창 없이 전체화면으로 뜬다. -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/app.css" />
+<title>칸반 — TeamFlow</title>
+<style>
+
+  #unassigned { margin: .75rem 0; padding: .625rem .875rem; border-radius: .5rem; font-size: .875rem; background: color-mix(in srgb, var(--warn) 12%, transparent); }
+
+  /* 좁은 화면에서는 세로로 쌓인다. 폰에서 열어보는 게 기본이다. */
+  #board { display: grid; gap: 1rem; margin-top: 1rem; }
+  @media (min-width: 46rem) { #board { grid-template-columns: repeat(3, 1fr); align-items: start; } }
+
+  .col { background: var(--surface); border-radius: var(--radius); padding: .875rem; }
+  .col h2 { font-size: .8125rem; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); margin: 0 0 .625rem; }
+  .col h2 .n { float: right; font-variant-numeric: tabular-nums; }
+
+  .task { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .75rem; margin-bottom: .625rem; }
+  .task .title { font-weight: 600; margin: 0 0 .25rem; font-size: .9375rem; }
+  .task .meta { font-size: .8125rem; color: var(--dim); margin: 0; }
+
+  /* 회의 → 업무 연결이 이 화면의 존재 이유다. 눈에 띄어야 한다. */
+  .origin { font-size: .75rem; margin: .375rem 0 0; color: var(--ok); }
+  .origin.manual { color: var(--dim); }
+
+  .warn { list-style: none; padding: 0; margin: .375rem 0 0; font-size: .75rem; color: var(--warn); }
+  .warn li::before { content: "⚠ "; }
+
+  .moves { display: flex; gap: .375rem; margin-top: .5rem; flex-wrap: wrap; }
+  /* ⭐ 예전에는 높이 26px 이었다. 손가락 끝 접촉면이 대략 44px 이라
+     그보다 작으면 **옆 카드의 버튼을 누른다** — 칸반에서 그건 엉뚱한
+     업무를 완료 처리하는 것이고, 완료는 기여 이벤트를 만든다.
+     크기는 app.css 의 button 규칙(min-height: var(--tap))이 정하고,
+     여기서는 한 줄에 몇 개가 들어가는지만 정한다. */
+  .moves button { flex: 1 1 auto; font-size: .875rem; padding-inline: .625rem; }
+
+  #result { font-size: .875rem; color: var(--bad); margin-top: 1rem; }
+    </style>
+</head>
+<body>
+  <h1>칸반</h1>
+  <p class="sub" id="who"></p>
+  <p class="sub" id="counts"></p>
+
+  <div id="unassigned" hidden></div>
+  <div id="board"></div>
+  <p id="result"></p>
+
+  <p class="note">
+    🗣 표시가 붙은 업무는 <strong>회의에서 나온 결정</strong>이 사람의 승인을
+    거쳐 여기까지 온 것입니다. 근거 발화까지 거슬러 올라갈 수 있습니다 —
+    그게 이 프로젝트가 하려는 일입니다.
+    <br /><br />
+    업무를 <strong>완료</strong>로 옮기면 그 시점에 기여 이벤트가 만들어지고
+    기여도 화면에 반영됩니다. 마감일이 있으면 지켰는지도 같이 기록됩니다.
+    담당자가 없는 업무는 누구의 기여인지 알 수 없어 반영되지 않습니다.
+  </p>
+
+  <script type="module" src="/kanban.js"></script>
+
+  <!-- 아래 탭바. `src/demo/nav.ts` 가 채운다.
+       위쪽 링크 줄에 의존하면 전체화면 PWA·WebView 에서 갇힌다 —
+       거기에는 주소창도 뒤로가기도 없다. -->
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
+</html>

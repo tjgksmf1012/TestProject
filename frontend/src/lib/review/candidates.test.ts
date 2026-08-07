@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   approvalBlockers,
+  attentionReasons,
   buildReviewPayload,
   canApprove,
   canSubmit,
@@ -132,13 +133,14 @@ describe('buildReviewPayload', () => {
   it('결정한 것만 담는다', () => {
     const list = [candidate({ id: 1 }), candidate({ id: 2 }), candidate({ id: 3 })];
     const payload = buildReviewPayload(
-      7,
       list,
       drafts([1, { decision: 'approve' }], [3, { decision: 'reject' }]),
       CONTEXT,
     );
 
-    assert.equal(payload.reviewer_id, 7);
+    // ⭐ 검토자는 페이로드에 없다. 서버가 세션에서 읽는다 — 요청으로
+    // 정할 수 있으면 남의 이름으로 승인 기록이 남는다.
+    assert.equal('reviewer_id' in payload, false);
     assert.deepEqual(
       payload.items.map((i) => [i.candidate_id, i.approve]),
       [
@@ -152,7 +154,6 @@ describe('buildReviewPayload', () => {
     // 원본과 같은 값을 override 로 보내면 감사 로그에 "사람이 바꿨다"로
     // 남는다. 안 바꿨는데 바꿨다고 기록되면 분쟁의 근거가 뒤틀린다.
     const payload = buildReviewPayload(
-      7,
       [candidate({ id: 1 })],
       drafts([
         1,
@@ -171,7 +172,6 @@ describe('buildReviewPayload', () => {
 
   it('실제로 바꾼 값만 override 로 나간다', () => {
     const payload = buildReviewPayload(
-      7,
       [candidate({ id: 1 })],
       drafts([
         1,
@@ -190,7 +190,6 @@ describe('buildReviewPayload', () => {
 
   it('공백만 있는 메모는 보내지 않는다', () => {
     const payload = buildReviewPayload(
-      7,
       [candidate({ id: 1 })],
       drafts([1, { decision: 'approve', note: '   ' }]),
       CONTEXT,
@@ -204,7 +203,6 @@ describe('buildReviewPayload', () => {
     assert.throws(
       () =>
         buildReviewPayload(
-          7,
           [candidate({ id: 1, assignee_id: null })],
           drafts([1, { decision: 'approve' }]),
           CONTEXT,
@@ -216,7 +214,6 @@ describe('buildReviewPayload', () => {
   it('거절은 불완전해도 보낼 수 있다', () => {
     // "이건 업무가 아니다" 라는 판단은 담당자가 없어도 할 수 있어야 한다.
     const payload = buildReviewPayload(
-      7,
       [candidate({ id: 1, assignee_id: null, deadline: null })],
       drafts([1, { decision: 'reject', note: '이미 완료된 일' }]),
       CONTEXT,
@@ -231,14 +228,13 @@ describe('buildReviewPayload', () => {
 
   it('아무것도 결정하지 않으면 던진다 — 서버가 빈 목록을 거부한다', () => {
     assert.throws(
-      () => buildReviewPayload(7, [candidate()], drafts(), CONTEXT),
+      () => buildReviewPayload([candidate()], drafts(), CONTEXT),
       /결정한 후보가 없습니다/,
     );
   });
 
   it('제목만 바꿔도 반영된다', () => {
     const payload = buildReviewPayload(
-      7,
       [candidate({ id: 1 })],
       drafts([1, { decision: 'approve', titleOverride: '  로그인 API + 소셜 로그인  ' }]),
       CONTEXT,
@@ -386,7 +382,7 @@ describe('실제 검토 시나리오', () => {
     assert.equal(canSubmit(summary), true);
 
     // 5) 채운 값만 override 로 나간다
-    const payload = buildReviewPayload(7, list, state, CONTEXT);
+    const payload = buildReviewPayload(list, state, CONTEXT);
     assert.deepEqual(payload.items, [
       { candidate_id: 1, approve: true, assignee_override: 3, deadline_override: '2026-09-15' },
       { candidate_id: 2, approve: true },
@@ -416,5 +412,75 @@ describe('describeBlocker', () => {
   it('모르는 코드는 삼키지 않고 그대로 보여준다', () => {
     // 삼키면 사용자가 원인을 영영 못 본다.
     assert.equal(describeBlocker('some_new_rule'), 'some_new_rule');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 왜 이 후보를 봐야 하는가 — 서버 경고
+// ══════════════════════════════════════════════════════════════
+//
+// 이 경고는 서버가 만들어 DB 에 저장한다. 오래도록 저장 단계에서 통째로
+// 버려지고 있었고, 그동안 화면은 확신도 숫자만 보여줬다. 숫자만 보면
+// 사람은 무엇을 확인해야 할지 모른 채 그냥 승인한다.
+
+describe('attentionReasons', () => {
+  it('서버가 준 이유를 그대로 보여준다', () => {
+    const reasons = attentionReasons(
+      candidate({ warnings: ['담당자 미확정 — 이름이 두 명과 일치'] }),
+    );
+    assert.deepEqual(reasons, ['담당자 미확정 — 이름이 두 명과 일치']);
+  });
+
+  it('여러 개면 전부 보여준다 — 하나만 고치고 넘어가면 안 된다', () => {
+    const reasons = attentionReasons(
+      candidate({ warnings: ['담당자 미확정', '마감일이 회의일보다 이전입니다'] }),
+    );
+    assert.equal(reasons.length, 2);
+  });
+
+  it('확신도가 높고 경고가 없으면 아무 말도 하지 않는다', () => {
+    assert.deepEqual(attentionReasons(candidate({ confidence: 0.94 })), []);
+  });
+
+  it('⭐ 경고가 없는데 확신도만 낮으면 빈손으로 두지 않는다', () => {
+    // 설명 없이 빨간 표시만 뜨면 사람은 그냥 무시하게 된다.
+    const reasons = attentionReasons(candidate({ confidence: 0.34, warnings: [] }));
+    assert.equal(reasons.length, 1);
+    assert.ok(reasons[0]?.includes('34%'));
+  });
+
+  it('경고가 있으면 확신도 문구를 덧붙이지 않는다', () => {
+    // 이미 구체적인 이유가 있는데 "확신도가 낮습니다" 를 더하면 잡음이다.
+    const reasons = attentionReasons(candidate({ confidence: 0.2, warnings: ['담당자 미확정'] }));
+    assert.deepEqual(reasons, ['담당자 미확정']);
+  });
+
+  it('⭐ warnings 가 없는 옛 데이터에서도 터지지 않는다', () => {
+    // 이 컬럼이 생기기 전에 저장된 후보는 필드 자체가 없다.
+    const old = candidate();
+    delete (old as Partial<Candidate>).warnings;
+    assert.deepEqual(attentionReasons(old), []);
+  });
+
+  it('원본을 건드리지 않는다', () => {
+    const c = candidate({ confidence: 0.3, warnings: ['담당자 미확정'] });
+    attentionReasons(c);
+    assert.deepEqual(c.warnings, ['담당자 미확정']);
+  });
+});
+
+describe('assignee_hint', () => {
+  it('⭐ 담당자가 안 풀린 후보는 회의에서 부른 이름을 들고 있다', () => {
+    // 이게 없으면 사람은 빈 담당자 칸만 보고 누구를 골라야 할지 모른다.
+    const c = candidate({ assignee_id: null, assignee_hint: '민수님' });
+    assert.equal(c.assignee_hint, '민수님');
+    assert.ok(codes(c).includes('missing_assignee'));
+  });
+
+  it('원문이 있어도 승인 판정에는 쓰이지 않는다', () => {
+    // 이름이 불렸다는 것과 그게 누구인지 아는 것은 다르다.
+    // 원문만 보고 승인을 열어 주면 엉뚱한 사람에게 업무가 붙는다.
+    const c = candidate({ assignee_id: null, assignee_hint: '민수님' });
+    assert.equal(canApprove(c, emptyDraft(), CONTEXT), false);
   });
 });

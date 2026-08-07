@@ -40,9 +40,11 @@ class ApprovalError(StrEnum):
     DEADLINE_IN_PAST = "deadline_in_past"
     UNKNOWN_ASSIGNEE = "unknown_assignee"
     NO_EVIDENCE = "no_evidence"
+    UNKNOWN_CANDIDATE = "unknown_candidate"
 
 
 _ERROR_TEXT: dict[ApprovalError, str] = {
+    ApprovalError.UNKNOWN_CANDIDATE: "이 회의에 없는 후보입니다",
     ApprovalError.ALREADY_APPROVED: "이미 승인된 후보입니다",
     ApprovalError.ALREADY_REJECTED: "이미 거절된 후보입니다",
     ApprovalError.MISSING_ASSIGNEE: "담당자를 지정해야 승인할 수 있습니다",
@@ -332,6 +334,16 @@ def apply_batch(
     for request in requests:
         candidate = candidates.get(request.candidate_id)
         if candidate is None:
+            # ⚠️ 예전에는 `continue` 로 조용히 넘어갔다.
+            #
+            # 그러면 사람이 "승인" 을 눌렀는데 서버가 200 + failures {} 를
+            # 돌려준다. **아무 일도 일어나지 않았는데 성공으로 보고되는 것**
+            # 이고, 하필 그게 이 시스템에서 사람이 개입하는 유일한 지점이다
+            # (docs/03 §3 — 승인된 것만 칸반에 올라간다).
+            #
+            # 다른 회의의 후보 ID 를 보내도 같은 결과였다. 화면 버그든
+            # 누가 손으로 만든 요청이든, 조용한 무시는 답이 아니다.
+            outcome.failures[request.candidate_id] = [ApprovalError.UNKNOWN_CANDIDATE]
             continue
         result = apply_approval(
             candidate,

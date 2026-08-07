@@ -5,12 +5,37 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 from teamflow.contribution.confidence import CoverageStats
 from teamflow.contribution.diff_filter import ChangedFile
 from teamflow.contribution.events import ContributionEvent, EventType, SourceKind
 from teamflow.contribution.github_ingest import PullRequest, Review
 from teamflow.contribution.profiles import DEFAULT_PROFILES, Role
+
+# ══════════════════════════════════════════════════════════════
+# SQLite 에서 외래키를 강제한다
+# ══════════════════════════════════════════════════════════════
+#
+# SQLite 는 기본값이 **꺼짐**이다. 그래서 592개 테스트가 전부 참조 무결성이
+# 없는 DB 에서 돌고 있었다 — 없는 user_id 를 넣어도 통과한다.
+#
+# 프로덕션은 PostgreSQL 이고 거기서는 강제된다. 즉 요청 본문의 id 를 그대로
+# FK 컬럼에 쓰는 엔드포인트는 **테스트에서 200, 배포에서 500** 이 된다.
+# 이 프로젝트에서 반복해서 나온 "테스트는 통과하는데 실제로는 안 되는"
+# 부류이고, 이건 그 부류를 자동으로 잡는 그물이다.
+#
+# 여기서 깨지는 테스트가 곧 프로덕션에서 깨질 것들이다.
+
+
+@event.listens_for(Engine, "connect")
+def _enforce_sqlite_foreign_keys(dbapi_connection, _record) -> None:
+    if type(dbapi_connection).__module__.startswith("sqlite3"):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
 
 T0 = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 
@@ -158,3 +183,34 @@ def dev_profiles() -> dict[int, object]:
         1: DEFAULT_PROFILES[Role.DEVELOPER],
         2: DEFAULT_PROFILES[Role.DEVELOPER],
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# 로그인 헬퍼
+# ══════════════════════════════════════════════════════════════
+#
+# 인증이 생기기 전에는 HTTP 테스트가 `user_id` 를 요청 본문에 적었습니다.
+# 그게 **정확히 고친 결함**이라, 테스트도 이제 로그인을 거쳐야 합니다.
+#
+# 비밀번호를 태우지 않고 세션을 직접 발급하는 이유: scrypt 는 일부러
+# 느리게 만든 함수이고(16MiB), HTTP 테스트 수십 개가 매번 그걸 돌면
+# 스위트가 눈에 띄게 느려집니다. 비밀번호 검증 경로는 `test_auth.py` 가
+# 따로 잽니다 — 여기서 확인할 것은 **세션이 없으면 막히는가**입니다.
+
+
+def login_as(client, user_id: int) -> str:
+    """이 클라이언트를 이 사용자로 로그인시킨다. 토큰을 돌려준다."""
+    from teamflow.db import session as db_session
+    from teamflow.services import auth_service
+
+    with db_session.session_scope() as session:
+        token, _ = auth_service.issue_session(session, user_id=user_id)
+
+    client.cookies.set(auth_service.COOKIE_NAME, token)
+    return token
+
+
+def logout(client) -> None:
+    from teamflow.services import auth_service
+
+    client.cookies.delete(auth_service.COOKIE_NAME)

@@ -2,45 +2,23 @@
 <html lang="ko">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<!-- 홈 화면에 추가하면 주소창 없이 전체화면으로 뜬다. -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/app.css" />
     <title>녹음 생존율 테스트 — TeamFlow AI</title>
     <style>
-      :root {
-        color-scheme: light dark;
-        --ok: #1a7f37;
-        --bad: #cf222e;
-        --warn: #9a6700;
-        --line: color-mix(in srgb, currentColor 15%, transparent);
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        padding: 1rem;
-        font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
-          "Malgun Gothic", system-ui, sans-serif;
-        max-width: 34rem;
-        margin-inline: auto;
-      }
-      h1 { font-size: 1.25rem; margin: 0 0 .25rem; }
-      .sub { opacity: .7; font-size: .875rem; margin: 0 0 1.5rem; }
+
       section { border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; margin-bottom: 1rem; }
-      h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; opacity: .6; margin: 0 0 .75rem; }
-      button {
-        font: inherit;
-        padding: .85rem 1rem;
-        border-radius: .5rem;
-        border: 1px solid var(--line);
-        background: color-mix(in srgb, currentColor 8%, transparent);
-        color: inherit;
-        width: 100%;
-        margin-bottom: .5rem;
-        cursor: pointer;
-        /* 폰에서 누르기 좋은 크기. 실험 중에 오조작하면 결과가 날아간다. */
-        min-height: 3rem;
-      }
-      button:disabled { opacity: .35; cursor: not-allowed; }
-      button.primary { background: #0969da; color: #fff; border-color: transparent; font-weight: 600; }
-      ul { list-style: none; padding: 0; margin: 0; font-size: .875rem; }
+
       li { padding: .25rem 0; }
       li::before { content: "· "; opacity: .5; }
       li.ok { color: var(--ok); }
@@ -48,9 +26,7 @@
       li.critical { color: var(--bad); }
       li.warning { color: var(--warn); }
       li.info { opacity: .7; }
-      dl { display: grid; grid-template-columns: 1fr auto; gap: .35rem 1rem; margin: 0; font-size: .9rem; }
-      dt { opacity: .65; }
-      dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+
       #phase {
         display: inline-block; padding: .3rem .7rem; border-radius: 999px;
         font-size: .8rem; font-weight: 600;
@@ -69,16 +45,19 @@
         padding: .6rem; border-radius: .4rem; margin: .75rem 0;
       }
       label.check { display: flex; align-items: center; gap: .5rem; font-size: .875rem; padding: .5rem 0; }
-      .note { font-size: .8rem; opacity: .7; margin-top: .75rem; }
-      code { font-size: .85em; background: color-mix(in srgb, currentColor 8%, transparent); padding: .1em .3em; border-radius: .25em; }
     </style>
   </head>
   <body>
     <h1>녹음 생존율 테스트</h1>
+    <p id="who" class="sub"></p>
     <p class="sub">
       docs/09 실험 5 — 폰이 회의 끝까지 녹음을 유지하는지 확인합니다.
       <strong>모드 A(멀티트랙)의 성립 여부</strong>가 여기서 결정됩니다.
     </p>
+
+    <!-- 이 환경에서 화면을 꺼도 되는가. `src/lib/shell/bridge.ts` 가
+         정하고 15개 테스트가 붙습니다. -->
+    <p id="safety" class="banner"></p>
 
     <section>
       <h2>상태</h2>
@@ -125,6 +104,14 @@
 
     <section id="result" hidden>
       <h2>결과</h2>
+
+      <!-- 서버에 "끝났다" 고 알렸는가. 이걸 알리지 않으면 트랙이 영원히
+           `recording` 으로 남고, 로비에서 검토 버튼도 강제 종료 버튼도
+           뜨지 않는다 — 오류 없이 회의가 멈춘다. -->
+      <p id="finish-state" hidden></p>
+      <button id="finish-retry" hidden type="button">다시 시도</button>
+      <a id="finish-next" hidden href="/lobby.html">회의 로비로 돌아가기</a>
+
       <p id="verdict"></p>
       <dl>
         <dt>커버리지</dt><dd id="coverage">-</dd>
@@ -143,5 +130,10 @@
     </section>
 
     <script type="module" src="./main.js"></script>
-  </body>
+  
+  <!-- 아래 탭바. `src/demo/nav.ts` 가 채운다.
+       위쪽 링크 줄에 의존하면 전체화면 PWA·WebView 에서 갇힌다 —
+       거기에는 주소창도 뒤로가기도 없다. -->
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
 </html>

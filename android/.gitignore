@@ -1,0 +1,8 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# 웹에서 복사해 오는 것. `app/build.gradle.kts` 의 copyOfflinePage 가 만든다.
+# 손으로 두면 웹 쪽 문구를 고쳐도 셸은 옛 문구를 보여준다.
+app/src/main/assets/

@@ -188,15 +188,80 @@ def test_estimate_offsets_reference_is_zero():
     assert offsets[0].track_index == 0
 
 
-def test_estimate_offsets_recovers_device_skew():
-    """B 기기가 100ms 늦게 녹음을 시작한 상황."""
-    track_a, track_b = build_two_speaker_meeting(seed=31)
-    skew = int(SR * 0.1)
-    delayed_b = delay_signal(track_b, skew)[: len(track_b)]
+def start_late(room: np.ndarray, samples: int) -> np.ndarray:
+    """**늦게** 녹음을 시작한 기기 — 앞부분을 놓친다.
 
-    offsets = estimate_offsets([track_a, delayed_b], sample_rate=SR)
-    recovered_ms = offsets[1].offset_ms
-    assert abs(recovered_ms - 100) <= 15, f"100ms 스큐를 {recovered_ms}ms 로 추정"
+    앞에 0을 붙이는 `delay_signal` 은 반대다. 그건 소리가 나기 전부터 켜져
+    있던 기기, 즉 **일찍** 시작한 쪽이다. 이 둘을 헷갈린 탓에 부호 규약이
+    반대로 굳어 있었고, 테스트가 그 반대를 고정하고 있었다.
+    """
+    return room[samples:].copy()
+
+
+#: `offset_sec` 의 규약 — "이 트랙을 공통 시간축에서 얼마나 뒤로 밀어야 하는가".
+#: `apply_offsets` 가 앞을 그만큼 패딩하고, 서버 타임스탬프 폴백
+#: (`started_at - earliest`)도 같은 부호다. 늦게 시작한 기기는 **양수**.
+
+
+def test_estimate_offsets_recovers_late_start():
+    """B 기기가 100ms **늦게** 시작한 상황 — 앞 100ms 를 놓쳤다."""
+    room, _ = build_two_speaker_meeting(seed=31)
+    skew = int(SR * 0.1)
+    late_b = start_late(room, skew)
+
+    offsets = estimate_offsets([room[: len(late_b)], late_b], sample_rate=SR)
+
+    assert abs(offsets[1].offset_ms - 100) <= 15, (
+        f"늦게 시작한 기기는 +100ms 여야 하는데 {offsets[1].offset_ms}ms"
+    )
+
+
+def test_estimate_offsets_recovers_early_start():
+    """반대 방향도 맞아야 한다 — 일찍 시작한 기기는 음수."""
+    room, _ = build_two_speaker_meeting(seed=31)
+    skew = int(SR * 0.1)
+    early_b = delay_signal(room, skew)[: len(room)]
+
+    offsets = estimate_offsets([room, early_b], sample_rate=SR)
+
+    assert abs(offsets[1].offset_ms + 100) <= 15, (
+        f"일찍 시작한 기기는 -100ms 여야 하는데 {offsets[1].offset_ms}ms"
+    )
+
+
+@pytest.mark.parametrize("skew_ms", [-250, -100, -30, 30, 100, 250])
+def test_estimate_then_apply_actually_aligns(skew_ms: int):
+    """⭐ **왕복** 테스트 — 이게 없어서 정렬이 반대로 가는 걸 못 잡았다.
+
+    기존 테스트는 `gcc_phat` 이 지연을 맞히는지(맞았다), `apply_offsets` 가
+    길이를 맞추는지(맞았다)만 봤다. 둘을 이어 붙였을 때 실제로 겹치는지는
+    아무도 확인하지 않았고, 실제로 겹치지 않았다.
+
+    실측(수정 전): 잔차 1.9881 → 1.9651. 즉 **전혀 정렬되지 않았다.**
+    """
+    room, _ = build_two_speaker_meeting(seed=41)
+    skew = int(SR * abs(skew_ms) / 1000)
+    span = len(room) - skew
+
+    reference = room[:span]
+    shifted = (
+        start_late(room, skew)[:span]
+        if skew_ms > 0
+        else delay_signal(room, skew)[:span]
+    )
+
+    offsets = estimate_offsets([reference, shifted], sample_rate=SR)
+    aligned = apply_offsets([reference, shifted], offsets, sample_rate=SR)
+
+    n = min(len(a) for a in aligned)
+    power = float(np.mean(reference.astype(np.float64) ** 2))
+    before = float(np.mean((reference[:n] - shifted[:n]).astype(np.float64) ** 2)) / power
+    after = float(np.mean((aligned[0][:n] - aligned[1][:n]).astype(np.float64) ** 2)) / power
+
+    assert after < before * 0.25, (
+        f"정렬 후에도 어긋나 있습니다 (전 {before:.3f} → 후 {after:.3f}). "
+        f"추정값 {offsets[1].offset_ms}ms 의 부호가 반대일 수 있습니다"
+    )
 
 
 def test_estimate_offsets_falls_back_to_server_timestamps():
@@ -472,3 +537,137 @@ def test_single_track_still_works():
     analysis = analyze_tracks([voice], sample_rate=SR)
     assert analysis.speaking_ms(0) > 500
     assert not analysis.overlap.any()
+
+
+# ══════════════════════════════════════════════════════════════
+# 조립 공백이 잡음 바닥을 붕괴시키는 문제
+#
+# `assembly.render()` 는 녹음이 끊긴 구간을 **정확한 0** 으로 채운다.
+# 그 0 은 `to_db` 의 하한 -100dB 에 붙는데, 잡음 바닥을 20백분위로 잡으면
+# 공백이 20% 를 넘는 순간 바닥이 통째로 -100dB 가 된다.
+#
+# 주화자는 `energy_db - noise_floor` 의 argmax 로 뽑으므로, 바닥이 60dB
+# 내려간 트랙이 **모든 프레임에서 이긴다.** 폰이 죽어 측정 불가로 빠져야 할
+# 사람이 오히려 나머지 전원을 "말 안 한 사람" 으로 만든다 — 이 프로젝트가
+# 막으려는 결과 그 자체다 (docs/05 §4.1.1).
+#
+# 실측(고치기 전): 3인 회의에서 한 명이 40% 끊기면 그 사람이 주화자 프레임의
+# 100% 를 가져가고 나머지 두 명이 0 이 됐다.
+# ══════════════════════════════════════════════════════════════
+
+
+def track_with_gap(
+    *, speech_amp: float, gap_fraction: float = 0.0, seed: int = 0, duration: float = 60.0
+) -> np.ndarray:
+    """뒤쪽 절반에 말소리가 있는 트랙. 앞부분 `gap_fraction` 은 조립 공백(정확한 0)."""
+    rng = np.random.default_rng(seed)
+    n = int(SR * duration)
+    signal = rng.standard_normal(n).astype(np.float32) * 0.01  # 마이크 잡음
+    signal[n // 2 :] += rng.standard_normal(n - n // 2).astype(np.float32) * speech_amp
+    if gap_fraction:
+        signal[: int(n * gap_fraction)] = 0.0
+    return signal
+
+
+def primary_share(analysis, track_index: int) -> float:
+    counts = [int((analysis.primary == i).sum()) for i in range(analysis.energy_db.shape[0])]
+    total = sum(counts)
+    return counts[track_index] / total if total else 0.0
+
+
+@pytest.mark.parametrize("gap_fraction", [0.25, 0.40, 0.60, 0.90])
+def test_broken_track_does_not_steal_speaker_labels(gap_fraction: float):
+    """⭐ 끊긴 트랙이 회의 전체의 화자 라벨을 가져가면 안 된다.
+
+    공백이 백분위 안으로 들어오는 순간(20% 초과) 터지던 문제라
+    경계 바로 위부터 훑는다.
+    """
+    healthy_a = track_with_gap(speech_amp=0.30, seed=1)
+    healthy_b = track_with_gap(speech_amp=0.30, seed=2)
+    broken = track_with_gap(speech_amp=0.05, gap_fraction=gap_fraction, seed=3)
+
+    analysis = analyze_tracks([healthy_a, healthy_b, broken], sample_rate=SR)
+
+    assert primary_share(analysis, 2) == 0.0, (
+        f"공백 {gap_fraction:.0%} 인 트랙이 주화자를 가져갔습니다 "
+        f"(바닥 {analysis.noise_floor_db})"
+    )
+    assert analysis.speaking_ms(0) > 0 and analysis.speaking_ms(1) > 0, (
+        "정상 트랙 두 개가 침묵으로 처리됐습니다"
+    )
+
+
+def scattered_gaps(signal: np.ndarray, *, fraction: float, chunks: int = 12) -> np.ndarray:
+    """공백을 트랙 전체에 흩어 놓는다.
+
+    실제 공백은 폰이 잠기고 풀리는 대로 여기저기 생긴다. 앞쪽에 한 덩어리로
+    몰아넣으면 조용한 구간만 통째로 지워져 잡음 표본이 남지 않는 인공적인
+    신호가 된다.
+    """
+    out = signal.copy()
+    n = len(out)
+    hole = int(n * fraction / chunks)
+    stride = n // chunks
+    for k in range(chunks):
+        start = k * stride
+        out[start : start + hole] = 0.0
+    return out
+
+
+def test_gap_does_not_collapse_the_noise_floor():
+    """공백이 있어도 잡음 바닥은 실제 잡음 수준에 머문다."""
+    intact = track_with_gap(speech_amp=0.30, seed=11)
+    gapped = scattered_gaps(intact, fraction=0.50)
+
+    analysis = analyze_tracks([intact, gapped], sample_rate=SR)
+    intact_floor, gapped_floor = analysis.noise_floor_db
+
+    # 붕괴하면 -100dB 로 간다. 그게 이 테스트가 막는 것이다.
+    assert gapped_floor > -80.0, f"바닥이 붕괴했습니다: {gapped_floor}"
+    assert abs(gapped_floor - intact_floor) < 10.0
+
+
+def test_floor_moving_up_is_the_safe_direction():
+    """공백이 조용한 구간에만 몰리면 바닥 추정이 말소리 쪽으로 올라간다.
+
+    막을 수 없는 일이고, 막을 필요도 없다 — 바닥이 **올라가면** 그 트랙은
+    상대 에너지가 줄어 경쟁에서 진다. 위험한 건 내려가는 쪽뿐이다.
+    """
+    healthy = track_with_gap(speech_amp=0.30, seed=31)
+    # 앞쪽 절반(=조용한 구간)이 통째로 공백인 최악의 배치
+    lopsided = track_with_gap(speech_amp=0.30, gap_fraction=0.50, seed=31)
+
+    analysis = analyze_tracks([healthy, lopsided], sample_rate=SR)
+
+    assert analysis.noise_floor_db[1] > analysis.noise_floor_db[0], "올라가는 쪽이어야 한다"
+    assert primary_share(analysis, 1) < 0.5, "바닥이 올라갔는데도 이겼습니다"
+
+
+def test_fully_silent_track_never_wins():
+    """트랙 전체가 공백이면 바닥을 추정할 근거가 없다. 이길 수 없어야 한다."""
+    healthy = track_with_gap(speech_amp=0.30, seed=21)
+    empty = np.zeros(int(SR * 60.0), dtype=np.float32)
+
+    analysis = analyze_tracks([healthy, empty], sample_rate=SR)
+
+    assert primary_share(analysis, 1) == 0.0
+    assert analysis.speaking_ms(1) == 0
+
+
+def test_noise_floor_ignores_synthetic_silence():
+    """단위 수준 — 하한에 붙은 프레임은 측정값이 아니라 '데이터 없음' 이다."""
+    from teamflow.audio.multitrack import DB_FLOOR, estimate_noise_floor_db
+
+    measured = np.array([-45.0, -44.0, -43.0, -42.0, -20.0])
+    padded = np.concatenate([np.full(20, DB_FLOOR), measured])
+
+    assert estimate_noise_floor_db(padded) == pytest.approx(
+        estimate_noise_floor_db(measured)
+    )
+
+
+def test_noise_floor_of_all_silence_is_the_floor():
+    from teamflow.audio.multitrack import DB_FLOOR, estimate_noise_floor_db
+
+    assert estimate_noise_floor_db(np.full(50, DB_FLOOR)) == DB_FLOOR
+    assert estimate_noise_floor_db(np.zeros(0)) == DB_FLOOR

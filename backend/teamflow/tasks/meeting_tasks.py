@@ -15,7 +15,8 @@ import logging
 from datetime import UTC, date, datetime, time
 
 from celery import Task
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from teamflow.config import get_settings
 from teamflow.db import models as m
@@ -191,6 +192,9 @@ def _serialize(result: PipelineResult) -> dict:
         "candidates": [
             {
                 "title": c.title,
+                # 전사에 등장한 이름 그대로. `assignee_id` 가 None 일 때
+                # 사람이 누구를 골라야 하는지 아는 유일한 단서다.
+                "assignee_hint": c.assignee_hint,
                 "assignee_id": c.assignee.user_id,
                 "deadline": c.deadline.value.isoformat() if c.deadline.value else None,
                 "confidence": c.overall_confidence,
@@ -199,12 +203,49 @@ def _serialize(result: PipelineResult) -> dict:
             }
             for c in (validation.candidates if validation else [])
         ],
+        # 트랙 번째가 아니라 track_id 로 바꿔서 넘긴다. 저장 태스크는
+        # 파이프라인이 트랙을 어떤 순서로 로드했는지 알 수 없다.
+        "alignment": [
+            {
+                "track_id": result.track_ids[o.track_index],
+                "offset_ms": o.offset_ms,
+                "confidence": round(float(o.confidence), 3),
+                "method": o.method,
+            }
+            for o in result.alignment
+            if 0 <= o.track_index < len(result.track_ids)
+        ],
         "decisions": [
             {"content": content, "evidence": list(evidence), "supersedes": supersedes}
             for content, evidence, supersedes in (validation.decisions if validation else [])
         ],
+        # ⚠️ 이 둘이 여기 없어서 **파이프라인 밖으로 나온 적이 없었다.**
+        # 검증(`validation.py`)까지 통과한 산출물인데, 근거 발화 id 가
+        # 실재하는지 확인까지 마친 것들이 그대로 버려졌다. 회의 재처리는
+        # 사람이 검토한 뒤에는 거부되므로 **영구 손실**이었다.
+        "unresolved_issues": [
+            {"content": content, "evidence": list(evidence)}
+            for content, evidence in (validation.unresolved_issues if validation else [])
+        ],
+        "next_agenda": list(validation.next_agenda) if validation else [],
         "rejected": len(validation.rejected) if validation else 0,
     }
+
+
+def _span(session: Session, utterance_ids: list[int]) -> tuple[int, int]:
+    """근거 발화들이 걸친 구간. 근거가 없으면 (0, 0).
+
+    ⭐ **시각을 지어내지 않는다.** 없는 것을 0..회의끝 으로 채우면 화면이
+    "회의 내내 해결되지 않았다" 로 읽는다.
+    """
+    if not utterance_ids:
+        return (0, 0)
+    rows = session.execute(
+        select(func.min(m.Utterance.start_ms), func.max(m.Utterance.end_ms)).where(
+            m.Utterance.id.in_(utterance_ids)
+        )
+    ).one()
+    return (int(rows[0] or 0), int(rows[1] or 0))
 
 
 def _parse_deadline(value: str | None) -> datetime | None:
@@ -240,11 +281,44 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
             meeting.status = "failed"
             return {"meeting_id": meeting_id, "status": "failed", "error": payload.get("error")}
 
-        # 재처리 시 이전 결과를 지운다. 안 그러면 발화가 두 배가 된다.
-        for row in session.scalars(
-            select(m.Utterance).where(m.Utterance.meeting_id == meeting_id)
-        ).all():
-            session.delete(row)
+        # ── 재처리 정리 ────────────────────────────────────────
+        #
+        # 예전에는 발화만 지웠다. 그러면 후보와 결정이 **중복 생성**되고,
+        # 더 나쁘게는 1회차 후보의 근거 발화 ID 가 삭제된 행을 가리킨다.
+        # SQLite 는 rowid 를 재사용해 우연히 맞지만 PostgreSQL 시퀀스는
+        # 재사용하지 않으므로 근거가 통째로 고아가 된다 — "근거를 클릭하면
+        # 원문으로" 가 끊기고, 근거 없는 후보를 막는 방어가 무력해진다.
+        #
+        # 재실행 경로는 실재한다: task_acks_late=True + reject_on_worker_lost
+        # 이라 워커가 죽으면 같은 회의가 다시 돈다.
+        reviewed = session.scalars(
+            select(m.MeetingTaskCandidate).where(
+                m.MeetingTaskCandidate.meeting_id == meeting_id,
+                m.MeetingTaskCandidate.review_status != "pending",
+            )
+        ).all()
+        if reviewed:
+            # ⚠️ 사람이 이미 판단한 회의는 다시 쓰지 않는다.
+            #
+            # 발화를 지우고 새로 만들면 승인된 후보(이미 칸반의 업무가 된 것)의
+            # 근거가 끊어진다. 그건 데이터 정정이 아니라 **분쟁 근거의 훼손**이다.
+            # 다시 처리해야 한다면 사람이 먼저 승인을 되돌려야 한다.
+            logger.warning(
+                "meeting=%s 는 이미 검토된 후보가 %d건 있어 재처리를 건너뜁니다",
+                meeting_id,
+                len(reviewed),
+            )
+            return {
+                "meeting_id": meeting_id,
+                "status": "already_reviewed",
+                "reviewed": len(reviewed),
+            }
+
+        for model in (m.Utterance, m.MeetingTaskCandidate, m.Decision):
+            for row in session.scalars(
+                select(model).where(model.meeting_id == meeting_id)
+            ).all():
+                session.delete(row)
         session.flush()
 
         utterance_ids: list[int] = []
@@ -274,22 +348,108 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
                 m.MeetingTaskCandidate(
                     meeting_id=meeting_id,
                     title=candidate["title"],
+                    assignee_hint=candidate.get("assignee_hint"),
                     assignee_id=candidate["assignee_id"],
                     deadline=_parse_deadline(candidate["deadline"]),
                     confidence=candidate["confidence"],
                     evidence_utterance_ids=to_real_ids(candidate["evidence"]),
+                    warnings=list(candidate.get("warnings") or []),
                 )
             )
 
+        # 결정 번복 추적. 예전에는 `supersedes` 가 여기까지 실려 오는데
+        # 쓰지 않아 `supersedes_id` 가 **영원히 NULL** 이었다.
+        #
+        # LLM 에게 넘긴 `prior_decisions` 는 우리가 준 원문 목록이라 대개
+        # 정확히 일치한다. 그래서 **정확히 일치할 때만** 잇는다 —
+        # 비슷한 것을 골라 주면 회의 기록이 틀려지고, 틀린 기록은
+        # 조용하다. 못 찾으면 원문을 남겨 사람이 고치게 한다.
+        active_by_content = {
+            row.content: row
+            for row in session.scalars(
+                select(m.Decision).where(
+                    m.Decision.project_id == meeting.project_id,
+                    m.Decision.status == "active",
+                )
+            ).all()
+        }
+
         for decision in payload["decisions"]:
+            hint = decision.get("supersedes")
+            superseded = active_by_content.get(hint) if hint else None
+
+            row = m.Decision(
+                project_id=meeting.project_id,
+                meeting_id=meeting_id,
+                content=decision["content"],
+                evidence_utterance_ids=to_real_ids(decision["evidence"]),
+                supersedes_id=superseded.id if superseded else None,
+                # 찾았으면 힌트를 남기지 않는다 — id 가 있는데 원문까지
+                # 두면 어느 쪽이 맞는지 다음 사람이 헷갈린다.
+                supersedes_hint=None if superseded else hint,
+            )
+            session.add(row)
+
+            if superseded is not None:
+                # 뒤집힌 결정은 더 이상 활성이 아니다. 이걸 안 바꾸면
+                # 다음 회의의 `prior_decisions` 에 **뒤집힌 결정이 계속
+                # 들어가서** LLM 이 같은 번복을 매번 다시 보고한다.
+                superseded.status = "superseded"
+                active_by_content.pop(hint, None)
+                logger.info(
+                    "결정 번복: meeting=%s 가 decision=%s 를 뒤집음",
+                    meeting_id,
+                    superseded.id,
+                )
+            elif hint:
+                logger.info(
+                    "결정 번복 힌트를 이을 결정을 못 찾았습니다 "
+                    "(사람이 확인해야 합니다): meeting=%s hint=%r",
+                    meeting_id,
+                    hint[:80],
+                )
+
+        # 미해결 사안 → `meeting_events` 의 `unanswered_question`.
+        # 새 표가 필요 없다 — 그 자리가 원래 이것을 위한 자리다.
+        for issue in payload.get("unresolved_issues", []):
+            evidence = to_real_ids(issue["evidence"])
             session.add(
-                m.Decision(
-                    project_id=meeting.project_id,
+                m.MeetingEvent(
                     meeting_id=meeting_id,
-                    content=decision["content"],
-                    evidence_utterance_ids=to_real_ids(decision["evidence"]),
+                    event_type="unanswered_question",
+                    severity="info",
+                    # 근거 발화의 구간을 그대로 쓴다. 없으면 0 — 시각을
+                    # 지어내지 않는다.
+                    start_ms=_span(session, evidence)[0],
+                    end_ms=_span(session, evidence)[1],
+                    evidence_utterance_ids=evidence,
+                    detail={"content": issue["content"]},
                 )
             )
+
+        meeting.next_agenda = list(payload.get("next_agenda") or [])
+
+        # 추정한 정렬 보정값을 트랙에 되돌려 쓴다.
+        #
+        # 이걸 안 쓰면 `offset_ms` 는 영원히 0 이다. 그러면 발화 시각이
+        # 트랙마다 다른 기준에서 매겨진 채로 남고, 나중에 회의를 다시
+        # 조립하거나 "이 발언이 저 발언에 대한 답인가" 를 보려면 정렬을
+        # 처음부터 다시 추정해야 한다 — 원본 오디오는 보존기간이 지나면
+        # 지워지므로(P8) 그때는 다시 구할 방법이 없다.
+        for entry in payload.get("alignment", []):
+            track = session.get(m.MeetingTrack, entry["track_id"])
+            if track is None or track.meeting_id != meeting_id:
+                # 재처리 중에 트랙이 지워졌거나 다른 회의의 id 가 섞인 경우.
+                logger.warning(
+                    "meeting=%s 정렬 결과의 track=%s 를 찾지 못해 건너뜁니다",
+                    meeting_id,
+                    entry["track_id"],
+                )
+                continue
+            track.offset_ms = entry["offset_ms"]
+
+        # 요약은 회의 행에 남는다. 근거 발화는 utterances 에 이미 있다.
+        meeting.summary = payload.get("summary") or None
 
         # 사람이 검토해야 하므로 confirmed 가 아니라 needs_review 다.
         # 승인 전에는 절대 tasks 로 넘어가지 않는다.

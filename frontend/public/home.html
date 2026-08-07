@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<!-- 홈 화면에 추가하면 주소창 없이 전체화면으로 뜬다. -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/app.css" />
+<title>TeamFlow</title>
+<style>
+
+  header { display: flex; align-items: baseline; gap: .75rem; margin-bottom: 1.5rem; }
+
+  #who { font-size: .875rem; color: var(--dim); }
+  /* --todo: 지금 사람이 해야 할 일이 있는 회의를 눈에 띄게 하는 색.
+     app.css 의 --warn 과 같은 뜻이라 그걸 그대로 쓴다. */
+  :root { --todo: var(--warn); }
+
+  .project h2 { font-size: 1.0625rem; margin: 0 0 .125rem; }
+  .project .sub { font-size: .8125rem; color: var(--dim); margin: 0 0 .625rem; }
+  .links { display: flex; gap: .5rem; margin-bottom: .75rem; flex-wrap: wrap; }
+
+  .meeting { border-top: 1px solid var(--line); padding: .75rem 0; }
+  .meeting:first-child { border-top: 0; }
+  .meeting .head { display: flex; align-items: baseline; gap: .5rem; }
+  .meeting .name { font-weight: 600; font-size: .9375rem; flex: 1; }
+  .meeting .when { font-size: .75rem; color: var(--dim); white-space: nowrap; }
+  .meeting .status { font-size: .8125rem; color: var(--dim); margin: .125rem 0 .5rem; }
+  /* 지금 사람이 해야 할 일이 있는 회의만 눈에 띄게 한다. */
+  .meeting.todo .status { color: var(--todo); }
+
+  .start { margin-top: 1.5rem; }
+  .start h2 { font-size: .9375rem; margin: 0 0 .75rem; }
+
+  .hint { font-size: .75rem; color: var(--dim); margin: 0 0 1rem; }
+
+</style>
+</head>
+<body>
+  <header>
+    <h1>TeamFlow</h1>
+    <span id="who"></span>
+    <button id="logout" type="button">로그아웃</button>
+  </header>
+
+  <div id="projects">불러오는 중…</div>
+
+  <section class="card start">
+    <h2>시작하기</h2>
+    <div class="row">
+      <input id="new-title" type="text" placeholder="새 프로젝트 이름" maxlength="200"
+             autocomplete="off" />
+      <button id="create" type="button" class="primary">만들기</button>
+    </div>
+    <p class="hint">만들면 초대 코드가 나옵니다. 그 코드를 팀원에게 알려 주세요.</p>
+
+    <div class="row">
+      <input id="code" type="text" placeholder="초대 코드 (ABCD-EFGH)" maxlength="12"
+             autocomplete="off" autocapitalize="characters" spellcheck="false" />
+      <button id="join" type="button">참가</button>
+    </div>
+    <p class="hint">팀원에게 코드를 받았다면 여기에 넣으세요.</p>
+
+    <p id="start-error" class="error" hidden></p>
+  </section>
+
+  <!-- 설치 안내. `src/demo/pwa.ts` 가 채우고, 설치할 방법이 없으면
+       비워 둡니다 — 아이폰과 안드로이드가 완전히 다릅니다. -->
+  <section class="card install" hidden id="install-card">
+    <h2>앱으로 쓰기</h2>
+    <p id="install" class="sub" hidden></p>
+    <button id="install-now" class="primary btn-block" type="button" hidden>
+      홈 화면에 추가
+    </button>
+    <p class="hint" id="install-why"></p>
+  </section>
+
+  <p class="note">
+    회의는 <strong>녹음 → 처리 → 사람이 검토 → 칸반</strong> 순서로 갑니다.
+    각 회의 아래 문구가 지금 어느 단계인지와 다음에 할 일을 말합니다.
+    처리 중인 회의에는 버튼이 없습니다 — 눌러도 아직 아무것도 없습니다.
+  </p>
+
+  <script type="module" src="/home.js"></script>
+
+  <!-- 아래 탭바. `src/demo/nav.ts` 가 채운다.
+       위쪽 링크 줄에 의존하면 전체화면 PWA·WebView 에서 갇힌다 —
+       거기에는 주소창도 뒤로가기도 없다. -->
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
+</html>

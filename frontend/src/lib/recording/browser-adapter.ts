@@ -135,6 +135,18 @@ export class HttpUploadTransport implements UploadTransport {
     this.#headers = headers;
   }
 
+  /**
+   * 트랙 주소를 나중에 정한다.
+   *
+   * 화면이 열릴 때는 아직 트랙이 없다 — 서버에 참가해야 track_id 가 나오고,
+   * 그러려면 로그인이 먼저다. 생성자에서만 받으면 화면이 트랙 주소를
+   * 스스로 지어내야 하는데, 그건 예전에 `?me=1` 로 신원을 지어내던 것과
+   * 같은 종류의 실수다.
+   */
+  retarget(trackUrl: string): void {
+    this.#trackUrl = trackUrl;
+  }
+
   async send(chunk: PendingChunk): Promise<void> {
     const response = await fetch(`${this.#trackUrl}/chunks/${chunk.seq}`, {
       method: 'PUT', // PUT 이라서 같은 seq 를 두 번 올려도 덮어쓴다
@@ -146,6 +158,10 @@ export class HttpUploadTransport implements UploadTransport {
         ...this.#headers,
       },
       body: chunk.payload as Blob,
+      // 청크 업로드는 인증이 필요하다 — 서버가 **이 트랙이 내 트랙인가**를
+      // 확인한다. 같은 오리진이면 기본값도 same-origin 이지만, 개발 중에
+      // 다른 주소를 붙였을 때 조용히 401 이 나는 걸 막는다.
+      credentials: 'same-origin',
     });
     if (!response.ok) throw new Error(`업로드 실패 (HTTP ${response.status})`);
   }

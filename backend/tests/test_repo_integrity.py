@@ -143,3 +143,226 @@ def test_audio_storage_paths_are_still_ignored():
     ignored = set(_ignored([Path(p) for p in must_ignore]))
     for path in must_ignore:
         assert path in ignored, f"{path} 가 무시되지 않습니다 — 음성이 커밋될 수 있습니다"
+
+
+def test_every_script_the_screens_load_is_in_the_repository():
+    """⭐ clone 하고 uvicorn 만 띄우면 화면이 떠야 한다.
+
+    이게 없던 동안 `frontend/public/main.js` 와 `review.js` 가 .gitignore
+    에 들어 있었다. README 가 안내하는 대로
+
+        clone → seed_demo.py → uvicorn → http://localhost:8000/review.html
+
+    을 따라가면 **HTML 은 뜨는데 스크립트가 404 라 빈 화면**이었다. 오류도
+    안 난다 — 이 저장소에서 반복해서 나오는 "문서가 안내하는 대로 했는데
+    동작하지 않는" 부류다.
+
+    프런트에 런타임 의존성이 0개인 게 이 프로젝트의 선택이고, "Node 없이
+    연다" 가 시연 경로의 전제다. 그러니 번들을 커밋한다. 소스를 고치면
+    `npm run build:demo` 로 다시 만들어 같이 커밋해야 한다.
+    """
+    import re
+
+    public = REPO_ROOT / "frontend" / "public"
+    tracked = _tracked()
+    missing = []
+
+    for page in sorted(public.glob("*.html")):
+        for src in re.findall(r'<script[^>]+src="([^"]+)"', page.read_text()):
+            if src.startswith(("http://", "https://", "//")):
+                continue
+            target = (public / src.lstrip("./").lstrip("/")).resolve()
+            rel = target.relative_to(REPO_ROOT)
+            if rel not in tracked:
+                missing.append(f"{page.name} → {src}")
+
+    assert not missing, (
+        "화면이 부르는 스크립트가 저장소에 없습니다. clone 하면 빈 화면입니다:\n"
+        + "\n".join(f"  {m}" for m in missing)
+    )
+
+
+def test_the_screens_have_a_korean_label_for_every_category_the_server_sends():
+    """⭐ 기여도 화면의 카테고리 어휘가 서버 `Category` 와 같아야 한다.
+
+    어긋나 있었다. 화면 표에는 서버가 만들지 않는 `review`·`design`·
+    `planning` 이 있었고, 서버가 실제로 보내는 `schedule`·`peer` 가
+    없었다. `describeCategory` 는 모르는 값을 **그대로 돌려주므로**
+    예외도 콘솔 경고도 없이 한글 화면에 영어 식별자가 찍혔다:
+
+        "schedule, peer 활동은 이번 계산에서 빠졌습니다."
+
+    성적으로 이어질 수 있는 화면에서 학생이 자기 점수에서 무엇이
+    빠졌는지 읽을 수 없는 상태였다. 프런트 테스트는 그 잘못된 어휘를
+    그대로 고정하고 있어서 절대 잡지 못했다 — 두 언어에 걸친 규약은
+    한쪽 테스트로 못 잡으므로 여기서 잡는다.
+    """
+    import re
+
+    from teamflow.contribution.events import Category
+
+    source = (
+        REPO_ROOT / "frontend" / "src" / "lib" / "contribution" / "view.ts"
+    ).read_text()
+
+    block = re.search(
+        r"export const CATEGORY_LABEL: Record<string, string> = \{(.*?)\};",
+        source,
+        re.DOTALL,
+    )
+    assert block is not None, "CATEGORY_LABEL 을 찾지 못했습니다"
+
+    labelled = set(re.findall(r"^\s*(\w+):", block.group(1), re.MULTILINE))
+    expected = {c.value for c in Category}
+
+    assert labelled == expected, (
+        "화면의 카테고리 라벨이 서버 Category 와 다릅니다.\n"
+        f"  서버에만 있음(화면에 영어로 찍힙니다): {sorted(expected - labelled)}\n"
+        f"  화면에만 있음(죽은 코드입니다):        {sorted(labelled - expected)}"
+    )
+
+
+def test_the_api_image_ships_the_screens():
+    """⭐ 컨테이너로 띄웠을 때 화면이 나와야 한다.
+
+    `Dockerfile.api` 가 `frontend/` 를 복사하지 않고 있었다. 그러면
+    `_mount_frontend` 가 조용히 마운트를 건너뛰고 **모든 화면이 404**
+    가 된다. API 는 멀쩡히 뜨고 `/health` 도 200 이라 컨테이너는
+    정상으로 보인다 — 사람이 주소를 열었을 때만 아무것도 안 나온다.
+
+    이 환경에는 Docker 데몬이 없어 이미지를 실제로 빌드해 볼 수 없다.
+    그래서 파일에 그 COPY 가 있는지만 본다. 약한 검사지만, 없는 것보다
+    낫다 — 없을 때는 아무도 몰랐다.
+    """
+    dockerfile = (REPO_ROOT / "docker" / "Dockerfile.api").read_text()
+
+    from teamflow.api import main as api_main
+
+    mounted = api_main.FRONTEND_EXPECTED_AT.relative_to(REPO_ROOT)
+    # `frontend/public` → 이미지가 이 경로를 만들어야 한다.
+    assert str(mounted) == "frontend/public"
+
+    copies = [
+        line
+        for line in dockerfile.splitlines()
+        if line.strip().upper().startswith("COPY") and "frontend" in line
+    ]
+    assert copies, (
+        "Dockerfile.api 가 frontend/ 를 복사하지 않습니다. "
+        "컨테이너에서 모든 화면이 404 가 되는데 API 는 정상으로 보입니다."
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 안드로이드 셸 — 웹과 코틀린이 어긋나면 조용히 아무 일도 안 일어난다
+# ══════════════════════════════════════════════════════════════
+
+ANDROID = REPO_ROOT / "android"
+
+
+def _shell_kotlin(name: str) -> str:
+    return (
+        ANDROID / "app" / "src" / "main" / "java" / "com" / "teamflow" / "shell" / name
+    ).read_text()
+
+
+def test_the_shell_bridge_name_matches_on_both_sides():
+    """⭐ 웹이 찾는 이름과 셸이 심는 이름이 같아야 한다.
+
+    어긋나면 **조용히 "셸이 아니다"** 가 된다. 셸 안인데 설치 안내가
+    뜨고, 서비스 워커가 셸 캐시와 겹치고, 무엇보다 녹음 시작을 셸에게
+    알리지 못해 **포그라운드 서비스가 안 올라간다** — 화면이 꺼지면
+    녹음이 끊긴다. 오류는 하나도 나지 않는다.
+
+    실제로 한 번 어긋나 있었다: 웹은 `TeamFlowShell` 을 봤고 셸은
+    `TeamFlowShellBridge` 를 심었다.
+    """
+    import re
+
+    kotlin = _shell_kotlin("ShellBridge.kt")
+    name = re.search(r'const val NAME = "([^"]+)"', kotlin)
+    assert name is not None, "ShellBridge.NAME 을 찾지 못했습니다"
+
+    web = (
+        REPO_ROOT / "frontend" / "src" / "lib" / "shell" / "bridge.ts"
+    ).read_text()
+    assert f"win.{name.group(1)}" in web, (
+        f"웹이 `{name.group(1)}` 를 찾지 않습니다. 셸이 심는 이름과 다릅니다."
+    )
+
+
+def test_every_bridge_method_the_web_calls_exists_in_the_shell():
+    """⭐ 웹이 부르는 브리지 함수가 셸에 전부 있어야 한다.
+
+    없는 함수를 부르면 그 자리에서 예외가 난다. 녹음 시작 직전이면
+    **녹음이 아예 시작되지 않는다.**
+    """
+    import re
+
+    kotlin = _shell_kotlin("ShellBridge.kt")
+    exposed = set(re.findall(r"@JavascriptInterface\s+fun (\w+)\(", kotlin))
+    assert exposed, "@JavascriptInterface 함수를 하나도 못 찾았습니다"
+
+    web = (REPO_ROOT / "frontend" / "src" / "lib" / "shell" / "bridge.ts").read_text()
+    declared = set(
+        re.findall(
+            r"^\s*(\w+): \(\) =>",
+            web[web.index("export interface ShellBridge") : web.index("declare global")],
+            re.MULTILINE,
+        )
+    )
+    assert declared, "웹 쪽 ShellBridge 인터페이스를 못 읽었습니다"
+
+    missing = sorted(declared - exposed)
+    assert not missing, f"웹이 부르는데 셸에 없는 함수: {missing}"
+
+
+def test_the_shell_declares_the_permissions_its_code_needs():
+    """⭐ 코드가 쓰는 것을 매니페스트가 선언해야 한다.
+
+    안드로이드는 선언되지 않은 권한을 **조용히 거절**한다. 포그라운드
+    서비스가 안 올라가면 화면이 꺼졌을 때 녹음이 끊기는데, 그건
+    녹음이 끝난 뒤 커버리지를 봐야 알 수 있다 — 그때는 이미 늦었다.
+    """
+    manifest = (ANDROID / "app" / "src" / "main" / "AndroidManifest.xml").read_text()
+
+    for permission in [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+        "android.permission.POST_NOTIFICATIONS",
+    ]:
+        assert permission in manifest, f"선언되지 않은 권한: {permission}"
+
+    # 서비스가 등록돼 있어야 `startForegroundService` 가 동작한다.
+    assert 'android:name=".RecordingService"' in manifest
+    assert 'android:foregroundServiceType="microphone"' in manifest
+
+
+def test_the_shell_refuses_plaintext_http_to_the_outside():
+    """⭐ 회의 음성과 세션 쿠키가 평문으로 나가면 안 된다.
+
+    안드로이드는 API 28+ 부터 평문을 기본으로 막지만, 이 앱은 minSdk 24
+    라 낮은 기기에서는 기본이 반대다. 명시적으로 막는다.
+    """
+    config = (
+        ANDROID / "app" / "src" / "main" / "res" / "xml" / "network_security_config.xml"
+    ).read_text()
+    assert '<base-config cleartextTrafficPermitted="false" />' in config
+
+    manifest = (ANDROID / "app" / "src" / "main" / "AndroidManifest.xml").read_text()
+    assert "android:networkSecurityConfig=" in manifest, (
+        "설정 파일만 있고 매니페스트가 가리키지 않으면 아무 효력이 없습니다"
+    )
+
+
+def test_the_recording_screen_actually_tells_the_shell():
+    """⭐ 브리지를 만들어 놓고 부르지 않으면 아무 일도 안 일어난다.
+
+    이 저장소에서 가장 자주 나온 결함이다. 여기서는 그 결과가
+    **화면이 꺼지면 녹음이 끊기는 것**이고, 오류는 안 난다.
+    """
+    screen = (REPO_ROOT / "frontend" / "src" / "demo" / "main.ts").read_text()
+    assert "tellShellRecordingStarted(window)" in screen
+    assert "tellShellRecordingStopped(window)" in screen

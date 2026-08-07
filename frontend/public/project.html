@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<!-- 홈 화면에 추가하면 주소창 없이 전체화면으로 뜬다. -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/app.css" />
+<title>프로젝트 설정 — TeamFlow</title>
+<style>
+  /* 되돌릴 수 없는 동작. 다른 구역과 눈에 띄게 달라야 하지만,
+     겁주는 붉은 상자로 만들지는 않는다 — 이건 권리 행사다. */
+  .danger { border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
+  .danger .label { font-size: .8125rem; font-weight: 600; color: var(--dim); margin: .875rem 0 .25rem; }
+  .danger ul.plain li { font-size: .875rem; color: var(--dim); padding: .125rem 0; }
+  .danger ul.plain li::before { content: "· "; }
+  .danger-btn { margin-top: 1rem; border-color: var(--bad); color: var(--bad); }
+  #del-result { font-size: .9375rem; margin-top: .75rem; }
+  #del-result.bad { color: var(--bad); }
+
+  section { border: 1px solid var(--line); border-radius: .625rem; padding: .875rem 1rem; margin-bottom: 1rem; }
+
+  #code { font: 700 1.5rem/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
+  #next { font-size: .875rem; margin: .5rem 0 0; }
+  #gh-state, #members { font-size: .8125rem; color: var(--dim); margin: .25rem 0 0; }
+  #error { color: var(--bad); font-size: .875rem; margin-top: 1rem; }
+
+</style>
+</head>
+<body>
+  <h1 id="title-heading">프로젝트</h1>
+  <p class="sub" id="members"></p>
+
+  <section>
+    <h2>팀원 초대</h2>
+    <p id="code">····</p>
+    <div class="row">
+      <button id="copy" type="button">코드 복사</button>
+      <button id="rotate" type="button">코드 새로 만들기</button>
+    </div>
+    <p id="next"></p>
+  </section>
+
+  <section>
+    <h2>회의 열기</h2>
+    <label>회의 제목 (선택)
+      <input id="meeting-title" type="text" placeholder="1주차 정기회의" />
+    </label>
+    <button id="open-meeting" class="primary" type="button">회의를 열고 로비로</button>
+  </section>
+
+  <section>
+    <h2>설정</h2>
+    <label>프로젝트 이름
+      <input id="title" type="text" />
+    </label>
+    <button id="save-title" type="button">이름 저장</button>
+
+    <label style="margin-top:1rem">GitHub 저장소
+      <input id="repo" type="text" placeholder="owner/repo" />
+    </label>
+    <button id="save-repo" type="button">저장소 연결</button>
+    <p id="gh-state"></p>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════
+       내 녹음 지우기 (docs/07 P6 — 개인정보 삭제 요청)
+
+       ⚠️ 이건 **법적 권리**입니다. 위험한 관리자 동작이 아닙니다.
+       마찰을 넣지 않되, 되돌릴 수 없다는 것과 기여도에 무슨 일이
+       일어나는지를 누르기 **전에** 말합니다.
+       ══════════════════════════════════════════════════════ -->
+  <section class="danger">
+    <h2>내 녹음 지우기</h2>
+    <p class="sub">
+      이 프로젝트에 남아 있는 <strong>내 목소리</strong>를 지웁니다.
+      개인정보 삭제 요청권(개인정보보호법 제36조)입니다.
+    </p>
+
+    <p class="label">지워지는 것</p>
+    <ul id="del-gone" class="plain"></ul>
+
+    <p class="label">남는 것</p>
+    <ul id="del-kept" class="plain"></ul>
+
+    <p class="label">기여도는 어떻게 되나요</p>
+    <p id="del-score" class="sub"></p>
+
+    <button id="del-run" type="button" class="btn-block danger-btn">
+      내 녹음과 성문 지우기
+    </button>
+    <p id="del-result" hidden></p>
+  </section>
+
+  <p id="error" hidden></p>
+
+  <p class="note">
+    초대 코드는 <strong>메신저로 돌아다니므로 샙니다.</strong> 팀이 다 모이면
+    새로 만들어 두는 게 좋습니다 — 지금 코드는 그 즉시 통하지 않습니다.
+    <br /><br />
+    저장소는 <code>owner/repo</code> 형식입니다. 주소를 붙여넣어도 고쳐서
+    저장합니다 — 웹훅이 <code>repository.full_name</code> 으로 프로젝트를
+    찾기 때문에, 형식이 틀리면 <strong>오류 없이 기여도만 비어 있게</strong>
+    됩니다.
+  </p>
+
+  <script type="module" src="/project.js"></script>
+
+  <!-- 아래 탭바. `src/demo/nav.ts` 가 채운다.
+       위쪽 링크 줄에 의존하면 전체화면 PWA·WebView 에서 갇힌다 —
+       거기에는 주소창도 뒤로가기도 없다. -->
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
+</html>

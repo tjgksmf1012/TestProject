@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:8080/v1"
     llm_model: str = "local"
 
+    # asr_backend: qwen3 | fake
+    #
+    # "fake" 는 오디오를 보지 않고 대본을 돌려준다. GPU 도 모델도 없이
+    # **업로드부터 칸반 등록까지 전 구간을 실제로 돌려 보기 위한 것**이다
+    # (scripts/seed_demo.py). 시연·개발용이며 운영에서 쓰면 안 된다 —
+    # `/health` 가 이 값을 그대로 노출하므로 켜져 있으면 바로 보인다.
+    asr_backend: str = "qwen3"
     asr_model: str = "Qwen/Qwen3-ASR-1.7B"
     diarization_model: str = "pyannote/speaker-diarization-community-1"
 
@@ -63,6 +70,15 @@ class Settings(BaseSettings):
 
     # ── 기여도 ────────────────────────────────────────────
     scoring_algo_version: str = "scoring-v1"
+
+    # ── 로그 ──────────────────────────────────────────────
+    # 이 프로젝트의 결함은 대부분 **조용히** 일어난다 — 트랙 하나가 버려지고,
+    # 회의가 큐에서 멈추고, 후보가 승인되지 않는다. 예외가 안 나므로 로그가
+    # 유일한 흔적인데, 그 로그가 기본 설정으로는 나가지 않았다.
+    #
+    # log_format: text | json  — 컨테이너 로그 수집기가 붙으면 json.
+    log_level: str = "INFO"
+    log_format: str = "text"
 
     @property
     def is_production(self) -> bool:
@@ -82,7 +98,17 @@ def get_settings() -> Settings:
     return Settings()
 
 
-TRUSTED_FIELDS = frozenset({"environment", "debug", "llm_backend", "asr_model"})
+TRUSTED_FIELDS = frozenset(
+    {
+        "environment",
+        "debug",
+        "llm_backend",
+        "asr_backend",
+        "asr_model",
+        "log_level",
+        "log_format",
+    }
+)
 
 
 def safe_dump(settings: Settings) -> dict[str, object]:
