@@ -642,6 +642,18 @@ class AudioAsset(Base):
         DateTime(timezone=True), nullable=False
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ⚠️ **왜 지웠는가.** `deleted_at` 만으로는 구분할 수 없다.
+    #
+    #   retention_expired  보존기간 30일이 지나 자동으로 지웠다
+    #   user_request       본인이 삭제를 요청했다 (docs/07 P6)
+    #
+    # 이 구분이 필요한 이유는 기여도 화면에 있다. 원본이 없어진 트랙은
+    # 재처리해도 발화가 안 나오는데, 그 상태를 "말을 안 한 사람" 으로
+    # 처리하면 측정이 아니라 오답이다 (docs/04 §2.6). 그런데 **왜 없어졌는지에
+    # 따라 사람이 할 일이 다르다** — 만료는 정상이고, 삭제 요청은 권리
+    # 행사이며, 어느 쪽도 "다음엔 화면을 켜 두자" 로 고칠 수 없다.
+    # 녹음이 끊긴 것과는 다른 문구가 나가야 한다.
+    deleted_reason: Mapped[str | None] = mapped_column(String(30))
     created_at: Mapped[datetime] = _now()
 
     __table_args__ = (

@@ -278,6 +278,19 @@ function whyInstall() {
   return "설치하면 녹음 중에 화면이 꺼지는 것을 더 잘 막습니다 — 브라우저 탭에서는 화면 꺼짐 방지가 잘 듣지 않습니다.";
 }
 
+// src/lib/shell/bridge.ts
+function shellBridge(win) {
+  const bridge = win.TeamFlowShellBridge;
+  if (!bridge) return null;
+  for (const name of ["isShell", "version", "startRecording", "stopRecording"]) {
+    if (typeof bridge[name] !== "function") return null;
+  }
+  return bridge;
+}
+function isInShell(win) {
+  return shellBridge(win) !== null;
+}
+
 // src/demo/pwa.ts
 var deferredPrompt = null;
 function registerServiceWorker() {
@@ -285,7 +298,7 @@ function registerServiceWorker() {
     console.info("[pwa] 이 브라우저는 서비스 워커를 지원하지 않습니다");
     return;
   }
-  if (window.TeamFlowShell) return;
+  if (isInShell(window)) return;
   navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((error) => {
     console.warn(
       "[pwa] 서비스 워커를 등록하지 못했습니다 — 오프라인 화면이 뜨지 않습니다.",
@@ -302,7 +315,7 @@ function renderInstallHint() {
     standalone: matchMedia("(display-mode: standalone)").matches,
     iosStandalone: navigator.standalone === true,
     hasPrompt: deferredPrompt !== null,
-    inShell: window.TeamFlowShell !== void 0
+    inShell: isInShell(window)
   });
   const text = describeInstall(state);
   host.textContent = text;

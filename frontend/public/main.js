@@ -1250,7 +1250,7 @@ function registerServiceWorker() {
     console.info("[pwa] 이 브라우저는 서비스 워커를 지원하지 않습니다");
     return;
   }
-  if (window.TeamFlowShell) return;
+  if (isInShell(window)) return;
   navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((error) => {
     console.warn(
       "[pwa] 서비스 워커를 등록하지 못했습니다 — 오프라인 화면이 뜨지 않습니다.",
@@ -1267,7 +1267,7 @@ function renderInstallHint() {
     standalone: matchMedia("(display-mode: standalone)").matches,
     iosStandalone: navigator.standalone === true,
     hasPrompt: deferredPrompt !== null,
-    inShell: window.TeamFlowShell !== void 0
+    inShell: isInShell(window)
   });
   const text = describeInstall(state);
   host.textContent = text;

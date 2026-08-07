@@ -1186,3 +1186,35 @@ def test_deletion_leaves_an_audit_trail(client: TestClient, track: dict, engine)
         ).all()
         assert len(logs) == 1
         assert logs[0].project_id == project_id
+
+
+def test_deleting_my_recording_shows_up_as_unmeasurable_not_zero(
+    client: TestClient, track: dict, engine
+):
+    """⭐ 삭제 → 기여도 화면이 **한 줄로 이어져야** 한다.
+
+    원본을 지워도 트랙 행은 `completed` 로 남는다. 그래서 기여도 계산은
+    그걸 **정상 측정된 트랙으로 센다** — 재처리하면 발화가 0건이라
+    "말을 안 한 사람" 이 된다. 이 시스템이 가장 하지 말아야 할 일이다.
+
+    그리고 사유가 **구분돼야** 한다. "녹음이 끊겼습니다" 는 다음 회의에
+    화면을 켜 두면 고쳐지지만, 삭제 요청은 그렇지 않다.
+    """
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    assert complete(client, track, slices=1).status_code == 200
+
+    project_id = _project_id(track["meeting_id"])
+
+    # 삭제 전에는 아무 표시도 없다.
+    before = client.get(f"/api/projects/{project_id}/contributions").json()
+    assert all(not member["measurement_gaps"] for member in before["members"])
+
+    assert client.post(f"/api/projects/{project_id}/me/data").status_code == 200
+
+    after = client.get(f"/api/projects/{project_id}/contributions").json()
+    flagged = [mem for mem in after["members"] if mem["measurement_gaps"]]
+    assert flagged, "삭제한 사람이 측정 불가로 표시되지 않았습니다"
+
+    reason = flagged[0]["measurement_gaps"][0]["reason"]
+    assert "본인 요청" in reason, reason
+    assert "끊" not in reason, reason

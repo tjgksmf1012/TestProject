@@ -52,6 +52,14 @@ class PurgeReport:
         )
 
 
+#: `audio_assets.deleted_reason` 에 들어가는 값.
+#:
+#: 화면이 이걸 보고 다른 문구를 냅니다 — 만료는 정상이고 삭제 요청은 권리
+#: 행사인데, 둘 다 "녹음이 끊겼습니다" 로 나가면 팀이 엉뚱한 대응을 합니다.
+REASON_RETENTION_EXPIRED = "retention_expired"
+REASON_USER_REQUEST = "user_request"
+
+
 def _safe_remove(root: Path, storage_key: str) -> tuple[bool, int, str | None]:
     """저장 루트 밖의 경로는 건드리지 않는다.
 
@@ -137,6 +145,7 @@ def purge_expired_audio(
         # 파일이 이미 없어도 레코드는 삭제 처리한다.
         # 그래야 다음 실행에서 다시 시도하지 않는다.
         asset.deleted_at = now
+        asset.deleted_reason = REASON_RETENTION_EXPIRED
         report.deleted_assets.append(asset.id)
         report.freed_bytes += size or (asset.bytes or 0)
 
@@ -232,6 +241,7 @@ def revoke_user_data(
             if not removed:
                 report.missing_files.append(asset.id)
             asset.deleted_at = now
+            asset.deleted_reason = REASON_USER_REQUEST
             report.deleted_assets.append(asset.id)
             report.freed_bytes += size or (asset.bytes or 0)
 
