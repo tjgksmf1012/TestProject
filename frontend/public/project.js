@@ -67,6 +67,67 @@ function isSessionExpired(status) {
   return status === 401;
 }
 
+// src/lib/github/health.ts
+var TONES = /* @__PURE__ */ new Set(["ok", "warn", "bad"]);
+function describeLastDelivery(iso, now) {
+  if (!iso) return "";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const seconds = Math.floor((now.getTime() - at.getTime()) / 1e3);
+  if (seconds < 60) return "방금";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}분 전`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}시간 전`;
+  return `${Math.floor(seconds / 86400)}일 전`;
+}
+function describeActivity(health, now) {
+  if (health.delivery_count <= 0) return "";
+  const when = describeLastDelivery(health.last_delivery_at, now);
+  const count = `배달 ${health.delivery_count}건`;
+  return when ? `${count} · 마지막 ${when}` : count;
+}
+function describeHealth(health, now) {
+  return {
+    headline: health.headline,
+    detail: health.detail,
+    // 서버가 모르는 값을 보내면 **좋은 쪽으로 넘기지 않습니다.** 연결이
+    // 정상이라고 잘못 말하는 것이 모른다고 말하는 것보다 나쁩니다.
+    tone: TONES.has(health.severity) ? health.severity : "warn",
+    nextStep: health.next_step,
+    warnings: health.warnings ?? [],
+    activity: describeActivity(health, now)
+  };
+}
+function describeHealthFailure(status) {
+  if (status === 403) {
+    return {
+      headline: "이 프로젝트의 구성원만 볼 수 있습니다",
+      detail: "연결 상태에는 저장소 이름이 들어 있어 팀 밖에는 보여주지 않습니다.",
+      tone: "warn",
+      nextStep: null,
+      warnings: [],
+      activity: ""
+    };
+  }
+  if (status === 0) {
+    return {
+      headline: "연결 상태를 확인하지 못했습니다",
+      detail: "서버에 닿지 못했습니다. 인터넷 연결을 확인하세요.",
+      tone: "warn",
+      nextStep: "잠시 뒤 새로고침하세요.",
+      warnings: [],
+      activity: ""
+    };
+  }
+  return {
+    headline: "연결 상태를 확인하지 못했습니다",
+    detail: `서버가 HTTP ${status} 로 답했습니다. 연결이 정상이라는 뜻은 아닙니다.`,
+    tone: "warn",
+    nextStep: "잠시 뒤 새로고침하세요.",
+    warnings: [],
+    activity: ""
+  };
+}
+
 // src/lib/html.ts
 var ESCAPES = {
   "&": "&amp;",
@@ -389,7 +450,29 @@ function render(detail) {
   $("code").textContent = detail.invite_code ? formatCode(detail.invite_code) : "(없음)";
   $("members").textContent = `팀원 ${detail.member_count}명`;
   say("next", nextStepAfterCreate(detail.member_count));
-  $("gh-state").textContent = detail.github_connected ? "GitHub App 설치 id 가 연결돼 있습니다" : "설치 id 가 없습니다 — 저장소를 연결해도 PR 기여도는 수집되지 않습니다";
+}
+function withCode(text) {
+  return escapeHtml(text).replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+function renderHealth(view) {
+  $("gh-health").className = `health ${view.tone}`;
+  $("gh-headline").innerHTML = withCode(view.headline);
+  $("gh-detail").innerHTML = withCode(view.detail);
+  $("gh-next").innerHTML = view.nextStep ? withCode(view.nextStep) : "";
+  $("gh-next").hidden = !view.nextStep;
+  $("gh-warnings").innerHTML = view.warnings.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+  $("gh-activity").textContent = view.activity;
+  $("gh-activity").hidden = view.activity === "";
+}
+async function loadHealth() {
+  let response;
+  try {
+    response = await call(`/api/projects/${projectId}/github`);
+  } catch {
+    return renderHealth(describeHealthFailure(0));
+  }
+  if (!response.ok) return renderHealth(describeHealthFailure(response.status));
+  renderHealth(describeHealth(await response.json(), /* @__PURE__ */ new Date()));
 }
 async function load() {
   const response = await call(`/api/projects/${projectId}`);
@@ -425,7 +508,9 @@ $("save-repo").addEventListener("click", () => {
   }).then(async (r) => {
     if (r.status === 409) return say("error", "다른 프로젝트가 이미 이 저장소를 쓰고 있습니다.");
     say("error", r.ok ? "" : `저장하지 못했습니다 (HTTP ${r.status})`);
-    if (r.ok) render(await r.json());
+    if (!r.ok) return;
+    render(await r.json());
+    void loadHealth();
   });
 });
 $("rotate").addEventListener("click", () => {
@@ -494,4 +579,5 @@ $("del-run").addEventListener("click", () => {
 });
 renderNav("project");
 void load();
+void loadHealth();
 bootApp();

@@ -17,6 +17,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
+import { bundle, entryPoints } from '../../build.mts';
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
 const PUBLIC = join(ROOT, 'public');
@@ -305,5 +307,62 @@ describe('앱 껍데기 배선', () => {
       }
     }
     strictEqual(problems.join(', '), '');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 빌드된 번들이 소스와 같은가
+//
+// ⚠️ **테스트는 `src/` 를 읽고, 브라우저는 `public/*.js` 를 받습니다.**
+//
+// 그래서 소스를 고치고 빌드를 안 하면 이런 일이 벌어집니다 — 테스트는
+// 전부 통과하고, 타입 검사도 통과하고, 화면은 **고치기 전 코드로**
+// 돕니다. 어디에도 오류가 안 납니다. 이 저장소가 반복해서 당한 부류이고,
+// 이 구역을 만들게 된 것도 실제로 한 번 그렇게 됐기 때문입니다.
+// ══════════════════════════════════════════════════════════════
+
+describe('빌드된 번들', () => {
+  it('⭐ public 의 번들이 지금 소스로 빌드한 것과 같다', async () => {
+    // 다르면 화면은 옛 코드로 돕니다. `npm run build:demo` 를 잊은 것입니다.
+    const fresh = await bundle();
+    const stale: string[] = [];
+    for (const [name, text] of fresh) {
+      let onDisk: string;
+      try {
+        onDisk = readFileSync(join(PUBLIC, name), 'utf8');
+      } catch {
+        stale.push(`${name} (없음)`);
+        continue;
+      }
+      if (onDisk !== text) stale.push(name);
+    }
+    strictEqual(
+      stale.join(', '),
+      '',
+      `번들이 소스와 다릅니다 — \`npm run build:demo\` 를 실행하세요: ${stale.join(', ')}`,
+    );
+  });
+
+  it('⭐ 화면이 부르는 스크립트마다 소스가 있다', () => {
+    // 없으면 그 화면은 404 를 받고 **아무 동작도 하지 않습니다.**
+    const missing = entryPoints().filter((path: string) => {
+      try {
+        readFileSync(path);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+    strictEqual(missing.join(', '), '');
+  });
+
+  it('⭐ 진입점 수를 세는 방식이 화면 수와 맞는다', () => {
+    // 손으로 적은 목록은 화면을 더할 때 빠집니다. 세는 쪽이 맞는지 확인합니다.
+    const withScript = readdirSync(PUBLIC)
+      .filter((n) => n.endsWith('.html'))
+      .filter((n) => /<script[^>]*\ssrc="\.?\/[A-Za-z0-9_-]+\.js"/.test(
+        readFileSync(join(PUBLIC, n), 'utf8'),
+      ));
+    strictEqual(entryPoints().length, withScript.length);
   });
 });

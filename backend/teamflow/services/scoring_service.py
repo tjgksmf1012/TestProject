@@ -148,8 +148,19 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
     if project and project.started_at:
         end = project.deadline or datetime.now(project.started_at.tzinfo)
         project_days = max(0, (end - project.started_at).days)
-        if project.github_connected_at:
-            github_days = max(0, (end - project.github_connected_at).days)
+        # ⚠️ `github_connected_at`(이름을 **적어 넣은** 시각)이 아니라
+        # `github_verified_at`(서명된 배달이 **처음 도착한** 시각)입니다.
+        #
+        # 예전에는 앞엣것을 썼습니다. 그래서 저장소 이름을 적기만 하면 —
+        # 오타여도, App 을 설치하지 않았어도 — `github_coverage` 가 1.0 이
+        # 됐습니다. GitHub 이벤트가 **0건**인 프로젝트가 "신뢰도 보통" 으로
+        # 나왔습니다.
+        #
+        # 신뢰도는 "얼마나 많은 근거로 계산했는가" 입니다. 근거가 없는데
+        # 높게 나오면 그건 신뢰도가 아니라 거짓말이고, 이 시스템에서는
+        # 성적에 쓰일 수 있는 값을 뒷받침하는 숫자입니다.
+        if project.github_verified_at:
+            github_days = max(0, (end - project.github_verified_at).days)
 
     member_count = (
         session.scalar(

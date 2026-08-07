@@ -392,18 +392,149 @@ def test_clearing_the_repository_disconnects(client: TestClient, people: dict):
         assert s.get(m.Project, project_id).github_connected_at is None
 
 
+def test_nobody_can_write_the_installation_id_through_the_api(
+    client: TestClient, people: dict
+):
+    """⭐ **이 자리에 있던 테스트가 결함을 고정하고 있었습니다.**
+
+    예전 테스트는 `{"github_installation_id": 12345}` 를 보내고 응답에 그
+    숫자가 안 나오는지만 봤습니다. 나가는 길은 막혀 있었지만 **들어오는 길이
+    열려 있었고**, 테스트는 그걸 정상으로 못 박고 있었습니다.
+
+    설치 id 는 워커가 `build_client()` 로 **그 설치의 액세스 토큰을 발급**할
+    때 씁니다. 아무 숫자나 써 넣을 수 있다는 것은, 이 팀과 아무 상관 없는
+    설치의 권한으로 GitHub API 를 부르게 만들 수 있다는 뜻입니다.
+    요청 본문의 id 를 권한에 그대로 쓰던 `member_ids` 결함과 같은 부류입니다.
+
+    이제 이 필드는 스키마에 아예 없고, 보내면 422 로 거절합니다. 조용히
+    무시하면 보낸 쪽은 저장된 줄 압니다.
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    response = client.patch(
+        f"/api/projects/{project_id}", json={"github_installation_id": 12345}
+    )
+
+    assert response.status_code == 422
+    with db_session.session_scope() as s:
+        assert s.get(m.Project, project_id).github_installation_id is None
+
+
 def test_the_installation_id_is_never_sent_back(client: TestClient, people: dict):
     """화면이 쓸 일이 없습니다 — 연결 여부만 알면 됩니다."""
     login_as(client, people["founder"])
     project_id = create_project(client)["project_id"]
 
+    with db_session.session_scope() as s:
+        s.get(m.Project, project_id).github_installation_id = 12345
+
+    body = client.get(f"/api/projects/{project_id}").json()
+
+    assert "github_installation_id" not in body
+    assert "12345" not in str(body)
+
+
+def test_connected_means_a_signed_delivery_arrived_not_that_a_name_was_typed(
+    client: TestClient, people: dict
+):
+    """⭐ "연결됨" 의 뜻이 바뀝니다.
+
+    예전에는 설치 id 가 있으면 참이었고, 그 id 는 화면에서 아무 숫자나
+    보내면 채워졌습니다. 즉 **아무것도 확인하지 않고** "연결됨" 을 보여
+    주고 있었습니다.
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
     body = client.patch(
-        f"/api/projects/{project_id}", json={"github_installation_id": 12345}
+        f"/api/projects/{project_id}", json={"github_repo": "team/teamflow"}
+    ).json()
+    assert body["github_connected"] is False
+
+    with db_session.session_scope() as s:
+        s.get(m.Project, project_id).github_verified_at = NOW
+
+    assert client.get(f"/api/projects/{project_id}").json()["github_connected"] is True
+
+
+def test_changing_the_repository_throws_away_the_old_proof(
+    client: TestClient, people: dict
+):
+    """앞 저장소에서 배달이 왔다는 사실은 **새 저장소의 근거가 아닙니다.**"""
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+    client.patch(f"/api/projects/{project_id}", json={"github_repo": "team/teamflow"})
+
+    with db_session.session_scope() as s:
+        project = s.get(m.Project, project_id)
+        project.github_verified_at = NOW
+        project.github_installation_id = 555
+
+    body = client.patch(
+        f"/api/projects/{project_id}", json={"github_repo": "team/other"}
+    ).json()
+
+    assert body["github_connected"] is False
+    with db_session.session_scope() as s:
+        assert s.get(m.Project, project_id).github_installation_id is None
+
+
+def test_fixing_only_the_letter_case_keeps_the_proof(client: TestClient, people: dict):
+    """대소문자만 고친 것은 **저장소를 바꾼 게 아닙니다.**
+
+    이걸 바뀐 것으로 보면, 표기를 정리한 순간 연결이 끊긴 것처럼 보이고
+    신뢰도가 근거 없이 떨어집니다.
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+    client.patch(f"/api/projects/{project_id}", json={"github_repo": "team/teamflow"})
+
+    with db_session.session_scope() as s:
+        s.get(m.Project, project_id).github_verified_at = NOW
+
+    body = client.patch(
+        f"/api/projects/{project_id}", json={"github_repo": "Team/TeamFlow"}
     ).json()
 
     assert body["github_connected"] is True
-    assert "github_installation_id" not in body
-    assert "12345" not in str(body)
+
+
+def test_the_lookup_key_cannot_drift_from_the_repository(
+    client: TestClient, people: dict
+):
+    """⭐ 둘이 어긋나면 웹훅이 조용히 사라집니다.
+
+    저장소를 바꾸는 자리마다 손으로 둘을 같이 쓰게 하면 언젠가 빠뜨립니다.
+    모델이 묶어 두고 있는지 확인합니다.
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    for typed in ("Team/TeamFlow", "team/teamflow", "  OTHER/Repo  ", ""):
+        client.patch(f"/api/projects/{project_id}", json={"github_repo": typed})
+        with db_session.session_scope() as s:
+            project = s.get(m.Project, project_id)
+            expected = typed.strip().lower() or None
+            assert project.github_repo_key == expected
+            assert project.github_repo == (typed.strip() or None)
+
+
+def test_two_projects_cannot_claim_the_same_repo_in_different_case(
+    client: TestClient, people: dict
+):
+    """⭐ 대소문자를 무시하고 찾게 된 순간 **이게 막히지 않으면** 배달이
+    어느 프로젝트에 붙을지 정해지지 않습니다."""
+    login_as(client, people["founder"])
+    first = create_project(client, "A")["project_id"]
+    second = create_project(client, "B")["project_id"]
+
+    client.patch(f"/api/projects/{first}", json={"github_repo": "team/teamflow"})
+    response = client.patch(
+        f"/api/projects/{second}", json={"github_repo": "TEAM/TeamFlow"}
+    )
+
+    assert response.status_code == 409
 
 
 def test_renaming_a_project(client: TestClient, people: dict):

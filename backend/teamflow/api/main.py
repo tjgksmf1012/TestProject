@@ -25,6 +25,7 @@ from teamflow.auth import passwords
 from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
 from teamflow.db.session import get_db
+from teamflow.github import connection as gh_connection
 from teamflow.github import webhook as gh
 from teamflow.jobs import retention
 from teamflow.logging_config import configure_logging
@@ -33,6 +34,7 @@ from teamflow.projects import invites
 from teamflow.services import (
     approval_service,
     auth_service,
+    github_connection_service,
     recording_service,
     task_service,
 )
@@ -633,9 +635,12 @@ def get_project(project_id: int, session: DbSession, user: CurrentUser) -> Proje
         project_id=project.id,
         title=project.title,
         github_repo=project.github_repo,
-        # 설치 id 자체는 내보내지 않습니다 — 화면이 쓸 일이 없고,
-        # 연결 여부만 알면 됩니다.
-        github_connected=project.github_installation_id is not None,
+        # ⚠️ "연결됨" 은 **서명된 배달이 실제로 도착했다** 는 뜻입니다.
+        #
+        # 예전에는 설치 id 가 있으면 참이었는데, 그 id 는 화면에서 아무
+        # 숫자나 보내면 채워졌습니다. 즉 아무것도 확인하지 않고 "연결됨" 을
+        # 보여 주고 있었습니다. 설치 id 자체는 여전히 내보내지 않습니다.
+        github_connected=project.github_verified_at is not None,
         invite_code=invites.format_code(project.invite_code or ""),
         member_count=int(count or 0),
     )
@@ -645,7 +650,18 @@ class ProjectPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     #: `owner/repo`. 빈 문자열이면 연결을 끊습니다.
     github_repo: str | None = Field(default=None, max_length=255)
-    github_installation_id: int | None = None
+
+    # ⚠️ `github_installation_id` 는 **일부러 없습니다.**
+    #
+    # 예전에는 여기 있었고, 화면에서 아무 숫자나 보내면 그대로 저장됐습니다.
+    # 워커는 그 값으로 `build_client()` 를 불러 **그 설치의 액세스 토큰을
+    # 발급**합니다. 즉 이 팀과 아무 상관 없는 설치의 권한으로 GitHub API 를
+    # 부르게 만들 수 있었습니다.
+    #
+    # 지금은 서명이 검증된 웹훅 본문의 `installation.id` 로만 채웁니다
+    # (`services/github_connection_service.record_delivery`). 요청 본문의
+    # id 를 FK 나 권한에 그대로 쓰던 결함(`member_ids`)과 같은 부류입니다.
+    model_config = {"extra": "forbid"}
 
 
 _REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
@@ -676,9 +692,14 @@ def patch_project(
                 status.HTTP_400_BAD_REQUEST,
                 "저장소는 `owner/repo` 형식이어야 합니다 (주소 전체가 아니라)",
             )
+        # ⚠️ 대조는 **대소문자를 무시하고** 합니다. `team/x` 와 `team/X` 를
+        # 다른 저장소로 보면, 웹훅이 왔을 때 어느 프로젝트에 붙을지 정해지지
+        # 않습니다. DB 의 유니크 제약이 최종 방어이고 이건 사람에게 이유를
+        # 말해 주기 위한 검사입니다.
         taken = session.scalar(
             select(m.Project.id).where(
-                m.Project.github_repo == repo, m.Project.id != project_id
+                m.Project.github_repo_key == gh_connection.repo_key(repo),
+                m.Project.id != project_id,
             )
         )
         if repo and taken:
@@ -687,11 +708,15 @@ def patch_project(
             raise HTTPException(
                 status.HTTP_409_CONFLICT, "다른 프로젝트가 이미 이 저장소를 쓰고 있습니다"
             )
+
+        # 저장소를 바꾸면 확인도 없던 일이 됩니다. 앞 저장소에서 배달이 왔다는
+        # 사실이 **새 저장소가 연결됐다는 근거가 되지는 않습니다.**
+        if not gh_connection.same_repo(project.github_repo, repo):
+            project.github_verified_at = None
+            project.github_installation_id = None
+
         project.github_repo = repo or None
         project.github_connected_at = datetime.now(UTC) if repo else None
-
-    if payload.github_installation_id is not None:
-        project.github_installation_id = payload.github_installation_id or None
 
     session.flush()
     return get_project(project_id, session, user)
@@ -764,6 +789,68 @@ def rotate_invite_code(
     project.invite_code = _fresh_invite_code(session)
     session.flush()
     return get_project(project_id, session, user)
+
+
+class GithubHealthOut(BaseModel):
+    """GitHub 연결 진단. docs/15 §4.2 의 1번.
+
+    "틀리면 오류 없이 기여도만 빕니다" 를 없애기 위한 화면입니다. 그래서
+    상태만이 아니라 **왜 그렇게 봤는지(detail)** 와 **지금 할 일(next_step)**
+    을 같이 내보냅니다. 상태만 보여 주면 사람은 못 고칩니다.
+    """
+
+    code: str
+    headline: str
+    detail: str
+    severity: str
+    next_step: str | None
+    warnings: list[str]
+
+    repo: str | None
+    #: 서명된 배달이 처음 도착한 시각. None 이면 **아직 확인되지 않았습니다.**
+    verified_at: datetime | None
+    delivery_count: int
+    last_delivery_at: datetime | None
+
+
+@app.get("/api/projects/{project_id}/github", response_model=GithubHealthOut)
+def github_health(
+    project_id: int, session: DbSession, user: CurrentUser, settings: AppSettings
+) -> GithubHealthOut:
+    """이 프로젝트의 GitHub 연결이 실제로 살아 있는가.
+
+    구성원만 볼 수 있습니다. 안 붙은 배달(오타 후보)이 여기 섞여 나가므로,
+    아무나 부를 수 있으면 **App 이 설치된 저장소를 캐내는 도구**가 됩니다.
+    무엇을 보여 주고 무엇을 감추는지는 `github/connection.looks_like_typo_of`
+    에 적어 두었습니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    facts = github_connection_service.collect_facts(
+        session,
+        project_id,
+        app_credentials_present=bool(
+            getattr(settings, "github_app_id", None)
+            and getattr(settings, "github_private_key", None)
+        ),
+        webhook_secret_present=bool(getattr(settings, "github_webhook_secret", None)),
+    )
+    state = gh_connection.diagnose(facts)
+
+    return GithubHealthOut(
+        code=state.code,
+        headline=state.headline,
+        detail=state.detail,
+        severity=state.severity,
+        next_step=state.next_step,
+        warnings=state.warnings,
+        repo=facts.repo,
+        verified_at=facts.verified_at,
+        delivery_count=facts.delivery_count,
+        last_delivery_at=facts.last_delivery_at,
+    )
 
 
 class MeetingIn(BaseModel):
@@ -1564,15 +1651,35 @@ async def github_webhook(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "필수 헤더가 없습니다")
 
     payload = await request.json()
+
+    # ── 연결 기록 ──────────────────────────────────────────────
+    #
+    # ⚠️ **저장할 이벤트인지 판단하기 전에** 합니다. 배달이 왔다는 사실
+    # 자체가 "이 저장소에 App 이 설치돼 있다" 는 증거이고, 그 증거는
+    # 우리가 그 이벤트를 쓰든 말든 똑같이 유효합니다.
+    #
+    # 특히 `ping` — App 을 설치하면 GitHub 이 **가장 먼저** 보내는 것이고
+    # 아래 `normalize` 는 이걸 버립니다. 여기서 안 잡으면 방금 연결을 마친
+    # 팀에게도 "아직 아무 배달도 없습니다" 가 나갑니다.
+    delivered_repo = (payload.get("repository") or {}).get("full_name")
+    project = None
+    if delivered_repo:
+        project = github_connection_service.record_delivery(
+            session,
+            repo=delivered_repo,
+            installation_id=(payload.get("installation") or {}).get("id"),
+        )
+
     normalized = gh.normalize(x_github_event, x_github_delivery, payload)
     if normalized is None:
         return {"status": "ignored", "event": x_github_event}
 
-    project = session.scalar(
-        select(m.Project).where(m.Project.github_repo == normalized.repo)
-    )
     if project is None:
         # 연결되지 않은 저장소. 조용히 무시한다 — 존재 여부를 알려주지 않는다.
+        #
+        # 다만 **흔적은 남겼습니다**(`record_delivery`). 그게 없으면 저장소
+        # 이름 오타는 증거를 남기지 않고, 팀은 기여도가 왜 비는지 영원히
+        # 알 수 없습니다. 남기는 것은 저장소 이름과 횟수뿐입니다.
         return {"status": "ignored", "reason": "unlinked_repo"}
 
     # 중복 방어. 웹훅은 재전송되고 백필과 겹칠 수 있다.

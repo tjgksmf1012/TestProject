@@ -120,6 +120,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **회의→후보→승인→칸반 흐름** | ✅ **11주차 게이트** | `backend/teamflow/meeting/approval.py` |
 | **FastAPI 앱 + 통합 테스트** | ✅ | `backend/teamflow/api/main.py` |
 | **GitHub 웹훅 (HMAC 서명 검증)** | ✅ | `backend/teamflow/github/webhook.py` |
+| **GitHub 연결 진단** (배달이 오는지·이름 오타·팀원 계정) | ✅ | `backend/teamflow/github/connection.py` |
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
 | docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
 | **Dockerfile (api·gpu, ffmpeg 포함)** | ⚠️ 빌드 미검증 | `docker/` |

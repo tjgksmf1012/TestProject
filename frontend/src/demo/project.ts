@@ -13,6 +13,12 @@ import {
   titleProblem,
 } from '../lib/project/setup.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
+import {
+  describeHealth,
+  describeHealthFailure,
+  type GithubHealth,
+  type HealthView,
+} from '../lib/github/health.ts';
 import { escapeHtml } from '../lib/html.ts';
 import {
   confirmPrompt,
@@ -78,9 +84,52 @@ function render(detail: Detail): void {
   $('code').textContent = detail.invite_code ? formatCode(detail.invite_code) : '(없음)';
   $('members').textContent = `팀원 ${detail.member_count}명`;
   say('next', nextStepAfterCreate(detail.member_count));
-  $('gh-state').textContent = detail.github_connected
-    ? 'GitHub App 설치 id 가 연결돼 있습니다'
-    : '설치 id 가 없습니다 — 저장소를 연결해도 PR 기여도는 수집되지 않습니다';
+}
+
+// ══════════════════════════════════════════════════════════════
+// GitHub 연결 진단 (docs/15 §4.2)
+//
+// ⚠️ 예전에는 이 자리에 한 줄이 있었습니다 — "설치 id 가 연결돼 있습니다".
+// 그 설치 id 는 **화면에서 아무 숫자나 보내면 채워졌고**, 그래서 아무것도
+// 확인하지 않은 채로 "연결됨" 을 보여주고 있었습니다.
+//
+// 지금은 서버가 실제 사실(배달이 왔는가·서명이 맞았는가·활동 계정이
+// 팀원과 이어지는가)로 판단하고, 화면은 그 판단과 **지금 할 일**을
+// 그대로 옮깁니다.
+// ══════════════════════════════════════════════════════════════
+
+/** 마크다운의 `백틱`만 굵게. 문구 자체는 서버가 정한다. */
+function withCode(text: string): string {
+  return escapeHtml(text).replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function renderHealth(view: HealthView): void {
+  $('gh-health').className = `health ${view.tone}`;
+  $('gh-headline').innerHTML = withCode(view.headline);
+  $('gh-detail').innerHTML = withCode(view.detail);
+
+  $('gh-next').innerHTML = view.nextStep ? withCode(view.nextStep) : '';
+  $('gh-next').hidden = !view.nextStep;
+
+  $('gh-warnings').innerHTML = view.warnings
+    .map((line) => `<li>${escapeHtml(line)}</li>`)
+    .join('');
+
+  $('gh-activity').textContent = view.activity;
+  $('gh-activity').hidden = view.activity === '';
+}
+
+async function loadHealth(): Promise<void> {
+  let response: Response;
+  try {
+    response = await call(`/api/projects/${projectId}/github`);
+  } catch {
+    // ⚠️ 여기서 조용히 넘어가면 진단 구역이 비고, **빈 구역은 사람 눈에
+    // "문제 없음" 으로 보입니다.** 못 물어봤다는 것과 괜찮다는 것은 다릅니다.
+    return renderHealth(describeHealthFailure(0));
+  }
+  if (!response.ok) return renderHealth(describeHealthFailure(response.status));
+  renderHealth(describeHealth((await response.json()) as GithubHealth, new Date()));
 }
 
 async function load(): Promise<void> {
@@ -125,7 +174,11 @@ $('save-repo').addEventListener('click', () => {
   }).then(async (r) => {
     if (r.status === 409) return say('error', '다른 프로젝트가 이미 이 저장소를 쓰고 있습니다.');
     say('error', r.ok ? '' : `저장하지 못했습니다 (HTTP ${r.status})`);
-    if (r.ok) render((await r.json()) as Detail);
+    if (!r.ok) return;
+    render((await r.json()) as Detail);
+    // 저장소를 바꿨으면 진단도 다시 봐야 합니다. 안 그러면 앞 저장소의
+    // 상태가 남아 **방금 잘못 적은 이름이 정상으로 보입니다.**
+    void loadHealth();
   });
 });
 
@@ -220,6 +273,7 @@ $('del-run').addEventListener('click', () => {
 
 renderNav('project');
 void load();
+void loadHealth();
 
 // 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
 bootApp();
