@@ -31,6 +31,13 @@ import {
   type TrackCompleteResult,
 } from '../lib/recording/complete.ts';
 import { blockers as sessionBlockers } from '../lib/recording/session.ts';
+import {
+  describeRecordingSafety,
+  isRiskyForRecording,
+  recordingSafety,
+  tellShellRecordingStarted,
+  tellShellRecordingStopped,
+} from '../lib/shell/bridge.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
@@ -131,6 +138,12 @@ function render(): void {
     state.phase === 'recording' || state.phase === 'interrupted'
   );
 
+  // ⭐ 이 환경에서 화면을 꺼도 되는지 **미리** 말한다. 회의가 끝난 뒤에
+  // "그 폰은 화면을 켜 뒀어야 했다" 를 알게 되면 그 회의는 다시 못 한다.
+  const safety = recordingSafety(window, matchMedia('(display-mode: standalone)').matches);
+  $('safety').textContent = describeRecordingSafety(safety);
+  $('safety').className = isRiskyForRecording(safety) ? 'banner' : 'banner ok-banner';
+
   const warnings = client.warnings;
   $('warnings').innerHTML = warnings.length
     ? warnings.map((w) => `<li class="${w.severity}">${escapeHtml(w.message)}</li>`).join('')
@@ -212,6 +225,12 @@ $('start').addEventListener('click', async () => {
     alert('시작할 수 없습니다. 위 목록을 확인하세요.');
     return;
   }
+
+  // ⭐ 안드로이드 셸에게 알린다. 셸은 지금 녹음 중인지 **모른다** —
+  // 마이크가 열린 것은 WebView 안 일이라 셸이 들여다볼 수 없다.
+  // 알려 줘야 포그라운드 서비스가 올라가고, 그래야 화면이 꺼져도
+  // 녹음이 끊기지 않는다. 셸이 없으면 아무 일도 하지 않는다.
+  tellShellRecordingStarted(window);
   // 회의 중 시계 드리프트를 흡수한다 (clock.ts: ±50ppm → 1시간에 180ms)
   resyncTimer = setInterval(() => void client.syncClock(), 5 * 60_000);
   const startedAt = Date.now();
@@ -295,6 +314,10 @@ $('stop').addEventListener('click', async () => {
   wakeLock = null;
 
   summary = await client.stop();
+  // 알림을 먼저 내린다. 서버 왕복을 기다리는 동안 "녹음 중" 이 떠
+  // 있으면 사람은 아직 듣고 있다고 생각한다.
+  tellShellRecordingStopped(window);
+
   showResult(summary);
   await tellServerWeAreDone(summary);
 });

@@ -38,7 +38,22 @@ import struct
 import zlib
 from pathlib import Path
 
-PUBLIC = Path(__file__).resolve().parents[1] / "frontend" / "public"
+ROOT = Path(__file__).resolve().parents[1]
+PUBLIC = ROOT / "frontend" / "public"
+
+#: 안드로이드 셸의 런처 아이콘.
+#:
+#: API 26+ 는 `mipmap-anydpi-v26/ic_launcher.xml`(적응형)을 쓰지만,
+#: 24·25 는 PNG 를 봅니다. 같은 그림을 두 번 그리지 않으려고 여기서
+#: 같이 굽습니다 — 손으로 맞추면 반드시 갈라집니다.
+ANDROID_RES = ROOT / "android" / "app" / "src" / "main" / "res"
+ANDROID_DENSITIES = [
+    ("mipmap-mdpi", 48),
+    ("mipmap-hdpi", 72),
+    ("mipmap-xhdpi", 96),
+    ("mipmap-xxhdpi", 144),
+    ("mipmap-xxxhdpi", 192),
+]
 
 BG = (0x25, 0x63, 0xEB)
 FG = (0xFF, 0xFF, 0xFF)
@@ -195,12 +210,25 @@ TARGETS = [
 
 def main() -> int:
     PUBLIC.mkdir(parents=True, exist_ok=True)
+    print(f"웹 ({PUBLIC.relative_to(ROOT)})")
     for name, size, maskable in TARGETS:
-        path = PUBLIC / name
         data = _png(size, _render(size, maskable=maskable))
-        path.write_bytes(data)
+        (PUBLIC / name).write_bytes(data)
         print(f"  {name:26} {size}×{size}  {len(data):>7,} bytes")
-    print(f"\n{len(TARGETS)}개를 {PUBLIC} 에 만들었습니다.")
+
+    if not ANDROID_RES.is_dir():
+        print("\n안드로이드 셸이 없어 런처 아이콘은 건너뜁니다.")
+        return 0
+
+    print(f"\n안드로이드 ({ANDROID_RES.relative_to(ROOT)})")
+    for folder, size in ANDROID_DENSITIES:
+        target = ANDROID_RES / folder
+        target.mkdir(parents=True, exist_ok=True)
+        data = _png(size, _render(size, maskable=False))
+        (target / "ic_launcher.png").write_bytes(data)
+        # `ic_launcher_round` 도 같은 그림. 둥근 모양은 런처가 깎습니다.
+        (target / "ic_launcher_round.png").write_bytes(data)
+        print(f"  {folder:20} {size}×{size}  {len(data):>7,} bytes")
     return 0
 
 

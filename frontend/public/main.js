@@ -997,6 +997,59 @@ function describeCompletionFailure(status, detail) {
   return `${detail || `종료하지 못했습니다 (HTTP ${status})`}. ${suffix}`;
 }
 
+// src/lib/shell/bridge.ts
+function shellBridge(win) {
+  const bridge = win.TeamFlowShellBridge;
+  if (!bridge) return null;
+  for (const name of ["isShell", "version", "startRecording", "stopRecording"]) {
+    if (typeof bridge[name] !== "function") return null;
+  }
+  return bridge;
+}
+function isInShell(win) {
+  return shellBridge(win) !== null;
+}
+function tellShellRecordingStarted(win) {
+  const bridge = shellBridge(win);
+  if (!bridge) return false;
+  try {
+    bridge.startRecording();
+    return true;
+  } catch (error) {
+    console.warn("[shell] 녹음 시작을 알리지 못했습니다", error);
+    return false;
+  }
+}
+function tellShellRecordingStopped(win) {
+  const bridge = shellBridge(win);
+  if (!bridge) return false;
+  try {
+    bridge.stopRecording();
+    return true;
+  } catch (error) {
+    console.warn("[shell] 녹음 종료를 알리지 못했습니다", error);
+    return false;
+  }
+}
+function recordingSafety(win, standalone) {
+  if (isInShell(win)) return "shell";
+  if (standalone) return "installed-pwa";
+  return "browser-tab";
+}
+function describeRecordingSafety(safety) {
+  switch (safety) {
+    case "shell":
+      return "화면을 꺼도 녹음이 이어집니다. 앱을 완전히 닫지만 마세요.";
+    case "installed-pwa":
+      return "화면을 켜 두세요. 앱으로 설치돼 있어 꺼짐 방지가 동작하지만, 화면이 잠기면 녹음이 끊길 수 있습니다.";
+    case "browser-tab":
+      return "브라우저 탭입니다 — 화면을 켜 두고 다른 앱으로 넘어가지 마세요. 홈 화면에 추가하면 더 안전합니다.";
+  }
+}
+function isRiskyForRecording(safety) {
+  return safety !== "shell";
+}
+
 // src/lib/auth/session.ts
 function loginUrlFor(pathWithQuery) {
   return `/login.html?next=${encodeURIComponent(pathWithQuery)}`;
@@ -1296,6 +1349,9 @@ function render() {
   $("blockers").innerHTML = blockers2.length ? blockers2.map((b) => `<li>${escapeHtml(b)}</li>`).join("") : '<li class="ok">준비됐습니다</li>';
   $("start").disabled = state.phase !== "ready";
   $("stop").disabled = !(state.phase === "recording" || state.phase === "interrupted");
+  const safety = recordingSafety(window, matchMedia("(display-mode: standalone)").matches);
+  $("safety").textContent = describeRecordingSafety(safety);
+  $("safety").className = isRiskyForRecording(safety) ? "banner" : "banner ok-banner";
   const warnings = client.warnings;
   $("warnings").innerHTML = warnings.length ? warnings.map((w) => `<li class="${w.severity}">${escapeHtml(w.message)}</li>`).join("") : '<li class="ok">캡처 설정이 요청대로 적용됐습니다</li>';
 }
@@ -1355,6 +1411,7 @@ $("start").addEventListener("click", async () => {
     alert("시작할 수 없습니다. 위 목록을 확인하세요.");
     return;
   }
+  tellShellRecordingStarted(window);
   resyncTimer = setInterval(() => void client.syncClock(), 5 * 6e4);
   const startedAt = Date.now();
   elapsedTimer = setInterval(() => {
@@ -1414,6 +1471,7 @@ $("stop").addEventListener("click", async () => {
   wakeLock?.release();
   wakeLock = null;
   summary = await client.stop();
+  tellShellRecordingStopped(window);
   showResult(summary);
   await tellServerWeAreDone(summary);
 });

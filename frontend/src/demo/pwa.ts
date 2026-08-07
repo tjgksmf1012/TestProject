@@ -11,17 +11,14 @@
  */
 
 import { describeInstall, installState, whyInstall } from '../lib/pwa/install.ts';
+import { isInShell } from '../lib/shell/bridge.ts';
 
-/** 안드로이드 셸이 심어 주는 표식. `window.TeamFlowShell` */
-interface ShellBridge {
-  version?: string;
-}
-
-declare global {
-  interface Window {
-    TeamFlowShell?: ShellBridge;
-  }
-}
+// ⚠️ 셸 판별은 `lib/shell/bridge.ts` 한 곳에서만 합니다.
+//
+// 예전에 여기서 `window.TeamFlowShell` 을 봤는데, 셸이 실제로 심는
+// 이름은 `TeamFlowShellBridge` 였습니다. **이름이 어긋나면 조용히
+// "셸이 아니다" 가 됩니다** — 셸 안에서 설치 안내가 뜨고, 서비스
+// 워커가 셸 캐시와 겹칩니다. 오류는 하나도 안 납니다.
 
 /** 브라우저가 준 설치 제안. 붙잡아 뒀다가 사람이 누를 때 쓴다. */
 let deferredPrompt: (Event & { prompt: () => Promise<void> }) | null = null;
@@ -40,9 +37,9 @@ export function registerServiceWorker(): void {
     console.info('[pwa] 이 브라우저는 서비스 워커를 지원하지 않습니다');
     return;
   }
-  // 안드로이드 셸 안에서는 등록하지 않습니다. 셸이 이미 자기 캐시를
-  // 갖고 있고, 둘이 겹치면 어느 쪽 화면을 보고 있는지 알 수 없습니다.
-  if (window.TeamFlowShell) return;
+  // 안드로이드 셸 안에서는 등록하지 않습니다. 셸과 서비스 워커가 각자
+  // 캐시를 가지면 지금 어느 쪽 화면을 보고 있는지 알 수 없습니다.
+  if (isInShell(window)) return;
 
   navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => {
     console.warn(
@@ -70,7 +67,7 @@ export function renderInstallHint(): void {
     iosStandalone:
       (navigator as Navigator & { standalone?: boolean }).standalone === true,
     hasPrompt: deferredPrompt !== null,
-    inShell: window.TeamFlowShell !== undefined,
+    inShell: isInShell(window),
   });
 
   const text = describeInstall(state);
