@@ -502,6 +502,9 @@ function render() {
   const record = $("record");
   record.disabled = !canStart(roster);
   record.textContent = record.disabled ? "전원 동의 후 시작할 수 있습니다" : "녹음 화면으로";
+  const call = $("call");
+  call.disabled = record.disabled;
+  call.textContent = call.disabled ? "통화도 전원 동의 후에" : "통화로 회의하기";
   $("finish").hidden = !room.needsForceFinish;
   $("review").hidden = room.recording > 0 || room.notJoined > 0 || tracks.length === 0;
 }
@@ -510,6 +513,9 @@ $("refuse").addEventListener("click", () => void submitConsent(false));
 $("finish").addEventListener("click", () => void forceFinish());
 $("record").addEventListener("click", () => {
   location.href = `/index.html?meeting=${meetingId}`;
+});
+$("call").addEventListener("click", () => {
+  location.href = `/call.html?meeting=${meetingId}`;
 });
 $("review").addEventListener("click", () => {
   location.href = `/review.html?meeting=${meetingId}`;

@@ -24,6 +24,7 @@ import {
   titleProblem,
 } from '../lib/project/setup.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
 const params = new URLSearchParams(location.search);
@@ -208,6 +209,11 @@ async function start(): Promise<void> {
 }
 
 void start();
+
+// 홈은 프로젝트를 아직 안 고른 상태라 칸반·기여도·설정 탭이 흐리게 나옵니다.
+// 그래도 **그려야** 합니다 — 안 그리면 `<nav id="tabs">` 가 빈 채로 남고,
+// PC 에서는 그게 아무것도 없는 줄로 화면 위에 그어집니다.
+renderNav('home');
 
 // 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
 bootApp();

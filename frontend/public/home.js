@@ -167,6 +167,127 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/nav/links.ts
+var LABEL = {
+  home: "홈",
+  lobby: "회의 로비",
+  record: "녹음",
+  review: "업무 후보 검토",
+  kanban: "칸반",
+  contributions: "기여도",
+  project: "설정"
+};
+function positive(value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+function navLinks(context) {
+  const project = positive(context.projectId);
+  const meeting = positive(context.meetingId);
+  const links = [{ screen: "home", label: LABEL.home, href: "/home.html" }];
+  if (meeting !== null) {
+    links.push({
+      screen: "lobby",
+      label: LABEL.lobby,
+      href: `/lobby.html?meeting=${meeting}`
+    });
+    links.push({
+      screen: "review",
+      label: LABEL.review,
+      href: `/review.html?meeting=${meeting}`
+    });
+  }
+  if (project !== null) {
+    const suffix = meeting !== null ? `&meeting=${meeting}` : "";
+    links.push({
+      screen: "kanban",
+      label: LABEL.kanban,
+      href: `/kanban.html?project=${project}${suffix}`
+    });
+    links.push({
+      screen: "contributions",
+      label: LABEL.contributions,
+      href: `/contributions.html?project=${project}${suffix}`
+    });
+    links.push({
+      screen: "project",
+      label: LABEL.project,
+      href: `/project.html?project=${project}`
+    });
+  }
+  return links.filter((link) => link.screen !== context.current);
+}
+function missingLinks(context) {
+  const notes = [];
+  if (positive(context.meetingId) === null && context.current !== "home") {
+    notes.push("회의를 지정하지 않아 로비·검토 화면으로 갈 수 없습니다");
+  }
+  if (positive(context.projectId) === null && context.current !== "home") {
+    notes.push("프로젝트를 지정하지 않아 칸반·기여도·설정 화면으로 갈 수 없습니다");
+  }
+  return notes;
+}
+var TAB_ICON = {
+  home: "🏠",
+  kanban: "📋",
+  contributions: "📊",
+  project: "⚙️"
+};
+var TAB_ORDER = ["home", "kanban", "contributions", "project"];
+function navTabs(context) {
+  const project = positive(context.projectId);
+  const meeting = positive(context.meetingId);
+  const suffix = meeting !== null ? `&meeting=${meeting}` : "";
+  return TAB_ORDER.map((screen) => {
+    const needsProject = screen !== "home";
+    const enabled = !needsProject || project !== null;
+    let href = "/home.html";
+    if (screen === "kanban") href = `/kanban.html?project=${project}${suffix}`;
+    if (screen === "contributions") {
+      href = `/contributions.html?project=${project}${suffix}`;
+    }
+    if (screen === "project") href = `/project.html?project=${project}`;
+    return {
+      screen,
+      label: LABEL[screen],
+      icon: TAB_ICON[screen] ?? "•",
+      // 못 가는 탭에 주소를 주면 눌렸을 때 `?project=null` 로 간다.
+      href: enabled ? href : "",
+      current: context.current === screen,
+      enabled,
+      blockedReason: enabled ? null : "프로젝트를 고르면 열립니다 — 홈에서 프로젝트를 누르세요"
+    };
+  });
+}
+function contextFromSearch(current, search) {
+  const params2 = new URLSearchParams(search);
+  const read = (key) => {
+    const raw = params2.get(key);
+    if (raw === null) return null;
+    return positive(Number(raw));
+  };
+  return { current, projectId: read("project"), meetingId: read("meeting") };
+}
+
+// src/demo/nav.ts
+function renderNav(current) {
+  const context = contextFromSearch(current, location.search);
+  const tabHost = document.getElementById("tabs");
+  if (tabHost) {
+    tabHost.innerHTML = navTabs(context).map((tab) => {
+      const href = tab.enabled ? ` href="${escapeHtml(tab.href)}"` : "";
+      const disabled = tab.enabled ? "" : ' aria-disabled="true"';
+      const marked = tab.current ? ' aria-current="page"' : "";
+      const title = tab.blockedReason ? ` title="${escapeHtml(tab.blockedReason)}"` : "";
+      return `<a${href}${disabled}${marked}${title}><span class="ico" aria-hidden="true">${escapeHtml(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
+    }).join("");
+  }
+  const host = document.getElementById("nav");
+  if (!host) return;
+  const links = navLinks(context).map((link) => `<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`).join("");
+  const notes = missingLinks(context).map((note) => `<span class="miss">${escapeHtml(note)}</span>`).join("");
+  host.innerHTML = links + notes;
+}
+
 // src/lib/pwa/install.ts
 function isIOS(userAgent) {
   if (/iPhone|iPod/.test(userAgent)) return true;
@@ -390,4 +511,5 @@ async function start() {
   await load();
 }
 void start();
+renderNav("home");
 bootApp();

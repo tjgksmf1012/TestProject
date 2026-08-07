@@ -357,6 +357,9 @@ function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 var get = (path) => fetch(`${apiBase}${path}`, { credentials: "same-origin", cache: "no-store" });
+function withEmphasis(text) {
+  return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
 function memberCard(member) {
   const bar = rangeBar(member);
   const notes = readBeforeTheNumber(member);
@@ -379,7 +382,7 @@ function memberCard(member) {
 
   ${noEvidence ? '<p class="empty">이 사람의 활동이 아직 하나도 연결되지 않았습니다 — 0 이라는 뜻이 아니라 <strong>연결이 없다</strong>는 뜻입니다.</p>' : ""}
 
-  ${notes.length ? `<ul class="notes">${notes.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul>` : ""}
+  ${notes.length ? `<ul class="notes">${notes.map((n) => `<li>${withEmphasis(n)}</li>`).join("")}</ul>` : ""}
 
   ${categories ? `<ul class="cats">${categories}</ul>` : ""}
 

@@ -809,7 +809,10 @@ var RecordingClient = class {
     this.#timesliceMs = options.timesliceMs ?? DEFAULT_TIMESLICE_MS;
     this.#clock = new ClockTracker(options.monotonic);
     this.#queue = new UploadQueue(options.upload, options.uploadOptions);
-    this.#dispatch({ type: "SECURE_CONTEXT", secure: options.media.isSecureContext() });
+    this.#state = reduce(this.#state, {
+      type: "SECURE_CONTEXT",
+      secure: options.media.isSecureContext()
+    });
   }
   get state() {
     return this.#state;

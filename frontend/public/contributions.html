@@ -31,8 +31,12 @@
   .track i { position: absolute; top: 0; bottom: 0; border-radius: .25rem; background: var(--bar); }
   .conf { font-size: .8125rem; color: var(--dim); margin: 0; }
 
+  /* ⚠️ `::before` 로 마커를 찍으므로 목록 기본 불릿을 꺼야 한다.
+     안 끄면 "• · 동료평가…" 처럼 마커가 두 개 찍힌다. */
+  .notes, .cats, .flags { list-style: none; padding-left: 0; margin: .5rem 0 0; }
   .notes li { font-size: .8125rem; color: var(--warn); padding: .15rem 0; }
   .notes li::before { content: "· "; }
+  .notes strong { color: var(--bad); }
 
   .cats li { display: flex; align-items: center; gap: .5rem; font-size: .8125rem; padding: .2rem 0; }
   .cat { min-width: 3.5rem; color: var(--dim); }

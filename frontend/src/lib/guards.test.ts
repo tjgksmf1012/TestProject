@@ -141,6 +141,28 @@ describe('모바일 규칙', () => {
     strictEqual(missing.join(', '), '');
   });
 
+  it('⭐ 탭바가 있는 화면은 그것을 **채운다** (결함 47)', () => {
+    // 위 테스트는 `<nav id="tabs">` 가 HTML 에 있는지만 봤습니다. 홈은
+    // 그 요소를 갖고 있으면서 `renderNav` 를 안 불렀고, 그래서 탭바가
+    // **빈 채로** 남았습니다 — 폰에서는 아래 여백처럼 보여서 아무도
+    // 몰랐고, PC 로 옮기고 나서야 화면 위에 빈 줄로 드러났습니다.
+    //
+    // 이 저장소가 반복해서 당한 방식 그대로입니다: 맞는 함수를 만들어
+    // 놓고 아무도 부르지 않는 것. 그러니 요소가 아니라 **호출**을 셉니다.
+    const offenders: string[] = [];
+    for (const { name, html } of screens()) {
+      if (!html.includes('id="tabs"')) continue;
+      const script = html.match(/<script[^>]*\ssrc="\.?\/([A-Za-z0-9_-]+)\.js"/)?.[1];
+      if (script === undefined) {
+        offenders.push(`${name} → 모듈 스크립트가 없다`);
+        continue;
+      }
+      const source = readFileSync(join(DEMO, `${script}.ts`), 'utf8');
+      if (!/renderNav\(/.test(source)) offenders.push(`${name} → ${script}.ts`);
+    }
+    strictEqual(offenders.join(', '), '');
+  });
+
   it('⭐ 화면이 공통 토큰을 다시 정의하지 않는다', () => {
     // app.css 보다 뒤에 오므로 다시 정의하면 **공통 값이 통째로 덮인다.**
     // 폰 기준으로 짠 색·간격이 화면마다 제각각으로 돌아간다.
@@ -364,5 +386,105 @@ describe('빌드된 번들', () => {
         readFileSync(join(PUBLIC, n), 'utf8'),
       ));
     strictEqual(entryPoints().length, withScript.length);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// hidden 이 실제로 가리는가
+// ══════════════════════════════════════════════════════════════
+
+describe('hidden', () => {
+  it('⭐ app.css 가 [hidden] 을 무력화하지 않게 못 박는다', () => {
+    // ⚠️ **작성자 스타일은 언제나 브라우저 기본을 이깁니다.** 특성도와
+    // 무관합니다. 그래서 `label { display: block }` 하나만 있어도
+    // `[hidden] { display: none }`(브라우저 기본)이 통째로 무력해집니다.
+    //
+    // 실제로 그랬고, **브라우저로 화면을 띄워 보고서야** 알았습니다 —
+    // 로비의 "강제 종료" 가 항상 보이고 있었습니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const rule = /\[hidden\]\s*\{[^}]*display:\s*none\s*!important/;
+    strictEqual(
+      rule.test(css),
+      true,
+      'app.css 에 `[hidden] { display: none !important }` 가 있어야 합니다. ' +
+        '없으면 화면이 숨긴 요소가 그대로 보입니다.',
+    );
+  });
+
+  it('⭐ 화면별 <style> 이 그 규칙을 되돌리지 않는다', () => {
+    // 화면 안에서 `[hidden]` 에 display 를 다시 주면 그 화면만 조용히
+    // 깨집니다. 전체를 다시 확인할 방법이 없으니 아예 못 쓰게 합니다.
+    const offenders: string[] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      const html = readFileSync(join(PUBLIC, name), 'utf8');
+      if (/\[hidden\][^{]*\{[^}]*display:\s*(?!none)/.test(html)) offenders.push(name);
+    }
+    strictEqual(offenders.join(', '), '');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// CSS 변수가 실제로 정의돼 있는가
+// ══════════════════════════════════════════════════════════════
+
+describe('CSS 토큰', () => {
+  it('⭐ 화면이 쓰는 var(--x) 가 전부 정의돼 있다', () => {
+    // ⚠️ 정의되지 않은 변수를 쓰면 **그 선언 전체가 무효**가 됩니다.
+    // 오류도 경고도 없고, 그 자리만 조용히 사라집니다.
+    //
+    // 실제로 그랬습니다. `--bar` 가 아무 데도 없어서
+    // `background: var(--bar)` 가 통째로 무시됐고, **기여도 화면의 구간
+    // 막대가 전부 투명**이었습니다 — 그 화면의 주인공인데도요.
+    // 브라우저로 띄워 보고서야 알았습니다.
+    const appCss = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const defined = new Set(
+      [...appCss.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] as string),
+    );
+
+    const problems: string[] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      const html = readFileSync(join(PUBLIC, name), 'utf8');
+      // 그 화면이 스스로 정의한 것도 인정한다.
+      const local = new Set(
+        [...html.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] as string),
+      );
+      for (const [, used] of html.matchAll(/var\((--[a-z0-9-]+)/g)) {
+        if (!defined.has(used as string) && !local.has(used as string)) {
+          problems.push(`${name} → ${used}`);
+        }
+      }
+    }
+    strictEqual(
+      [...new Set(problems)].join(', '),
+      '',
+      '정의되지 않은 CSS 변수를 씁니다. 그 선언은 조용히 사라집니다',
+    );
+  });
+
+  it('⭐ app.css 스스로도 없는 변수를 쓰지 않는다', () => {
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const defined = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] as string));
+    const missing = [
+      ...new Set(
+        [...css.matchAll(/var\((--[a-z0-9-]+)/g)]
+          .map((m) => m[1] as string)
+          .filter((name) => !defined.has(name)),
+      ),
+    ];
+    strictEqual(missing.join(', '), '');
+  });
+
+  it('⭐ 어두운 모드에서도 같은 토큰이 정의된다', () => {
+    // 밝은 쪽에만 있는 색이 있으면 어두운 모드에서 그 자리가 사라집니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const dark = css.slice(css.indexOf('prefers-color-scheme: dark'));
+    const darkTokens = new Set(
+      [...dark.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] as string),
+    );
+    // 색 토큰만 본다 — 치수(--radius 등)는 모드와 무관하다.
+    for (const name of ['--bg', '--surface', '--line', '--text', '--dim',
+                        '--accent', '--on-accent', '--ok', '--warn', '--bad', '--bar']) {
+      strictEqual(darkTokens.has(name), true, `어두운 모드에 ${name} 이 없습니다`);
+    }
   });
 });

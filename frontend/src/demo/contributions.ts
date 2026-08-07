@@ -51,6 +51,19 @@ function goToLogin(): void {
 const get = (path: string): Promise<Response> =>
   fetch(`${apiBase}${path}`, { credentials: 'same-origin', cache: 'no-store' });
 
+/**
+ * 마크다운 강조(`**측정하지 못했습니다**`)만 굵게 바꾼다.
+ *
+ * ⚠️ `escapeHtml` 을 **먼저** 걸고 그 다음에 별표만 태그로 바꿉니다.
+ * 순서가 바뀌면 사람 이름에 들어간 `<` 가 태그가 됩니다.
+ *
+ * 이걸 안 하는 동안 화면에 `**측정하지 못했습니다**` 가 별표째 나왔습니다.
+ * 문구 자체는 `lib/contribution/view.ts` 가 정하고, 여기서는 표시만 합니다.
+ */
+function withEmphasis(text: string): string {
+  return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+}
+
 function memberCard(member: MemberScore): string {
   const bar = rangeBar(member);
   const notes = readBeforeTheNumber(member);
@@ -88,7 +101,7 @@ function memberCard(member: MemberScore): string {
 
   ${
     notes.length
-      ? `<ul class="notes">${notes.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ul>`
+      ? `<ul class="notes">${notes.map((n) => `<li>${withEmphasis(n)}</li>`).join('')}</ul>`
       : ''
   }
 

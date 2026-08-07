@@ -181,7 +181,18 @@ def diagnose(facts: ConnectionFacts) -> ConnectionState:
             warnings=warnings,
         )
 
-    if facts.verified_at is None:
+    # ⚠️ 배달이 이미 들어와 있으면 그 자체가 연결됐다는 증거입니다.
+    #
+    # `verified_at` 은 나중에 추가한 칸이라, 그 전에 저장된 이벤트를 가진
+    # 프로젝트에는 값이 없습니다. `verified_at` 만 보면 그런 프로젝트에
+    # "아직 배달이 온 적이 없습니다" 라고 말하게 되는데, 같은 화면 바로
+    # 아래에 "배달 12건 · 마지막 3분 전" 이 나옵니다 — 화면이 스스로를
+    # 반박합니다. 게다가 다음 할 일로 "App 이 설치돼 있는지 확인하세요"
+    # 를 시킵니다. 가 보면 멀쩡히 설치돼 있고, 사람은 고칠 것이 없는
+    # 문제를 찾느라 시간을 씁니다. (결함 48)
+    proven = facts.verified_at is not None or facts.delivery_count > 0
+
+    if not proven:
         near = _closest_near_miss(facts)
         if near is not None:
             return ConnectionState(

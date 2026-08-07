@@ -43,6 +43,11 @@
   --ok: #15803d;
   --warn: #b45309;
   --bad: #b91c1c;
+  /* 막대·게이지 채움. 기여도 화면의 구간 막대가 이 색으로 그려집니다.
+     ⚠️ 이 토큰이 없던 동안 `background: var(--bar)` 가 통째로 무효가 되어
+     **구간 막대가 전부 투명**이었습니다 — 그 화면의 주인공인데도요.
+     브라우저로 띄워 보고서야 알았습니다. */
+  --bar: #2563eb;
 
   --radius: 0.875rem;
   --radius-sm: 0.5rem;
@@ -71,6 +76,7 @@
     --ok: #4ade80;
     --warn: #fbbf24;
     --bad: #fca5a5;
+    --bar: #60a5fa;
   }
 }
 
@@ -94,6 +100,29 @@ body {
   /* 탭바가 마지막 내용을 가리지 않게 한다. */
   padding: calc(var(--safe-top) + 1rem) calc(var(--safe-right) + 1rem)
     calc(var(--tabbar) + 1rem) calc(var(--safe-left) + 1rem);
+}
+
+/* ⚠️ `hidden` 이 실제로 가리게 만든다.
+ *
+ * 브라우저 기본 스타일시트에 `[hidden] { display: none }` 이 있지만,
+ * **작성자 스타일은 언제나 브라우저 기본을 이깁니다.** 특성도와 무관합니다.
+ * 그래서 아래 `label { display: block }` 이나 `button { display: inline-flex }`
+ * 하나만 있어도 `hidden` 이 통째로 무력해집니다.
+ *
+ * 실제로 그랬습니다. 화면을 브라우저로 띄워 보고서야 알았습니다:
+ *
+ *   로그인  이름 칸이 로그인 모드에서도 보임 (가입용인데)
+ *   홈      "앱 설치" 가 설치 불가한 브라우저에서도 보임
+ *   로비    **"강제 종료"** 가 항상 보임
+ *   녹음    "재시도" 가 항상 보임
+ *
+ * `!important` 를 쓰는 이유: `hidden` 은 "이건 지금 화면에 없다" 는
+ * 뜻이고, 그걸 이길 수 있는 스타일은 없어야 합니다. 여기가 이 파일에서
+ * `!important` 가 정당한 유일한 자리입니다.
+ *
+ * `guards.test.ts` 가 이 규칙이 사라지지 않는지 지킵니다. */
+[hidden] {
+  display: none !important;
 }
 
 /* 탭바가 없는 화면(로그인)은 아래 여백이 필요 없다. */
@@ -481,4 +510,155 @@ pre {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PC (docs/15 §6, docs/08 §4.1 의 7번)
+   ══════════════════════════════════════════════════════════════
+
+   방향이 **PC 우선**으로 바뀌었습니다(`docs/15`). 폰 기준으로 짠 것을
+   지우지 않고, **넓은 화면에서만** 다르게 놓습니다 — 폰은 여전히
+   열리고(모바일은 지운 게 아니라 뒤로 미룬 것) 두 벌을 관리하지 않아도
+   됩니다.
+
+   무엇이 바뀌는가:
+
+     본문 폭    34rem → 화면에 맞춰 최대 72rem
+     내비       **아래 고정 → 위 고정.** 아래 탭바는 엄지로 누르는
+                폰 관용구입니다. 마우스가 있는 화면에서 창 맨 아래는
+                가장 멀고, 거기에 주요 이동을 두면 매번 대각선으로
+                내려가야 합니다
+     칸반       세로로 쌓기 → **열 셋을 가로로** (docs/15 §6 이 콕 집은 것)
+     통화       한 줄에 한 명 → 참가자 격자
+     기여도     한 줄에 한 명 → 두 줄
+
+   기준을 48rem(768px)으로 잡은 이유: 그 아래는 열 셋을 가로로 놓으면
+   카드가 글자 몇 개 폭이 되어 오히려 읽기 나빠집니다. */
+
+@media (min-width: 48rem) {
+  :root {
+    /* 위로 올라간 내비의 높이. 아래 여백 대신 위 여백을 그만큼 준다. */
+    --tabbar: 0px;
+    --topnav: 3.25rem;
+  }
+
+  /* ⚠️ 폭을 **본문 자체**에 겁니다. 자식마다 `margin-inline: auto` 를
+     걸면, 화면별 `<style>` 의 `#members { margin: .25rem 0 0 }` 같은
+     단축 속성이 그걸 덮어씁니다 — id 선택자가 더 강하고 `margin` 단축은
+     좌우 값까지 0 으로 다시 씁니다.
+     실제로 그래서 프로젝트 화면의 "팀원 3명" 이 본문 밖으로 밀려
+     있었습니다. 본문에 걸면 아무도 깰 수 없습니다. */
+  body {
+    max-width: 72rem;
+    margin-inline: auto;
+    padding: calc(var(--topnav) + 1.5rem) 1.5rem 3rem;
+  }
+
+  body.no-tabs {
+    padding-top: 2.5rem;
+  }
+
+  .wrap,
+  .wrap.wide {
+    max-width: 72rem;
+  }
+
+  /* ── 내비를 위로 ──────────────────────────────────────── */
+  #tabs {
+    top: 0;
+    bottom: auto;
+    height: var(--topnav);
+    border-top: 0;
+    border-bottom: 1px solid var(--line);
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0 1.5rem;
+  }
+
+  #tabs a {
+    flex: 0 0 auto;
+    min-height: 0;
+    height: var(--topnav);
+    flex-direction: row;
+    gap: 0.4375rem;
+    padding: 0 0.875rem;
+    font-size: 0.875rem;
+    border-bottom: 2px solid transparent;
+  }
+
+  #tabs a[aria-current="page"] {
+    border-bottom-color: var(--accent);
+  }
+
+  #tabs a .ico {
+    font-size: 1rem;
+  }
+
+  /* ── 아래 고정 버튼줄도 흐름 안으로 ──────────────────────
+     화면 아래에 붙여 두면 마우스로 가장 먼 자리인데다, 스크롤이 없는
+     PC 화면에서는 내용과 겹쳐 보입니다. */
+  .actionbar {
+    position: static;
+    border-top: 0;
+    padding: 1.25rem 0 0;
+    background: transparent;
+    backdrop-filter: none;
+  }
+
+  .actionbar .inner {
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  .actionbar .inner > * {
+    flex: 0 0 auto;
+    min-width: 10rem;
+  }
+
+  body.has-actionbar,
+  body.no-tabs.has-actionbar {
+    padding-bottom: 3rem;
+  }
+
+  /* ── 칸반: 열 셋을 가로로 ────────────────────────────────
+     docs/15 §6 이 이름을 대고 지적한 것. 세로로 쌓으면 "지금 몇 개가
+     어느 단계에 있는가" 를 한눈에 볼 수 없고, 그게 칸반의 전부입니다. */
+  #board {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1rem;
+    align-items: start;
+  }
+
+  /* ── 통화: 참가자 격자 ───────────────────────────────────
+     한 줄에 한 명이면 4명이 화면 반을 먹고, 정작 "누가 연결됐나" 를
+     비교하기 어렵습니다. */
+  .peers {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 0.25rem 1rem;
+  }
+
+  .peers li {
+    border-top: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.75rem;
+  }
+
+  /* ── 기여도: 두 줄 ───────────────────────────────────── */
+  #members {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
+    gap: 1rem;
+    align-items: start;
+  }
+}
+
+/* 아주 넓은 화면에서 더 벌리지 않는다. 한 줄이 100자를 넘으면
+   눈이 다음 줄 첫 글자를 못 찾습니다. */
+@media (min-width: 90rem) {
+  body {
+    padding-inline: 2rem;
+  }
 }

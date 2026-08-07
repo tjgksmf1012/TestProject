@@ -179,6 +179,12 @@ function render(): void {
   record.disabled = !canStart(roster);
   record.textContent = record.disabled ? '전원 동의 후 시작할 수 있습니다' : '녹음 화면으로';
 
+  // 통화도 같은 게이트를 지납니다. 통화는 곧 녹음이고, 녹음은 전원의
+  // 동의가 있어야 시작할 수 있습니다 (docs/07 L1).
+  const call = $('call') as HTMLButtonElement;
+  call.disabled = record.disabled;
+  call.textContent = call.disabled ? '통화도 전원 동의 후에' : '통화로 회의하기';
+
   $('finish').hidden = !room.needsForceFinish;
   // 처리가 끝나야 후보가 생긴다. 그 전에 눌러도 빈 화면이라 감춘다.
   $('review').hidden = room.recording > 0 || room.notJoined > 0 || tracks.length === 0;
@@ -189,6 +195,9 @@ $('refuse').addEventListener('click', () => void submitConsent(false));
 $('finish').addEventListener('click', () => void forceFinish());
 $('record').addEventListener('click', () => {
   location.href = `/index.html?meeting=${meetingId}`;
+});
+$('call').addEventListener('click', () => {
+  location.href = `/call.html?meeting=${meetingId}`;
 });
 $('review').addEventListener('click', () => {
   location.href = `/review.html?meeting=${meetingId}`;

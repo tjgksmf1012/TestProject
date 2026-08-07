@@ -130,6 +130,48 @@ def test_waiting_when_nothing_arrived_yet():
     assert "설치" in state.detail or "설치" in (state.next_step or "")
 
 
+def test_deliveries_already_stored_count_as_proof():
+    """⭐ 결함 48 — 화면이 스스로를 반박하던 것.
+
+    `github_verified_at` 은 나중에 추가한 칸입니다. 그 전에 이벤트가
+    쌓인 프로젝트는 `verified_at` 이 NULL 인데 배달은 수십 건입니다.
+    `verified_at` 만 보면 진단이 "아직 배달이 온 적이 없습니다" 라고
+    말하고, 같은 화면 아래 줄이 "배달 12건 · 마지막 3분 전" 이라고
+    말합니다.
+
+    나쁜 건 어색함이 아니라 **다음 할 일**입니다. 진단은 "GitHub App 이
+    설치돼 있는지 확인하세요" 를 시킵니다. 가 보면 멀쩡히 설치돼
+    있습니다 — 고칠 것이 없는 문제를 찾게 만듭니다.
+    """
+    state = diagnose(
+        ConnectionFacts(
+            repo="team/teamflow",
+            webhook_secret_present=True,
+            app_credentials_present=True,
+            verified_at=None,  # 마이그레이션 전에 들어온 이벤트
+            delivery_count=12,
+            member_logins=frozenset({"minsu"}),
+            actor_logins=frozenset({"minsu"}),
+        )
+    )
+    assert state.code == "connected"
+    assert state.code != "waiting_for_delivery"
+
+
+def test_nothing_arrived_is_still_nothing_arrived():
+    """위 완화가 '배달 0건' 까지 연결로 넘기면 안 됩니다."""
+    state = diagnose(
+        ConnectionFacts(
+            repo="team/teamflow",
+            webhook_secret_present=True,
+            app_credentials_present=True,
+            verified_at=None,
+            delivery_count=0,
+        )
+    )
+    assert state.code == "waiting_for_delivery"
+
+
 def test_a_near_miss_names_the_repo_to_fix():
     """가장 값어치 있는 진단 — 무엇을 무엇으로 고쳐야 하는지 말합니다."""
     state = diagnose(
