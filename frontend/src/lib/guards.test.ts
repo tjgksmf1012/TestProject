@@ -747,6 +747,115 @@ describe('상태 화면 (지시서 §7)', () => {
     strictEqual(missing.join(', '), '', '공용 CSS 에 없는 스켈레톤 클래스');
   });
 
+  it('⭐ 지역 `<style>` 이 색을 손으로 칠하지 않는다 (결함 59·60)', () => {
+    // 지시서 §11-A 2번: **토큰을 우회하는 곳 = 0.**
+    //
+    // 손으로 칠한 색은 두 가지로 틀립니다.
+    //
+    //   결함 59  로그인의 주 버튼만 파랑(#2563eb). 나머지 여덟 화면은
+    //            청록입니다. **사람이 제일 먼저 보는 화면**이 브랜드
+    //            밖이었습니다
+    //   결함 60  `color: #fff` 가 네 곳. 밝은 모드에서는 맞지만
+    //            어두운 모드에서 의미색이 밝게 뒤집혀 **2.06:1** 이
+    //            됩니다. 밝은 모드만 보면 절대 안 보입니다
+    //
+    // 토큰은 모드마다 뒤집히지만 손으로 적은 값은 안 뒤집힙니다.
+    // 그게 이 규칙의 전부입니다.
+    const RAW = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/;
+    const offenders: string[] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      const style = /<style>([\s\S]*?)<\/style>/.exec(readFileSync(join(PUBLIC, name), 'utf8'));
+      if (style === null) continue;
+      // ⚠️ 주석을 먼저 뺍니다. 이 저장소의 주석은 "예전에는 #2563eb
+      // 였다" 처럼 **틀린 예를 그대로 적어 두므로**, 안 빼면 규칙이
+      // 자기 설명에 걸립니다.
+      const css = (style[1] as string).replace(/\/\*[\s\S]*?\*\//g, '');
+      // 선택자(`#submit`)가 아니라 **값**만 봅니다.
+      for (const [, body] of css.matchAll(/\{([^{}]*)\}/g)) {
+        for (const decl of (body as string).split(';')) {
+          const value = decl.slice(decl.indexOf(':') + 1);
+          if (decl.includes(':') && RAW.test(value)) {
+            offenders.push(`${name} → ${decl.trim().slice(0, 60)}`);
+          }
+        }
+      }
+    }
+    strictEqual(
+      offenders.join(' | '),
+      '',
+      '색은 tokens.css 에서만 정합니다 — 손으로 적은 값은 어두운 모드에서 안 뒤집힙니다',
+    );
+  });
+
+  it('⭐ 공용 CSS 가 **스스로를 덮지 않는다** (결함 61)', () => {
+    // Stage D 에서 위쪽에 디스플레이 타이포를 넣었는데, 아래쪽에 남아
+    // 있던 옛 `h1 { font-size: 1.5rem }` 이 **뒤에 나온다는 이유만으로**
+    // 이겼습니다. 특성도가 같으면 나중 것이 이깁니다.
+    //
+    // 그래서 `--fs-display`·`--ls-display` 는 만들어 놓고 **한 번도
+    // 화면에 나온 적이 없었습니다.** 브라우저로 봐도 "제목이 좀 작네"
+    // 정도라 눈에 안 띕니다 — 이 저장소의 대표 실패 방식(만들어 놓고
+    // 아무도 안 씀)이 자기 파일 안에서 일어난 것입니다.
+    //
+    // ⚠️ 같은 **선택자**가 두 번 나오는 것 자체는 정상입니다
+    // (`.rangebar, .cov` 로 바탕을 깔고 `.cov` 에서 높이만 다시 잡는
+    // 식). 문제가 되는 것은 **같은 속성**을 두 번 정하는 것입니다.
+    // 그때만 "어느 값이 이기나" 를 사람이 세어 봐야 합니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // 미디어 쿼리 안의 재정의는 정상 — 넓은 화면에서 값을 바꾸는 것이
+    // 그 블록의 존재 이유입니다. 그 구간은 건너뜁니다.
+    const media: [number, number][] = [];
+    for (const m of css.matchAll(/@media[^{]*\{/g)) {
+      let depth = 1;
+      let i = m.index + m[0].length;
+      while (i < css.length && depth > 0) {
+        if (css[i] === '{') depth++;
+        else if (css[i] === '}') depth--;
+        i++;
+      }
+      media.push([m.index, i]);
+    }
+    const insideMedia = (at: number): boolean => media.some(([a, b]) => at >= a && at < b);
+
+    const seen = new Map<string, Set<string>>();
+    const offenders: string[] = [];
+    for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (insideMedia(rule.index)) continue;
+      const selector = (rule[1] as string).split(/\s+/).join(' ').trim();
+      if (selector === '' || selector.startsWith('@') || selector === ':root') continue;
+      for (const one of selector.split(',').map((s) => s.trim()).filter(Boolean)) {
+        const props = seen.get(one) ?? new Set<string>();
+        for (const decl of (rule[2] as string).split(';')) {
+          if (!decl.includes(':')) continue;
+          const prop = decl.slice(0, decl.indexOf(':')).trim();
+          if (prop === '' || prop.startsWith('--')) continue;
+          if (props.has(prop)) offenders.push(`${one} → ${prop}`);
+          props.add(prop);
+        }
+        seen.set(one, props);
+      }
+    }
+    strictEqual(
+      [...new Set(offenders)].join(', '),
+      '',
+      '같은 선택자에 같은 속성을 두 번 정했습니다. 뒤엣것이 조용히 이깁니다',
+    );
+  });
+
+  it('⭐ 의미색 위의 글자색이 모드마다 뒤집힌다 (결함 60)', () => {
+    // `--on-semantic` 이 Layer 1 값을 참조해야 두 모드에서 다 맞습니다.
+    // 고정값(`#ffffff`)으로 적으면 어두운 모드가 그대로 깨집니다.
+    const tokens = readFileSync(join(PUBLIC, 'tokens.css'), 'utf8');
+    const decl = /--on-semantic:\s*([^;]+);/.exec(tokens);
+    strictEqual(decl !== null, true, '--on-semantic 이 없습니다');
+    strictEqual(
+      /^var\(--/.test((decl?.[1] ?? '').trim()),
+      true,
+      `--on-semantic 은 Layer 1 토큰을 참조해야 합니다 (지금: ${decl?.[1] ?? ''})`,
+    );
+  });
+
   it('⭐ 빈/오류 상태 클래스도 공용 CSS 에 있다', () => {
     const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
     for (const selector of ['.empty-state', '.failure-state']) {

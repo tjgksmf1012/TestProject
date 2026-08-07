@@ -16,7 +16,6 @@
 <link rel="stylesheet" href="/app.css" />
 <title>통화 — TeamFlow</title>
 <style>
-  section { border: 1px solid var(--line); border-radius: .625rem; padding: .875rem 1rem; margin-bottom: 1rem; }
 
   /* 통화 상태 한 줄. 이 화면에서 가장 먼저 읽히는 곳이다. */
   #summary { font-size: 1rem; font-weight: 600; margin: 0 0 .25rem; }
@@ -62,13 +61,13 @@
   <p id="summary">연결하는 중…</p>
   <p class="sub" id="sub"></p>
 
-  <section>
+  <section class="panel">
     <h2>참가자</h2>
     <ul id="peers" class="peers"></ul>
     <ul id="warnings" class="warnings"></ul>
   </section>
 
-  <section>
+  <section class="panel">
     <h2>내 마이크</h2>
     <p class="sub" id="mic">확인 중…</p>
     <!-- ⚠️ 이게 없으면 마이크가 죽은 걸 회의가 끝난 뒤에 안다.

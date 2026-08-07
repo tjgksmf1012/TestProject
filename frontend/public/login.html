@@ -18,8 +18,12 @@
 <title>로그인 — TeamFlow</title>
 <style>
 
-  #submit { background: #2563eb; color: #fff; border-color: #2563eb; font-weight: 600; margin-top: .5rem; }
-  #submit:disabled { opacity: .6; cursor: progress; }
+  /* ⚠️ 예전에는 여기서 `background: #2563eb`(파랑)를 손으로 칠했습니다
+     (결함 59). 나머지 여덟 화면은 전부 `class="primary"`(청록
+     `--primary`)를 쓰는데, **사람이 제일 먼저 보는 화면만** 다른
+     색이었습니다. 색은 이제 `button.primary` 가 정합니다. */
+  #submit { margin-top: var(--sp-2); }
+  #submit:disabled { cursor: progress; }
   #toggle { border: 0; color: var(--dim); margin-top: .75rem; text-decoration: underline; }
 
   .error p { margin: .125rem 0; }
@@ -42,7 +46,7 @@
     <label>비밀번호
       <input id="password" type="password" autocomplete="current-password" />
     </label>
-    <button id="submit" type="submit">로그인</button>
+    <button id="submit" class="primary" type="submit">로그인</button>
   </form>
   <button id="toggle" type="button">처음이신가요? 가입하기</button>
 

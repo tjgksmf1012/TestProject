@@ -18,7 +18,6 @@
     <title>녹음 생존율 테스트 — TeamFlow AI</title>
     <style>
 
-      section { border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; margin-bottom: 1rem; }
 
       li { padding: .25rem 0; }
       li::before { content: "· "; opacity: .5; }
@@ -33,9 +32,9 @@
         font-size: .8rem; font-weight: 600;
         background: color-mix(in srgb, currentColor 10%, transparent);
       }
-      #phase[data-phase="recording"] { background: var(--bad); color: #fff; }
-      #phase[data-phase="interrupted"] { background: var(--warn); color: #fff; }
-      #phase[data-phase="completed"] { background: var(--ok); color: #fff; }
+      #phase[data-phase="recording"] { background: var(--bad); color: var(--on-semantic); }
+      #phase[data-phase="interrupted"] { background: var(--warn); color: var(--on-semantic); }
+      #phase[data-phase="completed"] { background: var(--ok); color: var(--on-semantic); }
       #verdict { font-weight: 600; margin: 0 0 .75rem; }
       #verdict.ok { color: var(--ok); }
       #verdict.bad { color: var(--bad); }
@@ -60,13 +59,13 @@
          정하고 15개 테스트가 붙습니다. -->
     <p id="safety" class="banner"></p>
 
-    <section>
+    <section class="panel">
       <h2>상태</h2>
       <p><span id="phase">준비 중</span> <span id="elapsed"></span></p>
       <ul id="blockers"></ul>
     </section>
 
-    <section>
+    <section class="panel">
       <h2>준비</h2>
       <button id="consent">1. 녹음에 동의</button>
       <button id="permission">2. 마이크 권한 + 시각 동기화</button>
@@ -79,7 +78,7 @@
       </p>
     </section>
 
-    <section>
+    <section class="panel">
       <h2>캡처 설정 확인</h2>
       <ul id="warnings"></ul>
       <p class="note">
@@ -88,7 +87,7 @@
       </p>
     </section>
 
-    <section>
+    <section class="panel">
       <h2>녹음</h2>
       <button id="start" class="primary" disabled>녹음 시작</button>
       <button id="stop" disabled>정지</button>
@@ -103,7 +102,7 @@
       </p>
     </section>
 
-    <section id="result" hidden>
+    <section id="result" class="panel" hidden>
       <h2>결과</h2>
 
       <!-- 서버에 "끝났다" 고 알렸는가. 이걸 알리지 않으면 트랙이 영원히
