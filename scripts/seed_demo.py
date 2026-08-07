@@ -482,7 +482,71 @@ def _seed_tasks(session, project_id: int, user_ids: list[int], meeting_id: int) 
             origin.review_status = "approved"
             origin.reviewed_by = reviewer
             origin.created_task_id = task.id
+            if status == "done":
+                _seed_merged_pull_request(session, project_id, task, user_ids[owner])
     session.flush()
+
+
+def _seed_merged_pull_request(session, project_id: int, task, user_id: int) -> None:
+    """완료된 업무 하나에 병합된 PR 을 붙인다.
+
+    ⭐ **이게 없으면 시연에서 마지막 칸이 안 보입니다.**
+
+        회의 녹음 → 자막 → 업무 후보 → 승인 → 칸반
+            → **관련 PR 병합 → 업무 카드에 수행 근거**   ← 여기
+            → 기여도
+
+    docs/08 §5.1 의 필수 경로이고, 여기까지 화면에서 보여야 이 프로젝트가
+    "회의록 만드는 툴" 과 다르다는 주장이 성립합니다.
+
+    ⚠️ 연결을 손으로 만들지 않고 **운영 코드와 같은 함수**(`link_pull_request`)
+    를 부릅니다. 손으로 넣으면 시연은 되는데 실제 웹훅에서는 안 되는 상태를
+    못 알아챕니다 — 이 저장소에서 반복해서 나온 실패 방식입니다.
+    """
+    from teamflow.github.linking import task_marker
+    from teamflow.services import task_link_service
+
+    login = session.scalar(
+        select(m.Member.github_login).where(
+            m.Member.project_id == project_id, m.Member.user_id == user_id
+        )
+    )
+    merged_at = (task.completed_at or MEETING_START) + timedelta(hours=2)
+
+    event = m.GithubEvent(
+        project_id=project_id,
+        delivery_id=f"seed-pr-{task.id}",
+        repo="tjgksmf1012/teamflow-demo",
+        event_type="pull_request.merged",
+        actor_login=login or "minsu-dev",
+        actor_user_id=user_id,
+        ref=f"feat/{task.id}-schema",
+        payload={
+            "action": "closed",
+            "repository": {"full_name": "tjgksmf1012/teamflow-demo"},
+            "pull_request": {
+                "number": 17,
+                "title": f"{task.title}",
+                # 시연자가 화면에서 볼 표식과 **같은 것**을 씁니다.
+                "body": f"회의에서 정한 대로 정리했습니다.\n\n{task_marker(task.id)}",
+                "merged": True,
+                "merged_at": merged_at.isoformat(),
+                "user": {"login": login or "minsu-dev"},
+                "head": {"ref": f"feat/{task.id}-schema"},
+            },
+        },
+        occurred_at=merged_at,
+    )
+    session.add(event)
+    session.flush()
+
+    linked = task_link_service.link_pull_request(session, event)
+    if not linked:
+        # 조용히 넘어가면 시연 직전에 카드가 비어 있는 걸 발견합니다.
+        raise SystemExit(
+            f"업무 {task.id} 에 PR 을 잇지 못했습니다. "
+            "link_pull_request 나 표식 규칙이 바뀌었는지 확인하세요."
+        )
 
 
 def _delete_project(session, project_id: int) -> None:

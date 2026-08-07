@@ -26,6 +26,7 @@ from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
 from teamflow.db.session import get_db
 from teamflow.github import connection as gh_connection
+from teamflow.github import linking as gh_linking
 from teamflow.github import webhook as gh
 from teamflow.jobs import retention
 from teamflow.logging_config import configure_logging
@@ -36,6 +37,7 @@ from teamflow.services import (
     auth_service,
     github_connection_service,
     recording_service,
+    task_link_service,
     task_service,
 )
 from teamflow.tasks import dispatch
@@ -1714,6 +1716,18 @@ async def github_webhook(
     session.add(row)
     session.flush()
 
+    # ── 업무 ↔ PR 잇기 ────────────────────────────────────────
+    #
+    # docs/08 §5.1 필수 경로의 "관련 PR 병합 → 업무 카드에 수행 근거 표시".
+    # `task_github_links` 표는 처음부터 있었는데 **행이 한 번도 쓰인 적이
+    # 없었습니다** — 잇는 코드가 0곳이었습니다.
+    #
+    # ⚠️ 워커가 아니라 **여기서** 하는 이유는
+    # `services/task_link_service.py` 모듈 주석에 있습니다. 요약하면
+    # 워커 경로가 GitHub App 자격 증명이 없으면 통째로 건너뛰는데,
+    # 연결에는 API 도 자격 증명도 필요 없기 때문입니다.
+    linked = task_link_service.link_pull_request(session, row)
+
     # 병합된 PR 만 기여 이벤트가 됩니다. 나머지는 원본만 남깁니다.
     #
     # ⚠️ **커밋 뒤에** 큐에 넣습니다. 여기서 바로 넣으면 워커가 그 사이에
@@ -1731,6 +1745,7 @@ async def github_webhook(
         "event_type": normalized.event_type,
         "linked_user": actor_user_id,
         "queued": queued,
+        "linked_tasks": [ref.task_id for ref in linked],
     }
 
 
@@ -1752,6 +1767,27 @@ class TaskOriginOut(BaseModel):
     evidence_utterance_ids: list[int]
 
 
+class TaskGithubOut(BaseModel):
+    """이 업무로 이어진 GitHub 활동.
+
+    ⚠️ **근거(`why`)를 같이 싣습니다.** 연결만 보여주면 사람은 그걸 믿을지
+    말지 정할 수 없고, 틀린 연결을 고칠 수도 없습니다. `#12` 로 추정한
+    것과 `TASK-12` 가 적혀 있던 것은 신뢰도가 다릅니다.
+    """
+
+    event_id: int
+    repo: str
+    #: PR 번호. 본문에서 못 읽으면 None.
+    number: int | None
+    title: str | None
+    actor_login: str
+    merged_at: datetime
+    #: 1.0 이면 확정, 그 아래는 추정.
+    relevance: float
+    confirmed: bool
+    why: str
+
+
 class TaskOut(BaseModel):
     id: int
     title: str
@@ -1760,6 +1796,9 @@ class TaskOut(BaseModel):
     deadline: date | None
     completed_at: datetime | None
     origin: TaskOriginOut | None
+    #: 사람이 PR 에 적어야 하는 표식. 안 보여주면 아무도 안 적습니다.
+    marker: str = ""
+    github: list[TaskGithubOut] = Field(default_factory=list)
 
 
 class TaskBoardOut(BaseModel):
@@ -1768,22 +1807,58 @@ class TaskBoardOut(BaseModel):
     tasks: list[TaskOut]
 
 
+def _github_for_tasks(
+    session: Session, task_ids: list[int]
+) -> dict[int, list[TaskGithubOut]]:
+    out: dict[int, list[TaskGithubOut]] = {}
+    for task_id, pairs in task_link_service.links_for_tasks(session, task_ids).items():
+        # `event` 로 이름 짓지 않습니다 — 이 모듈은 sqlalchemy 의 `event` 를
+        # import 하고 있어서 조용히 가려집니다.
+        for link, row in pairs:
+            pull = (row.payload or {}).get("pull_request") or {}
+            relevance = float(link.relevance)
+            out.setdefault(task_id, []).append(
+                TaskGithubOut(
+                    event_id=row.id,
+                    repo=row.repo,
+                    number=pull.get("number"),
+                    title=pull.get("title"),
+                    actor_login=row.actor_login,
+                    merged_at=row.occurred_at,
+                    relevance=relevance,
+                    confirmed=relevance >= gh_linking.CONFIRMED_THRESHOLD,
+                    why=gh_linking.describe_source(link.link_source),
+                )
+            )
+    return out
+
+
 @app.get("/api/projects/{project_id}/tasks", response_model=TaskBoardOut)
 def list_tasks(project_id: int, session: DbSession, user: CurrentUser) -> TaskBoardOut:
     """칸반 보드가 읽는 목록.
 
-    **어느 회의에서 나왔는지를 같이 싣습니다.** 그게 없으면 이 화면은 그냥
-    할 일 목록이고, 이 프로젝트의 주장(회의 결정 → 칸반 업무)을 화면에서
-    확인할 방법이 없습니다.
+    **어느 회의에서 나왔는지와 어느 PR 로 끝났는지를 같이 싣습니다.** 그게
+    없으면 이 화면은 그냥 할 일 목록이고, 이 프로젝트의 주장
+    (회의 결정 → 칸반 업무 → GitHub 활동)을 화면에서 확인할 방법이 없습니다.
     """
     if session.get(m.Project, project_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
 
+    rows = task_service.list_tasks(session, project_id)
+    github = _github_for_tasks(session, [row["id"] for row in rows])
+
     return TaskBoardOut(
         project_id=project_id,
         statuses=list(task_service.STATUSES),
-        tasks=[TaskOut(**row) for row in task_service.list_tasks(session, project_id)],
+        tasks=[
+            TaskOut(
+                **row,
+                marker=gh_linking.task_marker(row["id"]),
+                github=github.get(row["id"], []),
+            )
+            for row in rows
+        ],
     )
 
 

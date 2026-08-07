@@ -14,6 +14,22 @@ export interface TaskOrigin {
   evidence_utterance_ids: number[];
 }
 
+/** 서버 `TaskGithubOut` 과 같은 모양. */
+export interface TaskGithubLink {
+  event_id: number;
+  repo: string;
+  /** PR 번호. 본문에서 못 읽으면 null. */
+  number: number | null;
+  title: string | null;
+  actor_login: string;
+  merged_at: string;
+  relevance: number;
+  /** `TASK-12` 가 적혀 있었으면 true. 추정이면 false. */
+  confirmed: boolean;
+  /** 왜 이 PR 이 이 업무에 붙었는가. */
+  why: string;
+}
+
 /** 서버 `TaskOut` 과 같은 모양. */
 export interface Task {
   id: number;
@@ -25,6 +41,9 @@ export interface Task {
   completed_at: string | null;
   /** null 이면 사람이 손으로 만든 업무다. */
   origin: TaskOrigin | null;
+  /** PR 에 적어야 하는 표식 (`TASK-12`). */
+  marker: string;
+  github: TaskGithubLink[];
 }
 
 export interface Column {
@@ -197,6 +216,51 @@ export function taskWarnings(task: Task, today: string): string[] {
   return warnings;
 }
 
+// ══════════════════════════════════════════════════════════════
+// GitHub 연결
+//
+// docs/08 §5.1 필수 경로의 마지막 눈에 보이는 칸입니다 —
+// **관련 PR 병합 → 업무 카드에 수행 근거 표시.**
+// ══════════════════════════════════════════════════════════════
+
+/** `team/teamflow#42` 처럼. 번호를 모르면 저장소만. */
+export function describePull(link: TaskGithubLink): string {
+  const where = link.number === null ? link.repo : `${link.repo}#${link.number}`;
+  return link.title ? `${where} ${link.title}` : where;
+}
+
+/**
+ * 확정된 것을 앞에.
+ *
+ * ⚠️ 사람은 위에서부터 읽습니다. 추정이 위에 있으면 그게 사실로 보이고,
+ * "이 업무는 이 PR 로 끝났다" 를 틀리게 믿습니다.
+ */
+export function sortLinks(links: readonly TaskGithubLink[]): TaskGithubLink[] {
+  return [...links].sort((a, b) => {
+    if (a.relevance !== b.relevance) return b.relevance - a.relevance;
+    return b.merged_at.localeCompare(a.merged_at);
+  });
+}
+
+/**
+ * 이 업무에 대해 GitHub 쪽에서 할 말 한 줄.
+ *
+ * ⚠️ **아무것도 안 붙었을 때 침묵하지 않습니다.** 빈 자리는 "PR 이
+ * 없구나" 가 아니라 "연결이 안 됐나?" 로도 읽힙니다. 무엇을 적어야
+ * 붙는지 알려주는 것이 이 화면이 할 일입니다 — 표식을 안 보여주면
+ * 아무도 안 적고, 자동 연결은 영영 안 일어납니다.
+ */
+export function describeLinkState(task: Task): string {
+  const links = task.github ?? [];
+  if (links.length === 0) {
+    return `연결된 PR 이 없습니다 — PR 제목이나 본문에 ${task.marker} 를 적으면 붙습니다`;
+  }
+  const sure = links.filter((link) => link.confirmed).length;
+  if (sure === links.length) return `PR ${links.length}건`;
+  if (sure === 0) return `PR ${links.length}건 (전부 추정 — 확인 필요)`;
+  return `PR ${links.length}건 (확정 ${sure} · 추정 ${links.length - sure})`;
+}
+
 export interface BoardSummary {
   total: number;
   done: number;
@@ -204,6 +268,8 @@ export interface BoardSummary {
   /** 회의에서 나온 업무 — 이 프로젝트의 주장이 실제로 도는지를 보는 숫자 */
   fromMeetings: number;
   unassigned: number;
+  /** PR 이 붙은 업무 — 회의→업무→GitHub 이 끝까지 도는지를 보는 숫자 */
+  withPulls: number;
 }
 
 export function summarize(tasks: readonly Task[], today: string): BoardSummary {
@@ -213,6 +279,7 @@ export function summarize(tasks: readonly Task[], today: string): BoardSummary {
     overdue: tasks.filter((t) => isOverdue(t, today)).length,
     fromMeetings: tasks.filter((t) => t.origin !== null).length,
     unassigned: tasks.filter((t) => t.assignee_id === null).length,
+    withPulls: tasks.filter((t) => (t.github ?? []).length > 0).length,
   };
 }
 

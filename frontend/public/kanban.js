@@ -83,13 +83,34 @@ function taskWarnings(task, today) {
   }
   return warnings;
 }
+function describePull(link) {
+  const where = link.number === null ? link.repo : `${link.repo}#${link.number}`;
+  return link.title ? `${where} ${link.title}` : where;
+}
+function sortLinks(links) {
+  return [...links].sort((a, b) => {
+    if (a.relevance !== b.relevance) return b.relevance - a.relevance;
+    return b.merged_at.localeCompare(a.merged_at);
+  });
+}
+function describeLinkState(task) {
+  const links = task.github ?? [];
+  if (links.length === 0) {
+    return `연결된 PR 이 없습니다 — PR 제목이나 본문에 ${task.marker} 를 적으면 붙습니다`;
+  }
+  const sure = links.filter((link) => link.confirmed).length;
+  if (sure === links.length) return `PR ${links.length}건`;
+  if (sure === 0) return `PR ${links.length}건 (전부 추정 — 확인 필요)`;
+  return `PR ${links.length}건 (확정 ${sure} · 추정 ${links.length - sure})`;
+}
 function summarize(tasks2, today) {
   return {
     total: tasks2.length,
     done: tasks2.filter((t) => t.status === "done").length,
     overdue: tasks2.filter((t) => isOverdue(t, today)).length,
     fromMeetings: tasks2.filter((t) => t.origin !== null).length,
-    unassigned: tasks2.filter((t) => t.assignee_id === null).length
+    unassigned: tasks2.filter((t) => t.assignee_id === null).length,
+    withPulls: tasks2.filter((t) => (t.github ?? []).length > 0).length
   };
 }
 function statusPatch(status) {
@@ -395,14 +416,29 @@ function cardHtml(task, today) {
   // 이게 없으면 이 화면은 그냥 할 일 목록이다.
   task.origin ? `<p class="origin">🗣 ${escapeHtml(task.origin.meeting_title ?? "회의")}에서 나온 업무
            · 근거 발화 ${task.origin.evidence_utterance_ids.length}건</p>` : '<p class="origin manual">손으로 만든 업무</p>'}
+  ${// ⭐ 대표 주장의 마지막 칸 — **이 업무가 어느 PR 로 끝났는가.**
+  //
+  // `task_github_links` 표는 처음부터 있었지만 잇는 코드가 0곳이라
+  // 행이 한 번도 쓰인 적이 없었습니다. 여기가 그게 눈에 보이는 자리입니다.
+  githubHtml(task)}
   ${warnings.length ? `<ul class="warn">${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul>` : ""}
   <div class="moves">${moves}</div>
 </article>`;
 }
+function githubHtml(task) {
+  const links = sortLinks(task.github ?? []);
+  if (links.length === 0) {
+    return `<p class="gh none">${escapeHtml(describeLinkState(task))}</p>`;
+  }
+  const items = links.map(
+    (link) => `<li class="${link.confirmed ? "sure" : "guess"}">${escapeHtml(describePull(link))}<span class="why">${escapeHtml(link.why)}</span></li>`
+  ).join("");
+  return `<p class="gh">${escapeHtml(describeLinkState(task))}</p><ul class="gh-list">${items}</ul>`;
+}
 function render() {
   const today = todayIso();
   const summary = summarize(tasks, today);
-  $("counts").textContent = `전체 ${summary.total} · 완료 ${summary.done} · 지연 ${summary.overdue} · 회의에서 나온 업무 ${summary.fromMeetings}`;
+  $("counts").textContent = `전체 ${summary.total} · 완료 ${summary.done} · 지연 ${summary.overdue} · 회의에서 나온 업무 ${summary.fromMeetings} · PR 이 붙은 업무 ${summary.withPulls}`;
   $("unassigned").hidden = summary.unassigned === 0;
   $("unassigned").textContent = `담당자가 없는 업무 ${summary.unassigned}건은 완료해도 기여도에 반영되지 않습니다.`;
   $("board").innerHTML = toColumns(tasks, statuses).map(

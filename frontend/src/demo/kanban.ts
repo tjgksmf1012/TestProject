@@ -2,12 +2,15 @@
  * 칸반 보드.
  *
  * ⚠️ 화면 코드라 자동 테스트가 없습니다. 판단이 들어가는 것은 전부
- * `src/lib/kanban/board.ts` 에 있고 33개 테스트로 검증됩니다.
+ * `src/lib/kanban/board.ts` 에 있고 테스트로 검증됩니다.
  */
 
 import {
+  describeLinkState,
+  describePull,
   describeStatus,
   nextStatuses,
+  sortLinks,
   statusPatch,
   summarize,
   taskWarnings,
@@ -86,6 +89,13 @@ function cardHtml(task: Task, today: string): string {
       : '<p class="origin manual">손으로 만든 업무</p>'
   }
   ${
+    // ⭐ 대표 주장의 마지막 칸 — **이 업무가 어느 PR 로 끝났는가.**
+    //
+    // `task_github_links` 표는 처음부터 있었지만 잇는 코드가 0곳이라
+    // 행이 한 번도 쓰인 적이 없었습니다. 여기가 그게 눈에 보이는 자리입니다.
+    githubHtml(task)
+  }
+  ${
     warnings.length
       ? `<ul class="warn">${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>`
       : ''
@@ -94,13 +104,37 @@ function cardHtml(task: Task, today: string): string {
 </article>`;
 }
 
+function githubHtml(task: Task): string {
+  const links = sortLinks(task.github ?? []);
+
+  // ⚠️ 아무것도 안 붙었어도 침묵하지 않습니다. 빈 자리는 "PR 이 없구나" 가
+  // 아니라 "연결이 고장났나" 로도 읽히고, 무엇보다 **표식을 안 알려주면
+  // 아무도 안 적어서** 자동 연결이 영영 안 일어납니다.
+  if (links.length === 0) {
+    return `<p class="gh none">${escapeHtml(describeLinkState(task))}</p>`;
+  }
+
+  const items = links
+    .map(
+      (link) =>
+        `<li class="${link.confirmed ? 'sure' : 'guess'}">` +
+        `${escapeHtml(describePull(link))}` +
+        `<span class="why">${escapeHtml(link.why)}</span></li>`,
+    )
+    .join('');
+
+  return `<p class="gh">${escapeHtml(describeLinkState(task))}</p><ul class="gh-list">${items}</ul>`;
+}
+
 function render(): void {
   const today = todayIso();
   const summary = summarize(tasks, today);
 
+  // 마지막 숫자가 이 프로젝트의 대표 주장이 **끝까지** 도는지를 봅니다 —
+  // 회의에서 나온 업무가 실제 PR 로 이어진 건수.
   $('counts').textContent =
     `전체 ${summary.total} · 완료 ${summary.done} · 지연 ${summary.overdue} · ` +
-    `회의에서 나온 업무 ${summary.fromMeetings}`;
+    `회의에서 나온 업무 ${summary.fromMeetings} · PR 이 붙은 업무 ${summary.withPulls}`;
 
   $('unassigned').hidden = summary.unassigned === 0;
   $('unassigned').textContent =

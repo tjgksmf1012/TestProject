@@ -3,17 +3,21 @@ import { describe, it } from 'node:test';
 
 import {
   daysBetween,
+  describeLinkState,
+  describePull,
   describeStatus,
   isDueSoon,
   isOverdue,
   localDateOf,
   nextStatuses,
   sortForBoard,
+  sortLinks,
   statusPatch,
   summarize,
   taskWarnings,
   toColumns,
   type Task,
+  type TaskGithubLink,
 } from './board.ts';
 
 const TODAY = '2026-09-10';
@@ -28,6 +32,8 @@ function task(over: Partial<Task> = {}): Task {
     deadline: '2026-09-20',
     completed_at: null,
     origin: null,
+    marker: 'TASK-1',
+    github: [],
     ...over,
   };
 }
@@ -298,6 +304,7 @@ describe('summarize', () => {
       overdue: 0,
       fromMeetings: 0,
       unassigned: 0,
+      withPulls: 0,
     });
   });
 });
@@ -322,5 +329,111 @@ describe('statusPatch', () => {
     const body = statusPatch('done');
     deepStrictEqual(body, { status: 'done' });
     strictEqual('deadline' in body, false);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// GitHub 연결 — docs/08 §5.1 필수 경로의 마지막 눈에 보이는 칸
+// ══════════════════════════════════════════════════════════════
+
+function link(over: Partial<TaskGithubLink> = {}): TaskGithubLink {
+  return {
+    event_id: 1,
+    repo: 'team/teamflow',
+    number: 42,
+    title: '로그인 API',
+    actor_login: 'minsu-dev',
+    merged_at: '2026-09-01T12:00:00Z',
+    relevance: 1,
+    confirmed: true,
+    why: 'PR 에 TASK 번호가 적혀 있습니다',
+    ...over,
+  };
+}
+
+describe('describePull', () => {
+  it('저장소#번호 제목', () => {
+    strictEqual(describePull(link()), 'team/teamflow#42 로그인 API');
+  });
+
+  it('번호를 모르면 저장소만', () => {
+    strictEqual(describePull(link({ number: null, title: null })), 'team/teamflow');
+  });
+});
+
+describe('sortLinks', () => {
+  it('⭐ 확정이 추정보다 위에 온다', () => {
+    // 사람은 위에서부터 읽는다. 추정이 위에 있으면 그게 사실로 보인다.
+    const sorted = sortLinks([
+      link({ event_id: 1, relevance: 0.3, confirmed: false }),
+      link({ event_id: 2, relevance: 1, confirmed: true }),
+    ]);
+    deepStrictEqual(
+      sorted.map((l) => l.event_id),
+      [2, 1],
+    );
+  });
+
+  it('같은 확신도면 최근 것이 위', () => {
+    const sorted = sortLinks([
+      link({ event_id: 1, merged_at: '2026-09-01T00:00:00Z' }),
+      link({ event_id: 2, merged_at: '2026-09-05T00:00:00Z' }),
+    ]);
+    deepStrictEqual(
+      sorted.map((l) => l.event_id),
+      [2, 1],
+    );
+  });
+
+  it('원본을 건드리지 않는다', () => {
+    const original = [link({ event_id: 1, relevance: 0.3 }), link({ event_id: 2 })];
+    sortLinks(original);
+    deepStrictEqual(
+      original.map((l) => l.event_id),
+      [1, 2],
+    );
+  });
+});
+
+describe('describeLinkState', () => {
+  it('⭐ 붙은 게 없으면 무엇을 적어야 하는지 알려준다', () => {
+    // ⚠️ 여기서 침묵하면 아무도 표식을 안 적고, 자동 연결은 영영 안 일어난다.
+    const text = describeLinkState(task({ marker: 'TASK-7' }));
+    strictEqual(text.includes('TASK-7'), true);
+  });
+
+  it('전부 확정이면 건수만', () => {
+    strictEqual(describeLinkState(task({ github: [link(), link()] })), 'PR 2건');
+  });
+
+  it('⭐ 전부 추정이면 확인이 필요하다고 말한다', () => {
+    const text = describeLinkState(
+      task({ github: [link({ confirmed: false, relevance: 0.3 })] }),
+    );
+    strictEqual(text.includes('추정'), true);
+    strictEqual(text.includes('확인'), true);
+  });
+
+  it('섞여 있으면 몇 건씩인지', () => {
+    const text = describeLinkState(
+      task({ github: [link(), link({ confirmed: false, relevance: 0.6 })] }),
+    );
+    strictEqual(text, 'PR 2건 (확정 1 · 추정 1)');
+  });
+
+  it('서버가 github 를 안 보내도 터지지 않는다', () => {
+    const broken = task();
+    delete (broken as { github?: TaskGithubLink[] }).github;
+    strictEqual(describeLinkState(broken).includes('없습니다'), true);
+  });
+});
+
+describe('summarize — withPulls', () => {
+  it('⭐ 회의→업무→GitHub 이 끝까지 도는 업무가 몇 개인가', () => {
+    const summary = summarize(
+      [task({ id: 1, github: [link()] }), task({ id: 2 }), task({ id: 3, github: [link()] })],
+      TODAY,
+    );
+    strictEqual(summary.withPulls, 2);
   });
 });
