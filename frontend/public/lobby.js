@@ -576,6 +576,7 @@ var $ = (id) => {
   return el;
 };
 var roster = [];
+var progressLine = "";
 var tracks = [];
 var consentMessage = "";
 function goToLogin() {
@@ -621,6 +622,7 @@ async function refresh() {
     roster = consent.roster;
     consentMessage = consent.message;
     tracks = trackBody.tracks;
+    progressLine = await getJson(`/api/meetings/${meetingId}/progress`).then((body) => String(body.message ?? "")).catch(() => "");
     render();
   } catch (err) {
     $("sub").textContent = "불러오지 못했습니다";
@@ -727,6 +729,7 @@ function render() {
   renderMembers(statuses);
   $("sub").textContent = `회의 ${meetingId} · 팀원 ${roster.length}명`;
   $("room-message").textContent = room.message;
+  $("progress").textContent = progressLine;
   const record = $("record");
   record.disabled = !canStart(roster);
   record.textContent = record.disabled ? "전원 동의 후 시작할 수 있습니다" : "녹음 화면으로";

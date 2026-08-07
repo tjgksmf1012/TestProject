@@ -69,6 +69,9 @@
     <p id="axis" class="axis" hidden></p>
     <ul id="members"></ul>
     <p class="status" id="room-message"></p>
+    <!-- 처리가 어디까지 갔는지. 파이프라인이 Redis 에 쓰던 것을 처음으로
+         읽어 옵니다 — 그전까지 이 자리에 쓸 말이 없었습니다 (감사 #8). -->
+    <p class="status" id="progress"></p>
   </section>
 
   <section class="panel">

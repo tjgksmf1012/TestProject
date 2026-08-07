@@ -56,6 +56,8 @@ const $ = (id: string): HTMLElement => {
 };
 
 let roster: RosterEntry[] = [];
+/** 처리 진행 문구. 서버가 만든 문장을 그대로 씁니다 (감사 #8). */
+let progressLine = '';
 let tracks: TrackHealth[] = [];
 let consentMessage = '';
 
@@ -122,6 +124,16 @@ async function refresh(): Promise<void> {
     roster = consent.roster;
     consentMessage = consent.message;
     tracks = trackBody.tracks;
+
+    // ⚠️ **진행률은 보조 정보입니다.** 실패해도 로비는 그대로 돌아야
+    // 하므로 위 `Promise.all` 에 넣지 않고 따로, 그리고 조용히 받습니다.
+    //
+    // 문구는 **서버가 만든 것을 그대로** 씁니다. 여기서 다시 만들면
+    // "0%" 와 "모름" 을 가르는 규칙이 두 곳에 생기고, 한쪽만 고쳐집니다.
+    progressLine = await getJson(`/api/meetings/${meetingId}/progress`)
+      .then((body) => String((body as { message?: string }).message ?? ''))
+      .catch(() => '');
+
     render();
   } catch (err) {
     // ⚠️ 목록 **바로 위**에도 씁니다. `#sub` 한 줄만 바꾸면 참가자
@@ -277,6 +289,7 @@ function render(): void {
 
   $('sub').textContent = `회의 ${meetingId} · 팀원 ${roster.length}명`;
   $('room-message').textContent = room.message;
+  $('progress').textContent = progressLine;
 
   const record = $('record') as HTMLButtonElement;
   record.disabled = !canStart(roster);

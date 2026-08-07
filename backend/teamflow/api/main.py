@@ -51,6 +51,7 @@ from teamflow.services import (
     approval_service,
     auth_service,
     github_connection_service,
+    progress_service,
     recording_service,
     task_link_service,
     task_service,
@@ -1670,6 +1671,49 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
         started_at=meeting.started_at,
         capture_mode=meeting.capture_mode,
         summary=meeting.summary,
+    )
+
+
+class MeetingProgressOut(BaseModel):
+    """회의 처리가 어디까지 갔는가.
+
+    ⚠️ `stage` 가 `None` 이면 **모르는 것**입니다. 0% 가 아닙니다 —
+    아직 못 받았을 수도, 이미 끝났을 수도, 이 배포에 Redis 가 없을
+    수도 있습니다. 화면이 그 셋을 "멈춰 있다" 로 읽으면 안 됩니다.
+    """
+
+    stage: str | None = None
+    percent: int | None = None
+    detail: str = ""
+    #: 화면에 그대로 쓸 한 줄. 서버와 화면이 **같은 문장**을 씁니다.
+    message: str
+
+
+@app.get("/api/meetings/{meeting_id}/progress", response_model=MeetingProgressOut)
+def get_meeting_progress(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> MeetingProgressOut:
+    """처리가 어디까지 갔는지 (감사 #8).
+
+    `pipeline/steps.py` 의 `RedisProgress` 는 처음부터 진행률을 쓰고
+    있었고 그 docstring 은 "API가 SSE로 프런트에 흘린다" 고 적어 두고
+    있었습니다. **그 API 가 없었습니다.** 쓰기만 하고 읽는 곳이 0곳이라,
+    1시간 회의를 10분 처리하는 동안 화면이 할 수 있는 말은 "처리 중"
+    뿐이었습니다 — 멈춘 건지 도는 건지도 몰랐습니다.
+
+    ⚠️ **SSE 가 아니라 읽기 엔드포인트입니다.** 로비는 이미 3초마다
+    폴링하고, 이 저장소는 그 이유를 `lobby.ts` 에 적어 뒀습니다 —
+    "SSE·WebSocket 을 붙이면 서버에 상태가 생기고, 그건 이 화면 하나
+    때문에 지불하기엔 비쌉니다." 그 판단을 뒤집을 이유가 없습니다.
+    """
+    meeting = _load_meeting_for(session, meeting_id, user)
+    client = progress_service.progress_client(get_settings().redis_url)
+    progress = progress_service.read_progress(client, meeting_id)
+    return MeetingProgressOut(
+        stage=progress.stage if progress else None,
+        percent=progress.percent if progress else None,
+        detail=progress.detail if progress else "",
+        message=progress_service.describe(progress, meeting_status=meeting.status),
     )
 
 
