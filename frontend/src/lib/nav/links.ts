@@ -19,6 +19,8 @@
  *     index(녹음)   meeting 이 있으면 서버 트랙, 없으면 로컬 실험
  */
 
+import type { IconName } from './icons.ts';
+
 export type ScreenId =
   | 'home'
   | 'lobby'
@@ -157,8 +159,8 @@ export function missingLinks(context: NavContext): string[] {
 export interface NavTab {
   screen: ScreenId;
   label: string;
-  /** 탭바에 그릴 그림. 이모지를 쓰는 이유는 아이콘 파일이 0개이기 때문. */
-  icon: string;
+  /** 탭바에 그릴 그림의 **이름**. 마크업은 `icons.ts` 가 만듭니다. */
+  icon: IconName;
   href: string;
   current: boolean;
   /** 지금 갈 수 있는가. 못 가면 흐리게 그린다. */
@@ -167,11 +169,17 @@ export interface NavTab {
   blockedReason: string | null;
 }
 
-const TAB_ICON: Record<string, string> = {
-  home: '🏠',
-  kanban: '📋',
-  contributions: '📊',
-  project: '⚙️',
+/**
+ * ⚠️ 예전에는 `🏠📋📊⚙️` 였습니다. 이모지는 **기기마다 다른 그림**이고
+ * 색이 박혀 있어 어두운 모드에서 안 맞습니다 (지시서 §4.6).
+ * 지금은 `icons.ts` 가 직접 그린 path 를 줍니다.
+ */
+const TAB_ICON: Record<string, IconName> = {
+  home: 'home',
+  kanban: 'board',
+  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
+  contributions: 'track',
+  project: 'sliders',
 };
 
 /** 탭 순서. **바꾸지 마세요** — 사람은 자리를 기억해서 누릅니다. */
@@ -196,7 +204,7 @@ export function navTabs(context: NavContext): NavTab[] {
     return {
       screen,
       label: LABEL[screen],
-      icon: TAB_ICON[screen] ?? '•',
+      icon: TAB_ICON[screen] ?? 'sliders',
       // 못 가는 탭에 주소를 주면 눌렸을 때 `?project=null` 로 간다.
       href: enabled ? href : '',
       current: context.current === screen,

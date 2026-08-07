@@ -787,6 +787,101 @@ describe('상태 화면 (지시서 §7)', () => {
     );
   });
 
+  it('⭐ 화면에 **색 이모지**를 내보내지 않는다 (지시서 §4.6)', () => {
+    // 색 이모지는 셋을 못 합니다.
+    //
+    //   · 기기마다 **다른 그림**이 나옵니다 (Apple·Google·Windows 각각)
+    //   · 색이 박혀 있어 어두운 모드에서도 그대로고, 선택된 탭이
+    //     진해질 때 아이콘만 안 따라옵니다
+    //   · 크기·베이스라인이 서체에 딸려 있어 세로 정렬이 틀어집니다
+    //
+    // ⚠️ **흑백 기호는 막지 않습니다.** `⚠` `✓` `⚑` `→` `①` 은 본문
+    // 서체로 그려지고 `color` 를 따라갑니다 — 위 셋 중 어느 것도
+    // 해당하지 않습니다. 목록 글머리에 SVG 를 넣는 것은 과합니다.
+    //
+    // 잡는 것은 (a) 이모지 블록의 문자와 (b) **변이 선택자 U+FE0F** 입니다.
+    // (b) 가 붙으면 `⚠` 같은 흑백 기호도 **색 이모지로 강제**됩니다 —
+    // 실제로 `⚠️ 화면이 가려짐` 이 그랬습니다.
+    const EMOJI = /[\u{1F000}-\u{1FAFF}]|\u{FE0F}/u;
+
+    const offenders: string[] = [];
+    const check = (label: string, text: string): void => {
+      const clean = text
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      clean.split('\n').forEach((line, i) => {
+        if (EMOJI.test(line)) offenders.push(`${label}:${i + 1} ${line.trim().slice(0, 50)}`);
+      });
+    };
+
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      check(name, readFileSync(join(PUBLIC, name), 'utf8'));
+    }
+    for (const { name, source } of demoFiles()) check(name, source);
+
+    strictEqual(
+      offenders.join(' | '),
+      '',
+      '색 이모지 대신 `src/lib/nav/icons.ts` 의 아이콘을 쓰세요',
+    );
+  });
+
+  it('⭐ 간격이 4px 격자를 벗어나지 않는다 (지시서 §4.3 · §11-A 3번)', () => {
+    // 격자 밖 값은 여백을 미세하게 어긋나게 만들고, 그건 화면마다
+    // 조금씩 다른 인상을 줍니다. 어느 한 곳도 눈에 띄지 않는데 전체가
+    // 어수선해지는 종류의 결함입니다.
+    //
+    // 시작할 때 **15종 48곳**이었습니다 — `.15rem`(2.4px) `.35rem`(5.6px)
+    // `.85rem`(13.6px) `.9rem`(14.4px) 같은 값들.
+    //
+    // 격자: 4·8·12·16·20·24·32·40·48·64·80·96, 그리고 §4.3 이 아이콘↔텍스트와
+    // 라벨↔입력창에만 허용하는 6.
+    const GRID = new Set([0, 4, 6, 8, 12, 16, 20, 24, 32, 40, 48, 64, 80, 96]);
+    const SPACING =
+      /^(margin|padding|gap|row-gap|column-gap)(-(top|right|bottom|left|inline|block))?$/;
+
+    const toPx = (value: string): number | null => {
+      const m = /^(-?[\d.]+)(rem|px)$/.exec(value.trim());
+      if (m === null) return null;
+      const n = Number(m[1]);
+      return m[2] === 'rem' ? Math.round(n * 16 * 100) / 100 : n;
+    };
+
+    const sources: [string, string][] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      const style = /<style>([\s\S]*?)<\/style>/.exec(readFileSync(join(PUBLIC, name), 'utf8'));
+      if (style !== null) sources.push([name, style[1] as string]);
+    }
+    sources.push(['app.css', readFileSync(join(PUBLIC, 'app.css'), 'utf8')]);
+
+    const offenders: string[] = [];
+    for (const [name, raw] of sources) {
+      const css = raw.replace(/\/\*[\s\S]*?\*\//g, '');
+      for (const rule of css.matchAll(/\{([^{}]*)\}/g)) {
+        for (const decl of (rule[1] as string).split(';')) {
+          if (!decl.includes(':')) continue;
+          const prop = decl.slice(0, decl.indexOf(':')).trim();
+          const value = decl.slice(decl.indexOf(':') + 1);
+          if (!SPACING.test(prop)) continue;
+          // 토큰과 `calc()` 는 통과 — 값은 tokens.css 가 정합니다.
+          if (value.includes('var(') || value.includes('calc(')) continue;
+          for (const part of value.split(/\s+/).filter(Boolean)) {
+            const px = toPx(part);
+            if (px !== null && !GRID.has(Math.abs(px))) {
+              offenders.push(`${name} → ${prop}: ${part}`);
+            }
+          }
+        }
+      }
+    }
+    strictEqual(
+      [...new Set(offenders)].join(', '),
+      '',
+      '간격은 4·8·12·16·… 만 씁니다 (아이콘↔텍스트·라벨↔입력창만 6)',
+    );
+  });
+
   it('⭐ 공용 CSS 가 **스스로를 덮지 않는다** (결함 61)', () => {
     // Stage D 에서 위쪽에 디스플레이 타이포를 넣었는데, 아래쪽에 남아
     // 있던 옛 `h1 { font-size: 1.5rem }` 이 **뒤에 나온다는 이유만으로**

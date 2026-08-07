@@ -158,6 +158,26 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/nav/icons.ts
+var PATHS = {
+  // 지붕(3,11)-(12,3)-(21,11) + 몸통 x 5.5~18.5, y 9.5~20
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5.5 9.5V20h13V9.5"/>',
+  // 보드 3~21 × 4~20, 세로 칸막이 x=9·15 — 열 셋이 칸반의 전부다
+  board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
+  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
+  // 가운데 줄은 **끊겨 있습니다.** 그 구멍이 이 화면의 값어치입니다.
+  track: '<path d="M4 6h13"/><path d="M4 12h5M12 12h6"/><path d="M4 18h10"/>',
+  // 말풍선 — 칸반 카드의 "회의에서 나온 업무" 표시.
+  // ⚠️ 예전에는 `🗣` 였습니다. 그 자리는 **이 제품의 대표 주장이 카드에
+  // 보이는 곳**이라, 기기마다 다른 그림이 나오면 안 됩니다.
+  meeting: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 16v4l4-4"/>',
+  // 슬라이더 — 손잡이가 있어 트랙 아이콘과 헷갈리지 않는다
+  sliders: '<path d="M4 8h16M4 16h16"/><circle cx="14" cy="8" r="2.5"/><circle cx="9" cy="16" r="2.5"/>'
+};
+function iconSvg(name) {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + PATHS[name] + "</svg>";
+}
+
 // src/lib/ui/empty.ts
 function emptyHtml(state) {
   const action = state.action ? `<a class="btn btn-primary" href="${escapeHtml(state.action.href)}">${escapeHtml(state.action.label)}</a>` : "";
@@ -279,10 +299,11 @@ function missingLinks(context) {
   return notes;
 }
 var TAB_ICON = {
-  home: "🏠",
-  kanban: "📋",
-  contributions: "📊",
-  project: "⚙️"
+  home: "home",
+  kanban: "board",
+  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
+  contributions: "track",
+  project: "sliders"
 };
 var TAB_ORDER = ["home", "kanban", "contributions", "project"];
 function navTabs(context) {
@@ -301,7 +322,7 @@ function navTabs(context) {
     return {
       screen,
       label: LABEL[screen],
-      icon: TAB_ICON[screen] ?? "•",
+      icon: TAB_ICON[screen] ?? "sliders",
       // 못 가는 탭에 주소를 주면 눌렸을 때 `?project=null` 로 간다.
       href: enabled ? href : "",
       current: context.current === screen,
@@ -330,7 +351,7 @@ function renderNav(current) {
       const disabled = tab.enabled ? "" : ' aria-disabled="true"';
       const marked = tab.current ? ' aria-current="page"' : "";
       const title = tab.blockedReason ? ` title="${escapeHtml(tab.blockedReason)}"` : "";
-      return `<a${href}${disabled}${marked}${title}><span class="ico" aria-hidden="true">${escapeHtml(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
+      return `<a${href}${disabled}${marked}${title}><span class="ico">${iconSvg(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
     }).join("");
   }
   const host = document.getElementById("nav");
@@ -358,7 +379,7 @@ function describeInstall(state) {
     case "promptable":
       return "앱으로 설치하면 주소창 없이 전체 화면으로 열리고, 홈 화면에서 바로 들어옵니다.";
     case "manual-ios":
-      return '아이폰에서는 공유 버튼(⬆️) → "홈 화면에 추가" 를 누르면 앱처럼 쓸 수 있습니다.';
+      return '아이폰에서는 화면 아래 가운데의 공유 버튼(상자에서 위로 나가는 화살표) → "홈 화면에 추가" 를 누르면 앱처럼 쓸 수 있습니다.';
     case "installed":
       return "";
     case "in-shell":
@@ -475,7 +496,7 @@ function cardHtml(task, today) {
   </p>
   ${// ⭐ 이 프로젝트의 주장이 화면에서 보이는 지점.
   // 이게 없으면 이 화면은 그냥 할 일 목록이다.
-  task.origin ? `<p class="origin">🗣 ${escapeHtml(task.origin.meeting_title ?? "회의")}에서 나온 업무
+  task.origin ? `<p class="origin">${iconSvg("meeting")} ${escapeHtml(task.origin.meeting_title ?? "회의")}에서 나온 업무
            · 근거 발화 ${task.origin.evidence_utterance_ids.length}건</p>` : '<p class="origin manual">손으로 만든 업무</p>'}
   ${// ⭐ 대표 주장의 마지막 칸 — **이 업무가 어느 PR 로 끝났는가.**
   //

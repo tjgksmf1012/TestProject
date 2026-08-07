@@ -20,36 +20,36 @@
   /* 되돌릴 수 없는 동작. 다른 구역과 눈에 띄게 달라야 하지만,
      겁주는 붉은 상자로 만들지는 않는다 — 이건 권리 행사다. */
   .danger { border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
-  .danger .label { font-size: .8125rem; font-weight: 600; color: var(--dim); margin: .875rem 0 .25rem; }
-  .danger ul.plain li { font-size: .875rem; color: var(--dim); padding: .125rem 0; }
+  .danger .label { font-size: var(--fs-label); font-weight: 600; color: var(--text-subtle); margin: var(--sp-4) 0 .25rem; }
+  .danger ul.plain li { font-size: var(--fs-label); color: var(--text-subtle); padding: var(--sp-1) 0; }
   .danger ul.plain li::before { content: "· "; }
-  .danger-btn { margin-top: 1rem; border-color: var(--bad); color: var(--bad); }
-  #del-result { font-size: .9375rem; margin-top: .75rem; }
+  .danger-btn { margin-top: var(--sp-4); border-color: var(--bad); color: var(--bad); }
+  #del-result { font-size: var(--fs-body); margin-top: var(--sp-3); }
   #del-result.bad { color: var(--bad); }
 
 
   #code { font: 700 1.5rem/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
-  #next { font-size: .875rem; margin: .5rem 0 0; }
-  #members { font-size: .8125rem; color: var(--dim); margin: .25rem 0 0; }
+  #next { font-size: var(--fs-label); margin: var(--sp-2) 0 0; }
+  #members { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-1) 0 0; }
 
   /* 연결 진단. 심각도에 따라 왼쪽 띠 색만 바뀐다 — 상자 전체를 붉게
      칠하면 경고와 오류가 같은 무게로 보이고, 둘 다 무시하게 된다. */
-  .health { margin-top: .875rem; padding: .75rem .875rem; border-radius: .5rem;
+  .health { margin-top: var(--sp-4); padding: .75rem var(--sp-4); border-radius: .5rem;
             border: 1px solid var(--line); border-left-width: 3px;
             background: color-mix(in srgb, var(--line) 12%, transparent); }
   .health.ok   { border-left-color: var(--ok); }
   .health.warn { border-left-color: var(--warn); }
   .health.bad  { border-left-color: var(--bad); }
-  .health-headline { font-size: .9375rem; font-weight: 600; margin: 0; }
-  .health-detail { font-size: .8125rem; color: var(--dim); margin: .375rem 0 0; }
+  .health-headline { font-size: var(--fs-body); font-weight: 600; margin: 0; }
+  .health-detail { font-size: var(--fs-label); color: var(--text-subtle); margin: .375rem 0 0; }
   /* 지금 할 일. 이것만 눈에 들어와도 고칠 수 있어야 한다. */
-  .health-next { font-size: .875rem; margin: .5rem 0 0; font-weight: 600; }
-  .health-warnings { margin: .5rem 0 0; }
-  .health-warnings li { font-size: .8125rem; color: var(--dim); padding: .125rem 0; }
+  .health-next { font-size: var(--fs-label); margin: var(--sp-2) 0 0; font-weight: 600; }
+  .health-warnings { margin: var(--sp-2) 0 0; }
+  .health-warnings li { font-size: var(--fs-label); color: var(--text-subtle); padding: var(--sp-1) 0; }
   .health-warnings li::before { content: "⚠ "; }
-  .health-activity { font-size: .75rem; color: var(--dim); margin: .5rem 0 0; }
+  .health-activity { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-2) 0 0; }
   .health code { font: inherit; font-weight: 700; }
-  #error { color: var(--bad); font-size: .875rem; margin-top: 1rem; }
+  #error { color: var(--bad); font-size: var(--fs-label); margin-top: var(--sp-4); }
 
 </style>
 </head>

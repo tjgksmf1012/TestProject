@@ -18,30 +18,30 @@
 <title>TeamFlow</title>
 <style>
 
-  header { display: flex; align-items: baseline; gap: .75rem; margin-bottom: 1.5rem; }
+  header { display: flex; align-items: baseline; gap: var(--sp-3); margin-bottom: var(--sp-6); }
 
-  #who { font-size: .875rem; color: var(--dim); }
+  #who { font-size: var(--fs-label); color: var(--text-subtle); }
   /* --todo: 지금 사람이 해야 할 일이 있는 회의를 눈에 띄게 하는 색.
      app.css 의 --warn 과 같은 뜻이라 그걸 그대로 쓴다. */
   :root { --todo: var(--warn); }
 
-  .project h2 { font-size: 1.0625rem; margin: 0 0 .125rem; }
-  .project .sub { font-size: .8125rem; color: var(--dim); margin: 0 0 .625rem; }
-  .links { display: flex; gap: .5rem; margin-bottom: .75rem; flex-wrap: wrap; }
+  .project h2 { font-size: var(--fs-title); margin: 0 0 var(--sp-1); }
+  .project .sub { font-size: var(--fs-label); color: var(--text-subtle); margin: 0 0 var(--sp-3); }
+  .links { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-3); flex-wrap: wrap; }
 
-  .meeting { border-top: 1px solid var(--line); padding: .75rem 0; }
+  .meeting { border-top: 1px solid var(--line); padding: var(--sp-3) 0; }
   .meeting:first-child { border-top: 0; }
-  .meeting .head { display: flex; align-items: baseline; gap: .5rem; }
-  .meeting .name { font-weight: 600; font-size: .9375rem; flex: 1; }
-  .meeting .when { font-size: .75rem; color: var(--dim); white-space: nowrap; }
-  .meeting .status { font-size: .8125rem; color: var(--dim); margin: .125rem 0 .5rem; }
+  .meeting .head { display: flex; align-items: baseline; gap: var(--sp-2); }
+  .meeting .name { font-weight: 600; font-size: var(--fs-body); flex: 1; }
+  .meeting .when { font-size: var(--fs-caption); color: var(--text-subtle); white-space: nowrap; }
+  .meeting .status { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-1) 0 .5rem; }
   /* 지금 사람이 해야 할 일이 있는 회의만 눈에 띄게 한다. */
   .meeting.todo .status { color: var(--todo); }
 
-  .start { margin-top: 1.5rem; }
-  .start h2 { font-size: .9375rem; margin: 0 0 .75rem; }
+  .start { margin-top: var(--sp-6); }
+  .start h2 { font-size: var(--fs-body); margin: 0 0 var(--sp-3); }
 
-  .hint { font-size: .75rem; color: var(--dim); margin: 0 0 1rem; }
+  .hint { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0 0 var(--sp-4); }
 
 </style>
 </head>

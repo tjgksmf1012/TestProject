@@ -21,29 +21,29 @@
 
   /* 참가자 한 명 = 한 줄. 이름·상태가 위, 커버리지 막대가 아래.
      막대는 **한 줄을 통째로** 써야 42% 와 98% 의 차이가 보입니다. */
-  li { display: grid; grid-template-columns: 6rem 1fr; gap: .25rem .5rem;
-       padding: .5rem 0; border-top: 1px solid var(--line); align-items: baseline; }
+  li { display: grid; grid-template-columns: 6rem 1fr; gap: var(--sp-1) var(--sp-2);
+       padding: var(--sp-2) 0; border-top: 1px solid var(--line); align-items: baseline; }
   li:first-child { border-top: 0; }
   .name { font-weight: 600; }
-  .state { font-size: .8125rem; color: var(--dim); }
+  .state { font-size: var(--fs-label); color: var(--text-subtle); }
   /* 트랙은 이름 칸 아래가 아니라 **상태 칸 아래**로. */
   li .tl { grid-column: 2; }
 
   /* 시간축 — 트랙과 같은 격자에 맞춘다. 안 맞으면 눈금이 가리키는
      시각이 트랙의 그 자리와 어긋난다. */
-  .axis { display: grid; grid-template-columns: 6rem 1fr; gap: 0 .5rem;
-          margin: 0 0 .25rem; font-size: .75rem; color: var(--dim); }
+  .axis { display: grid; grid-template-columns: 6rem 1fr; gap: 0 var(--sp-2);
+          margin: 0 0 var(--sp-1); font-size: var(--fs-caption); color: var(--text-subtle); }
   .axis .marks { display: flex; justify-content: space-between; }
   .granted { color: var(--ok); } .refused { color: var(--bad); } .pending { color: var(--warn); }
   .broken .state, .at_risk .state { color: var(--warn); }
   .broken .state { color: var(--bad); }
 
-  button.primary:disabled { background: transparent; color: var(--dim); border-color: var(--line); font-weight: 400; cursor: not-allowed; }
-  button + button { margin-top: .5rem; }
+  button.primary:disabled { background: transparent; color: var(--text-subtle); border-color: var(--line); font-weight: 400; cursor: not-allowed; }
+  button + button { margin-top: var(--sp-2); }
  .row button { margin-top: 0; }
-  .blockers { margin: 0 0 .75rem; padding: .625rem .875rem; border-radius: .5rem; background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: .875rem; }
-  .blockers p { margin: .125rem 0; }
-  .status { font-size: .875rem; color: var(--dim); margin: .75rem 0 0; }
+  .blockers { margin: 0 0 var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: .5rem; background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: var(--fs-label); }
+  .blockers p { margin: var(--sp-1) 0; }
+  .status { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-3) 0 0; }
     </style>
 </head>
 <body>

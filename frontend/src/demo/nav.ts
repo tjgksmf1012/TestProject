@@ -18,6 +18,7 @@ import {
   navTabs,
   type ScreenId,
 } from '../lib/nav/links.ts';
+import { iconSvg } from '../lib/nav/icons.ts';
 import { escapeHtml } from '../lib/html.ts';
 
 /**
@@ -43,7 +44,10 @@ export function renderNav(current: ScreenId): void {
           : '';
         return (
           `<a${href}${disabled}${marked}${title}>` +
-          `<span class="ico" aria-hidden="true">${escapeHtml(tab.icon)}</span>` +
+          // ⚠️ `iconSvg` 는 **이스케이프하지 않습니다.** `icons.ts` 의
+          // 상수 마크업이라 안전하고, 이스케이프하면 태그가 글자로
+          // 나옵니다. 그 파일이 상수만 담는지는 테스트가 고정합니다.
+          `<span class="ico">${iconSvg(tab.icon)}</span>` +
           `<span>${escapeHtml(tab.label)}</span>` +
           `</a>`
         );

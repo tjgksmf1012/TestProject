@@ -19,6 +19,7 @@ import {
 } from '../lib/kanban/board.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { iconSvg } from '../lib/nav/icons.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
@@ -88,7 +89,7 @@ function cardHtml(task: Task, today: string): string {
     // ⭐ 이 프로젝트의 주장이 화면에서 보이는 지점.
     // 이게 없으면 이 화면은 그냥 할 일 목록이다.
     task.origin
-      ? `<p class="origin">🗣 ${escapeHtml(task.origin.meeting_title ?? '회의')}에서 나온 업무
+      ? `<p class="origin">${iconSvg('meeting')} ${escapeHtml(task.origin.meeting_title ?? '회의')}에서 나온 업무
            · 근거 발화 ${task.origin.evidence_utterance_ids.length}건</p>`
       : '<p class="origin manual">손으로 만든 업무</p>'
   }

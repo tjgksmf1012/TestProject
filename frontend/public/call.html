@@ -18,41 +18,41 @@
 <style>
 
   /* 통화 상태 한 줄. 이 화면에서 가장 먼저 읽히는 곳이다. */
-  #summary { font-size: 1rem; font-weight: 600; margin: 0 0 .25rem; }
+  #summary { font-size: var(--fs-body); font-weight: 600; margin: 0 0 var(--sp-1); }
   #sub { margin-top: 0; }
 
   /* 참가자. 얼굴이 없으므로 이름 첫 글자를 원으로 — 누가 있는지 한눈에. */
   .peers { list-style: none; padding: 0; margin: 0; }
-  .peers li { display: flex; align-items: center; gap: .75rem; padding: .625rem 0;
+  .peers li { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0;
               border-top: 1px solid var(--line); }
   .peers li:first-child { border-top: 0; }
   .face { width: 2.25rem; height: 2.25rem; border-radius: 50%; flex: 0 0 auto;
-          display: grid; place-items: center; font-weight: 700; font-size: .9375rem;
+          display: grid; place-items: center; font-weight: 700; font-size: var(--fs-body);
           background: color-mix(in srgb, var(--text) 10%, transparent); }
   .face.me { background: color-mix(in srgb, var(--ok) 22%, transparent); }
   .who { flex: 1; min-width: 0; }
   .who .name { font-weight: 600; }
-  .who .state { display: block; font-size: .8125rem; color: var(--dim); }
+  .who .state { display: block; font-size: var(--fs-label); color: var(--text-subtle); }
   .who .state.ok { color: var(--ok); }
   .who .state.warn { color: var(--warn); }
   .who .state.bad { color: var(--bad); }
   /* 헤드폰을 안 쓴 사람 — 이게 그 사람 트랙에 남의 목소리를 섞는다. */
-  .badge { font-size: .75rem; padding: .125rem .5rem; border-radius: 1rem;
+  .badge { font-size: var(--fs-caption); padding: var(--sp-1) .5rem; border-radius: 1rem;
            background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 
-  .warnings { list-style: none; padding: 0; margin: .75rem 0 0; }
-  .warnings li { font-size: .8125rem; color: var(--warn); padding: .1875rem 0; }
+  .warnings { list-style: none; padding: 0; margin: var(--sp-3) 0 0; }
+  .warnings li { font-size: var(--fs-label); color: var(--warn); padding: var(--sp-1) 0; }
   .warnings li::before { content: "⚠ "; }
 
   /* 마이크 레벨. "내 소리가 들어가고 있나" 를 눈으로 확인하는 유일한 곳. */
-  .meter { height: .5rem; border-radius: .25rem; margin-top: .5rem;
+  .meter { height: .5rem; border-radius: .25rem; margin-top: var(--sp-2);
            background: color-mix(in srgb, var(--text) 10%, transparent); overflow: hidden; }
   .meter span { display: block; height: 100%; width: 0;
                 background: var(--ok); transition: width .1s linear; }
 
   .actionbar button { flex: 1; }
   #leave { border-color: var(--bad); color: var(--bad); }
-  #status { font-size: .875rem; color: var(--dim); margin: .75rem 0 0; }
+  #status { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-3) 0 0; }
   #status.bad { color: var(--bad); }
 </style>
 </head>

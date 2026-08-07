@@ -155,7 +155,7 @@ const PHASE_LABEL: Record<string, string> = {
   idle: '준비 중',
   ready: '시작 가능',
   recording: '녹음 중',
-  interrupted: '⚠️ 화면이 가려짐',
+  interrupted: '화면이 가려짐',
   stopping: '마무리 중',
   completed: '완료',
   failed: '오류',

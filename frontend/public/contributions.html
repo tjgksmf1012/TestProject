@@ -18,38 +18,38 @@
 <title>기여도 — TeamFlow</title>
 <style>
 
-  .warnings { margin: 1rem 0; padding: .75rem .9rem; border-radius: .5rem; font-size: .875rem; background: color-mix(in srgb, var(--warn) 12%, transparent); }
-  .warnings p { margin: .2rem 0; }
+  .warnings { margin: var(--sp-4) 0; padding: .75rem var(--sp-4); border-radius: .5rem; font-size: var(--fs-label); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .warnings p { margin: var(--sp-1) 0; }
 
-  .card { border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; margin-bottom: .9rem; }
-  .card header { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .5rem; }
-  .who { font-weight: 700; font-size: 1.0625rem; }
-  .role { font-size: .75rem; color: var(--dim); }
+  .card { border: 1px solid var(--line); border-radius: .75rem; padding: var(--sp-4); margin-bottom: var(--sp-4); }
+  .card header { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+  .who { font-weight: 700; font-size: var(--fs-title); }
+  .role { font-size: var(--fs-caption); color: var(--text-subtle); }
 
   /* 구간이 주인공이다. 단일 점수를 크게 띄우지 않는다. */
-  .range { font-size: 1.5rem; font-weight: 700; margin: 0; font-variant-numeric: tabular-nums; }
+  .range { font-size: var(--fs-number); font-weight: 700; margin: 0; font-variant-numeric: tabular-nums; }
   /* 구간 막대는 공용 `.range` 로 옮겼습니다 (app.css).
      캡이 구간의 양끝을 가리켜야 하는데, 여기 있던 규칙은 캡이
      없어서 "19~29%" 가 그냥 채워진 막대로 보였습니다. */
-  .rangebar { margin: .4rem 0 .5rem; }
-  .conf { font-size: .8125rem; color: var(--dim); margin: 0; }
+  .rangebar { margin: var(--sp-2) 0 .5rem; }
+  .conf { font-size: var(--fs-label); color: var(--text-subtle); margin: 0; }
 
   /* ⚠️ `::before` 로 마커를 찍으므로 목록 기본 불릿을 꺼야 한다.
      안 끄면 "• · 동료평가…" 처럼 마커가 두 개 찍힌다. */
-  .notes, .cats, .flags { list-style: none; padding-left: 0; margin: .5rem 0 0; }
-  .notes li { font-size: .8125rem; color: var(--warn); padding: .15rem 0; }
+  .notes, .cats, .flags { list-style: none; padding-left: 0; margin: var(--sp-2) 0 0; }
+  .notes li { font-size: var(--fs-label); color: var(--warn); padding: var(--sp-1) 0; }
   .notes li::before { content: "· "; }
   .notes strong { color: var(--bad); }
 
-  .cats li { display: flex; align-items: center; gap: .5rem; font-size: .8125rem; padding: .2rem 0; }
-  .cat { min-width: 3.5rem; color: var(--dim); }
+  .cats li { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-label); padding: var(--sp-1) 0; }
+  .cat { min-width: 3.5rem; color: var(--text-subtle); }
   .catbar { flex: 1; height: .375rem; border-radius: .2rem; background: color-mix(in srgb, currentColor 8%, transparent); }
-  .catbar i { display: block; height: 100%; border-radius: .2rem; background: color-mix(in srgb, var(--bar) 65%, transparent); }
-  .catnum { min-width: 2.5rem; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .catbar i { display: block; height: 100%; border-radius: .2rem; background: color-mix(in srgb, var(--primary) 65%, transparent); }
+  .catnum { min-width: 2.5rem; text-align: right; color: var(--text-subtle); font-variant-numeric: tabular-nums; }
 
-  .flags li { font-size: .8125rem; color: var(--bad); padding: .15rem 0; }
+  .flags li { font-size: var(--fs-label); color: var(--bad); padding: var(--sp-1) 0; }
   .flags li::before { content: "⚑ "; }
-  .flagnote { font-size: .75rem; color: var(--dim); margin: .25rem 0 0; }
+  .flagnote { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-1) 0 0; }
     </style>
 </head>
 <body>

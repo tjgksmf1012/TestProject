@@ -288,6 +288,14 @@ function render(): void {
   call.disabled = record.disabled;
   call.textContent = call.disabled ? '통화도 전원 동의 후에' : '통화로 회의하기';
 
+  // ⚠️ **한 화면에 주 버튼은 하나** (지시서 §8).
+  //
+  // 내가 아직 동의를 안 했으면 "동의합니다" 가 주 동작입니다. 하고 나면
+  // 주 동작은 "녹음 화면으로" 로 넘어갑니다 — 그때도 동의 버튼이 청록인
+  // 채로 남아 있으면 **또 눌러야 하나** 싶게 만듭니다.
+  const iAgreed = roster.some((e) => e.user_id === meId && consentStateOf(e) === 'granted');
+  $('agree').classList.toggle('primary', !iAgreed);
+
   $('finish').hidden = !room.needsForceFinish;
   // 처리가 끝나야 후보가 생긴다. 그 전에 눌러도 빈 화면이라 감춘다.
   $('review').hidden = room.recording > 0 || room.notJoined > 0 || tracks.length === 0;

@@ -92,7 +92,9 @@ function projectHtml(project: Project, meetings: Meeting[]): string {
 
 /** 받아 오기만 한다. **그리지 않는다** — 아래 주석 참고. */
 async function fetchAll(): Promise<
-  { kind: 'expired' } | { kind: 'failed'; status: number } | { kind: 'ok'; html: string }
+  | { kind: 'expired' }
+  | { kind: 'failed'; status: number }
+  | { kind: 'ok'; html: string; hasProjects: boolean }
 > {
   const response = await get('/api/projects');
   if (isSessionExpired(response.status)) return { kind: 'expired' };
@@ -100,7 +102,11 @@ async function fetchAll(): Promise<
 
   const projects = orderProjects((await response.json()) as Project[]);
   if (projects.length === 0) {
-    return { kind: 'ok', html: `<p class="empty">${escapeHtml(emptyProjectsMessage())}</p>` };
+    return {
+      kind: 'ok',
+      hasProjects: false,
+      html: `<p class="empty">${escapeHtml(emptyProjectsMessage())}</p>`,
+    };
   }
 
   // 프로젝트마다 회의를 받아 옵니다. 한 사람이 속한 프로젝트는 많아야
@@ -116,6 +122,7 @@ async function fetchAll(): Promise<
 
   return {
     kind: 'ok',
+    hasProjects: true,
     html: projects.map((p, i) => projectHtml(p, meetings[i] ?? [])).join(''),
   };
 }
@@ -150,6 +157,15 @@ async function load(): Promise<void> {
     return;
   }
   $('projects').innerHTML = result.html;
+
+  // ⚠️ **한 화면에 주 버튼은 하나** (지시서 §8).
+  //
+  // 프로젝트가 이미 있으면 각 회의 카드의 "다음 할 일" 버튼이 주
+  // 동작입니다 — 사람이 홈에 오는 이유가 그것입니다. 그때 "만들기"
+  // 까지 청록으로 칠하면 **무엇부터 눌러야 하는지가 사라집니다.**
+  //
+  // 반대로 하나도 없으면 만들기가 유일한 길이므로 주 버튼이 맞습니다.
+  $('create').classList.toggle('primary', !result.hasProjects);
 }
 
 // ══════════════════════════════════════════════════════════════
