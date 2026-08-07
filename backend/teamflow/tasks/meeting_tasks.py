@@ -15,7 +15,8 @@ import logging
 from datetime import UTC, date, datetime, time
 
 from celery import Task
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from teamflow.config import get_settings
 from teamflow.db import models as m
@@ -218,8 +219,33 @@ def _serialize(result: PipelineResult) -> dict:
             {"content": content, "evidence": list(evidence), "supersedes": supersedes}
             for content, evidence, supersedes in (validation.decisions if validation else [])
         ],
+        # ⚠️ 이 둘이 여기 없어서 **파이프라인 밖으로 나온 적이 없었다.**
+        # 검증(`validation.py`)까지 통과한 산출물인데, 근거 발화 id 가
+        # 실재하는지 확인까지 마친 것들이 그대로 버려졌다. 회의 재처리는
+        # 사람이 검토한 뒤에는 거부되므로 **영구 손실**이었다.
+        "unresolved_issues": [
+            {"content": content, "evidence": list(evidence)}
+            for content, evidence in (validation.unresolved_issues if validation else [])
+        ],
+        "next_agenda": list(validation.next_agenda) if validation else [],
         "rejected": len(validation.rejected) if validation else 0,
     }
+
+
+def _span(session: Session, utterance_ids: list[int]) -> tuple[int, int]:
+    """근거 발화들이 걸친 구간. 근거가 없으면 (0, 0).
+
+    ⭐ **시각을 지어내지 않는다.** 없는 것을 0..회의끝 으로 채우면 화면이
+    "회의 내내 해결되지 않았다" 로 읽는다.
+    """
+    if not utterance_ids:
+        return (0, 0)
+    rows = session.execute(
+        select(func.min(m.Utterance.start_ms), func.max(m.Utterance.end_ms)).where(
+            m.Utterance.id.in_(utterance_ids)
+        )
+    ).one()
+    return (int(rows[0] or 0), int(rows[1] or 0))
 
 
 def _parse_deadline(value: str | None) -> datetime | None:
@@ -331,15 +357,77 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
                 )
             )
 
+        # 결정 번복 추적. 예전에는 `supersedes` 가 여기까지 실려 오는데
+        # 쓰지 않아 `supersedes_id` 가 **영원히 NULL** 이었다.
+        #
+        # LLM 에게 넘긴 `prior_decisions` 는 우리가 준 원문 목록이라 대개
+        # 정확히 일치한다. 그래서 **정확히 일치할 때만** 잇는다 —
+        # 비슷한 것을 골라 주면 회의 기록이 틀려지고, 틀린 기록은
+        # 조용하다. 못 찾으면 원문을 남겨 사람이 고치게 한다.
+        active_by_content = {
+            row.content: row
+            for row in session.scalars(
+                select(m.Decision).where(
+                    m.Decision.project_id == meeting.project_id,
+                    m.Decision.status == "active",
+                )
+            ).all()
+        }
+
         for decision in payload["decisions"]:
+            hint = decision.get("supersedes")
+            superseded = active_by_content.get(hint) if hint else None
+
+            row = m.Decision(
+                project_id=meeting.project_id,
+                meeting_id=meeting_id,
+                content=decision["content"],
+                evidence_utterance_ids=to_real_ids(decision["evidence"]),
+                supersedes_id=superseded.id if superseded else None,
+                # 찾았으면 힌트를 남기지 않는다 — id 가 있는데 원문까지
+                # 두면 어느 쪽이 맞는지 다음 사람이 헷갈린다.
+                supersedes_hint=None if superseded else hint,
+            )
+            session.add(row)
+
+            if superseded is not None:
+                # 뒤집힌 결정은 더 이상 활성이 아니다. 이걸 안 바꾸면
+                # 다음 회의의 `prior_decisions` 에 **뒤집힌 결정이 계속
+                # 들어가서** LLM 이 같은 번복을 매번 다시 보고한다.
+                superseded.status = "superseded"
+                active_by_content.pop(hint, None)
+                logger.info(
+                    "결정 번복: meeting=%s 가 decision=%s 를 뒤집음",
+                    meeting_id,
+                    superseded.id,
+                )
+            elif hint:
+                logger.info(
+                    "결정 번복 힌트를 이을 결정을 못 찾았습니다 "
+                    "(사람이 확인해야 합니다): meeting=%s hint=%r",
+                    meeting_id,
+                    hint[:80],
+                )
+
+        # 미해결 사안 → `meeting_events` 의 `unanswered_question`.
+        # 새 표가 필요 없다 — 그 자리가 원래 이것을 위한 자리다.
+        for issue in payload.get("unresolved_issues", []):
+            evidence = to_real_ids(issue["evidence"])
             session.add(
-                m.Decision(
-                    project_id=meeting.project_id,
+                m.MeetingEvent(
                     meeting_id=meeting_id,
-                    content=decision["content"],
-                    evidence_utterance_ids=to_real_ids(decision["evidence"]),
+                    event_type="unanswered_question",
+                    severity="info",
+                    # 근거 발화의 구간을 그대로 쓴다. 없으면 0 — 시각을
+                    # 지어내지 않는다.
+                    start_ms=_span(session, evidence)[0],
+                    end_ms=_span(session, evidence)[1],
+                    evidence_utterance_ids=evidence,
+                    detail={"content": issue["content"]},
                 )
             )
+
+        meeting.next_agenda = list(payload.get("next_agenda") or [])
 
         # 추정한 정렬 보정값을 트랙에 되돌려 쓴다.
         #

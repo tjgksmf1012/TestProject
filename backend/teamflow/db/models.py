@@ -274,6 +274,12 @@ class Meeting(Base):
     # 남지 않았다. 재생성하려면 회의를 통째로 다시 처리해야 하고, 그건 이미
     # 사람이 검토한 회의에서는 거부된다 — 즉 영구 손실이었다.
     summary: Mapped[str | None] = mapped_column(Text)
+    # 다음 회의에서 다룰 안건. LLM 이 만들고 검증까지 통과한 산출물인데
+    # **`_serialize` 에 없어서** 파이프라인 밖으로 나온 적이 없었다.
+    #
+    # 근거 발화가 없는 값이라 `MeetingEvent` 가 아니라 회의에 붙인다 —
+    # "다음에 뭘 하기로 했더라" 는 회의 하나의 성질이다.
+    next_agenda: Mapped[list | None] = mapped_column(JSONType)
     # 녹음을 시작한 사람. 통신비밀보호법상 반드시 회의 참석자여야 한다 (docs/07 L1).
     started_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = _now()
@@ -390,6 +396,17 @@ class Decision(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     # 이 결정이 뒤집은 이전 결정 (제안서 5장의 결정 번복 추적)
     supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("decisions.id"))
+    # LLM 이 "이 결정을 뒤집었다" 고 적어 보낸 **원문**.
+    #
+    # ⚠️ 이 컬럼이 없던 동안 `supersedes` 는 Celery 페이로드까지 실려 오고
+    # 저장 단계에서 버려졌습니다 — `supersedes_id` 는 **영원히 NULL** 이었고,
+    # 결정 번복 추적은 표만 있고 데이터가 없는 기능이었습니다.
+    #
+    # id 를 못 찾았을 때 힌트를 지우지 않고 남기는 이유: LLM 에게 넘긴
+    # `prior_decisions` 는 우리가 준 원문 목록이라 대개 정확히 일치하지만,
+    # 바꿔 쓰면 못 찾습니다. 그때 **추측해서 아무 결정이나 뒤집힌 것으로
+    # 표시하면** 회의 기록이 틀려집니다. 사람이 보고 고칠 수 있게 남깁니다.
+    supersedes_hint: Mapped[str | None] = mapped_column(Text)
     evidence_utterance_ids: Mapped[list | None] = mapped_column(BigIntArray)
     confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = _now()

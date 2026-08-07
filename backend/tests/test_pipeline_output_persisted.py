@@ -361,3 +361,225 @@ def test_pipeline_records_the_track_ids_it_loaded():
         meeting_date=NOW.date(),
     )
     assert result.track_ids == [41, 42]
+
+
+# ══════════════════════════════════════════════════════════════
+# 결정 번복 · 미해결 사안 · 다음 안건
+# ══════════════════════════════════════════════════════════════
+#
+# 이 셋도 같은 방식으로 버려지고 있었다.
+#
+#     supersedes         페이로드까지 실려 오는데 안 씀 → supersedes_id 영원히 NULL
+#     unresolved_issues  `_serialize` 에 아예 없음
+#     next_agenda        같음
+#
+# 전부 `validation.py` 를 통과한 산출물이다 — 근거 발화 id 가 실재하는지
+# 확인까지 마친 것들이 그대로 버려졌다.
+
+
+def test_serialize_carries_what_the_llm_made(seeded):
+    """⭐ `_serialize` 가 빠뜨리면 저장 태스크는 볼 수조차 없다.
+
+    저장 쪽을 아무리 고쳐도 소용없다 — 값이 프로세스 경계를 넘지 못한다.
+    """
+    analysis = MeetingAnalysis(
+        summary="요약",
+        decisions=[],
+        tasks=[],
+        unresolved_issues=[
+            {"content": "배포 방식은 결론이 안 났습니다", "evidence_utterance_ids": [1]}
+        ],
+        next_agenda=["배포 방식 다시 논의", "테스트 범위 정하기"],
+    )
+    validation = validate_analysis(
+        analysis,
+        known_utterance_ids={1},
+        members=[],
+        meeting_date=NOW.date(),
+    )
+
+    result = PipelineResult(
+        meeting_id=seeded["meeting_id"],
+        stage=Stage.DONE,
+        track_ids=list(seeded["track_ids"]),
+        segments=[],
+        alignment=[],
+        validation=validation,
+    )
+    payload_out = _serialize(result)
+
+    assert payload_out["next_agenda"] == ["배포 방식 다시 논의", "테스트 범위 정하기"]
+    assert len(payload_out["unresolved_issues"]) == 1
+    assert "배포 방식" in payload_out["unresolved_issues"][0]["content"]
+
+
+def test_next_agenda_reaches_the_meeting_row(seeded):
+    """다음 안건은 근거 발화가 없어 회의에 붙인다."""
+    persist_results_task(
+        seeded["meeting_id"],
+        payload(seeded, next_agenda=["배포 방식 다시 논의"]),
+    )
+
+    with db_session.session_scope() as s:
+        meeting = s.get(m.Meeting, seeded["meeting_id"])
+        assert meeting.next_agenda == ["배포 방식 다시 논의"]
+
+
+def test_unresolved_issues_become_meeting_events(seeded):
+    """⭐ 새 표가 필요 없다 — `unanswered_question` 이 원래 그 자리다."""
+    persist_results_task(
+        seeded["meeting_id"],
+        payload(
+            seeded,
+            unresolved_issues=[
+                {"content": "배포 방식은 결론이 안 났습니다", "evidence": [1]}
+            ],
+        ),
+    )
+
+    with db_session.session_scope() as s:
+        events = s.scalars(
+            select(m.MeetingEvent).where(
+                m.MeetingEvent.meeting_id == seeded["meeting_id"]
+            )
+        ).all()
+        assert len(events) == 1
+        assert events[0].event_type == "unanswered_question"
+        assert events[0].detail["content"] == "배포 방식은 결론이 안 났습니다"
+        # 근거 발화가 실제 행 id 로 바뀌어 있어야 한다 (1부터 시작하는
+        # 순번을 그대로 두면 남의 발화를 가리킨다).
+        assert events[0].evidence_utterance_ids
+        utterance = s.get(m.Utterance, events[0].evidence_utterance_ids[0])
+        assert utterance is not None
+        # 구간은 근거 발화에서 가져온다 — 지어내지 않는다.
+        assert events[0].start_ms == utterance.start_ms
+        assert events[0].end_ms == utterance.end_ms
+
+
+def test_an_issue_without_evidence_does_not_invent_a_span(seeded):
+    """⭐ 없는 시각을 0..회의끝 으로 채우면 "회의 내내 미해결" 로 읽힌다."""
+    persist_results_task(
+        seeded["meeting_id"],
+        payload(seeded, unresolved_issues=[{"content": "근거 없음", "evidence": []}]),
+    )
+
+    with db_session.session_scope() as s:
+        event = s.scalars(select(m.MeetingEvent)).one()
+        assert (event.start_ms, event.end_ms) == (0, 0)
+
+
+def _prior_decision(project_id: int, content: str) -> int:
+    """지난 회의에서 나온 결정.
+
+    ⭐ **다른 회의여야 한다.** 재처리는 같은 회의의 결정을 먼저 지우므로
+    (`persist_results_task` 의 삭제 루프), 같은 회의에 넣으면 조회 시점에
+    이미 없다. 실제로도 뒤집히는 결정은 지난 회의에서 온다.
+    """
+    with db_session.session_scope() as s:
+        project = s.get(m.Project, project_id)
+        earlier = m.Meeting(
+            project_id=project_id,
+            started_at=NOW,
+            started_by=s.scalars(select(m.User.id)).first(),
+        )
+        s.add(earlier)
+        s.flush()
+        row = m.Decision(
+            project_id=project.id,
+            meeting_id=earlier.id,
+            content=content,
+            status="active",
+            evidence_utterance_ids=[],
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def test_supersedes_links_the_decision_it_overturned(seeded):
+    """⭐ `supersedes_id` 가 **영원히 NULL** 이었다.
+
+    결정 번복 추적은 표만 있고 데이터가 없는 기능이었다. 값은 Celery
+    페이로드까지 실려 왔는데 `m.Decision(...)` 이 쓰지 않았다.
+    """
+    with db_session.session_scope() as s:
+        project_id = s.get(m.Meeting, seeded["meeting_id"]).project_id
+    old_id = _prior_decision(project_id, "인증은 세션으로 간다")
+
+    persist_results_task(
+        seeded["meeting_id"],
+        payload(
+            seeded,
+            decisions=[
+                {
+                    "content": "인증은 JWT 로 간다",
+                    "evidence": [1],
+                    "supersedes": "인증은 세션으로 간다",
+                }
+            ],
+        ),
+    )
+
+    with db_session.session_scope() as s:
+        new = s.scalars(
+            select(m.Decision).where(m.Decision.content == "인증은 JWT 로 간다")
+        ).one()
+        assert new.supersedes_id == old_id
+        assert new.supersedes_hint is None, "id 를 찾았으면 원문을 남기지 않는다"
+
+        # ⭐ 뒤집힌 결정은 더 이상 활성이 아니다. 안 바꾸면 다음 회의의
+        # `prior_decisions` 에 계속 들어가 같은 번복을 매번 다시 보고한다.
+        assert s.get(m.Decision, old_id).status == "superseded"
+
+
+def test_an_unmatched_hint_is_kept_not_guessed(seeded):
+    """⭐ 비슷한 것을 골라 주면 회의 기록이 틀려지고, 틀린 기록은 조용하다.
+
+    LLM 이 원문을 바꿔 쓰면 못 찾는다. 그때는 **추측하지 않고** 원문을
+    남겨 사람이 고치게 한다.
+    """
+    with db_session.session_scope() as s:
+        project_id = s.get(m.Meeting, seeded["meeting_id"]).project_id
+    old_id = _prior_decision(project_id, "인증은 세션으로 간다")
+
+    persist_results_task(
+        seeded["meeting_id"],
+        payload(
+            seeded,
+            decisions=[
+                {
+                    "content": "인증은 JWT 로 간다",
+                    "evidence": [1],
+                    # 원문과 다르게 적힌 힌트
+                    "supersedes": "세션 기반 인증을 쓰기로 했던 것",
+                }
+            ],
+        ),
+    )
+
+    with db_session.session_scope() as s:
+        new = s.scalars(
+            select(m.Decision).where(m.Decision.content == "인증은 JWT 로 간다")
+        ).one()
+        assert new.supersedes_id is None, "못 찾았는데 아무거나 이었습니다"
+        assert new.supersedes_hint == "세션 기반 인증을 쓰기로 했던 것"
+        # 엉뚱한 결정을 뒤집힌 것으로 표시하지 않았는가
+        assert s.get(m.Decision, old_id).status == "active"
+
+
+def test_no_hint_leaves_both_fields_empty(seeded):
+    """번복이 아닌 보통 결정은 아무 흔적도 남기지 않는다."""
+    persist_results_task(
+        seeded["meeting_id"],
+        payload(
+            seeded,
+            decisions=[
+                {"content": "인증은 JWT 로 간다", "evidence": [1], "supersedes": None}
+            ],
+        ),
+    )
+
+    with db_session.session_scope() as s:
+        new = s.scalars(select(m.Decision)).one()
+        assert new.supersedes_id is None
+        assert new.supersedes_hint is None
