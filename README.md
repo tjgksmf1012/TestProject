@@ -4,10 +4,10 @@
 > 회의에서 나온 결정을 실제 업무와 코드 활동까지 연결한다.
 
 **현재 상태: 설계 확정 + GPU 없이 검증 가능한 전 구간 구현 완료.**
-기여도 엔진, 회의 처리 파이프라인, 녹음 수집(클라이언트·서버), 화면 아홉 개까지
-동작하고 테스트로 고정돼 있습니다.
+기여도 엔진, 회의 처리 파이프라인, 녹음 수집(클라이언트·서버), 브라우저
+통화(WebRTC), 화면 열 개까지 동작하고 테스트로 고정돼 있습니다.
 
-**남은 것 둘** — ① 브라우저 통화(WebRTC), ② 모델 구현(GPU 필요).
+**남은 것 하나** — 모델 구현(GPU 필요).
 회의 → 업무 → GitHub → 기여도 경로는 **끝까지 이어졌습니다.**
 지금 순서와 근거는 [`docs/08` §4.1](docs/08-MVP-로드맵.md) 에 있습니다.
 
@@ -184,7 +184,8 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **화면 간 이동** (막다른 길 없음) | ✅ | `frontend/src/lib/nav/`, [docs/13](docs/13-화면-구조.md) |
 | **모바일 우선 화면 + 앱 설치(PWA)** | ✅ (보류) | `frontend/public/app.css`·`sw.js`, [docs/14](docs/14-모바일.md) |
 | **안드로이드 셸** (화면 꺼도 녹음 유지) | 🔨 빌드 미확인 (보류) | `android/`, [docs/14](docs/14-모바일.md) |
-| **브라우저 통화로 회의** (WebRTC) | ❌ 다음 작업 | [docs/15](docs/15-PC-우선-방향.md) |
+| **브라우저 통화로 회의** (WebRTC 메시 5명 · 헤드폰 확인) | ✅ 같은 기기 3인 통화로 확인 / **실제 네트워크는 미검증** | `backend/teamflow/call/`, `frontend/src/lib/call/`, `public/call.html` |
+| **PC 화면** (48rem↑ 상단 탭·칸반 3열 가로) | ✅ | `frontend/public/app.css`, [docs/15](docs/15-PC-우선-방향.md) §4.7 |
 | 프로젝트 만들기·회의 열기 **화면** | ⬜ | API 는 있음. 가입 후 첫 사용자가 할 게 없습니다 |
 | **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
 | **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ⚠️ 실측 미검증 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
@@ -217,6 +218,7 @@ ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend --rel
 
 - `http://localhost:8000/home.html` — **여기부터.** 내 프로젝트와 회의, 다음에 할 일
 - `http://localhost:8000/lobby.html?meeting=1` — **회의 로비** (동의 → 상태 → 종료)
+- `http://localhost:8000/call.html?meeting=1` — **통화** (WebRTC 메시, 5명까지)
 - `http://localhost:8000/?meeting=1` — 녹음 화면 (서버 트랙에 참가)
 - `http://localhost:8000/` — 녹음 화면 (서버 없이, 실기기 실험 5)
 - `http://localhost:8000/review.html?meeting=1` — 업무 후보 승인 화면
