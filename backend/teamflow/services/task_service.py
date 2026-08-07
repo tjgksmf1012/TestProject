@@ -114,6 +114,8 @@ def _emit(
     source_id: int,
     occurred_at: datetime,
     magnitude: float = 1.0,
+    source_kind: SourceKind = SourceKind.TASK,
+    metadata: dict | None = None,
 ) -> bool:
     """기여 이벤트 하나. 이미 있으면 아무 일도 하지 않는다.
 
@@ -124,7 +126,7 @@ def _emit(
     """
     exists = session.scalar(
         select(m.ContributionEventRow.id).where(
-            m.ContributionEventRow.source_kind == SourceKind.TASK.value,
+            m.ContributionEventRow.source_kind == source_kind.value,
             m.ContributionEventRow.source_id == source_id,
             m.ContributionEventRow.event_type == event_type.value,
         )
@@ -139,10 +141,10 @@ def _emit(
             occurred_at=occurred_at,
             category=CATEGORY_OF[event_type].value,
             event_type=event_type.value,
-            source_kind=SourceKind.TASK.value,
+            source_kind=source_kind.value,
             source_id=source_id,
             magnitude=magnitude,
-            event_metadata={},
+            event_metadata=metadata or {},
         )
     )
     return True
@@ -251,6 +253,17 @@ def _change_deadline(
 
     마감을 계속 뒤로 미루면 준수율이 저절로 올라갑니다. 점수를 깎지는
     않지만, 변경 횟수를 남기지 않으면 그 조작이 보이지 않습니다.
+
+    ## ⚠️ 감사 표만으로는 탐지가 죽어 있었다
+
+    `task_deadline_changes` 행은 처음부터 남고 있었습니다. 그런데
+    `scoring._detect_integrity_flags` 는 그 표를 보지 않습니다 —
+    `DEADLINE_CHANGED` **기여 이벤트**를 셉니다. 만드는 곳이 0곳이라
+    `frequent_deadline_change` 플래그는 **한 번도 뜰 수 없었습니다.**
+    `docs/09` 실험 4 가 검증하겠다고 적어 둔 바로 그 플래그입니다.
+
+    둘 다 남깁니다. 목적이 다릅니다 — 감사 표는 **누가 언제 왜** 바꿨는지,
+    기여 이벤트는 **그 사람의 준수율을 그대로 읽어도 되는가**입니다.
     """
     new_value = (
         datetime.combine(deadline, datetime.min.time(), tzinfo=UTC) if deadline else None
@@ -259,16 +272,37 @@ def _change_deadline(
     if (old_value.date() if old_value else None) == (deadline or None):
         return
 
-    session.add(
-        m.TaskDeadlineChange(
-            task_id=task.id,
-            changed_by=actor_id,
-            old_deadline=old_value,
-            new_deadline=new_value,
-            reason=reason,
-        )
+    change = m.TaskDeadlineChange(
+        task_id=task.id,
+        changed_by=actor_id,
+        old_deadline=old_value,
+        new_deadline=new_value,
+        reason=reason,
     )
+    session.add(change)
     task.deadline = new_value
+
+    if task.assignee_id is None:
+        # 담당자가 없으면 흔들릴 준수율도 없다. 변경 이력은 위에서 이미 남겼다.
+        return
+
+    # `change.id` 가 있어야 변경마다 다른 근거를 가리킬 수 있다.
+    session.flush()
+    _emit(
+        session,
+        project_id=task.project_id,
+        # ⭐ **담당자**에게 붙인다. 바꾼 사람이 아니다.
+        # `_detect_integrity_flags` 가 이 사람의 met/missed 건수와 비교하므로,
+        # 바꾼 사람에게 붙이면 두 사람의 숫자를 섞은 비율이 된다.
+        # 남이 바꿨다는 사실은 아래 `changed_by` 로 근거에 남는다.
+        user_id=task.assignee_id,
+        event_type=EventType.DEADLINE_CHANGED,
+        source_kind=SourceKind.DEADLINE_CHANGE,
+        source_id=change.id,
+        occurred_at=_now(),
+        magnitude=0.0,
+        metadata={"task_id": task.id, "changed_by": actor_id},
+    )
 
 
 def _change_status(session: Session, task: m.Task, status: str, actor_id: int) -> None:

@@ -415,3 +415,112 @@ def test_the_seed_writes_gaps_in_the_same_shape_production_does():
             problems.append(f"{i}번째 항목에 {sorted(missing)} 없음 (쓴 것: {sorted(entry_keys)})")
 
     assert not problems, "시드가 운영과 다른 키를 씁니다:\n  " + "\n  ".join(problems)
+
+
+# ══════════════════════════════════════════════════════════════
+# 만들어 놓고 아무도 안 만드는 이벤트 종류
+# ══════════════════════════════════════════════════════════════
+
+# 생산자가 **없는 것이 맞는** 종류. 기능 자체가 아직 없습니다.
+#
+# ⚠️ 이 셋은 `DEADLINE_CHANGED` 와 다릅니다. `score_team` 은 **팀 전체가 0인
+# 카테고리를 가중치 재정규화에서 빼므로**(scoring.py 의 `skipped`), 이벤트가
+# 하나도 없는 카테고리는 조용한 0점이 되지 않습니다 — 기획자의 문서 30% 는
+# 사라지는 게 아니라 남은 카테고리로 재분배됩니다. 반면 무결성 플래그에는
+# 그런 안전장치가 없어서, 세는 이벤트가 안 만들어지면 **영원히 안 뜹니다.**
+#
+# 여기에 새 이름을 넣을 때는 그 종류가 없어도 조용히 틀린 값이 나오지
+# 않는다는 근거를 함께 적을 것.
+NO_PRODUCER_YET = {
+    "BLOCKER_RESOLVED": (
+        "블로커 표시 기능이 없다. TASK 는 task_completed 로 활성이라 카테고리가 죽지 않는다"
+    ),
+    "DOCUMENT_REVISED": "문서 연동이 없다. 팀 전체가 0이면 DOCUMENT 가 재정규화에서 빠진다",
+    "PEER_RATING": "동료 평가 화면이 없다. 위와 같은 이유로 PEER 가 빠진다",
+}
+
+# 읽기만 하는 파일. 여기서 이름이 나온다고 생산자가 있는 게 아니다.
+CONSUMERS_ONLY = (
+    "backend/teamflow/contribution/scoring.py",
+    "backend/teamflow/contribution/events.py",
+)
+
+
+def _event_type_names() -> list[str]:
+    """`EventType` **클래스 몸통** 안의 멤버 이름만.
+
+    ⚠️ 파일 전체를 훑으면 안 됩니다. 같은 파일의 `Category` 와 `SourceKind`
+    가 생김새가 똑같아서 `CODE`·`GITHUB_EVENT` 까지 딸려 옵니다 — 처음에
+    그렇게 짰다가 멀쩡한 이름 여덟 개를 고아로 신고했습니다.
+    """
+    import re
+
+    src = (REPO_ROOT / "backend" / "teamflow" / "contribution" / "events.py").read_text()
+    body = re.search(r"^class EventType\b.*?(?=^class |\Z)", src, re.M | re.S)
+    assert body, "EventType 클래스를 못 찾았습니다"
+    return re.findall(r"^    ([A-Z][A-Z_0-9]*) = \"", body.group(0), re.M)
+
+
+def test_every_event_type_has_something_that_creates_it():
+    """⭐ 세는 코드만 있고 만드는 코드가 없으면 그 기능은 **죽어 있다.**
+
+    `DEADLINE_CHANGED` 가 그랬습니다. `scoring._detect_integrity_flags` 가
+    이 이벤트를 세어 `frequent_deadline_change` 플래그를 띄우는데, 만드는
+    곳이 **0곳**이라 `docs/09` 가 "구현된 무결성 플래그" 라고 적어 둔 그
+    플래그가 한 번도 뜰 수 없었습니다. 마감일 변경은 `task_deadline_changes`
+    표에 꼬박꼬박 남고 있었으니 더 안 보였습니다.
+
+    같은 부류를 이 저장소는 반복해 겪었습니다 — `renderNav`(결함 47),
+    `extract_task_refs`(결함 12), 진행률 읽기(감사 #8). 그래서 존재가 아니라
+    **만드는 곳**을 셉니다.
+    """
+    names = _event_type_names()
+    # 여덟 발언 + 나머지. 한 자릿수로 떨어지면 정규식이 끊긴 것이다.
+    assert len(names) >= 15, f"EventType 을 못 읽었습니다: {names}"
+
+    sources = [
+        path
+        for path in (REPO_ROOT / "backend" / "teamflow").rglob("*.py")
+        if path.relative_to(REPO_ROOT).as_posix() not in CONSUMERS_ONLY
+    ]
+    blob = "\n".join(p.read_text() for p in sources)
+
+    # 발언 여덟 종은 라벨에서 **만들어집니다** — `EventType.UTT_SOCIAL` 이라고
+    # 적힌 곳이 없습니다. 그래서 글자가 아니라 **동작**을 봅니다.
+    #
+    # ⚠️ 처음에는 `'EventType(f"utt_{label}")' in blob` 으로 짰습니다.
+    # `EventType("utt_" + label)` 로 바꾸기만 해도 실패하는, 형태에만
+    # 민감한 가드였습니다. 그런 가드는 사람이 느슨하게 만들고, 느슨해진
+    # 가드는 진짜를 놓칩니다.
+    from teamflow.contribution.events import EventType
+    from teamflow.services import meeting_contribution_service as mcs
+
+    orphans = []
+    for name in names:
+        if name in NO_PRODUCER_YET:
+            continue
+        if name.startswith("UTT_"):
+            label = name[len("UTT_") :].lower()
+            try:
+                made = mcs._event_type_for(label)
+            # 무엇이 터지든 배선이 끊긴 것이다 — 종류를 좁히면 새 실패 방식을 놓친다.
+            except Exception as exc:
+                orphans.append(f"{name} (라벨 {label!r} → {exc!r})")
+                continue
+            if made is not EventType[name]:
+                orphans.append(f"{name} (라벨 {label!r} 이 {made} 를 만듭니다)")
+            continue
+        if f"EventType.{name}" not in blob:
+            orphans.append(name)
+
+    assert not orphans, (
+        "세기만 하고 만드는 곳이 없는 이벤트 종류입니다. 배선하거나, "
+        "없어도 조용히 틀린 값이 안 나오는 근거를 적고 NO_PRODUCER_YET 에 "
+        f"넣으세요:\n  {orphans}"
+    )
+
+
+def test_the_allowlist_does_not_name_types_that_are_gone():
+    """면제 목록이 실제 이름을 가리키는지. 오타면 면제가 조용히 넓어진다."""
+    unknown = sorted(set(NO_PRODUCER_YET) - set(_event_type_names()))
+    assert not unknown, f"EventType 에 없는 이름이 면제돼 있습니다: {unknown}"

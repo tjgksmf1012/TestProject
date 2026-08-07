@@ -26,6 +26,7 @@ from sqlalchemy.pool import StaticPool
 from teamflow.config import Settings, get_settings
 from teamflow.db import models as m
 from teamflow.db import session as db_session
+from teamflow.services import scoring_service
 
 from .conftest import login_as
 
@@ -333,7 +334,13 @@ def test_a_deadline_added_after_completion_does_not_create_a_met(
     assert patch(client, board, task_id, {"status": "done"}).status_code == 200
 
     kinds = [e["event_type"] for e in events(owner)]
-    assert kinds == ["task_completed"], kinds
+
+    # 이 테스트가 막는 것은 **없던 준수 기록**이다. 마감일을 붙였다는 사실
+    # 자체는 남아야 한다 — 그게 바로 이 조작을 보이게 하는 기록이고,
+    # 지우면 `frequent_deadline_change` 가 셀 것이 없어진다.
+    assert "deadline_met" not in kinds, kinds
+    assert "deadline_missed" not in kinds, kinds
+    assert kinds == ["task_completed", "deadline_changed"], kinds
 
 
 def test_reopening_clears_completed_at_but_keeps_the_record(
@@ -402,6 +409,98 @@ def test_changing_the_deadline_is_always_logged(client: TestClient, board: dict)
         assert changes[0].task_id == board["from_meeting"]
         assert changes[0].changed_by == board["member"]
         assert changes[0].reason == "설계가 바뀜"
+
+
+def test_changing_the_deadline_reaches_the_contribution_events(
+    client: TestClient, board: dict
+):
+    """⭐ 변경 이력만 남기면 조작 탐지는 **죽어 있다.**
+
+    `scoring._detect_integrity_flags` 는 `DEADLINE_CHANGED` **기여 이벤트**를
+    셉니다 — `task_deadline_changes` 테이블은 쳐다보지도 않습니다. 그래서
+    감사 로그만 남기던 동안 `frequent_deadline_change` 플래그는 **한 번도
+    뜰 수 없었습니다.** 위 테스트가 통과하고 있었던 이유이기도 합니다:
+    그 테스트는 감사 표를 보고 이 테스트는 기여 이벤트를 봅니다.
+    """
+    patch(client, board, board["from_meeting"], {"deadline": "2026-10-01"})
+    patch(client, board, board["from_meeting"], {"deadline": "2026-10-08"})
+
+    changed = [e for e in events() if e["event_type"] == "deadline_changed"]
+
+    # 업무당 하나가 아니라 **변경마다 하나**다. 업무 id 를 source_id 로 쓰면
+    # 두 번째가 멱등성에 막혀 "3회 이상" 문턱을 영원히 못 넘는다.
+    assert len(changed) == 2
+    assert len({e["source_id"] for e in changed}) == 2
+
+    # 준수율이 흔들리는 사람은 **담당자**다. 바꾼 사람이 아니다 —
+    # `_detect_integrity_flags` 가 이 사람의 met/missed 와 비교하기 때문에,
+    # 다른 사람에게 붙이면 두 사람의 숫자를 섞은 비율이 된다.
+    assert {e["user_id"] for e in changed} == {board["member"]}
+
+
+def test_the_change_lands_on_the_assignee_not_on_whoever_moved_it(
+    client: TestClient, board: dict
+):
+    """⚠️ 담당자와 바꾼 사람이 **다를 때**만 이 구분이 드러난다.
+
+    위 테스트의 업무는 담당자도 로그인 사용자도 김민수라, 행위자에게
+    붙여도 그대로 통과합니다. 그래서 남의 업무를 옮기는 경우를 따로 씁니다 —
+    이 저장소는 "아무나 남의 업무를 옮길 수 있다" 가 정상 동작입니다
+    (`test_any_member_can_move_someone_elses_task`).
+    """
+    patch(client, board, board["by_hand"], {"deadline": "2026-12-01"})  # 담당자 other
+
+    changed = [e for e in events() if e["event_type"] == "deadline_changed"]
+    assert [e["user_id"] for e in changed] == [board["other"]]
+
+    # 누가 바꿨는지는 근거에 남는다 — 사라지면 사보타주와 자기 조작을
+    # 구분할 수 없다. 플래그는 판정이 아니라 "해석에 주의" 이므로,
+    # 판정에 쓸 재료는 사람이 볼 수 있어야 한다.
+    with db_session.session_scope() as s:
+        row = s.scalars(
+            select(m.ContributionEventRow).where(
+                m.ContributionEventRow.event_type == "deadline_changed"
+            )
+        ).one()
+        assert row.event_metadata["changed_by"] == board["member"]
+        assert row.event_metadata["task_id"] == board["by_hand"]
+        assert row.source_kind == "deadline_change"
+
+
+def test_pushing_the_deadline_back_raises_the_integrity_flag(
+    client: TestClient, board: dict
+):
+    """⭐ 끝에서 끝까지 — 버튼을 누르면 `frequent_deadline_change` 가 실제로 뜬다.
+
+    이게 이 결함의 본체입니다. 순수 산정 테스트(`test_anti_gaming`)는
+    처음부터 통과하고 있었고, 감사 표 테스트도 통과하고 있었습니다.
+    **둘을 잇는 코드만 없었습니다.** 그러니 이 사슬 전체를 도는 테스트가
+    아니면 같은 일이 또 벌어집니다 (결함 47·감사 #8 과 같은 부류).
+    """
+    task_id = board["from_meeting"]  # 담당자 member, 마감 있음
+    for day in ("2026-10-01", "2026-10-08", "2026-10-15"):
+        assert patch(client, board, task_id, {"deadline": day}).status_code == 200
+    assert patch(client, board, task_id, {"status": "done"}).status_code == 200
+
+    with db_session.session_scope() as s:
+        result = scoring_service.compute(s, board["project_id"])
+
+    codes = [f.code for f in result.members[board["member"]].integrity_flags]
+    assert "frequent_deadline_change" in codes, codes
+
+
+def test_a_task_without_an_assignee_logs_the_change_but_makes_no_event(
+    client: TestClient, board: dict
+):
+    """담당자가 없으면 누구의 준수율도 안 흔들린다 — 이벤트를 만들지 않는다.
+
+    변경 이력 자체는 남습니다. 둘은 다른 목적입니다.
+    """
+    patch(client, board, board["orphan"], {"deadline": "2026-11-01"})
+
+    with db_session.session_scope() as s:
+        assert len(s.scalars(select(m.TaskDeadlineChange)).all()) == 1
+    assert [e for e in events() if e["event_type"] == "deadline_changed"] == []
 
 
 def test_setting_the_same_deadline_is_not_a_change(client: TestClient, board: dict):
