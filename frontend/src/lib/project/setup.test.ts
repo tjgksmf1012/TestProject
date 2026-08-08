@@ -3,7 +3,9 @@ import { describe, it } from 'node:test';
 
 import {
   CODE_LENGTH,
+  NO_CODE,
   codeProblem,
+  codeToCopy,
   formatCode,
   nextStepAfterCreate,
   normalizeCode,
@@ -139,5 +141,25 @@ describe('nextStepAfterCreate', () => {
 
   it('0명이어도 터지지 않는다', () => {
     strictEqual(nextStepAfterCreate(0).length > 0, true);
+  });
+});
+
+describe('클립보드에 넣을 코드', () => {
+  it('⭐ 코드가 없으면 **null** — 화면 글자를 복사하면 `(없음)` 이 나간다', () => {
+    strictEqual(codeToCopy(null), null);
+    strictEqual(codeToCopy(undefined), null);
+    strictEqual(codeToCopy(''), null);
+    strictEqual(codeToCopy('   '), null);
+  });
+
+  it('⚠️ 표시용 문구 자체를 넘겨도 복사하지 않는다', () => {
+    // 화면에서 읽어 오던 실수를 그대로 재현한다. `(없음)` 은 여덟 자가
+    // 아니고 알파벳 밖 글자가 섞여 있으므로 코드일 수 없다.
+    strictEqual(codeToCopy(NO_CODE), null);
+  });
+
+  it('있으면 사람이 받아 적기 쉬운 형태로', () => {
+    strictEqual(codeToCopy('ABCDEFGH'), 'ABCD-EFGH');
+    strictEqual(codeToCopy('  abcd-efgh '), 'ABCD-EFGH');
   });
 });

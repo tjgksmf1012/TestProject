@@ -1,11 +1,24 @@
 // src/lib/project/setup.ts
 var CODE_LENGTH = 8;
+var CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
 function normalizeCode(raw) {
   return raw.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
 }
 function formatCode(raw) {
   const clean = normalizeCode(raw);
   return clean.length === CODE_LENGTH ? `${clean.slice(0, 4)}-${clean.slice(4)}` : clean;
+}
+function codeProblem(raw) {
+  const clean = normalizeCode(raw);
+  if (clean.length === 0) return "초대 코드를 입력하세요";
+  if (clean.length !== CODE_LENGTH) {
+    return `초대 코드는 ${CODE_LENGTH}자입니다 (지금 ${clean.length}자)`;
+  }
+  const bad = [...clean].filter((ch) => !CODE_ALPHABET.includes(ch));
+  if (bad.length > 0) {
+    return `코드에 쓰지 않는 글자가 있습니다: ${[...new Set(bad)].join(", ")} — 0·O·1·I·L 은 쓰지 않습니다`;
+  }
+  return null;
 }
 function titleProblem(raw) {
   const title = raw.trim();
@@ -36,6 +49,12 @@ function nextStepAfterCreate(memberCount) {
     return "아직 혼자입니다. 아래 초대 코드를 팀원에게 알려 주세요 — 다 모인 뒤에 회의를 여는 게 좋습니다.";
   }
   return "팀원이 모였습니다. 회의를 열면 로비에서 동의를 받고 녹음을 시작할 수 있습니다.";
+}
+var NO_CODE = "(없음)";
+function codeToCopy(inviteCode2) {
+  const raw = (inviteCode2 ?? "").trim();
+  if (codeProblem(raw) !== null) return null;
+  return formatCode(raw);
 }
 
 // src/lib/auth/session.ts
@@ -584,11 +603,16 @@ function say(id, text) {
   $(id).textContent = text;
   $(id).hidden = text === "";
 }
+var inviteCode = null;
 function render(detail) {
   $("title-heading").textContent = detail.title;
   input("title").value = detail.title;
   input("repo").value = detail.github_repo ?? "";
-  $("code").textContent = detail.invite_code ? formatCode(detail.invite_code) : "(없음)";
+  inviteCode = detail.invite_code || null;
+  $("code").textContent = inviteCode ? formatCode(inviteCode) : NO_CODE;
+  const button = $("copy");
+  button.disabled = inviteCode === null;
+  button.title = inviteCode === null ? "초대 코드가 없습니다 — 새로 만들어 주세요" : "";
   $("members").textContent = `팀원 ${detail.member_count}명`;
   say("next", nextStepAfterCreate(detail.member_count));
 }
@@ -761,7 +785,9 @@ $("rotate").addEventListener("click", () => {
   );
 });
 $("copy").addEventListener("click", () => {
-  void navigator.clipboard.writeText($("code").textContent ?? "").then(() => {
+  const text = codeToCopy(inviteCode);
+  if (text === null) return;
+  void navigator.clipboard.writeText(text).then(() => {
     $("copy").textContent = "복사됨";
     setTimeout(() => $("copy").textContent = "코드 복사", 1500);
   });

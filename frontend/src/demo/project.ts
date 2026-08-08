@@ -6,6 +6,8 @@
  */
 
 import {
+  NO_CODE,
+  codeToCopy,
   formatCode,
   nextStepAfterCreate,
   normalizeRepo,
@@ -109,13 +111,25 @@ function say(id: string, text: string): void {
   $(id).hidden = text === '';
 }
 
+/** 지금 초대 코드. **화면 글자가 아니라 데이터**에서 복사한다 (결함 71). */
+let inviteCode: string | null = null;
+
 function render(detail: Detail): void {
   $('title-heading').textContent = detail.title;
   input('title').value = detail.title;
   input('repo').value = detail.github_repo ?? '';
   // 네 글자마다 끊어 보여준다 — 여덟을 한 번에 읽으면 받아 적다 틀린다.
   // 서버가 하이픈·공백을 걷어내므로 이대로 복사해도 통한다.
-  $('code').textContent = detail.invite_code ? formatCode(detail.invite_code) : '(없음)';
+  inviteCode = detail.invite_code || null;
+  $('code').textContent = inviteCode ? formatCode(inviteCode) : NO_CODE;
+
+  // ⚠️ 코드가 없으면 **누를 수 없게** 합니다. 예전에는 눌리는 채로 두고
+  // 화면 글자를 복사했는데, 그러면 클립보드에 `(없음)` 이 들어가고 버튼은
+  // "복사됨" 이라고 말했습니다. 그걸 카톡으로 받은 사람은 참가 칸에
+  // `(없음)` 을 넣고 "코드가 없습니다" 를 보고 **자기를 의심합니다.**
+  const button = $('copy') as HTMLButtonElement;
+  button.disabled = inviteCode === null;
+  button.title = inviteCode === null ? '초대 코드가 없습니다 — 새로 만들어 주세요' : '';
   $('members').textContent = `팀원 ${detail.member_count}명`;
   say('next', nextStepAfterCreate(detail.member_count));
 }
@@ -358,7 +372,11 @@ $('rotate').addEventListener('click', () => {
 });
 
 $('copy').addEventListener('click', () => {
-  void navigator.clipboard.writeText($('code').textContent ?? '').then(() => {
+  // 표시용 문자열이 아니라 **데이터**에서 만든다. 없으면 아무 말도 하지
+  // 않습니다 — 버튼이 이미 비활성이라 여기까지 오지 않습니다.
+  const text = codeToCopy(inviteCode);
+  if (text === null) return;
+  void navigator.clipboard.writeText(text).then(() => {
     $('copy').textContent = '복사됨';
     setTimeout(() => ($('copy').textContent = '코드 복사'), 1500);
   });

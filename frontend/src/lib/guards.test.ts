@@ -804,6 +804,30 @@ describe('상태 화면 (지시서 §7)', () => {
     );
   });
 
+  it('⭐ 초대 코드를 **화면 글자에서 복사하지 않는다**', () => {
+    // 코드가 없을 때 코드 자리에는 `(없음)` 이 적혀 있습니다. 화면 글자를
+    // 그대로 복사하면 클립보드에 문자열 `(없음)` 이 들어가고 버튼은
+    // **"복사됨"** 이라고 말합니다. 받은 사람은 그걸 참가 칸에 넣고
+    // "코드가 없습니다" 를 보고 **자기를 의심합니다.**
+    const src = codeOf(readFileSync(join(DEMO, 'project.ts'), 'utf8'));
+    strictEqual(
+      /writeText\(\s*\$\('code'\)/.test(src),
+      false,
+      '화면의 `#code` 글자를 그대로 복사합니다',
+    );
+    strictEqual(
+      /codeToCopy\(/.test(src),
+      true,
+      '`codeToCopy` 를 안 씁니다 — 데이터에서 만들어야 합니다',
+    );
+    // 코드가 없으면 누를 수 없어야 합니다.
+    strictEqual(
+      /disabled\s*=\s*inviteCode === null/.test(src),
+      true,
+      '코드가 없을 때 복사 버튼을 막지 않습니다',
+    );
+  });
+
   it('⭐ 기여도 카드가 역할을 **겸직까지** 말한다', () => {
     // 서버의 `role` 은 주 역할 **하나**입니다. `blended_profile` 이
     // `max(shares)` 로 고르는데 동률이면 사전 순에 달립니다. 그래서 카드가
