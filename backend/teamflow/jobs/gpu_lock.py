@@ -39,6 +39,23 @@ class GpuBusy(Exception):
         self.holder = holder
 
 
+class GpuLeaseLost(RuntimeError):
+    """작업 **도중에** 리스를 잃었다. GpuBusy 와 다르다.
+
+    `GpuBusy` 는 시작도 못 한 것이라 그냥 다시 넣으면 됩니다. 이건 이미
+    돌던 작업이 GPU 를 남과 나눠 쓰게 된 것이라, **그때까지 나온 결과를
+    믿을 수 없습니다.** 조용히 이어 가면 두 ASR 이 다툰 결과가 멀쩡한
+    회의록으로 저장됩니다.
+    """
+
+    def __init__(self, job_id: str) -> None:
+        super().__init__(
+            f"GPU 락을 작업 도중에 잃었습니다 ({job_id}). "
+            "ASR 이 TTL 보다 오래 걸려 다른 잡이 같은 GPU 를 잡았을 수 있습니다."
+        )
+        self.job_id = job_id
+
+
 # 소유자가 맞을 때만 해제한다.
 # 확인 후 삭제를 두 번의 왕복으로 하면, 그 사이에 TTL 만료 + 다른 잡 획득이 일어나
 # **남의 락을 지우는** 사고가 난다. Lua 로 원자적으로 처리한다.

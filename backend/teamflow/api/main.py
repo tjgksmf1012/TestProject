@@ -619,7 +619,8 @@ def create_project(payload: ProjectIn, session: DbSession, user: CurrentUser) ->
     project = m.Project(
         title=payload.title,
         started_at=datetime.now(UTC),
-        github_repo=payload.github_repo,
+        # PATCH 와 **같은 문**을 지난다 (`_checked_repo` 주석 참고).
+        github_repo=_checked_repo(session, payload.github_repo),
         invite_code=_fresh_invite_code(session),
     )
     session.add(project)
@@ -699,6 +700,46 @@ class ProjectPatch(BaseModel):
 _REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 
 
+def _checked_repo(session: Session, repo: str | None, *, exclude: int | None = None) -> str | None:
+    """저장소 값을 받아들이기 전에 거치는 **한 개의** 문.
+
+    ⚠️ 이 검사 둘이 PATCH 에만 있었습니다. 만들기(`POST /api/projects`)는
+    같은 값을 그냥 저장했고, 화면이 마침 만들 때 저장소를 안 보내서 아무도
+    몰랐습니다 — **API 는 화면보다 오래 삽니다.**
+
+    그래서 두 경로가 같은 함수를 지나게 했습니다. 한쪽에만 검사를 더하면
+    다음 사람이 또 한쪽을 빠뜨립니다.
+    """
+    if repo is None:
+        return None
+    repo = repo.strip()
+    if not repo:
+        return ""
+
+    # 웹훅은 `repository.full_name` 으로 프로젝트를 찾습니다. 주소 전체를
+    # 넣으면 **영원히 못 찾습니다** — 오류도 안 나고 기여도만 비어 있습니다.
+    if not _REPO_PATTERN.match(repo):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "저장소는 `owner/repo` 형식이어야 합니다 (주소 전체가 아니라)",
+        )
+
+    # ⚠️ 대조는 **대소문자를 무시하고** 합니다. `team/x` 와 `team/X` 를
+    # 다른 저장소로 보면, 웹훅이 왔을 때 어느 프로젝트에 붙을지 정해지지
+    # 않습니다. DB 의 유니크 제약이 최종 방어이고 이건 사람에게 이유를
+    # 말해 주기 위한 검사입니다.
+    query = select(m.Project.id).where(
+        m.Project.github_repo_key == gh_connection.repo_key(repo)
+    )
+    if exclude is not None:
+        query = query.where(m.Project.id != exclude)
+    if session.scalar(query):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "다른 프로젝트가 이미 이 저장소를 쓰고 있습니다"
+        )
+    return repo
+
+
 @app.patch("/api/projects/{project_id}", response_model=ProjectDetail)
 def patch_project(
     project_id: int, payload: ProjectPatch, session: DbSession, user: CurrentUser
@@ -718,28 +759,7 @@ def patch_project(
         project.title = payload.title
 
     if payload.github_repo is not None:
-        repo = payload.github_repo.strip()
-        if repo and not _REPO_PATTERN.match(repo):
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "저장소는 `owner/repo` 형식이어야 합니다 (주소 전체가 아니라)",
-            )
-        # ⚠️ 대조는 **대소문자를 무시하고** 합니다. `team/x` 와 `team/X` 를
-        # 다른 저장소로 보면, 웹훅이 왔을 때 어느 프로젝트에 붙을지 정해지지
-        # 않습니다. DB 의 유니크 제약이 최종 방어이고 이건 사람에게 이유를
-        # 말해 주기 위한 검사입니다.
-        taken = session.scalar(
-            select(m.Project.id).where(
-                m.Project.github_repo_key == gh_connection.repo_key(repo),
-                m.Project.id != project_id,
-            )
-        )
-        if repo and taken:
-            # 웹훅은 저장소로 프로젝트를 찾습니다. 둘이 같은 저장소를 가리키면
-            # 한쪽만 이벤트를 받고 다른 쪽은 이유 없이 빕니다.
-            raise HTTPException(
-                status.HTTP_409_CONFLICT, "다른 프로젝트가 이미 이 저장소를 쓰고 있습니다"
-            )
+        repo = _checked_repo(session, payload.github_repo, exclude=project_id) or ""
 
         # 저장소를 바꾸면 확인도 없던 일이 됩니다. 앞 저장소에서 배달이 왔다는
         # 사실이 **새 저장소가 연결됐다는 근거가 되지는 않습니다.**

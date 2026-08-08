@@ -467,6 +467,43 @@ def test_the_change_lands_on_the_assignee_not_on_whoever_moved_it(
         assert row.source_kind == "deadline_change"
 
 
+def test_completing_a_task_records_who_pressed_it(client: TestClient, board: dict):
+    """⭐ 점수가 **생기는** 순간에 기록이 없으면 분쟁 때 답할 수 없다.
+
+    되돌리기에는 `task_reopened` 감사 로그가 있었는데 완료에는 없었습니다.
+    이 저장소는 **아무나 남의 업무를 완료로 옮길 수 있는 것이 정상 동작**
+    이라(`test_any_member_can_move_someone_elses_task`), 기여 이벤트는
+    담당자 앞으로 생기고 **누가 눌렀는지는 어디에도 안 남았습니다.**
+    한 번도 되돌린 적이 없는 프로젝트는 `audit_logs` 가 아예 비어 있어,
+    밀어주기·대리 완료 의심이 제기되면 재구성할 방법이 없었습니다.
+    """
+    login_as(client, board["other"])  # 담당자(김민수)가 아닌 사람이 누른다
+    assert patch(client, board, board["from_meeting"], {"status": "done"}).status_code == 200
+
+    with db_session.session_scope() as s:
+        log = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "task_completed")
+        ).one()
+        assert log.actor_id == board["other"], "누른 사람"
+        assert log.target == f"task:{board['from_meeting']}"
+        assert log.before == {"status": "todo"}
+        assert log.after == {"status": "done"}
+
+    # 점수는 담당자 앞으로 간다 — 그건 그대로다.
+    done = [e for e in events() if e["event_type"] == "task_completed"]
+    assert [e["user_id"] for e in done] == [board["member"]]
+
+    # 이벤트 자체에도 누가 눌렀는지 실린다. 감사 로그와 기여 이벤트는
+    # 다른 표라, 하나만 보고 판단하는 사람이 생긴다.
+    with db_session.session_scope() as s:
+        row = s.scalars(
+            select(m.ContributionEventRow).where(
+                m.ContributionEventRow.event_type == "task_completed"
+            )
+        ).one()
+        assert row.event_metadata["completed_by"] == board["other"]
+
+
 def test_pushing_the_deadline_back_raises_the_integrity_flag(
     client: TestClient, board: dict
 ):

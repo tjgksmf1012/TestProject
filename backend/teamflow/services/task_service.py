@@ -150,11 +150,17 @@ def _emit(
     return True
 
 
-def _record_completion(session: Session, task: m.Task, completed_at: datetime) -> None:
+def _record_completion(
+    session: Session, task: m.Task, completed_at: datetime, *, actor_id: int | None = None
+) -> None:
     """완료가 기여도에 도달하는 유일한 경로.
 
     담당자가 없는 업무는 이벤트를 만들지 않습니다 — 누구의 기여인지 모르는
     완료를 아무에게나 붙일 수는 없습니다.
+
+    `actor_id` 는 **누른 사람**입니다. 점수는 담당자에게 가지만, 누가
+    눌렀는지를 이벤트에도 실어 둡니다 — 감사 로그와 기여 이벤트는 다른
+    표라, 둘 중 하나만 보고 판단하는 사람이 반드시 생깁니다.
     """
     if task.assignee_id is None:
         logger.info(
@@ -169,6 +175,7 @@ def _record_completion(session: Session, task: m.Task, completed_at: datetime) -
         event_type=EventType.TASK_COMPLETED,
         source_id=task.id,
         occurred_at=completed_at,
+        metadata={"completed_by": actor_id} if actor_id is not None else None,
     )
 
     # ⚠️ **마감 준수는 업무 하나당 딱 한 번만 판정한다.**
@@ -312,7 +319,28 @@ def _change_status(session: Session, task: m.Task, status: str, actor_id: int) -
     if status == DONE:
         completed_at = _now()
         task.completed_at = completed_at
-        _record_completion(session, task, completed_at)
+        # ⭐ **점수가 생기는 순간**을 기록한다.
+        #
+        # 예전에는 되돌리기(아래)에만 감사 로그가 있었습니다. 그런데 이
+        # 저장소는 아무나 남의 업무를 완료로 옮길 수 있는 것이 정상
+        # 동작이고, 기여 이벤트는 **담당자** 앞으로 생깁니다. 그래서
+        # 누가 눌렀는지가 어디에도 안 남았습니다 — 한 번도 되돌린 적이
+        # 없는 프로젝트는 `audit_logs` 가 통째로 비어 있었습니다.
+        #
+        # 밀어주기·대리 완료 의심이 제기됐을 때 답할 재료가 필요합니다.
+        # 시스템이 판정하지는 않습니다. 사람이 볼 수 있게만 합니다.
+        session.add(
+            m.AuditLog(
+                project_id=task.project_id,
+                actor_id=actor_id,
+                action="task_completed",
+                target=f"task:{task.id}",
+                before={"status": before},
+                after={"status": status},
+                at=completed_at,
+            )
+        )
+        _record_completion(session, task, completed_at, actor_id=actor_id)
         return
 
     if before == DONE:

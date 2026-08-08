@@ -381,6 +381,46 @@ def test_two_projects_cannot_claim_the_same_repository(client: TestClient, peopl
     assert response.status_code == 409
 
 
+def test_creating_a_project_checks_the_repository_the_same_way(
+    client: TestClient, people: dict
+):
+    """⚠️ 검사가 **PATCH 에만** 있었다. 만들 때는 그냥 통과했다.
+
+    위 두 테스트(`_a_repository_url_is_refused`, `_two_projects_cannot_claim_`)가
+    전부 PATCH 를 지나가는 동안, `POST /api/projects` 는 같은 값을 검사 없이
+    저장했습니다. 화면이 마침 만들 때 저장소를 안 보내서 아무도 몰랐습니다 —
+    API 는 화면보다 오래 삽니다.
+
+    주소를 넣으면 웹훅이 영원히 그 프로젝트를 못 찾고, 오류도 안 납니다.
+    """
+    login_as(client, people["founder"])
+
+    response = client.post(
+        "/api/projects", json={"title": "주소", "github_repo": "https://github.com/team/x"}
+    )
+    assert response.status_code == 400
+    assert "owner/repo" in response.json()["detail"]
+
+
+def test_creating_a_project_cannot_steal_a_claimed_repository(
+    client: TestClient, people: dict
+):
+    """같은 저장소를 만들기로 두 번 잡으면 409 다 — 500 이 아니라.
+
+    유니크 제약이 최종 방어이긴 했지만, 만들기 경로에는 그 앞에 아무 검사도
+    없어서 **처리되지 않은 IntegrityError** 가 났습니다. 사용자에게는
+    "서버 오류" 로 보이고, 무엇을 고쳐야 하는지 알 수 없습니다.
+    """
+    login_as(client, people["founder"])
+    first = create_project(client, "A")["project_id"]
+    client.patch(f"/api/projects/{first}", json={"github_repo": "team/teamflow"})
+
+    response = client.post(
+        "/api/projects", json={"title": "B", "github_repo": "Team/TeamFlow"}
+    )
+    assert response.status_code == 409, response.text
+
+
 def test_clearing_the_repository_disconnects(client: TestClient, people: dict):
     login_as(client, people["founder"])
     project_id = create_project(client)["project_id"]
