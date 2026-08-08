@@ -10,7 +10,7 @@ docs/05-기여도-산정-설계.md §1
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -479,3 +479,61 @@ def compute(session: Session, project_id: int) -> TeamScoreResult:
         load_coverage(session, project_id),
         unmeasurable=load_measurement_gaps(session, project_id),
     )
+
+
+def persist_run(
+    session: Session,
+    project_id: int,
+    result: TeamScoreResult,
+    *,
+    now: datetime | None = None,
+) -> m.ScoreRun:
+    """이번 계산을 **스냅샷으로 못 박는다.**
+
+    ## 왜 필요한가
+
+    기여도는 조회할 때마다 이벤트 로그에서 **다시 계산합니다**(`compute`).
+    그게 맞습니다 — 가중치를 바꿔도 과거가 오염되지 않고, 모든 숫자에
+    근거가 붙습니다.
+
+    그런데 사람이 "이 값으로 확정한다" 고 말하려면 **그 순간의 값**이
+    고정돼 있어야 합니다. 안 그러면 확정한 뒤에 이벤트가 하나 더 들어오는
+    것만으로 확정값이 가리키던 근거가 달라집니다.
+
+    `score_runs` · `score_results` 는 처음부터 스키마에 있었는데 **쓰는
+    코드가 0곳**이었습니다. 그래서 `final_contributions` 도 영원히 빈
+    테이블이었고, `docs/05` §5 가 ❌ 로 금지한 **"시스템이 확정"** 쪽으로
+    실제 동작했습니다.
+
+    ## 언제 부르는가
+
+    **확정할 때만.** 조회할 때마다 부르면 화면을 열 때마다 행이 쌓입니다.
+    """
+    now = now or datetime.now(UTC)
+    run = m.ScoreRun(
+        project_id=project_id,
+        algo_version=result.algo_version,
+        computed_at=now,
+    )
+    session.add(run)
+    session.flush()
+
+    for member in result.members.values():
+        for score in member.categories.values():
+            session.add(
+                m.ScoreResult(
+                    run_id=run.id,
+                    user_id=member.user_id,
+                    category=score.category.value,
+                    raw_value=score.raw,
+                    # 이 카테고리가 그 사람 점수에 실제로 기여한 몫.
+                    # 팀 내 점유율 × 재정규화된 가중치 (scoring.py 와 같은 식).
+                    weighted=score.team_share * score.weight,
+                    confidence=member.confidence.value,
+                    range_low=member.range_low,
+                    range_high=member.range_high,
+                    evidence_ids=list(score.evidence_ids),
+                )
+            )
+    session.flush()
+    return run

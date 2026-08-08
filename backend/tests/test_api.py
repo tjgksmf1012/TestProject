@@ -786,3 +786,137 @@ def test_a_review_event_is_stored_but_not_queued(client: TestClient, seeded, mon
     assert response.status_code == 202
     assert response.json()["queued"] is False
     assert queued == []
+
+
+# ══════════════════════════════════════════════════════════════
+# 최종 확정 — **사람이** 확정한다 (docs/05 §5)
+# ══════════════════════════════════════════════════════════════
+
+
+def _final_url(seeded) -> str:
+    return f"/api/projects/{seeded['project_id']}/contributions/final"
+
+
+def test_nothing_is_confirmed_until_a_person_confirms_it(client: TestClient, seeded):
+    """⭐ 확정 전에는 확정값이 **없어야** 한다.
+
+    시스템이 계산한 숫자를 확정값처럼 보여주면, `docs/05` §5 가 ❌ 로
+    금지한 "최종 점수를 시스템이 확정" 이 그대로 일어납니다.
+    """
+    add_contribution_events(seeded["project_id"], seeded["user_ids"][0], 5)
+
+    body = client.get(_final_url(seeded)).json()
+    assert body["finals"] == []
+    assert body["run_id"] == 0
+
+
+def test_confirming_pins_the_calculation_it_was_based_on(client: TestClient, seeded):
+    """⭐ 확정은 **그 순간의 계산**을 가리켜야 한다.
+
+    기여도는 조회할 때마다 이벤트 로그에서 다시 계산합니다. 그래서 확정
+    시점의 값을 못 박아 두지 않으면, 확정한 뒤에 이벤트가 하나 더
+    들어오는 것만으로 확정값이 가리키던 근거가 달라집니다.
+
+    `score_runs`·`score_results` 는 처음부터 스키마에 있었는데 **쓰는
+    코드가 0곳**이었습니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+
+    response = client.post(
+        _final_url(seeded), json={"finals": [{"user_id": u} for u in users[:2]]}
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["run_id"] > 0
+
+    with db_session.session_scope() as s:
+        runs = s.scalars(select(m.ScoreRun)).all()
+        assert len(runs) == 1
+        results = s.scalars(select(m.ScoreResult)).all()
+        assert results, "카테고리별 결과가 하나도 안 남았습니다"
+        assert all(r.run_id == runs[0].id for r in results)
+        assert all(r.evidence_ids is not None for r in results), "근거 없는 점수 금지"
+
+
+def test_the_system_value_is_kept_next_to_the_human_one(client: TestClient, seeded):
+    """⭐ 조정해도 시스템 값을 **지우지 않는다.**
+
+    둘을 나란히 남겨야 나중에 "왜 달랐나" 를 물을 수 있습니다. 덮어쓰면
+    조정이 있었다는 사실 자체가 사라집니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+
+    body = client.post(
+        _final_url(seeded),
+        json={
+            "finals": [
+                {"user_id": users[0], "final_value": 40.0, "reason": "발표 준비를 도맡음"},
+                {"user_id": users[1]},
+            ]
+        },
+    ).json()
+
+    adjusted = next(f for f in body["finals"] if f["user_id"] == users[0])
+    assert adjusted["final_value"] == 40.0
+    assert adjusted["system_value"] != 40.0, "시스템 값이 조정값으로 덮였습니다"
+    assert adjusted["reason"] == "발표 준비를 도맡음"
+    assert adjusted["adjusted_by"] == seeded["user_ids"][0] or adjusted["adjusted_by"]
+
+    kept = next(f for f in body["finals"] if f["user_id"] == users[1])
+    assert kept["final_value"] == kept["system_value"], "안 건드리면 시스템 값 그대로"
+
+
+def test_changing_the_number_without_a_reason_is_refused(client: TestClient, seeded):
+    """⚠️ 근거 없는 조정은 근거 없는 점수와 같다.
+
+    이 프로젝트가 "모든 점수에 근거" 를 내세우면서 **사람의 조정만**
+    근거 없이 통과시키면 앞뒤가 안 맞습니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+
+    response = client.post(
+        _final_url(seeded), json={"finals": [{"user_id": users[0], "final_value": 99.0}]}
+    )
+    assert response.status_code == 400
+    assert "이유" in response.json()["detail"]
+
+
+def test_confirming_leaves_an_audit_trail(client: TestClient, seeded):
+    """조정은 판단이다. 판단에는 **주체**가 있어야 이의를 제기할 상대가 생긴다."""
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+
+    client.post(
+        _final_url(seeded),
+        json={"finals": [{"user_id": users[0], "final_value": 55.0, "reason": "합의"}]},
+    )
+
+    with db_session.session_scope() as s:
+        log = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "score_adjusted")
+        ).one()
+        assert log.actor_id is not None
+        assert log.after["final_value"] == 55.0
+        assert log.after["reason"] == "합의"
+
+
+def test_an_outsider_cannot_confirm(client: TestClient, seeded):
+    """기여도는 성적에 반영될 수 있는 값이다. 남의 팀 것을 확정할 이유가 없다."""
+    add_contribution_events(seeded["project_id"], seeded["user_ids"][0], 5)
+
+    with db_session.session_scope() as s:
+        outsider = m.User(name="외부인", email="out@example.com")
+        s.add(outsider)
+        s.flush()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    response = client.post(
+        _final_url(seeded), json={"finals": [{"user_id": seeded["user_ids"][0]}]}
+    )
+    assert response.status_code in (403, 404)

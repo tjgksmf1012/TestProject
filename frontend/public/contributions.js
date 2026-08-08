@@ -85,6 +85,51 @@ function hasNoEvidence(member) {
   return member.categories.every((c) => c.event_count === 0);
 }
 
+// src/lib/contribution/final.ts
+function sameValue(a, b) {
+  return Math.abs(a - b) < 1e-9;
+}
+function problemsWith(drafts, systemValues2) {
+  const problems = [];
+  for (const draft of drafts) {
+    if (draft.final_value === null) continue;
+    if (Number.isNaN(draft.final_value)) {
+      problems.push(`숫자가 아닌 값이 있습니다 (${draft.user_id})`);
+      continue;
+    }
+    const system = systemValues2.get(draft.user_id);
+    if (system === void 0) continue;
+    if (!sameValue(draft.final_value, system) && !draft.reason.trim()) {
+      problems.push("시스템 값과 다르게 확정하려면 이유를 적어야 합니다");
+    }
+  }
+  return [...new Set(problems)];
+}
+function toPayload(drafts, systemValues2) {
+  return drafts.map((draft) => {
+    const system = systemValues2.get(draft.user_id);
+    const untouched = draft.final_value === null || system !== void 0 && sameValue(draft.final_value, system);
+    if (untouched) return { user_id: draft.user_id };
+    return {
+      user_id: draft.user_id,
+      final_value: draft.final_value,
+      reason: draft.reason.trim() || void 0
+    };
+  });
+}
+function describeFinals(finals, names) {
+  if (finals.length === 0) return "아직 아무도 확정하지 않았습니다.";
+  const first = finals[0];
+  if (first === void 0) return "아직 아무도 확정하지 않았습니다.";
+  const when = new Date(first.confirmed_at).toLocaleString("ko-KR");
+  const adjusted = finals.filter((f) => !sameValue(f.final_value, f.system_value));
+  if (adjusted.length === 0) {
+    return `${when} 에 시스템 값 그대로 확정했습니다.`;
+  }
+  const who = adjusted.map((f) => names.get(f.user_id) ?? `#${f.user_id}`).join(", ");
+  return `${when} 에 확정했습니다 — ${who} 은(는) 시스템 값과 다르게 정했습니다.`;
+}
+
 // src/lib/auth/session.ts
 function loginUrlFor(pathWithQuery) {
   return `/login.html?next=${encodeURIComponent(pathWithQuery)}`;
@@ -434,6 +479,7 @@ var $ = (id) => {
   return el;
 };
 var people = [];
+var systemValues = /* @__PURE__ */ new Map();
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
@@ -490,6 +536,70 @@ function render(score) {
     return;
   }
   $("members").innerHTML = orderForDisplay(score.members, people).map(memberCard).join("");
+  systemValues = new Map(score.members.map((ms) => [ms.user_id, Number(ms.share.toFixed(3))]));
+  renderFinalRows(score);
+}
+function renderFinalRows(score) {
+  const rows = orderForDisplay(score.members, people);
+  $("finals").innerHTML = rows.map((ms) => {
+    const name = escapeHtml(nameOf(ms.user_id, people));
+    const system = (systemValues.get(ms.user_id) ?? 0).toFixed(1);
+    return `<div class="final-row" data-user="${ms.user_id}">
+        <span class="who">${name}</span>
+        <span class="sys">시스템 ${system}%</span>
+        <label>확정 <input type="number" class="val" step="0.1" min="0" max="100"
+          placeholder="${system}" aria-label="${name} 확정값" /></label>
+        <span class="why"><input type="text" class="reason"
+          placeholder="시스템 값과 다르게 정했다면 이유" aria-label="${name} 조정 이유" /></span>
+      </div>`;
+  }).join("");
+}
+function draftsFromScreen() {
+  return [...$("finals").querySelectorAll(".final-row")].map((row) => {
+    const raw = row.querySelector(".val")?.value.trim() ?? "";
+    return {
+      user_id: Number(row.dataset["user"]),
+      // 빈 칸은 **0 이 아니라 "안 건드렸다"** 다. Number('') 가 0 이라
+      // 여기서 안 가르면 아무것도 안 적은 사람이 0점으로 확정된다.
+      final_value: raw === "" ? null : Number(raw),
+      reason: row.querySelector(".reason")?.value ?? ""
+    };
+  });
+}
+async function loadFinals() {
+  const response = await get(`/api/projects/${projectId}/contributions/final`);
+  if (!response.ok) {
+    $("final-state").textContent = "";
+    return;
+  }
+  const body = await response.json();
+  const names = new Map(people.map((p) => [p.user_id, p.name]));
+  $("final-state").textContent = describeFinals(body.finals, names);
+}
+async function confirm() {
+  const drafts = draftsFromScreen();
+  const problems = problemsWith(drafts, systemValues);
+  if (problems.length > 0) {
+    $("final-message").textContent = problems.join(" · ");
+    return;
+  }
+  const response = await fetch(`${apiBase}/api/projects/${projectId}/contributions/final`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ finals: toPayload(drafts, systemValues) }),
+    credentials: "same-origin"
+  });
+  if (isSessionExpired(response.status)) {
+    goToLogin();
+    return;
+  }
+  if (!response.ok) {
+    const body = await response.json();
+    $("final-message").textContent = typeof body.detail === "string" ? body.detail : "확정하지 못했습니다";
+    return;
+  }
+  $("final-message").textContent = "확정했습니다.";
+  await loadFinals();
 }
 async function fetchAll() {
   const [scoreRes, memberRes] = await Promise.all([
@@ -524,6 +634,7 @@ async function load() {
     return;
   }
   render(result.score);
+  await loadFinals();
 }
 async function start() {
   const me = await get("/api/auth/me");
@@ -534,6 +645,7 @@ async function start() {
   $("who").textContent = `${(await me.json()).name} 님이 보고 있습니다`;
   await load();
 }
+$("confirm").addEventListener("click", () => void confirm());
 void start();
 renderNav("contributions");
 bootApp();

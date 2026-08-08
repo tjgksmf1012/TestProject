@@ -2210,6 +2210,186 @@ class ScoreOut(BaseModel):
     )
 
 
+class FinalIn(BaseModel):
+    """확정 한 건. `final_value` 를 안 보내면 시스템 값을 그대로 받아들인다."""
+
+    user_id: int
+    final_value: float | None = None
+    reason: str | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+class FinalsIn(BaseModel):
+    finals: list[FinalIn]
+
+    model_config = {"extra": "forbid"}
+
+
+class FinalOut(BaseModel):
+    user_id: int
+    system_value: float
+    final_value: float
+    adjusted_by: int | None
+    reason: str | None
+    confirmed_at: datetime
+
+
+class FinalsOut(BaseModel):
+    run_id: int
+    finals: list[FinalOut]
+    notice: str = (
+        "이 값은 사람이 확정한 것입니다. 시스템 값과 다르면 그 이유가 함께 남습니다."
+    )
+
+
+@app.get("/api/projects/{project_id}/contributions/final", response_model=FinalsOut)
+def read_final_contributions(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> FinalsOut:
+    """확정된 기여도. 아직 확정 전이면 `run_id: 0` 에 빈 목록."""
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    rows = session.scalars(
+        select(m.FinalContribution).where(m.FinalContribution.project_id == project_id)
+    ).all()
+    return FinalsOut(
+        run_id=rows[0].run_id if rows else 0,
+        finals=[
+            FinalOut(
+                user_id=r.user_id,
+                system_value=float(r.system_value),
+                final_value=float(r.final_value),
+                adjusted_by=r.adjusted_by,
+                reason=r.reason,
+                confirmed_at=r.confirmed_at,
+            )
+            for r in sorted(rows, key=lambda r: r.user_id)
+        ],
+    )
+
+
+@app.post(
+    "/api/projects/{project_id}/contributions/final",
+    response_model=FinalsOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def confirm_contributions(
+    project_id: int, payload: FinalsIn, session: DbSession, user: CurrentUser
+) -> FinalsOut:
+    """**사람이** 기여도를 확정한다.
+
+    `docs/05` §5 는 "최종 점수를 시스템이 확정" 을 ❌ 로 금지합니다. 그런데
+    확정을 남길 자리가 API 에도 화면에도 없어서, 배포 상태에서 존재하는
+    값은 시스템이 계산한 숫자뿐이었습니다 — 금지한 쪽으로 실제 동작한
+    것입니다.
+
+    ## 여기서 지키는 것
+
+    · **시스템 값을 지우지 않습니다.** `system_value` 와 `final_value` 를
+      나란히 남깁니다. 둘이 다르면 나중에 "왜 달랐나" 를 물을 수 있습니다
+    · **누가 바꿨는지 남깁니다** (`adjusted_by`). 조정은 판단이고, 판단에는
+      주체가 있어야 이의를 제기할 상대가 생깁니다
+    · **바꿨으면 이유를 받습니다.** 시스템 값과 다른데 이유가 없으면
+      거절합니다 — 근거 없는 조정은 근거 없는 점수와 같습니다
+    · 확정 시점의 계산을 `score_runs`·`score_results` 로 **못 박습니다**.
+      안 그러면 확정 뒤에 이벤트가 하나 더 들어오는 것만으로 확정값이
+      가리키던 근거가 달라집니다
+
+    ⚠️ **누가 확정할 수 있는가** — 지금은 **구성원 누구나**입니다. 이
+    저장소에 팀장·교수 역할 개념이 아직 없습니다. 남의 업무를 옮기는 것도
+    같은 규칙이고(그리고 감사 로그에 남고), 여기도 `adjusted_by` 로
+    남습니다. 역할이 생기면 여기부터 좁혀야 합니다.
+    """
+    from teamflow.services import scoring_service
+
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    result = scoring_service.compute(session, project_id)
+    if not result.members:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "확정할 기여도가 없습니다. 활동 기록이 하나도 없습니다",
+        )
+
+    members = {
+        uid
+        for uid in session.scalars(
+            select(m.Member.user_id).where(m.Member.project_id == project_id)
+        ).all()
+    }
+    unknown = sorted({f.user_id for f in payload.finals} - members)
+    if unknown:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"이 프로젝트의 구성원이 아닙니다: {unknown}"
+        )
+
+    now = datetime.now(UTC)
+    run = scoring_service.persist_run(session, project_id, result, now=now)
+
+    # 확정은 **덮어쓴다**. 다시 확정하면 새 run 을 가리키게 된다 —
+    # 이전 확정이 어떤 계산 위에서 이뤄졌는지는 감사 로그에 남는다.
+    existing = {
+        row.user_id: row
+        for row in session.scalars(
+            select(m.FinalContribution).where(
+                m.FinalContribution.project_id == project_id
+            )
+        ).all()
+    }
+
+    for item in payload.finals:
+        score = result.members.get(item.user_id)
+        # 계산 결과에 없는 구성원 = 활동 기록이 0건. 시스템 값은 0 이지만
+        # 그건 "안 했다" 가 아니라 "이 계산에 잡힌 게 없다" 다.
+        system_value = round(score.share, 3) if score else 0.0
+        final_value = system_value if item.final_value is None else item.final_value
+
+        if abs(final_value - system_value) > 1e-9 and not (item.reason or "").strip():
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"시스템 값과 다르게 확정하려면 이유가 필요합니다 (user_id={item.user_id})",
+            )
+
+        row = existing.get(item.user_id)
+        before = (
+            {"final_value": float(row.final_value), "run_id": row.run_id} if row else None
+        )
+        if row is None:
+            row = m.FinalContribution(project_id=project_id, user_id=item.user_id)
+            session.add(row)
+        row.run_id = run.id
+        row.system_value = system_value
+        row.final_value = final_value
+        row.adjusted_by = user.id
+        row.reason = (item.reason or "").strip() or None
+        row.confirmed_at = now
+
+        session.add(
+            m.AuditLog(
+                project_id=project_id,
+                actor_id=user.id,
+                action="score_adjusted",
+                target=f"final_contributions/{project_id}:{item.user_id}",
+                before=before,
+                after={
+                    "run_id": run.id,
+                    "system_value": system_value,
+                    "final_value": final_value,
+                    "reason": row.reason,
+                },
+                at=now,
+            )
+        )
+
+    session.flush()
+    return read_final_contributions(project_id, session, user)
+
+
 @app.get("/api/projects/{project_id}/contributions", response_model=ScoreOut)
 def contributions(
     project_id: int, session: DbSession, settings: AppSettings, user: CurrentUser

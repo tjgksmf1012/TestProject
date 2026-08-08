@@ -804,6 +804,28 @@ describe('상태 화면 (지시서 §7)', () => {
     );
   });
 
+  it('⭐ 확정 엔드포인트를 **실제로 부르는 화면이 있다** (docs/05 §5)', () => {
+    // `docs/05` §5 는 "최종 점수를 시스템이 확정" 을 ❌ 로 금지합니다.
+    // 그런데 확정을 남길 자리가 API 에도 화면에도 없어서, 배포 상태에서
+    // 존재하는 값은 시스템이 계산한 숫자뿐이었습니다 — **금지한 쪽으로
+    // 실제 동작한 것**입니다.
+    //
+    // API 만 만들고 화면을 안 붙이면 정확히 결함 47 이므로, 존재가 아니라
+    // **호출**을 셉니다.
+    const callers = demoFiles().filter(({ source }) =>
+      /contributions\/final`?\)/.test(codeOf(source)),
+    );
+    strictEqual(
+      callers.length > 0,
+      true,
+      '`/contributions/final` 을 부르는 화면이 하나도 없습니다',
+    );
+
+    // 확정 버튼도 있어야 누를 수 있습니다.
+    const html = readFileSync(join(PUBLIC, 'contributions.html'), 'utf8');
+    strictEqual(html.includes('id="confirm"'), true, '확정 버튼이 없습니다');
+  });
+
   it('⭐ 3단계 동의 ②③ 을 **묻고 보낸다** (docs/07 §2.3)', () => {
     // ②③ 은 스키마에도 있고 서버도 받는데, **화면이 묻지를 않았습니다.**
     // 그래서 "3단계 분리 동의" 는 문서와 DB 에만 존재했고, 거부할

@@ -24,6 +24,13 @@ import {
   type Person,
   type TeamScore,
 } from '../lib/contribution/view.ts';
+import {
+  describeFinals,
+  problemsWith,
+  toPayload,
+  type Draft,
+  type FinalRow,
+} from '../lib/contribution/final.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
@@ -47,6 +54,8 @@ const $ = (id: string): HTMLElement => {
 };
 
 let people: Person[] = [];
+/** 마지막으로 그린 시스템 값. 확정 표가 이 값과 비교한다. */
+let systemValues = new Map<number, number>();
 
 function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
@@ -146,6 +155,85 @@ function render(score: TeamScore): void {
   }
 
   $('members').innerHTML = orderForDisplay(score.members, people).map(memberCard).join('');
+
+  systemValues = new Map(score.members.map((ms) => [ms.user_id, Number(ms.share.toFixed(3))]));
+  renderFinalRows(score);
+}
+
+/** 확정 표. 한 줄 = 한 사람, 시스템 값과 확정값이 **나란히**. */
+function renderFinalRows(score: TeamScore): void {
+  const rows = orderForDisplay(score.members, people);
+  $('finals').innerHTML = rows
+    .map((ms) => {
+      const name = escapeHtml(nameOf(ms.user_id, people));
+      const system = (systemValues.get(ms.user_id) ?? 0).toFixed(1);
+      return `<div class="final-row" data-user="${ms.user_id}">
+        <span class="who">${name}</span>
+        <span class="sys">시스템 ${system}%</span>
+        <label>확정 <input type="number" class="val" step="0.1" min="0" max="100"
+          placeholder="${system}" aria-label="${name} 확정값" /></label>
+        <span class="why"><input type="text" class="reason"
+          placeholder="시스템 값과 다르게 정했다면 이유" aria-label="${name} 조정 이유" /></span>
+      </div>`;
+    })
+    .join('');
+}
+
+/** 화면의 입력 칸을 읽어 판단용 자료로. **판단은 `lib/contribution/final.ts` 가 한다.** */
+function draftsFromScreen(): Draft[] {
+  return [...$('finals').querySelectorAll<HTMLElement>('.final-row')].map((row) => {
+    const raw = row.querySelector<HTMLInputElement>('.val')?.value.trim() ?? '';
+    return {
+      user_id: Number(row.dataset['user']),
+      // 빈 칸은 **0 이 아니라 "안 건드렸다"** 다. Number('') 가 0 이라
+      // 여기서 안 가르면 아무것도 안 적은 사람이 0점으로 확정된다.
+      final_value: raw === '' ? null : Number(raw),
+      reason: row.querySelector<HTMLInputElement>('.reason')?.value ?? '',
+    };
+  });
+}
+
+async function loadFinals(): Promise<void> {
+  const response = await get(`/api/projects/${projectId}/contributions/final`);
+  if (!response.ok) {
+    // 확정 조회가 실패해도 기여도 화면은 살아 있어야 한다.
+    $('final-state').textContent = '';
+    return;
+  }
+  const body = (await response.json()) as { finals: FinalRow[] };
+  const names = new Map(people.map((p) => [p.user_id, p.name]));
+  $('final-state').textContent = describeFinals(body.finals, names);
+}
+
+async function confirm(): Promise<void> {
+  const drafts = draftsFromScreen();
+  const problems = problemsWith(drafts, systemValues);
+  if (problems.length > 0) {
+    // ⚠️ 서버도 같은 규칙으로 거절한다. 여기서 먼저 말하는 이유는,
+    // 서버가 400 을 돌려준 뒤에 알려 주면 그때는 이미 다른 사람의
+    // 확정까지 같이 실패한 뒤이기 때문이다.
+    $('final-message').textContent = problems.join(' · ');
+    return;
+  }
+
+  const response = await fetch(`${apiBase}/api/projects/${projectId}/contributions/final`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ finals: toPayload(drafts, systemValues) }),
+    credentials: 'same-origin',
+  });
+  if (isSessionExpired(response.status)) {
+    goToLogin();
+    return;
+  }
+  if (!response.ok) {
+    const body = (await response.json()) as { detail?: unknown };
+    $('final-message').textContent =
+      typeof body.detail === 'string' ? body.detail : '확정하지 못했습니다';
+    return;
+  }
+  $('final-message').textContent = '확정했습니다.';
+  await loadFinals();
 }
 
 /** 받아 오기만 한다. **그리지 않는다** — `load()` 의 주석 참고. */
@@ -200,6 +288,7 @@ async function load(): Promise<void> {
     return;
   }
   render(result.score);
+  await loadFinals();
 }
 
 async function start(): Promise<void> {
@@ -211,6 +300,8 @@ async function start(): Promise<void> {
   $('who').textContent = `${((await me.json()) as Me).name} 님이 보고 있습니다`;
   await load();
 }
+
+$('confirm').addEventListener('click', () => void confirm());
 
 void start();
 
