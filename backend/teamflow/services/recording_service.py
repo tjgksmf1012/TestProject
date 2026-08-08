@@ -28,7 +28,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from teamflow.audio import assembly
@@ -632,12 +632,65 @@ def register_audio_asset(
 
 
 def track_health(session: Session, meeting_id: int) -> list[dict]:
-    """회의의 트랙별 상태. 승인 화면에서 "이 트랙은 못 씁니다"를 띄우는 근거."""
+    """회의의 트랙별 상태. 승인 화면에서 "이 트랙은 못 씁니다"를 띄우는 근거.
+
+    ⭐ **녹음 중인 트랙에는 `coverage` 도 `total_gap_ms` 도 없습니다.**
+    둘 다 `complete_track` 에서만 채워지므로, 회의가 끝나기 전에는 NULL 입니다.
+    그동안 로비는 모든 트랙을 "녹음 중" 이라고 불렀습니다 — 폰이 죽어
+    조각이 한 개도 안 와도 똑같이 "녹음 중" 이었습니다 (결함 83).
+
+    로비의 존재 이유가 **회의 중에** 망가지는 폰을 찾는 것인데, 그걸 할 수
+    있는 시점이 회의가 끝난 뒤였습니다. 그때는 이미 그 회의를 못 살립니다.
+
+    그래서 **살아 있다는 신호**를 같이 줍니다.
+
+        chunk_count  지금까지 받은 조각 수
+        silent_ms    마지막 소식 이후 흐른 시간 (조각이 없으면 시작 시각 기준)
+
+    ⚠️ 시간을 **서버가 잽니다.** 조각의 `client_at_ms` 는 녹음하는 폰의
+    동기화된 시계 기준이고, 로비를 보는 사람의 브라우저 시계는 그것과
+    다를 수 있습니다. 화면에서 빼면 시계가 어긋난 만큼 전부 죽은 것으로
+    보이거나 전부 멀쩡한 것으로 보입니다 — 운행도표의 축 문제와 같습니다.
+
+    ⚠️ 판단은 여기서 하지 않습니다. 문턱값(`WARN_GAP_MS`)과 문구는 화면이
+    정합니다. 여기서는 **재기만** 합니다.
+    """
     tracks = session.scalars(
         select(m.MeetingTrack)
         .where(m.MeetingTrack.meeting_id == meeting_id)
         .order_by(m.MeetingTrack.id)
     ).all()
+
+    # 트랙마다 따로 세면 N번 왕복한다. 한 번에 가져온다.
+    track_ids = [t.id for t in tracks]
+    signs: dict[int, tuple[int, datetime | None]] = {}
+    if track_ids:
+        rows = session.execute(
+            select(
+                m.TrackChunk.track_id,
+                func.count(m.TrackChunk.id),
+                func.max(m.TrackChunk.received_at),
+            )
+            .where(m.TrackChunk.track_id.in_(track_ids))
+            .group_by(m.TrackChunk.track_id)
+        ).all()
+        signs = {row[0]: (row[1], row[2]) for row in rows}
+
+    now = now_utc()
+
+    def _silent_ms(track: m.MeetingTrack) -> int | None:
+        """마지막 소식 이후 흐른 밀리초. 녹음 중이 아니면 뜻이 없어 None."""
+        if track.status != "recording":
+            return None
+        _, last_at = signs.get(track.id, (0, None))
+        # 아직 한 조각도 안 왔으면 **참가한 순간**이 마지막 소식이다.
+        since = last_at or track.started_at
+        if since is None:
+            return None
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=UTC)
+        return max(0, int((now - since).total_seconds() * 1000))
+
     return [
         {
             "track_id": t.id,
@@ -662,6 +715,9 @@ def track_health(session: Session, meeting_id: int) -> list[dict]:
             "gaps": t.gaps or [],
             "started_at": t.started_at,
             "ended_at": t.ended_at,
+            # ── 살아 있다는 신호 (결함 83). 위 docstring 참고.
+            "chunk_count": signs.get(t.id, (0, None))[0],
+            "silent_ms": _silent_ms(t),
         }
         for t in tracks
     ]

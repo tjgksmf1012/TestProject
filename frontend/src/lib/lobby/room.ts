@@ -41,6 +41,14 @@ export interface TrackHealth {
   gaps?: { reason?: string; startMs: number; endMs: number }[];
   started_at?: string | null;
   ended_at?: string | null;
+  /* ── 아래 둘은 **회의 중에** 폰이 살아 있는지 보는 값입니다 (결함 83).
+     `coverage` 와 `total_gap_ms` 는 `complete_track` 에서만 채워지므로
+     녹음 중에는 언제나 null 입니다. 그래서 아래 `verdictOf` 의 `broken`·
+     `at_risk` 가지가 **회의가 끝나기 전에는 한 번도 못 탔습니다.** */
+  /** 지금까지 서버가 받은 조각 수. */
+  chunk_count?: number;
+  /** 마지막 소식 이후 흐른 밀리초. 녹음 중이 아니면 null. **서버가 잰다.** */
+  silent_ms?: number | null;
 }
 
 export type ConsentState = 'granted' | 'refused' | 'pending';
@@ -161,12 +169,57 @@ function verdictOf(track: TrackHealth | undefined): TrackVerdict {
   if (track.status === 'recording') {
     if (coverage !== null && coverage < MIN_USABLE_COVERAGE) return 'broken';
     if ((track.total_gap_ms ?? 0) >= WARN_GAP_MS) return 'at_risk';
+    // ⭐ **여기까지는 녹음 중에 한 번도 못 탑니다** (결함 83). 위 두 값은
+    // 트랙이 끝나야 채워지니까요. 회의 중에 실제로 알 수 있는 것은
+    // "마지막으로 소식이 온 지 얼마나 됐나" 하나뿐입니다.
+    //
+    // ⚠️ 문턱은 새로 만들지 않고 `WARN_GAP_MS` 를 그대로 씁니다. "이만큼
+    // 끊기면 사람에게 알린다" 는 판단은 이미 이 파일이 하고 있었고, 다른
+    // 숫자를 지어내면 같은 뜻에 값이 둘이 됩니다.
+    if (isSilentTooLong(track)) return 'at_risk';
     return 'healthy';
   }
 
   // 종료됨. 서버가 실제 청크로 커버리지를 다시 계산한 뒤다.
   if (track.status === 'completed') return 'finished';
   return 'broken'; // unusable | aborted
+}
+
+/**
+ * 회의 중에 이 트랙이 조용한 지 오래됐는가 (결함 83).
+ *
+ * ⚠️ 시간은 **서버가 잽니다.** 조각의 시각은 녹음하는 폰의 동기화된 시계
+ * 기준이고, 로비를 보는 사람의 브라우저 시계는 그것과 다를 수 있습니다.
+ * 여기서 빼면 시계가 어긋난 만큼 전부 죽은 것으로 보이거나 전부 멀쩡한
+ * 것으로 보입니다 — 운행도표의 축 문제와 같습니다.
+ *
+ * ⚠️ **모르면 경고하지 않습니다.** `silent_ms` 가 없는 서버(옛 버전)에서는
+ * 판단하지 않습니다. 없는 근거로 "폰을 확인하세요" 를 띄우면, 다음부터
+ * 사람은 이 경고를 안 믿습니다.
+ */
+export function isSilentTooLong(track: TrackHealth): boolean {
+  const silent = track.silent_ms;
+  if (silent === null || silent === undefined) return false;
+  return silent >= WARN_GAP_MS;
+}
+
+/**
+ * 무엇을 확인해야 하는지까지 말한다.
+ *
+ * 조각이 **한 개도** 안 온 것과, 오다가 끊긴 것은 **할 일이 다릅니다.**
+ * 앞은 녹음을 아예 시작 안 했을 수 있고, 뒤는 화면이 꺼졌을 가능성이 큽니다.
+ */
+function describeAtRisk(track: TrackHealth | undefined): string {
+  const silentMs = track?.silent_ms;
+  if (silentMs !== null && silentMs !== undefined) {
+    const seconds = Math.round(silentMs / 1000);
+    const howLong = seconds >= 60 ? `${Math.round(seconds / 60)}분째` : `${seconds}초째`;
+    return (track?.chunk_count ?? 0) === 0
+      ? `${howLong} 녹음이 한 조각도 안 왔습니다 — 그 폰에서 녹음을 시작했는지 확인해 주세요`
+      : `${howLong} 녹음이 안 올라옵니다 — 폰 화면을 켜 주세요`;
+  }
+  const gapSeconds = Math.round((track?.total_gap_ms ?? 0) / 1000);
+  return `녹음이 끊기고 있습니다 (공백 ${gapSeconds}초) — 폰 화면을 켜 주세요`;
 }
 
 function messageFor(verdict: TrackVerdict, track: TrackHealth | undefined): string {
@@ -179,7 +232,7 @@ function messageFor(verdict: TrackVerdict, track: TrackHealth | undefined): stri
     case 'healthy':
       return '녹음 중';
     case 'at_risk':
-      return `녹음이 끊기고 있습니다 (공백 ${Math.round((track?.total_gap_ms ?? 0) / 1000)}초) — 폰 화면을 켜 주세요`;
+      return describeAtRisk(track);
     case 'broken':
       // ⚠️ "0" 이 아니라 "측정 불가" 다. 이 구분이 이 프로젝트의 전부다.
       return percent === null

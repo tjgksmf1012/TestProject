@@ -1294,3 +1294,110 @@ def test_track_health_gives_an_empty_list_not_null_when_there_are_no_gaps(engine
         rows = recording_service.track_health(s, meeting["meeting_id"])
     assert rows
     assert all(isinstance(r["gaps"], list) for r in rows)
+
+
+def test_track_health_says_how_long_a_recording_track_has_been_quiet(engine, meeting):
+    """⭐ **로비가 회의 중에 죽은 폰을 못 찾고 있었습니다** (결함 83).
+
+    `coverage` 와 `total_gap_ms` 는 `complete_track` 에서만 채워집니다.
+    즉 녹음 중에는 언제나 NULL 입니다. 그래서 화면의 `verdictOf` 에 있는
+    `broken`·`at_risk` 가지가 **회의가 끝나기 전에는 한 번도 못 탔고**,
+    조각이 한 개도 안 오는 트랙까지 "녹음 중" 으로 보였습니다.
+
+    로비의 존재 이유가 회의 **중에** 망가지는 폰을 찾는 것인데, 그걸 할 수
+    있는 시점이 회의가 끝난 뒤였습니다. 그때는 그 회의를 못 살립니다.
+
+    ⚠️ 시간은 **서버가 잽니다.** 조각의 `client_at_ms` 는 녹음하는 폰의
+    시계 기준이라, 로비를 보는 사람의 브라우저에서 빼면 시계가 어긋난
+    만큼 전부 죽은 것으로 보이거나 전부 멀쩡한 것으로 보입니다.
+    """
+    from teamflow.services import recording_service
+
+    with db_session.session_scope() as s:
+        s.add(
+            m.MeetingTrack(
+                meeting_id=meeting["meeting_id"],
+                user_id=meeting["user_ids"][0],
+                started_at=recording_service.now_utc() - timedelta(minutes=7),
+                status="recording",
+                gaps=[],
+            )
+        )
+
+    with db_session.session_scope() as s:
+        (row,) = recording_service.track_health(s, meeting["meeting_id"])
+
+    # 회의 중인 트랙이 정확히 어떤 모습인지 못 박아 둔다 — 이 셋이 NULL 이라는
+    # 사실이 결함 83 의 원인이었다.
+    assert row["coverage"] is None
+    assert row["total_gap_ms"] is None
+    assert row["status"] == "recording"
+
+    assert row["chunk_count"] == 0, "조각이 한 개도 안 왔다"
+    assert row["silent_ms"] is not None, "회의 중에는 반드시 잰 값을 줘야 한다"
+    assert row["silent_ms"] >= 6 * 60_000, row["silent_ms"]
+
+
+def test_track_health_measures_quiet_from_the_last_chunk_not_the_start(engine, meeting):
+    """조각이 오고 있으면 **마지막 조각**이 기준이다.
+
+    시작 시각으로 재면 한 시간짜리 회의에서 멀쩡히 녹음 중인 폰이
+    "1시간째 소식 없음" 으로 보입니다.
+    """
+    from teamflow.services import recording_service
+
+    with db_session.session_scope() as s:
+        track = m.MeetingTrack(
+            meeting_id=meeting["meeting_id"],
+            user_id=meeting["user_ids"][0],
+            started_at=recording_service.now_utc() - timedelta(minutes=45),
+            status="recording",
+            gaps=[],
+        )
+        s.add(track)
+        s.flush()
+        s.add(
+            m.TrackChunk(
+                track_id=track.id,
+                seq=0,
+                bytes=1024,
+                client_at_ms=0,
+                received_at=recording_service.now_utc() - timedelta(seconds=4),
+            )
+        )
+
+    with db_session.session_scope() as s:
+        (row,) = recording_service.track_health(s, meeting["meeting_id"])
+
+    assert row["chunk_count"] == 1
+    assert row["silent_ms"] is not None
+    assert row["silent_ms"] < 30_000, f"방금 조각이 왔는데 {row['silent_ms']}ms 로 쟀다"
+
+
+def test_track_health_does_not_measure_quiet_for_finished_tracks(engine, meeting):
+    """끝난 트랙에 `silent_ms` 를 주면 화면이 그걸로 판단할 수 있다.
+
+    종료된 트랙은 서버가 실제 청크로 커버리지를 다시 계산한 뒤라, 판단
+    근거가 이미 있습니다. 뜻이 없는 값은 **주지 않습니다** — 있으면 언젠가
+    누가 씁니다.
+    """
+    from teamflow.services import recording_service
+
+    with db_session.session_scope() as s:
+        s.add(
+            m.MeetingTrack(
+                meeting_id=meeting["meeting_id"],
+                user_id=meeting["user_ids"][0],
+                started_at=NOW,
+                ended_at=NOW + timedelta(minutes=30),
+                status="completed",
+                coverage=0.98,
+                total_gap_ms=0,
+                gaps=[],
+            )
+        )
+
+    with db_session.session_scope() as s:
+        (row,) = recording_service.track_health(s, meeting["meeting_id"])
+
+    assert row["silent_ms"] is None

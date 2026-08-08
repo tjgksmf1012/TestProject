@@ -64,10 +64,26 @@ function verdictOf(track) {
   if (track.status === "recording") {
     if (coverage !== null && coverage < MIN_USABLE_COVERAGE) return "broken";
     if ((track.total_gap_ms ?? 0) >= WARN_GAP_MS) return "at_risk";
+    if (isSilentTooLong(track)) return "at_risk";
     return "healthy";
   }
   if (track.status === "completed") return "finished";
   return "broken";
+}
+function isSilentTooLong(track) {
+  const silent = track.silent_ms;
+  if (silent === null || silent === void 0) return false;
+  return silent >= WARN_GAP_MS;
+}
+function describeAtRisk(track) {
+  const silentMs = track?.silent_ms;
+  if (silentMs !== null && silentMs !== void 0) {
+    const seconds = Math.round(silentMs / 1e3);
+    const howLong = seconds >= 60 ? `${Math.round(seconds / 60)}분째` : `${seconds}초째`;
+    return (track?.chunk_count ?? 0) === 0 ? `${howLong} 녹음이 한 조각도 안 왔습니다 — 그 폰에서 녹음을 시작했는지 확인해 주세요` : `${howLong} 녹음이 안 올라옵니다 — 폰 화면을 켜 주세요`;
+  }
+  const gapSeconds = Math.round((track?.total_gap_ms ?? 0) / 1e3);
+  return `녹음이 끊기고 있습니다 (공백 ${gapSeconds}초) — 폰 화면을 켜 주세요`;
 }
 function messageFor(verdict, track) {
   const coverage = track?.coverage;
@@ -78,7 +94,7 @@ function messageFor(verdict, track) {
     case "healthy":
       return "녹음 중";
     case "at_risk":
-      return `녹음이 끊기고 있습니다 (공백 ${Math.round((track?.total_gap_ms ?? 0) / 1e3)}초) — 폰 화면을 켜 주세요`;
+      return describeAtRisk(track);
     case "broken":
       return percent === null ? "녹음을 쓸 수 없습니다 — 이 사람의 발언량은 측정할 수 없습니다" : `커버리지 ${percent}% — 이 사람의 발언량은 측정할 수 없습니다`;
     case "finished":
