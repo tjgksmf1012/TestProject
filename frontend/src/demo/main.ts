@@ -41,6 +41,7 @@ import {
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
+import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { renderNav } from './nav.ts';
 import type { SyncTransport } from '../lib/recording/client.ts';
@@ -117,6 +118,9 @@ let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 let summary: RecordingSummary | null = null;
 
 // ── 화면 ────────────────────────────────────────────────────
+
+/** 마지막으로 만든 실험 표 한 줄. **화면 글자가 아니라 여기서** 복사한다 (결함 71). */
+let lastRow: string | null = null;
 
 function render(): void {
   const state = client.state;
@@ -365,18 +369,33 @@ function showResult(result: RecordingSummary): void {
     : '<li class="ok">공백 없음</li>';
 
   // docs/09 실험 5 표에 그대로 붙여 넣을 수 있는 한 줄
-  $('row').textContent =
+  lastRow =
     `| ${navigator.userAgent.slice(0, 40)} | ` +
     `${($('wakelock') as HTMLInputElement).checked ? '있음' : '없음'} | ` +
     `${(result.timeline.coverage * 100).toFixed(1)}% | ` +
     `${(result.timeline.longestGapMs / 1000).toFixed(1)}초 | ` +
     `${[...new Set(result.timeline.gaps.map((g) => g.reason))].join(', ') || '-'} |`;
+  $('row').textContent = lastRow;
 }
 
-$('copy').addEventListener('click', async () => {
-  await navigator.clipboard.writeText($('row').textContent ?? '');
-  $('copy').textContent = '복사됨';
-  setTimeout(() => ($('copy').textContent = '표에 붙일 한 줄 복사'), 1500);
+$('copy').addEventListener('click', () => {
+  // ⚠️ **화면 글자가 아니라 데이터에서 복사합니다** (결함 71 과 같은 자리).
+  // `#row` 를 다시 읽으면, 화면이 아직 안 그려졌거나 다른 코드가 그 자리를
+  // 건드린 순간 엉뚱한 것이 클립보드로 갑니다.
+  if (lastRow === null) return;
+  // ⚠️ 그리고 **안 됐을 때 그렇다고 말합니다** (결함 81). 이 화면은 실기기
+  // 실험용이라 폰에서 `http://` 로 여는 경우가 많은데, 거기서는
+  // `navigator.clipboard` 가 아예 없습니다.
+  void copyText(lastRow, navigator.clipboard).then((outcome) => {
+    if (copySucceeded(outcome)) {
+      $('copy-note').hidden = true;
+      $('copy').textContent = describeCopy(outcome, '한 줄');
+      setTimeout(() => ($('copy').textContent = '표에 붙일 한 줄 복사'), 1500);
+      return;
+    }
+    $('copy-note').textContent = describeCopy(outcome, '한 줄');
+    $('copy-note').hidden = false;
+  });
 });
 
 render();

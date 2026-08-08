@@ -1213,6 +1213,29 @@ function detailText(body, fallback) {
   return fallback;
 }
 
+// src/lib/ui/copy.ts
+async function copyText(text, clipboard) {
+  if (clipboard === void 0 || clipboard === null) return "unavailable";
+  if (typeof clipboard.writeText !== "function") return "unavailable";
+  try {
+    await clipboard.writeText(text);
+    return "copied";
+  } catch {
+    return "refused";
+  }
+}
+function describeCopy(outcome, what) {
+  if (outcome === "copied") return "복사됨";
+  const how = `${withJosa(what, "을를")} 길게 눌러 직접 복사하세요`;
+  if (outcome === "unavailable") {
+    return `이 주소에서는 브라우저가 복사를 막습니다 — ${how}`;
+  }
+  return `복사하지 못했습니다 — ${how}`;
+}
+function copySucceeded(outcome) {
+  return outcome === "copied";
+}
+
 // src/lib/html.ts
 var ESCAPES = {
   "&": "&amp;",
@@ -1493,6 +1516,7 @@ var wakeLock = null;
 var resyncTimer = null;
 var elapsedTimer = null;
 var summary = null;
+var lastRow = null;
 function render() {
   const state = client.state;
   $("phase").textContent = PHASE_LABEL[state.phase] ?? state.phase;
@@ -1650,12 +1674,21 @@ function showResult(result) {
   $("gaps").innerHTML = result.timeline.gaps.length ? result.timeline.gaps.map(
     (g) => `<li><code>${g.reason}</code> ${(g.durationMs / 1e3).toFixed(1)}초 (${((g.startMs - result.timeline.startedAtMs) / 1e3).toFixed(0)}초 지점)</li>`
   ).join("") : '<li class="ok">공백 없음</li>';
-  $("row").textContent = `| ${navigator.userAgent.slice(0, 40)} | ${$("wakelock").checked ? "있음" : "없음"} | ${(result.timeline.coverage * 100).toFixed(1)}% | ${(result.timeline.longestGapMs / 1e3).toFixed(1)}초 | ${[...new Set(result.timeline.gaps.map((g) => g.reason))].join(", ") || "-"} |`;
+  lastRow = `| ${navigator.userAgent.slice(0, 40)} | ${$("wakelock").checked ? "있음" : "없음"} | ${(result.timeline.coverage * 100).toFixed(1)}% | ${(result.timeline.longestGapMs / 1e3).toFixed(1)}초 | ${[...new Set(result.timeline.gaps.map((g) => g.reason))].join(", ") || "-"} |`;
+  $("row").textContent = lastRow;
 }
-$("copy").addEventListener("click", async () => {
-  await navigator.clipboard.writeText($("row").textContent ?? "");
-  $("copy").textContent = "복사됨";
-  setTimeout(() => $("copy").textContent = "표에 붙일 한 줄 복사", 1500);
+$("copy").addEventListener("click", () => {
+  if (lastRow === null) return;
+  void copyText(lastRow, navigator.clipboard).then((outcome) => {
+    if (copySucceeded(outcome)) {
+      $("copy-note").hidden = true;
+      $("copy").textContent = describeCopy(outcome, "한 줄");
+      setTimeout(() => $("copy").textContent = "표에 붙일 한 줄 복사", 1500);
+      return;
+    }
+    $("copy-note").textContent = describeCopy(outcome, "한 줄");
+    $("copy-note").hidden = false;
+  });
 });
 render();
 renderNav("record");

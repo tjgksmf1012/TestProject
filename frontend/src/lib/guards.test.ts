@@ -367,6 +367,80 @@ describe('줄어들 수 없는 컨트롤 (결함 77)', () => {
   });
 });
 
+describe('복사가 안 될 때 (결함 81)', () => {
+  const PUBLIC_DIR = join(ROOT, 'public');
+  const demoFiles = (): { rel: string; code: string }[] => {
+    const out: { rel: string; code: string }[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+          out.push({
+            rel: full.slice(ROOT.length + 1).split('\\').join('/'),
+            code: readFileSync(full, 'utf8'),
+          });
+        }
+      }
+    };
+    walk(join(ROOT, 'src'));
+    return out;
+  };
+
+  it('⭐ `navigator.clipboard` 를 직접 부르지 않는다', () => {
+    // 두 화면이 이렇게 쓰고 있었습니다.
+    //
+    //     void navigator.clipboard.writeText(text).then(() => { … '복사됨' })
+    //
+    // `navigator.clipboard` 는 **보안 컨텍스트에서만 있습니다.** 폰에서
+    // `http://192.168.0.5:8000` 으로 열면 `undefined` 라 그 줄이 클릭
+    // 핸들러 안에서 죽고, 화면은 아무 말도 안 합니다. `.catch` 도
+    // 없어서 권한 거절도 같은 결과입니다.
+    //
+    // 사람이 겪는 일: 눌러도 아무 변화가 없다 → 카톡에 붙여 넣는다 →
+    // **아까 복사해 둔 다른 글**이 나간다. 결함 71 의 거울상입니다.
+    // ⚠️ **부르는 것**만 막습니다. `copyText(text, navigator.clipboard)` 처럼
+    // 클립보드를 **넘겨 주는 것**은 이 설계가 원하는 모양입니다 — 처음 쓴
+    // 검사가 이름만 보고 그 둘을 같이 잡아, 방금 고친 두 파일을 결함으로
+    // 신고했습니다.
+    const direct = /navigator\s*\??\.\s*clipboard\s*\??\.\s*writeText/;
+    const offenders = demoFiles()
+      .filter(({ rel }) => rel !== 'src/lib/ui/copy.ts')
+      .filter(({ code }) => direct.test(code))
+      .map(({ rel }) => rel);
+    strictEqual(offenders.join(', '), '', '`lib/ui/copy.ts` 의 `copyText` 를 쓰세요');
+
+    // 통과해야 하는 모양을 일부러 넣어 본다
+    strictEqual(direct.test('void copyText(text, navigator.clipboard).then(…)'), false);
+    strictEqual(direct.test('await navigator.clipboard.writeText(x)'), true);
+    strictEqual(direct.test('navigator?.clipboard?.writeText(x)'), true);
+  });
+
+  it('⭐ 복사 버튼이 있는 화면에는 실패를 적을 자리가 있다', () => {
+    // 만들어 놓고 아무도 안 쓰면 결함 47 입니다. 버튼이 있는 화면마다
+    // 안내를 적을 요소가 실제로 있는지 봅니다.
+    const missing: string[] = [];
+    for (const name of readdirSync(PUBLIC_DIR).filter((n) => n.endsWith('.html'))) {
+      const html = readFileSync(join(PUBLIC_DIR, name), 'utf8');
+      if (!/id="copy"/.test(html)) continue;
+      if (!/id="copy-note"/.test(html)) missing.push(name);
+    }
+    strictEqual(missing.join(', '), '', '`<p class="status" id="copy-note" hidden>` 를 두세요');
+  });
+
+  it('⭐ 실패 안내를 실제로 그 자리에 쓴다', () => {
+    // 요소만 두고 안 쓰면 화면은 여전히 조용합니다 — 결함 47 그대로입니다.
+    const users = demoFiles()
+      .filter(({ rel }) => rel !== 'src/lib/ui/copy.ts')
+      .filter(({ code }) => /copyText\(/.test(code));
+    strictEqual(users.length >= 2, true, '복사 경로가 둘인데 그보다 적게 잡혔습니다');
+    const silent = users
+      .filter(({ code }) => !/copy-note/.test(code))
+      .map(({ rel }) => rel);
+    strictEqual(silent.join(', '), '', '실패했을 때 `#copy-note` 에 이유를 쓰세요');
+  });
+});
+
 describe('한국어 조사 (결함 76)', () => {
   /** `src/` 의 프로덕션 코드에서 주석·import 를 걷어낸 것. */
   const codeFiles = (): { rel: string; code: string }[] => {

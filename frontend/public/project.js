@@ -191,6 +191,29 @@ function withJosa(word, pair) {
   return `${word}${josa(word, pair)}`;
 }
 
+// src/lib/ui/copy.ts
+async function copyText(text, clipboard) {
+  if (clipboard === void 0 || clipboard === null) return "unavailable";
+  if (typeof clipboard.writeText !== "function") return "unavailable";
+  try {
+    await clipboard.writeText(text);
+    return "copied";
+  } catch {
+    return "refused";
+  }
+}
+function describeCopy(outcome, what) {
+  if (outcome === "copied") return "복사됨";
+  const how = `${withJosa(what, "을를")} 길게 눌러 직접 복사하세요`;
+  if (outcome === "unavailable") {
+    return `이 주소에서는 브라우저가 복사를 막습니다 — ${how}`;
+  }
+  return `복사하지 못했습니다 — ${how}`;
+}
+function copySucceeded(outcome) {
+  return outcome === "copied";
+}
+
 // src/lib/github/health.ts
 var TONES = /* @__PURE__ */ new Set(["ok", "warn", "bad"]);
 function describeLastDelivery(iso, now) {
@@ -893,9 +916,14 @@ $("rotate").addEventListener("click", () => {
 $("copy").addEventListener("click", () => {
   const text = codeToCopy(inviteCode);
   if (text === null) return;
-  void navigator.clipboard.writeText(text).then(() => {
-    $("copy").textContent = "복사됨";
-    setTimeout(() => $("copy").textContent = "코드 복사", 1500);
+  void copyText(text, navigator.clipboard).then((outcome) => {
+    if (copySucceeded(outcome)) {
+      say("copy-note", "");
+      $("copy").textContent = describeCopy(outcome, "코드");
+      setTimeout(() => $("copy").textContent = "코드 복사", 1500);
+      return;
+    }
+    say("copy-note", describeCopy(outcome, "코드"));
   });
 });
 $("open-meeting").addEventListener("click", () => {

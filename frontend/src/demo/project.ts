@@ -15,6 +15,7 @@ import {
   titleProblem,
 } from '../lib/project/setup.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
+import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import {
   describeHealth,
   describeHealthFailure,
@@ -380,9 +381,20 @@ $('copy').addEventListener('click', () => {
   // 않습니다 — 버튼이 이미 비활성이라 여기까지 오지 않습니다.
   const text = codeToCopy(inviteCode);
   if (text === null) return;
-  void navigator.clipboard.writeText(text).then(() => {
-    $('copy').textContent = '복사됨';
-    setTimeout(() => ($('copy').textContent = '코드 복사'), 1500);
+  // ⚠️ **안 됐을 때 그렇다고 말합니다** (결함 81). 폰에서 `http://` 로
+  // 열면 `navigator.clipboard` 가 아예 없습니다. 예전에는 그 자리에서
+  // 조용히 죽었고, 사람은 클립보드에 남아 있던 **다른 글**을 카톡으로
+  // 보냈습니다.
+  void copyText(text, navigator.clipboard).then((outcome) => {
+    if (copySucceeded(outcome)) {
+      say('copy-note', '');
+      $('copy').textContent = describeCopy(outcome, '코드');
+      setTimeout(() => ($('copy').textContent = '코드 복사'), 1500);
+      return;
+    }
+    // 실패 이유는 버튼이 아니라 아래 줄에 적습니다 — 버튼 글자를 길게
+    // 만들면 옆의 "코드 새로 만들기" 와 겹칩니다 (결함 77).
+    say('copy-note', describeCopy(outcome, '코드'));
   });
 });
 
