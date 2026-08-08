@@ -797,7 +797,7 @@ def join_project(payload: JoinIn, session: DbSession, user: CurrentUser) -> Join
     if not invites.looks_like_code(code):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "코드 형식이 올바르지 않습니다 — 8자이고 0·O·1·I·L 은 쓰지 않습니다",
+            "코드 형식이 올바르지 않습니다 — 8자이고 0·O·1·I·L은 쓰지 않습니다",
         )
 
     project = session.scalars(
@@ -947,7 +947,7 @@ def start_github_backfill(
     if not project.github_repo:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "저장소가 연결되지 않았습니다. 먼저 owner/repo 를 저장하세요.",
+            "저장소가 연결되지 않았습니다. 먼저 owner/repo를 저장하세요.",
         )
     # 자격 증명이 없으면 워커가 아무것도 못 합니다. 202 로 받아 두고
     # 조용히 아무 일도 안 일어나면, 사람은 화면만 보고 기다립니다.

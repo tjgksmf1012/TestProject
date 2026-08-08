@@ -46,7 +46,7 @@ export function codeProblem(raw: string): string | null {
   if (bad.length > 0) {
     // 어떤 글자가 문제인지 말합니다. "형식이 틀렸습니다" 만으로는
     // 여덟 글자 중 어디를 고쳐야 하는지 알 수 없습니다.
-    return `코드에 쓰지 않는 글자가 있습니다: ${[...new Set(bad)].join(', ')} — 0·O·1·I·L 은 쓰지 않습니다`;
+    return `코드에 쓰지 않는 글자가 있습니다: ${[...new Set(bad)].join(', ')} — 0·O·1·I·L은 쓰지 않습니다`;
   }
   return null;
 }

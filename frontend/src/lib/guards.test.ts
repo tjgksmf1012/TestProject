@@ -428,6 +428,130 @@ describe('한국어 조사 (결함 76)', () => {
     }
     strictEqual(offenders.join('\n'), '', '`withJosa(값, 짝)` 으로 붙여 쓰세요');
   });
+
+  // ⭐ **세 번째 층입니다** (결함 80).
+  //
+  // 결함 76 은 `.ts` 의 `${값} 조사` 를 고쳤고, 결함 79 는 백엔드의
+  // 글자 그대로 적힌 조사를 고쳤습니다. 그런데 **화면 HTML 에 박혀 있는
+  // 정적 글자**는 두 가드 어느 쪽도 안 봅니다. 실제로 아홉 자리가 남아
+  // 있었습니다 — 기여도 화면의 `0 이 아닙니다`(이 제품의 핵심 불변식을
+  // 말하는 문장), 녹음 화면의 `Wake Lock 을`, 로그인의 `scrypt 로`.
+  //
+  // ⚠️ **브라우저가 보는 대로 재야 합니다.** 소스에서 `이유</strong>를`
+  // 는 붙어 있는데 태그를 공백으로 바꿔 읽으면 `이유 를` 로 보입니다.
+  // 처음 쓴 검사가 그래서 멀쩡한 네 자리를 결함으로 신고했습니다 —
+  // 이 세션에서 측정 방법이 틀려 없는 결함이 생긴 **열한 번째**입니다.
+  // 그래서 인라인 태그는 **폭 0** 으로 지우고, 줄바꿈을 만드는 태그만
+  // 줄바꿈으로 바꾸고, 연속 공백을 접습니다. 브라우저가 하는 일입니다.
+  const screens = (): { name: string; html: string }[] =>
+    readdirSync(PUBLIC)
+      .filter((name) => name.endsWith('.html'))
+      .map((name) => ({ name, html: readFileSync(join(PUBLIC, name), 'utf8') }));
+
+  // 블록 경계 표시. 공백 접기에 안 쓸려 가도록 **글자가 아닌 것**을 씁니다.
+  const BLOCK = '\u0000';
+  const rendered = (html: string): string =>
+    html
+      .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<!--[\s\S]*?-->/g, BLOCK)
+      // 줄바꿈을 만드는 태그만 경계. 나머지 인라인 태그는 **폭 0** 으로 지운다
+      .replace(
+        /<\/?(br|p|div|li|ul|ol|h[1-6]|section|td|tr|table|dt|dd|dl|nav|button|label|option|form|main|header|footer|article|aside)\b[^>]*>/gi,
+        BLOCK,
+      )
+      .replace(/<[^>]+>/g, '')
+      // ⚠️ **소스의 줄바꿈은 브라우저가 공백으로 만듭니다.** 줄바꿈으로
+      // 남겨 두면 줄 끝에 걸린 조사를 놓칩니다 — 기여도 화면의
+      // `0 이⏎아닙니다` 가 실제로 그렇게 빠져나갔습니다.
+      .replace(/\s+/g, ' ')
+      .replace(new RegExp(` ?${BLOCK} ?`, 'g'), '\n');
+
+  it('⭐ 화면 HTML 의 글자도 조사를 붙여 쓴다 (결함 80)', () => {
+    // 앞말이 무엇이든 이것들은 조사입니다 — 띄우면 틀립니다.
+    const SURE = '은|는|을|를|과|와|의|에서|으로|부터|까지|라고|이라고|처럼';
+    // ⚠️ 이쪽은 **앞말이 한글이 아닐 때만** 봅니다. `이`·`가`·`로`·`도`·`만`
+    // 은 조사일 수도 있고 아닐 수도 있습니다 — `그게 이 프로젝트가` 의
+    // `이` 는 관형사고, `3년 만에` 의 `만` 은 의존명사입니다. 한글 뒤에서
+    // 둘을 글자만 보고 가를 수 없으므로, 가를 수 있는 자리만 봅니다.
+    const sure = new RegExp(`(?<=[가-힣A-Za-z0-9%)\\]"'’」』+]) (${SURE})(?=[ .,·—…!?"'\`)\\]]|$)`, 'g');
+    const maybe = new RegExp(`(?<=[A-Za-z0-9%)\\]"'’」』+]) (이|가|로|도|만)(?=[ .,·—…!?"'\`)\\]]|$)`, 'g');
+
+    const offenders: string[] = [];
+    for (const { name, html } of screens()) {
+      const text = rendered(html);
+      for (const rx of [sure, maybe]) {
+        rx.lastIndex = 0;
+        for (const m of text.matchAll(rx)) {
+          const at = m.index ?? 0;
+          offenders.push(`${name} → …${text.slice(Math.max(0, at - 24), at + 12).replace(/\n/g, ' ')}…`);
+        }
+      }
+    }
+    strictEqual(offenders.join('\n'), '', '조사는 앞말에 붙여 쓰세요');
+  });
+
+  // ⚠️ **개발자용 오류 문구는 일부러 통과시킵니다.** 이 저장소는
+  // `` `x` 를 `` 처럼 코드 이름 뒤에 조사를 띄어 쓰는 문서 관례를 쓰고,
+  // 아래 셋은 화면에 안 나오고 개발자만 봅니다. 그래도 **근거를 적게**
+  // 했습니다 — "그냥 예외" 로 두면 다음에 진짜 화면 문구가 여기 섞입니다.
+  const DEV_ONLY_ON_PURPOSE: Record<string, string> = {
+    'lib/recording/browser-adapter.ts':
+      '어댑터를 잘못 끼웠을 때 개발자가 보는 throw. 화면에는 이 문장이 안 나온다.',
+    'lib/recording/clock.ts':
+      '시계 동기화 전에 `toServerTime` 을 부른 코드를 잡는 throw. 개발자만 본다.',
+    'lib/recording/timeline.ts':
+      '`timesliceMs` 를 잘못 준 코드를 잡는 throw. 개발자만 본다.',
+  };
+
+  it('⭐ 화면에 나가는 `.ts` 문자열도 조사를 붙여 쓴다 (결함 80)', () => {
+    // 결함 76 의 가드는 `${값} 조사` 만 봅니다. 글자 그대로 적힌 것은
+    // 통과합니다 — 실제로 `lib/pwa/install.ts` 의 iOS 설치 안내가
+    // `"홈 화면에 추가" 를 누르면` 이었습니다. 결함 79 에서 백엔드가
+    // 똑같이 새 나갔던 것과 **같은 자리**입니다.
+    const SURE = '은|는|을|를|과|와|의|에서|으로|부터|까지|라고|이라고|처럼';
+    const spaced = new RegExp(`(?<=[가-힣A-Za-z0-9%)\\]"'’」』+]) (${SURE})(?=[ .,·—…!?"'\`)\\]]|$)`);
+    const offenders: string[] = [];
+    for (const { rel, code } of codeFiles()) {
+      if (rel in DEV_ONLY_ON_PURPOSE) continue;
+      for (const lit of code.matchAll(/'[^'\n]*'|"[^"\n]*"|`[^`]*`/g)) {
+        if (spaced.test(lit[0])) offenders.push(`${rel} → ${lit[0].slice(0, 60)}`);
+      }
+    }
+    strictEqual(offenders.join('\n'), '', '조사는 앞말에 붙여 쓰세요');
+  });
+
+  it('면제 목록이 낡지 않았다', () => {
+    // 면제한 파일이 사라지거나 문구가 고쳐졌는데 목록만 남으면, 그 자리에
+    // 새로 들어온 진짜 결함이 조용히 면제됩니다.
+    const known = new Set(codeFiles().map(({ rel }) => rel));
+    const stale = Object.keys(DEV_ONLY_ON_PURPOSE).filter((rel) => !known.has(rel));
+    strictEqual(stale.join(', '), '', '면제 목록에 없는 파일이 적혀 있습니다');
+    const noReason = Object.entries(DEV_ONLY_ON_PURPOSE)
+      .filter(([, why]) => why.trim().length < 20)
+      .map(([rel]) => rel);
+    strictEqual(noReason.join(', '), '', '면제에는 근거를 적으세요');
+  });
+
+  it('띄어 쓰는 것이 맞는 말까지 잡지는 않는다', () => {
+    // 가드가 너무 넓으면 맞는 글을 고치게 만듭니다. 통과해야 하는 것을
+    // 일부러 넣어 확인합니다. 의존명사·단위·관형사는 **띄어 쓰는 것이
+    // 맞습니다** — 조사와 규칙이 정반대입니다.
+    const ok = [
+      '<p>커버리지 95% 미만이면 모드 A를 내려야 합니다.</p>',
+      '<p>후보 3 개 중 2 개를 승인했습니다.</p>',
+      '<p>그게 이 프로젝트가 하려는 일입니다.</p>',
+      '<p>말풍선이 붙은 업무는 <strong>회의에서 나온 결정</strong>이 승인을 거친 것입니다.</p>',
+      '<p>각 칸에 값을 적고 <strong>이유</strong>를 함께 적으세요.</p>',
+      '<p>다시 시도할 수 있습니다.</p>',
+    ];
+    const SURE = '은|는|을|를|과|와|의|에서|으로|부터|까지|라고|이라고|처럼';
+    const sure = new RegExp(`(?<=[가-힣A-Za-z0-9%)\\]"'’」』+]) (${SURE})(?=[ .,·—…!?"'\`)\\]]|$)`);
+    const maybe = new RegExp(`(?<=[A-Za-z0-9%)\\]"'’」』+]) (이|가|로|도|만)(?=[ .,·—…!?"'\`)\\]]|$)`);
+    const wronglyFlagged = ok.filter((html) => {
+      const text = rendered(html);
+      return sure.test(text) || maybe.test(text);
+    });
+    strictEqual(wronglyFlagged.join('\n'), '', '이건 띄어 쓰는 것이 맞는 말입니다');
+  });
 });
 
 describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {

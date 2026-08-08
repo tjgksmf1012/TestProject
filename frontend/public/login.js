@@ -117,7 +117,7 @@ function describeInstall(state) {
     case "promptable":
       return "앱으로 설치하면 주소창 없이 전체 화면으로 열리고, 홈 화면에서 바로 들어옵니다.";
     case "manual-ios":
-      return '아이폰에서는 화면 아래 가운데의 공유 버튼(상자에서 위로 나가는 화살표) → "홈 화면에 추가" 를 누르면 앱처럼 쓸 수 있습니다.';
+      return '아이폰에서는 화면 아래 가운데의 공유 버튼(상자에서 위로 나가는 화살표) → "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있습니다.';
     case "installed":
       return "";
     case "in-shell":

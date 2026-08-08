@@ -647,7 +647,16 @@ def test_screen_text_does_not_space_korean_particles():
     `seq 는 0 이상` 처럼 **코드 이름 뒤에 조사를 띄우는** 문서 관례를
     씁니다. 그건 화면에 안 나오므로 여기서 볼 대상이 아닙니다.
     화면 문구를 만드는 것이 존재 이유인 모듈만 봅니다.
+
+    ⚠️ **이 가드는 처음에 두 군데를 놓쳤습니다** (결함 80 에서 넓혔습니다).
+
+      · 앞말을 `[A-Za-z0-9)]` 로만 봐서 **닫는 따옴표 뒤**를 못 잡았습니다 —
+        `‘지난 활동 가져오기’ 를 누르면` 이 이 파일 안에서 통과하고
+        있었습니다. 가드가 있는 파일 안에서도 빠져나간 것입니다.
+      · `api/main.py` 를 안 봤습니다. `HTTPException` 의 `detail` 은
+        **그대로 화면에 뜹니다** — 초대 코드 형식 오류가 그랬습니다.
     """
+    import ast
     import re
 
     SCREEN_TEXT_MODULES = [
@@ -655,31 +664,100 @@ def test_screen_text_does_not_space_korean_particles():
         REPO_ROOT / "backend" / "teamflow" / "github" / "connection.py",
         # "왜 이 PR 이 이 업무에 붙었는가" — 카드에 그대로 나간다
         REPO_ROOT / "backend" / "teamflow" / "github" / "linking.py",
+        # `HTTPException(detail=…)` 은 화면이 그대로 읽어 사람에게 보여준다
+        REPO_ROOT / "backend" / "teamflow" / "api" / "main.py",
+        # 트랙 상태 문장 (결함 78)
+        REPO_ROOT / "backend" / "teamflow" / "services" / "recording_service.py",
     ]
 
-    particles = ["은", "는", "이", "가", "을", "를", "와", "과"]
-    particles += ["으로", "로", "에서", "에게", "에", "의"]
-    alternatives = "|".join(sorted(particles, key=len, reverse=True))
-    spaced = re.compile(
-        r"[A-Za-z0-9\)] (" + alternatives + r")(?=[\s.,)\"']|$)"
-    )
+    # ⚠️ **면제에는 근거를 적습니다.** 화면에 뜨긴 하지만 사람의 조작으로는
+    # 닿을 수 없는 자리가 있습니다. "그냥 예외" 로 두면 다음에 진짜 화면
+    # 문구가 여기 섞입니다.
+    CLIENT_BUG_ONLY = {
+        "main.py «q 는»": (
+            "`seq 는 0 이상이어야 합니다` — 사람이 seq 를 입력하는 화면이 없다. "
+            "녹음 클라이언트가 음수를 보낼 때만 닿고, 그때는 필드 이름이 보여야 고친다."
+        ),
+    }
+
+    # 앞말이 무엇이든 조사인 것. 띄우면 틀린다.
+    sure = ["은", "는", "을", "를", "과", "와", "의", "에서", "으로", "부터", "까지"]
+    # ⚠️ 이쪽은 **앞말이 한글이 아닐 때만** 본다. `이`·`가`·`로`·`도`·`만` 은
+    # 관형사·의존명사일 수도 있어서(`이 화면`, `3년 만에`) 한글 뒤에서는
+    # 글자만 보고 가를 수 없다. 가를 수 있는 자리만 본다.
+    maybe = ["이", "가", "로", "도", "만", "에", "에게"]
+    before_any = r"[가-힣A-Za-z0-9%)\]”’\"']"
+    before_code = r"[A-Za-z0-9%)\]”’\"']"
+    tail = r"(?=[\s.,·—…!?)\"']|$)"
+    def _alts(words: list[str]) -> str:
+        return "|".join(sorted(words, key=len, reverse=True))
+
+    patterns = [
+        re.compile(before_any + " (" + _alts(sure) + ")" + tail),
+        re.compile(before_code + " (" + _alts(maybe) + ")" + tail),
+    ]
     hangul = re.compile(r"[가-힣]")
+
+    # ⚠️ **줄 단위로 보면 안 됩니다.** 처음에는 `"logger." in line` 으로
+    # 로그를 걸렀는데, 인자가 다음 줄에 있는 로그 호출이 그물을 빠져나가
+    # 멀쩡한 로그 두 줄을 결함으로 신고했습니다. 파이썬 코드는 파이썬에게
+    # 물어봅니다 — `ast` 로 **문자열이 어디에 쓰이는지** 를 봅니다.
+    def _logged(tree: ast.AST) -> set[int]:
+        """`logger.*(...)` 안에 들어간 문자열들의 id."""
+        out: set[int] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)):
+                continue
+            if func.value.id not in {"logger", "log", "logging"}:
+                continue
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                    out.add(id(inner))
+        return out
+
+    def _docstrings(tree: ast.AST) -> set[int]:
+        """docstring 은 사람이 읽는 문서이지 화면 문구가 아니다."""
+        out: set[int] = set()
+        for node in ast.walk(tree):
+            holders = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            if not isinstance(node, holders):
+                continue
+            body = getattr(node, "body", [])
+            if not body:
+                continue
+            first = body[0]
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
+                out.add(id(first.value))
+        return out
 
     offenders: list[str] = []
     for path in SCREEN_TEXT_MODULES:
-        source = path.read_text(encoding="utf-8")
-        # docstring 을 통째로 뺀다 — 사람이 읽는 문서이지 화면 문구가 아니다
-        bare = re.sub(r'"""[\s\S]*?"""', "", source)
-        for line_no, line in enumerate(bare.splitlines(), start=1):
-            if "logger." in line or line.lstrip().startswith("#"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        skip = _logged(tree) | _docstrings(tree)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
                 continue
-            for lit in re.finditer(r'"[^"\n]*"|\'[^\'\n]*\'', line):
-                text = lit.group(0)
-                if not hangul.search(text):
-                    continue
+            if id(node) in skip:
+                continue
+            text = node.value
+            if not hangul.search(text):
+                continue
+            for spaced in patterns:
                 hit = spaced.search(text)
-                if hit:
-                    offenders.append(f"{path.name}:{line_no} «{hit.group(0)}»")
+                if hit is None:
+                    continue
+                key = f"{path.name} «{hit.group(0)}»"
+                if key in CLIENT_BUG_ONLY:
+                    continue
+                offenders.append(f"{path.name}:{node.lineno} «{hit.group(0)}»")
+                break
 
     assert offenders == [], (
         "화면 문구에서 조사를 띄어 썼습니다: "

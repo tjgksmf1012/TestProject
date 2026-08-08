@@ -176,7 +176,7 @@ def _missing_history_warning(facts: ConnectionFacts) -> str | None:
     return (
         "연결하기 전의 PR은 기여도에 들어가 있지 않습니다. "
         "웹훅은 연결한 순간부터 오기 때문입니다. "
-        "아래 ‘지난 활동 가져오기’ 를 누르면 채웁니다."
+        "아래 ‘지난 활동 가져오기’를 누르면 채웁니다."
     )
 
 
