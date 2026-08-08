@@ -246,7 +246,7 @@ var PATHS = {
   sliders: '<path d="M4 8h16M4 16h16"/><circle cx="14" cy="8" r="2.5"/><circle cx="9" cy="16" r="2.5"/>'
 };
 function iconSvg(name) {
-  return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + PATHS[name] + "</svg>";
+  return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + PATHS[name] + "</svg>";
 }
 
 // src/demo/nav.ts

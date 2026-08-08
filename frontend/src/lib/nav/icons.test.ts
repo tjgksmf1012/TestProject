@@ -84,6 +84,26 @@ describe('안전하게 넣을 수 있는가', () => {
       ok(/<(path|rect|circle)\b/.test(iconSvg(name)), `${name} 이 비어 있습니다`);
     }
   });
+
+  it('⭐ CSS 가 하나도 안 걸려도 제 모양으로 그려진다 (결함 74)', () => {
+    // 예전에는 `<svg viewBox="0 0 24 24">` 뿐이었고 크기·선·색을 전부
+    // `app.css` 의 `.ico svg` 가 줬습니다. 그래서 이 마크업은
+    // **`<span class="ico">` 안에 있을 때만** 제대로 그려졌습니다.
+    //
+    // 부르는 곳 둘 중 하나(칸반 카드의 "회의에서 나온 업무")가 감싸는
+    // 것을 빠뜨렸고, 규칙이 하나도 안 걸리자 SVG 는 제 자리를 다 차지해
+    // **294×294** 로 커지고 기본 `fill: black` 으로 칠해졌습니다.
+    // 카드 한가운데 거대한 검은 말풍선이 생겼습니다 — 밝은 모드에서도요.
+    //
+    // 감싸는 것을 잊지 말라고 적어 두는 대신, **안 감싸도 되게** 만듭니다.
+    for (const name of ICON_NAMES) {
+      const svg = iconSvg(name);
+      ok(/\bwidth="\d+"/.test(svg), `${name} 에 width 가 없습니다`);
+      ok(/\bheight="\d+"/.test(svg), `${name} 에 height 가 없습니다`);
+      ok(svg.includes('fill="none"'), `${name} 에 fill="none" 이 없습니다 — 검게 칠해집니다`);
+      ok(svg.includes('stroke="currentColor"'), `${name} 에 stroke 가 없습니다`);
+    }
+  });
 });
 
 describe('기여도 아이콘은 시그니처다', () => {

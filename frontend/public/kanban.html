@@ -33,7 +33,12 @@
   .task .meta { font-size: var(--fs-label); color: var(--text-subtle); margin: 0; }
 
   /* 회의 → 업무 연결이 이 화면의 존재 이유다. 눈에 띄어야 한다. */
-  .origin .ico, .origin svg { --ico: 14px; display: inline-block; vertical-align: -2px; }
+  /* ⚠️ `--ico` 만 정하면 안 됩니다 (결함 74). 그 변수를 **읽는** 규칙은
+     `app.css` 의 `.ico svg` 하나뿐이고, 이 자리는 `<span class="ico">` 로
+     감싸지 않아 그 규칙이 안 걸렸습니다. 값을 정해 놓고 아무도 안 읽는
+     상태였고, 아이콘은 294×294 검은 덩어리로 그려졌습니다. */
+  .origin .ico, .origin svg { --ico: 14px; width: 14px; height: 14px;
+                              display: inline-block; vertical-align: -2px; }
   .origin { font-size: var(--fs-caption); margin: .375rem 0 0; color: var(--ok); }
   .origin.manual { color: var(--text-subtle); }
 

@@ -65,14 +65,31 @@ const PATHS: Record<IconName, string> = {
 };
 
 /**
- * 탭 하나에 들어갈 `<svg>`.
+ * 아이콘 하나짜리 `<svg>`.
  *
  * `aria-hidden` 입니다 — 바로 옆에 글자 라벨이 있으므로, 낭독기가
  * 그림까지 읽으면 같은 것을 두 번 말합니다.
+ *
+ * ## ⚠️ 크기와 선을 **여기서** 붙입니다 (결함 74)
+ *
+ * 예전에는 `<svg viewBox="0 0 24 24">` 뿐이었고, 크기·선·색은 전부
+ * `app.css` 의 `.ico svg` 가 줬습니다. 그래서 이 마크업은
+ * **`<span class="ico">` 안에 있을 때만** 제대로 그려졌습니다.
+ *
+ * 부르는 곳이 둘인데 하나가 감싸는 것을 빠뜨렸습니다 — 칸반 카드의
+ * "회의에서 나온 업무" 표시가 그것입니다. 규칙이 하나도 안 걸리니
+ * SVG 는 제 자리를 다 차지하고(**실측 294×294**) 기본 `fill: black` 으로
+ * 칠해져서, 카드 한가운데에 **거대한 검은 말풍선**이 생겼습니다.
+ * 밝은 모드·어두운 모드 양쪽에서요.
+ *
+ * 이제 스스로 그려집니다. CSS 는 여전히 이깁니다(선언이 표현 속성보다
+ * 세다) — `.ico svg` 의 `--ico` 로 크기를 바꾸는 길은 그대로입니다.
  */
 export function iconSvg(name: IconName): string {
   return (
-    '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true" focusable="false">' +
     PATHS[name] +
     '</svg>'
   );
