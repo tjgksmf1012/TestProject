@@ -12,6 +12,7 @@ import {
   orderForDisplay,
   rangeBar,
   readBeforeTheNumber,
+  roleOf,
   teamWarnings,
   type Category,
   type MemberScore,
@@ -374,5 +375,39 @@ describe('describeCategory', () => {
 
   it('모르는 것은 그대로 — 삼키면 원인을 못 본다', () => {
     strictEqual(describeCategory('brand_new'), 'brand_new');
+  });
+});
+
+describe('카드에 적을 역할', () => {
+  it('⭐ 겸직이면 **둘 다** 보인다 — 서버의 `role` 은 주 역할 하나뿐이다', () => {
+    const people = [{ user_id: 1, name: '김민수', role_shares: { developer: 0.4, planner: 0.6 } }];
+    strictEqual(roleOf(member(), people), '기획 60% · 개발 40%');
+  });
+
+  it('⚠️ 동률이면 서버의 `max` 는 사전 순에 달린다 — 비중을 그대로 보여준다', () => {
+    const people = [{ user_id: 1, name: '김민수', role_shares: { developer: 0.5, planner: 0.5 } }];
+    const text = roleOf(member(), people);
+    strictEqual(text.includes('개발 50%'), true);
+    strictEqual(text.includes('기획 50%'), true);
+  });
+
+  it('단일 역할은 이름만', () => {
+    const people = [{ user_id: 1, name: '김민수', role_shares: { planner: 1 } }];
+    strictEqual(roleOf(member(), people), '기획');
+  });
+
+  it('⚠️ 비중을 모르면 서버가 준 것을 그대로 쓴다 — **지어내지 않는다**', () => {
+    strictEqual(roleOf(member(), [{ user_id: 1, name: '김민수' }]), '개발');
+    strictEqual(roleOf(member(), []), '개발');
+  });
+
+  it('⚠️ 모르는 역할은 **그대로** 둔다 — 지어낸 한국어보다 영어 식별자가 정직하다', () => {
+    const people = [{ user_id: 1, name: '김민수', role_shares: { tester: 1 } }];
+    strictEqual(roleOf(member(), people), 'tester');
+  });
+
+  it('0 인 역할은 안 보인다', () => {
+    const people = [{ user_id: 1, name: '김민수', role_shares: { developer: 1, planner: 0 } }];
+    strictEqual(roleOf(member(), people), '개발');
   });
 });

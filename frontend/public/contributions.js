@@ -84,6 +84,21 @@ function categoriesForDisplay(member) {
 function hasNoEvidence(member) {
   return member.categories.every((c) => c.event_count === 0);
 }
+var ROLE_NAMES = {
+  developer: "개발",
+  planner: "기획",
+  designer: "디자인"
+};
+function roleLabel(key) {
+  return ROLE_NAMES[key] ?? key;
+}
+function roleOf(member, people2) {
+  const shares = people2.find((p) => p.user_id === member.user_id)?.role_shares;
+  const named = Object.entries(shares ?? {}).filter(([, v]) => v > 0);
+  if (named.length === 0) return roleLabel(member.role);
+  if (named.length === 1) return roleLabel(named[0]?.[0] ?? member.role);
+  return named.sort((a, b) => b[1] - a[1]).map(([key, value]) => `${roleLabel(key)} ${Math.round(value * 100)}%`).join(" · ");
+}
 
 // src/lib/contribution/final.ts
 function sameValue(a, b) {
@@ -500,7 +515,7 @@ function memberCard(member) {
 <article class="card">
   <header>
     <span class="who">${escapeHtml(nameOf(member.user_id, people))}</span>
-    <span class="role">${escapeHtml(member.role)}</span>
+    <span class="role">${escapeHtml(roleOf(member, people))}</span>
   </header>
 
   <p class="range">${escapeHtml(describeRange(member))}</p>

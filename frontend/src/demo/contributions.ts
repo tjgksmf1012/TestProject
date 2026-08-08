@@ -19,6 +19,7 @@ import {
   orderForDisplay,
   rangeBar,
   readBeforeTheNumber,
+  roleOf,
   teamWarnings,
   type MemberScore,
   type Person,
@@ -98,7 +99,7 @@ function memberCard(member: MemberScore): string {
 <article class="card">
   <header>
     <span class="who">${escapeHtml(nameOf(member.user_id, people))}</span>
-    <span class="role">${escapeHtml(member.role)}</span>
+    <span class="role">${escapeHtml(roleOf(member, people))}</span>
   </header>
 
   <p class="range">${escapeHtml(describeRange(member))}</p>

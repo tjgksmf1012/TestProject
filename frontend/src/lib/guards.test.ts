@@ -804,6 +804,28 @@ describe('상태 화면 (지시서 §7)', () => {
     );
   });
 
+  it('⭐ 기여도 카드가 역할을 **겸직까지** 말한다', () => {
+    // 서버의 `role` 은 주 역할 **하나**입니다. `blended_profile` 이
+    // `max(shares)` 로 고르는데 동률이면 사전 순에 달립니다. 그래서 카드가
+    // `member.role` 을 그대로 쓰던 동안, 시연 데이터의 세 사람이 전부
+    // `developer` 로 보였습니다 — 실제로는 50/50, 60/40, 70/30 이었습니다.
+    //
+    // ⚠️ 이걸 되돌려 봤을 때 **번들 신선도 테스트만** 깨졌습니다.
+    // 그건 "빌드를 안 했다" 는 뜻이고 의미 검사가 아닙니다. tsc 의
+    // 미사용 import 경고도 카드가 무엇을 그리는지는 안 봅니다.
+    const card = codeOf(readFileSync(join(DEMO, 'contributions.ts'), 'utf8'));
+    strictEqual(
+      /roleOf\(/.test(card),
+      true,
+      '카드가 `roleOf` 를 안 씁니다 — 겸직이 주 역할 하나로 접힙니다',
+    );
+    strictEqual(
+      /class="role">\$\{escapeHtml\(member\.role\)/.test(card),
+      false,
+      '카드가 `member.role` 을 그대로 씁니다',
+    );
+  });
+
   it('⭐ 역할을 **정할 자리가 있고 실제로 보낸다**', () => {
     // 가입·초대가 `developer: 1.0` 을 하드코딩하고 바꿀 자리가 없었습니다.
     // 그래서 기획자·디자이너 프로파일이 도달 불가였고, 문서만 쓴 사람이
