@@ -552,3 +552,41 @@ def test_the_readme_table_count_is_not_stale():
         f"README 가 테이블을 {wrong} 개라고 적었는데 실제는 {actual} 개입니다. "
         "models.py 를 고쳤으면 README 도 같이 고치세요."
     )
+
+
+def test_nothing_claims_the_audio_is_encrypted_while_it_is_plaintext():
+    """⭐ 하다 만 암호화는 **안 한 것보다 나쁘다** — 없는 보호를 믿게 만든다.
+
+    `audio_encryption_key_id` 라는 이름 때문에 P4(별도 암호화 키)가
+    충족된 것처럼 읽혔습니다. 실제로는 그 값을 `audio_assets` 에 복사만
+    하고 암·복호를 하는 코드가 없습니다. 오디오는 평문입니다.
+
+    그래서 **둘 중 하나여야** 합니다.
+      · 정말 암호화한다 → 청크를 쓰고 읽는 경로에 암·복호가 있다
+      · 아직 아니다     → 설정·문서가 그렇게 말한다
+
+    이 테스트는 **둘이 어긋나는 것**을 잡습니다. 나중에 암호화를 붙이면
+    첫 번째 가지로 넘어가고, 이 테스트는 그때 자연스럽게 통과합니다.
+    """
+    store = (REPO_ROOT / "backend" / "teamflow" / "audio" / "chunk_store.py").read_text()
+
+    # 실제로 암·복호를 하는가? 라이브러리 호출로 판단한다 — 주석의 단어가
+    # 아니라 코드를 본다.
+    encrypts = any(
+        marker in store
+        for marker in ("Fernet", "AESGCM", "encrypt(", "cryptography", "nacl")
+    )
+    if encrypts:
+        return  # 첫 번째 가지. 이 테스트가 할 일은 없다.
+
+    config = (REPO_ROOT / "backend" / "teamflow" / "config.py").read_text()
+    docs = (REPO_ROOT / "docs" / "07-법적-윤리-요구사항.md").read_text()
+
+    assert "평문" in config, (
+        "오디오를 암호화하지 않는데 `config.py` 가 그 사실을 말하지 않습니다. "
+        "`audio_encryption_key_id` 는 이름만으로 암호화를 암시합니다."
+    )
+    assert "평문" in docs, (
+        "`docs/07` 의 P4 가 아직 충족되지 않았다는 사실이 문서에 없습니다. "
+        "체크리스트가 사실과 다르면 감사에서 그대로 통과합니다."
+    )
