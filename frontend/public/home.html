@@ -52,6 +52,10 @@
     <button id="logout" type="button">로그아웃</button>
   </header>
 
+  <!-- 로그아웃이 **실제로 안 됐을 때** (결함 82). 화면만 옮기고 세션이
+       남아 있으면, 공용 PC 에서 다음 사람이 이 계정으로 들어옵니다. -->
+  <p class="status" id="logout-note" hidden></p>
+
   <!-- 비워 둔다. "불러오는 중…" 을 여기 적어 두면 **언제나** 한 번
        깜빡입니다 — 대부분의 요청은 200ms 안에 끝나기 때문입니다.
        로딩 표시는 `src/lib/ui/pending.ts` 가 늦게 켭니다. -->

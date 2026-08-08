@@ -32,6 +32,7 @@ import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { clearSkeleton, rowItems, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
+import { wireLogout } from './logout.ts';
 import { bootApp } from './pwa.ts';
 
 const params = new URLSearchParams(location.search);
@@ -371,14 +372,7 @@ $('contrib').addEventListener('click', () => {
   // 기여도는 프로젝트 단위지만 이름을 붙이려면 회의 단위 명단 API 가 필요하다.
   location.href = `/contributions.html?project=${projectId}&meeting=${meetingId}`;
 });
-$('logout').addEventListener('click', () => {
-  void fetch(`${apiBase}/api/auth/logout`, {
-    method: 'POST',
-    credentials: 'same-origin',
-  }).then(() => {
-    location.href = '/login.html';
-  });
-});
+wireLogout({ button: $('logout'), note: $('logout-note'), apiBase });
 
 async function start(): Promise<void> {
   // 화면이 서버에 "나는 누구인가" 를 묻는다. 이 한 줄이 `?me=1` 을 대체한다.

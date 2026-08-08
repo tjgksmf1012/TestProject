@@ -29,6 +29,7 @@ import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { clearSkeleton, projectCards, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
+import { wireLogout } from './logout.ts';
 import { bootApp } from './pwa.ts';
 
 const params = new URLSearchParams(location.search);
@@ -238,14 +239,7 @@ input('code').addEventListener('blur', () => {
   if (clean.length === CODE_LENGTH) input('code').value = formatCode(clean);
 });
 
-$('logout').addEventListener('click', () => {
-  void fetch(`${apiBase}/api/auth/logout`, {
-    method: 'POST',
-    credentials: 'same-origin',
-  }).then(() => {
-    location.href = '/login.html';
-  });
-});
+wireLogout({ button: $('logout'), note: $('logout-note'), apiBase });
 
 async function start(): Promise<void> {
   const me = await get('/api/auth/me');

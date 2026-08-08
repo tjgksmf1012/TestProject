@@ -125,6 +125,16 @@ function safeApiBase(raw, pageOrigin) {
 function isSessionExpired(status) {
   return status === 401;
 }
+function logoutOutcome(status) {
+  if (status === null) return "still-signed-in";
+  if (status === 401) return "done";
+  if (status >= 200 && status < 300) return "done";
+  return "still-signed-in";
+}
+function describeLogoutFailure(status) {
+  const why = status === null ? "서버에 연결하지 못했습니다" : `서버가 처리하지 못했습니다 (HTTP ${status})`;
+  return `로그아웃하지 못했습니다 — ${why}. 이 기기에 로그인 상태가 그대로 남아 있으니 다시 눌러 주세요.`;
+}
 
 // src/lib/project/setup.ts
 var CODE_LENGTH = 8;
@@ -389,6 +399,26 @@ function renderNav(current) {
   host.innerHTML = links + notes;
 }
 
+// src/demo/logout.ts
+function wireLogout({ button, note, apiBase: apiBase2, next = "/login.html" }) {
+  button.addEventListener("click", () => {
+    button.setAttribute("aria-busy", "true");
+    note.hidden = true;
+    void fetch(`${apiBase2}/api/auth/logout`, {
+      method: "POST",
+      credentials: "same-origin"
+    }).then((response) => response.status).catch(() => null).then((status) => {
+      button.removeAttribute("aria-busy");
+      if (logoutOutcome(status) === "done") {
+        location.href = next;
+        return;
+      }
+      note.textContent = describeLogoutFailure(status);
+      note.hidden = false;
+    });
+  });
+}
+
 // src/lib/pwa/install.ts
 function isIOS(userAgent) {
   if (/iPhone|iPod/.test(userAgent)) return true;
@@ -620,14 +650,7 @@ input("code").addEventListener("blur", () => {
   const clean = normalizeCode(input("code").value);
   if (clean.length === CODE_LENGTH) input("code").value = formatCode(clean);
 });
-$("logout").addEventListener("click", () => {
-  void fetch(`${apiBase}/api/auth/logout`, {
-    method: "POST",
-    credentials: "same-origin"
-  }).then(() => {
-    location.href = "/login.html";
-  });
-});
+wireLogout({ button: $("logout"), note: $("logout-note"), apiBase });
 async function start() {
   const me = await get("/api/auth/me");
   if (!me.ok) {

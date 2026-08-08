@@ -367,6 +367,49 @@ describe('줄어들 수 없는 컨트롤 (결함 77)', () => {
   });
 });
 
+describe('로그아웃이 안 될 때 (결함 82)', () => {
+  const demoFiles = (): { rel: string; code: string }[] =>
+    readdirSync(join(ROOT, 'src', 'demo'))
+      .filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))
+      .map((n) => ({ rel: `src/demo/${n}`, code: readFileSync(join(ROOT, 'src', 'demo', n), 'utf8') }));
+
+  it('⭐ 로그아웃 응답을 안 보고 화면을 옮기지 않는다', () => {
+    // 홈과 로비가 이렇게 쓰고 있었습니다.
+    //
+    //     void fetch(`${apiBase}/api/auth/logout`, { method: 'POST' })
+    //       .then(() => { location.href = '/login.html'; });
+    //
+    // `fetch` 는 500 에서도 resolve 합니다. 서버가 세션을 못 끊어도 화면은
+    // 로그인 화면으로 갑니다 — 그 사람은 로그아웃했다고 믿고 자리를 뜨는데
+    // **세션 토큰은 살아 있습니다.** 서버의 `logout` docstring 이 경고하는
+    // 바로 그 상황입니다.
+    const offenders = demoFiles()
+      .filter(({ rel }) => rel !== 'src/demo/logout.ts')
+      .filter(({ code }) => /auth\/logout/.test(code))
+      .map(({ rel }) => rel);
+    strictEqual(offenders.join(', '), '', '`demo/logout.ts` 의 `wireLogout` 을 쓰세요');
+  });
+
+  it('⭐ 로그아웃 버튼이 있는 화면에는 실패를 적을 자리가 있다', () => {
+    const missing = readdirSync(PUBLIC)
+      .filter((n) => n.endsWith('.html'))
+      .filter((n) => /id="logout"/.test(readFileSync(join(PUBLIC, n), 'utf8')))
+      .filter((n) => !/id="logout-note"/.test(readFileSync(join(PUBLIC, n), 'utf8')));
+    strictEqual(missing.join(', '), '', '`<p class="status" id="logout-note" hidden>` 를 두세요');
+  });
+
+  it('⭐ 그 자리를 실제로 부른다', () => {
+    // 요소만 두고 안 쓰면 결함 47 입니다. 화면마다 `wireLogout` 에
+    // `logout-note` 를 넘기는지 봅니다.
+    const wired = demoFiles()
+      .filter(({ rel }) => rel !== 'src/demo/logout.ts')
+      .filter(({ code }) => /wireLogout\(/.test(code));
+    strictEqual(wired.length >= 2, true, '로그아웃 화면이 둘인데 그보다 적게 잡혔습니다');
+    const silent = wired.filter(({ code }) => !/logout-note/.test(code)).map(({ rel }) => rel);
+    strictEqual(silent.join(', '), '', '`note: $(\'logout-note\')` 를 넘기세요');
+  });
+});
+
 describe('복사가 안 될 때 (결함 81)', () => {
   const PUBLIC_DIR = join(ROOT, 'public');
   const demoFiles = (): { rel: string; code: string }[] => {
