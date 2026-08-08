@@ -318,6 +318,55 @@ describe('모바일 규칙', () => {
   });
 });
 
+describe('줄어들 수 없는 컨트롤 (결함 77)', () => {
+  const screens = (): { name: string; html: string }[] =>
+    readdirSync(PUBLIC)
+      .filter((name) => name.endsWith('.html'))
+      .map((name) => ({ name, html: readFileSync(join(PUBLIC, name), 'utf8') }));
+
+  it('⭐ `.row` 안에 못 줄어드는 컨트롤을 두면 줄바꿈을 허용한다', () => {
+    // 승인 화면이 이랬습니다.
+    //
+    //     app.css     .row > * { min-width: 0 }        ← 라벨은 0 까지 줄어든다
+    //     review.html select { min-width: 8rem }        ← 컨트롤은 못 줄어든다
+    //
+    // 라벨 상자보다 내용이 넓어지고, 넘친 부분이 **옆 라벨 글자 위로
+    // 올라탑니다.** 360·390px 에서 "마감일" 이 담당자 칸을 덮었습니다.
+    //
+    // ⚠️ `audit360.mjs`(가로 넘침)는 이걸 **못 잡습니다.** `body` 에
+    // `overflow-x: hidden` 이 있어 넘친 것이 잘리고, 잘린 것은 넘침으로
+    // 세지지 않습니다. 잘린 것은 가로 스크롤보다 나쁩니다 — 밀어서
+    // 볼 수조차 없습니다.
+    //
+    // 그래서 **겹치는 대신 줄을 바꾸게** 합니다.
+    const offenders: string[] = [];
+    for (const { name, html } of screens()) {
+      const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+      const bare = style.replace(/\/\*[\s\S]*?\*\//g, '');
+      // 이 화면이 `.row` 를 쓰는가
+      if (!/class="row"/.test(html) && !/\.row\b/.test(bare)) continue;
+      // 컨트롤에 못 줄어드는 바닥을 줬는가
+      const hardFloor = [...bare.matchAll(/([^{}]+)\{([^{}]*)\}/g)].some(
+        (rule) =>
+          /\b(select|input|textarea)\b/.test(rule[1] ?? '') &&
+          /min-width:\s*(?!0)/.test(rule[2] ?? ''),
+      );
+      if (!hardFloor) continue;
+      // 그러면 줄바꿈과 내용 바닥이 **둘 다** 있어야 한다
+      const wraps = /\.row[^{]*\{[^}]*flex-wrap:\s*wrap/.test(bare);
+      const floor = /\.row\s*>?\s*label[^{]*\{[^}]*min-width:\s*max-content/.test(bare);
+      if (!wraps || !floor) {
+        offenders.push(`${name} → ${!wraps ? 'flex-wrap 없음' : ''}${!wraps && !floor ? ' · ' : ''}${!floor ? 'label min-width: max-content 없음' : ''}`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`.row { flex-wrap: wrap }` 와 `.row > label { min-width: max-content }` 를 같이 두세요',
+    );
+  });
+});
+
 describe('한국어 조사 (결함 76)', () => {
   /** `src/` 의 프로덕션 코드에서 주석·import 를 걷어낸 것. */
   const codeFiles = (): { rel: string; code: string }[] => {

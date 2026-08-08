@@ -29,6 +29,9 @@
 
 
   #code { font: 700 1.5rem/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
+  /* 코드가 **없을 때**는 코드 조판을 벗긴다. 안 그러면 `(없음)` 이 값처럼
+     읽힌다 (결함 71 의 뒷면). */
+  #code.none { font: inherit; letter-spacing: normal; color: var(--text-subtle); }
   #next { font-size: var(--fs-label); margin: var(--sp-2) 0 0; }
   #members { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-1) 0 0; }
 

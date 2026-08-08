@@ -715,6 +715,7 @@ function render(detail) {
   input("repo").value = detail.github_repo ?? "";
   inviteCode = detail.invite_code || null;
   $("code").textContent = inviteCode ? formatCode(inviteCode) : NO_CODE;
+  $("code").classList.toggle("none", inviteCode === null);
   const button = $("copy");
   button.disabled = inviteCode === null;
   button.title = inviteCode === null ? "초대 코드가 없습니다 — 새로 만들어 주세요" : "";

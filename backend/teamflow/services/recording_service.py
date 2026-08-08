@@ -49,6 +49,44 @@ class TrackError(Exception):
     """트랙 상태가 맞지 않는다."""
 
 
+# ── 트랙 상태를 사람 말로 ────────────────────────────────────
+#
+# ⚠️ 예전에는 이렇게 나갔습니다 (결함 78).
+#
+#     트랙에 참가하지 못했습니다: 이미 종료된 트랙입니다 (status=completed)
+#
+# 두 가지가 잘못됐습니다.
+#
+#   1. **`status=completed` 는 우리 내부 이름**입니다. 사람은 그걸 보고
+#      앱이 고장 났다고 읽습니다 — 결함 73(본문 JSON)·76(`은(는)`)과
+#      같은 부류입니다. 화면에 나가는 글자는 사람의 말이어야 합니다.
+#   2. **다음 할 일이 없습니다.** 결함 48 에서 배운 것이 그것입니다 —
+#      나쁜 건 어색함이 아니라, 사람이 무엇을 해야 할지 모르는 것입니다.
+#
+# ⚠️ **모르는 상태는 지어내지 않습니다.** 아래 표에 없는 값이 오면 그 값을
+# 그대로 보여 줍니다. 그럴듯한 문장을 지어내면 사람은 없는 상황을 믿습니다
+# (결함 70 의 "모르는 역할은 그대로 둔다" 와 같은 규칙).
+# ⚠️ **상태 문장과 다음 할 일을 나눠 둡니다.** 무슨 일이 있었는지는 상태가
+# 정하지만, 무엇을 해야 하는지는 **어디서 막혔는지**가 정합니다. 녹음 화면을
+# 열다 막힌 사람과, 이미 녹음 중이던 폰이 청크를 더 보내다 막힌 경우는
+# 해야 할 일이 다릅니다.
+_TRACK_STATE_MESSAGE: dict[str, str] = {
+    "completed": "이 회의의 녹음은 이미 끝났습니다",
+    "unusable": "이 트랙은 녹음이 너무 많이 끊겨 쓸 수 없습니다",
+    "aborted": "이 트랙은 강제 종료됐습니다",
+}
+
+
+def describe_track_state(status: str) -> str:
+    """트랙 상태 → 사람이 읽을 한 줄. 모르는 값은 **그대로** 돌려준다."""
+    known = _TRACK_STATE_MESSAGE.get(status)
+    if known is not None:
+        return known
+    # 모르는 상태. 지어내지 않고 있는 그대로 — 그래야 다음 사람이 이 표에
+    # 빠진 값이 있다는 걸 알아챈다.
+    return f"이 트랙은 지금 녹음을 받을 수 없습니다 (상태: {status})"
+
+
 @dataclass(frozen=True, slots=True)
 class ConsentStatus:
     """회의 참여자들의 동의 현황.
@@ -317,7 +355,9 @@ def join_track(
 
     if track is not None:
         if track.status != "recording":
-            raise TrackError(f"이미 종료된 트랙입니다 (status={track.status})")
+            raise TrackError(
+                f"{describe_track_state(track.status)} — 로비에서 회의 상태를 확인하세요."
+            )
         return track
 
     track = m.MeetingTrack(
@@ -361,7 +401,9 @@ def store_chunk(
     """
     track = _load_track(session, meeting_id, track_id)
     if track.status != "recording":
-        raise TrackError(f"녹음이 끝난 트랙입니다 (status={track.status})")
+        raise TrackError(
+            f"{describe_track_state(track.status)} — 더 이상 녹음을 보낼 수 없습니다."
+        )
 
     # 매 청크마다 확인한다. 회의 도중에 철회할 수 있기 때문이다.
     # 본인 동의를 먼저 본다 — 혼자 철회한 경우 전체 검사만으로는 막히지 않는다

@@ -590,3 +590,43 @@ def test_nothing_claims_the_audio_is_encrypted_while_it_is_plaintext():
         "`docs/07` 의 P4 가 아직 충족되지 않았다는 사실이 문서에 없습니다. "
         "체크리스트가 사실과 다르면 감사에서 그대로 통과합니다."
     )
+
+
+def test_no_error_message_leaks_an_internal_state_name():
+    """⭐ 사람에게 보여주는 문장에 **내부 이름**을 넣지 않는다 (결함 78).
+
+    녹음 화면이 이렇게 말하고 있었습니다.
+
+        트랙에 참가하지 못했습니다: 이미 종료된 트랙입니다 (status=completed)
+
+    `status=completed` 는 우리 DB 의 값입니다. 사람에게는 아무 뜻이 없고,
+    괄호 안의 영어를 보면 **앱이 고장 났다**고 읽습니다. 결함 73(본문 JSON이
+    그대로)·76(`은(는)`)과 같은 부류입니다 — 화면에 나가는 글자가 사람의
+    말이 아닌 것.
+
+    ⚠️ **예외를 좁게 둡니다.** 로그와 개발자용 메시지는 대상이 아닙니다.
+    여기서 보는 것은 `HTTPException` 의 `detail` 로 흘러가는 예외 문구,
+    즉 `ConsentError`·`TrackError` 처럼 **화면이 그대로 받아 적는** 것들입니다.
+    """
+    import re
+
+    services = REPO_ROOT / "backend" / "teamflow" / "services"
+    # 화면까지 흘러가는 예외들. `api/main.py` 가 이들을 `detail` 로 바꾼다.
+    raised = re.compile(r"raise\s+(ConsentError|TrackError|ValueError)\((.*?)\)", re.S)
+    # 내부 이름이 새는 모양: `status=`, `state=`, `phase=` 같은 key=value
+    leak = re.compile(r"\b(status|state|phase|kind|type)\s*=\s*\{")
+
+    offenders: list[str] = []
+    for path in sorted(services.glob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        for match in raised.finditer(source):
+            body = match.group(2)
+            if leak.search(body):
+                line = source[: match.start()].count("\n") + 1
+                offenders.append(f"{path.name}:{line} {body.strip()[:60]}")
+
+    assert offenders == [], (
+        "화면에 나가는 문구에 내부 상태 이름이 들어 있습니다: "
+        + " | ".join(offenders)
+        + ". `describe_track_state` 처럼 사람 말로 옮기는 자리를 두세요."
+    )

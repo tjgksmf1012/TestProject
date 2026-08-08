@@ -39,6 +39,24 @@
       .conf.low { color: var(--warn); opacity: 1; font-weight: 700; }
 
       .row label { font-size: var(--fs-label); opacity: .75; display: flex; gap: var(--sp-icon); align-items: center; }
+
+      /* ⚠️ **겹치는 대신 줄을 바꾸게 한다** (결함 77).
+       *
+       * `app.css` 의 `.row > * { min-width: 0 }` 은 라벨이 0 까지 줄어들게
+       * 합니다(결함 53 때 넣은 것). 그런데 그 안의 `select`·`input[type=date]`
+       * 는 아래에서 `min-width: 8rem` 을 받아 **못 줄어듭니다.** 그래서 라벨
+       * 상자보다 내용이 넓어지고, 넘친 부분이 **옆 라벨 글자 위로 올라탑니다** —
+       * 360·390px 에서 "마감일" 이 담당자 칸을 덮었습니다.
+       *
+       * ⚠️ `audit360.mjs` 는 이걸 **못 잡습니다.** 그 도구는 가로 넘침을 보는데
+       * `body { overflow-x: hidden }` 이라 넘친 것이 잘려서 0px 로 나옵니다.
+       * 잘린 것은 가로 스크롤보다 나쁩니다 — 밀어서 볼 수조차 없습니다.
+       *
+       * `max-content` 로 바닥을 주면 flex 가 **줄바꿈으로** 해결합니다.
+       * 숫자를 손으로 고르지 않는 이유: 라벨 글자 폭은 글꼴·번역에 따라
+       * 달라지는데 `max-content` 는 그때그때 실제 폭을 씁니다. */
+      .row { flex-wrap: wrap; }
+      .row > label { min-width: max-content; }
       /* ⭐ 글자를 16px 밑으로 내리지 않는다. iOS Safari 는 그보다 작은
          입력 칸에 포커스가 가면 화면을 확대하고 **확대된 채로 돌아오지
          않는다.** 승인 화면은 담당자 고르기·마감일 넣기가 전부 입력이라

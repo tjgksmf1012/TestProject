@@ -122,6 +122,10 @@ function render(detail: Detail): void {
   // 서버가 하이픈·공백을 걷어내므로 이대로 복사해도 통한다.
   inviteCode = detail.invite_code || null;
   $('code').textContent = inviteCode ? formatCode(inviteCode) : NO_CODE;
+  // ⚠️ **없는 것을 코드처럼 보이게 두지 않습니다.** `#code` 는 초대 코드용
+  // 조판(굵은 고정폭 24px, 자간 넓힘)인데, `(없음)` 까지 그렇게 그리면
+  // 그것도 코드로 읽힙니다 — 결함 71 이 고친 오해를 조판이 거들게 됩니다.
+  $('code').classList.toggle('none', inviteCode === null);
 
   // ⚠️ 코드가 없으면 **누를 수 없게** 합니다. 예전에는 눌리는 채로 두고
   // 화면 글자를 복사했는데, 그러면 클립보드에 `(없음)` 이 들어가고 버튼은

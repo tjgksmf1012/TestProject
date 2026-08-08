@@ -636,7 +636,13 @@ def test_chunks_are_refused_after_completion(client: TestClient, track: dict):
 
     response = put_chunk(client, track["meeting_id"], track["track_id"], 1)
     assert response.status_code == 404
-    assert "녹음이 끝난" in response.json()["detail"]
+    detail = response.json()["detail"]
+    # 무슨 일이 있었는지 + **더 보낼 수 없다**는 것까지 말한다.
+    assert "이미 끝났습니다" in detail
+    assert "더 이상 녹음을 보낼 수 없습니다" in detail
+    # ⚠️ 내부 상태 이름을 사람에게 보여주지 않는다 (결함 78).
+    assert "status=" not in detail
+    assert "completed" not in detail
 
 
 def test_rejoining_a_completed_track_conflicts(
@@ -647,6 +653,15 @@ def test_rejoining_a_completed_track_conflicts(
 
     response = join(client, meeting["meeting_id"], meeting["user_ids"][0])
     assert response.status_code == 409
+
+    # ⚠️ 사람이 읽는 문장이어야 한다 (결함 78). 예전에는 이렇게 나갔다:
+    #     "이미 종료된 트랙입니다 (status=completed)"
+    # 내부 상태 이름은 사람에게 아무 뜻이 없고, **다음 할 일**도 없었다.
+    detail = response.json()["detail"]
+    assert "이미 끝났습니다" in detail
+    assert "로비에서 회의 상태를 확인하세요" in detail
+    assert "status=" not in detail
+    assert "completed" not in detail
 
 
 # ── 트랙 현황 ──────────────────────────────────────────────────
