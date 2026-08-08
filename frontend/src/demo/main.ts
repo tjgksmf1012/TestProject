@@ -199,8 +199,19 @@ async function joinMeeting(id: string): Promise<void> {
     return;
   }
   if (!response.ok) {
-    const detail = await response.text();
-    $('who').textContent = `트랙에 참가하지 못했습니다: ${detail}`;
+    // ⚠️ 예전에는 `await response.text()` 였습니다. 그러면 화면에
+    // **본문 JSON 이 그대로** 나옵니다 —
+    //
+    //     트랙에 참가하지 못했습니다: {"detail":"녹음에 동의하지 않았습니다"}
+    //
+    // 결함 51 과 같은 부류인데 그때 안 잡혔습니다. 그 수색은 `.json()` 뒤에
+    // 붙은 `as { detail?: string }` 를 찾았고, 여기는 `.text()` 라 안 걸렸습니다.
+    // **같은 파일 아래쪽(`finish`)은 이미 `detailText` 를 쓰고 있었습니다.**
+    const body = await response.json().catch(() => null);
+    $('who').textContent = `트랙에 참가하지 못했습니다: ${detailText(
+      body,
+      `HTTP ${response.status}`,
+    )}`;
     return;
   }
 

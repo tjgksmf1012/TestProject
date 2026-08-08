@@ -44,7 +44,9 @@
         background: color-mix(in srgb, currentColor 6%, transparent);
         padding: var(--sp-2); border-radius: var(--r-badge); margin: var(--sp-3) 0;
       }
-      label.check { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-label); padding: var(--sp-2) 0; }
+      /* 배치는 `app.css` 의 `label:has(> input[type=checkbox])` 가 합니다 —
+         여기서 다시 적으면 두 곳이 어긋납니다. 크기만 이 화면 것으로. */
+      label.check { font-size: var(--fs-label); }
     </style>
   </head>
   <body>

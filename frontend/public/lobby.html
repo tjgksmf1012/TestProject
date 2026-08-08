@@ -50,8 +50,13 @@
   .extras { margin: var(--sp-3) 0 0; padding: var(--sp-2) var(--sp-3) var(--sp-3);
             border: 1px solid var(--line); border-radius: var(--r-card); }
   .extras legend { padding: 0 var(--sp-1); font-size: var(--fs-label); color: var(--text-subtle); }
-  .extras label { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-icon);
-                  align-items: baseline; margin: var(--sp-2) 0 0; font-size: var(--fs-label); }
+  /* ⚠️ 예전에는 여기에 `display: grid; grid-template-columns: auto 1fr` 이
+     있었습니다. 그리드 항목이 **셋**(체크박스 · 글자 · `.hint`)이라
+     `.hint` 가 1열로 떨어지고, 그 열이 설명 글 너비만큼 벌어졌습니다.
+     설명이 라벨 글자보다 **223px 왼쪽**에 찍혔습니다 (결함 72).
+     지금은 글자와 설명을 한 `<span>` 에 넣고 `app.css` 의
+     `label:has(> input[type=checkbox])` 규칙(flex)을 그대로 씁니다. */
+  .extras label { margin: var(--sp-2) 0 0; font-size: var(--fs-label); }
   .extras .hint { display: block; color: var(--text-subtle); font-size: var(--fs-caption); }
     </style>
 </head>
@@ -72,10 +77,14 @@
          거부해도 회의는 그대로 진행된다 — 그게 분리해서 받는 이유다. -->
     <fieldset class="extras">
       <legend>따로 받는 동의</legend>
+      <!-- ⚠️ 글자와 설명을 **한 상자에** 넣습니다. 형제로 두면 체크박스
+           옆 열이 아니라 그 아래 열로 떨어집니다 (결함 72). -->
       <label><input type="checkbox" id="keep-audio" checked />
-        원본 음성 파일 보관 <span class="hint">거부하면 회의록을 만든 뒤 바로 지웁니다</span></label>
+        <span>원본 음성 파일 보관
+          <span class="hint">거부하면 회의록을 만든 뒤 바로 지웁니다</span></span></label>
       <label><input type="checkbox" id="keep-voiceprint" checked />
-        목소리 특징 저장 <span class="hint">거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다</span></label>
+        <span>목소리 특징 저장
+          <span class="hint">거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다</span></span></label>
     </fieldset>
 
     <div class="row" style="margin-top:.75rem">

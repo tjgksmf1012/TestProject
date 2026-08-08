@@ -1438,8 +1438,11 @@ async function joinMeeting(id) {
     return;
   }
   if (!response.ok) {
-    const detail = await response.text();
-    $("who").textContent = `트랙에 참가하지 못했습니다: ${detail}`;
+    const body = await response.json().catch(() => null);
+    $("who").textContent = `트랙에 참가하지 못했습니다: ${detailText(
+      body,
+      `HTTP ${response.status}`
+    )}`;
     return;
   }
   const track = await response.json();

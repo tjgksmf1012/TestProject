@@ -192,6 +192,42 @@ describe('모바일 규칙', () => {
     strictEqual(offenders.join(', '), '');
   });
 
+  it('⭐ 오류 **본문 자체**를 화면에 넣지 않는다 (결함 73)', () => {
+    // 위 가드는 `.json()` 뒤에 붙은 `as { detail?: string }` 를 찾습니다.
+    // 그래서 **`.text()` 를 쓰는 곳은 안 걸렸습니다.** 녹음 화면이 그랬고,
+    // 화면에 이렇게 나왔습니다.
+    //
+    //     트랙에 참가하지 못했습니다: {"detail":"녹음에 동의하지 않았습니다"}
+    //
+    // 같은 파일 아래쪽(`finish`)은 이미 `detailText` 를 쓰고 있었습니다 —
+    // **한 곳만 고친 것**입니다. 사람은 중괄호를 보면 앱이 깨졌다고 읽고,
+    // 정작 읽어야 할 문장("녹음에 동의하지 않았습니다")은 못 봅니다.
+    //
+    // ⚠️ `.text()` 자체를 금지하지 않습니다 — 응답이 원래 텍스트인 곳이
+    // 있을 수 있습니다. 금지하는 것은 **그 값을 화면에 넣는 것**입니다.
+    const offenders: string[] = [];
+    for (const { name, source } of demoFiles()) {
+      const code = codeOf(source);
+      // `const x = await response.text()` 로 받은 이름을 모은다
+      const names = [...code.matchAll(/(?:const|let)\s+(\w+)\s*=\s*await\s+\w+\.text\(\)/g)].map(
+        (m) => m[1] as string,
+      );
+      for (const bound of names) {
+        // 그 이름이 textContent·innerHTML 로 들어가는가
+        const used = new RegExp(
+          `(?:textContent|innerHTML)\\s*=[^;]*\\b${bound}\\b`,
+          's',
+        ).test(code);
+        if (used) offenders.push(`${name} → ${bound}`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`await response.text()` 를 화면에 넣습니다. `detailText(await response.json(), …)` 를 쓰세요',
+    );
+  });
+
   it('⭐ 헤더를 객체로 겹쳐 쓰지 않는다 (결함 50)', () => {
     // 자바스크립트 객체 키는 대소문자를 구분하고 **HTTP 헤더는 안
     // 합니다.** 이 모양이 그래서 위험합니다.
@@ -279,6 +315,104 @@ describe('모바일 규칙', () => {
       }
     }
     strictEqual(offenders.join(', '), '');
+  });
+});
+
+describe('체크박스 (결함 72)', () => {
+  const appCss = (): string => readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+  const screens = (): { name: string; html: string }[] =>
+    readdirSync(PUBLIC)
+      .filter((name) => name.endsWith('.html'))
+      .map((name) => ({ name, html: readFileSync(join(PUBLIC, name), 'utf8') }));
+
+  /** `선택자 { 내용 }` 규칙을 전부. 주석은 미리 지운다. */
+  function rules(css: string): { selector: string; body: string }[] {
+    const bare = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    return [...bare.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+      selector: (m[1] ?? '').trim(),
+      body: m[2] ?? '',
+    }));
+  }
+
+  it('⭐ 글자 칸 크기를 체크박스에도 주지 않는다', () => {
+    // 공용 CSS 가 `input, select, textarea { width: 100%; min-height: 44px }`
+    // 였습니다. 체크박스도 `input` 이라 그 크기를 받아 **글자 칸만큼
+    // 부풀었습니다** — 실측 **217×44**. 로비의 ②③ 동의와 녹음 화면의
+    // Wake Lock 둘 다 파란 정사각형 하나가 화면 가운데 놓이고 라벨은
+    // 저 멀리 오른쪽으로 밀렸습니다.
+    //
+    // `tsc` 도 테스트도 CSS 를 안 보고, 브라우저 오류도 안 납니다.
+    // 캡처를 **사람 눈으로 볼 때만** 보였습니다.
+    const offenders: string[] = [];
+    for (const { selector, body } of rules(appCss())) {
+      // 글자 칸 크기를 정하는 규칙만 본다
+      if (!/\bwidth:\s*100%/.test(body) && !/min-height:\s*var\(--tap\)/.test(body)) continue;
+      // 그 규칙이 `input` 을 통째로 잡는가
+      if (!/(^|,)\s*input\s*(,|$)/.test(selector)) continue;
+      offenders.push(selector);
+    }
+    strictEqual(
+      offenders.join(' | '),
+      '',
+      '`input` 을 통째로 잡습니다. `input:not([type=checkbox]):not([type=radio])` 로 좁히세요',
+    );
+  });
+
+  it('⭐ 체크박스 색을 브라우저 기본 파랑에 맡기지 않는다', () => {
+    // 안 정하면 UA 스타일시트의 파랑이 칠해집니다. 청록으로 맞춘 아홉
+    // 화면에 파란 것 하나가 생기고 어두운 모드도 안 따라옵니다 —
+    // 결함 59(로그인 버튼만 파랑)와 같은 실패인데, **우리 CSS 가 아니라
+    // 브라우저 기본을 통해** 들어오므로 날 색(hex) 가드가 못 잡습니다.
+    const found = rules(appCss()).some(
+      ({ selector, body }) =>
+        /input\[type=['"]?checkbox/.test(selector) && /accent-color:\s*var\(--/.test(body),
+    );
+    strictEqual(found, true, 'app.css 가 체크박스에 accent-color 토큰을 주지 않습니다');
+  });
+
+  it('⭐ 누르는 것은 라벨이다 — 라벨이 44px 를 확보한다', () => {
+    // 체크박스 상자는 13px 입니다. 그걸 44px 로 늘리면 거대한 상자가
+    // 되고, 안 늘리면 접촉면이 모자랍니다. **라벨 어디를 눌러도 토글되는
+    // 것이 브라우저 기본 동작**이라 실제 접촉면은 `<label>` 입니다.
+    const found = rules(appCss()).some(
+      ({ selector, body }) =>
+        /label:has\(\s*>\s*input\[type=['"]?checkbox/.test(selector) &&
+        /min-height:\s*var\(--tap\)/.test(body),
+    );
+    strictEqual(found, true, '체크박스를 품은 라벨에 min-height: var(--tap) 이 없습니다');
+  });
+
+  it('⭐ 체크박스 라벨의 설명을 형제로 두지 않는다', () => {
+    // 로비의 ②③ 는 이렇게 적혀 있었습니다.
+    //
+    //     <label><input type="checkbox" …/>
+    //       원본 음성 파일 보관 <span class="hint">거부하면 …</span></label>
+    //
+    // 라벨이 `display: grid; grid-template-columns: auto 1fr` 였는데
+    // **그리드 항목이 셋**이었습니다 — 체크박스 · 익명 텍스트 · `.hint`.
+    // `.hint` 가 1열로 떨어지면서 그 열이 설명 글 너비만큼 벌어지고,
+    // 설명은 라벨 글자보다 **223px 왼쪽**에 찍혔습니다.
+    //
+    // 글자와 설명을 한 상자에 넣으면 항목이 둘이 되어 이 일이 안 생깁니다.
+    const offenders: string[] = [];
+    for (const { name, html } of screens()) {
+      for (const label of html.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label>/g)) {
+        const inner = label[1] ?? '';
+        if (!/type=['"]checkbox/.test(inner)) continue;
+        if (!/class=['"][^'"]*\bhint\b/.test(inner)) continue;
+        // 체크박스 **뒤**에 바로 오는 것이 hint 면 형제다 —
+        // 감싸는 <span> 이 있으면 그 사이에 여는 태그가 하나 더 있다.
+        const after = inner.slice(inner.indexOf('>', inner.indexOf('type=')) + 1);
+        const nextTag = after.match(/<(\/?)([a-z]+)([^>]*)>/);
+        const wrapped = nextTag?.[2] === 'span' && !/\bhint\b/.test(nextTag[3] ?? '');
+        if (!wrapped) offenders.push(`${name} → ${(inner.match(/id=['"]([^'"]+)/) ?? [])[1] ?? '?'}`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '설명(.hint)이 체크박스의 형제입니다. 글자와 함께 <span> 으로 감싸세요',
+    );
   });
 });
 
