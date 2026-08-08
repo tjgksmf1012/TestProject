@@ -147,11 +147,6 @@ export function safeApiBase(raw: string | null, pageOrigin: string): string {
   return target.origin + target.pathname.replace(/\/+$/, '');
 }
 
-/** 브라우저에서 쓰는 형태. 테스트는 위 순수 함수를 직접 부른다. */
-export function apiBaseFromLocation(search: string, pageOrigin: string): string {
-  return safeApiBase(new URLSearchParams(search).get('api'), pageOrigin);
-}
-
 /**
  * 서버 응답을 사람이 읽을 문구로.
  *

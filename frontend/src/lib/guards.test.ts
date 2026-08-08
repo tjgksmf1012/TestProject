@@ -12,7 +12,7 @@
  */
 
 import { strictEqual } from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
@@ -315,6 +315,97 @@ describe('모바일 규칙', () => {
       }
     }
     strictEqual(offenders.join(', '), '');
+  });
+});
+
+describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
+  // 이 저장소의 **대표 실패 방식**입니다 — 결함 47(`renderNav`),
+  // 감사 #8(진행률), #12(`extract_task_refs`), #13(확정 테이블),
+  // 결함 63(`DEADLINE_CHANGED`) 이 전부 같은 모양이었습니다.
+  // 백엔드에는 `EventType` 생산자 가드를 달았는데 **프런트에는 없었습니다.**
+  //
+  // 실제로 찾아보니 `lib/track/bar.ts` 의 `coverageBar`·`describeCoverage`
+  // 가 그랬습니다. CSS(`.cov`)도 있고 테스트 13개도 붙어 있는데 **그리는
+  // 화면이 0곳**이었습니다. 게다가 같은 판단(커버리지가 null 이면 "아직
+  // 모릅니다")을 `lobby/room.ts` 가 따로 구현해 화면에 그리고 있었습니다 —
+  // 같은 뜻을 두 벌 가지고 있고 그중 하나만 살아 있는 상태입니다.
+  //
+  // ⚠️ **면제에는 반드시 근거를 적습니다.** "테스트가 쓰니까 됐다" 는
+  // 근거가 아닙니다. 왜 화면이 안 부르는데도 남겨야 하는지를 씁니다.
+  const TEST_ONLY_ON_PURPOSE: Record<string, string> = {
+    'lib/nav/links.ts::labelOf':
+      'links.test.ts 가 "navLinks 와 tabsFor 의 라벨이 같은 표에서 나온다" 를 이걸로 확인한다. ' +
+      '지우면 두 곳이 서로 다른 글자를 써도 아무도 모른다',
+    'lib/nav/icons.ts::ICON_NAMES':
+      '아이콘 이름 목록. icons.test.ts 가 이걸로 전부를 훑는다 — 새 아이콘이 검사를 빠져나가지 못하게',
+    'lib/recording/session.ts::reduceAll':
+      '이벤트를 순서대로 적용하는 재생(replay)용. 실기기 로그를 그대로 돌려 보는 데 쓴다 (docs/09 실험 5)',
+    'lib/recording/capture.ts::estimateSessionBytes':
+      'docs/11 비용 계산의 근거. 문서의 숫자가 코드와 어긋나지 않게 테스트가 붙잡는다',
+    'lib/recording/capture.ts::estimateChunkBytes':
+      '위와 같음 — docs/11 의 청크 크기 근거',
+  };
+
+  it('⭐ `lib/` 의 export 를 화면이 실제로 부른다', () => {
+    const files: { rel: string; source: string }[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, name.name);
+        if (name.isDirectory()) walk(full);
+        else if (name.name.endsWith('.ts')) {
+          files.push({
+            rel: full.slice(join(ROOT, 'src').length + 1).split('\\').join('/'),
+            source: readFileSync(full, 'utf8'),
+          });
+        }
+      }
+    };
+    walk(join(ROOT, 'src'));
+
+    const offenders: string[] = [];
+    for (const { rel, source } of files) {
+      if (!rel.startsWith('lib/') || rel.endsWith('.test.ts')) continue;
+      for (const m of source.matchAll(/^export (?:function|const) (\w+)/gm)) {
+        const name = m[1] as string;
+        const key = `${rel}::${name}`;
+        if (key in TEST_ONLY_ON_PURPOSE) continue;
+
+        // 제 파일 안에서 쓰이면(다른 export 가 부르면) 산 것이다
+        const selfUse = new RegExp(`\\b${name}\\b`, 'g');
+        const inOwnFile =
+          [...source.matchAll(selfUse)].length >
+          [...source.matchAll(new RegExp(`^export (?:function|const) ${name}\\b`, 'gm'))].length;
+        if (inOwnFile) continue;
+
+        const users = files.filter(
+          (f) => f.rel !== rel && new RegExp(`\\b${name}\\b`).test(f.source),
+        );
+        if (users.length === 0) {
+          offenders.push(`${key} — 아무도 안 씀`);
+        } else if (users.every((f) => f.rel.endsWith('.test.ts'))) {
+          offenders.push(`${key} — 테스트만 씀`);
+        }
+      }
+    }
+    strictEqual(
+      offenders.join('\n'),
+      '',
+      '화면이 안 부르는 export 입니다. 배선하거나, 지우거나, 근거를 적어 면제 목록에 넣으세요',
+    );
+  });
+
+  it('면제 목록이 실재하는 자리를 가리킨다', () => {
+    // 면제 목록이 낡으면 가드가 조용히 헐거워집니다 — 지운 이름이
+    // 남아 있으면 다음 사람은 "면제된 게 있구나" 로만 읽습니다.
+    const missing = Object.keys(TEST_ONLY_ON_PURPOSE).filter((key) => {
+      const [rel, name] = key.split('::');
+      const path = join(ROOT, 'src', rel as string);
+      if (!existsSync(path)) return true;
+      return !new RegExp(`^export (?:function|const) ${name}\\b`, 'm').test(
+        readFileSync(path, 'utf8'),
+      );
+    });
+    strictEqual(missing.join(', '), '');
   });
 });
 
@@ -1152,8 +1243,8 @@ describe('상태 화면 (지시서 §7)', () => {
     // 아무도 안 씀)이 자기 파일 안에서 일어난 것입니다.
     //
     // ⚠️ 같은 **선택자**가 두 번 나오는 것 자체는 정상입니다
-    // (`.rangebar, .cov` 로 바탕을 깔고 `.cov` 에서 높이만 다시 잡는
-    // 식). 문제가 되는 것은 **같은 속성**을 두 번 정하는 것입니다.
+    // (`.a, .b` 로 바탕을 깔고 `.b` 에서 높이만 다시 잡는 식).
+    // 문제가 되는 것은 **같은 속성**을 두 번 정하는 것입니다.
     // 그때만 "어느 값이 이기나" 를 사람이 세어 봐야 합니다.
     const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 

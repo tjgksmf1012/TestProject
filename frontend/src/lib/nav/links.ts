@@ -53,6 +53,14 @@ const LABEL: Record<ScreenId, string> = {
   project: '설정',
 };
 
+/**
+ * 화면 이름.
+ *
+ * ⚠️ **테스트만 부릅니다.** 그래도 남깁니다 — `links.test.ts` 가
+ * "`navLinks` 와 `tabsFor` 의 라벨이 같은 표에서 나온다" 를 이걸로
+ * 확인합니다. 지우면 두 곳이 서로 다른 글자를 쓰기 시작해도 아무도
+ * 모릅니다. 근거는 `guards.test.ts` 의 면제 목록에 적어 뒀습니다.
+ */
 export function labelOf(screen: ScreenId): string {
   return LABEL[screen];
 }

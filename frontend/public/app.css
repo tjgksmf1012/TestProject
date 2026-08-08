@@ -819,31 +819,33 @@ pre {
    트랙 막대 — 시그니처 (docs/16)
    ══════════════════════════════════════════════════════════════
 
-   판단은 `src/lib/track/bar.ts` 에 있고 13개 테스트가 붙습니다.
-   여기는 그리기만 합니다.
+   판단은 `src/lib/contribution/view.ts`(구간)와
+   `src/lib/track/diagram.ts`(운행도표)에 있습니다. 여기는 그리기만 합니다.
 
    ⚠️ **두 종류를 섞으면 거짓말이 됩니다.**
 
-       .rangebar 구간의 **위치**가 뜻을 가진다 (19%~29%)
-       .cov     **양**만 뜻을 가진다. 위치는 아무 뜻이 없다
+       위치가 뜻을 가지는 막대   구간(19%~29%) · 운행도표(12분~19분)
+       양만 뜻을 가지는 막대     커버리지 42% — 언제 끊겼는지는 모른다
 
-   `.cov` 에 눈금을 그리지 않는 이유가 그것입니다 — 눈금이 있으면
-   시간축으로 읽히고, 사람은 "12분쯤에 끊겼구나" 라고 생각합니다.
-   우리는 그걸 모릅니다. */
+   양만 아는 값에 눈금을 그리면 사람은 "12분쯤에 끊겼구나" 로 읽습니다.
+   우리는 그걸 모릅니다.
 
-.rangebar,
-.cov {
+   ⚠️ **그래서 `.cov` 라는 비율 막대를 만들어 뒀었는데, 지웠습니다**
+   (결함 75). 그리는 화면이 **0곳**이었기 때문입니다 — 운행도표가
+   들어오면서 서버가 구멍의 **위치**까지 주게 됐고(`track_health()` 의
+   `gaps`), 양만 아는 자리가 사라졌습니다. 커버리지 숫자를 글로 말하는
+   곳(`lobby/room.ts`)은 null 을 "아직 모릅니다" 로 이미 가르고 있습니다.
+
+   양만 아는 값을 다시 그려야 하면 그때 만드세요. 안 쓰는 그림을 남겨
+   두면 다음 사람이 **위치가 있는 자리에 그것을 씁니다.** */
+
+.rangebar {
   position: relative;
+  height: 8px;
   border-radius: 3px;
   background: var(--sunken);
   overflow: hidden;
 }
-
-/* 높이는 **각자** 정합니다. 공통 규칙에서 한 번 정하고 아래에서 다시
-   덮으면, 읽는 사람이 어느 값이 이기는지 세어 봐야 합니다. */
-.rangebar { height: 8px; }
-
-.cov { height: var(--track-h-mini); }
 
 /* 구간 — 위치가 뜻을 가진다 */
 .rangebar i {
@@ -870,24 +872,6 @@ pre {
 .rangebar i::before { left: 0; }
 .rangebar i::after { right: 0; }
 
-/* 비율 — 양만 뜻을 가진다 */
-.cov i {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-}
-.cov i[data-kind="talk"] { background: var(--primary); }
-
-/* 구멍은 빗금입니다. **색만으로 구분하지 않습니다** — 색각 이상에서
-   채운 칸과 구멍이 같은 회색으로 보이면 이 그림은 아무것도 말하지
-   않게 됩니다. 흙빛인 이유는 빨강이 아니어야 하기 때문입니다:
-   녹음이 끊긴 것은 오류가 아니라 **결측**입니다. */
-.cov i[data-kind="gap"] {
-  background: var(--gap-tint);
-  background-image: repeating-linear-gradient(
-    -45deg, var(--gap) 0 1px, transparent 1px 5px);
-}
-
 .track-label {
   display: flex;
   justify-content: space-between;
@@ -898,8 +882,9 @@ pre {
 }
 
 /* ── 운행도표: 한 사람의 트랙 ─────────────────────────────
-   `.cov`(비율)와 달리 **위치가 뜻을 가집니다.** 그래서 눈금을
-   그립니다 — 눈금이 있어야 "12분쯤" 을 읽을 수 있습니다.
+   여기는 **위치가 뜻을 가집니다.** 그래서 눈금을 그립니다 —
+   눈금이 있어야 "12분쯤" 을 읽을 수 있습니다. 양만 아는 값에는
+   눈금을 그리면 안 됩니다 (위 주석).
    판단은 `src/lib/track/diagram.ts`, 18개 테스트가 축을 고정합니다. */
 .tl {
   position: relative;

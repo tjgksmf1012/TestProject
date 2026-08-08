@@ -3,7 +3,6 @@ import { describe, it } from 'node:test';
 
 import {
   MIN_PASSWORD_LENGTH,
-  apiBaseFromLocation,
   describeAuthFailure,
   isSessionExpired,
   loginUrlFor,
@@ -196,19 +195,27 @@ describe('safeApiBase', () => {
   });
 });
 
-describe('apiBaseFromLocation', () => {
-  it('주소창에서 읽어도 같은 판단을 한다', () => {
+describe('주소창에서 읽어도 같은 판단을 한다', () => {
+  // 화면들은 `safeApiBase(params.get('api'), location.origin)` 를 직접
+  // 씁니다. 예전에는 그걸 감싼 `apiBaseFromLocation` 이 따로 있었는데
+  // **부르는 화면이 0곳**이었습니다 — 테스트만 그 길을 지나고 있었던
+  // 셈이라 지웠습니다. 여기 있던 경우는 화면이 실제로 지나는 길로
+  // 옮겼습니다. 공격 사례를 같이 잃으면 안 되니까요.
+  const fromSearch = (search: string, pageOrigin: string): string =>
+    safeApiBase(new URLSearchParams(search).get('api'), pageOrigin);
+
+  it('남의 오리진은 거절한다', () => {
     strictEqual(
-      apiBaseFromLocation('?api=https://evil.example&next=/home.html', 'https://teamflow.example'),
+      fromSearch('?api=https://evil.example&next=/home.html', 'https://teamflow.example'),
       '',
-    );
-    strictEqual(
-      apiBaseFromLocation('?api=http://localhost:8000', 'http://localhost:5173'),
-      'http://localhost:8000',
     );
   });
 
+  it('로컬끼리는 통과한다', () => {
+    strictEqual(fromSearch('?api=http://localhost:8000', 'http://localhost:5173'), 'http://localhost:8000');
+  });
+
   it('파라미터가 없으면 빈 값', () => {
-    strictEqual(apiBaseFromLocation('', 'https://teamflow.example'), '');
+    strictEqual(fromSearch('', 'https://teamflow.example'), '');
   });
 });
