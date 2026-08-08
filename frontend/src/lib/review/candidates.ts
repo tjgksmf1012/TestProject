@@ -1,3 +1,5 @@
+
+import { withJosa } from '../text/josa.ts';
 /**
  * 업무 후보 검토 로직.
  *
@@ -246,7 +248,7 @@ export function buildReviewPayload(
       const blockers = approvalBlockers(candidate, draft, context);
       if (blockers.length > 0) {
         throw new Error(
-          `후보 ${candidate.id} 를 승인할 수 없습니다: ${blockers
+          `${withJosa(`후보 ${candidate.id}`, '을를')} 승인할 수 없습니다: ${blockers
             .map((b) => b.message)
             .join(', ')}`,
         );

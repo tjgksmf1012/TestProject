@@ -248,7 +248,7 @@ function checkSync(estimate, { toleranceMs = SYNC_TOLERANCE_MS } = {}) {
   if (estimate.maxErrorMs > toleranceMs) {
     return {
       ok: false,
-      reason: `시각 오차 상한 ${estimate.maxErrorMs.toFixed(0)}ms 가 허용치 ${toleranceMs}ms 를 넘습니다 (네트워크가 느립니다)`
+      reason: `시각 오차 상한 ${estimate.maxErrorMs.toFixed(0)}ms가 허용치 ${toleranceMs}ms를 넘습니다 (네트워크가 느립니다)`
     };
   }
   if (estimate.spreadMs > toleranceMs) {
@@ -479,6 +479,111 @@ function toTimelineInput(state) {
   };
 }
 
+// src/lib/text/josa.ts
+var PAIRS = {
+  은는: ["은", "는"],
+  이가: ["이", "가"],
+  을를: ["을", "를"],
+  과와: ["과", "와"],
+  으로로: ["으로", "로"]
+};
+var DIGIT_HAS_FINAL = {
+  "0": true,
+  // 영
+  "1": true,
+  // 일
+  "2": false,
+  // 이
+  "3": true,
+  // 삼
+  "4": false,
+  // 사
+  "5": false,
+  // 오
+  "6": true,
+  // 육
+  "7": true,
+  // 칠
+  "8": true,
+  // 팔
+  "9": false
+  // 구
+};
+var LETTER_HAS_FINAL = {
+  a: false,
+  // 에이
+  b: false,
+  // 비
+  c: false,
+  // 씨
+  d: false,
+  // 디
+  e: false,
+  // 이
+  f: true,
+  // 에프
+  g: false,
+  // 지
+  h: false,
+  // 에이치
+  i: false,
+  // 아이
+  j: false,
+  // 제이
+  k: false,
+  // 케이
+  l: true,
+  // 엘
+  m: true,
+  // 엠
+  n: true,
+  // 엔
+  o: false,
+  // 오
+  p: false,
+  // 피
+  q: false,
+  // 큐
+  r: true,
+  // 알
+  s: true,
+  // 에스
+  t: false,
+  // 티
+  u: false,
+  // 유
+  v: false,
+  // 브이
+  w: false,
+  // 더블유
+  x: true,
+  // 엑스
+  y: false,
+  // 와이
+  z: false
+  // 지
+};
+function hasFinalConsonant(word) {
+  const trimmed = word.trim();
+  if (trimmed === "") return null;
+  const last = trimmed[trimmed.length - 1];
+  const code = last.codePointAt(0) ?? 0;
+  if (code >= 44032 && code <= 55203) {
+    return (code - 44032) % 28 !== 0;
+  }
+  if (last in DIGIT_HAS_FINAL) return DIGIT_HAS_FINAL[last];
+  const lower = last.toLowerCase();
+  if (lower in LETTER_HAS_FINAL) return LETTER_HAS_FINAL[lower];
+  return null;
+}
+function josa(word, pair) {
+  const [withFinal, withoutFinal] = PAIRS[pair];
+  return hasFinalConsonant(word) === true ? withFinal : withoutFinal;
+}
+function withJosa(word, pair) {
+  return `${word}${josa(word, pair)}`;
+}
+
 // src/lib/recording/timeline.ts
 var DEFAULT_STALL_TOLERANCE_MS = 300;
 var MIN_REPORTED_GAP_MS = 100;
@@ -623,7 +728,7 @@ function describeTimeline(timeline) {
     return `녹음이 끊김 없이 완료됐습니다 (${formatDuration(timeline.durationMs)})`;
   }
   const reasons = new Set(timeline.gaps.map((g) => REASON_LABEL[g.reason]));
-  return `${formatDuration(timeline.totalGapMs)} 가 비었습니다 (${[...reasons].join(", ")}). 가장 긴 공백 ${formatDuration(timeline.longestGapMs)}, 커버리지 ${(timeline.coverage * 100).toFixed(1)}%`;
+  return `${withJosa(formatDuration(timeline.totalGapMs), "이가")} 비었습니다 (${[...reasons].join(", ")}). 가장 긴 공백 ${formatDuration(timeline.longestGapMs)}, 커버리지 ${(timeline.coverage * 100).toFixed(1)}%`;
 }
 function formatDuration(ms) {
   const total = Math.round(ms / 1e3);

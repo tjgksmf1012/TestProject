@@ -1,3 +1,5 @@
+
+import { withJosa } from '../text/josa.ts';
 /**
  * 칸반 보드의 판단 로직.
  *
@@ -253,7 +255,7 @@ export function sortLinks(links: readonly TaskGithubLink[]): TaskGithubLink[] {
 export function describeLinkState(task: Task): string {
   const links = task.github ?? [];
   if (links.length === 0) {
-    return `연결된 PR 이 없습니다 — PR 제목이나 본문에 ${task.marker} 를 적으면 붙습니다`;
+    return `연결된 PR이 없습니다 — PR 제목이나 본문에 ${withJosa(task.marker, '을를')} 적으면 붙습니다`;
   }
   const sure = links.filter((link) => link.confirmed).length;
   if (sure === links.length) return `PR ${links.length}건`;

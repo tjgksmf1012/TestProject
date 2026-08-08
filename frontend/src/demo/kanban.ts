@@ -139,7 +139,7 @@ function render(): void {
   // 회의에서 나온 업무가 실제 PR 로 이어진 건수.
   $('counts').textContent =
     `전체 ${summary.total} · 완료 ${summary.done} · 지연 ${summary.overdue} · ` +
-    `회의에서 나온 업무 ${summary.fromMeetings} · PR 이 붙은 업무 ${summary.withPulls}`;
+    `회의에서 나온 업무 ${summary.fromMeetings} · PR이 붙은 업무 ${summary.withPulls}`;
 
   $('unassigned').hidden = summary.unassigned === 0;
   $('unassigned').textContent =
@@ -152,7 +152,7 @@ function render(): void {
     $('board').innerHTML = emptyHtml({
       what: '여기에는 팀의 업무 카드가 단계별로 놓입니다.',
       why: '아직 등록된 업무가 하나도 없습니다 — 고장이 아닙니다.',
-      how: '회의를 열어 녹음하면 AI 가 업무 후보를 뽑고, 승인한 것이 여기로 옵니다. 직접 만들 수도 있습니다.',
+      how: '회의를 열어 녹음하면 AI가 업무 후보를 뽑고, 승인한 것이 여기로 옵니다. 직접 만들 수도 있습니다.',
       action: { label: '회의 열기', href: `/project.html?project=${projectId}` },
     });
     return;

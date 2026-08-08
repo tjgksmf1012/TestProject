@@ -86,6 +86,111 @@ function isSessionExpired(status) {
   return status === 401;
 }
 
+// src/lib/text/josa.ts
+var PAIRS = {
+  은는: ["은", "는"],
+  이가: ["이", "가"],
+  을를: ["을", "를"],
+  과와: ["과", "와"],
+  으로로: ["으로", "로"]
+};
+var DIGIT_HAS_FINAL = {
+  "0": true,
+  // 영
+  "1": true,
+  // 일
+  "2": false,
+  // 이
+  "3": true,
+  // 삼
+  "4": false,
+  // 사
+  "5": false,
+  // 오
+  "6": true,
+  // 육
+  "7": true,
+  // 칠
+  "8": true,
+  // 팔
+  "9": false
+  // 구
+};
+var LETTER_HAS_FINAL = {
+  a: false,
+  // 에이
+  b: false,
+  // 비
+  c: false,
+  // 씨
+  d: false,
+  // 디
+  e: false,
+  // 이
+  f: true,
+  // 에프
+  g: false,
+  // 지
+  h: false,
+  // 에이치
+  i: false,
+  // 아이
+  j: false,
+  // 제이
+  k: false,
+  // 케이
+  l: true,
+  // 엘
+  m: true,
+  // 엠
+  n: true,
+  // 엔
+  o: false,
+  // 오
+  p: false,
+  // 피
+  q: false,
+  // 큐
+  r: true,
+  // 알
+  s: true,
+  // 에스
+  t: false,
+  // 티
+  u: false,
+  // 유
+  v: false,
+  // 브이
+  w: false,
+  // 더블유
+  x: true,
+  // 엑스
+  y: false,
+  // 와이
+  z: false
+  // 지
+};
+function hasFinalConsonant(word) {
+  const trimmed = word.trim();
+  if (trimmed === "") return null;
+  const last = trimmed[trimmed.length - 1];
+  const code = last.codePointAt(0) ?? 0;
+  if (code >= 44032 && code <= 55203) {
+    return (code - 44032) % 28 !== 0;
+  }
+  if (last in DIGIT_HAS_FINAL) return DIGIT_HAS_FINAL[last];
+  const lower = last.toLowerCase();
+  if (lower in LETTER_HAS_FINAL) return LETTER_HAS_FINAL[lower];
+  return null;
+}
+function josa(word, pair) {
+  const [withFinal, withoutFinal] = PAIRS[pair];
+  return hasFinalConsonant(word) === true ? withFinal : withoutFinal;
+}
+function withJosa(word, pair) {
+  return `${word}${josa(word, pair)}`;
+}
+
 // src/lib/github/health.ts
 var TONES = /* @__PURE__ */ new Set(["ok", "warn", "bad"]);
 function describeLastDelivery(iso, now) {
@@ -145,7 +250,7 @@ function describeHealthFailure(status) {
   }
   return {
     headline: "연결 상태를 확인하지 못했습니다",
-    detail: `서버가 HTTP ${status} 로 답했습니다. 연결이 정상이라는 뜻은 아닙니다.`,
+    detail: `서버가 ${withJosa(`HTTP ${status}`, "으로로")} 답했습니다. 연결이 정상이라는 뜻은 아닙니다.`,
     tone: "warn",
     nextStep: "잠시 뒤 새로고침하세요.",
     warnings: [],

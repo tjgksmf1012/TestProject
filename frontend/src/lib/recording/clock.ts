@@ -153,8 +153,8 @@ export function checkSync(
     return {
       ok: false,
       reason:
-        `시각 오차 상한 ${estimate.maxErrorMs.toFixed(0)}ms 가 허용치 ` +
-        `${toleranceMs}ms 를 넘습니다 (네트워크가 느립니다)`,
+        `시각 오차 상한 ${estimate.maxErrorMs.toFixed(0)}ms가 허용치 ` +
+        `${toleranceMs}ms를 넘습니다 (네트워크가 느립니다)`,
     };
   }
   if (estimate.spreadMs > toleranceMs) {

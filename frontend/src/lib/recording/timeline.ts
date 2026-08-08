@@ -27,6 +27,7 @@
  */
 
 import type { ChunkMeta, Gap, Interval, ServerTimeMs } from './types.ts';
+import { withJosa } from '../text/josa.ts';
 
 /** 실제 오디오가 존재하는 구간. 서버는 이 절대 시각에 그대로 배치한다. */
 export interface Segment extends Interval {
@@ -259,7 +260,7 @@ export function describeTimeline(timeline: Timeline): string {
   }
   const reasons = new Set(timeline.gaps.map((g) => REASON_LABEL[g.reason]));
   return (
-    `${formatDuration(timeline.totalGapMs)} 가 비었습니다 ` +
+    `${withJosa(formatDuration(timeline.totalGapMs), '이가')} 비었습니다 ` +
     `(${[...reasons].join(', ')}). ` +
     `가장 긴 공백 ${formatDuration(timeline.longestGapMs)}, ` +
     `커버리지 ${(timeline.coverage * 100).toFixed(1)}%`

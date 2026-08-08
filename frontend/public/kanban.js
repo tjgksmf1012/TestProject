@@ -1,3 +1,108 @@
+// src/lib/text/josa.ts
+var PAIRS = {
+  은는: ["은", "는"],
+  이가: ["이", "가"],
+  을를: ["을", "를"],
+  과와: ["과", "와"],
+  으로로: ["으로", "로"]
+};
+var DIGIT_HAS_FINAL = {
+  "0": true,
+  // 영
+  "1": true,
+  // 일
+  "2": false,
+  // 이
+  "3": true,
+  // 삼
+  "4": false,
+  // 사
+  "5": false,
+  // 오
+  "6": true,
+  // 육
+  "7": true,
+  // 칠
+  "8": true,
+  // 팔
+  "9": false
+  // 구
+};
+var LETTER_HAS_FINAL = {
+  a: false,
+  // 에이
+  b: false,
+  // 비
+  c: false,
+  // 씨
+  d: false,
+  // 디
+  e: false,
+  // 이
+  f: true,
+  // 에프
+  g: false,
+  // 지
+  h: false,
+  // 에이치
+  i: false,
+  // 아이
+  j: false,
+  // 제이
+  k: false,
+  // 케이
+  l: true,
+  // 엘
+  m: true,
+  // 엠
+  n: true,
+  // 엔
+  o: false,
+  // 오
+  p: false,
+  // 피
+  q: false,
+  // 큐
+  r: true,
+  // 알
+  s: true,
+  // 에스
+  t: false,
+  // 티
+  u: false,
+  // 유
+  v: false,
+  // 브이
+  w: false,
+  // 더블유
+  x: true,
+  // 엑스
+  y: false,
+  // 와이
+  z: false
+  // 지
+};
+function hasFinalConsonant(word) {
+  const trimmed = word.trim();
+  if (trimmed === "") return null;
+  const last = trimmed[trimmed.length - 1];
+  const code = last.codePointAt(0) ?? 0;
+  if (code >= 44032 && code <= 55203) {
+    return (code - 44032) % 28 !== 0;
+  }
+  if (last in DIGIT_HAS_FINAL) return DIGIT_HAS_FINAL[last];
+  const lower = last.toLowerCase();
+  if (lower in LETTER_HAS_FINAL) return LETTER_HAS_FINAL[lower];
+  return null;
+}
+function josa(word, pair) {
+  const [withFinal, withoutFinal] = PAIRS[pair];
+  return hasFinalConsonant(word) === true ? withFinal : withoutFinal;
+}
+function withJosa(word, pair) {
+  return `${word}${josa(word, pair)}`;
+}
+
 // src/lib/kanban/board.ts
 var STATUS_LABEL = {
   todo: "할 일",
@@ -96,7 +201,7 @@ function sortLinks(links) {
 function describeLinkState(task) {
   const links = task.github ?? [];
   if (links.length === 0) {
-    return `연결된 PR 이 없습니다 — PR 제목이나 본문에 ${task.marker} 를 적으면 붙습니다`;
+    return `연결된 PR이 없습니다 — PR 제목이나 본문에 ${withJosa(task.marker, "을를")} 적으면 붙습니다`;
   }
   const sure = links.filter((link) => link.confirmed).length;
   if (sure === links.length) return `PR ${links.length}건`;
@@ -520,14 +625,14 @@ function githubHtml(task) {
 function render() {
   const today = todayIso();
   const summary = summarize(tasks, today);
-  $("counts").textContent = `전체 ${summary.total} · 완료 ${summary.done} · 지연 ${summary.overdue} · 회의에서 나온 업무 ${summary.fromMeetings} · PR 이 붙은 업무 ${summary.withPulls}`;
+  $("counts").textContent = `전체 ${summary.total} · 완료 ${summary.done} · 지연 ${summary.overdue} · 회의에서 나온 업무 ${summary.fromMeetings} · PR이 붙은 업무 ${summary.withPulls}`;
   $("unassigned").hidden = summary.unassigned === 0;
   $("unassigned").textContent = `담당자가 없는 업무 ${summary.unassigned}건은 완료해도 기여도에 반영되지 않습니다.`;
   if (summary.total === 0) {
     $("board").innerHTML = emptyHtml({
       what: "여기에는 팀의 업무 카드가 단계별로 놓입니다.",
       why: "아직 등록된 업무가 하나도 없습니다 — 고장이 아닙니다.",
-      how: "회의를 열어 녹음하면 AI 가 업무 후보를 뽑고, 승인한 것이 여기로 옵니다. 직접 만들 수도 있습니다.",
+      how: "회의를 열어 녹음하면 AI가 업무 후보를 뽑고, 승인한 것이 여기로 옵니다. 직접 만들 수도 있습니다.",
       action: { label: "회의 열기", href: `/project.html?project=${projectId}` }
     });
     return;

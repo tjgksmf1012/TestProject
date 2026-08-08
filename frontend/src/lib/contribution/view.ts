@@ -171,7 +171,7 @@ export function readBeforeTheNumber(member: MemberScore): string[] {
     // ⚠️ "0" 이라고 쓰지 않는다. 측정하지 못한 것과 하지 않은 것은 다르다.
     lines.push(
       `${category} 기여를 **측정하지 못했습니다** — ${gap.reason ?? '사유 미기록'}. ` +
-        '0 으로 계산하지 않고 나머지 활동으로 추정했습니다.',
+        '0으로 계산하지 않고 나머지 활동으로 추정했습니다.',
     );
   }
 
@@ -211,7 +211,7 @@ export function teamWarnings(score: TeamScore, people: readonly Person[]): strin
     const names = unmeasured.map((m) => nameOf(m.user_id, people)).join(', ');
     warnings.push(
       `${names} 님은 일부 활동을 측정하지 못했습니다. ` +
-        '그 영역은 0 이 아니라 나머지 활동으로 추정한 값입니다.',
+        '그 영역은 0이 아니라 나머지 활동으로 추정한 값입니다.',
     );
   }
 

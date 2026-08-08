@@ -1,3 +1,5 @@
+
+import { withJosa } from '../text/josa.ts';
 /**
  * 최종 확정 — **사람이** 확정한다 (`docs/05` §5).
  *
@@ -96,10 +98,11 @@ export function describeFinals(finals: FinalRow[], names: Map<number, string>): 
   const when = new Date(first.confirmed_at).toLocaleString('ko-KR');
   const adjusted = finals.filter((f) => !sameValue(f.final_value, f.system_value));
   if (adjusted.length === 0) {
-    return `${when} 에 시스템 값 그대로 확정했습니다.`;
+    return `${when}에 시스템 값 그대로 확정했습니다.`;
   }
   const who = adjusted
     .map((f) => names.get(f.user_id) ?? `#${f.user_id}`)
     .join(', ');
-  return `${when} 에 확정했습니다 — ${who} 은(는) 시스템 값과 다르게 정했습니다.`;
+  // ⚠️ `은(는)` 이 그대로 화면에 나오고 있었습니다 (결함 76).
+  return `${when}에 확정했습니다 — ${withJosa(who, '은는')} 시스템 값과 다르게 정했습니다.`;
 }

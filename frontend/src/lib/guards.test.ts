@@ -318,6 +318,69 @@ describe('모바일 규칙', () => {
   });
 });
 
+describe('한국어 조사 (결함 76)', () => {
+  /** `src/` 의 프로덕션 코드에서 주석·import 를 걷어낸 것. */
+  const codeFiles = (): { rel: string; code: string }[] => {
+    const out: { rel: string; code: string }[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+          out.push({
+            rel: full.slice(join(ROOT, 'src').length + 1).split('\\').join('/'),
+            // ⚠️ 주석은 뺍니다. 이 저장소의 주석은 `` `x` 를 `` 처럼
+            // 코드 조각 뒤에 조사를 띄어 쓰는 문서 관례를 씁니다.
+            // 그건 화면에 안 나오므로 여기서 볼 대상이 아닙니다.
+            code: readFileSync(full, 'utf8')
+              .replace(/\/\*[\s\S]*?\*\//g, '')
+              .replace(/^\s*\/\/.*$/gm, ''),
+          });
+        }
+      }
+    };
+    walk(join(ROOT, 'src'));
+    return out;
+  };
+
+  it('⭐ `은(는)` 같은 짝 표기를 화면에 내보내지 않는다', () => {
+    // 확정 화면에 이렇게 나왔습니다.
+    //
+    //     2026. 8. 8. 오후 1:03:30 에 확정했습니다 — 김민수 은(는) …
+    //
+    // `은(는)` 은 사람이 읽는 글자가 아닙니다. **미완성 소프트웨어**로
+    // 읽히고, 이 화면은 성적에 쓰일 수 있는 숫자를 보여주는 곳이라
+    // 그 인상이 숫자에까지 옮겨 갑니다.
+    const PAIRED = /은\(는\)|는\(은\)|이\(가\)|가\(이\)|을\(를\)|를\(을\)|와\(과\)|과\(와\)|\(으\)로/;
+    const offenders = codeFiles()
+      .filter(({ code }) => PAIRED.test(code))
+      .map(({ rel }) => rel);
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`lib/text/josa.ts` 의 `withJosa` 로 값에 맞는 조사를 고르세요',
+    );
+  });
+
+  it('⭐ 값과 조사 사이를 띄우지 않는다', () => {
+    // `${who} 은(는)` 처럼 띄우면 조사가 **다음 낱말처럼** 보입니다.
+    // 한국어에서 조사는 앞말에 붙여 씁니다.
+    //
+    // ⚠️ 조사 목록을 좁게 유지합니다. `${n} 개`(단위)나 `${x} 중`처럼
+    // 띄어 쓰는 것이 맞는 말이 섞이면 이 가드가 **틀린 신고**를 합니다.
+    const PARTICLES = ['은', '는', '이', '가', '을', '를', '와', '과', '로', '으로', '에게', '에', '의'];
+    const spaced = new RegExp(`\\$\\{[^{}]*\\}\\s+(${PARTICLES.join('|')})[\\s\`]`);
+    const offenders: string[] = [];
+    for (const { rel, code } of codeFiles()) {
+      // 템플릿 리터럴 안만 본다
+      for (const lit of code.matchAll(/`[^`]*`/g)) {
+        if (spaced.test(lit[0])) offenders.push(`${rel} → ${lit[0].slice(0, 50)}`);
+      }
+    }
+    strictEqual(offenders.join('\n'), '', '`withJosa(값, 짝)` 으로 붙여 쓰세요');
+  });
+});
+
 describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
   // 이 저장소의 **대표 실패 방식**입니다 — 결함 47(`renderNav`),
   // 감사 #8(진행률), #12(`extract_task_refs`), #13(확정 테이블),

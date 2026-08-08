@@ -41,7 +41,7 @@ function readBeforeTheNumber(member) {
   for (const gap of member.measurement_gaps ?? []) {
     const category = gap.category ? describeCategory(gap.category) : "일부 활동";
     lines.push(
-      `${category} 기여를 **측정하지 못했습니다** — ${gap.reason ?? "사유 미기록"}. 0 으로 계산하지 않고 나머지 활동으로 추정했습니다.`
+      `${category} 기여를 **측정하지 못했습니다** — ${gap.reason ?? "사유 미기록"}. 0으로 계산하지 않고 나머지 활동으로 추정했습니다.`
     );
   }
   lines.push(...member.confidence_reasons);
@@ -59,7 +59,7 @@ function teamWarnings(score, people2) {
   if (unmeasured.length > 0) {
     const names = unmeasured.map((m) => nameOf(m.user_id, people2)).join(", ");
     warnings.push(
-      `${names} 님은 일부 활동을 측정하지 못했습니다. 그 영역은 0 이 아니라 나머지 활동으로 추정한 값입니다.`
+      `${names} 님은 일부 활동을 측정하지 못했습니다. 그 영역은 0이 아니라 나머지 활동으로 추정한 값입니다.`
     );
   }
   const shaky = score.members.filter((m) => m.confidence < LOW_CONFIDENCE);
@@ -98,6 +98,111 @@ function roleOf(member, people2) {
   if (named.length === 0) return roleLabel(member.role);
   if (named.length === 1) return roleLabel(named[0]?.[0] ?? member.role);
   return named.sort((a, b) => b[1] - a[1]).map(([key, value]) => `${roleLabel(key)} ${Math.round(value * 100)}%`).join(" · ");
+}
+
+// src/lib/text/josa.ts
+var PAIRS = {
+  은는: ["은", "는"],
+  이가: ["이", "가"],
+  을를: ["을", "를"],
+  과와: ["과", "와"],
+  으로로: ["으로", "로"]
+};
+var DIGIT_HAS_FINAL = {
+  "0": true,
+  // 영
+  "1": true,
+  // 일
+  "2": false,
+  // 이
+  "3": true,
+  // 삼
+  "4": false,
+  // 사
+  "5": false,
+  // 오
+  "6": true,
+  // 육
+  "7": true,
+  // 칠
+  "8": true,
+  // 팔
+  "9": false
+  // 구
+};
+var LETTER_HAS_FINAL = {
+  a: false,
+  // 에이
+  b: false,
+  // 비
+  c: false,
+  // 씨
+  d: false,
+  // 디
+  e: false,
+  // 이
+  f: true,
+  // 에프
+  g: false,
+  // 지
+  h: false,
+  // 에이치
+  i: false,
+  // 아이
+  j: false,
+  // 제이
+  k: false,
+  // 케이
+  l: true,
+  // 엘
+  m: true,
+  // 엠
+  n: true,
+  // 엔
+  o: false,
+  // 오
+  p: false,
+  // 피
+  q: false,
+  // 큐
+  r: true,
+  // 알
+  s: true,
+  // 에스
+  t: false,
+  // 티
+  u: false,
+  // 유
+  v: false,
+  // 브이
+  w: false,
+  // 더블유
+  x: true,
+  // 엑스
+  y: false,
+  // 와이
+  z: false
+  // 지
+};
+function hasFinalConsonant(word) {
+  const trimmed = word.trim();
+  if (trimmed === "") return null;
+  const last = trimmed[trimmed.length - 1];
+  const code = last.codePointAt(0) ?? 0;
+  if (code >= 44032 && code <= 55203) {
+    return (code - 44032) % 28 !== 0;
+  }
+  if (last in DIGIT_HAS_FINAL) return DIGIT_HAS_FINAL[last];
+  const lower = last.toLowerCase();
+  if (lower in LETTER_HAS_FINAL) return LETTER_HAS_FINAL[lower];
+  return null;
+}
+function josa(word, pair) {
+  const [withFinal, withoutFinal] = PAIRS[pair];
+  return hasFinalConsonant(word) === true ? withFinal : withoutFinal;
+}
+function withJosa(word, pair) {
+  return `${word}${josa(word, pair)}`;
 }
 
 // src/lib/contribution/final.ts
@@ -139,10 +244,10 @@ function describeFinals(finals, names) {
   const when = new Date(first.confirmed_at).toLocaleString("ko-KR");
   const adjusted = finals.filter((f) => !sameValue(f.final_value, f.system_value));
   if (adjusted.length === 0) {
-    return `${when} 에 시스템 값 그대로 확정했습니다.`;
+    return `${when}에 시스템 값 그대로 확정했습니다.`;
   }
   const who = adjusted.map((f) => names.get(f.user_id) ?? `#${f.user_id}`).join(", ");
-  return `${when} 에 확정했습니다 — ${who} 은(는) 시스템 값과 다르게 정했습니다.`;
+  return `${when}에 확정했습니다 — ${withJosa(who, "은는")} 시스템 값과 다르게 정했습니다.`;
 }
 
 // src/lib/auth/session.ts

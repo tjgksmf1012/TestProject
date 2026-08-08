@@ -1,3 +1,5 @@
+
+import { withJosa } from '../text/josa.ts';
 /**
  * 브라우저 통화 — 메시 연결을 누가 언제 만드는가.
  *
@@ -177,7 +179,7 @@ export function callWarnings(
   if (failed.length) {
     const names = failed.map((p) => p.name).join(', ');
     problems.push(
-      `${names} 와 연결하지 못했습니다. 그 사람에게는 내 목소리가 가지 않습니다.`,
+      `${withJosa(names, '과와')} 연결하지 못했습니다. 그 사람에게는 내 목소리가 가지 않습니다.`,
     );
   }
   return problems;

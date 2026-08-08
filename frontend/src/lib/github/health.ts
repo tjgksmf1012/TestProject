@@ -1,3 +1,5 @@
+
+import { withJosa } from '../text/josa.ts';
 /**
  * GitHub 연결 진단 — 화면이 할 말.
  *
@@ -150,7 +152,7 @@ export function describeHealthFailure(status: number): HealthView {
   }
   return {
     headline: '연결 상태를 확인하지 못했습니다',
-    detail: `서버가 HTTP ${status} 로 답했습니다. 연결이 정상이라는 뜻은 아닙니다.`,
+    detail: `서버가 ${withJosa(`HTTP ${status}`, '으로로')} 답했습니다. 연결이 정상이라는 뜻은 아닙니다.`,
     tone: 'warn',
     nextStep: '잠시 뒤 새로고침하세요.',
     warnings: [],
