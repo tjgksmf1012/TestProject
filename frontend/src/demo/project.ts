@@ -19,6 +19,13 @@ import {
   type GithubHealth,
   type HealthView,
 } from '../lib/github/health.ts';
+import {
+  describeRoles,
+  problemWith,
+  ROLE_OPTIONS,
+  sumOf,
+  toPayload as rolesToPayload,
+} from '../lib/contribution/roles.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { detailText } from '../lib/http/detail.ts';
 import {
@@ -199,6 +206,71 @@ async function startBackfill(): Promise<void> {
     '잠시 뒤 이 화면을 새로고침하면 반영된 범위가 바뀝니다.';
 }
 
+/** 역할 칸을 그린다. 서버가 준 지금 값이 기본으로 들어간다. */
+function renderRoles(shares: Record<string, number>): void {
+  $('roles').innerHTML = ROLE_OPTIONS.map(
+    (opt) => `<label>
+      <span>${escapeHtml(opt.label)}</span>
+      <input type="number" class="rshare" data-role="${opt.key}" step="0.1" min="0" max="1"
+        value="${shares[opt.key] ?? 0}" aria-label="${escapeHtml(opt.label)} 비중" />
+      <span class="hint">${escapeHtml(opt.hint)}</span>
+    </label>`,
+  ).join('');
+  for (const input of $('roles').querySelectorAll<HTMLInputElement>('.rshare')) {
+    input.addEventListener('input', showRoleSum);
+  }
+  showRoleSum();
+}
+
+function rolesFromScreen(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const input of $('roles').querySelectorAll<HTMLInputElement>('.rshare')) {
+    // 빈 칸은 0 으로 친다 — 역할에서는 "안 적었다" 가 곧 "이 역할은 아니다" 다.
+    // (확정 화면의 빈 칸과 다르다. 거기서는 빈 칸이 "안 건드렸다" 였다.)
+    const raw = input.value.trim();
+    out[input.dataset['role'] ?? ''] = raw === '' ? 0 : Number(raw);
+  }
+  return out;
+}
+
+function showRoleSum(): void {
+  const total = sumOf(rolesFromScreen());
+  const bad = Math.abs(total - 1) > 1e-6;
+  $('role-sum').textContent = `합계 ${total}`;
+  $('role-sum').classList.toggle('bad', bad);
+}
+
+async function loadRoles(): Promise<void> {
+  const response = await call(`/api/projects/${projectId}/members`);
+  if (!response.ok) return;
+  const members = (await response.json()) as { user_id: number; role_shares?: Record<string, number> }[];
+  const meRes = await call('/api/auth/me');
+  if (!meRes.ok) return;
+  const me = (await meRes.json()) as { user_id: number };
+  const mine = members.find((entry) => entry.user_id === me.user_id);
+  renderRoles(mine?.role_shares ?? {});
+  $('role-message').textContent = `지금 ${describeRoles(mine?.role_shares)}`;
+}
+
+async function saveRoles(): Promise<void> {
+  const shares = rolesFromScreen();
+  const problem = problemWith(shares);
+  if (problem !== null) {
+    $('role-message').textContent = problem;
+    return;
+  }
+  const response = await call(`/api/projects/${projectId}/members/me`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role_shares: rolesToPayload(shares) }),
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    $('role-message').textContent = detailText(body, '역할을 저장하지 못했습니다');
+    return;
+  }
+  $('role-message').textContent = `저장했습니다 — ${describeRoles(body.role_shares)}`;
+}
+
 async function loadHealth(): Promise<void> {
   // ⚠️ 예전에는 HTML 에 "연결 상태를 확인하는 중…" 을 심어 뒀습니다.
   // 이 요청은 거의 언제나 200ms 안에 끝나므로, 그 문구는 **화면을 열
@@ -369,8 +441,11 @@ $('del-run').addEventListener('click', () => {
 });
 
 renderNav('project');
+$('save-roles').addEventListener('click', () => void saveRoles());
+
 void load();
 void loadHealth();
+void loadRoles();
 
 // 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
 bootApp();

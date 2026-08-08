@@ -804,6 +804,20 @@ describe('상태 화면 (지시서 §7)', () => {
     );
   });
 
+  it('⭐ 역할을 **정할 자리가 있고 실제로 보낸다**', () => {
+    // 가입·초대가 `developer: 1.0` 을 하드코딩하고 바꿀 자리가 없었습니다.
+    // 그래서 기획자·디자이너 프로파일이 도달 불가였고, 문서만 쓴 사람이
+    // 개발자 가중치로 계산돼 이유 없이 낮게 나왔습니다 — 오류는 안 납니다.
+    const html = readFileSync(join(PUBLIC, 'project.html'), 'utf8');
+    strictEqual(html.includes('id="roles"'), true, '역할 칸이 없습니다');
+    strictEqual(html.includes('id="save-roles"'), true, '저장 버튼이 없습니다');
+
+    const callers = demoFiles().filter(({ source }) =>
+      /members\/me`?,/.test(codeOf(source)),
+    );
+    strictEqual(callers.length > 0, true, '`/members/me` 를 부르는 화면이 없습니다');
+  });
+
   it('⭐ 확정 엔드포인트를 **실제로 부르는 화면이 있다** (docs/05 §5)', () => {
     // `docs/05` §5 는 "최종 점수를 시스템이 확정" 을 ❌ 로 금지합니다.
     // 그런데 확정을 남길 자리가 API 에도 화면에도 없어서, 배포 상태에서

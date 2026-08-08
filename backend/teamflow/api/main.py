@@ -1786,6 +1786,85 @@ def list_project_members(
     return _project_members(session, project_id)
 
 
+class RoleIn(BaseModel):
+    """역할 비중. `{"developer": 0.7, "planner": 0.3}` 처럼 겸직도 된다."""
+
+    role_shares: dict[str, float]
+
+    model_config = {"extra": "forbid"}
+
+
+@app.patch("/api/projects/{project_id}/members/me", response_model=MemberOut)
+def set_my_role(
+    project_id: int, payload: RoleIn, session: DbSession, user: CurrentUser
+) -> MemberOut:
+    """**내** 역할을 정한다.
+
+    ## 왜 필요한가
+
+    가입도 초대도 `role_shares={"developer": 1.0}` 을 하드코딩하고 있었고,
+    이걸 바꾸는 API 도 화면도 없었습니다. 그래서 `PLANNER`·`DESIGNER`
+    프로파일과 `blended_profile` 은 **실사용 경로로 도달 불가**였고,
+    기획자·디자이너 팀원의 기여도가 **개발자 가중치로** 계산됐습니다.
+
+    기획자 프로파일은 코드 0% · 문서 30% 인데 개발자로 계산하면 코드 35% ·
+    문서 5% 입니다. 문서만 쓴 사람이 이유 없이 낮게 나옵니다 — 그리고
+    **오류는 어디에도 안 납니다.**
+
+    ## ⚠️ 본인만 바꿉니다
+
+    역할은 가중치를 바꾸고, 가중치는 점수를 바꿉니다. 남이 내 역할을
+    바꿀 수 있으면 그건 **남의 점수를 바꾸는 일**입니다. 업무를 옮기는
+    것(누구나 가능)과 다릅니다 — 업무는 사실의 기록이고 역할은 판단의
+    전제입니다.
+
+    그래서 경로가 `/members/me` 입니다. 남의 id 를 넣을 자리 자체가
+    없습니다 — 요청 본문의 id 를 믿던 결함(`member_ids`)과 같은 부류를
+    설계로 막습니다.
+
+    바꾼 사실은 감사 로그에 남습니다. 역할을 유리한 쪽으로 옮겨 두는
+    것도 조작이고, 그건 사람이 볼 수 있어야 합니다.
+    """
+    from teamflow.contribution.profiles import clean_role_shares
+
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    try:
+        cleaned = clean_role_shares(payload.role_shares)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    member = session.scalars(
+        select(m.Member).where(
+            m.Member.project_id == project_id, m.Member.user_id == user.id
+        )
+    ).one()
+    before = dict(member.role_shares or {})
+    member.role_shares = cleaned
+
+    if before != cleaned:
+        session.add(
+            m.AuditLog(
+                project_id=project_id,
+                actor_id=user.id,
+                action="weights_changed",
+                target=f"members/{user.id}",
+                before={"role_shares": before},
+                after={"role_shares": cleaned},
+                at=datetime.now(UTC),
+            )
+        )
+    session.flush()
+
+    return MemberOut(
+        user_id=user.id,
+        name=user.name,
+        role_shares={k: float(v) for k, v in cleaned.items()},
+    )
+
+
 @app.get("/api/meetings/{meeting_id}/members", response_model=list[MemberOut])
 def list_meeting_members(
     meeting_id: int, session: DbSession, user: CurrentUser

@@ -51,11 +51,38 @@
   .health code { font: inherit; font-weight: 700; }
   #error { color: var(--bad); font-size: var(--fs-label); margin-top: var(--sp-4); }
 
+  /* 역할 — 한 줄 = 한 역할. 합이 눈에 보여야 1 을 맞출 수 있다. */
+  .roles label { display: grid; grid-template-columns: 6rem 5.5rem 1fr; gap: var(--sp-2);
+                 align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
+  .roles label:first-child { border-top: 0; }
+  .roles input { font-size: var(--fs-input); }
+  .roles .hint { font-size: var(--fs-caption); color: var(--text-subtle); }
+  .rolesum { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-2) 0; }
+  .rolesum.bad { color: var(--bad); }
+  .rolestatus { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-3) 0 0; }
 </style>
 </head>
 <body>
   <h1 id="title-heading">프로젝트</h1>
   <p class="sub" id="members"></p>
+
+  <!-- ⭐ 역할. 이 값이 기여도 **가중치**를 정한다 — 기획자는 코드 0% · 문서 30%,
+       개발자는 코드 35% · 문서 5%. 바꿀 자리가 없던 동안 전원이 개발자로
+       계산돼, 문서만 쓴 사람이 이유 없이 낮게 나왔고 오류는 안 났다.
+       `src/demo/project.ts` 가 채운다. -->
+  <section class="panel">
+    <h2>내 역할</h2>
+    <p class="sub">기여도 가중치가 여기서 정해집니다. 겸직이면 둘 이상에 나눠 적으세요.</p>
+    <div id="roles" class="roles"></div>
+    <p class="rolesum" id="role-sum"></p>
+    <button id="save-roles" type="button">역할 저장</button>
+    <p class="rolestatus" id="role-message"></p>
+    <p class="note">
+      <strong>내 역할만 바꿉니다.</strong> 역할은 가중치를 바꾸고 가중치는 점수를
+      바꿉니다 — 남이 내 역할을 바꿀 수 있으면 그건 남의 점수를 바꾸는 일입니다.
+      바꾼 사실은 기록에 남습니다.
+    </p>
+  </section>
 
   <section class="panel">
     <h2>팀원 초대</h2>

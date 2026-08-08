@@ -10,7 +10,12 @@ from teamflow.contribution.confidence import (
     compute_confidence,
 )
 from teamflow.contribution.events import Category, EventType
-from teamflow.contribution.profiles import DEFAULT_PROFILES, Role, blended_profile
+from teamflow.contribution.profiles import (
+    DEFAULT_PROFILES,
+    Role,
+    blended_profile,
+    clean_role_shares,
+)
 from teamflow.contribution.scoring import score_team
 
 from .conftest import Ids, deadline, task_done, utterance
@@ -313,3 +318,60 @@ def test_low_confidence_produces_wide_range(ids: Ids):
     assert member.confidence.value < 0.6
     assert member.range_high - member.range_low > 5.0
     assert member.confidence.reasons
+
+
+# ══════════════════════════════════════════════════════════════
+# 역할 비중 검사 — 이 값이 틀리면 기여도 전체가 조용히 틀어진다
+# ══════════════════════════════════════════════════════════════
+
+
+def test_a_plain_role_is_accepted():
+    assert clean_role_shares({"planner": 1.0}) == {"planner": 1.0}
+
+
+def test_a_blend_is_accepted():
+    assert clean_role_shares({"developer": 0.7, "planner": 0.3}) == {
+        "developer": 0.7,
+        "planner": 0.3,
+    }
+
+
+def test_zero_shares_are_dropped_not_kept():
+    """⚠️ `{developer: 1, planner: 0}` 은 겸직이 아니라 개발자다.
+
+    남겨 두면 `blended_profile` 이 이름표를 `blend(...planner:0.00)` 로
+    만들어 화면이 겸직처럼 보입니다.
+    """
+    assert clean_role_shares({"developer": 1.0, "planner": 0.0}) == {"developer": 1.0}
+
+
+def test_shares_that_do_not_sum_to_one_are_refused():
+    """⚠️ `blended_profile` 은 합으로 나눠 정규화하므로 5:5 도 "돌아갑니다".
+
+    그런데 그러면 화면에 적힌 숫자와 실제 비중이 달라지고, 사람은 자기가
+    적은 값이 그대로 쓰인다고 믿습니다. 받아들일 때 막습니다.
+    """
+    for bad in ({"developer": 0.9}, {"developer": 5, "planner": 5}, {"developer": 1.2}):
+        with pytest.raises(ValueError, match="합이 1"):
+            clean_role_shares(bad)
+
+
+def test_floating_point_dust_still_passes():
+    """0.1 을 세 번 더하면 0.30000000000000004 다. 화면에서 온 값이다."""
+    assert clean_role_shares({"developer": 0.1 + 0.1 + 0.1, "planner": 0.7})
+
+
+def test_an_unknown_role_is_refused_with_the_list():
+    with pytest.raises(ValueError, match="모르는 역할"):
+        clean_role_shares({"tester": 1.0})
+
+
+def test_a_negative_share_is_refused():
+    with pytest.raises(ValueError, match="음수"):
+        clean_role_shares({"developer": 1.5, "planner": -0.5})
+
+
+def test_an_empty_choice_is_refused():
+    for bad in (None, {}, {"developer": 0.0}):
+        with pytest.raises(ValueError):
+            clean_role_shares(bad)

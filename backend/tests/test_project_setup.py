@@ -640,3 +640,130 @@ def test_the_whole_first_run_works(client: TestClient, people: dict):
     assert client.post("/api/projects/join", json={"invite_code": code}).status_code == 200
     assert len(client.get(f"/api/projects/{project_id}/meetings").json()) == 1
     assert len(client.get(f"/api/projects/{project_id}/members").json()) == 2
+
+
+# ══════════════════════════════════════════════════════════════
+# 역할 — 이 값이 기여도 가중치를 정한다
+# ══════════════════════════════════════════════════════════════
+
+
+def test_everyone_starts_as_a_developer_and_can_change_it(
+    client: TestClient, people: dict
+):
+    """⭐ 기획자·디자이너 프로파일이 **실사용 경로로 도달 불가**였다.
+
+    가입도 초대도 `role_shares={"developer": 1.0}` 을 하드코딩했고 바꾸는
+    API 가 없었습니다. 기획자 프로파일은 코드 0% · 문서 30% 인데 개발자로
+    계산하면 코드 35% · 문서 5% 입니다 — 문서만 쓴 사람이 이유 없이 낮게
+    나오고, **오류는 어디에도 안 납니다.**
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    before = client.get(f"/api/projects/{project_id}/members").json()
+    assert before[0]["role_shares"] == {"developer": 1.0}, "기본값"
+
+    response = client.patch(
+        f"/api/projects/{project_id}/members/me",
+        json={"role_shares": {"developer": 0.6, "planner": 0.4}},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["role_shares"] == {"developer": 0.6, "planner": 0.4}
+
+    after = client.get(f"/api/projects/{project_id}/members").json()
+    assert after[0]["role_shares"] == {"developer": 0.6, "planner": 0.4}
+
+
+def test_the_new_role_actually_reaches_the_scoring(client: TestClient, people: dict):
+    """⭐ 저장만 되고 산정이 안 읽으면 고친 게 아니다.
+
+    기획자는 코드 가중치가 0 입니다. 역할을 바꾸면 같은 이벤트로도
+    카테고리 가중치가 달라져야 합니다.
+    """
+    from teamflow.contribution.profiles import Role
+    from teamflow.services import scoring_service
+
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    with db_session.session_scope() as s:
+        profiles = scoring_service.load_profiles(s, project_id)
+        assert profiles[people["founder"]].role is Role.DEVELOPER
+
+    client.patch(
+        f"/api/projects/{project_id}/members/me",
+        json={"role_shares": {"planner": 1.0}},
+    )
+
+    with db_session.session_scope() as s:
+        profile = scoring_service.load_profiles(s, project_id)[people["founder"]]
+        assert profile.role is Role.PLANNER, "산정이 새 역할을 안 읽습니다"
+
+
+def test_a_role_change_is_logged(client: TestClient, people: dict):
+    """역할은 가중치를 바꾸고 가중치는 점수를 바꾼다. 유리한 쪽으로
+    옮겨 두는 것도 조작이고, 그건 사람이 볼 수 있어야 한다."""
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+    client.patch(
+        f"/api/projects/{project_id}/members/me",
+        json={"role_shares": {"designer": 1.0}},
+    )
+
+    with db_session.session_scope() as s:
+        log = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "weights_changed")
+        ).one()
+        assert log.actor_id == people["founder"]
+        assert log.before["role_shares"] == {"developer": 1.0}
+        assert log.after["role_shares"] == {"designer": 1.0}
+
+
+def test_a_bad_split_is_refused_with_a_reason(client: TestClient, people: dict):
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    for bad, word in (
+        ({"developer": 0.5, "planner": 0.2}, "합이 1"),
+        ({"tester": 1.0}, "모르는 역할"),
+        ({}, "골라야"),
+    ):
+        response = client.patch(
+            f"/api/projects/{project_id}/members/me", json={"role_shares": bad}
+        )
+        assert response.status_code == 400, (bad, response.text)
+        assert word in response.json()["detail"], (bad, response.json())
+
+
+def test_there_is_no_way_to_set_someone_elses_role(client: TestClient, people: dict):
+    """⚠️ 남의 역할을 바꾸는 것은 **남의 점수를 바꾸는 일**이다.
+
+    경로가 `/members/me` 라 남의 id 를 넣을 자리 자체가 없습니다 —
+    요청 본문의 id 를 믿던 결함(`member_ids`)과 같은 부류를 설계로
+    막습니다. 그래도 누가 우회를 시도할 수 있으니 확인해 둡니다.
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    # 남의 id 를 경로에 넣어 보기
+    assert client.patch(
+        f"/api/projects/{project_id}/members/{people['joiner']}",
+        json={"role_shares": {"planner": 1.0}},
+    ).status_code in (404, 405, 422)
+
+    # 본문에 몰래 실어 보기 — `extra: forbid` 가 막는다
+    assert client.patch(
+        f"/api/projects/{project_id}/members/me",
+        json={"role_shares": {"planner": 1.0}, "user_id": people["joiner"]},
+    ).status_code == 422
+
+
+def test_an_outsider_cannot_set_a_role(client: TestClient, people: dict):
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    login_as(client, people["stranger"])
+    assert client.patch(
+        f"/api/projects/{project_id}/members/me",
+        json={"role_shares": {"planner": 1.0}},
+    ).status_code in (403, 404)

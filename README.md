@@ -116,7 +116,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 기여도 이벤트 모델 | ✅ | `backend/teamflow/contribution/events.py` |
 | diff 필터 (조작 저항성 핵심) | ✅ | `backend/teamflow/contribution/diff_filter.py` |
 | GitHub 이벤트 정규화 | ✅ | `backend/teamflow/contribution/github_ingest.py` |
-| 역할별 가중치 프로파일 | ⚠️ 계산은 되나 **역할을 정하는 곳이 없음** | `backend/teamflow/contribution/profiles.py` — 가입·초대가 전원 `developer` 고정(`api/main.py`). 기획/디자인·겸직은 `scripts/seed_demo.py` 로만 도달 |
+| 역할별 가중치 프로파일 | ✅ | `backend/teamflow/contribution/profiles.py` + `PATCH /api/projects/{id}/members/me` + 프로젝트 화면 |
 | 신뢰도·조정범위 계산 | ✅ | `backend/teamflow/contribution/confidence.py` |
 | **측정 불가 처리 (0점과 구분)** | ✅ | `backend/teamflow/contribution/scoring.py` |
 | 기여도 산정 엔진 | ✅ | `backend/teamflow/contribution/scoring.py` |

@@ -136,6 +136,45 @@ function describeHealthFailure(status) {
   };
 }
 
+// src/lib/contribution/roles.ts
+var ROLE_OPTIONS = [
+  { key: "developer", label: "개발", hint: "코드 35% · 업무 30%" },
+  { key: "planner", label: "기획", hint: "문서 30% · 업무 30% · 코드 0%" },
+  { key: "designer", label: "디자인", hint: "문서 35% · 업무 30% · 코드 0%" }
+];
+function sumOf(shares) {
+  const total = Object.values(shares).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
+  return Math.round(total * 1e6) / 1e6;
+}
+function problemWith(shares) {
+  if (Object.values(shares).some((v) => !Number.isFinite(v))) {
+    return "숫자가 아닌 값이 있습니다";
+  }
+  if (Object.values(shares).some((v) => v < 0)) {
+    return "역할 비중은 음수일 수 없습니다";
+  }
+  const total = sumOf(shares);
+  if (total === 0) return "역할을 하나 이상 골라야 합니다";
+  if (Math.abs(total - 1) > 1e-6) {
+    return `합이 1 이어야 합니다 (지금 ${total})`;
+  }
+  return null;
+}
+function toPayload(shares) {
+  const out = {};
+  for (const [key, value] of Object.entries(shares)) {
+    if (value > 0) out[key] = value;
+  }
+  return out;
+}
+function describeRoles(shares) {
+  const entries = Object.entries(shares ?? {}).filter(([, v]) => v > 0);
+  if (entries.length === 0) return "역할이 정해지지 않았습니다.";
+  const label = (key) => ROLE_OPTIONS.find((o) => o.key === key)?.label ?? key;
+  if (entries.length === 1) return `${label(entries[0]?.[0] ?? "")} 100%`;
+  return entries.sort((a, b) => b[1] - a[1]).map(([key, value]) => `${label(key)} ${Math.round(value * 100)}%`).join(" · ");
+}
+
 // src/lib/html.ts
 var ESCAPES = {
   "&": "&amp;",
@@ -597,6 +636,63 @@ async function startBackfill() {
   }
   status.textContent = "가져오기를 시작했습니다. PR 수에 따라 몇 분 걸립니다 — 잠시 뒤 이 화면을 새로고침하면 반영된 범위가 바뀝니다.";
 }
+function renderRoles(shares) {
+  $("roles").innerHTML = ROLE_OPTIONS.map(
+    (opt) => `<label>
+      <span>${escapeHtml(opt.label)}</span>
+      <input type="number" class="rshare" data-role="${opt.key}" step="0.1" min="0" max="1"
+        value="${shares[opt.key] ?? 0}" aria-label="${escapeHtml(opt.label)} 비중" />
+      <span class="hint">${escapeHtml(opt.hint)}</span>
+    </label>`
+  ).join("");
+  for (const input2 of $("roles").querySelectorAll(".rshare")) {
+    input2.addEventListener("input", showRoleSum);
+  }
+  showRoleSum();
+}
+function rolesFromScreen() {
+  const out = {};
+  for (const input2 of $("roles").querySelectorAll(".rshare")) {
+    const raw = input2.value.trim();
+    out[input2.dataset["role"] ?? ""] = raw === "" ? 0 : Number(raw);
+  }
+  return out;
+}
+function showRoleSum() {
+  const total = sumOf(rolesFromScreen());
+  const bad = Math.abs(total - 1) > 1e-6;
+  $("role-sum").textContent = `합계 ${total}`;
+  $("role-sum").classList.toggle("bad", bad);
+}
+async function loadRoles() {
+  const response = await call(`/api/projects/${projectId}/members`);
+  if (!response.ok) return;
+  const members = await response.json();
+  const meRes = await call("/api/auth/me");
+  if (!meRes.ok) return;
+  const me = await meRes.json();
+  const mine = members.find((entry) => entry.user_id === me.user_id);
+  renderRoles(mine?.role_shares ?? {});
+  $("role-message").textContent = `지금 ${describeRoles(mine?.role_shares)}`;
+}
+async function saveRoles() {
+  const shares = rolesFromScreen();
+  const problem = problemWith(shares);
+  if (problem !== null) {
+    $("role-message").textContent = problem;
+    return;
+  }
+  const response = await call(`/api/projects/${projectId}/members/me`, {
+    method: "PATCH",
+    body: JSON.stringify({ role_shares: toPayload(shares) })
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    $("role-message").textContent = detailText(body, "역할을 저장하지 못했습니다");
+    return;
+  }
+  $("role-message").textContent = `저장했습니다 — ${describeRoles(body.role_shares)}`;
+}
 async function loadHealth() {
   let response;
   try {
@@ -724,6 +820,8 @@ $("del-run").addEventListener("click", () => {
   });
 });
 renderNav("project");
+$("save-roles").addEventListener("click", () => void saveRoles());
 void load();
 void loadHealth();
+void loadRoles();
 bootApp();
