@@ -145,7 +145,7 @@ def _unlinked_members_warning(facts: ConnectionFacts) -> str | None:
     names = ", ".join(facts.members_without_login)
     return (
         f"GitHub 계정을 연결하지 않은 팀원이 있습니다: {names}. "
-        "이 팀원들의 PR 은 주인을 찾지 못해 기여도에 들어가지 않습니다."
+        "이 팀원들의 PR은 주인을 찾지 못해 기여도에 들어가지 않습니다."
     )
 
 
@@ -174,7 +174,7 @@ def _missing_history_warning(facts: ConnectionFacts) -> str | None:
     # ⚠️ 마크다운을 쓰지 않습니다. 경고 줄은 화면에서 `escapeHtml` 로만
     # 지나가므로 별표가 그대로 보입니다 (결함 44 와 같은 부류).
     return (
-        "연결하기 전의 PR 은 기여도에 들어가 있지 않습니다. "
+        "연결하기 전의 PR은 기여도에 들어가 있지 않습니다. "
         "웹훅은 연결한 순간부터 오기 때문입니다. "
         "아래 ‘지난 활동 가져오기’ 를 누르면 채웁니다."
     )
@@ -197,9 +197,9 @@ def describe_coverage(facts: ConnectionFacts) -> str:
         when = facts.verified_at.date().isoformat()
         return (
             f"{when}(연결한 날) 이후의 활동만 반영돼 있습니다 — "
-            "그 전의 PR 은 아직 가져오지 않았습니다."
+            "그 전의 PR은 아직 가져오지 않았습니다."
         )
-    return "연결 이후의 활동만 반영돼 있습니다 — 그 전의 PR 은 아직 가져오지 않았습니다."
+    return "연결 이후의 활동만 반영돼 있습니다 — 그 전의 PR은 아직 가져오지 않았습니다."
 
 
 def diagnose(facts: ConnectionFacts) -> ConnectionState:
@@ -237,7 +237,7 @@ def diagnose(facts: ConnectionFacts) -> ConnectionState:
             code="server_missing_webhook_secret",
             headline="서버에 웹훅 시크릿이 없습니다",
             detail=(
-                "이 상태에서는 GitHub 이 보낸 배달이 전부 401 로 거절됩니다. "
+                "이 상태에서는 GitHub이 보낸 배달이 전부 401로 거절됩니다. "
                 "저장소 설정과 무관하며 팀에서 고칠 수 없습니다."
             ),
             severity="bad",
@@ -251,7 +251,7 @@ def diagnose(facts: ConnectionFacts) -> ConnectionState:
     # 프로젝트에는 값이 없습니다. `verified_at` 만 보면 그런 프로젝트에
     # "아직 배달이 온 적이 없습니다" 라고 말하게 되는데, 같은 화면 바로
     # 아래에 "배달 12건 · 마지막 3분 전" 이 나옵니다 — 화면이 스스로를
-    # 반박합니다. 게다가 다음 할 일로 "App 이 설치돼 있는지 확인하세요"
+    # 반박합니다. 게다가 다음 할 일로 "App이 설치돼 있는지 확인하세요"
     # 를 시킵니다. 가 보면 멀쩡히 설치돼 있고, 사람은 고칠 것이 없는
     # 문제를 찾느라 시간을 씁니다. (결함 48)
     proven = facts.verified_at is not None or facts.delivery_count > 0
@@ -274,11 +274,11 @@ def diagnose(facts: ConnectionFacts) -> ConnectionState:
             code="waiting_for_delivery",
             headline="아직 이 저장소에서 배달이 온 적이 없습니다",
             detail=(
-                "저장소 이름을 적는 것만으로는 연결되지 않습니다. GitHub App 이 그 "
+                "저장소 이름을 적는 것만으로는 연결되지 않습니다. GitHub App이 그 "
                 "저장소에 설치돼야 하고, 설치되면 첫 활동에서 배달이 옵니다."
             ),
             severity="warn",
-            next_step="GitHub 저장소 설정 → GitHub Apps 에서 이 App 이 설치돼 있는지 확인하세요.",
+            next_step="GitHub 저장소 설정 → GitHub Apps에서 이 App이 설치돼 있는지 확인하세요.",
             warnings=warnings,
         )
 
@@ -286,9 +286,9 @@ def diagnose(facts: ConnectionFacts) -> ConnectionState:
     if not facts.app_credentials_present:
         return ConnectionState(
             code="server_missing_app_credentials",
-            headline="배달은 오지만 서버가 GitHub API 를 부를 수 없습니다",
+            headline="배달은 오지만 서버가 GitHub API를 부를 수 없습니다",
             detail=(
-                "웹훅 본문만으로는 PR 의 변경 파일을 알 수 없어 diff 필터를 걸 수 "
+                "웹훅 본문만으로는 PR의 변경 파일을 알 수 없어 diff 필터를 걸 수 "
                 "없습니다. 이벤트는 저장되지만 기여 이벤트로 바뀌지 않습니다."
             ),
             severity="bad",

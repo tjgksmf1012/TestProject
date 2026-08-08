@@ -630,3 +630,59 @@ def test_no_error_message_leaks_an_internal_state_name():
         + " | ".join(offenders)
         + ". `describe_track_state` 처럼 사람 말로 옮기는 자리를 두세요."
     )
+
+
+def test_screen_text_does_not_space_korean_particles():
+    """⭐ 화면에 나가는 문구에서 **조사를 앞말에 붙여** 쓴다 (결함 79).
+
+    칸반 카드에 이렇게 적혀 있었습니다.
+
+        PR 에 TASK 번호가 적혀 있습니다
+
+    한국어에서 조사는 앞말에 붙습니다 — `PR에` 입니다. 띄우면 조사가
+    다음 낱말처럼 보입니다. 결함 76 에서 프런트를 고쳤는데, 그때 백엔드
+    스캔은 **보간(`{…}`)만** 봐서 이런 **글자 그대로**의 문구를 놓쳤습니다.
+
+    ⚠️ **대상을 좁게 잡습니다.** 이 저장소의 주석·로그·docstring 은
+    `seq 는 0 이상` 처럼 **코드 이름 뒤에 조사를 띄우는** 문서 관례를
+    씁니다. 그건 화면에 안 나오므로 여기서 볼 대상이 아닙니다.
+    화면 문구를 만드는 것이 존재 이유인 모듈만 봅니다.
+    """
+    import re
+
+    SCREEN_TEXT_MODULES = [
+        # 연결 진단 — 상태·근거·다음 할 일을 그대로 화면에 띄운다
+        REPO_ROOT / "backend" / "teamflow" / "github" / "connection.py",
+        # "왜 이 PR 이 이 업무에 붙었는가" — 카드에 그대로 나간다
+        REPO_ROOT / "backend" / "teamflow" / "github" / "linking.py",
+    ]
+
+    particles = ["은", "는", "이", "가", "을", "를", "와", "과"]
+    particles += ["으로", "로", "에서", "에게", "에", "의"]
+    alternatives = "|".join(sorted(particles, key=len, reverse=True))
+    spaced = re.compile(
+        r"[A-Za-z0-9\)] (" + alternatives + r")(?=[\s.,)\"']|$)"
+    )
+    hangul = re.compile(r"[가-힣]")
+
+    offenders: list[str] = []
+    for path in SCREEN_TEXT_MODULES:
+        source = path.read_text(encoding="utf-8")
+        # docstring 을 통째로 뺀다 — 사람이 읽는 문서이지 화면 문구가 아니다
+        bare = re.sub(r'"""[\s\S]*?"""', "", source)
+        for line_no, line in enumerate(bare.splitlines(), start=1):
+            if "logger." in line or line.lstrip().startswith("#"):
+                continue
+            for lit in re.finditer(r'"[^"\n]*"|\'[^\'\n]*\'', line):
+                text = lit.group(0)
+                if not hangul.search(text):
+                    continue
+                hit = spaced.search(text)
+                if hit:
+                    offenders.append(f"{path.name}:{line_no} «{hit.group(0)}»")
+
+    assert offenders == [], (
+        "화면 문구에서 조사를 띄어 썼습니다: "
+        + " | ".join(offenders)
+        + ". 조사는 앞말에 붙여 쓰세요 (`PR에`, `App이`)."
+    )

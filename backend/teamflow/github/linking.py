@@ -153,7 +153,7 @@ def find_task_refs(
 def describe_source(source: str) -> str:
     """왜 이 PR 이 이 업무에 붙었는가. 화면에 그대로 나갑니다."""
     return {
-        SOURCE_EXPLICIT: "PR 에 TASK 번호가 적혀 있습니다",
+        SOURCE_EXPLICIT: "PR에 TASK 번호가 적혀 있습니다",
         SOURCE_BRANCH: "브랜치 이름의 번호로 추정했습니다",
-        SOURCE_ISSUE_REF: "PR 의 #번호로 추정했습니다 (GitHub 이슈 번호일 수 있습니다)",
+        SOURCE_ISSUE_REF: "PR의 #번호로 추정했습니다 (GitHub 이슈 번호일 수 있습니다)",
     }.get(source, "근거를 알 수 없습니다")

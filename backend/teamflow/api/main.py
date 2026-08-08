@@ -958,7 +958,7 @@ def start_github_backfill(
     ):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "서버에 GitHub App 자격 증명이 없거나 App 이 아직 이 저장소에 "
+            "서버에 GitHub App 자격 증명이 없거나 App이 아직 이 저장소에 "
             "설치되지 않았습니다. 지난 활동을 가져오려면 그것부터 필요합니다.",
         )
 
