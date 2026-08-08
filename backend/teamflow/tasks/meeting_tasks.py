@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from teamflow.config import get_settings
 from teamflow.db import models as m
 from teamflow.db.session import session_scope
+from teamflow.jobs import retention
 from teamflow.jobs.gpu_lock import GpuBusy
 from teamflow.meeting.resolve import TeamMemberName
 from teamflow.pipeline.meeting_pipeline import PipelineResult, Stage, process_meeting
@@ -474,9 +475,29 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
         # 사실이고, 틀린 라벨은 발화 자체를 고쳐서 바로잡는다.
         contribution = meeting_contribution_service.record_meeting(session, meeting)
 
+        # ── ② 원본 보관을 거부한 사람의 녹음 삭제 ─────────────
+        #
+        # `docs/07` §2.3 — "② 거부 → **전사 완료 후 원본 즉시 삭제.**
+        # 텍스트만 남김." 여기가 전사가 끝난 바로 그 지점입니다. 발화가
+        # 이미 저장됐으므로 원본이 없어도 회의록은 남습니다.
+        #
+        # ⚠️ 실패해도 회의 처리를 되돌리지 않습니다. 파일 하나를 못 지웠다고
+        # 방금 만든 회의록을 통째로 버리면 손해가 더 큽니다. 못 지운 것은
+        # 보고서에 남고, 보존기간이 지나면 매일 도는 잡이 다시 집어갑니다.
+        purged = retention.purge_unconsented_audio(
+            session,
+            meeting_id=meeting_id,
+            storage_root=get_settings().audio_storage_root,
+        )
+        if purged.failed:
+            logger.error(
+                "meeting=%s 원본 보관 거부분을 못 지웠습니다: %s", meeting_id, purged.failed
+            )
+
     return {
         "meeting_id": meeting_id,
         "status": "needs_review",
+        "audio_purged": len(purged.deleted_assets),
         "utterances": len(payload["segments"]),
         "candidates": len(payload["candidates"]),
         "contribution": contribution,

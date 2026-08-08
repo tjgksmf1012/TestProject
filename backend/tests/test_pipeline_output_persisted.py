@@ -634,3 +634,69 @@ def test_the_utterance_type_column_is_filled_by_the_pipeline(seeded):
         rows = s.scalars(select(m.Utterance)).all()
     assert rows
     assert all(row.utterance_type is not None for row in rows)
+
+
+# ══════════════════════════════════════════════════════════════
+# ② 원본 보관 거부 — **부르는 곳이 있는가** (docs/07 §2.3)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_persisting_results_deletes_the_originals_of_those_who_refused(
+    seeded, tmp_path, monkeypatch
+):
+    """⭐ 함수만 만들고 **부르는 곳이 없으면** 정확히 같은 결함이다.
+
+    이 저장소가 반복해 겪은 실패입니다 — `renderNav`(결함 47),
+    `extract_task_refs`(결함 12), 진행률 읽기(감사 #8), `DEADLINE_CHANGED`
+    (결함 63). 그래서 존재가 아니라 **호출**을 셉니다.
+
+    전사가 끝나는 지점이 여기입니다. 발화가 이미 저장됐으므로 원본이
+    없어도 회의록은 남습니다 — "텍스트만 남김" 이 그 뜻입니다.
+    """
+    from teamflow.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "audio_storage_root", tmp_path, raising=False)
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "teamflow.tasks.meeting_tasks.get_settings", lambda: settings, raising=True
+    )
+
+    refuser, agreer = seeded["user_ids"]
+    (tmp_path / "refused.opus").write_bytes(b"voice")
+    (tmp_path / "kept.opus").write_bytes(b"voice")
+
+    with db_session.session_scope() as s:
+        meeting_id = seeded["meeting_id"]
+        s.add_all(
+            [
+                m.RecordingConsent(
+                    meeting_id=meeting_id, user_id=refuser, consented=False,
+                    consent_type="raw_audio_retention", consented_at=NOW,
+                ),
+                m.RecordingConsent(
+                    meeting_id=meeting_id, user_id=agreer, consented=True,
+                    consent_type="raw_audio_retention", consented_at=NOW,
+                ),
+                m.AudioAsset(
+                    meeting_id=meeting_id, track_id=seeded["track_ids"][0],
+                    storage_key="refused.opus", encryption_key_id="k1",
+                    kind="raw", bytes=5, retention_until=NOW,
+                ),
+                m.AudioAsset(
+                    meeting_id=meeting_id, track_id=seeded["track_ids"][1],
+                    storage_key="kept.opus", encryption_key_id="k1",
+                    kind="raw", bytes=5, retention_until=NOW,
+                ),
+            ]
+        )
+
+    out = persist_results_task(seeded["meeting_id"], payload(seeded))
+
+    assert out["audio_purged"] == 1
+    assert not (tmp_path / "refused.opus").exists(), "거부한 사람의 원본이 남았다"
+    assert (tmp_path / "kept.opus").exists(), "동의한 사람 것까지 지우면 데이터 손실이다"
+
+    # 텍스트는 남는다 — 그게 "텍스트만 남김" 의 뜻이다.
+    with db_session.session_scope() as s:
+        assert s.scalars(select(m.Utterance)).all()

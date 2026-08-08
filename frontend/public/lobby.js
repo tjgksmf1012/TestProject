@@ -575,6 +575,10 @@ var $ = (id) => {
   if (!el) throw new Error(`요소 없음: ${id}`);
   return el;
 };
+var checked = (id) => {
+  const el = document.getElementById(id);
+  return el instanceof HTMLInputElement ? el.checked : false;
+};
 var roster = [];
 var progressLine = "";
 var tracks = [];
@@ -642,16 +646,19 @@ async function refresh() {
     }
   }
 }
+async function postConsent(consentType, consented) {
+  return fetch(`${apiBase}/api/meetings/${meetingId}/consent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // `user_id` 를 보내지 않는다. **동의는 본인만 한다** — 서버가 세션에서
+    // 읽으므로 남을 대신해 동의해 줄 방법이 없다.
+    body: JSON.stringify({ consent_type: consentType, consented }),
+    credentials: "same-origin"
+  });
+}
 async function submitConsent(consented) {
   try {
-    const response = await fetch(`${apiBase}/api/meetings/${meetingId}/consent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // `user_id` 를 보내지 않는다. **동의는 본인만 한다** — 서버가 세션에서
-      // 읽으므로 남을 대신해 동의해 줄 방법이 없다.
-      body: JSON.stringify({ consent_type: "recording", consented }),
-      credentials: "same-origin"
-    });
+    const response = await postConsent("recording", consented);
     if (isSessionExpired(response.status)) {
       goToLogin();
       return;
@@ -663,6 +670,19 @@ async function submitConsent(consented) {
         "동의를 제출하지 못했습니다"
       );
       return;
+    }
+    if (consented) {
+      const extras = [
+        ["raw_audio_retention", checked("keep-audio")],
+        ["voiceprint_storage", checked("keep-voiceprint")]
+      ];
+      for (const [type, value] of extras) {
+        const extra = await postConsent(type, value);
+        if (!extra.ok) {
+          $("consent-message").textContent = "녹음 동의는 접수됐지만 아래 두 항목을 저장하지 못했습니다. 다시 눌러 주세요.";
+          return;
+        }
+      }
     }
     roster = body.roster;
     consentMessage = body.message;

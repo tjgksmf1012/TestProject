@@ -55,6 +55,12 @@ const $ = (id: string): HTMLElement => {
   return el;
 };
 
+/** 체크박스의 지금 값. 요소가 없으면 **동의로 치지 않는다.** */
+const checked = (id: string): boolean => {
+  const el = document.getElementById(id);
+  return el instanceof HTMLInputElement ? el.checked : false;
+};
+
 let roster: RosterEntry[] = [];
 /** 처리 진행 문구. 서버가 만든 문장을 그대로 씁니다 (감사 #8). */
 let progressLine = '';
@@ -163,16 +169,23 @@ async function refresh(): Promise<void> {
   }
 }
 
+async function postConsent(
+  consentType: string,
+  consented: boolean,
+): Promise<Response> {
+  return fetch(`${apiBase}/api/meetings/${meetingId}/consent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    // `user_id` 를 보내지 않는다. **동의는 본인만 한다** — 서버가 세션에서
+    // 읽으므로 남을 대신해 동의해 줄 방법이 없다.
+    body: JSON.stringify({ consent_type: consentType, consented }),
+    credentials: 'same-origin',
+  });
+}
+
 async function submitConsent(consented: boolean): Promise<void> {
   try {
-    const response = await fetch(`${apiBase}/api/meetings/${meetingId}/consent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // `user_id` 를 보내지 않는다. **동의는 본인만 한다** — 서버가 세션에서
-      // 읽으므로 남을 대신해 동의해 줄 방법이 없다.
-      body: JSON.stringify({ consent_type: 'recording', consented }),
-      credentials: 'same-origin',
-    });
+    const response = await postConsent('recording', consented);
     if (isSessionExpired(response.status)) {
       goToLogin();
       return;
@@ -185,6 +198,31 @@ async function submitConsent(consented: boolean): Promise<void> {
       );
       return;
     }
+
+    // ②③ 을 같이 보낸다 (docs/07 §2.3).
+    //
+    // ⚠️ **녹음에 동의했을 때만** 보냅니다. 녹음 자체를 거부한 사람에게
+    // "원본은 보관해도 되나요" 를 묻는 건 뜻이 없고, 거부 기록에 딸린
+    // 응답이 남으면 나중에 그게 무슨 뜻인지 아무도 모릅니다.
+    //
+    // ⚠️ 이게 실패해도 녹음 동의는 이미 접수됐습니다. 되돌리지 않고
+    // 사람에게 말합니다 — 조용히 넘어가면 화면의 체크박스와 서버의
+    // 기록이 어긋난 채로 남습니다.
+    if (consented) {
+      const extras: [string, boolean][] = [
+        ['raw_audio_retention', checked('keep-audio')],
+        ['voiceprint_storage', checked('keep-voiceprint')],
+      ];
+      for (const [type, value] of extras) {
+        const extra = await postConsent(type, value);
+        if (!extra.ok) {
+          $('consent-message').textContent =
+            '녹음 동의는 접수됐지만 아래 두 항목을 저장하지 못했습니다. 다시 눌러 주세요.';
+          return;
+        }
+      }
+    }
+
     roster = body.roster;
     consentMessage = body.message;
     render();

@@ -116,12 +116,12 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 기여도 이벤트 모델 | ✅ | `backend/teamflow/contribution/events.py` |
 | diff 필터 (조작 저항성 핵심) | ✅ | `backend/teamflow/contribution/diff_filter.py` |
 | GitHub 이벤트 정규화 | ✅ | `backend/teamflow/contribution/github_ingest.py` |
-| 역할별 가중치 프로파일 | ✅ | `backend/teamflow/contribution/profiles.py` |
+| 역할별 가중치 프로파일 | ⚠️ 계산은 되나 **역할을 정하는 곳이 없음** | `backend/teamflow/contribution/profiles.py` — 가입·초대가 전원 `developer` 고정(`api/main.py`). 기획/디자인·겸직은 `scripts/seed_demo.py` 로만 도달 |
 | 신뢰도·조정범위 계산 | ✅ | `backend/teamflow/contribution/confidence.py` |
 | **측정 불가 처리 (0점과 구분)** | ✅ | `backend/teamflow/contribution/scoring.py` |
 | 기여도 산정 엔진 | ✅ | `backend/teamflow/contribution/scoring.py` |
-| DB 스키마 (26개 테이블) | ✅ | `backend/teamflow/db/models.py` |
-| **조작 저항성 테스트** | ✅ **24 시나리오** | `backend/tests/test_anti_gaming.py` |
+| DB 스키마 (28개 테이블) | ✅ | `backend/teamflow/db/models.py` |
+| **조작 저항성 테스트** | ✅ **11 시나리오 · 24 케이스** | `backend/tests/test_anti_gaming.py` |
 | 환경 진단 스크립트 | ✅ | `scripts/check_env.py` |
 | LLM 출력 스키마 (guided decoding) | ✅ | `backend/teamflow/meeting/schema.py` |
 | 환각 방어 (근거 발화 검증) | ✅ | `backend/teamflow/meeting/validation.py` |
@@ -137,7 +137,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
 | docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
 | **Dockerfile (api·gpu, ffmpeg 포함)** | ⚠️ 빌드 미검증 | `docker/` |
-| **Alembic 마이그레이션** | ✅ 26개 테이블 | `backend/migrations/` |
+| **Alembic 마이그레이션** | ✅ 28개 테이블 | `backend/migrations/` |
 | GPU 배타 락 (TTL·소유권 검증) | ✅ | `backend/teamflow/jobs/gpu_lock.py` |
 | **보존기간 삭제 잡** (법적 요구사항) | ✅ | `backend/teamflow/jobs/retention.py` |
 | **멀티트랙 정렬 (GCC-PHAT)** | ✅ | `backend/teamflow/audio/multitrack.py` |
@@ -193,11 +193,11 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 937 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 1289 passed (2026-08)
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 472 passed, 설치 불필요
+cd frontend && npm test                          # 647 passed (2026-08), 설치 불필요
 cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
 .venv/bin/python scripts/make_icons.py           # 앱 아이콘 (stdlib 만 씀)
 

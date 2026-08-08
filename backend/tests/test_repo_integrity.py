@@ -524,3 +524,31 @@ def test_the_allowlist_does_not_name_types_that_are_gone():
     """면제 목록이 실제 이름을 가리키는지. 오타면 면제가 조용히 넓어진다."""
     unknown = sorted(set(NO_PRODUCER_YET) - set(_event_type_names()))
     assert not unknown, f"EventType 에 없는 이름이 면제돼 있습니다: {unknown}"
+
+
+def test_the_readme_table_count_is_not_stale():
+    """⭐ README 가 "26개 테이블" 이라고 적어 둔 동안 실제로는 28개였다.
+
+    숫자는 조용히 낡습니다. 테이블을 하나 더하면서 README 를 같이 고칠
+    사람은 없습니다 — 아무 데서도 오류가 안 나니까요. 그래서 셉니다.
+
+    ⚠️ 테스트 통과 개수는 **일부러 안 셉니다.** 커밋마다 바뀌는 값이라
+    가드를 달면 관계없는 작업이 계속 빨개지고, 그러면 사람이 가드를
+    느슨하게 만듭니다. 대신 README 에 `(2026-08)` 을 붙여 **스냅샷임을
+    드러냈습니다** — 낡은 스냅샷은 거짓말이 아닙니다.
+    """
+    import re
+
+    from teamflow.db.models import Base
+
+    actual = len(Base.metadata.tables)
+    readme = (REPO_ROOT / "README.md").read_text()
+
+    claims = {int(n) for n in re.findall(r"(\d+)개 테이블", readme)}
+    assert claims, "README 에서 테이블 수 주장을 못 찾았습니다"
+
+    wrong = sorted(n for n in claims if n != actual)
+    assert not wrong, (
+        f"README 가 테이블을 {wrong} 개라고 적었는데 실제는 {actual} 개입니다. "
+        "models.py 를 고쳤으면 README 도 같이 고치세요."
+    )

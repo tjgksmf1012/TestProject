@@ -58,6 +58,9 @@ class PurgeReport:
 #: 행사인데, 둘 다 "녹음이 끊겼습니다" 로 나가면 팀이 엉뚱한 대응을 합니다.
 REASON_RETENTION_EXPIRED = "retention_expired"
 REASON_USER_REQUEST = "user_request"
+#: ② `raw_audio_retention` 을 **명시적으로 거부**한 사람의 원본.
+#: 보존기간이 남았는지와 무관하게 전사가 끝나면 바로 지운다.
+REASON_CONSENT_REFUSED = "consent_refused"
 
 
 def _safe_remove(root: Path, storage_key: str) -> tuple[bool, int, str | None]:
@@ -163,6 +166,95 @@ def purge_expired_audio(
 
     if not dry_run:
         session.flush()
+    return report
+
+
+def purge_unconsented_audio(
+    session: Session,
+    *,
+    meeting_id: int,
+    storage_root: Path,
+    now: datetime | None = None,
+    dry_run: bool = False,
+) -> PurgeReport:
+    """② 원본 보관을 **거부한 사람**의 녹음을 전사 직후 지운다.
+
+    `docs/07` §2.3 이 이렇게 적어 뒀습니다.
+
+        ② 거부 → 전사 완료 후 원본 즉시 삭제. 텍스트만 남김.
+
+    ⚠️ 저장만 되고 **아무 효과가 없었습니다.** 거부한 사람의 원본이 동의한
+    사람과 똑같이 30일 남았습니다. DB 에는 '거부' 로, 로비 화면에도 '거부'
+    로 표시되면서 실제 처리는 동의한 것과 같았습니다 — **동의 기록 자체가
+    사실과 다른 상태**이고, 감사·분쟁에서 가장 나쁜 형태입니다.
+
+    ⚠️ **명시적 거부일 때만** 지웁니다. 아직 아무 답도 안 한 사람은
+    거부한 것이 아닙니다 — 그 사람 것까지 지우면 그건 데이터 손실이고,
+    되돌릴 방법이 없습니다. 여기서는 `측정 불가 ≠ 거부` 입니다.
+
+    ⚠️ **전사가 끝난 뒤에** 부르세요. 그전에 지우면 회의록이 안 나옵니다.
+    """
+    now = now or datetime.now(UTC)
+    report = PurgeReport()
+
+    refused_users = select(m.RecordingConsent.user_id).where(
+        m.RecordingConsent.meeting_id == meeting_id,
+        m.RecordingConsent.consent_type == "raw_audio_retention",
+        m.RecordingConsent.consented.is_(False),
+    )
+    refused_tracks = select(m.MeetingTrack.id).where(
+        m.MeetingTrack.meeting_id == meeting_id,
+        m.MeetingTrack.user_id.in_(refused_users),
+    )
+    assets = session.scalars(
+        select(m.AudioAsset).where(
+            m.AudioAsset.kind == "raw",
+            m.AudioAsset.deleted_at.is_(None),
+            m.AudioAsset.track_id.in_(refused_tracks),
+        )
+    ).all()
+
+    for asset in assets:
+        if dry_run:
+            report.deleted_assets.append(asset.id)
+            report.freed_bytes += asset.bytes or 0
+            continue
+
+        removed, size, error = _safe_remove(storage_root, asset.storage_key)
+        if error:
+            report.failed[asset.id] = error
+            logger.error("동의 거부 오디오 삭제 실패 asset=%s: %s", asset.id, error)
+            continue
+
+        if not removed:
+            report.missing_files.append(asset.id)
+
+        asset.deleted_at = now
+        asset.deleted_reason = REASON_CONSENT_REFUSED
+        report.deleted_assets.append(asset.id)
+        report.freed_bytes += size or (asset.bytes or 0)
+
+        session.add(
+            m.AuditLog(
+                project_id=None,
+                actor_id=None,  # 시스템 작업
+                action="audio_deleted",
+                target=f"audio_assets/{asset.id}",
+                before={"storage_key": asset.storage_key, "kind": asset.kind},
+                after={"deleted_at": now.isoformat(), "reason": REASON_CONSENT_REFUSED},
+                at=now,
+            )
+        )
+
+    if not dry_run:
+        session.flush()
+    if report.deleted_assets:
+        logger.info(
+            "meeting=%s 원본 보관 거부 %d건 삭제 (%.1fMB)",
+            meeting_id,
+            len(report.deleted_assets),
+            report.freed_bytes / 1_048_576,
+        )
     return report
 
 

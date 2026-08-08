@@ -804,6 +804,32 @@ describe('상태 화면 (지시서 §7)', () => {
     );
   });
 
+  it('⭐ 3단계 동의 ②③ 을 **묻고 보낸다** (docs/07 §2.3)', () => {
+    // ②③ 은 스키마에도 있고 서버도 받는데, **화면이 묻지를 않았습니다.**
+    // 그래서 "3단계 분리 동의" 는 문서와 DB 에만 존재했고, 거부할
+    // 방법 자체가 없었습니다. 저장만 되고 아무 효과가 없던 것도
+    // 결국 아무도 거부할 수 없었기 때문입니다.
+    //
+    // 존재가 아니라 **호출**을 셉니다 (결함 47·63·감사 #8 교훈).
+    const lobbyHtml = readFileSync(join(PUBLIC, 'lobby.html'), 'utf8');
+    for (const id of ['keep-audio', 'keep-voiceprint']) {
+      strictEqual(
+        lobbyHtml.includes(`id="${id}"`),
+        true,
+        `로비에 ${id} 체크박스가 없습니다 — 물어보지 않으면 거부할 수 없습니다`,
+      );
+    }
+
+    const lobbyTs = codeOf(readFileSync(join(DEMO, 'lobby.ts'), 'utf8'));
+    for (const type of ['raw_audio_retention', 'voiceprint_storage']) {
+      strictEqual(
+        lobbyTs.includes(type),
+        true,
+        `로비가 ${type} 을 서버로 보내지 않습니다`,
+      );
+    }
+  });
+
   it('⭐ 화면에 **색 이모지**를 내보내지 않는다 (지시서 §4.6)', () => {
     // 색 이모지는 셋을 못 합니다.
     //

@@ -44,6 +44,15 @@
   .blockers { margin: 0 0 var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: .5rem; background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: var(--fs-label); }
   .blockers p { margin: var(--sp-1) 0; }
   .status { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-3) 0 0; }
+
+  /* ②③ 은 녹음 동의와 **다른 무게**다. 테두리로 묶어 한 덩어리로 보이게 하되
+     시각적 비중은 낮춘다 — 주 동작은 아래 "동의합니다" 하나다. */
+  .extras { margin: var(--sp-3) 0 0; padding: var(--sp-2) var(--sp-3) var(--sp-3);
+            border: 1px solid var(--line); border-radius: var(--r-card); }
+  .extras legend { padding: 0 var(--sp-1); font-size: var(--fs-label); color: var(--text-subtle); }
+  .extras label { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-icon);
+                  align-items: baseline; margin: var(--sp-2) 0 0; font-size: var(--fs-label); }
+  .extras .hint { display: block; color: var(--text-subtle); font-size: var(--fs-caption); }
     </style>
 </head>
 <body>
@@ -57,6 +66,18 @@
     <h2>동의</h2>
     <div id="blockers" class="blockers" hidden></div>
     <ul id="roster"></ul>
+
+    <!-- ②③ 은 **따로** 묻는다 (docs/07 §2.3). 녹음 동의에 묶어 버리면
+         "녹음은 되지만 원본은 남기기 싫다" 를 말할 방법이 없다.
+         거부해도 회의는 그대로 진행된다 — 그게 분리해서 받는 이유다. -->
+    <fieldset class="extras">
+      <legend>따로 받는 동의</legend>
+      <label><input type="checkbox" id="keep-audio" checked />
+        원본 음성 파일 보관 <span class="hint">거부하면 회의록을 만든 뒤 바로 지웁니다</span></label>
+      <label><input type="checkbox" id="keep-voiceprint" checked />
+        목소리 특징 저장 <span class="hint">거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다</span></label>
+    </fieldset>
+
     <div class="row" style="margin-top:.75rem">
       <button id="agree" class="primary">동의합니다</button>
       <button id="refuse">거부</button>
