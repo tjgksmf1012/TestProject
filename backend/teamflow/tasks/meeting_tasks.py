@@ -334,7 +334,14 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
         # **점수가 누적된다.**
         meeting_contribution_service.forget_meeting_events(session, meeting_id)
 
-        for model in (m.Utterance, m.MeetingTaskCandidate, m.Decision):
+        # ⚠️ **`MeetingEvent` 도 여기 있어야 합니다** (결함 113). 미해결
+        # 사안은 이 표에 들어가는데 정리 목록에 없어서, 재처리할 때마다
+        # 같은 사안이 한 벌씩 더 쌓였습니다.
+        #
+        # 결함 111 **전에는 아무도 못 봤습니다** — 그 표를 읽는 화면이
+        # 0곳이었기 때문입니다. 화면에 올리자 중복이 그대로 보이게
+        # 됐습니다. **안 보이던 것이 안 틀렸던 것은 아닙니다.**
+        for model in (m.Utterance, m.MeetingTaskCandidate, m.Decision, m.MeetingEvent):
             for row in session.scalars(
                 select(model).where(model.meeting_id == meeting_id)
             ).all():

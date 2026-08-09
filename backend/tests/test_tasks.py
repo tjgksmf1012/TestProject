@@ -466,6 +466,54 @@ def test_reprocessing_keeps_evidence_pointing_at_live_rows(seeded):
             assert set(row.evidence_utterance_ids) <= live, "근거가 고아입니다"
 
 
+def test_reprocessing_does_not_pile_up_unresolved_issues(seeded):
+    """⭐ 재처리 정리가 **`meeting_events` 를 안 지우고 있었다** (결함 113).
+
+    정리 목록은 셋뿐이었습니다 — `Utterance`·`MeetingTaskCandidate`·
+    `Decision`. 미해결 사안은 `meeting_events` 에 들어가는데 거기 없어서,
+    **재처리할 때마다 같은 사안이 한 벌씩 더 쌓였습니다.**
+
+    ⚠️ 이 결함은 결함 111 **전에는 아무도 못 봤습니다.** 그 표를 읽는
+    화면이 0곳이었기 때문입니다. 화면에 올리자 중복이 그대로 보이게
+    됐습니다 — **안 보이던 것이 안 틀렸던 것은 아닙니다.**
+
+    재실행 경로는 실재합니다: `task_acks_late=True` + `reject_on_worker_lost`
+    라 워커가 죽으면 같은 회의가 다시 돕니다.
+    """
+    data = payload(user_ids=seeded["user_ids"])
+    data["unresolved_issues"] = [
+        {"content": "배포 방식을 정하지 못했습니다", "evidence": [1]}
+    ]
+    data["next_agenda"] = ["배포 방식 결정"]
+
+    persist_results_task(seeded["meeting_id"], data)
+    persist_results_task(seeded["meeting_id"], data)
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(
+            select(m.MeetingEvent).where(
+                m.MeetingEvent.meeting_id == seeded["meeting_id"],
+                m.MeetingEvent.event_type == "unanswered_question",
+            )
+        ).all()
+        assert len(rows) == 1, f"재처리마다 쌓였습니다: {len(rows)}건"
+
+        # 근거는 **이번 판의** 발화를 가리켜야 한다. 옛 행이 남아 있으면
+        # 지워진 발화를 가리키는 고아가 됩니다.
+        live = set(
+            s.scalars(
+                select(m.Utterance.id).where(
+                    m.Utterance.meeting_id == seeded["meeting_id"]
+                )
+            ).all()
+        )
+        assert set(rows[0].evidence_utterance_ids) <= live, "근거가 고아입니다"
+
+        # 다음 안건은 **덮어쓰기**라 원래 안 쌓입니다. 같이 확인해 둡니다.
+        meeting = s.get(m.Meeting, seeded["meeting_id"])
+        assert meeting.next_agenda == ["배포 방식 결정"]
+
+
 def test_reprocessing_refuses_when_a_human_already_decided(seeded):
     """⭐ 승인된 후보가 있으면 재처리하지 않는다.
 

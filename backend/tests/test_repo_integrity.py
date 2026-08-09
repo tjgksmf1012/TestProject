@@ -782,6 +782,69 @@ def test_the_pipeline_does_not_put_a_python_exception_on_the_screen():
     )
 
 
+def test_the_reprocessing_cleanup_names_every_table_it_rewrites():
+    """⭐ 재처리 정리 목록에 **빠진 표가 없는가** (결함 113).
+
+    `persist_results_task` 는 회의를 다시 처리할 때 앞판의 결과를 지우고
+    새로 씁니다. 그 정리 목록에 셋만 있었습니다 —
+    `Utterance`·`MeetingTaskCandidate`·`Decision`. **미해결 사안이
+    들어가는 `MeetingEvent` 는 없었습니다.** 그래서 재처리할 때마다 같은
+    사안이 한 벌씩 더 쌓였습니다.
+
+    ⚠️ **결함 111 전에는 아무도 못 봤습니다** — 그 표를 읽는 화면이
+    0곳이었기 때문입니다. 화면에 올리자 중복이 그대로 보이게 됐습니다.
+    **안 보이던 것이 안 틀렸던 것은 아닙니다.**
+
+    이 검사는 &#34;그 태스크가 만드는 표&#34; 와 &#34;지우는 표&#34; 를 맞춰 봅니다.
+    새 표에 회의 결과를 쓰기 시작하면서 정리를 안 하면 여기서 걸립니다.
+    """
+    import ast
+
+    source = (
+        REPO_ROOT / "backend" / "teamflow" / "tasks" / "meeting_tasks.py"
+    ).read_text()
+    tree = ast.parse(source)
+
+    # `m.Xxx(...)` 로 **만드는** 표
+    created = {
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "m"
+        and node.func.attr[:1].isupper()
+    }
+
+    # `for model in (m.A, m.B, …)` 로 **지우는** 표
+    cleaned: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.For) or not isinstance(node.iter, ast.Tuple):
+            continue
+        for element in node.iter.elts:
+            if isinstance(element, ast.Attribute) and isinstance(element.value, ast.Name):
+                if element.value.id == "m":
+                    cleaned.add(element.attr)
+
+    assert cleaned, "정리 목록을 못 찾았습니다 — 이 검사가 헛돌고 있습니다"
+
+    # 회의마다 새로 만드는 것이 아닌 표. 근거를 적는다.
+    exempt = {
+        "MeetingTrack": "녹음이 만든다. 재처리는 트랙을 다시 만들지 않는다",
+        "ContributionEventRow": (
+            "`forget_meeting_events` 가 **발화를 지우기 전에** 따로 지운다 — "
+            "발화가 사라진 뒤에는 어느 이벤트가 이 회의 것이었는지 알 방법이 없다"
+        ),
+        "AuditLog": "무슨 일이 있었는가의 기록이다. 재처리로 지우면 안 된다",
+    }
+
+    missing = sorted(created - cleaned - set(exempt))
+    assert not missing, (
+        "재처리가 만드는데 정리 목록에 없습니다 — 다시 돌 때마다 쌓입니다:\n  "
+        + "\n  ".join(missing)
+    )
+
+
 def test_every_column_a_person_must_fill_has_a_route_that_fills_it():
     """⭐ 사람이 채워야 하는 칸에 **채울 길이 있는가** (결함 112).
 
