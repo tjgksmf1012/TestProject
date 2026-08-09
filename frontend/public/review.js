@@ -294,6 +294,18 @@ function attr(value) {
   return `"${escapeHtml(String(value))}"`;
 }
 
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+
 // src/lib/ui/empty.ts
 function emptyHtml(state) {
   const action = state.action ? `<a class="btn btn-primary" href="${escapeHtml(state.action.href)}">${escapeHtml(state.action.label)}</a>` : "";
@@ -795,12 +807,19 @@ $("submit").addEventListener("click", async () => {
     alert(error instanceof Error ? error.message : String(error));
     return;
   }
-  const response = await fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    credentials: "same-origin"
-  });
+  const response = await trySend(
+    () => fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      credentials: "same-origin"
+    })
+  );
+  if (response === null) {
+    $("result").textContent = unreachableText("제출하지 못했습니다");
+    $("result").className = "bad";
+    return;
+  }
   if (isSessionExpired(response.status)) {
     goToLogin();
     return;

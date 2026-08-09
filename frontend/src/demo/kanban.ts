@@ -19,7 +19,9 @@ import {
 } from '../lib/kanban/board.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { trySend, unreachableText } from '../lib/http/send.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
+import { withJosa } from '../lib/text/josa.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
@@ -73,8 +75,10 @@ function cardHtml(task: Task, today: string): string {
   const moves = nextStatuses(task, statuses)
     .map(
       (s) =>
+        // ⚠️ `…로` 를 글자로 붙이면 안 된다. `진행 중` 은 받침이 있어
+        // `진행 중으로` 다 — 붙여 놓은 동안 버튼에 **"진행 중로"** 가 떴다.
         `<button class="move" data-id="${task.id}" data-to="${escapeHtml(s)}">` +
-        `${escapeHtml(describeStatus(s))}로</button>`,
+        `${escapeHtml(withJosa(describeStatus(s), '으로로'))}</button>`,
     )
     .join('');
 
@@ -176,15 +180,21 @@ function render(): void {
 }
 
 async function move(taskId: number, to: string): Promise<void> {
-  const response = await fetch(`${apiBase}/api/projects/${projectId}/tasks/${taskId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    // ⚠️ `statusPatch` 를 쓴다. 손으로 객체를 만들면서 `deadline: null` 을
-    // 넣으면 서버가 마감일을 지운다.
-    body: JSON.stringify(statusPatch(to)),
-    credentials: 'same-origin',
-  });
+  const response = await trySend(() =>
+    fetch(`${apiBase}/api/projects/${projectId}/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      // ⚠️ `statusPatch` 를 쓴다. 손으로 객체를 만들면서 `deadline: null` 을
+      // 넣으면 서버가 마감일을 지운다.
+      body: JSON.stringify(statusPatch(to)),
+      credentials: 'same-origin',
+    }),
+  );
 
+  if (response === null) {
+    $('result').textContent = unreachableText('옮기지 못했습니다');
+    return;
+  }
   if (isSessionExpired(response.status)) {
     goToLogin();
     return;

@@ -33,6 +33,7 @@ import {
   type FinalRow,
 } from '../lib/contribution/final.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
+import { trySend, unreachableText } from '../lib/http/send.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
@@ -217,12 +218,20 @@ async function confirm(): Promise<void> {
     return;
   }
 
-  const response = await fetch(`${apiBase}/api/projects/${projectId}/contributions/final`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ finals: toPayload(drafts, systemValues) }),
-    credentials: 'same-origin',
-  });
+  // ⚠️ 여기서 실패를 놓치면 화면에 **"확정했습니다."** 가 그대로 남는다.
+  // 이 시스템에서 사람이 개입하는 유일한 지점이다 (docs/05 §5).
+  const response = await trySend(() =>
+    fetch(`${apiBase}/api/projects/${projectId}/contributions/final`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ finals: toPayload(drafts, systemValues) }),
+      credentials: 'same-origin',
+    }),
+  );
+  if (response === null) {
+    $('final-message').textContent = unreachableText('확정하지 못했습니다');
+    return;
+  }
   if (isSessionExpired(response.status)) {
     goToLogin();
     return;

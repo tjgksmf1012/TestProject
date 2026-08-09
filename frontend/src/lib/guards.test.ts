@@ -410,6 +410,85 @@ describe('로그아웃이 안 될 때 (결함 82)', () => {
   });
 });
 
+describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
+  const demoSources = (): { rel: string; code: string }[] =>
+    readdirSync(DEMO)
+      .filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))
+      .map((n) => ({ rel: `src/demo/${n}`, code: codeOf(readFileSync(join(DEMO, n), 'utf8')) }));
+
+  /** `이름(` 부터 짝 맞는 `)` 까지. 인자 안의 괄호를 세어 자릅니다. */
+  const callsOf = (code: string, name: string): { at: number; args: string }[] => {
+    const found: { at: number; args: string }[] = [];
+    const needle = `${name}(`;
+    for (let at = code.indexOf(needle); at !== -1; at = code.indexOf(needle, at + 1)) {
+      // `trySend(` 가 `send(` 로도 걸립니다 — 앞 글자가 이름의 일부면 건너뜁니다.
+      if (at > 0 && /[\w$.]/.test(code[at - 1] as string)) continue;
+      let depth = 0;
+      let i = at + needle.length - 1;
+      for (; i < code.length; i++) {
+        if (code[i] === '(') depth++;
+        else if (code[i] === ')' && --depth === 0) break;
+      }
+      found.push({ at, args: code.slice(at + needle.length, i) });
+    }
+    return found;
+  };
+
+  it('⭐ 누르면 바뀌는 요청은 전부 `trySend` 를 거친다', () => {
+    // `fetch` 는 서버가 500 을 줘도 **성공**으로 끝나고, 서버에 닿지
+    // 못하면 **거부**합니다. `!response.ok` 만 보는 코드는 두 번째를
+    // 통째로 놓치고, 그 뒤가 `void …` 나 `async` 클릭 처리기면 거부가
+    // 아무 데도 안 걸립니다. 브라우저에서 확인한 결과가 이렇습니다.
+    //
+    //     새 프로젝트 만들기  아무 일도 안 일어남
+    //     칸반 카드 옮기기    아무 일도 안 일어남
+    //     기여도 확정         **"확정했습니다."** 가 그대로 남음
+    const offenders: string[] = [];
+    for (const { rel, code } of demoSources()) {
+      // `send()` 는 `call()` 을 `trySend` 로 감싼 그 파일의 지역 helper 다.
+      const hasWrapper = /const send\s*=[\s\S]{0,120}?trySend\(/.test(code);
+      for (const name of ['fetch', 'call']) {
+        for (const { at, args } of callsOf(code, name)) {
+          if (!/\bmethod:/.test(args)) continue; // GET 은 받아 오기 길이다
+          const before = code.slice(Math.max(0, at - 40), at);
+          if (/trySend\(\(\)\s*=>\s*$/.test(before)) continue;
+          if (hasWrapper && name === 'call') continue;
+          offenders.push(`${rel} 의 ${name}(`);
+        }
+      }
+    }
+    strictEqual(
+      [...new Set(offenders)].join(', '),
+      '',
+      '`trySend(() => fetch(…))` 로 감싸고 `null` 일 때 화면에 적으세요',
+    );
+  });
+
+  it('⭐ `trySend` 를 쓰는 화면은 `null` 일 때 할 말이 있다', () => {
+    // 감싸 놓고 `null` 을 안 보면 그대로 조용합니다 — 오히려 나빠집니다.
+    const silent = demoSources()
+      .filter(({ code }) => /trySend\(/.test(code))
+      // 화면마다 할 말이 다릅니다 — 공통 문구든, 그 화면 전용이든
+      // **`null` 을 받아 사람에게 옮기는 함수**가 하나는 있어야 합니다.
+      .filter(
+        ({ code }) =>
+          !/unreachableText\(|describeCompletionFailure\(0\)|describeRequestFailure\(0\)|describeLogoutFailure\(/.test(
+            code,
+          ),
+      )
+      .map(({ rel }) => rel);
+    strictEqual(silent.join(', '), '', '`response === null` 일 때 적을 문구가 없습니다');
+  });
+
+  it('⭐ 브라우저 예외를 화면에 붙이지 않는다', () => {
+    // `전송 실패: ${String(err)}` → `전송 실패: TypeError: Failed to fetch`
+    const offenders = demoSources()
+      .filter(({ code }) => /\$\{String\(err[a-z]*\)\}|\$\{err[a-z]*\}/.test(code))
+      .map(({ rel }) => rel);
+    strictEqual(offenders.join(', '), '', '`describeUnexpected()` 를 쓰고 원문은 콘솔에 남기세요');
+  });
+});
+
 describe('복사가 안 될 때 (결함 81)', () => {
   const PUBLIC_DIR = join(ROOT, 'public');
   const demoFiles = (): { rel: string; code: string }[] => {
@@ -544,6 +623,29 @@ describe('한국어 조사 (결함 76)', () => {
       }
     }
     strictEqual(offenders.join('\n'), '', '`withJosa(값, 짝)` 으로 붙여 쓰세요');
+  });
+
+  it('⭐ 값 바로 뒤에 조사를 글자로 붙이지 않는다 (결함 88)', () => {
+    // **네 번째 층입니다.** 앞의 둘은 `${값} 조사` 처럼 **띄운** 것을
+    // 봤고, 이건 **붙여 놓은** 것을 봅니다. 붙여 써서 띄어쓰기 가드가
+    // 통과시켰고, 짝 표기가 아니라 `은(는)` 가드도 통과시켰습니다.
+    //
+    // 칸반 카드 버튼이 그래서 이랬습니다.
+    //
+    //     `${escapeHtml(describeStatus(s))}로`  →  진행 중로
+    //
+    // `진행 중` 은 받침이 있으므로 `진행 중으로` 입니다. `할 일로` 와
+    // `완료로` 는 맞아서, 세 버튼 중 **하나만** 틀린 채로 있었습니다 —
+    // 눈으로 훑으면 넘어가기 딱 좋은 모양입니다.
+    const PARTICLES = ['은', '는', '이', '가', '을', '를', '와', '과', '으로', '로'];
+    const attached = new RegExp(`\\}(${PARTICLES.join('|')})(?![\\w가-힣])`);
+    const offenders: string[] = [];
+    for (const { rel, code } of codeFiles()) {
+      for (const lit of code.matchAll(/`[^`]*`/g)) {
+        if (attached.test(lit[0])) offenders.push(`${rel} → ${lit[0].slice(0, 60)}`);
+      }
+    }
+    strictEqual(offenders.join('\n'), '', '`withJosa(값, 짝)` 으로 값에 맞는 조사를 고르세요');
   });
 
   // ⭐ **세 번째 층입니다** (결함 80).

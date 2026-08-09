@@ -41,6 +41,7 @@ import {
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
+import { trySend, unreachableText } from '../lib/http/send.ts';
 import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { renderNav } from './nav.ts';
@@ -188,16 +189,24 @@ async function joinMeeting(id: string): Promise<void> {
   }
   $('who').textContent = `${((await me.json()) as Me).name} 님의 트랙으로 녹음합니다`;
 
-  const response = await fetch(`${apiBase}/api/meetings/${id}/tracks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      started_at: new Date().toISOString(),
-      device_label: navigator.userAgent.slice(0, 100),
+  const response = await trySend(() =>
+    fetch(`${apiBase}/api/meetings/${id}/tracks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        started_at: new Date().toISOString(),
+        device_label: navigator.userAgent.slice(0, 100),
+      }),
+      credentials: 'same-origin',
     }),
-    credentials: 'same-origin',
-  });
+  );
 
+  if (response === null) {
+    // 여기서 조용하면 녹음 버튼이 계속 비활성인 채로 남고, 사람은
+    // **폰이 고장난 줄** 안다.
+    $('who').textContent = unreachableText('트랙에 참가하지 못했습니다');
+    return;
+  }
   if (isSessionExpired(response.status)) {
     location.href = loginUrlFor(location.pathname + location.search);
     return;
@@ -282,15 +291,15 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
     timesliceMs: result.timesliceMs,
   });
 
-  let response: Response;
-  try {
-    response = await fetch(`${trackUrl}/complete`, {
+  const response = await trySend(() =>
+    fetch(`${trackUrl}/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       body: JSON.stringify(body),
-    });
-  } catch {
+    }),
+  );
+  if (response === null) {
     $('finish-state').textContent = describeCompletionFailure(0);
     $('finish-retry').hidden = false;
     return;

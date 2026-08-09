@@ -360,6 +360,18 @@ function detailText(body, fallback) {
   return fallback;
 }
 
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+
 // src/lib/privacy/deletion.ts
 function whatGetsDeleted() {
   return [
@@ -407,7 +419,11 @@ function describeOutcome(result) {
     parts.push(`성문 ${result.revoked_voiceprints}건`);
   }
   return {
-    text: `${parts.join("과 ")}을 지웠습니다 (${describeFreed(result.freed_bytes)} 확보). 되돌릴 수 없습니다.`,
+    text: (
+      // ⚠️ `…을` 을 글자로 붙이지 않는다. 지금은 목록이 늘 `…건` 으로
+      // 끝나 맞지만, 단위를 바꾸는 순간 조용히 틀린 조사가 된다 (결함 88).
+      `${withJosa(parts.join("과 "), "을를")} 지웠습니다 (${describeFreed(result.freed_bytes)} 확보). 되돌릴 수 없습니다.`
+    ),
     needsRetry: false,
     deletedSomething: true
   };
@@ -727,6 +743,7 @@ async function call(path, init) {
   if (isSessionExpired(response.status)) goToLogin();
   return response;
 }
+var send = (path, init) => trySend(() => call(path, init));
 function say(id, text) {
   $(id).textContent = text;
   $(id).hidden = text === "";
@@ -767,15 +784,13 @@ async function startBackfill() {
   button.disabled = true;
   status.hidden = false;
   status.textContent = "가져오는 중…";
-  let response;
-  try {
-    response = await call(`/api/projects/${projectId}/github/backfill`, {
-      method: "POST",
-      body: JSON.stringify({})
-    });
-  } catch {
+  const response = await send(`/api/projects/${projectId}/github/backfill`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+  if (response === null) {
     button.disabled = false;
-    status.textContent = "서버에 닿지 못했습니다. 잠시 뒤 다시 누르세요.";
+    status.textContent = unreachableText("가져오지 못했습니다");
     return;
   }
   if (!response.ok) {
@@ -835,10 +850,14 @@ async function saveRoles() {
     $("role-message").textContent = problem;
     return;
   }
-  const response = await call(`/api/projects/${projectId}/members/me`, {
+  const response = await send(`/api/projects/${projectId}/members/me`, {
     method: "PATCH",
     body: JSON.stringify({ role_shares: toPayload(shares) })
   });
+  if (response === null) {
+    $("role-message").textContent = unreachableText("역할을 저장하지 못했습니다");
+    return;
+  }
   const body = await response.json();
   if (!response.ok) {
     $("role-message").textContent = detailText(body, "역할을 저장하지 못했습니다");
@@ -874,10 +893,11 @@ async function load() {
 $("save-title").addEventListener("click", () => {
   const problem = titleProblem(input("title").value);
   if (problem) return say("error", problem);
-  void call(`/api/projects/${projectId}`, {
+  void send(`/api/projects/${projectId}`, {
     method: "PATCH",
     body: JSON.stringify({ title: input("title").value.trim() })
   }).then(async (r) => {
+    if (r === null) return say("error", unreachableText("이름을 바꾸지 못했습니다"));
     say("error", r.ok ? "" : `이름을 바꾸지 못했습니다 (HTTP ${r.status})`);
     if (r.ok) render(await r.json());
   });
@@ -888,10 +908,11 @@ $("save-repo").addEventListener("click", () => {
   if (problem) return say("error", problem);
   const repo = normalizeRepo(raw);
   input("repo").value = repo;
-  void call(`/api/projects/${projectId}`, {
+  void send(`/api/projects/${projectId}`, {
     method: "PATCH",
     body: JSON.stringify({ github_repo: repo })
   }).then(async (r) => {
+    if (r === null) return say("error", unreachableText("저장하지 못했습니다"));
     if (r.status === 409) return say("error", "다른 프로젝트가 이미 이 저장소를 쓰고 있습니다.");
     say("error", r.ok ? "" : `저장하지 못했습니다 (HTTP ${r.status})`);
     if (!r.ok) return;
@@ -907,9 +928,12 @@ $("rotate").addEventListener("click", () => {
     "초대 코드를 새로 만듭니다.\n지금 코드는 그 즉시 통하지 않습니다. 계속할까요?"
   );
   if (!ok) return;
-  void call(`/api/projects/${projectId}/invite/rotate`, { method: "POST" }).then(
+  void send(`/api/projects/${projectId}/invite/rotate`, { method: "POST" }).then(
     async (r) => {
-      if (r.ok) render(await r.json());
+      if (r === null) return say("error", unreachableText("코드를 새로 만들지 못했습니다"));
+      if (!r.ok) return say("error", `코드를 새로 만들지 못했습니다 (HTTP ${r.status})`);
+      say("error", "");
+      render(await r.json());
     }
   );
 });
@@ -928,10 +952,11 @@ $("copy").addEventListener("click", () => {
 });
 $("open-meeting").addEventListener("click", () => {
   const title = input("meeting-title").value.trim();
-  void call(`/api/projects/${projectId}/meetings`, {
+  void send(`/api/projects/${projectId}/meetings`, {
     method: "POST",
     body: JSON.stringify({ title: title || null })
   }).then(async (r) => {
+    if (r === null) return say("error", unreachableText("회의를 열지 못했습니다"));
     if (!r.ok) {
       const body = await r.json().catch(() => null);
       return say(
@@ -958,7 +983,13 @@ $("del-run").addEventListener("click", () => {
   button.disabled = true;
   $("del-result").className = "";
   say("del-result", "지우는 중…");
-  void call(`/api/projects/${projectId}/me/data`, { method: "POST" }).then(async (response) => {
+  void send(`/api/projects/${projectId}/me/data`, { method: "POST" }).then(async (response) => {
+    if (response === null) {
+      $("del-result").className = "bad";
+      say("del-result", describeRequestFailure(0));
+      button.disabled = false;
+      return;
+    }
     if (!response.ok) {
       const body = await response.json().catch(() => null);
       $("del-result").className = "bad";
@@ -973,10 +1004,6 @@ $("del-run").addEventListener("click", () => {
     $("del-result").className = outcome.needsRetry ? "bad" : "";
     say("del-result", outcome.text);
     button.disabled = !outcome.needsRetry;
-  }).catch(() => {
-    $("del-result").className = "bad";
-    say("del-result", describeRequestFailure(0));
-    button.disabled = false;
   });
 });
 renderNav("project");

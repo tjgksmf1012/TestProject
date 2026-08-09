@@ -25,6 +25,7 @@ import {
 } from '../lib/project/setup.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { detailText } from '../lib/http/detail.ts';
+import { trySend, unreachableText } from '../lib/http/send.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { clearSkeleton, projectCards, showSkeleton } from '../lib/ui/skeleton.ts';
@@ -192,12 +193,15 @@ $('create').addEventListener('click', () => {
   if (problem) return say(problem);
 
   say('');
-  void fetch(`${apiBase}/api/projects`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    body: JSON.stringify({ title: raw.trim() }),
-  }).then(async (response) => {
+  void trySend(() =>
+    fetch(`${apiBase}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ title: raw.trim() }),
+    }),
+  ).then(async (response) => {
+    if (response === null) return say(unreachableText('만들지 못했습니다'));
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
       const body = await response.json().catch(() => null);
@@ -216,12 +220,15 @@ $('join').addEventListener('click', () => {
   if (problem) return say(problem);
 
   say('');
-  void fetch(`${apiBase}/api/projects/join`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    body: JSON.stringify({ invite_code: normalizeCode(raw) }),
-  }).then(async (response) => {
+  void trySend(() =>
+    fetch(`${apiBase}/api/projects/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ invite_code: normalizeCode(raw) }),
+    }),
+  ).then(async (response) => {
+    if (response === null) return say(unreachableText('참가하지 못했습니다'));
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
       const body = await response.json().catch(() => null);

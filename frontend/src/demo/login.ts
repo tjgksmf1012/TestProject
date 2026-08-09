@@ -7,6 +7,7 @@
  */
 
 import { detailText } from '../lib/http/detail.ts';
+import { describeUnexpected, trySend, unreachableText } from '../lib/http/send.ts';
 import { describeAuthFailure, safeApiBase, safeRedirect, validateLogin, validateSignup, type FormProblem } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { bootApp } from './pwa.ts';
@@ -70,15 +71,21 @@ async function submit(): Promise<void> {
   try {
     const path = mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
     const body = mode === 'signup' ? { name, email, password } : { email, password };
-    const response = await fetch(`${apiBase}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      // 쿠키를 받으려면 필요하다. 같은 오리진이면 기본값도 same-origin 이지만,
-      // 개발 중에 ?api= 로 다른 주소를 붙였을 때 조용히 로그인이 안 되는 걸
-      // 막는다.
-      credentials: 'same-origin',
-    });
+    const response = await trySend(() =>
+      fetch(`${apiBase}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        // 쿠키를 받으려면 필요하다. 같은 오리진이면 기본값도 same-origin 이지만,
+        // 개발 중에 ?api= 로 다른 주소를 붙였을 때 조용히 로그인이 안 되는 걸
+        // 막는다.
+        credentials: 'same-origin',
+      }),
+    );
+    if (response === null) {
+      showMessage(unreachableText(mode === 'signup' ? '가입하지 못했습니다' : '로그인하지 못했습니다'));
+      return;
+    }
 
     if (!response.ok) {
       // 422 는 `detail` 이 **객체 배열**입니다. 그대로 넘기면 로그인
@@ -91,7 +98,9 @@ async function submit(): Promise<void> {
 
     location.href = next;
   } catch (err) {
-    showMessage(`연결하지 못했습니다: ${String(err)}`);
+    // 보내는 실패는 위에서 `null` 로 끝난다. 여기는 응답을 읽다 깨진 경우다.
+    console.error(err);
+    showMessage(describeUnexpected());
   } finally {
     button.disabled = false;
   }

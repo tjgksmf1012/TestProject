@@ -1213,6 +1213,18 @@ function detailText(body, fallback) {
   return fallback;
 }
 
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+
 // src/lib/ui/copy.ts
 async function copyText(text, clipboard) {
   if (clipboard === void 0 || clipboard === null) return "unavailable";
@@ -1553,15 +1565,21 @@ async function joinMeeting(id) {
     return;
   }
   $("who").textContent = `${(await me.json()).name} 님의 트랙으로 녹음합니다`;
-  const response = await fetch(`${apiBase}/api/meetings/${id}/tracks`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      started_at: (/* @__PURE__ */ new Date()).toISOString(),
-      device_label: navigator.userAgent.slice(0, 100)
-    }),
-    credentials: "same-origin"
-  });
+  const response = await trySend(
+    () => fetch(`${apiBase}/api/meetings/${id}/tracks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        started_at: (/* @__PURE__ */ new Date()).toISOString(),
+        device_label: navigator.userAgent.slice(0, 100)
+      }),
+      credentials: "same-origin"
+    })
+  );
+  if (response === null) {
+    $("who").textContent = unreachableText("트랙에 참가하지 못했습니다");
+    return;
+  }
   if (isSessionExpired(response.status)) {
     location.href = loginUrlFor(location.pathname + location.search);
     return;
@@ -1613,15 +1631,15 @@ async function tellServerWeAreDone(result) {
     warnings: result.warnings,
     timesliceMs: result.timesliceMs
   });
-  let response;
-  try {
-    response = await fetch(`${trackUrl}/complete`, {
+  const response = await trySend(
+    () => fetch(`${trackUrl}/complete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify(body)
-    });
-  } catch {
+    })
+  );
+  if (response === null) {
     $("finish-state").textContent = describeCompletionFailure(0);
     $("finish-retry").hidden = false;
     return;

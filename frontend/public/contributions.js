@@ -279,6 +279,18 @@ function isSessionExpired(status) {
   return status === 401;
 }
 
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+
 // src/lib/html.ts
 var ESCAPES = {
   "&": "&amp;",
@@ -703,12 +715,18 @@ async function confirm() {
     $("final-message").textContent = problems.join(" · ");
     return;
   }
-  const response = await fetch(`${apiBase}/api/projects/${projectId}/contributions/final`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ finals: toPayload(drafts, systemValues) }),
-    credentials: "same-origin"
-  });
+  const response = await trySend(
+    () => fetch(`${apiBase}/api/projects/${projectId}/contributions/final`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ finals: toPayload(drafts, systemValues) }),
+      credentials: "same-origin"
+    })
+  );
+  if (response === null) {
+    $("final-message").textContent = unreachableText("확정하지 못했습니다");
+    return;
+  }
   if (isSessionExpired(response.status)) {
     goToLogin();
     return;

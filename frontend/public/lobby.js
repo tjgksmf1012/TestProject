@@ -295,6 +295,21 @@ function detailText(body, fallback) {
   return fallback;
 }
 
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+function describeUnexpected() {
+  return "알 수 없는 오류가 생겼습니다 — 새로고침해도 같으면 알려 주세요.";
+}
+
 // src/lib/ui/failure.ts
 function describeHttpStatus(status) {
   if (status === 401) return "로그인이 풀렸습니다.";
@@ -498,10 +513,12 @@ function wireLogout({ button, note, apiBase: apiBase2, next = "/login.html" }) {
   button.addEventListener("click", () => {
     button.setAttribute("aria-busy", "true");
     note.hidden = true;
-    void fetch(`${apiBase2}/api/auth/logout`, {
-      method: "POST",
-      credentials: "same-origin"
-    }).then((response) => response.status).catch(() => null).then((status) => {
+    void trySend(
+      () => fetch(`${apiBase2}/api/auth/logout`, {
+        method: "POST",
+        credentials: "same-origin"
+      })
+    ).then((response) => response === null ? null : response.status).then((status) => {
       button.removeAttribute("aria-busy");
       if (logoutOutcome(status) === "done") {
         location.href = next;
@@ -693,18 +710,24 @@ async function refresh() {
   }
 }
 async function postConsent(consentType, consented) {
-  return fetch(`${apiBase}/api/meetings/${meetingId}/consent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    // `user_id` 를 보내지 않는다. **동의는 본인만 한다** — 서버가 세션에서
-    // 읽으므로 남을 대신해 동의해 줄 방법이 없다.
-    body: JSON.stringify({ consent_type: consentType, consented }),
-    credentials: "same-origin"
-  });
+  return trySend(
+    () => fetch(`${apiBase}/api/meetings/${meetingId}/consent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // `user_id` 를 보내지 않는다. **동의는 본인만 한다** — 서버가 세션에서
+      // 읽으므로 남을 대신해 동의해 줄 방법이 없다.
+      body: JSON.stringify({ consent_type: consentType, consented }),
+      credentials: "same-origin"
+    })
+  );
 }
 async function submitConsent(consented) {
   try {
     const response = await postConsent("recording", consented);
+    if (response === null) {
+      $("consent-message").textContent = unreachableText("동의를 제출하지 못했습니다");
+      return;
+    }
     if (isSessionExpired(response.status)) {
       goToLogin();
       return;
@@ -724,7 +747,7 @@ async function submitConsent(consented) {
       ];
       for (const [type, value] of extras) {
         const extra = await postConsent(type, value);
-        if (!extra.ok) {
+        if (extra === null || !extra.ok) {
           $("consent-message").textContent = "녹음 동의는 접수됐지만 아래 두 항목을 저장하지 못했습니다. 다시 눌러 주세요.";
           return;
         }
@@ -734,7 +757,8 @@ async function submitConsent(consented) {
     consentMessage = body.message;
     render();
   } catch (err) {
-    $("consent-message").textContent = `전송 실패: ${String(err)}`;
+    console.error(err);
+    $("consent-message").textContent = describeUnexpected();
   }
 }
 async function forceFinish() {
@@ -743,15 +767,22 @@ async function forceFinish() {
   );
   if (!ok) return;
   try {
-    const response = await fetch(`${apiBase}/api/meetings/${meetingId}/finish`, {
-      method: "POST",
-      credentials: "same-origin"
-    });
+    const response = await trySend(
+      () => fetch(`${apiBase}/api/meetings/${meetingId}/finish`, {
+        method: "POST",
+        credentials: "same-origin"
+      })
+    );
+    if (response === null) {
+      $("room-message").textContent = unreachableText("회의를 끝내지 못했습니다");
+      return;
+    }
     const body = await response.json();
     $("room-message").textContent = body.message ?? "";
     await refresh();
   } catch (err) {
-    $("room-message").textContent = `강제 종료 실패: ${String(err)}`;
+    console.error(err);
+    $("room-message").textContent = describeUnexpected();
   }
 }
 function renderRoster() {

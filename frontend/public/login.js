@@ -24,6 +24,21 @@ function detailText(body, fallback) {
   return fallback;
 }
 
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+function describeUnexpected() {
+  return "알 수 없는 오류가 생겼습니다 — 새로고침해도 같으면 알려 주세요.";
+}
+
 // src/lib/auth/session.ts
 var MIN_PASSWORD_LENGTH = 8;
 function validateLogin(email, password) {
@@ -236,15 +251,21 @@ async function submit() {
   try {
     const path = mode === "signup" ? "/api/auth/signup" : "/api/auth/login";
     const body = mode === "signup" ? { name, email, password } : { email, password };
-    const response = await fetch(`${apiBase}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      // 쿠키를 받으려면 필요하다. 같은 오리진이면 기본값도 same-origin 이지만,
-      // 개발 중에 ?api= 로 다른 주소를 붙였을 때 조용히 로그인이 안 되는 걸
-      // 막는다.
-      credentials: "same-origin"
-    });
+    const response = await trySend(
+      () => fetch(`${apiBase}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        // 쿠키를 받으려면 필요하다. 같은 오리진이면 기본값도 same-origin 이지만,
+        // 개발 중에 ?api= 로 다른 주소를 붙였을 때 조용히 로그인이 안 되는 걸
+        // 막는다.
+        credentials: "same-origin"
+      })
+    );
+    if (response === null) {
+      showMessage(unreachableText(mode === "signup" ? "가입하지 못했습니다" : "로그인하지 못했습니다"));
+      return;
+    }
     if (!response.ok) {
       const body2 = await response.json().catch(() => null);
       const detail = detailText(body2, "") || void 0;
@@ -253,7 +274,8 @@ async function submit() {
     }
     location.href = next;
   } catch (err) {
-    showMessage(`연결하지 못했습니다: ${String(err)}`);
+    console.error(err);
+    showMessage(describeUnexpected());
   } finally {
     button.disabled = false;
   }

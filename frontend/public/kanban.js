@@ -263,6 +263,18 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+
 // src/lib/nav/icons.ts
 var PATHS = {
   // 지붕(3,11)-(12,3)-(21,11) + 몸통 x 5.5~18.5, y 9.5~20
@@ -590,7 +602,11 @@ function memberName(userId) {
 function cardHtml(task, today) {
   const warnings = taskWarnings(task, today);
   const moves = nextStatuses(task, statuses).map(
-    (s) => `<button class="move" data-id="${task.id}" data-to="${escapeHtml(s)}">${escapeHtml(describeStatus(s))}로</button>`
+    (s) => (
+      // ⚠️ `…로` 를 글자로 붙이면 안 된다. `진행 중` 은 받침이 있어
+      // `진행 중으로` 다 — 붙여 놓은 동안 버튼에 **"진행 중로"** 가 떴다.
+      `<button class="move" data-id="${task.id}" data-to="${escapeHtml(s)}">${escapeHtml(withJosa(describeStatus(s), "으로로"))}</button>`
+    )
   ).join("");
   return `
 <article class="task" data-id="${task.id}">
@@ -651,14 +667,20 @@ function render() {
   }
 }
 async function move(taskId, to) {
-  const response = await fetch(`${apiBase}/api/projects/${projectId}/tasks/${taskId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    // ⚠️ `statusPatch` 를 쓴다. 손으로 객체를 만들면서 `deadline: null` 을
-    // 넣으면 서버가 마감일을 지운다.
-    body: JSON.stringify(statusPatch(to)),
-    credentials: "same-origin"
-  });
+  const response = await trySend(
+    () => fetch(`${apiBase}/api/projects/${projectId}/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      // ⚠️ `statusPatch` 를 쓴다. 손으로 객체를 만들면서 `deadline: null` 을
+      // 넣으면 서버가 마감일을 지운다.
+      body: JSON.stringify(statusPatch(to)),
+      credentials: "same-origin"
+    })
+  );
+  if (response === null) {
+    $("result").textContent = unreachableText("옮기지 못했습니다");
+    return;
+  }
   if (isSessionExpired(response.status)) {
     goToLogin();
     return;

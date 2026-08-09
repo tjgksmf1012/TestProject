@@ -28,6 +28,7 @@ import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth
 import { escapeHtml } from '../lib/html.ts';
 import { axisTicks, buildDiagram, describeGap } from '../lib/track/diagram.ts';
 import { detailText } from '../lib/http/detail.ts';
+import { describeUnexpected, trySend, unreachableText } from '../lib/http/send.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { clearSkeleton, rowItems, showSkeleton } from '../lib/ui/skeleton.ts';
@@ -173,20 +174,28 @@ async function refresh(): Promise<void> {
 async function postConsent(
   consentType: string,
   consented: boolean,
-): Promise<Response> {
-  return fetch(`${apiBase}/api/meetings/${meetingId}/consent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    // `user_id` 를 보내지 않는다. **동의는 본인만 한다** — 서버가 세션에서
-    // 읽으므로 남을 대신해 동의해 줄 방법이 없다.
-    body: JSON.stringify({ consent_type: consentType, consented }),
-    credentials: 'same-origin',
-  });
+): Promise<Response | null> {
+  // 서버에 닿지 못하면 `null`. 동의는 **누르면 바뀌는** 요청이라
+  // 실패를 화면이 반드시 말해야 한다 (결함 87).
+  return trySend(() =>
+    fetch(`${apiBase}/api/meetings/${meetingId}/consent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // `user_id` 를 보내지 않는다. **동의는 본인만 한다** — 서버가 세션에서
+      // 읽으므로 남을 대신해 동의해 줄 방법이 없다.
+      body: JSON.stringify({ consent_type: consentType, consented }),
+      credentials: 'same-origin',
+    }),
+  );
 }
 
 async function submitConsent(consented: boolean): Promise<void> {
   try {
     const response = await postConsent('recording', consented);
+    if (response === null) {
+      $('consent-message').textContent = unreachableText('동의를 제출하지 못했습니다');
+      return;
+    }
     if (isSessionExpired(response.status)) {
       goToLogin();
       return;
@@ -216,7 +225,7 @@ async function submitConsent(consented: boolean): Promise<void> {
       ];
       for (const [type, value] of extras) {
         const extra = await postConsent(type, value);
-        if (!extra.ok) {
+        if (extra === null || !extra.ok) {
           $('consent-message').textContent =
             '녹음 동의는 접수됐지만 아래 두 항목을 저장하지 못했습니다. 다시 눌러 주세요.';
           return;
@@ -228,7 +237,10 @@ async function submitConsent(consented: boolean): Promise<void> {
     consentMessage = body.message;
     render();
   } catch (err) {
-    $('consent-message').textContent = `전송 실패: ${String(err)}`;
+    // 여기까지 오는 것은 응답을 읽다 깨진 경우뿐이다 — 보내는 실패는
+    // 위에서 `null` 로 끝난다. 원문은 콘솔에만 남긴다.
+    console.error(err);
+    $('consent-message').textContent = describeUnexpected();
   }
 }
 
@@ -240,15 +252,22 @@ async function forceFinish(): Promise<void> {
   if (!ok) return;
 
   try {
-    const response = await fetch(`${apiBase}/api/meetings/${meetingId}/finish`, {
-      method: 'POST',
-      credentials: 'same-origin',
-    });
+    const response = await trySend(() =>
+      fetch(`${apiBase}/api/meetings/${meetingId}/finish`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      }),
+    );
+    if (response === null) {
+      $('room-message').textContent = unreachableText('회의를 끝내지 못했습니다');
+      return;
+    }
     const body = await response.json();
     $('room-message').textContent = body.message ?? '';
     await refresh();
   } catch (err) {
-    $('room-message').textContent = `강제 종료 실패: ${String(err)}`;
+    console.error(err);
+    $('room-message').textContent = describeUnexpected();
   }
 }
 

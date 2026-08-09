@@ -203,6 +203,18 @@ function detailText(body, fallback) {
   return fallback;
 }
 
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+
 // src/lib/ui/failure.ts
 function describeHttpStatus(status) {
   if (status === 401) return "로그인이 풀렸습니다.";
@@ -404,10 +416,12 @@ function wireLogout({ button, note, apiBase: apiBase2, next = "/login.html" }) {
   button.addEventListener("click", () => {
     button.setAttribute("aria-busy", "true");
     note.hidden = true;
-    void fetch(`${apiBase2}/api/auth/logout`, {
-      method: "POST",
-      credentials: "same-origin"
-    }).then((response) => response.status).catch(() => null).then((status) => {
+    void trySend(
+      () => fetch(`${apiBase2}/api/auth/logout`, {
+        method: "POST",
+        credentials: "same-origin"
+      })
+    ).then((response) => response === null ? null : response.status).then((status) => {
       button.removeAttribute("aria-busy");
       if (logoutOutcome(status) === "done") {
         location.href = next;
@@ -611,12 +625,15 @@ $("create").addEventListener("click", () => {
   const problem = titleProblem(raw);
   if (problem) return say(problem);
   say("");
-  void fetch(`${apiBase}/api/projects`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    body: JSON.stringify({ title: raw.trim() })
-  }).then(async (response) => {
+  void trySend(
+    () => fetch(`${apiBase}/api/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ title: raw.trim() })
+    })
+  ).then(async (response) => {
+    if (response === null) return say(unreachableText("만들지 못했습니다"));
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
       const body = await response.json().catch(() => null);
@@ -631,12 +648,15 @@ $("join").addEventListener("click", () => {
   const problem = codeProblem(raw);
   if (problem) return say(problem);
   say("");
-  void fetch(`${apiBase}/api/projects/join`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "same-origin",
-    body: JSON.stringify({ invite_code: normalizeCode(raw) })
-  }).then(async (response) => {
+  void trySend(
+    () => fetch(`${apiBase}/api/projects/join`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ invite_code: normalizeCode(raw) })
+    })
+  ).then(async (response) => {
+    if (response === null) return say(unreachableText("참가하지 못했습니다"));
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
       const body = await response.json().catch(() => null);

@@ -30,6 +30,7 @@ import {
 } from '../lib/review/candidates.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { attr, escapeHtml } from '../lib/html.ts';
+import { trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
 import { failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
@@ -337,12 +338,20 @@ $('submit').addEventListener('click', async () => {
     return;
   }
 
-  const response = await fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    credentials: 'same-origin',
-  });
+  const response = await trySend(() =>
+    fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      credentials: 'same-origin',
+    }),
+  );
+
+  if (response === null) {
+    $('result').textContent = unreachableText('제출하지 못했습니다');
+    $('result').className = 'bad';
+    return;
+  }
 
   if (isSessionExpired(response.status)) {
     goToLogin();

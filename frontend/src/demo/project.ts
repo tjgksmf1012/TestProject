@@ -31,6 +31,7 @@ import {
 } from '../lib/contribution/roles.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { detailText } from '../lib/http/detail.ts';
+import { trySend, unreachableText } from '../lib/http/send.ts';
 import {
   confirmPrompt,
   describeOutcome,
@@ -106,6 +107,16 @@ async function call(path: string, init?: RequestInit): Promise<Response> {
   if (isSessionExpired(response.status)) goToLogin();
   return response;
 }
+
+/**
+ * `call` 과 같지만 **서버에 닿지 못하면 `null`.**
+ *
+ * 누르면 무언가 바뀌는 요청은 전부 이걸 쓴다. 예전에는 `void call(…)`
+ * 뒤에 `.then` 만 달아 둬서, 연결이 끊기면 거부가 아무 데도 안 걸리고
+ * 화면은 **아무 말도 안 했다** (결함 87).
+ */
+const send = (path: string, init?: RequestInit): Promise<Response | null> =>
+  trySend(() => call(path, init));
 
 function say(id: string, text: string): void {
   $(id).textContent = text;
@@ -188,20 +199,18 @@ async function startBackfill(): Promise<void> {
   status.hidden = false;
   status.textContent = '가져오는 중…';
 
-  let response: Response;
-  try {
-    // ⚠️ `headers` 를 다시 주지 않습니다. `call()` 이 이미
-    // `Content-Type` 을 넣는데, 여기서 `content-type` 을 또 주면
-    // **자바스크립트 객체 키는 대소문자를 구분하고 HTTP 헤더는 안
-    // 하므로** 둘 다 살아남아 `application/json, application/json` 이
-    // 나갑니다. FastAPI 는 그걸 JSON 으로 안 보고 422 를 줍니다.
-    response = await call(`/api/projects/${projectId}/github/backfill`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
-  } catch {
+  // ⚠️ `headers` 를 다시 주지 않습니다. `call()` 이 이미
+  // `Content-Type` 을 넣는데, 여기서 `content-type` 을 또 주면
+  // **자바스크립트 객체 키는 대소문자를 구분하고 HTTP 헤더는 안
+  // 하므로** 둘 다 살아남아 `application/json, application/json` 이
+  // 나갑니다. FastAPI 는 그걸 JSON 으로 안 보고 422 를 줍니다.
+  const response = await send(`/api/projects/${projectId}/github/backfill`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (response === null) {
     button.disabled = false;
-    status.textContent = '서버에 닿지 못했습니다. 잠시 뒤 다시 누르세요.';
+    status.textContent = unreachableText('가져오지 못했습니다');
     return;
   }
 
@@ -278,10 +287,14 @@ async function saveRoles(): Promise<void> {
     $('role-message').textContent = problem;
     return;
   }
-  const response = await call(`/api/projects/${projectId}/members/me`, {
+  const response = await send(`/api/projects/${projectId}/members/me`, {
     method: 'PATCH',
     body: JSON.stringify({ role_shares: rolesToPayload(shares) }),
   });
+  if (response === null) {
+    $('role-message').textContent = unreachableText('역할을 저장하지 못했습니다');
+    return;
+  }
   const body = await response.json();
   if (!response.ok) {
     $('role-message').textContent = detailText(body, '역할을 저장하지 못했습니다');
@@ -327,10 +340,11 @@ async function load(): Promise<void> {
 $('save-title').addEventListener('click', () => {
   const problem = titleProblem(input('title').value);
   if (problem) return say('error', problem);
-  void call(`/api/projects/${projectId}`, {
+  void send(`/api/projects/${projectId}`, {
     method: 'PATCH',
     body: JSON.stringify({ title: input('title').value.trim() }),
   }).then(async (r) => {
+    if (r === null) return say('error', unreachableText('이름을 바꾸지 못했습니다'));
     say('error', r.ok ? '' : `이름을 바꾸지 못했습니다 (HTTP ${r.status})`);
     if (r.ok) render((await r.json()) as Detail);
   });
@@ -346,10 +360,11 @@ $('save-repo').addEventListener('click', () => {
   const repo = normalizeRepo(raw);
   input('repo').value = repo;
 
-  void call(`/api/projects/${projectId}`, {
+  void send(`/api/projects/${projectId}`, {
     method: 'PATCH',
     body: JSON.stringify({ github_repo: repo }),
   }).then(async (r) => {
+    if (r === null) return say('error', unreachableText('저장하지 못했습니다'));
     if (r.status === 409) return say('error', '다른 프로젝트가 이미 이 저장소를 쓰고 있습니다.');
     say('error', r.ok ? '' : `저장하지 못했습니다 (HTTP ${r.status})`);
     if (!r.ok) return;
@@ -369,9 +384,14 @@ $('rotate').addEventListener('click', () => {
     '초대 코드를 새로 만듭니다.\n지금 코드는 그 즉시 통하지 않습니다. 계속할까요?',
   );
   if (!ok) return;
-  void call(`/api/projects/${projectId}/invite/rotate`, { method: 'POST' }).then(
+  // ⚠️ 예전에는 `if (r.ok)` 하나뿐이었다. 실패하면 화면이 그대로라
+  // 사람은 코드가 바뀐 줄 알고 **옛 코드를 다시 나눠 준다.**
+  void send(`/api/projects/${projectId}/invite/rotate`, { method: 'POST' }).then(
     async (r) => {
-      if (r.ok) render((await r.json()) as Detail);
+      if (r === null) return say('error', unreachableText('코드를 새로 만들지 못했습니다'));
+      if (!r.ok) return say('error', `코드를 새로 만들지 못했습니다 (HTTP ${r.status})`);
+      say('error', '');
+      render((await r.json()) as Detail);
     },
   );
 });
@@ -400,10 +420,11 @@ $('copy').addEventListener('click', () => {
 
 $('open-meeting').addEventListener('click', () => {
   const title = input('meeting-title').value.trim();
-  void call(`/api/projects/${projectId}/meetings`, {
+  void send(`/api/projects/${projectId}/meetings`, {
     method: 'POST',
     body: JSON.stringify({ title: title || null }),
   }).then(async (r) => {
+    if (r === null) return say('error', unreachableText('회의를 열지 못했습니다'));
     if (!r.ok) {
       const body = await r.json().catch(() => null);
       return say(
@@ -446,8 +467,14 @@ $('del-run').addEventListener('click', () => {
   $('del-result').className = '';
   say('del-result', '지우는 중…');
 
-  void call(`/api/projects/${projectId}/me/data`, { method: 'POST' })
+  void send(`/api/projects/${projectId}/me/data`, { method: 'POST' })
     .then(async (response) => {
+      if (response === null) {
+        $('del-result').className = 'bad';
+        say('del-result', describeRequestFailure(0));
+        button.disabled = false;
+        return;
+      }
       if (!response.ok) {
         const body = await response.json().catch(() => null);
         $('del-result').className = 'bad';
@@ -466,11 +493,6 @@ $('del-run').addEventListener('click', () => {
       // 다시 시도해야 하면 버튼을 살려 둔다. 성공했으면 되돌릴 수 없으므로
       // 다시 누를 이유가 없다 — 눌러도 "지울 녹음이 없습니다" 가 나온다.
       button.disabled = !outcome.needsRetry;
-    })
-    .catch(() => {
-      $('del-result').className = 'bad';
-      say('del-result', describeRequestFailure(0));
-      button.disabled = false;
     });
 });
 

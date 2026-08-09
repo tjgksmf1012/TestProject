@@ -16,6 +16,7 @@
  */
 
 import { describeLogoutFailure, logoutOutcome } from '../lib/auth/session.ts';
+import { trySend } from '../lib/http/send.ts';
 
 export interface LogoutWiring {
   /** 로그아웃 버튼. */
@@ -35,13 +36,16 @@ export function wireLogout({ button, note, apiBase, next = '/login.html' }: Logo
 
     // ⚠️ 상태를 **보고** 나서 옮깁니다. `fetch` 는 500 에서도 resolve 하므로
     // `.then(() => location.href = …)` 은 "실패해도 옮긴다" 와 같습니다.
-    void fetch(`${apiBase}/api/auth/logout`, {
-      method: 'POST',
-      credentials: 'same-origin',
-    })
-      .then((response) => response.status)
-      // 네트워크가 끊기면 거절됩니다. `null` 로 바꿔 아래 한 곳에서 판단합니다.
-      .catch(() => null)
+    //
+    // 네트워크가 끊기면 `trySend` 가 `null` 을 돌려줍니다 — 그때도
+    // `logoutOutcome` 한 곳에서 판단합니다 (결함 87 과 같은 약).
+    void trySend(() =>
+      fetch(`${apiBase}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      }),
+    )
+      .then((response) => (response === null ? null : response.status))
       .then((status) => {
         button.removeAttribute('aria-busy');
         if (logoutOutcome(status) === 'done') {
