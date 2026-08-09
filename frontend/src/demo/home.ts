@@ -27,7 +27,7 @@ import { escapeHtml } from '../lib/html.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { trySend, unreachableText } from '../lib/http/send.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
-import { whileLoading } from '../lib/ui/pending.ts';
+import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, projectCards, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { wireLogout } from './logout.ts';
@@ -193,14 +193,17 @@ $('create').addEventListener('click', () => {
   if (problem) return say(problem);
 
   say('');
-  void trySend(() =>
-    fetch(`${apiBase}/api/projects`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ title: raw.trim() }),
-    }),
-  ).then(async (response) => {
+  // ⚠️ 누르는 동안 잠근다. 답이 늦으면 사람은 한 번 더 누르고,
+  // 이 요청은 **멱등이 아니라** 누른 만큼 프로젝트가 생긴다 (결함 89).
+  void whilePressed($('create') as HTMLButtonElement, async () => {
+    const response = await trySend(() =>
+      fetch(`${apiBase}/api/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ title: raw.trim() }),
+      }),
+    );
     if (response === null) return say(unreachableText('만들지 못했습니다'));
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
@@ -220,14 +223,15 @@ $('join').addEventListener('click', () => {
   if (problem) return say(problem);
 
   say('');
-  void trySend(() =>
-    fetch(`${apiBase}/api/projects/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ invite_code: normalizeCode(raw) }),
-    }),
-  ).then(async (response) => {
+  void whilePressed($('join') as HTMLButtonElement, async () => {
+    const response = await trySend(() =>
+      fetch(`${apiBase}/api/projects/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ invite_code: normalizeCode(raw) }),
+      }),
+    );
     if (response === null) return say(unreachableText('참가하지 못했습니다'));
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
@@ -246,7 +250,7 @@ input('code').addEventListener('blur', () => {
   if (clean.length === CODE_LENGTH) input('code').value = formatCode(clean);
 });
 
-wireLogout({ button: $('logout'), note: $('logout-note'), apiBase });
+wireLogout({ button: $('logout') as HTMLButtonElement, note: $('logout-note'), apiBase });
 
 async function start(): Promise<void> {
   const me = await get('/api/auth/me');

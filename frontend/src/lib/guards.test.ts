@@ -480,6 +480,34 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
     strictEqual(silent.join(', '), '', '`response === null` 일 때 적을 문구가 없습니다');
   });
 
+  it('⭐ 누르면 바뀌는 버튼은 누르는 동안 잠근다 (결함 89)', () => {
+    // 느린 망에서 "만들기" 를 눌렀는데 2초 동안 아무 일이 없으면 사람은
+    // 한 번 더 누릅니다. 브라우저에서 세 번 눌러 보니 **프로젝트가 셋**
+    // 생겼습니다 — 화면은 그중 하나로 들어가고, 나머지 둘은 같은 이름에
+    // **다른 초대 코드**를 가진 채 목록에 남습니다.
+    //
+    // 초대 코드는 팀원이 들어오는 유일한 통로라, 갈라지면 기여도가
+    // 갈라집니다.
+    //
+    // ⚠️ `del-run`·`gh-backfill`·로그인은 **이미** 잠그고 있었습니다.
+    // 잠그는 곳과 안 잠그는 곳이 섞여 있던 것이 결함입니다 — 두 벌이
+    // 있으면 한쪽만 고쳐집니다(73·81·82·87).
+    const offenders: string[] = [];
+    for (const { rel, code } of demoSources()) {
+      // ⚠️ `\bsend\(` 까지 보면 통화 화면의 **WebSocket** `send()` 가
+      // 걸립니다 — 이 규칙과 아무 상관이 없습니다. 첫 판에 실제로 걸렸습니다.
+      if (!/trySend\(/.test(code)) continue;
+      // 그 파일이 잠그는 방법: 공용 helper 이거나, 직접 `disabled = true`.
+      const locks = /whilePressed\(/.test(code) || /\.disabled = true/.test(code);
+      if (!locks) offenders.push(rel);
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`whilePressed(button, () => …)` 로 누르는 동안 잠그세요',
+    );
+  });
+
   it('⭐ 브라우저 예외를 화면에 붙이지 않는다', () => {
     // `전송 실패: ${String(err)}` → `전송 실패: TypeError: Failed to fetch`
     const offenders = demoSources()

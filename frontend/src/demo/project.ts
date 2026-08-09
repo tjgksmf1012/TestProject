@@ -41,7 +41,7 @@ import {
   whatRemains,
   type RevokeResult,
 } from '../lib/privacy/deletion.ts';
-import { whileLoading } from '../lib/ui/pending.ts';
+import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, rows, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
@@ -340,10 +340,11 @@ async function load(): Promise<void> {
 $('save-title').addEventListener('click', () => {
   const problem = titleProblem(input('title').value);
   if (problem) return say('error', problem);
-  void send(`/api/projects/${projectId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ title: input('title').value.trim() }),
-  }).then(async (r) => {
+  void whilePressed($('save-title') as HTMLButtonElement, async () => {
+    const r = await send(`/api/projects/${projectId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: input('title').value.trim() }),
+    });
     if (r === null) return say('error', unreachableText('이름을 바꾸지 못했습니다'));
     say('error', r.ok ? '' : `이름을 바꾸지 못했습니다 (HTTP ${r.status})`);
     if (r.ok) render((await r.json()) as Detail);
@@ -360,10 +361,11 @@ $('save-repo').addEventListener('click', () => {
   const repo = normalizeRepo(raw);
   input('repo').value = repo;
 
-  void send(`/api/projects/${projectId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ github_repo: repo }),
-  }).then(async (r) => {
+  void whilePressed($('save-repo') as HTMLButtonElement, async () => {
+    const r = await send(`/api/projects/${projectId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ github_repo: repo }),
+    });
     if (r === null) return say('error', unreachableText('저장하지 못했습니다'));
     if (r.status === 409) return say('error', '다른 프로젝트가 이미 이 저장소를 쓰고 있습니다.');
     say('error', r.ok ? '' : `저장하지 못했습니다 (HTTP ${r.status})`);
@@ -386,14 +388,13 @@ $('rotate').addEventListener('click', () => {
   if (!ok) return;
   // ⚠️ 예전에는 `if (r.ok)` 하나뿐이었다. 실패하면 화면이 그대로라
   // 사람은 코드가 바뀐 줄 알고 **옛 코드를 다시 나눠 준다.**
-  void send(`/api/projects/${projectId}/invite/rotate`, { method: 'POST' }).then(
-    async (r) => {
-      if (r === null) return say('error', unreachableText('코드를 새로 만들지 못했습니다'));
-      if (!r.ok) return say('error', `코드를 새로 만들지 못했습니다 (HTTP ${r.status})`);
-      say('error', '');
-      render((await r.json()) as Detail);
-    },
-  );
+  void whilePressed($('rotate') as HTMLButtonElement, async () => {
+    const r = await send(`/api/projects/${projectId}/invite/rotate`, { method: 'POST' });
+    if (r === null) return say('error', unreachableText('코드를 새로 만들지 못했습니다'));
+    if (!r.ok) return say('error', `코드를 새로 만들지 못했습니다 (HTTP ${r.status})`);
+    say('error', '');
+    render((await r.json()) as Detail);
+  });
 });
 
 $('copy').addEventListener('click', () => {
@@ -420,10 +421,13 @@ $('copy').addEventListener('click', () => {
 
 $('open-meeting').addEventListener('click', () => {
   const title = input('meeting-title').value.trim();
-  void send(`/api/projects/${projectId}/meetings`, {
-    method: 'POST',
-    body: JSON.stringify({ title: title || null }),
-  }).then(async (r) => {
+  // ⚠️ 회의도 **누른 만큼 생긴다.** 답이 늦다고 두 번 누르면 빈 회의가
+  // 하나 남고, 팀원이 어느 쪽에 들어갈지 갈린다 (결함 89).
+  void whilePressed($('open-meeting') as HTMLButtonElement, async () => {
+    const r = await send(`/api/projects/${projectId}/meetings`, {
+      method: 'POST',
+      body: JSON.stringify({ title: title || null }),
+    });
     if (r === null) return say('error', unreachableText('회의를 열지 못했습니다'));
     if (!r.ok) {
       const body = await r.json().catch(() => null);
@@ -497,7 +501,9 @@ $('del-run').addEventListener('click', () => {
 });
 
 renderNav('project');
-$('save-roles').addEventListener('click', () => void saveRoles());
+$('save-roles').addEventListener('click', () => {
+  void whilePressed($('save-roles') as HTMLButtonElement, saveRoles);
+});
 
 void load();
 void loadHealth();

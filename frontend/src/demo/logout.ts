@@ -20,7 +20,7 @@ import { trySend } from '../lib/http/send.ts';
 
 export interface LogoutWiring {
   /** 로그아웃 버튼. */
-  button: HTMLElement;
+  button: HTMLButtonElement;
   /** 못 끊었을 때 이유를 적을 자리. 없으면 버튼 옆에 아무 말도 못 한다. */
   note: HTMLElement;
   /** `safeApiBase` 를 지난 주소. */
@@ -31,6 +31,9 @@ export interface LogoutWiring {
 
 export function wireLogout({ button, note, apiBase, next = '/login.html' }: LogoutWiring): void {
   button.addEventListener('click', () => {
+    // 누르는 동안 잠근다 (결함 89). 로그아웃은 멱등이지만, 두 번 누르면
+    // 두 요청이 겹쳐 나중 것의 401 이 "실패" 로 읽힐 수 있다.
+    button.disabled = true;
     button.setAttribute('aria-busy', 'true');
     note.hidden = true;
 
@@ -47,6 +50,7 @@ export function wireLogout({ button, note, apiBase, next = '/login.html' }: Logo
     )
       .then((response) => (response === null ? null : response.status))
       .then((status) => {
+        button.disabled = false;
         button.removeAttribute('aria-busy');
         if (logoutOutcome(status) === 'done') {
           location.href = next;

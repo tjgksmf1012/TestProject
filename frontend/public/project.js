@@ -456,6 +456,17 @@ async function whileLoading(work, show, hide, timers = browserTimers, delayMs = 
     if (shown) hide();
   }
 }
+async function whilePressed(button, run) {
+  const was = button.disabled;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute("aria-busy");
+  }
+}
 
 // src/lib/ui/skeleton.ts
 var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
@@ -893,10 +904,11 @@ async function load() {
 $("save-title").addEventListener("click", () => {
   const problem = titleProblem(input("title").value);
   if (problem) return say("error", problem);
-  void send(`/api/projects/${projectId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ title: input("title").value.trim() })
-  }).then(async (r) => {
+  void whilePressed($("save-title"), async () => {
+    const r = await send(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title: input("title").value.trim() })
+    });
     if (r === null) return say("error", unreachableText("이름을 바꾸지 못했습니다"));
     say("error", r.ok ? "" : `이름을 바꾸지 못했습니다 (HTTP ${r.status})`);
     if (r.ok) render(await r.json());
@@ -908,10 +920,11 @@ $("save-repo").addEventListener("click", () => {
   if (problem) return say("error", problem);
   const repo = normalizeRepo(raw);
   input("repo").value = repo;
-  void send(`/api/projects/${projectId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ github_repo: repo })
-  }).then(async (r) => {
+  void whilePressed($("save-repo"), async () => {
+    const r = await send(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ github_repo: repo })
+    });
     if (r === null) return say("error", unreachableText("저장하지 못했습니다"));
     if (r.status === 409) return say("error", "다른 프로젝트가 이미 이 저장소를 쓰고 있습니다.");
     say("error", r.ok ? "" : `저장하지 못했습니다 (HTTP ${r.status})`);
@@ -928,14 +941,13 @@ $("rotate").addEventListener("click", () => {
     "초대 코드를 새로 만듭니다.\n지금 코드는 그 즉시 통하지 않습니다. 계속할까요?"
   );
   if (!ok) return;
-  void send(`/api/projects/${projectId}/invite/rotate`, { method: "POST" }).then(
-    async (r) => {
-      if (r === null) return say("error", unreachableText("코드를 새로 만들지 못했습니다"));
-      if (!r.ok) return say("error", `코드를 새로 만들지 못했습니다 (HTTP ${r.status})`);
-      say("error", "");
-      render(await r.json());
-    }
-  );
+  void whilePressed($("rotate"), async () => {
+    const r = await send(`/api/projects/${projectId}/invite/rotate`, { method: "POST" });
+    if (r === null) return say("error", unreachableText("코드를 새로 만들지 못했습니다"));
+    if (!r.ok) return say("error", `코드를 새로 만들지 못했습니다 (HTTP ${r.status})`);
+    say("error", "");
+    render(await r.json());
+  });
 });
 $("copy").addEventListener("click", () => {
   const text = codeToCopy(inviteCode);
@@ -952,10 +964,11 @@ $("copy").addEventListener("click", () => {
 });
 $("open-meeting").addEventListener("click", () => {
   const title = input("meeting-title").value.trim();
-  void send(`/api/projects/${projectId}/meetings`, {
-    method: "POST",
-    body: JSON.stringify({ title: title || null })
-  }).then(async (r) => {
+  void whilePressed($("open-meeting"), async () => {
+    const r = await send(`/api/projects/${projectId}/meetings`, {
+      method: "POST",
+      body: JSON.stringify({ title: title || null })
+    });
     if (r === null) return say("error", unreachableText("회의를 열지 못했습니다"));
     if (!r.ok) {
       const body = await r.json().catch(() => null);
@@ -1007,7 +1020,9 @@ $("del-run").addEventListener("click", () => {
   });
 });
 renderNav("project");
-$("save-roles").addEventListener("click", () => void saveRoles());
+$("save-roles").addEventListener("click", () => {
+  void whilePressed($("save-roles"), saveRoles);
+});
 void load();
 void loadHealth();
 void loadRoles();

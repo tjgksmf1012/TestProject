@@ -1225,6 +1225,19 @@ function unreachableText(what) {
   return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
 }
 
+// src/lib/ui/pending.ts
+async function whilePressed(button, run) {
+  const was = button.disabled;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute("aria-busy");
+  }
+}
+
 // src/lib/ui/copy.ts
 async function copyText(text, clipboard) {
   if (clipboard === void 0 || clipboard === null) return "unavailable";
@@ -1676,7 +1689,13 @@ $("stop").addEventListener("click", async () => {
   await tellServerWeAreDone(summary);
 });
 $("finish-retry").addEventListener("click", () => {
-  if (summary) void tellServerWeAreDone(summary);
+  const done = summary;
+  if (done) {
+    void whilePressed(
+      $("finish-retry"),
+      () => tellServerWeAreDone(done)
+    );
+  }
 });
 document.addEventListener("visibilitychange", () => {
   client.setHidden(document.visibilityState === "hidden");

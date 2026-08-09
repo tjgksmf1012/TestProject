@@ -341,6 +341,17 @@ async function whileLoading(work, show, hide, timers = browserTimers, delayMs = 
     if (shown) hide();
   }
 }
+async function whilePressed(button, run) {
+  const was = button.disabled;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute("aria-busy");
+  }
+}
 
 // src/lib/ui/skeleton.ts
 var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
@@ -799,42 +810,44 @@ function wireCards() {
     card.querySelector(".clear")?.addEventListener("click", decide("pending"));
   }
 }
-$("submit").addEventListener("click", async () => {
-  let payload;
-  try {
-    payload = buildReviewPayload(candidates, drafts, context);
-  } catch (error) {
-    alert(error instanceof Error ? error.message : String(error));
-    return;
-  }
-  const response = await trySend(
-    () => fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      credentials: "same-origin"
-    })
-  );
-  if (response === null) {
-    $("result").textContent = unreachableText("제출하지 못했습니다");
-    $("result").className = "bad";
-    return;
-  }
-  if (isSessionExpired(response.status)) {
-    goToLogin();
-    return;
-  }
-  if (!response.ok) {
-    $("result").textContent = `제출 실패 (HTTP ${response.status})`;
-    $("result").className = "bad";
-    return;
-  }
-  const result = await response.json();
-  const failed = Object.entries(result.failures);
-  $("result").className = failed.length ? "bad" : "ok";
-  $("result").textContent = failed.length ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` + failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join("/")}`).join(" · ") : describeSubmitResult(result.approved_count, result.approved_task_ids);
-  drafts.clear();
-  await load();
+$("submit").addEventListener("click", () => {
+  void whilePressed($("submit"), async () => {
+    let payload;
+    try {
+      payload = buildReviewPayload(candidates, drafts, context);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    const response = await trySend(
+      () => fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "same-origin"
+      })
+    );
+    if (response === null) {
+      $("result").textContent = unreachableText("제출하지 못했습니다");
+      $("result").className = "bad";
+      return;
+    }
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    if (!response.ok) {
+      $("result").textContent = `제출 실패 (HTTP ${response.status})`;
+      $("result").className = "bad";
+      return;
+    }
+    const result = await response.json();
+    const failed = Object.entries(result.failures);
+    $("result").className = failed.length ? "bad" : "ok";
+    $("result").textContent = failed.length ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` + failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join("/")}`).join(" · ") : describeSubmitResult(result.approved_count, result.approved_task_ids);
+    drafts.clear();
+    await load();
+  });
 });
 async function start() {
   const response = await get("/api/auth/me");

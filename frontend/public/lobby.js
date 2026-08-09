@@ -347,6 +347,17 @@ async function whileLoading(work, show, hide, timers = browserTimers, delayMs = 
     if (shown) hide();
   }
 }
+async function whilePressed(button, run) {
+  const was = button.disabled;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute("aria-busy");
+  }
+}
 
 // src/lib/ui/skeleton.ts
 var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
@@ -511,6 +522,7 @@ function renderNav(current) {
 // src/demo/logout.ts
 function wireLogout({ button, note, apiBase: apiBase2, next = "/login.html" }) {
   button.addEventListener("click", () => {
+    button.disabled = true;
     button.setAttribute("aria-busy", "true");
     note.hidden = true;
     void trySend(
@@ -519,6 +531,7 @@ function wireLogout({ button, note, apiBase: apiBase2, next = "/login.html" }) {
         credentials: "same-origin"
       })
     ).then((response) => response === null ? null : response.status).then((status) => {
+      button.disabled = false;
       button.removeAttribute("aria-busy");
       if (logoutOutcome(status) === "done") {
         location.href = next;
@@ -838,9 +851,15 @@ function render() {
   $("finish").hidden = !room.needsForceFinish;
   $("review").hidden = room.recording > 0 || room.notJoined > 0 || tracks.length === 0;
 }
-$("agree").addEventListener("click", () => void submitConsent(true));
-$("refuse").addEventListener("click", () => void submitConsent(false));
-$("finish").addEventListener("click", () => void forceFinish());
+$("agree").addEventListener("click", () => {
+  void whilePressed($("agree"), () => submitConsent(true));
+});
+$("refuse").addEventListener("click", () => {
+  void whilePressed($("refuse"), () => submitConsent(false));
+});
+$("finish").addEventListener("click", () => {
+  void whilePressed($("finish"), forceFinish);
+});
 $("record").addEventListener("click", () => {
   location.href = `/index.html?meeting=${meetingId}`;
 });

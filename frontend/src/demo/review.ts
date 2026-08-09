@@ -33,7 +33,7 @@ import { attr, escapeHtml } from '../lib/html.ts';
 import { trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
 import { failureHtml } from '../lib/ui/failure.ts';
-import { whileLoading } from '../lib/ui/pending.ts';
+import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, rows, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
@@ -329,56 +329,60 @@ function wireCards(): void {
 
 // ── 제출 ────────────────────────────────────────────────────
 
-$('submit').addEventListener('click', async () => {
-  let payload;
-  try {
-    payload = buildReviewPayload(candidates, drafts, context);
-  } catch (error) {
-    alert(error instanceof Error ? error.message : String(error));
-    return;
-  }
+$('submit').addEventListener('click', () => {
+  // 누르는 동안 잠근다 (결함 89). ⚠️ 원래 상태로 되돌리므로, 결정한
+  // 항목이 없어 잠겨 있어야 하는 경우가 요청 한 번에 풀리지 않는다.
+  void whilePressed($('submit') as HTMLButtonElement, async () => {
+    let payload;
+    try {
+      payload = buildReviewPayload(candidates, drafts, context);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error));
+      return;
+    }
 
-  const response = await trySend(() =>
-    fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      credentials: 'same-origin',
-    }),
-  );
+    const response = await trySend(() =>
+      fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'same-origin',
+      }),
+    );
 
-  if (response === null) {
-    $('result').textContent = unreachableText('제출하지 못했습니다');
-    $('result').className = 'bad';
-    return;
-  }
+    if (response === null) {
+      $('result').textContent = unreachableText('제출하지 못했습니다');
+      $('result').className = 'bad';
+      return;
+    }
 
-  if (isSessionExpired(response.status)) {
-    goToLogin();
-    return;
-  }
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
 
-  if (!response.ok) {
-    $('result').textContent = `제출 실패 (HTTP ${response.status})`;
-    $('result').className = 'bad';
-    return;
-  }
+    if (!response.ok) {
+      $('result').textContent = `제출 실패 (HTTP ${response.status})`;
+      $('result').className = 'bad';
+      return;
+    }
 
-  const result = (await response.json()) as {
-    approved_count: number;
-    approved_task_ids: number[];
-    failures: Record<string, string[]>;
-  };
+    const result = (await response.json()) as {
+      approved_count: number;
+      approved_task_ids: number[];
+      failures: Record<string, string[]>;
+    };
 
-  const failed = Object.entries(result.failures);
-  $('result').className = failed.length ? 'bad' : 'ok';
-  $('result').textContent = failed.length
-    ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` +
-      failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join('/')}`).join(' · ')
-    : describeSubmitResult(result.approved_count, result.approved_task_ids);
+    const failed = Object.entries(result.failures);
+    $('result').className = failed.length ? 'bad' : 'ok';
+    $('result').textContent = failed.length
+      ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` +
+        failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join('/')}`).join(' · ')
+      : describeSubmitResult(result.approved_count, result.approved_task_ids);
 
-  drafts.clear();
-  await load();
+    drafts.clear();
+    await load();
+  });
 });
 
 async function start(): Promise<void> {

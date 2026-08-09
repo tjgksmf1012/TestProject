@@ -346,6 +346,17 @@ async function whileLoading(work, show, hide, timers = browserTimers, delayMs = 
     if (shown) hide();
   }
 }
+async function whilePressed(button, run) {
+  const was = button.disabled;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute("aria-busy");
+  }
+}
 
 // src/lib/ui/skeleton.ts
 var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
@@ -783,7 +794,9 @@ async function start() {
   $("who").textContent = `${(await me.json()).name} 님이 보고 있습니다`;
   await load();
 }
-$("confirm").addEventListener("click", () => void confirm());
+$("confirm").addEventListener("click", () => {
+  void whilePressed($("confirm"), confirm);
+});
 void start();
 renderNav("contributions");
 bootApp();

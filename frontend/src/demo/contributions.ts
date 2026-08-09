@@ -37,7 +37,7 @@ import { trySend, unreachableText } from '../lib/http/send.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
-import { whileLoading } from '../lib/ui/pending.ts';
+import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, scoreCards, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
@@ -311,7 +311,11 @@ async function start(): Promise<void> {
   await load();
 }
 
-$('confirm').addEventListener('click', () => void confirm());
+$('confirm').addEventListener('click', () => {
+  // 확정은 **사람이 개입하는 유일한 지점**이다. 답이 늦다고 두 번
+  // 누르면 같은 요청이 두 번 나간다 (결함 89).
+  void whilePressed($('confirm') as HTMLButtonElement, confirm);
+});
 
 void start();
 

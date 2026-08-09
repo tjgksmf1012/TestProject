@@ -338,6 +338,17 @@ async function whileLoading(work, show, hide, timers = browserTimers, delayMs = 
     if (shown) hide();
   }
 }
+async function whilePressed(button, run) {
+  const was = button.disabled;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute("aria-busy");
+  }
+}
 
 // src/lib/ui/skeleton.ts
 var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
@@ -662,7 +673,7 @@ function render() {
   ).join("");
   for (const button of document.querySelectorAll(".move")) {
     button.addEventListener("click", () => {
-      void move(Number(button.dataset.id), button.dataset.to ?? "");
+      void whilePressed(button, () => move(Number(button.dataset.id), button.dataset.to ?? ""));
     });
   }
 }

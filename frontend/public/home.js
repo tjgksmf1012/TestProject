@@ -252,6 +252,17 @@ async function whileLoading(work, show, hide, timers = browserTimers, delayMs = 
     if (shown) hide();
   }
 }
+async function whilePressed(button, run) {
+  const was = button.disabled;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute("aria-busy");
+  }
+}
 
 // src/lib/ui/skeleton.ts
 var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
@@ -414,6 +425,7 @@ function renderNav(current) {
 // src/demo/logout.ts
 function wireLogout({ button, note, apiBase: apiBase2, next = "/login.html" }) {
   button.addEventListener("click", () => {
+    button.disabled = true;
     button.setAttribute("aria-busy", "true");
     note.hidden = true;
     void trySend(
@@ -422,6 +434,7 @@ function wireLogout({ button, note, apiBase: apiBase2, next = "/login.html" }) {
         credentials: "same-origin"
       })
     ).then((response) => response === null ? null : response.status).then((status) => {
+      button.disabled = false;
       button.removeAttribute("aria-busy");
       if (logoutOutcome(status) === "done") {
         location.href = next;
@@ -625,14 +638,15 @@ $("create").addEventListener("click", () => {
   const problem = titleProblem(raw);
   if (problem) return say(problem);
   say("");
-  void trySend(
-    () => fetch(`${apiBase}/api/projects`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ title: raw.trim() })
-    })
-  ).then(async (response) => {
+  void whilePressed($("create"), async () => {
+    const response = await trySend(
+      () => fetch(`${apiBase}/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ title: raw.trim() })
+      })
+    );
     if (response === null) return say(unreachableText("만들지 못했습니다"));
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
@@ -648,14 +662,15 @@ $("join").addEventListener("click", () => {
   const problem = codeProblem(raw);
   if (problem) return say(problem);
   say("");
-  void trySend(
-    () => fetch(`${apiBase}/api/projects/join`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ invite_code: normalizeCode(raw) })
-    })
-  ).then(async (response) => {
+  void whilePressed($("join"), async () => {
+    const response = await trySend(
+      () => fetch(`${apiBase}/api/projects/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ invite_code: normalizeCode(raw) })
+      })
+    );
     if (response === null) return say(unreachableText("참가하지 못했습니다"));
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();

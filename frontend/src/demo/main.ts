@@ -42,6 +42,7 @@ import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { trySend, unreachableText } from '../lib/http/send.ts';
+import { whilePressed } from '../lib/ui/pending.ts';
 import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { renderNav } from './nav.ts';
@@ -350,7 +351,13 @@ $('stop').addEventListener('click', async () => {
 });
 
 $('finish-retry').addEventListener('click', () => {
-  if (summary) void tellServerWeAreDone(summary);
+  // 답이 늦으면 사람은 "다시 시도" 를 연달아 누른다 (결함 89).
+  const done = summary;
+  if (done) {
+    void whilePressed($('finish-retry') as HTMLButtonElement, () =>
+      tellServerWeAreDone(done),
+    );
+  }
 });
 
 document.addEventListener('visibilitychange', () => {

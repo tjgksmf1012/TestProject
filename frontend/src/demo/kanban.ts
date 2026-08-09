@@ -24,7 +24,7 @@ import { iconSvg } from '../lib/nav/icons.ts';
 import { withJosa } from '../lib/text/josa.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
-import { whileLoading } from '../lib/ui/pending.ts';
+import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { board as boardSkeleton, clearSkeleton, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
@@ -174,7 +174,7 @@ function render(): void {
 
   for (const button of document.querySelectorAll<HTMLButtonElement>('.move')) {
     button.addEventListener('click', () => {
-      void move(Number(button.dataset.id), button.dataset.to ?? '');
+      void whilePressed(button, () => move(Number(button.dataset.id), button.dataset.to ?? ''));
     });
   }
 }

@@ -8,7 +8,7 @@
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { LOADING_DELAY_MS, whileLoading, type Timers } from './pending.ts';
+import { LOADING_DELAY_MS, whileLoading, whilePressed, type Timers } from './pending.ts';
 
 /** 시계를 손으로 돌리는 타이머. 실제로 200ms 를 기다리지 않습니다. */
 class FakeTimers implements Timers {
@@ -169,5 +169,55 @@ describe('경계', () => {
 
   it('지연 값이 한 곳에만 있다', () => {
     strictEqual(LOADING_DELAY_MS, 200);
+  });
+});
+
+describe('whilePressed (결함 89)', () => {
+  /** 버튼 대역. 실제 `HTMLButtonElement` 의 필요한 부분만. */
+  const fakeButton = () => {
+    const attrs = new Map<string, string>();
+    return {
+      disabled: false,
+      setAttribute: (n: string, v: string) => void attrs.set(n, v),
+      removeAttribute: (n: string) => void attrs.delete(n),
+      attrs,
+    };
+  };
+
+  it('⭐ 기다리는 동안 잠겨 있다', async () => {
+    const button = fakeButton();
+    let finish: () => void = () => {};
+    const work = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+
+    const running = whilePressed(button, () => work);
+    strictEqual(button.disabled, true, '누른 직후에 잠겨야 합니다');
+    strictEqual(button.attrs.get('aria-busy'), 'true');
+
+    finish();
+    await running;
+    strictEqual(button.disabled, false);
+    strictEqual(button.attrs.has('aria-busy'), false);
+  });
+
+  it('⭐ 원래 잠겨 있었으면 잠긴 채로 되돌린다', async () => {
+    // 승인 화면의 제출은 결정한 항목이 없으면 잠깁니다. `false` 로
+    // 풀어 버리면 요청 한 번 뒤에 열립니다.
+    const button = fakeButton();
+    button.disabled = true;
+    await whilePressed(button, () => Promise.resolve());
+    strictEqual(button.disabled, true);
+  });
+
+  it('⭐ 실패해도 반드시 푼다 — 그리고 그대로 던진다', async () => {
+    const button = fakeButton();
+    await rejects(() => whilePressed(button, () => Promise.reject(new Error('끊김'))), /끊김/);
+    strictEqual(button.disabled, false);
+    strictEqual(button.attrs.has('aria-busy'), false);
+  });
+
+  it('결과를 그대로 돌려준다', async () => {
+    strictEqual(await whilePressed(fakeButton(), () => Promise.resolve(42)), 42);
   });
 });

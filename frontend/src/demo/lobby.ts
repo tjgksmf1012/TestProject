@@ -30,7 +30,7 @@ import { axisTicks, buildDiagram, describeGap } from '../lib/track/diagram.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { describeUnexpected, trySend, unreachableText } from '../lib/http/send.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
-import { whileLoading } from '../lib/ui/pending.ts';
+import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, rowItems, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { wireLogout } from './logout.ts';
@@ -372,9 +372,17 @@ function render(): void {
   $('review').hidden = room.recording > 0 || room.notJoined > 0 || tracks.length === 0;
 }
 
-$('agree').addEventListener('click', () => void submitConsent(true));
-$('refuse').addEventListener('click', () => void submitConsent(false));
-$('finish').addEventListener('click', () => void forceFinish());
+// ⚠️ 누르는 동안 잠근다 (결함 89). 동의는 멱등이지만, 두 번 누르면
+// 두 요청이 겹쳐 **나중에 도착한 쪽의 명단**이 화면에 남는다.
+$('agree').addEventListener('click', () => {
+  void whilePressed($('agree') as HTMLButtonElement, () => submitConsent(true));
+});
+$('refuse').addEventListener('click', () => {
+  void whilePressed($('refuse') as HTMLButtonElement, () => submitConsent(false));
+});
+$('finish').addEventListener('click', () => {
+  void whilePressed($('finish') as HTMLButtonElement, forceFinish);
+});
 $('record').addEventListener('click', () => {
   location.href = `/index.html?meeting=${meetingId}`;
 });
@@ -391,7 +399,7 @@ $('contrib').addEventListener('click', () => {
   // 기여도는 프로젝트 단위지만 이름을 붙이려면 회의 단위 명단 API 가 필요하다.
   location.href = `/contributions.html?project=${projectId}&meeting=${meetingId}`;
 });
-wireLogout({ button: $('logout'), note: $('logout-note'), apiBase });
+wireLogout({ button: $('logout') as HTMLButtonElement, note: $('logout-note'), apiBase });
 
 async function start(): Promise<void> {
   // 화면이 서버에 "나는 누구인가" 를 묻는다. 이 한 줄이 `?me=1` 을 대체한다.

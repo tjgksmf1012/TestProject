@@ -80,3 +80,53 @@ export async function whileLoading<T>(
     if (shown) hide();
   }
 }
+
+/** 누르는 동안 잠글 수 있는 것. 실제로는 `HTMLButtonElement` 입니다. */
+export interface Pressable {
+  disabled: boolean;
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+}
+
+/**
+ * **누르는 동안 그 버튼을 잠근다.** 답이 오면 원래대로 돌린다.
+ *
+ * ## 왜 필요한가 (결함 89)
+ *
+ * 느린 망에서 &#34;만들기&#34; 를 눌렀는데 2초 동안 아무 일이 없으면 사람은
+ * 한 번 더 누릅니다. 브라우저에서 세 번 눌러 보니 **프로젝트가 셋**
+ * 생겼습니다 — 화면은 그중 하나로 들어가고, 나머지 둘은 같은 이름으로
+ * 목록에 남습니다. 각자 **다른 초대 코드**를 가진 채로요.
+ *
+ * 그게 이 제품에서 특히 나쁜 이유: 초대 코드는 팀원이 들어오는 유일한
+ * 통로입니다. 사람이 A 의 코드를 나눠 주고 나중에 B 를 열면, 팀이
+ * 갈라지고 **기여도도 갈라집니다.**
+ *
+ * ## 이 함수가 못 하는 것
+ *
+ * ⚠️ **서버 쪽 멱등성이 아닙니다.** 탭 두 개에서 각각 누르거나, 이미
+ * 나간 요청이 재전송되는 것은 못 막습니다. 진짜 해법은 요청에 키를
+ * 붙여 서버가 같은 것을 두 번 만들지 않는 것인데, 그건 API 를 바꾸는
+ * 일이라 이 범위에서 안 했습니다 — `docs/17` §C 에 그렇게 적어 뒀습니다.
+ * 여기서 없애는 것은 **실제로 관찰된 실패**(사람이 같은 버튼을 두 번
+ * 누르는 것) 하나입니다.
+ *
+ * ⚠️ **원래 상태로 되돌립니다.** `false` 로 풀어 버리면, 원래 잠겨
+ * 있어야 할 버튼(승인 화면의 제출은 결정한 항목이 없으면 잠깁니다)이
+ * 요청 한 번 뒤에 열립니다.
+ */
+export async function whilePressed<T>(
+  button: Pressable,
+  run: () => Promise<T>,
+): Promise<T> {
+  const was = button.disabled;
+  button.disabled = true;
+  // 눌린 채 기다리는 중임을 보조기술에도 알립니다.
+  button.setAttribute('aria-busy', 'true');
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute('aria-busy');
+  }
+}
