@@ -29,6 +29,14 @@
   /* 트랙은 이름 칸 아래가 아니라 **상태 칸 아래**로. */
   li .tl { grid-column: 2; }
 
+  /* 기기가 남긴 경고도 같은 칸으로 (결함 93).
+     ⚠️ 이걸 안 걸면 첫 칸(6rem)에 떨어져 **한 줄에 한두 낱말**씩
+     쪼개집니다. 넘침은 0px 이라 수치 검사는 통과하고, 캡처를 눈으로
+     봐야만 보입니다 — 이 PR 에서 반복해 겪은 그대로입니다.
+     상태 칸(2열)만 써도 180px 이라 여전히 좁아, **줄 전체**를 씁니다. */
+  li .warn { grid-column: 1 / -1; margin: 0; padding-left: 1.1em; }
+  li .warn li { display: list-item; grid-template-columns: none; padding: 0; border-top: 0; }
+
   /* 시간축 — 트랙과 같은 격자에 맞춘다. 안 맞으면 눈금이 가리키는
      시각이 트랙의 그 자리와 어긋난다. */
   .axis { display: grid; grid-template-columns: 6rem 1fr; gap: 0 var(--sp-2);

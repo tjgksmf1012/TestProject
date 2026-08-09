@@ -25,6 +25,16 @@ export interface RosterEntry {
   voiceprint_storage?: boolean | null;
 }
 
+/**
+ * 녹음하던 기기가 남긴 경고 한 줄. 서버가 `complete_track` 에 저장한
+ * 그대로입니다 — 문구는 **녹음 클라이언트가 만든 한국어**입니다.
+ */
+export interface CaptureWarning {
+  setting?: string;
+  severity?: string;
+  message?: string;
+}
+
 /** 서버의 `GET /api/meetings/{id}/tracks` 의 `tracks[]` 한 줄. */
 export interface TrackHealth {
   track_id: number;
@@ -33,7 +43,22 @@ export interface TrackHealth {
   coverage: number | null;
   total_gap_ms: number | null;
   capture_confidence: number | null;
-  warnings: unknown[];
+  /**
+   * 녹음하던 기기가 남긴 경고. **서버가 이미 보내고 있었습니다.**
+   *
+   * ⚠️ 오래도록 `unknown[]` 으로 받아만 두고 **읽는 곳이 0곳**이었습니다
+   * (결함 93). 녹음 화면은 자기가 방금 잡은 경고를 보여주지만, 그건
+   * 그 폰에서 그 순간에만 보입니다. 업로드돼 저장된 뒤로는 **아무 화면도
+   * 이 값을 안 봤습니다** — 로비가 &#34;누구 폰이 잘못됐나&#34; 를 보는
+   * 곳인데도요.
+   *
+   * ⚠️ **완료된 트랙에만 들어 있습니다.** `capture_warnings` 는 참가할
+   * 때 `[]` 로 만들어지고 `complete_track` 에서만 채워집니다 — 녹음
+   * 중에는 언제나 비어 있습니다(결함 83 과 같은 시점 문제). 그래서 이
+   * 값은 &#34;회의 중 경보&#34; 가 아니라 **&#34;끝난 뒤 이 사람 녹음을
+   * 얼마나 믿을지&#34;** 입니다.
+   */
+  warnings?: CaptureWarning[];
   stop_reason: string | null;
   /* ── 아래 셋은 **구멍이 언제 생겼는지** 그리기 위한 값입니다.
      "42% 가 비었다" 와 "12분에 끊겼다" 는 다른 말이고, 뒤쪽이라야
@@ -322,4 +347,26 @@ export function roomStatus(statuses: readonly MemberStatus[]): RoomStatus {
     needsForceFinish: anyJoined && recording === 0 && notJoined > 0,
     message,
   };
+}
+
+/**
+ * 이 트랙에서 **사람에게 보여줄** 경고 문구들.
+ *
+ * ⚠️ `critical` 만 올립니다. 녹음 클라이언트는 `warning` 도 남기는데
+ * (예: 표본율이 권장값과 다름), 그건 트랙을 못 쓰게 만들지 않습니다.
+ * 로비에 다 쏟으면 진짜 문제가 묻힙니다 — 이 화면은 &#34;누가 문제인가&#34;
+ * 를 한눈에 보는 곳입니다.
+ *
+ * ⚠️ **문구를 여기서 만들지 않습니다.** 기기가 남긴 말을 그대로 씁니다.
+ * 여기서 다시 쓰면 같은 사실에 두 문장이 생기고, 한쪽만 고쳐집니다.
+ *
+ * ⚠️ 모양이 이상하면 **버립니다.** 저장된 JSON 이라 무엇이든 들어올 수
+ * 있고, `[object Object]` 를 화면에 띄우는 것보다 안 띄우는 게 낫습니다.
+ */
+export function captureAlerts(track: TrackHealth | undefined): string[] {
+  if (track === undefined) return [];
+  return (track.warnings ?? [])
+    .filter((w) => w !== null && typeof w === 'object' && w.severity === 'critical')
+    .map((w) => (typeof w.message === 'string' ? w.message.trim() : ''))
+    .filter((message) => message !== '');
 }

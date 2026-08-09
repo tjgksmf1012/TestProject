@@ -15,6 +15,7 @@
 
 import {
   canStart,
+  captureAlerts,
   consentStateOf,
   describeConsent,
   memberStatuses,
@@ -322,6 +323,15 @@ function renderRoster(): void {
   $('consent-message').textContent = consentMessage;
 }
 
+/** 기기가 남긴 경고를 목록으로. 없으면 빈 문자열 — 빈 상자를 안 만듭니다. */
+function alertsHtml(track: TrackHealth | undefined): string {
+  const alerts = captureAlerts(track);
+  if (alerts.length === 0) return '';
+  return `<ul class="warn">${alerts
+    .map((message) => `<li>${escapeHtml(message)}</li>`)
+    .join('')}</ul>`;
+}
+
 function renderMembers(statuses: MemberStatus[]): void {
   // ⭐ 운행도표 — 사람마다 한 줄, 구멍이 **제자리에** 찍힙니다.
   //
@@ -364,7 +374,12 @@ function renderMembers(statuses: MemberStatus[]): void {
               .join('')}</span>`;
       return (
         `<li class="${s.verdict}"><span class="name">${escapeHtml(s.name)}</span>` +
-        `<span class="state">${escapeHtml(s.message)}</span>${bar}</li>`
+        `<span class="state">${escapeHtml(s.message)}</span>${bar}` +
+        // ⭐ 기기가 남긴 경고. **서버가 이미 보내고 있었는데 읽는 곳이
+        // 0곳이었습니다** (결함 93). 커버리지가 100% 여도 마이크 설정이
+        // 잘못됐으면 그 사람의 자막은 다르게 읽어야 합니다.
+        alertsHtml(tracks.find((t) => t.user_id === s.userId)) +
+        `</li>`
       );
     })
     .join('');

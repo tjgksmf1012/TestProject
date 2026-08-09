@@ -5,6 +5,7 @@ import {
   MIN_USABLE_COVERAGE,
   WARN_GAP_MS,
   canStart,
+  captureAlerts,
   consentStateOf,
   describeConsent,
   isSilentTooLong,
@@ -344,5 +345,46 @@ describe('회의 중에 폰이 죽었는가 (결함 83)', () => {
     // 종료된 트랙은 서버가 실제 청크로 커버리지를 다시 계산한 뒤다.
     const done = recording({ status: 'completed', coverage: 0.98, silent_ms: null });
     strictEqual(only(done).verdict, 'finished');
+  });
+});
+
+describe('기기가 남긴 경고 (결함 93)', () => {
+  const track = (warnings: unknown): TrackHealth =>
+    ({
+      track_id: 1,
+      user_id: 1,
+      status: 'completed',
+      coverage: 1,
+      total_gap_ms: 0,
+      capture_confidence: 1,
+      stop_reason: null,
+      warnings,
+    }) as TrackHealth;
+
+  it('⭐ critical 만 올린다', () => {
+    const alerts = captureAlerts(
+      track([
+        { severity: 'critical', message: '마이크가 회의 중에 바뀌었습니다' },
+        { severity: 'warning', message: '표본율이 권장값과 다릅니다' },
+      ]),
+    );
+    deepStrictEqual(alerts, ['마이크가 회의 중에 바뀌었습니다']);
+  });
+
+  it('문구를 여기서 만들지 않는다 — 기기가 남긴 말을 그대로', () => {
+    deepStrictEqual(captureAlerts(track([{ severity: 'critical', message: '가나다' }])), ['가나다']);
+  });
+
+  it('⭐ 모양이 이상하면 버린다 — `[object Object]` 를 띄우지 않는다', () => {
+    deepStrictEqual(
+      captureAlerts(track([null, 'text', { severity: 'critical' }, { severity: 'critical', message: '   ' }])),
+      [],
+    );
+  });
+
+  it('경고가 없거나 트랙이 없으면 빈 배열', () => {
+    deepStrictEqual(captureAlerts(track([])), []);
+    deepStrictEqual(captureAlerts(track(undefined)), []);
+    deepStrictEqual(captureAlerts(undefined), []);
   });
 });

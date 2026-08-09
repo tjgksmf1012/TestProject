@@ -145,6 +145,10 @@ function roomStatus(statuses) {
     message
   };
 }
+function captureAlerts(track) {
+  if (track === void 0) return [];
+  return (track.warnings ?? []).filter((w) => w !== null && typeof w === "object" && w.severity === "critical").map((w) => typeof w.message === "string" ? w.message.trim() : "").filter((message) => message !== "");
+}
 
 // src/lib/auth/session.ts
 function loginUrlFor(pathWithQuery) {
@@ -829,6 +833,11 @@ function renderRoster() {
   box.innerHTML = blockers.map((b) => `<p>${escapeHtml(b)}</p>`).join("");
   $("consent-message").textContent = consentMessage;
 }
+function alertsHtml(track) {
+  const alerts = captureAlerts(track);
+  if (alerts.length === 0) return "";
+  return `<ul class="warn">${alerts.map((message) => `<li>${escapeHtml(message)}</li>`).join("")}</ul>`;
+}
 function renderMembers(statuses) {
   const diagram = buildDiagram(
     tracks.map((t) => ({
@@ -848,7 +857,10 @@ function renderMembers(statuses) {
         describeGap(g, diagram.durationMs)
       )}"></i>`
     ).join("")}</span>`;
-    return `<li class="${s.verdict}"><span class="name">${escapeHtml(s.name)}</span><span class="state">${escapeHtml(s.message)}</span>${bar2}</li>`;
+    return `<li class="${s.verdict}"><span class="name">${escapeHtml(s.name)}</span><span class="state">${escapeHtml(s.message)}</span>${bar2}` + // ⭐ 기기가 남긴 경고. **서버가 이미 보내고 있었는데 읽는 곳이
+    // 0곳이었습니다** (결함 93). 커버리지가 100% 여도 마이크 설정이
+    // 잘못됐으면 그 사람의 자막은 다르게 읽어야 합니다.
+    alertsHtml(tracks.find((t) => t.user_id === s.userId)) + `</li>`;
   }).join("");
 }
 function render() {

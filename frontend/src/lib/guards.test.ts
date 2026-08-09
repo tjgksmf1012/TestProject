@@ -582,6 +582,80 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
   });
 });
 
+describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
+  /**
+   * 화면이 **안 읽어도 되는** 칸과 그 이유. 비워 두면 안 됩니다 —
+   * 근거 없는 면제는 다음 사람이 그냥 늘립니다 (결함 80 의 면제 목록과 같은 규칙).
+   */
+  const EXEMPT: Record<string, string> = {
+    track_id:
+      '로비는 트랙을 **사람으로** 찾는다(`user_id`). 트랙 하나만 여는 화면이 없어 ' +
+      '번호를 쓸 데가 없다 — 생기면 그때 지운다',
+    stop_reason:
+      '내부 enum(consent_revoked·backpressure…)이라 그대로 띄우면 결함 78·86 이 반복된다. ' +
+      '한국어 어휘표를 만들고 `_screen_vocabularies` 에 넣어야 하므로 따로 한다',
+    capture_confidence:
+      '`coverage` 가 이미 "얼마나 담겼나" 를 말한다. 비슷한 숫자를 둘 띄우면 ' +
+      '사람이 어느 쪽을 믿을지 모른다',
+  };
+
+  it('⭐ `TrackHealth` 의 칸은 화면이 읽거나, 안 읽는 이유가 적혀 있다', () => {
+    // 서버는 `capture_warnings` 를 저장하고 트랙마다 실어 보냈고, 화면
+    // 타입에도 `warnings` 가 있었습니다. **읽는 곳이 0곳이었습니다.**
+    // 녹음 화면은 자기가 방금 잡은 경고를 보여주지만 그건 그 폰에서
+    // 그 순간뿐이고, 저장된 뒤로는 아무 화면도 안 봤습니다 — 로비가
+    // "누구 폰이 잘못됐나" 를 보는 곳인데도요.
+    //
+    // 이 저장소의 대표 실패 방식(47·63·75·83·84)이 **타입 한 줄**로
+    // 나타난 경우라 죽은 export 가드에도 안 걸렸습니다.
+    const room = readFileSync(join(ROOT, 'src', 'lib', 'lobby', 'room.ts'), 'utf8');
+    const block = /export interface TrackHealth \{([\s\S]*?)\n\}/.exec(room);
+    strictEqual(block !== null, true, 'room.ts 에서 TrackHealth 를 못 찾았습니다');
+
+    const body = codeOf(block?.[1] ?? '');
+    const fields = [...body.matchAll(/^\s*(\w+)\??:/gm)].map((m) => m[1] as string);
+    strictEqual(fields.length > 5, true, `칸을 못 읽었습니다 (${fields.length}개)`);
+
+    // ⚠️ **`TrackHealth` 를 아는 파일만** 봅니다.
+    //
+    // 처음에는 `src/` 전체에서 `.warnings` 를 찾았는데, 그러면 승인
+    // 화면의 `candidate.warnings`·진단의 `health.warnings`·녹음 화면의
+    // `client.warnings` 가 **다른 객체인데도** 걸려서 되돌림이 안
+    // 깨졌습니다 — "내 검사가 다른 이유로 통과 중" 을 여덟 번째로
+    // 겪은 자리입니다. 같은 이름의 다른 칸을 세고 있었습니다.
+    const sources: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+          const code = codeOf(readFileSync(full, 'utf8'));
+          if (/TrackHealth/.test(code)) sources.push(code);
+        }
+      }
+    };
+    walk(join(ROOT, 'src'));
+    strictEqual(sources.length >= 2, true, 'TrackHealth 를 쓰는 파일을 못 찾았습니다');
+
+    const unread = fields.filter((f) => {
+      const read = new RegExp(`\\.${f}\\b`);
+      return !sources.some((code) => read.test(code));
+    });
+
+    const unexplained = unread.filter((f) => !(f in EXEMPT));
+    strictEqual(
+      unexplained.join(', '),
+      '',
+      '서버가 보내는데 아무 화면도 안 읽습니다 — 쓰거나, 위 EXEMPT 에 이유를 적으세요',
+    );
+
+    // 면제 목록이 낡지 않았는가: 이미 읽고 있는 칸이 면제에 남아 있으면
+    // 다음 사람이 "이건 안 읽어도 되는구나" 로 읽습니다.
+    const stale = Object.keys(EXEMPT).filter((f) => fields.includes(f) && !unread.includes(f));
+    strictEqual(stale.join(', '), '', '이제 읽고 있습니다 — 면제 목록에서 빼세요');
+  });
+});
+
 describe('복사가 안 될 때 (결함 81)', () => {
   const PUBLIC_DIR = join(ROOT, 'public');
   const demoFiles = (): { rel: string; code: string }[] => {
