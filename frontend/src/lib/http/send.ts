@@ -79,3 +79,34 @@ export function unreachableText(what: string): string {
 export function describeUnexpected(): string {
   return '알 수 없는 오류가 생겼습니다 — 새로고침해도 같으면 알려 주세요.';
 }
+
+/**
+ * **읽는 요청.** 서버에 닿지 못하면 던지지 않고 `null` 을 돌려준다.
+ *
+ * ## 왜 이것도 필요한가 (결함 102)
+ *
+ * 결함 87 은 **바꾸는 요청**(POST·PATCH·DELETE)만 `trySend` 로 보냈습니다.
+ * 가드 이름부터 "누르면 **바뀌는** 요청은 전부 `trySend` 를 거친다" 였고,
+ * 읽는 요청은 대상 밖이었습니다.
+ *
+ * 그래서 읽기가 끊긴 채 화면을 열면 이랬습니다 (브라우저 재현, GET 만 끊음).
+ *
+ *     기여도  #members 가 **빈 문자열** · pageerror: Failed to fetch
+ *     홈      #projects 가 **빈 문자열**
+ *     칸반    #board 가 **빈 문자열**
+ *
+ * 세 화면이 **아무 말도 안 하고 텅 빈 채**로 남습니다. 사람은 그걸
+ * "아직 아무도 아무것도 안 했구나" 로 읽습니다 — 이 저장소가 대표
+ * 실패로 적어 둔 바로 그 모양이고, 기여도 화면에서는 **오답**입니다.
+ *
+ * ⚠️ **네 화면이 각자 `const get = … fetch(…)` 를 가지고 있었습니다.**
+ * 본문까지 거의 같은 네 벌이라, 한 곳을 고쳐도 셋이 남습니다. 그래서
+ * 여기 한 벌만 둡니다.
+ *
+ * ⚠️ **`null` 을 로그인 만료로 읽지 마세요.** 세션이 끊긴 것과 연결이
+ * 끊긴 것은 다릅니다. `null` 일 때 로그인 화면으로 보내면, 지하철에서
+ * 화면을 연 사람이 이유도 모른 채 로그아웃당합니다.
+ */
+export function tryGet(url: string): Promise<Response | null> {
+  return trySend(() => fetch(url, { credentials: 'same-origin', cache: 'no-store' }));
+}

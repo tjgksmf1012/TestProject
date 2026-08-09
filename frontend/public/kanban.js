@@ -274,6 +274,9 @@ async function trySend(request) {
 function unreachableText(what) {
   return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
 }
+function tryGet(url) {
+  return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
+}
 
 // src/lib/nav/icons.ts
 var PATHS = {
@@ -605,7 +608,7 @@ function todayIso() {
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
-var get = (path) => fetch(`${apiBase}${path}`, { credentials: "same-origin", cache: "no-store" });
+var get = (path) => tryGet(`${apiBase}${path}`);
 function memberName(userId) {
   if (userId === null) return "담당자 없음";
   return members.find((m) => m.user_id === userId)?.name ?? `사용자 #${userId}`;
@@ -710,12 +713,13 @@ async function fetchAll() {
     get(`/api/projects/${projectId}/tasks`),
     get(`/api/projects/${projectId}/members`)
   ]);
+  if (boardRes === null) return { kind: "unreachable" };
   if (isSessionExpired(boardRes.status)) return { kind: "expired" };
   if (!boardRes.ok) return { kind: "failed", status: boardRes.status };
   const payload = await boardRes.json();
   statuses = payload.statuses;
   tasks = payload.tasks;
-  if (memberRes.ok) members = await memberRes.json();
+  if (memberRes?.ok) members = await memberRes.json();
   return { kind: "ok" };
 }
 async function load() {
@@ -738,6 +742,14 @@ async function load() {
     wireRetry($("board"));
     return;
   }
+  if (result.kind === "unreachable") {
+    $("board").innerHTML = failureHtml({
+      what: unreachableText("업무를 불러오지 못했습니다."),
+      retry: true
+    });
+    wireRetry($("board"));
+    return;
+  }
   render();
 }
 function wireRetry(container) {
@@ -747,6 +759,10 @@ function wireRetry(container) {
 }
 async function start() {
   const me = await get("/api/auth/me");
+  if (me === null) {
+    await load();
+    return;
+  }
   if (!me.ok) {
     goToLogin();
     return;

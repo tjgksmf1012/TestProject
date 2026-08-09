@@ -752,16 +752,18 @@ function withJsonType(given) {
   return headers;
 }
 async function call(path, init) {
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    headers: withJsonType(init?.headers),
-    credentials: "same-origin",
-    cache: "no-store"
-  });
-  if (isSessionExpired(response.status)) goToLogin();
+  const response = await trySend(
+    () => fetch(`${apiBase}${path}`, {
+      ...init,
+      headers: withJsonType(init?.headers),
+      credentials: "same-origin",
+      cache: "no-store"
+    })
+  );
+  if (response !== null && isSessionExpired(response.status)) goToLogin();
   return response;
 }
-var send = (path, init) => trySend(() => call(path, init));
+var send = (path, init) => call(path, init);
 function say(id, text) {
   $(id).textContent = text;
   $(id).hidden = text === "";
@@ -852,10 +854,10 @@ function showRoleSum() {
 }
 async function loadRoles() {
   const response = await call(`/api/projects/${projectId}/members`);
-  if (!response.ok) return;
+  if (response === null || !response.ok) return;
   const members = await response.json();
   const meRes = await call("/api/auth/me");
-  if (!meRes.ok) return;
+  if (meRes === null || !meRes.ok) return;
   const me = await meRes.json();
   const mine = members.find((entry) => entry.user_id === me.user_id);
   renderRoles(mine?.role_shares ?? {});
@@ -884,21 +886,21 @@ async function saveRoles() {
   showNote($("role-message"), `저장했습니다 — ${describeRoles(body.role_shares)}`, "plain");
 }
 async function loadHealth() {
-  let response;
-  try {
-    response = await whileLoading(
-      call(`/api/projects/${projectId}/github`),
-      () => showSkeleton($("gh-headline"), rows(1)),
-      () => clearSkeleton($("gh-headline"))
-    );
-  } catch {
-    return renderHealth(describeHealthFailure(0));
-  }
+  const response = await whileLoading(
+    call(`/api/projects/${projectId}/github`),
+    () => showSkeleton($("gh-headline"), rows(1)),
+    () => clearSkeleton($("gh-headline"))
+  );
+  if (response === null) return renderHealth(describeHealthFailure(0));
   if (!response.ok) return renderHealth(describeHealthFailure(response.status));
   renderHealth(describeHealth(await response.json(), /* @__PURE__ */ new Date()));
 }
 async function load() {
   const response = await call(`/api/projects/${projectId}`);
+  if (response === null) {
+    say("error", unreachableText("프로젝트를 불러오지 못했습니다"));
+    return;
+  }
   if (!response.ok) {
     say(
       "error",

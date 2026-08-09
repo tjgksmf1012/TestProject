@@ -24,6 +24,7 @@ import {
   type RosterPeer,
 } from '../lib/call/mesh.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { tryGet, unreachableText } from '../lib/http/send.ts';
 import { showNote } from '../lib/ui/failure.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
@@ -270,10 +271,12 @@ $('leave').addEventListener('click', () => {
 });
 
 async function start(): Promise<void> {
-  const response = await fetch(`${apiBase}/api/auth/me`, {
-    credentials: 'same-origin',
-    cache: 'no-store',
-  });
+  // ⚠️ 닿지 못한 것을 로그인 만료로 읽으면 안 됩니다 (결함 102).
+  const response = await tryGet(`${apiBase}/api/auth/me`);
+  if (response === null) {
+    showNote($('mic'), unreachableText('통화에 들어가지 못했습니다'));
+    return;
+  }
   if (isSessionExpired(response.status) || !response.ok) {
     goToLogin();
     return;

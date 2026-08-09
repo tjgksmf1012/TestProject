@@ -305,6 +305,12 @@ async function trySend(request) {
 function unreachableText(what) {
   return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
 }
+function describeUnexpected() {
+  return "알 수 없는 오류가 생겼습니다 — 새로고침해도 같으면 알려 주세요.";
+}
+function tryGet(url) {
+  return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
+}
 
 // src/lib/ui/empty.ts
 function emptyHtml(state) {
@@ -643,13 +649,16 @@ function update(id, patch) {
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
-var get = (path) => fetch(`${apiBase}${path}`, { credentials: "same-origin" });
+var get = (path) => tryGet(`${apiBase}${path}`);
 async function fetchAll() {
   const [candidateRes, memberRes, meetingRes] = await Promise.all([
     get(`/api/meetings/${meetingId}/candidates`),
     get(`/api/meetings/${meetingId}/members`),
     get(`/api/meetings/${meetingId}`)
   ]);
+  if (candidateRes === null || memberRes === null || meetingRes === null) {
+    return "unreachable";
+  }
   if ([candidateRes, memberRes, meetingRes].some((r) => isSessionExpired(r.status))) {
     return "expired";
   }
@@ -670,6 +679,16 @@ async function load() {
   );
   if (result === "expired") {
     goToLogin();
+    return;
+  }
+  if (result === "unreachable") {
+    $("list").innerHTML = failureHtml({
+      what: unreachableText("업무 후보를 불러오지 못했습니다."),
+      retry: true
+    });
+    $("list").querySelector(".retry")?.addEventListener("click", () => {
+      void load();
+    });
     return;
   }
   render();
@@ -851,6 +870,10 @@ $("submit").addEventListener("click", () => {
 });
 async function start() {
   const response = await get("/api/auth/me");
+  if (response === null) {
+    await load();
+    return;
+  }
   if (!response.ok) {
     goToLogin();
     return;
@@ -860,10 +883,10 @@ async function start() {
   await load();
 }
 start().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
+  console.error("업무 후보 조회 실패", error);
   $("list").innerHTML = failureHtml({
     what: "업무 후보를 불러오지 못했습니다.",
-    help: message,
+    help: describeUnexpected(),
     retry: true
   });
   $("list").querySelector(".retry")?.addEventListener("click", () => {

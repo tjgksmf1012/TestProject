@@ -232,6 +232,21 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+function tryGet(url) {
+  return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
+}
+
 // src/lib/ui/failure.ts
 function showNote(slot, text, tone = "bad") {
   slot.textContent = text;
@@ -657,10 +672,11 @@ $("leave").addEventListener("click", () => {
   location.href = `/lobby.html?meeting=${meetingId}`;
 });
 async function start() {
-  const response = await fetch(`${apiBase}/api/auth/me`, {
-    credentials: "same-origin",
-    cache: "no-store"
-  });
+  const response = await tryGet(`${apiBase}/api/auth/me`);
+  if (response === null) {
+    showNote($("mic"), unreachableText("통화에 들어가지 못했습니다"));
+    return;
+  }
   if (isSessionExpired(response.status) || !response.ok) {
     goToLogin();
     return;

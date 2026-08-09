@@ -19,7 +19,7 @@ import {
 } from '../lib/kanban/board.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
-import { trySend, unreachableText } from '../lib/http/send.ts';
+import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { withJosa } from '../lib/text/josa.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
@@ -62,8 +62,9 @@ function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 
-const get = (path: string): Promise<Response> =>
-  fetch(`${apiBase}${path}`, { credentials: 'same-origin', cache: 'no-store' });
+// ⚠️ **읽기도 `tryGet` 을 거칩니다** (결함 102) — 칸반 판이 텅 빈 채로
+// 남았습니다.
+const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
 
 function memberName(userId: number | null): string {
   if (userId === null) return '담당자 없음';
@@ -212,7 +213,10 @@ async function move(taskId: number, to: string): Promise<void> {
 
 /** 받아 오기만 한다. **그리지 않는다** — `load()` 의 주석 참고. */
 async function fetchAll(): Promise<
-  { kind: 'expired' } | { kind: 'failed'; status: number } | { kind: 'ok' }
+  | { kind: 'expired' }
+  | { kind: 'unreachable' }
+  | { kind: 'failed'; status: number }
+  | { kind: 'ok' }
 > {
   // ⭐ 명단은 **프로젝트** 단위로 받는다.
   //
@@ -223,13 +227,14 @@ async function fetchAll(): Promise<
     get(`/api/projects/${projectId}/members`),
   ]);
 
+  if (boardRes === null) return { kind: 'unreachable' };
   if (isSessionExpired(boardRes.status)) return { kind: 'expired' };
   if (!boardRes.ok) return { kind: 'failed', status: boardRes.status };
 
   const payload = (await boardRes.json()) as { statuses: string[]; tasks: Task[] };
   statuses = payload.statuses;
   tasks = payload.tasks;
-  if (memberRes.ok) members = (await memberRes.json()) as Member[];
+  if (memberRes?.ok) members = (await memberRes.json()) as Member[];
   return { kind: 'ok' };
 }
 
@@ -264,6 +269,15 @@ async function load(): Promise<void> {
     wireRetry($('board'));
     return;
   }
+  if (result.kind === 'unreachable') {
+    // 텅 빈 판은 "업무가 없다" 로 읽힙니다 (결함 102).
+    $('board').innerHTML = failureHtml({
+      what: unreachableText('업무를 불러오지 못했습니다.'),
+      retry: true,
+    });
+    wireRetry($('board'));
+    return;
+  }
   render();
 }
 
@@ -276,6 +290,10 @@ function wireRetry(container: HTMLElement): void {
 
 async function start(): Promise<void> {
   const me = await get('/api/auth/me');
+  if (me === null) {
+    await load();
+    return;
+  }
   if (!me.ok) {
     goToLogin();
     return;

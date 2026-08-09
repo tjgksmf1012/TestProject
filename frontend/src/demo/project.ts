@@ -98,14 +98,19 @@ function withJsonType(given: HeadersInit | undefined): Headers {
   return headers;
 }
 
-async function call(path: string, init?: RequestInit): Promise<Response> {
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    headers: withJsonType(init?.headers),
-    credentials: 'same-origin',
-    cache: 'no-store',
-  });
-  if (isSessionExpired(response.status)) goToLogin();
+async function call(path: string, init?: RequestInit): Promise<Response | null> {
+  // ⚠️ **닿지 못하면 `null`** (결함 102). 예전에는 맨 `fetch` 라 읽기가
+  // 끊기면 던졌고, 그 뒤가 `void load…()` 면 거부가 아무 데도 안 걸려
+  // 화면이 조용히 빈 채로 남았습니다.
+  const response = await trySend(() =>
+    fetch(`${apiBase}${path}`, {
+      ...init,
+      headers: withJsonType(init?.headers),
+      credentials: 'same-origin',
+      cache: 'no-store',
+    }),
+  );
+  if (response !== null && isSessionExpired(response.status)) goToLogin();
   return response;
 }
 
@@ -116,8 +121,10 @@ async function call(path: string, init?: RequestInit): Promise<Response> {
  * 뒤에 `.then` 만 달아 둬서, 연결이 끊기면 거부가 아무 데도 안 걸리고
  * 화면은 **아무 말도 안 했다** (결함 87).
  */
+// ⚠️ `call` 이 이미 `null` 을 돌려줍니다 (결함 102) — 여기서 또 감싸지
+// 않습니다. 이름은 남깁니다: 부르는 쪽이 "바꾸는 요청" 임을 읽습니다.
 const send = (path: string, init?: RequestInit): Promise<Response | null> =>
-  trySend(() => call(path, init));
+  call(path, init);
 
 function say(id: string, text: string): void {
   $(id).textContent = text;
@@ -271,10 +278,10 @@ function showRoleSum(): void {
 
 async function loadRoles(): Promise<void> {
   const response = await call(`/api/projects/${projectId}/members`);
-  if (!response.ok) return;
+  if (response === null || !response.ok) return;
   const members = (await response.json()) as { user_id: number; role_shares?: Record<string, number> }[];
   const meRes = await call('/api/auth/me');
-  if (!meRes.ok) return;
+  if (meRes === null || !meRes.ok) return;
   const me = (await meRes.json()) as { user_id: number };
   const mine = members.find((entry) => entry.user_id === me.user_id);
   renderRoles(mine?.role_shares ?? {});
@@ -310,24 +317,25 @@ async function loadHealth(): Promise<void> {
   // ⚠️ 예전에는 HTML 에 "연결 상태를 확인하는 중…" 을 심어 뒀습니다.
   // 이 요청은 거의 언제나 200ms 안에 끝나므로, 그 문구는 **화면을 열
   // 때마다 한 번 깜빡이기만** 했습니다 (지시서 §4.7).
-  let response: Response;
-  try {
-    response = await whileLoading(
-      call(`/api/projects/${projectId}/github`),
-      () => showSkeleton($('gh-headline'), rows(1)),
-      () => clearSkeleton($('gh-headline')),
-    );
-  } catch {
-    // ⚠️ 여기서 조용히 넘어가면 진단 구역이 비고, **빈 구역은 사람 눈에
-    // "문제 없음" 으로 보입니다.** 못 물어봤다는 것과 괜찮다는 것은 다릅니다.
-    return renderHealth(describeHealthFailure(0));
-  }
+  const response = await whileLoading(
+    call(`/api/projects/${projectId}/github`),
+    () => showSkeleton($('gh-headline'), rows(1)),
+    () => clearSkeleton($('gh-headline')),
+  );
+  // ⚠️ 여기서 조용히 넘어가면 진단 구역이 비고, **빈 구역은 사람 눈에
+  // "문제 없음" 으로 보입니다.** 못 물어봤다는 것과 괜찮다는 것은 다릅니다.
+  if (response === null) return renderHealth(describeHealthFailure(0));
   if (!response.ok) return renderHealth(describeHealthFailure(response.status));
   renderHealth(describeHealth((await response.json()) as GithubHealth, new Date()));
 }
 
 async function load(): Promise<void> {
   const response = await call(`/api/projects/${projectId}`);
+  if (response === null) {
+    // 빈 화면은 "설정할 게 없다" 로 읽힙니다 (결함 102).
+    say('error', unreachableText('프로젝트를 불러오지 못했습니다'));
+    return;
+  }
   if (!response.ok) {
     say(
       'error',

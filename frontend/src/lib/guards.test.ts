@@ -464,6 +464,99 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
     );
   });
 
+  it('⭐ **읽는 요청도** `tryGet` 을 거친다 (결함 102)', () => {
+    // 위 가드는 이름 그대로 **바꾸는** 요청만 봅니다 — `method:` 가 없으면
+    // `continue` 하고 "GET 은 받아 오기 길이다" 라고 적어 두었습니다.
+    // 그런데 받아 오기도 서버에 닿지 못하면 **던집니다.** 그 뒤가
+    // `void start()` 면 거부가 아무 데도 안 걸립니다.
+    //
+    // GET 만 끊고 네 화면을 열어 봤습니다.
+    //
+    //     기여도  #members 가 **빈 문자열** · pageerror: Failed to fetch
+    //     홈      #projects 가 **빈 문자열**
+    //     칸반    #board 가 **빈 문자열**
+    //     승인    말은 했는데 화면에 **`Failed to fetch`**
+    //
+    // 앞의 셋은 "아직 아무도 아무것도 안 했구나" 로 읽힙니다 — 이
+    // 저장소가 대표 실패로 적어 둔 그 모양이고, 기여도 화면에서는
+    // 버그가 아니라 **오답**입니다.
+    //
+    // ⚠️ 네 화면이 각자 `const get = … fetch(…)` 를 들고 있었습니다.
+    // 네 벌이라 한 곳만 고치면 셋이 남습니다 — `lib/http/send.ts` 의
+    // `tryGet` 한 벌로 합쳤습니다.
+    /**
+     * 이미 **다른 방식으로 맞게** 잡는 곳. 비워 두면 안 됩니다 —
+     * 근거 없는 면제는 다음 사람이 그냥 늘립니다.
+     */
+    const EXEMPT: Record<string, string> = {
+      'src/demo/lobby.ts':
+        '`getJson` 이 **던지는 것이 계약**이고 호출부가 `catch` 로 받아 ' +
+        '`#sub` 에 "불러오지 못했습니다" 를 빨갛게 씁니다 (결함 98 에서 실측). ' +
+        '이미 사람에게 말하고 있으므로 바꾸면 오히려 두 갈래가 됩니다',
+      'src/demo/login.ts':
+        '`void fetch(…/me)` 는 **이미 로그인돼 있으면 넘겨 주려는** 곁길입니다. ' +
+        '닿지 못하면 로그인 폼이 그대로 남고, 그게 맞는 화면입니다 — ' +
+        '여기서 "서버에 닿지 못했습니다" 를 띄우면 아직 아무것도 안 한 사람을 놀래킵니다',
+    };
+
+    const offenders: string[] = [];
+    for (const { rel, code } of demoSources()) {
+      if (rel in EXEMPT) continue;
+      for (const { at, args } of callsOf(code, 'fetch')) {
+        if (/\bmethod:/.test(args)) continue; // 바꾸는 요청은 위 가드가 본다
+        const before = code.slice(Math.max(0, at - 40), at);
+        // `tryGet` 안에서 부르는 것과 `trySend(() => fetch(…))` 는 맞다
+        if (/trySend\(\(\)\s*=>\s*$/.test(before)) continue;
+        offenders.push(`${rel} 의 읽기 fetch(`);
+      }
+    }
+
+    // 면제 목록이 낡지 않았는가 — 그 파일이 이제 안 걸리면 빼야 합니다.
+    const stale = Object.keys(EXEMPT).filter((rel) => {
+      const source = demoSources().find((f) => f.rel === rel);
+      if (!source) return true;
+      return !callsOf(source.code, 'fetch').some(({ at, args }) => {
+        if (/\bmethod:/.test(args)) return false;
+        return !/trySend\(\(\)\s*=>\s*$/.test(source.code.slice(Math.max(0, at - 40), at));
+      });
+    });
+    strictEqual(stale.join(', '), '', '이제 안 걸립니다 — 면제 목록에서 빼세요');
+    strictEqual(
+      [...new Set(offenders)].join(', '),
+      '',
+      '`tryGet(주소)` 를 쓰고 `null` 일 때 화면에 적으세요 — 텅 빈 화면은 "0건" 으로 읽힙니다',
+    );
+  });
+
+  it('⭐ 브라우저 예외를 **변수에 담아서도** 화면에 붙이지 않는다 (결함 103)', () => {
+    // 아래 가드는 `${String(err)}` 같은 **직접 붙이기**만 봅니다. 승인
+    // 화면은 한 단계 돌아갔고, 그래서 통과했습니다.
+    //
+    //     const message = error instanceof Error ? error.message : String(error);
+    //     failureHtml({ …, help: message })
+    //
+    // GET 을 끊으면 한글 화면에 **`Failed to fetch`** 가 그대로 떴습니다.
+    const offenders: string[] = [];
+    for (const { rel, code } of demoSources()) {
+      // `error.message` 를 담은 변수 이름을 모으고, 그 이름이 화면으로
+      // 나가는 자리에 쓰이는지 본다.
+      const carriers = [
+        ...code.matchAll(/const (\w+)\s*=[^;]*\b(?:err|error)\w*\.message/g),
+      ].map((m) => m[1] as string);
+      for (const name of carriers) {
+        const toScreen = new RegExp(
+          `(?:help|what|message):\\s*${name}\\b|textContent\\s*=\\s*${name}\\b|showNote\\([^)]*\\b${name}\\b`,
+        );
+        if (toScreen.test(code)) offenders.push(`${rel} → ${name}`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`describeUnexpected()` 를 쓰고 원문은 `console.error` 로 남기세요',
+    );
+  });
+
   it('⭐ `trySend` 를 쓰는 화면은 `null` 일 때 할 말이 있다', () => {
     // 감싸 놓고 `null` 을 안 보면 그대로 조용합니다 — 오히려 나빠집니다.
     const silent = demoSources()

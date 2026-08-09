@@ -1224,6 +1224,9 @@ async function trySend(request) {
 function unreachableText(what) {
   return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
 }
+function tryGet(url) {
+  return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
+}
 
 // src/lib/html.ts
 var ESCAPES = {
@@ -1579,7 +1582,11 @@ $("consent").addEventListener("click", () => {
   client.setConsent("all_confirmed");
 });
 async function joinMeeting(id) {
-  const me = await fetch(`${apiBase}/api/auth/me`, { credentials: "same-origin" });
+  const me = await tryGet(`${apiBase}/api/auth/me`);
+  if (me === null) {
+    showNote($("join-note"), unreachableText("회의에 들어가지 못했습니다"));
+    return;
+  }
   if (!me.ok) {
     location.href = loginUrlFor(location.pathname + location.search);
     return;

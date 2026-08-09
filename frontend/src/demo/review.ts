@@ -30,7 +30,7 @@ import {
 } from '../lib/review/candidates.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { attr, escapeHtml } from '../lib/html.ts';
-import { trySend, unreachableText } from '../lib/http/send.ts';
+import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
 import { failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
@@ -96,16 +96,22 @@ function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 
-const get = (path: string): Promise<Response> =>
-  fetch(`${apiBase}${path}`, { credentials: 'same-origin' });
+// ⚠️ **읽기도 `tryGet` 을 거칩니다** (결함 102). 여기는 유일하게 말을
+// 하긴 했는데, `error.message` 를 그대로 붙여 화면에 **`Failed to fetch`**
+// 가 나왔습니다 (결함 103).
+const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
 
 /** 받아 오기만 한다. **그리지 않는다** — `load()` 의 주석 참고. */
-async function fetchAll(): Promise<'expired' | 'ok'> {
+async function fetchAll(): Promise<'expired' | 'unreachable' | 'ok'> {
   const [candidateRes, memberRes, meetingRes] = await Promise.all([
     get(`/api/meetings/${meetingId}/candidates`),
     get(`/api/meetings/${meetingId}/members`),
     get(`/api/meetings/${meetingId}`),
   ]);
+  // 셋 중 하나라도 닿지 못했으면 그건 연결 문제입니다 (결함 102).
+  if (candidateRes === null || memberRes === null || meetingRes === null) {
+    return 'unreachable';
+  }
   if ([candidateRes, memberRes, meetingRes].some((r) => isSessionExpired(r.status))) {
     return 'expired';
   }
@@ -132,6 +138,18 @@ async function load(): Promise<void> {
 
   if (result === 'expired') {
     goToLogin();
+    return;
+  }
+  if (result === 'unreachable') {
+    $('list').innerHTML = failureHtml({
+      what: unreachableText('업무 후보를 불러오지 못했습니다.'),
+      retry: true,
+    });
+    $('list')
+      .querySelector<HTMLButtonElement>('.retry')
+      ?.addEventListener('click', () => {
+        void load();
+      });
     return;
   }
   render();
@@ -387,6 +405,11 @@ $('submit').addEventListener('click', () => {
 
 async function start(): Promise<void> {
   const response = await get('/api/auth/me');
+  // 닿지 못한 것을 만료로 읽으면 이유도 모른 채 로그아웃당합니다.
+  if (response === null) {
+    await load();
+    return;
+  }
   if (!response.ok) {
     goToLogin();
     return;
@@ -400,10 +423,14 @@ start().catch((error: unknown) => {
   // ⚠️ 목록 자리에 씁니다. 예전에는 화면 맨 아래 `#result` 에만 한 줄
   // 남겼는데, 그러면 목록은 **텅 빈 채**로 있고 사람은 후보가 0건인
   // 줄 압니다 — 실패와 0건이 같은 모양이 됩니다.
-  const message = error instanceof Error ? error.message : String(error);
+  // ⚠️ 예전에는 `error.message` 를 `help` 에 붙였습니다 (결함 103).
+  // 연결이 끊기면 한글 화면에 **`Failed to fetch`** 가 그대로 나왔습니다 —
+  // 결함 87 이 금지한 바로 그것인데, 그 가드는 `${String(err)}` 만 봐서
+  // **변수에 담아 쓰는 이 모양을 놓쳤습니다.** 원문은 콘솔에 남깁니다.
+  console.error('업무 후보 조회 실패', error);
   $('list').innerHTML = failureHtml({
     what: '업무 후보를 불러오지 못했습니다.',
-    help: message,
+    help: describeUnexpected(),
     retry: true,
   });
   $('list')

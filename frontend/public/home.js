@@ -214,6 +214,9 @@ async function trySend(request) {
 function unreachableText(what) {
   return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
 }
+function tryGet(url) {
+  return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
+}
 
 // src/lib/ui/failure.ts
 function describeHttpStatus(status) {
@@ -557,7 +560,7 @@ var $ = (id) => {
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
-var get = (path) => fetch(`${apiBase}${path}`, { credentials: "same-origin", cache: "no-store" });
+var get = (path) => tryGet(`${apiBase}${path}`);
 function meetingHtml(meeting) {
   const step = nextStepFor(meeting);
   return `
@@ -584,6 +587,7 @@ function projectHtml(project, meetings) {
 }
 async function fetchAll() {
   const response = await get("/api/projects");
+  if (response === null) return { kind: "unreachable" };
   if (isSessionExpired(response.status)) return { kind: "expired" };
   if (!response.ok) return { kind: "failed", status: response.status };
   const projects = orderProjects(await response.json());
@@ -597,7 +601,7 @@ async function fetchAll() {
   const meetings = await Promise.all(
     projects.map(
       (p) => get(`/api/projects/${p.project_id}/meetings`).then(
-        (r) => r.ok ? r.json() : []
+        (r) => r?.ok ? r.json() : []
       )
     )
   );
@@ -622,6 +626,16 @@ async function load() {
       what: "프로젝트 목록을 불러오지 못했습니다.",
       help: describeHttpStatus(result.status) ?? void 0,
       code: `HTTP ${result.status}`,
+      retry: true
+    });
+    $("projects").querySelector(".retry")?.addEventListener("click", () => {
+      void load();
+    });
+    return;
+  }
+  if (result.kind === "unreachable") {
+    $("projects").innerHTML = failureHtml({
+      what: unreachableText("프로젝트를 불러오지 못했습니다."),
       retry: true
     });
     $("projects").querySelector(".retry")?.addEventListener("click", () => {
@@ -692,6 +706,10 @@ input("code").addEventListener("blur", () => {
 wireLogout({ button: $("logout"), note: $("logout-note"), apiBase });
 async function start() {
   const me = await get("/api/auth/me");
+  if (me === null) {
+    await load();
+    return;
+  }
   if (!me.ok) {
     goToLogin();
     return;

@@ -41,7 +41,7 @@ import {
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
-import { trySend, unreachableText } from '../lib/http/send.ts';
+import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { showNote } from '../lib/ui/failure.ts';
 import { whilePressed } from '../lib/ui/pending.ts';
 import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
@@ -184,7 +184,14 @@ $('consent').addEventListener('click', () => {
  * 선언했고, 그래서 남의 트랙에 목소리를 올릴 수 있었다.
  */
 async function joinMeeting(id: string): Promise<void> {
-  const me = await fetch(`${apiBase}/api/auth/me`, { credentials: 'same-origin' });
+  // ⚠️ 읽기도 `tryGet` 을 거칩니다 (결함 102). 맨 `fetch` 는 닿지 못하면
+  // 던지는데, 이 함수는 `void joinMeeting(…)` 으로 불려 거부가 아무 데도
+  // 안 걸립니다 — 화면은 아무 말도 안 하고 녹음 버튼만 비활성입니다.
+  const me = await tryGet(`${apiBase}/api/auth/me`);
+  if (me === null) {
+    showNote($('join-note'), unreachableText('회의에 들어가지 못했습니다'));
+    return;
+  }
   if (!me.ok) {
     location.href = loginUrlFor(location.pathname + location.search);
     return;

@@ -25,7 +25,7 @@ import {
 } from '../lib/project/setup.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { detailText } from '../lib/http/detail.ts';
-import { trySend, unreachableText } from '../lib/http/send.ts';
+import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, projectCards, showSkeleton } from '../lib/ui/skeleton.ts';
@@ -49,8 +49,9 @@ function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 
-const get = (path: string): Promise<Response> =>
-  fetch(`${apiBase}${path}`, { credentials: 'same-origin', cache: 'no-store' });
+// ⚠️ **읽기도 `tryGet` 을 거칩니다** (결함 102) — 맨 `fetch` 는 닿지
+// 못하면 던지고, 프로젝트 목록이 텅 빈 채로 남았습니다.
+const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
 
 function meetingHtml(meeting: Meeting): string {
   const step = nextStepFor(meeting);
@@ -95,10 +96,13 @@ function projectHtml(project: Project, meetings: Meeting[]): string {
 /** 받아 오기만 한다. **그리지 않는다** — 아래 주석 참고. */
 async function fetchAll(): Promise<
   | { kind: 'expired' }
+  | { kind: 'unreachable' }
   | { kind: 'failed'; status: number }
   | { kind: 'ok'; html: string; hasProjects: boolean }
 > {
   const response = await get('/api/projects');
+  // 닿지 못한 것과 세션이 끊긴 것은 다릅니다 (결함 102).
+  if (response === null) return { kind: 'unreachable' };
   if (isSessionExpired(response.status)) return { kind: 'expired' };
   if (!response.ok) return { kind: 'failed', status: response.status };
 
@@ -117,7 +121,7 @@ async function fetchAll(): Promise<
   const meetings = await Promise.all(
     projects.map((p) =>
       get(`/api/projects/${p.project_id}/meetings`).then((r) =>
-        r.ok ? (r.json() as Promise<Meeting[]>) : [],
+        r?.ok ? (r.json() as Promise<Meeting[]>) : [],
       ),
     ),
   );
@@ -149,6 +153,20 @@ async function load(): Promise<void> {
       what: '프로젝트 목록을 불러오지 못했습니다.',
       help: describeHttpStatus(result.status) ?? undefined,
       code: `HTTP ${result.status}`,
+      retry: true,
+    });
+    $('projects')
+      .querySelector<HTMLButtonElement>('.retry')
+      ?.addEventListener('click', () => {
+        void load();
+      });
+    return;
+  }
+  if (result.kind === 'unreachable') {
+    // 텅 빈 목록은 "프로젝트가 없다" 로 읽힙니다 — 실패와 0건이 같은
+    // 모양이 되면 안 됩니다 (결함 102).
+    $('projects').innerHTML = failureHtml({
+      what: unreachableText('프로젝트를 불러오지 못했습니다.'),
       retry: true,
     });
     $('projects')
@@ -254,6 +272,11 @@ wireLogout({ button: $('logout') as HTMLButtonElement, note: $('logout-note'), a
 
 async function start(): Promise<void> {
   const me = await get('/api/auth/me');
+  // 닿지 못한 것을 만료로 읽으면 이유도 모른 채 로그아웃당합니다.
+  if (me === null) {
+    await load();
+    return;
+  }
   if (!me.ok) {
     goToLogin();
     return;

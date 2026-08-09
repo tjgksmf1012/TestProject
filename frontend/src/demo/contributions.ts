@@ -35,7 +35,7 @@ import {
   type FinalRow,
 } from '../lib/contribution/final.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
-import { trySend, unreachableText } from '../lib/http/send.ts';
+import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml, showNote } from '../lib/ui/failure.ts';
@@ -72,8 +72,10 @@ function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 
-const get = (path: string): Promise<Response> =>
-  fetch(`${apiBase}${path}`, { credentials: 'same-origin', cache: 'no-store' });
+// ⚠️ **읽기도 `tryGet` 을 거칩니다** (결함 102). 맨 `fetch` 는 서버에
+// 닿지 못하면 던지고, 그 뒤가 `void start()` 라 거부가 아무 데도 안
+// 걸려 **카드 영역이 텅 빈 채로** 남았습니다.
+const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
 
 /**
  * 마크다운 강조(`**측정하지 못했습니다**`)만 굵게 바꾼다.
@@ -225,7 +227,7 @@ function restoreAdjustments(finals: FinalRow[]): void {
 
 async function loadFinals(): Promise<void> {
   const response = await get(`/api/projects/${projectId}/contributions/final`);
-  if (!response.ok) {
+  if (response === null || !response.ok) {
     // 확정 조회가 실패해도 기여도 화면은 살아 있어야 한다.
     // ⚠️ 다만 **확정은 막습니다** — 저장된 조정을 모르는 채로 확정하면
     // 남의 조정을 말없이 지웁니다 (결함 97).
@@ -292,7 +294,10 @@ async function confirm(): Promise<void> {
 
 /** 받아 오기만 한다. **그리지 않는다** — `load()` 의 주석 참고. */
 async function fetchAll(): Promise<
-  { kind: 'expired' } | { kind: 'failed'; status: number } | { kind: 'ok'; score: TeamScore }
+  | { kind: 'expired' }
+  | { kind: 'unreachable' }
+  | { kind: 'failed'; status: number }
+  | { kind: 'ok'; score: TeamScore }
 > {
   // ⭐ 명단은 **프로젝트** 단위. 회의 단위로 받던 동안에는 `?project=N`
   // 만으로 열면 이름이 전부 `사용자 #3` 이었고, 이름 순 정렬도 그 문자열
@@ -302,10 +307,13 @@ async function fetchAll(): Promise<
     get(`/api/projects/${projectId}/members`),
   ]);
 
+  // ⚠️ **닿지 못한 것을 만료로 읽지 않습니다.** 그러면 지하철에서 화면을
+  // 연 사람이 이유도 모른 채 로그아웃당합니다.
+  if (scoreRes === null) return { kind: 'unreachable' };
   if (isSessionExpired(scoreRes.status)) return { kind: 'expired' };
   if (!scoreRes.ok) return { kind: 'failed', status: scoreRes.status };
 
-  if (memberRes.ok) people = (await memberRes.json()) as Person[];
+  if (memberRes?.ok) people = (await memberRes.json()) as Person[];
   return { kind: 'ok', score: (await scoreRes.json()) as TeamScore };
 }
 
@@ -321,6 +329,20 @@ async function load(): Promise<void> {
 
   if (result.kind === 'expired') {
     goToLogin();
+    return;
+  }
+  if (result.kind === 'unreachable') {
+    // 빈 카드 영역은 "아무도 아무것도 안 했다" 로 읽힙니다 — 이 화면에서
+    // 그건 버그가 아니라 오답입니다.
+    $('members').innerHTML = failureHtml({
+      what: unreachableText('기여도를 불러오지 못했습니다.'),
+      retry: true,
+    });
+    $('members')
+      .querySelector<HTMLButtonElement>('.retry')
+      ?.addEventListener('click', () => {
+        void load();
+      });
     return;
   }
   if (result.kind === 'failed') {
@@ -347,6 +369,12 @@ async function load(): Promise<void> {
 
 async function start(): Promise<void> {
   const me = await get('/api/auth/me');
+  if (me === null) {
+    // 연결이 끊긴 것을 로그인 만료로 읽으면 안 됩니다. `load()` 가
+    // 같은 이유로 실패하며 사람이 읽을 문장을 카드 자리에 씁니다.
+    await load();
+    return;
+  }
   if (!me.ok) {
     goToLogin();
     return;

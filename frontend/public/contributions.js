@@ -315,6 +315,9 @@ async function trySend(request) {
 function unreachableText(what) {
   return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
 }
+function tryGet(url) {
+  return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
+}
 
 // src/lib/html.ts
 var ESCAPES = {
@@ -657,7 +660,7 @@ var finalsKnown = false;
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
-var get = (path) => fetch(`${apiBase}${path}`, { credentials: "same-origin", cache: "no-store" });
+var get = (path) => tryGet(`${apiBase}${path}`);
 function withEmphasis(text) {
   return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
@@ -752,7 +755,7 @@ function restoreAdjustments(finals) {
 }
 async function loadFinals() {
   const response = await get(`/api/projects/${projectId}/contributions/final`);
-  if (!response.ok) {
+  if (response === null || !response.ok) {
     $("final-state").textContent = "";
     finalsKnown = false;
     return;
@@ -806,9 +809,10 @@ async function fetchAll() {
     get(`/api/projects/${projectId}/contributions`),
     get(`/api/projects/${projectId}/members`)
   ]);
+  if (scoreRes === null) return { kind: "unreachable" };
   if (isSessionExpired(scoreRes.status)) return { kind: "expired" };
   if (!scoreRes.ok) return { kind: "failed", status: scoreRes.status };
-  if (memberRes.ok) people = await memberRes.json();
+  if (memberRes?.ok) people = await memberRes.json();
   return { kind: "ok", score: await scoreRes.json() };
 }
 async function load() {
@@ -819,6 +823,16 @@ async function load() {
   );
   if (result.kind === "expired") {
     goToLogin();
+    return;
+  }
+  if (result.kind === "unreachable") {
+    $("members").innerHTML = failureHtml({
+      what: unreachableText("기여도를 불러오지 못했습니다."),
+      retry: true
+    });
+    $("members").querySelector(".retry")?.addEventListener("click", () => {
+      void load();
+    });
     return;
   }
   if (result.kind === "failed") {
@@ -838,6 +852,10 @@ async function load() {
 }
 async function start() {
   const me = await get("/api/auth/me");
+  if (me === null) {
+    await load();
+    return;
+  }
   if (!me.ok) {
     goToLogin();
     return;
