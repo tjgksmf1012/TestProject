@@ -324,6 +324,11 @@ function failureHtml(failure) {
   const retry = failure.retry ? '<button type="button" class="retry">다시 불러오기</button>' : "";
   return `<div class="failure-state" role="alert"><p class="what">${escapeHtml(failure.what)}</p>` + help + retry + code + "</div>";
 }
+function showNote(slot, text, tone = "bad") {
+  slot.textContent = text;
+  slot.hidden = text === "";
+  slot.classList.toggle("bad", text !== "" && tone === "bad");
+}
 
 // src/lib/ui/pending.ts
 var LOADING_DELAY_MS = 200;
@@ -723,7 +728,7 @@ async function confirm() {
   const drafts = draftsFromScreen();
   const problems = problemsWith(drafts, systemValues);
   if (problems.length > 0) {
-    $("final-message").textContent = problems.join(" · ");
+    showNote($("final-message"), problems.join(" · "));
     return;
   }
   const response = await trySend(
@@ -735,7 +740,7 @@ async function confirm() {
     })
   );
   if (response === null) {
-    $("final-message").textContent = unreachableText("확정하지 못했습니다");
+    showNote($("final-message"), unreachableText("확정하지 못했습니다"));
     return;
   }
   if (isSessionExpired(response.status)) {
@@ -744,10 +749,13 @@ async function confirm() {
   }
   if (!response.ok) {
     const body = await response.json();
-    $("final-message").textContent = typeof body.detail === "string" ? body.detail : "확정하지 못했습니다";
+    showNote(
+      $("final-message"),
+      typeof body.detail === "string" ? body.detail : "확정하지 못했습니다"
+    );
     return;
   }
-  $("final-message").textContent = "확정했습니다.";
+  showNote($("final-message"), "확정했습니다.", "plain");
   await loadFinals();
 }
 async function fetchAll() {

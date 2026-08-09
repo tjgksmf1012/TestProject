@@ -29,7 +29,7 @@ import { escapeHtml } from '../lib/html.ts';
 import { axisTicks, buildDiagram, describeGap } from '../lib/track/diagram.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { describeUnexpected, trySend, unreachableText } from '../lib/http/send.ts';
-import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
+import { describeHttpStatus, failureHtml, showNote } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, rowItems, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
@@ -253,13 +253,11 @@ async function submitConsent(consented: boolean): Promise<void> {
  * 꺼내면 못 봅니다.
  */
 function consentNote(text: string): void {
-  $('consent-note').textContent = text;
-  $('consent-note').hidden = text === '';
+  showNote($('consent-note'), text);
 }
 
-function roomNote(text: string): void {
-  $('room-note').textContent = text;
-  $('room-note').hidden = text === '';
+function roomNote(text: string, tone: 'bad' | 'plain' = 'bad'): void {
+  showNote($('room-note'), text, tone);
 }
 
 async function forceFinish(): Promise<void> {
@@ -296,7 +294,8 @@ async function forceFinish(): Promise<void> {
     // ⚠️ 성공 문구도 `#room-message` 가 아니라 여기 씁니다. 저기 쓰면
     // 바로 아래 `refresh()` 가, 아니면 3초 뒤 폴링이 덮습니다 —
     // **"2개 트랙을 강제 종료했습니다" 라는 건수가 사라집니다.**
-    roomNote((body as { message?: string })?.message ?? '');
+    // 성공은 실패처럼 안 보이게 — 같은 자리를 쓰되 색은 다르게.
+    roomNote((body as { message?: string })?.message ?? '', 'plain');
     await refresh();
   } catch (err) {
     console.error(err);

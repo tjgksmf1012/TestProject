@@ -1225,6 +1225,25 @@ function unreachableText(what) {
   return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
 }
 
+// src/lib/html.ts
+var ESCAPES = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;"
+};
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
+}
+
+// src/lib/ui/failure.ts
+function showNote(slot, text, tone = "bad") {
+  slot.textContent = text;
+  slot.hidden = text === "";
+  slot.classList.toggle("bad", text !== "" && tone === "bad");
+}
+
 // src/lib/ui/pending.ts
 async function whilePressed(button, run) {
   const was = button.disabled;
@@ -1259,18 +1278,6 @@ function describeCopy(outcome, what) {
 }
 function copySucceeded(outcome) {
   return outcome === "copied";
-}
-
-// src/lib/html.ts
-var ESCAPES = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;"
-};
-function escapeHtml(text) {
-  return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
 // src/lib/nav/links.ts
@@ -1718,13 +1725,12 @@ $("copy").addEventListener("click", () => {
   if (lastRow === null) return;
   void copyText(lastRow, navigator.clipboard).then((outcome) => {
     if (copySucceeded(outcome)) {
-      $("copy-note").hidden = true;
+      showNote($("copy-note"), "");
       $("copy").textContent = describeCopy(outcome, "한 줄");
       setTimeout(() => $("copy").textContent = "표에 붙일 한 줄 복사", 1500);
       return;
     }
-    $("copy-note").textContent = describeCopy(outcome, "한 줄");
-    $("copy-note").hidden = false;
+    showNote($("copy-note"), describeCopy(outcome, "한 줄"));
   });
 });
 render();

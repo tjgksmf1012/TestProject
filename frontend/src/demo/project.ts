@@ -41,6 +41,7 @@ import {
   whatRemains,
   type RevokeResult,
 } from '../lib/privacy/deletion.ts';
+import { showNote } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, rows, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
@@ -408,14 +409,14 @@ $('copy').addEventListener('click', () => {
   // 보냈습니다.
   void copyText(text, navigator.clipboard).then((outcome) => {
     if (copySucceeded(outcome)) {
-      say('copy-note', '');
+      showNote($('copy-note'), '');
       $('copy').textContent = describeCopy(outcome, '코드');
       setTimeout(() => ($('copy').textContent = '코드 복사'), 1500);
       return;
     }
     // 실패 이유는 버튼이 아니라 아래 줄에 적습니다 — 버튼 글자를 길게
     // 만들면 옆의 "코드 새로 만들기" 와 겹칩니다 (결함 77).
-    say('copy-note', describeCopy(outcome, '코드'));
+    showNote($('copy-note'), describeCopy(outcome, '코드'));
   });
 });
 

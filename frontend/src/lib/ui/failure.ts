@@ -57,3 +57,37 @@ export function failureHtml(failure: Failure): string {
     '</div>'
   );
 }
+
+/** 한 줄짜리 안내를 담는 자리. 실제로는 `HTMLElement` 입니다. */
+export interface NoteSlot {
+  textContent: string | null;
+  hidden: boolean;
+  classList: { toggle(name: string, on: boolean): void };
+}
+
+/**
+ * 한 줄 안내를 그 자리에 쓴다. **실패면 실패처럼 보이게.**
+ *
+ * ## 왜 필요한가 (결함 92)
+ *
+ * 요청이 실패했을 때 화면이 하는 말을 아홉 자리에서 재 봤더니 **색이
+ * 세 가지**였습니다.
+ *
+ *     빨강  홈 만들기 · 칸반 옮기기 · 승인 제출 · 프로젝트 이름
+ *     회색  **기여도 확정** · 로비 동의 · 복사
+ *     본문  내 녹음 지우기
+ *
+ * 사람은 화면 몇 개만 봐도 &#34;빨간 줄 = 뭔가 잘못됐다&#34; 를 배웁니다.
+ * 그 다음부터 회색 실패는 **평범한 상태 줄**로 읽힙니다. 하필 회색인
+ * 곳 하나가 **기여도 확정** — 이 시스템에서 사람이 개입하는 유일한
+ * 지점이고, 결함 87 에서 &#34;확정했습니다&#34; 가 남는 것을 고친 바로
+ * 그 자리입니다. 고쳐 놓은 문구가 안 보이면 고친 것이 아닙니다.
+ *
+ * ⚠️ **빈 문자열은 지웁니다.** 안내를 지울 때 클래스만 남으면 다음
+ * 안내가 엉뚱한 색으로 뜹니다.
+ */
+export function showNote(slot: NoteSlot, text: string, tone: 'bad' | 'plain' = 'bad'): void {
+  slot.textContent = text;
+  slot.hidden = text === '';
+  slot.classList.toggle('bad', text !== '' && tone === 'bad');
+}

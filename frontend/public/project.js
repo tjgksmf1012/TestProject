@@ -435,6 +435,13 @@ function describeRequestFailure(status, detail) {
   return (detail || `요청이 실패했습니다 (HTTP ${status})`) + ". 아무것도 지워지지 않았을 수 있습니다 — 다시 확인해 주세요.";
 }
 
+// src/lib/ui/failure.ts
+function showNote(slot, text, tone = "bad") {
+  slot.textContent = text;
+  slot.hidden = text === "";
+  slot.classList.toggle("bad", text !== "" && tone === "bad");
+}
+
 // src/lib/ui/pending.ts
 var LOADING_DELAY_MS = 200;
 var browserTimers = {
@@ -954,12 +961,12 @@ $("copy").addEventListener("click", () => {
   if (text === null) return;
   void copyText(text, navigator.clipboard).then((outcome) => {
     if (copySucceeded(outcome)) {
-      say("copy-note", "");
+      showNote($("copy-note"), "");
       $("copy").textContent = describeCopy(outcome, "코드");
       setTimeout(() => $("copy").textContent = "코드 복사", 1500);
       return;
     }
-    say("copy-note", describeCopy(outcome, "코드"));
+    showNote($("copy-note"), describeCopy(outcome, "코드"));
   });
 });
 $("open-meeting").addEventListener("click", () => {

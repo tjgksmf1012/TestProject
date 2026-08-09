@@ -503,6 +503,44 @@ def test_the_recording_screen_actually_tells_the_shell():
     assert "tellShellRecordingStopped(window)" in screen
 
 
+def test_the_seed_makes_a_project_the_api_could_have_made():
+    """⭐ **시드가 제품이 만들 수 없는 상태를 만들지 않는다** (결함 91).
+
+    시연 프로젝트만 `invite_code` 가 NULL 이었습니다. 화면은 정직하게
+    `(없음)` 을 띄우고 복사 버튼을 잠갔지만(결함 71), 그 결과 **시연에서
+    팀원을 초대할 방법이 없었습니다** — 첫 화면이 &#34;시작하는 두 가지
+    방법&#34; 인데 그중 하나가 막힌 채였고, 그 상태로 화면을 재고
+    캡처해 왔습니다.
+
+    칸 이름을 손으로 적지 않고 **두 파일에서 읽어 비교합니다.** 나중에
+    프로젝트에 칸이 하나 늘면 시드도 같이 걸립니다.
+    """
+    import ast
+
+    def project_kwargs(path: Path) -> set[str]:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name != "Project":
+                continue
+            return {kw.arg for kw in node.keywords if kw.arg}
+        return set()
+
+    api = project_kwargs(REPO_ROOT / "backend" / "teamflow" / "api" / "main.py")
+    seed = project_kwargs(REPO_ROOT / "scripts" / "seed_demo.py")
+    assert api, "api/main.py 에서 Project(...) 를 못 찾았습니다"
+    assert seed, "seed_demo.py 에서 Project(...) 를 못 찾았습니다"
+
+    missing = sorted(api - seed)
+    assert missing == [], (
+        "시드가 API 와 다른 모양의 프로젝트를 만듭니다 — 시연에서만 비는 칸입니다: "
+        f"{missing}"
+    )
+
+
 def test_the_seed_writes_gaps_in_the_same_shape_production_does():
     """⭐ **시연 데이터가 운영과 다른 모양이면 시연에서만 안 나옵니다.**
 

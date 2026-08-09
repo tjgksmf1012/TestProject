@@ -42,6 +42,7 @@ import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { trySend, unreachableText } from '../lib/http/send.ts';
+import { showNote } from '../lib/ui/failure.ts';
 import { whilePressed } from '../lib/ui/pending.ts';
 import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import { escapeHtml } from '../lib/html.ts';
@@ -404,13 +405,12 @@ $('copy').addEventListener('click', () => {
   // `navigator.clipboard` 가 아예 없습니다.
   void copyText(lastRow, navigator.clipboard).then((outcome) => {
     if (copySucceeded(outcome)) {
-      $('copy-note').hidden = true;
+      showNote($('copy-note'), '');
       $('copy').textContent = describeCopy(outcome, '한 줄');
       setTimeout(() => ($('copy').textContent = '표에 붙일 한 줄 복사'), 1500);
       return;
     }
-    $('copy-note').textContent = describeCopy(outcome, '한 줄');
-    $('copy-note').hidden = false;
+    showNote($('copy-note'), describeCopy(outcome, '한 줄'));
   });
 });
 

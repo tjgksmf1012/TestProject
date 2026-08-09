@@ -230,6 +230,11 @@ function failureHtml(failure) {
   const retry = failure.retry ? '<button type="button" class="retry">다시 불러오기</button>' : "";
   return `<div class="failure-state" role="alert"><p class="what">${escapeHtml(failure.what)}</p>` + help + retry + code + "</div>";
 }
+function showNote(slot, text, tone = "bad") {
+  slot.textContent = text;
+  slot.hidden = text === "";
+  slot.classList.toggle("bad", text !== "" && tone === "bad");
+}
 
 // src/lib/ui/pending.ts
 var LOADING_DELAY_MS = 200;
@@ -440,8 +445,7 @@ function wireLogout({ button, note, apiBase: apiBase2, next = "/login.html" }) {
         location.href = next;
         return;
       }
-      note.textContent = describeLogoutFailure(status);
-      note.hidden = false;
+      showNote(note, describeLogoutFailure(status));
     });
   });
 }

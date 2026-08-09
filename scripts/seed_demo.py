@@ -43,6 +43,7 @@ from teamflow.config import get_settings
 from teamflow.contribution.events import CATEGORY_OF, EventType
 from teamflow.db import models as m
 from teamflow.db import session as db_session
+from teamflow.projects import invites
 from teamflow.services import meeting_contribution_service
 
 PROJECT_TITLE = "TeamFlow 시연 프로젝트"
@@ -169,6 +170,15 @@ def seed(*, reset: bool) -> dict:
             title=PROJECT_TITLE,
             started_at=MEETING_START - timedelta(days=14),
             github_repo="tjgksmf1012/teamflow-demo",
+            # ⚠️ **API 가 만드는 프로젝트와 같은 모양이어야 한다** (결함 91).
+            #
+            # 이게 없던 동안 시연 프로젝트만 `invite_code` 가 NULL 이었다.
+            # 화면은 정직하게 `(없음)` 을 띄우고 복사 버튼을 잠갔지만
+            # (결함 71), 그 결과 **시연에서 팀원을 초대할 방법이 없었다** —
+            # 이 제품의 첫 화면이 "시작하는 두 가지 방법" 인데 그중 하나가
+            # 막힌 채였다. 제품이 만들 수 없는 상태를 시드가 만들고 있었고,
+            # 그 상태로 화면을 재고 캡처해 왔다.
+            invite_code=invites.generate_code(),
         )
         s.add(project)
         s.flush()

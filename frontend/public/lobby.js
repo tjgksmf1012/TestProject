@@ -325,6 +325,11 @@ function failureHtml(failure) {
   const retry = failure.retry ? '<button type="button" class="retry">다시 불러오기</button>' : "";
   return `<div class="failure-state" role="alert"><p class="what">${escapeHtml(failure.what)}</p>` + help + retry + code + "</div>";
 }
+function showNote(slot, text, tone = "bad") {
+  slot.textContent = text;
+  slot.hidden = text === "";
+  slot.classList.toggle("bad", text !== "" && tone === "bad");
+}
 
 // src/lib/ui/pending.ts
 var LOADING_DELAY_MS = 200;
@@ -537,8 +542,7 @@ function wireLogout({ button, note, apiBase: apiBase2, next = "/login.html" }) {
         location.href = next;
         return;
       }
-      note.textContent = describeLogoutFailure(status);
-      note.hidden = false;
+      showNote(note, describeLogoutFailure(status));
     });
   });
 }
@@ -775,12 +779,10 @@ async function submitConsent(consented) {
   }
 }
 function consentNote(text) {
-  $("consent-note").textContent = text;
-  $("consent-note").hidden = text === "";
+  showNote($("consent-note"), text);
 }
-function roomNote(text) {
-  $("room-note").textContent = text;
-  $("room-note").hidden = text === "";
+function roomNote(text, tone = "bad") {
+  showNote($("room-note"), text, tone);
 }
 async function forceFinish() {
   const ok = confirm(
@@ -808,7 +810,7 @@ async function forceFinish() {
       roomNote(detailText(body, `회의를 끝내지 못했습니다 (HTTP ${response.status})`));
       return;
     }
-    roomNote(body?.message ?? "");
+    roomNote(body?.message ?? "", "plain");
     await refresh();
   } catch (err) {
     console.error(err);

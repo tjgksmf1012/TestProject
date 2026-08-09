@@ -17,6 +17,7 @@
 
 import { describeLogoutFailure, logoutOutcome } from '../lib/auth/session.ts';
 import { trySend } from '../lib/http/send.ts';
+import { showNote } from '../lib/ui/failure.ts';
 
 export interface LogoutWiring {
   /** 로그아웃 버튼. */
@@ -56,8 +57,7 @@ export function wireLogout({ button, note, apiBase, next = '/login.html' }: Logo
           location.href = next;
           return;
         }
-        note.textContent = describeLogoutFailure(status);
-        note.hidden = false;
+        showNote(note, describeLogoutFailure(status));
       });
   });
 }

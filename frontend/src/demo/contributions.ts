@@ -36,7 +36,7 @@ import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth
 import { trySend, unreachableText } from '../lib/http/send.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
-import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
+import { describeHttpStatus, failureHtml, showNote } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, scoreCards, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
@@ -214,7 +214,7 @@ async function confirm(): Promise<void> {
     // ⚠️ 서버도 같은 규칙으로 거절한다. 여기서 먼저 말하는 이유는,
     // 서버가 400 을 돌려준 뒤에 알려 주면 그때는 이미 다른 사람의
     // 확정까지 같이 실패한 뒤이기 때문이다.
-    $('final-message').textContent = problems.join(' · ');
+    showNote($('final-message'), problems.join(' · '));
     return;
   }
 
@@ -229,7 +229,7 @@ async function confirm(): Promise<void> {
     }),
   );
   if (response === null) {
-    $('final-message').textContent = unreachableText('확정하지 못했습니다');
+    showNote($('final-message'), unreachableText('확정하지 못했습니다'));
     return;
   }
   if (isSessionExpired(response.status)) {
@@ -238,11 +238,14 @@ async function confirm(): Promise<void> {
   }
   if (!response.ok) {
     const body = (await response.json()) as { detail?: unknown };
-    $('final-message').textContent =
-      typeof body.detail === 'string' ? body.detail : '확정하지 못했습니다';
+    showNote(
+      $('final-message'),
+      typeof body.detail === 'string' ? body.detail : '확정하지 못했습니다',
+    );
     return;
   }
-  $('final-message').textContent = '확정했습니다.';
+  // ⚠️ 성공은 빨갛게 쓰지 않습니다 — 같은 자리라도 뜻이 다릅니다.
+  showNote($('final-message'), '확정했습니다.', 'plain');
   await loadFinals();
 }
 

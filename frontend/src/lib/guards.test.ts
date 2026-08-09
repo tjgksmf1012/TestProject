@@ -546,6 +546,33 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
     }
   });
 
+  it('⭐ 안내 자리는 `showNote` 를 거친다 (결함 92)', () => {
+    // 요청이 실패했을 때 화면이 하는 말을 아홉 자리에서 재 봤더니
+    // **색이 세 가지**였습니다.
+    //
+    //     빨강  홈 만들기 · 칸반 옮기기 · 승인 제출 · 프로젝트 이름
+    //     회색  **기여도 확정** · 로비 동의 · 복사
+    //
+    // 사람은 화면 몇 개만 봐도 "빨간 줄 = 뭔가 잘못됐다" 를 배웁니다.
+    // 그 다음부터 회색 실패는 평범한 상태 줄로 읽힙니다 — 하필 회색인
+    // 곳 하나가 **기여도 확정**, 결함 87 에서 "확정했습니다" 가 남는 것을
+    // 고친 바로 그 자리였습니다.
+    //
+    // 글자와 색을 **한 함수**가 같이 정하게 하고, 그 함수를 건너뛰지
+    // 못하게 합니다.
+    const offenders: string[] = [];
+    for (const { rel, code } of demoSources()) {
+      for (const m of code.matchAll(/\$\('([\w-]*-note)'\)\s*\.\s*(textContent|hidden)\s*=/g)) {
+        offenders.push(`${rel} → ${m[1]}.${m[2]}`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`showNote(자리, 글자)` 로 쓰세요 — 글자와 색이 갈라집니다',
+    );
+  });
+
   it('⭐ 브라우저 예외를 화면에 붙이지 않는다', () => {
     // `전송 실패: ${String(err)}` → `전송 실패: TypeError: Failed to fetch`
     const offenders = demoSources()
