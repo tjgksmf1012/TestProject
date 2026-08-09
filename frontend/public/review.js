@@ -359,6 +359,22 @@ async function whilePressed(button, run) {
   }
 }
 
+// src/lib/time/calendar.ts
+var TEAM_TIMEZONE = "Asia/Seoul";
+var FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TEAM_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit"
+});
+function isoFrom(at) {
+  const parts = new Map(FORMATTER.formatToParts(at).map((p) => [p.type, p.value]));
+  return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}`;
+}
+function todayInTeamCalendar(now = /* @__PURE__ */ new Date()) {
+  return isoFrom(now);
+}
+
 // src/lib/ui/skeleton.ts
 var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
 var wrap = (inner) => `<div class="sk-wrap" aria-hidden="true">${inner}</div>`;
@@ -625,12 +641,7 @@ var drafts = /* @__PURE__ */ new Map();
 var candidates = [];
 var members = [];
 var meeting = null;
-var context = { memberIds: [], today: todayIso() };
-function todayIso() {
-  const now = /* @__PURE__ */ new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
+var context = { memberIds: [], today: todayInTeamCalendar() };
 var $ = (id) => {
   const el = document.getElementById(id);
   if (!el) throw new Error(`요소 없음: ${id}`);
@@ -668,7 +679,7 @@ async function fetchAll() {
   candidates = sortForReview(await candidateRes.json());
   members = await memberRes.json();
   meeting = await meetingRes.json();
-  context = { memberIds: members.map((m) => m.user_id), today: todayIso() };
+  context = { memberIds: members.map((m) => m.user_id), today: todayInTeamCalendar() };
   return "ok";
 }
 async function load() {

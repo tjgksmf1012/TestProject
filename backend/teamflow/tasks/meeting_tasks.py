@@ -18,6 +18,7 @@ from celery import Task
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from teamflow.clock import local_date
 from teamflow.config import get_settings
 from teamflow.db import models as m
 from teamflow.db.session import session_scope
@@ -100,7 +101,17 @@ def process_meeting_task(self: Task, meeting_id: int) -> dict:
         meeting.status = "processing"
         project_id = meeting.project_id
         capture_mode = meeting.capture_mode
-        meeting_date = meeting.started_at.date()
+        # ⚠️ **팀 달력의 날짜여야 합니다** (결함 108). 이 값은 곧바로
+        # `resolve_deadline` 의 기준일이 되어 "내일"·"다음 주 월요일" 같은
+        # 표현을 실제 날짜로 바꿉니다. `.date()` 는 UTC 달력일이라 새벽에
+        # 시작한 회의에서 하루가 어긋납니다 — 요일까지 어긋나면 주 단위로
+        # 틀립니다.
+        #
+        #     회의 시작 2026-09-07 01:00 KST (월) = 09-06 16:00Z (일)
+        #     "내일까지"        UTC기준 09-07  팀달력 09-08
+        #     "다음 주 월요일"   UTC기준 09-07  팀달력 09-14
+        #                       ↑ 회의 당일이 마감이 된다
+        meeting_date = local_date(meeting.started_at)
 
         members = [
             TeamMemberName(user_id=user_id, name=name)

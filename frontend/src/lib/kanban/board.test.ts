@@ -1,6 +1,8 @@
 import { deepStrictEqual, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { TEAM_TIMEZONE, teamDateOf } from '../time/calendar.ts';
+
 import {
   daysBetween,
   describeLinkState,
@@ -8,7 +10,6 @@ import {
   describeStatus,
   isDueSoon,
   isOverdue,
-  localDateOf,
   nextStatuses,
   sortForBoard,
   sortLinks,
@@ -148,33 +149,53 @@ describe('isOverdue', () => {
     strictEqual(isOverdue(late, TODAY), true);
   });
 
-  it('⭐ 한국에서 마감 다음날 새벽에 끝낸 것은 지연이다', () => {
+  it('⭐ 마감 다음날 새벽에 끝낸 것은 지연이다', () => {
     // 서버는 `completed_at` 을 UTC 순간으로 주고 `deadline` 은 달력 날짜로
     // 준다. 앞 10자를 자르면 UTC 달력일이 나오는데, 한국 시각 9월 5일
     // 01:00 은 UTC 로 9월 4일이다 — 그대로 비교하면 마감 9월 4일을 넘긴
     // 업무가 "제때" 로 읽힌다. 오차가 한쪽으로만 나서 **지연을 과소보고만
     // 한다.**
-    const previous = process.env.TZ;
-    process.env.TZ = 'Asia/Seoul';
-    try {
-      const late = task({
-        status: 'done',
-        deadline: '2026-09-04',
-        completed_at: '2026-09-04T16:00:00Z', // KST 09-05 01:00
-      });
-      strictEqual(localDateOf('2026-09-04T16:00:00Z'), '2026-09-05');
-      strictEqual(isOverdue(late, TODAY), true);
+    const late = task({
+      status: 'done',
+      deadline: '2026-09-04',
+      completed_at: '2026-09-04T16:00:00Z', // KST 09-05 01:00
+    });
+    strictEqual(teamDateOf('2026-09-04T16:00:00Z'), '2026-09-05');
+    strictEqual(isOverdue(late, TODAY), true);
 
-      // 같은 날 안에서 끝낸 것은 지연이 아니다 (KST 09-04 23:00).
-      const onTime = task({
-        status: 'done',
-        deadline: '2026-09-04',
-        completed_at: '2026-09-04T14:00:00Z',
-      });
-      strictEqual(isOverdue(onTime, TODAY), false);
+    // 같은 날 안에서 끝낸 것은 지연이 아니다 (KST 09-04 23:00).
+    const onTime = task({
+      status: 'done',
+      deadline: '2026-09-04',
+      completed_at: '2026-09-04T14:00:00Z',
+    });
+    strictEqual(isOverdue(onTime, TODAY), false);
+  });
+
+  it('⭐ 보는 사람의 시간대를 바꿔도 판정이 달라지지 않는다 (결함 109)', () => {
+    // 예전에는 `Date#getFullYear()` 를 썼다 — **보는 사람의 달력**이다.
+    // 그래서 같은 업무가 서울에서는 "지연", 뉴욕에서는 "제때" 였다.
+    // 서버는 결함 107 을 고치며 팀 달력 하나를 정했는데 화면은 몰랐다.
+    const late = task({
+      status: 'done',
+      deadline: '2026-09-04',
+      completed_at: '2026-09-04T16:00:00Z',
+    });
+
+    const previous = process.env.TZ;
+    try {
+      for (const zone of ['Asia/Seoul', 'America/New_York', 'UTC', 'Pacific/Kiritimati']) {
+        process.env.TZ = zone;
+        strictEqual(teamDateOf('2026-09-04T16:00:00Z'), '2026-09-05', zone);
+        strictEqual(isOverdue(late, TODAY), true, zone);
+      }
     } finally {
       process.env.TZ = previous;
     }
+  });
+
+  it('팀 달력은 한국 시간이다 — 서버 `project_timezone` 과 같은 값', () => {
+    strictEqual(TEAM_TIMEZONE, 'Asia/Seoul');
   });
 
   it('완료 시각이 이상한 문자열이면 지연으로 몰지 않는다', () => {
@@ -182,7 +203,7 @@ describe('isOverdue', () => {
       isOverdue(task({ status: 'done', deadline: '2026-09-01', completed_at: 'x' }), TODAY),
       false,
     );
-    strictEqual(localDateOf('x'), null);
+    strictEqual(teamDateOf('x'), null);
   });
 
   it('완료됐는데 완료 시각이 없으면 지연으로 몰지 않는다', () => {

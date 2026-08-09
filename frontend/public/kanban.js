@@ -103,6 +103,27 @@ function withJosa(word, pair) {
   return `${word}${josa(word, pair)}`;
 }
 
+// src/lib/time/calendar.ts
+var TEAM_TIMEZONE = "Asia/Seoul";
+var FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TEAM_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit"
+});
+function isoFrom(at) {
+  const parts = new Map(FORMATTER.formatToParts(at).map((p) => [p.type, p.value]));
+  return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}`;
+}
+function teamDateOf(instant) {
+  const at = new Date(instant);
+  if (Number.isNaN(at.getTime())) return null;
+  return isoFrom(at);
+}
+function todayInTeamCalendar(now = /* @__PURE__ */ new Date()) {
+  return isoFrom(now);
+}
+
 // src/lib/kanban/board.ts
 var STATUS_LABEL = {
   todo: "할 일",
@@ -143,17 +164,11 @@ function sortForBoard(tasks2) {
     return a.id - b.id;
   });
 }
-function localDateOf(instant) {
-  const at = new Date(instant);
-  if (Number.isNaN(at.getTime())) return null;
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
-}
 function isOverdue(task, today) {
   if (task.deadline === null) return false;
   if (task.status === "done") {
     if (!task.completed_at) return false;
-    const completedOn = localDateOf(task.completed_at);
+    const completedOn = teamDateOf(task.completed_at);
     if (completedOn === null) return false;
     return completedOn > task.deadline;
   }
@@ -600,11 +615,6 @@ var $ = (id) => {
 var tasks = [];
 var statuses = [];
 var members = [];
-function todayIso() {
-  const now = /* @__PURE__ */ new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
@@ -653,7 +663,7 @@ function githubHtml(task) {
   return `<p class="gh">${escapeHtml(describeLinkState(task))}</p><ul class="gh-list">${items}</ul>`;
 }
 function render() {
-  const today = todayIso();
+  const today = todayInTeamCalendar();
   const summary = summarize(tasks, today);
   $("counts").textContent = `전체 ${summary.total} · 완료 ${summary.done} · 지연 ${summary.overdue} · 회의에서 나온 업무 ${summary.fromMeetings} · PR이 붙은 업무 ${summary.withPulls}`;
   $("unassigned").hidden = summary.unassigned === 0;

@@ -37,6 +37,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from teamflow.clock import local_date
 from teamflow.contribution.events import CATEGORY_OF, EventType, SourceKind
 from teamflow.db import models as m
 
@@ -205,7 +206,18 @@ def _record_completion(
         # 마감일이 없으면 준수 여부를 물을 수 없다. **지켰다고 치지 않는다.**
         return
 
-    met = completed_at.date() <= deadline.date()
+    # ⚠️ **팀이 사는 달력으로 봅니다** (결함 107). `.date()` 는 UTC
+    # 달력일이라 한국(UTC+9)에서는 사람이 보는 날짜와 다릅니다.
+    #
+    #     완료 2026-09-04T16:00Z = KST 09-05 01:00   마감 09-04
+    #     UTC 로 보면   09-04 <= 09-04  → 제때  ← 틀림
+    #     KST 로 보면   09-05 >  09-04  → 늦음
+    #
+    # 칸반 화면(`kanban/board.ts` 의 `localDateOf`)은 이미 로컬 달력으로
+    # 고쳐 놓고 그 이유를 주석에 길게 적어 뒀습니다. **서버만 안 고쳐져
+    # 있었습니다** — 같은 업무를 칸반은 "늦음", 기여도는 "제때" 로
+    # 말했습니다. 사람은 어느 쪽을 믿을지 모릅니다.
+    met = local_date(completed_at) <= local_date(deadline)
     _emit(
         session,
         project_id=task.project_id,

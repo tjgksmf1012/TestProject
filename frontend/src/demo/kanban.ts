@@ -25,6 +25,7 @@ import { withJosa } from '../lib/text/josa.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
+import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { board as boardSkeleton, clearSkeleton, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
@@ -50,13 +51,6 @@ interface Member {
 let tasks: Task[] = [];
 let statuses: string[] = [];
 let members: Member[] = [];
-
-/** 로컬 자정 기준 오늘. `toISOString()` 은 UTC 라 한국에서 하루 어긋난다. */
-function todayIso(): string {
-  const now = new Date();
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
 
 function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
@@ -137,7 +131,7 @@ function githubHtml(task: Task): string {
 }
 
 function render(): void {
-  const today = todayIso();
+  const today = todayInTeamCalendar();
   const summary = summarize(tasks, today);
 
   // 마지막 숫자가 이 프로젝트의 대표 주장이 **끝까지** 도는지를 봅니다 —

@@ -246,6 +246,50 @@ def test_missing_the_deadline_is_recorded_too(client: TestClient, board: dict):
     assert "deadline_met" not in kinds
 
 
+@pytest.mark.parametrize(
+    ("completed_utc", "expected"),
+    [
+        # KST 09-04 23:00 — 아직 마감일 안. 제때.
+        (datetime(2026, 9, 4, 14, 0, tzinfo=UTC), "deadline_met"),
+        # KST 09-05 01:00 — 날짜가 넘어갔다. 늦음.
+        # UTC 달력으로 보면 09-04 라 "제때" 가 된다. 그게 결함 107 이었다.
+        (datetime(2026, 9, 4, 16, 0, tzinfo=UTC), "deadline_missed"),
+    ],
+)
+def test_the_deadline_is_judged_on_the_team_calendar(
+    client: TestClient,
+    board: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    completed_utc: datetime,
+    expected: str,
+):
+    """⭐ 마감 준수는 **팀이 사는 달력**으로 판정한다 (결함 107).
+
+    한국(UTC+9)에서 밤 9시 이후에 끝낸 업무는 UTC 로는 아직 어제입니다.
+    `completed_at.date()` 로 재면 하루를 벌어 줍니다 — 마감 당일 밤에
+    끝낸 업무가 **하루 늦게 끝내도 "제때"** 로 기록됐습니다.
+
+    반대 방향은 없습니다. UTC 는 KST 보다 항상 뒤이므로 이 오차는 늘
+    한쪽으로만, **늦은 쪽을 봐주는 쪽으로만** 작동했습니다.
+
+    칸반 화면(`kanban/board.ts` 의 `isOverdue`)은 이미 로컬 달력으로
+    비교하고 있었습니다. 그래서 같은 업무를 두고 **칸반은 "지연",
+    기여도는 "제때"** 라고 말했습니다. 사람은 어느 쪽을 믿을지 모릅니다.
+    """
+    from teamflow.services import task_service
+
+    assert patch(
+        client, board, board["from_meeting"], {"deadline": "2026-09-04"}
+    ).status_code == 200
+    monkeypatch.setattr(task_service, "_now", lambda: completed_utc)
+    patch(client, board, board["from_meeting"], {"status": "done"})
+
+    kinds = {e["event_type"] for e in events(board["member"])}
+    assert expected in kinds, kinds
+    other = "deadline_met" if expected == "deadline_missed" else "deadline_missed"
+    assert other not in kinds, kinds
+
+
 def test_a_task_without_a_deadline_claims_neither(client: TestClient, board: dict):
     """⭐ 마감일이 없으면 **지켰다고 치지 않는다.**
 

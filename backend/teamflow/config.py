@@ -22,6 +22,28 @@ class Settings(BaseSettings):
     environment: str = "development"
     debug: bool = False
 
+    # ── 이 팀이 사는 달력 ─────────────────────────────────
+    #
+    # ⚠️ **날짜 판정은 전부 이 시간대로 합니다** (결함 107).
+    #
+    # 마감 준수를 `completed_at.date()` 로 판정하고 있었습니다. 그건
+    # **UTC 달력일**이라 한국(UTC+9)에서는 사람이 보는 날짜와 다릅니다.
+    #
+    #     완료 2026-09-04T16:00Z  = KST 09-05 01:00   마감 09-04
+    #     칸반   (로컬 달력)  → 09-05 > 09-04  → **늦음**
+    #     기여도 (UTC 달력)   → 09-04 <= 09-04 → **제때**
+    #
+    # 같은 업무를 두 화면이 다르게 말합니다. 화면(`kanban/board.ts`)은
+    # 이미 로컬 달력으로 고쳐 놓고 그 이유를 주석에 길게 적어 뒀는데,
+    # **서버만 안 고쳐져 있었습니다** — 두 벌이 있으면 한쪽만 고쳐집니다.
+    #
+    # 오차는 한쪽으로만 납니다: UTC 날짜는 KST 날짜보다 같거나 하루
+    # 이르므로 **지연을 과소보고만 합니다.** 늦은 것이 제때로 보이지,
+    # 그 반대는 없습니다. 기여도는 성적에 쓰일 수 있는 값입니다.
+    #
+    # Celery 도 같은 값을 씁니다(`tasks/__init__.py`) — 여기서 읽어 갑니다.
+    project_timezone: str = "Asia/Seoul"
+
     # ── 인프라 ────────────────────────────────────────────
     database_url: str = "postgresql+psycopg://teamflow:teamflow@localhost:5432/teamflow"
     redis_url: str = "redis://localhost:6379/0"

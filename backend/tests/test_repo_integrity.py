@@ -782,6 +782,181 @@ def test_the_pipeline_does_not_put_a_python_exception_on_the_screen():
     )
 
 
+def test_the_defect_log_does_not_claim_a_stale_count():
+    """⭐ 결함 기록이 스스로 말하는 건수가 **실제와 맞는가**.
+
+    `docs/17` 첫 줄은 &#34;결함 일흔다섯&#34; 처럼 건수를 말합니다. 그 숫자는
+    결함이 하나 늘 때마다 낡습니다 — 실제로 **결함 92번에서 멈춰
+    있었습니다.** 그동안 열세 개가 더 늘었는데 문서는 계속 &#34;쉰아홉&#34;
+    이라고 말했습니다.
+
+    README 표 건수(`test_the_readme_table_count_is_not_stale`)와 같은
+    부류입니다. 사람이 세어서 적는 숫자는 반드시 낡습니다.
+
+    ⚠️ 한글 수사(&#34;일흔다섯&#34;)는 기계가 세기 어려우므로 **숫자도 같이**
+    적게 했습니다. 이 검사는 그 숫자를 봅니다.
+    """
+    import re
+
+    doc = (REPO_ROOT / "docs" / "17-결함-기록.md").read_text()
+
+    header = re.search(
+        r"\*\*(\d+)건\*\*\s*·\s*(\d+)~(\d+)번\s*·\s*(\d+)번은 비어 있습니다", doc
+    )
+    assert header, (
+        "docs/17 첫 줄에서 '**N건** · A~B번 · C번은 비어 있습니다' 를 못 찾았습니다"
+    )
+    claimed, low, high, gap = (int(g) for g in header.groups())
+
+    found: set[int] = set()
+    for run in re.finditer(r"결함\s+([\d~·,\s]+)", doc):
+        for part in re.split(r"[·,\s]+", run.group(1).strip()):
+            if "~" in part:
+                a, _, b = part.partition("~")
+                if a.isdigit() and b.isdigit():
+                    found.update(range(int(a), int(b) + 1))
+            elif part.isdigit():
+                found.add(int(part))
+
+    ours = {n for n in found if low <= n <= high}
+    holes = sorted(set(range(low, high + 1)) - ours)
+
+    assert holes == [gap], (
+        f"문서가 {gap}번만 비었다고 하는데 실제로 빈 번호는 {holes} 입니다"
+    )
+    assert len(ours) == claimed, (
+        f"문서는 {claimed}건이라고 하는데 실제로 적힌 결함은 {len(ours)}건입니다 "
+        f"({low}~{high})"
+    )
+    assert max(ours) == high, f"가장 큰 결함 번호는 {max(ours)} 인데 머리말은 {high} 입니다"
+
+
+def test_the_team_calendar_is_the_same_on_both_sides():
+    """⭐ 서버와 화면이 **같은 달력**을 쓰는가 (결함 109).
+
+    서버는 결함 107 을 고치면서 `settings.project_timezone` 이라는 하나의
+    달력을 정했습니다. 그런데 칸반 화면은 `Date#getFullYear()` — 즉
+    **보는 사람의 시간대**로 마감 준수를 그리고 있었습니다.
+
+        완료 2026-09-04T16:00:00Z, 마감 2026-09-04
+        서울에서 보면  09-05 → 지연
+        뉴욕에서 보면  09-04 → 제때
+        서버는        09-05 → 지연
+
+    같은 업무가 **누가 보느냐에 따라** 달라졌습니다. 시연을 어느
+    노트북에서 하든 같은 답이 나와야 합니다.
+
+    시간대는 숫자가 아니라 문자열이라 `PAIRED_CONSTANTS` 표에 담기지
+    않습니다. 그래서 짝을 여기서 따로 봅니다.
+    """
+    import re
+
+    back = (REPO_ROOT / "backend" / "teamflow" / "config.py").read_text()
+    front = (REPO_ROOT / "frontend" / "src" / "lib" / "time" / "calendar.ts").read_text()
+
+    back_hit = re.search(r"project_timezone:\s*str\s*=\s*['\"]([^'\"]+)['\"]", back)
+    front_hit = re.search(r"TEAM_TIMEZONE\s*=\s*['\"]([^'\"]+)['\"]", front)
+
+    assert back_hit, "config.py 에서 project_timezone 기본값을 못 찾았습니다"
+    assert front_hit, "calendar.ts 에서 TEAM_TIMEZONE 을 못 찾았습니다"
+    assert back_hit.group(1) == front_hit.group(1), (
+        f"팀 달력이 갈라졌습니다: 서버 {back_hit.group(1)!r} vs "
+        f"화면 {front_hit.group(1)!r}"
+    )
+
+
+def test_the_screens_read_the_calendar_from_one_place():
+    """⭐ 화면이 날짜를 **손으로 짜 맞추지** 않는가 (결함 109).
+
+    되돌리기 쉬운 결함입니다. `getFullYear()/getMonth()/getDate()` 를
+    이어 붙이면 그 자리에서는 잘 돌아가 보이고, 시간대가 다른 사람이
+    볼 때만 틀립니다. 이 저장소에는 그 조각이 **세 벌** 있었습니다 —
+    `board.ts` 의 `localDateOf`, `demo/kanban.ts` 와 `demo/review.ts` 의
+    `todayIso`. 셋 다 같은 실수를 따로 하고 있었습니다.
+
+    이제 `lib/time/calendar.ts` 한 곳만 달력을 압니다.
+    """
+    import re
+
+    allowed = {"src/lib/time/calendar.ts"}
+    root = REPO_ROOT / "frontend" / "src"
+
+    offenders = []
+    for path in sorted(root.rglob("*.ts")):
+        rel = path.relative_to(REPO_ROOT / "frontend").as_posix()
+        if rel in allowed or rel.endswith(".test.ts"):
+            continue
+        source = path.read_text()
+        for number, line in enumerate(source.splitlines(), 1):
+            if re.search(r"\.getMonth\(\)|\.getDate\(\)|\.getFullYear\(\)", line):
+                offenders.append(f"{rel}:{number}  {line.strip()}")
+
+    assert not offenders, (
+        "화면이 날짜를 손으로 짜 맞추고 있습니다 — 보는 사람의 달력이 됩니다.\n"
+        "`lib/time/calendar.ts` 의 `teamDateOf`/`todayInTeamCalendar` 를 쓰세요:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_no_instant_is_turned_into_a_calendar_day_by_hand():
+    """⭐ 순간을 날짜로 바꿀 때는 **팀 달력**을 거친다 (결함 107·108).
+
+    이 저장소는 시각을 전부 UTC 로 저장합니다. 그래서 `.date()` 는
+    **UTC 달력일**입니다. 한국(UTC+9)에서는 밤 9시 이후가 통째로 하루
+    앞으로 밀립니다 — 그리고 UTC 는 KST 보다 항상 뒤이므로 이 오차는
+    무작위가 아니라 **한쪽으로만** 기웁니다.
+
+    같은 결함을 두 곳에서 따로 찾았습니다.
+
+    * 107 — `completed_at.date()` 로 마감 준수를 판정. 마감 당일 밤에
+      끝낸 업무가 하루 늦어도 "제때" 였습니다.
+    * 108 — `started_at.date()` 를 마감 표현의 기준일로 사용. 새벽에
+      시작한 회의에서 **"다음 주 월요일" 이 회의 당일**이 됐습니다.
+
+    두 번째를 찾고 나서 `teamflow/clock.py` 로 모았습니다. 이 가드는
+    세 번째를 막습니다.
+
+    ⚠️ **마감일(`deadline`)은 여기 넣지 않습니다.** 그건 순간이 아니라
+    달력 날짜이고, 이 저장소는 그것을 UTC 자정으로 저장합니다
+    (`approval_service` 의 `datetime.combine(..., tzinfo=UTC)`).
+    UTC 자정을 `.date()` 로 되읽는 것은 정확한 역변환이라 옳습니다.
+    """
+    import ast
+
+    # 진짜 '순간' 인 열들. 달력 날짜인 `deadline` 은 일부러 뺐다.
+    instants = {"completed_at", "occurred_at", "merged_at", "started_at", "created_at"}
+
+    # ⚠️ 글자로 찾으면 **이 결함을 설명하는 주석과 docstring 이 먼저
+    # 걸립니다.** `clock.py` 는 `completed_at.date()` 가 왜 틀렸는지를
+    # 적어 두려고 그 모양을 그대로 쓰고 있습니다. 그래서 구문으로 찾습니다.
+    offenders = []
+    for path in sorted((REPO_ROOT / "backend" / "teamflow").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or node.args or node.keywords:
+                continue
+            called = node.func
+            if not isinstance(called, ast.Attribute) or called.attr != "date":
+                continue
+            owner = called.value
+            name = (
+                owner.attr
+                if isinstance(owner, ast.Attribute)
+                else owner.id
+                if isinstance(owner, ast.Name)
+                else ""
+            )
+            if name in instants:
+                rel = path.relative_to(REPO_ROOT)
+                offenders.append(f"{rel}:{node.lineno}  {name}.date()")
+
+    assert not offenders, (
+        "순간을 `.date()` 로 잘랐습니다 — UTC 달력일이라 한국에서 하루가\n"
+        "어긋납니다. `teamflow.clock.local_date()` 를 쓰세요:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
 def test_the_seed_track_numbers_agree_with_the_production_formula():
     """⭐ 시드의 커버리지·총 공백·구멍 목록이 **서로 맞는가** (결함 99).
 

@@ -34,6 +34,7 @@ import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/htt
 import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
 import { failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
+import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { clearSkeleton, rows, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
@@ -61,14 +62,7 @@ const drafts = new Map<number, Draft>();
 let candidates: Candidate[] = [];
 let members: Member[] = [];
 let meeting: MeetingInfo | null = null;
-let context: ReviewContext = { memberIds: [], today: todayIso() };
-
-/** 로컬 자정 기준 오늘. `toISOString()` 은 UTC 라 한국에서 하루 어긋난다. */
-function todayIso(): string {
-  const now = new Date();
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
+let context: ReviewContext = { memberIds: [], today: todayInTeamCalendar() };
 
 const $ = (id: string): HTMLElement => {
   const el = document.getElementById(id);
@@ -122,7 +116,7 @@ async function fetchAll(): Promise<'expired' | 'unreachable' | 'ok'> {
   candidates = sortForReview((await candidateRes.json()) as Candidate[]);
   members = (await memberRes.json()) as Member[];
   meeting = (await meetingRes.json()) as MeetingInfo;
-  context = { memberIds: members.map((m) => m.user_id), today: todayIso() };
+  context = { memberIds: members.map((m) => m.user_id), today: todayInTeamCalendar() };
   return 'ok';
 }
 
