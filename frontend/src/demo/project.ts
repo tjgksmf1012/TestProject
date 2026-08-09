@@ -6,10 +6,11 @@
  */
 
 import {
-  NO_CODE,
   codeToCopy,
   formatCode,
+  githubLoginStatus,
   nextStepAfterCreate,
+  NO_CODE,
   normalizeRepo,
   repoProblem,
   titleProblem,
@@ -284,7 +285,11 @@ function showRoleSum(): void {
 async function loadRoles(): Promise<void> {
   const response = await call(`/api/projects/${projectId}/members`);
   if (response === null || !response.ok) return;
-  const members = (await response.json()) as { user_id: number; role_shares?: Record<string, number> }[];
+  const members = (await response.json()) as {
+    user_id: number;
+    role_shares?: Record<string, number>;
+    github_login?: string | null;
+  }[];
   const meRes = await call('/api/auth/me');
   if (meRes === null || !meRes.ok) return;
   const me = (await meRes.json()) as { user_id: number };
@@ -293,6 +298,12 @@ async function loadRoles(): Promise<void> {
   // ⚠️ 상태·문제·실패·성공이 **한 자리**에 옵니다. 그래서 `showNote` 로
   // 색까지 같이 정합니다 — 글자만 바꾸면 실패가 상태처럼 보입니다 (결함 98).
   showNote($('role-message'), `지금 ${describeRoles(mine?.role_shares)}`, 'plain');
+
+  // ⚠️ **저장한 것이 화면으로 돌아와야 합니다.** 안 돌아오면 사람은
+  // 매번 다시 적고, 이미 이어 놓았다는 사실을 못 봅니다 (결함 94·97 과
+  // 같은 부류).
+  ($('gh-login') as HTMLInputElement).value = mine?.github_login ?? '';
+  showNote($('gh-login-message'), githubLoginStatus(mine?.github_login ?? null), 'plain');
 }
 
 async function saveRoles(): Promise<void> {
@@ -316,6 +327,30 @@ async function saveRoles(): Promise<void> {
     return;
   }
   showNote($('role-message'), `저장했습니다 — ${describeRoles(body.role_shares)}`, 'plain');
+}
+
+async function saveGithubLogin(): Promise<void> {
+  const typed = ($('gh-login') as HTMLInputElement).value;
+  const response = await send(`/api/projects/${projectId}/members/me/github`, {
+    method: 'PATCH',
+    body: JSON.stringify({ github_login: typed }),
+  });
+  if (response === null) {
+    showNote($('gh-login-message'), unreachableText('GitHub 계정을 저장하지 못했습니다'));
+    return;
+  }
+  const body = await response.json();
+  if (!response.ok) {
+    // 409(이미 쓰는 사람 있음)와 400(형식) 둘 다 서버 문장이 그대로
+    // 사람에게 쓸 만합니다.
+    showNote($('gh-login-message'), detailText(body, 'GitHub 계정을 저장하지 못했습니다'));
+    return;
+  }
+  // 서버가 정리한 값을 되받아 씁니다 — 주소를 붙여 넣었으면 아이디만 남습니다.
+  ($('gh-login') as HTMLInputElement).value = body.github_login ?? '';
+  showNote($('gh-login-message'), githubLoginStatus(body.github_login ?? null), 'plain');
+  // 연결 진단의 "연결하지 않은 팀원" 경고가 방금 바뀌었을 수 있습니다.
+  void loadHealth();
 }
 
 async function loadHealth(): Promise<void> {
@@ -517,6 +552,10 @@ $('del-run').addEventListener('click', () => {
 });
 
 renderNav('project');
+$('save-gh-login').addEventListener('click', () => {
+  void whilePressed($('save-gh-login') as HTMLButtonElement, saveGithubLogin);
+});
+
 $('save-roles').addEventListener('click', () => {
   void whilePressed($('save-roles') as HTMLButtonElement, saveRoles);
 });

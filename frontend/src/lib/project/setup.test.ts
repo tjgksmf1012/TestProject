@@ -12,6 +12,7 @@ import {
   normalizeRepo,
   repoProblem,
   titleProblem,
+  githubLoginStatus,
 } from './setup.ts';
 
 describe('normalizeCode', () => {
@@ -161,5 +162,29 @@ describe('클립보드에 넣을 코드', () => {
   it('있으면 사람이 받아 적기 쉬운 형태로', () => {
     strictEqual(codeToCopy('ABCDEFGH'), 'ABCD-EFGH');
     strictEqual(codeToCopy('  abcd-efgh '), 'ABCD-EFGH');
+  });
+});
+
+
+describe('githubLoginStatus', () => {
+  it('⭐ 비어 있으면 **왜 문제인지**까지 말한다', () => {
+    // 아무 말도 안 하면 안 적어도 되는 칸으로 읽힙니다. 그 상태가 바로
+    // 그 사람의 PR 이 주인을 못 찾는 상태입니다.
+    const text = githubLoginStatus(null);
+    strictEqual(text.includes('아직 연결하지 않았습니다'), true, text);
+    strictEqual(text.includes('기여도'), true, text);
+  });
+
+  it('공백만 있는 것도 비어 있는 것이다', () => {
+    strictEqual(githubLoginStatus('   '), githubLoginStatus(null));
+  });
+
+  it('이어져 있으면 어떤 아이디인지 그대로 보여준다', () => {
+    strictEqual(githubLoginStatus('minsu-dev'), '지금 minsu-dev로 이어져 있습니다.');
+  });
+
+  it('⭐ 조사를 **계산**한다 — `v` 는 받침 없음, `7` 은 받침 있음', () => {
+    // 손으로 `로` 를 박아 두면 `hong7` 이 "hong7로" 가 됩니다.
+    strictEqual(githubLoginStatus('hong7'), '지금 hong7으로 이어져 있습니다.');
   });
 });

@@ -93,6 +93,24 @@
     </p>
   </section>
 
+  <!-- ⚠️ 이 칸이 비어 있으면 **그 사람의 PR 이 주인을 못 찾습니다**
+       (결함 112). 읽는 곳은 넷인데(이벤트 배분·백필·업무↔PR·연결 진단)
+       값을 넣는 자리가 저장소에 0곳이었습니다 — 연결 진단은 "연결하지
+       않은 팀원이 있습니다" 라고 경고하면서 연결할 곳을 안 줬습니다. -->
+  <section class="panel">
+    <h2>내 GitHub 계정</h2>
+    <p class="sub">이 아이디로 올린 PR·리뷰가 내 기여도로 들어옵니다. 안 적으면 활동이 주인을 못 찾습니다.</p>
+    <label class="row">
+      <input id="gh-login" type="text" placeholder="minsu-dev" autocomplete="off" spellcheck="false" />
+    </label>
+    <button id="save-gh-login" type="button">계정 저장</button>
+    <p class="rolestatus" id="gh-login-message"></p>
+    <p class="note">
+      <strong>내 계정만 바꿉니다.</strong> 한 프로젝트에서 같은 아이디를 둘이 쓸 수 없습니다 —
+      남의 아이디를 적으면 그 사람의 PR이 내 기여가 되기 때문입니다. 바꾼 사실은 기록에 남습니다.
+    </p>
+  </section>
+
   <section class="panel">
     <h2>팀원 초대</h2>
     <p id="code">····</p>

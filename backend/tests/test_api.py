@@ -664,6 +664,144 @@ def test_meeting_members_404_for_unknown_meeting(client: TestClient, seeded):
 
 
 # ══════════════════════════════════════════════════════════════
+# 내 GitHub 아이디 (결함 112)
+# ══════════════════════════════════════════════════════════════
+
+
+def gh(client: TestClient, board_or_seeded: dict, value):
+    return client.patch(
+        f"/api/projects/{board_or_seeded['project_id']}/members/me/github",
+        json={"github_login": value},
+    )
+
+
+def test_i_can_connect_my_github_account(client: TestClient, seeded):
+    """⭐ 이 칸에 값을 넣는 코드가 **저장소에 0곳**이었다 (결함 112).
+
+    읽는 곳은 넷입니다 — 이벤트 배분·백필·업무↔PR·연결 진단. 쓰는 곳은
+    시드와 테스트뿐이었습니다. 실제로 배포하면 이 칸은 영원히 NULL 이고,
+    그러면 **아무의 PR 도 주인을 못 찾습니다.**
+
+    연결 진단은 이미 "GitHub 계정을 연결하지 않은 팀원이 있습니다" 라고
+    경고하고 있었는데, **연결할 자리가 없었습니다.**
+    """
+    response = gh(client, seeded, "https://github.com/NewName")
+    assert response.status_code == 200, response.text
+    assert response.json()["github_login"] == "NewName"
+
+    with db_session.session_scope() as s:
+        member = s.scalars(
+            select(m.Member).where(
+                m.Member.project_id == seeded["project_id"],
+                m.Member.user_id == seeded["user_ids"][0],
+            )
+        ).one()
+        assert member.github_login == "NewName"
+
+
+def test_the_member_list_carries_the_login_back(client: TestClient, seeded):
+    """저장한 것이 화면으로 돌아와야 한다 — 안 돌아오면 매번 다시 적는다."""
+    body = client.get(f"/api/meetings/{seeded['meeting_id']}/members").json()
+    assert [x["github_login"] for x in body] == [
+        "minsu-dev",
+        "haneul-design",
+        "jiwon-pm",
+    ]
+
+
+def test_an_empty_value_disconnects(client: TestClient, seeded):
+    """잘못 적었을 때 지울 방법이 있어야 한다."""
+    assert gh(client, seeded, "").json()["github_login"] is None
+
+
+def test_a_login_github_could_not_have_made_is_refused(client: TestClient, seeded):
+    """400 이고, 문구는 한국어다 (결함 78·86 과 같은 규칙)."""
+    response = gh(client, seeded, "min su")
+    assert response.status_code == 400
+    assert "GitHub 아이디" in response.json()["detail"]
+
+
+def test_i_cannot_claim_a_teammates_login(client: TestClient, seeded):
+    """⭐ 남의 아이디를 적으면 **그 사람의 PR 이 통째로 내 기여**가 된다.
+
+    예의 문제가 아니라 점수 문제입니다. 한 프로젝트 안에서 같은 아이디를
+    둘이 쓸 수 없습니다.
+    """
+    response = gh(client, seeded, "haneul-design")
+    assert response.status_code == 409
+    assert "이미 쓰고 있는 아이디입니다" in response.json()["detail"]
+
+    with db_session.session_scope() as s:
+        mine = s.scalars(
+            select(m.Member).where(
+                m.Member.project_id == seeded["project_id"],
+                m.Member.user_id == seeded["user_ids"][0],
+            )
+        ).one()
+        assert mine.github_login == "minsu-dev", "거절했으면 내 값도 그대로여야 한다"
+
+
+def test_claiming_a_teammates_login_in_another_case_is_also_refused(
+    client: TestClient, seeded
+):
+    """⚠️ **대소문자만 바꾸면 통과**하면 막은 것이 아니다.
+
+    GitHub 은 대소문자를 보존하지만 비교는 무시합니다 — `Haneul-Design`
+    으로 등록하면 같은 웹훅이 두 사람에게 걸립니다.
+    """
+    assert gh(client, seeded, "Haneul-Design").status_code == 409
+
+
+def test_keeping_my_own_login_is_not_a_conflict(client: TestClient, seeded):
+    """자기 것을 다시 저장하는 것은 충돌이 아니다 — 흔한 일이다."""
+    assert gh(client, seeded, "minsu-dev").status_code == 200
+    assert gh(client, seeded, "MinSu-Dev").status_code == 200
+
+
+def test_two_members_without_a_login_do_not_collide(client: TestClient, seeded):
+    """⚠️ 아직 안 이은 사람끼리 **중복으로 걸리면** 아무도 등록을 못 한다."""
+    with db_session.session_scope() as s:
+        for row in s.scalars(
+            select(m.Member).where(m.Member.project_id == seeded["project_id"])
+        ).all():
+            row.github_login = None
+
+    assert gh(client, seeded, "brand-new").status_code == 200
+
+
+def test_changing_my_github_login_is_always_logged(client: TestClient, seeded):
+    """⭐ 이 한 줄이 바뀌면 그 사람의 기여도가 통째로 바뀐다.
+
+    기여도 분쟁에서 필요한 것은 지금 값이 아니라 **누가 언제 그렇게
+    적었는가**입니다.
+    """
+    gh(client, seeded, "renamed-me")
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "github_login_changed")
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].before == {"github_login": "minsu-dev"}
+        assert rows[0].after == {"github_login": "renamed-me"}
+        assert rows[0].actor_id == seeded["user_ids"][0]
+
+
+def test_an_outsider_cannot_set_a_login_in_someone_elses_project(
+    client: TestClient, seeded, engine
+):
+    """구성원이 아니면 403. 이 프로젝트의 기여도에 손댈 수 없다."""
+    with db_session.session_scope() as s:
+        outsider = m.User(name="외부인", email="out@example.com")
+        s.add(outsider)
+        s.flush()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    assert gh(client, seeded, "sneaky").status_code == 403
+
+
+# ══════════════════════════════════════════════════════════════
 # 회의록 — 요약 말고 나머지 (결함 110·111)
 # ══════════════════════════════════════════════════════════════
 

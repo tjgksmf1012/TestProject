@@ -9,6 +9,8 @@
  * 서버 응답만으로는 사람이 무엇을 고쳐야 할지 알 수 없는 경우뿐입니다.
  */
 
+import { withJosa } from '../text/josa.ts';
+
 /** 서버 `projects/invites.py` 와 같아야 한다. */
 export const CODE_LENGTH = 8;
 export const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -130,4 +132,26 @@ export function codeToCopy(inviteCode: string | null | undefined): string | null
   if (codeProblem(raw) !== null) return null;
   // 서버가 하이픈·공백을 걷어내므로 보기 좋은 형태로 보내도 통합니다.
   return formatCode(raw);
+}
+
+
+/**
+ * GitHub 계정이 이어졌는지 화면에 쓸 한 줄 (결함 112).
+ *
+ * ⚠️ **비어 있을 때 아무 말도 안 하면 안 됩니다.** 그 상태가 바로 그
+ * 사람의 PR 이 주인을 못 찾는 상태이고, 화면에는 그냥 빈 칸으로
+ * 보입니다 — 사람은 안 적어도 되는 칸으로 읽습니다.
+ *
+ * 연결 진단도 같은 말을 하지만 그건 **프로젝트를 만든 사람**이 보는
+ * 자리입니다. 자기 칸 옆에서 자기 상태를 말해 줘야 자기가 고칩니다.
+ */
+export function githubLoginStatus(login: string | null): string {
+  const value = (login ?? '').trim();
+  if (value === '') {
+    return '아직 연결하지 않았습니다 — 이 상태로는 내 PR이 기여도에 들어가지 않습니다.';
+  }
+  // ⚠️ 조사는 **계산**합니다 (결함 76·88). GitHub 아이디는 영문·숫자로
+  // 끝나고, `minsu-dev` 는 "브이" 로 읽어 받침이 없고 `hong7` 은 "칠"
+  // 이라 받침이 있습니다 — `로`/`으로` 가 갈립니다.
+  return `지금 ${withJosa(value, '으로로')} 이어져 있습니다.`;
 }

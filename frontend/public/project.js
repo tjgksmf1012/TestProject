@@ -1,91 +1,3 @@
-// src/lib/project/setup.ts
-var CODE_LENGTH = 8;
-var CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
-function normalizeCode(raw) {
-  return raw.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
-}
-function formatCode(raw) {
-  const clean = normalizeCode(raw);
-  return clean.length === CODE_LENGTH ? `${clean.slice(0, 4)}-${clean.slice(4)}` : clean;
-}
-function codeProblem(raw) {
-  const clean = normalizeCode(raw);
-  if (clean.length === 0) return "초대 코드를 입력하세요";
-  if (clean.length !== CODE_LENGTH) {
-    return `초대 코드는 ${CODE_LENGTH}자입니다 (지금 ${clean.length}자)`;
-  }
-  const bad = [...clean].filter((ch) => !CODE_ALPHABET.includes(ch));
-  if (bad.length > 0) {
-    return `코드에 쓰지 않는 글자가 있습니다: ${[...new Set(bad)].join(", ")} — 0·O·1·I·L은 쓰지 않습니다`;
-  }
-  return null;
-}
-function titleProblem(raw) {
-  const title = raw.trim();
-  if (title.length === 0) return "프로젝트 이름을 입력하세요";
-  if (title.length > 200) return "이름이 너무 깁니다 (200자까지)";
-  return null;
-}
-var REPO = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
-function normalizeRepo(raw) {
-  let value = raw.trim();
-  if (value === "") return "";
-  value = value.replace(/^https?:\/\/(www\.)?github\.com\//i, "");
-  value = value.replace(/^git@github\.com:/i, "");
-  value = value.replace(/\.git$/i, "");
-  value = value.replace(/\/+$/, "");
-  return value;
-}
-function repoProblem(raw) {
-  const value = normalizeRepo(raw);
-  if (value === "") return null;
-  if (!REPO.test(value)) {
-    return "저장소는 `owner/repo` 형식이어야 합니다";
-  }
-  return null;
-}
-function nextStepAfterCreate(memberCount) {
-  if (memberCount <= 1) {
-    return "아직 혼자입니다. 아래 초대 코드를 팀원에게 알려 주세요 — 다 모인 뒤에 회의를 여는 게 좋습니다.";
-  }
-  return "팀원이 모였습니다. 회의를 열면 로비에서 동의를 받고 녹음을 시작할 수 있습니다.";
-}
-var NO_CODE = "(없음)";
-function codeToCopy(inviteCode2) {
-  const raw = (inviteCode2 ?? "").trim();
-  if (codeProblem(raw) !== null) return null;
-  return formatCode(raw);
-}
-
-// src/lib/auth/session.ts
-function loginUrlFor(pathWithQuery) {
-  return `/login.html?next=${encodeURIComponent(pathWithQuery)}`;
-}
-var LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
-function safeApiBase(raw, pageOrigin) {
-  if (!raw) return "";
-  if (raw.startsWith("/")) {
-    if (raw.startsWith("//") || raw.startsWith("/\\")) return "";
-    return raw.replace(/\/+$/, "");
-  }
-  let target;
-  let page;
-  try {
-    target = new URL(raw);
-    page = new URL(pageOrigin);
-  } catch {
-    return "";
-  }
-  if (target.origin === page.origin) return target.origin + target.pathname.replace(/\/+$/, "");
-  if (!LOCAL_HOSTS.has(page.hostname)) return "";
-  if (!LOCAL_HOSTS.has(target.hostname)) return "";
-  if (target.protocol !== "http:" && target.protocol !== "https:") return "";
-  return target.origin + target.pathname.replace(/\/+$/, "");
-}
-function isSessionExpired(status) {
-  return status === 401;
-}
-
 // src/lib/text/josa.ts
 var PAIRS = {
   은는: ["은", "는"],
@@ -189,6 +101,101 @@ function josa(word, pair) {
 }
 function withJosa(word, pair) {
   return `${word}${josa(word, pair)}`;
+}
+
+// src/lib/project/setup.ts
+var CODE_LENGTH = 8;
+var CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+function normalizeCode(raw) {
+  return raw.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+}
+function formatCode(raw) {
+  const clean = normalizeCode(raw);
+  return clean.length === CODE_LENGTH ? `${clean.slice(0, 4)}-${clean.slice(4)}` : clean;
+}
+function codeProblem(raw) {
+  const clean = normalizeCode(raw);
+  if (clean.length === 0) return "초대 코드를 입력하세요";
+  if (clean.length !== CODE_LENGTH) {
+    return `초대 코드는 ${CODE_LENGTH}자입니다 (지금 ${clean.length}자)`;
+  }
+  const bad = [...clean].filter((ch) => !CODE_ALPHABET.includes(ch));
+  if (bad.length > 0) {
+    return `코드에 쓰지 않는 글자가 있습니다: ${[...new Set(bad)].join(", ")} — 0·O·1·I·L은 쓰지 않습니다`;
+  }
+  return null;
+}
+function titleProblem(raw) {
+  const title = raw.trim();
+  if (title.length === 0) return "프로젝트 이름을 입력하세요";
+  if (title.length > 200) return "이름이 너무 깁니다 (200자까지)";
+  return null;
+}
+var REPO = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+function normalizeRepo(raw) {
+  let value = raw.trim();
+  if (value === "") return "";
+  value = value.replace(/^https?:\/\/(www\.)?github\.com\//i, "");
+  value = value.replace(/^git@github\.com:/i, "");
+  value = value.replace(/\.git$/i, "");
+  value = value.replace(/\/+$/, "");
+  return value;
+}
+function repoProblem(raw) {
+  const value = normalizeRepo(raw);
+  if (value === "") return null;
+  if (!REPO.test(value)) {
+    return "저장소는 `owner/repo` 형식이어야 합니다";
+  }
+  return null;
+}
+function nextStepAfterCreate(memberCount) {
+  if (memberCount <= 1) {
+    return "아직 혼자입니다. 아래 초대 코드를 팀원에게 알려 주세요 — 다 모인 뒤에 회의를 여는 게 좋습니다.";
+  }
+  return "팀원이 모였습니다. 회의를 열면 로비에서 동의를 받고 녹음을 시작할 수 있습니다.";
+}
+var NO_CODE = "(없음)";
+function codeToCopy(inviteCode2) {
+  const raw = (inviteCode2 ?? "").trim();
+  if (codeProblem(raw) !== null) return null;
+  return formatCode(raw);
+}
+function githubLoginStatus(login) {
+  const value = (login ?? "").trim();
+  if (value === "") {
+    return "아직 연결하지 않았습니다 — 이 상태로는 내 PR이 기여도에 들어가지 않습니다.";
+  }
+  return `지금 ${withJosa(value, "으로로")} 이어져 있습니다.`;
+}
+
+// src/lib/auth/session.ts
+function loginUrlFor(pathWithQuery) {
+  return `/login.html?next=${encodeURIComponent(pathWithQuery)}`;
+}
+var LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+function safeApiBase(raw, pageOrigin) {
+  if (!raw) return "";
+  if (raw.startsWith("/")) {
+    if (raw.startsWith("//") || raw.startsWith("/\\")) return "";
+    return raw.replace(/\/+$/, "");
+  }
+  let target;
+  let page;
+  try {
+    target = new URL(raw);
+    page = new URL(pageOrigin);
+  } catch {
+    return "";
+  }
+  if (target.origin === page.origin) return target.origin + target.pathname.replace(/\/+$/, "");
+  if (!LOCAL_HOSTS.has(page.hostname)) return "";
+  if (!LOCAL_HOSTS.has(target.hostname)) return "";
+  if (target.protocol !== "http:" && target.protocol !== "https:") return "";
+  return target.origin + target.pathname.replace(/\/+$/, "");
+}
+function isSessionExpired(status) {
+  return status === 401;
 }
 
 // src/lib/ui/copy.ts
@@ -865,6 +872,8 @@ async function loadRoles() {
   const mine = members.find((entry) => entry.user_id === me.user_id);
   renderRoles(mine?.role_shares ?? {});
   showNote($("role-message"), `지금 ${describeRoles(mine?.role_shares)}`, "plain");
+  $("gh-login").value = mine?.github_login ?? "";
+  showNote($("gh-login-message"), githubLoginStatus(mine?.github_login ?? null), "plain");
 }
 async function saveRoles() {
   const shares = rolesFromScreen();
@@ -887,6 +896,25 @@ async function saveRoles() {
     return;
   }
   showNote($("role-message"), `저장했습니다 — ${describeRoles(body.role_shares)}`, "plain");
+}
+async function saveGithubLogin() {
+  const typed = $("gh-login").value;
+  const response = await send(`/api/projects/${projectId}/members/me/github`, {
+    method: "PATCH",
+    body: JSON.stringify({ github_login: typed })
+  });
+  if (response === null) {
+    showNote($("gh-login-message"), unreachableText("GitHub 계정을 저장하지 못했습니다"));
+    return;
+  }
+  const body = await response.json();
+  if (!response.ok) {
+    showNote($("gh-login-message"), detailText(body, "GitHub 계정을 저장하지 못했습니다"));
+    return;
+  }
+  $("gh-login").value = body.github_login ?? "";
+  showNote($("gh-login-message"), githubLoginStatus(body.github_login ?? null), "plain");
+  void loadHealth();
 }
 async function loadHealth() {
   const response = await whileLoading(
@@ -1032,6 +1060,9 @@ $("del-run").addEventListener("click", () => {
   });
 });
 renderNav("project");
+$("save-gh-login").addEventListener("click", () => {
+  void whilePressed($("save-gh-login"), saveGithubLogin);
+});
 $("save-roles").addEventListener("click", () => {
   void whilePressed($("save-roles"), saveRoles);
 });

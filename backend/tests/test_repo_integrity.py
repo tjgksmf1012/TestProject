@@ -782,6 +782,59 @@ def test_the_pipeline_does_not_put_a_python_exception_on_the_screen():
     )
 
 
+def test_every_column_a_person_must_fill_has_a_route_that_fills_it():
+    """⭐ 사람이 채워야 하는 칸에 **채울 길이 있는가** (결함 112).
+
+    `Member.github_login` 은 기여도의 GitHub 다리 전체가 서 있는 칸입니다.
+
+        웹훅 actor_login  ──(이 칸)──▶  user_id  ──▶  기여 이벤트
+
+    읽는 곳은 넷이었습니다 — 이벤트 배분·백필·업무↔PR·연결 진단.
+    **쓰는 곳은 시드와 테스트뿐이었습니다.** 실제로 배포하면 이 칸은
+    영원히 NULL 이고, 그러면 아무의 PR 도 주인을 못 찾습니다.
+
+    ⚠️ 연결 진단은 이미 &#34;GitHub 계정을 연결하지 않은 팀원이 있습니다&#34;
+    라고 **경고하고 있었습니다.** 할 일을 알려 주면서 그 일을 할 자리를
+    안 주는 것은, 결함 105 에서 고친 것(할 수 없는 일을 안 했다고 깎기)의
+    거울입니다.
+
+    ⚠️ **시드는 쓰는 곳으로 세지 않습니다.** 시드가 채우면 시연은 돌고
+    운영은 안 돕니다 — 결함 91 에서 겪은 그대로입니다.
+    """
+    import ast
+
+    # (모델 속성, 왜 사람이 채워야 하는가)
+    needs_a_person = {
+        "github_login": "이게 없으면 그 사람의 PR 이 주인을 못 찾는다",
+    }
+
+    api = REPO_ROOT / "backend" / "teamflow" / "api"
+    services = REPO_ROOT / "backend" / "teamflow" / "services"
+
+    writers: dict[str, list[str]] = {name: [] for name in needs_a_person}
+    for root in (api, services):
+        for path in sorted(root.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                # `x.github_login = ...` 만 쓰기로 센다. 비교(`==`)는 읽기다.
+                if not isinstance(node, ast.Assign):
+                    continue
+                for target in node.targets:
+                    if isinstance(target, ast.Attribute) and target.attr in needs_a_person:
+                        writers[target.attr].append(
+                            f"{path.relative_to(REPO_ROOT)}:{node.lineno}"
+                        )
+
+    orphans = [
+        f"{name} — {why} (쓰는 라우트가 0곳)"
+        for name, why in needs_a_person.items()
+        if not writers[name]
+    ]
+    assert not orphans, (
+        "사람이 채워야 하는 칸인데 제품에 채울 자리가 없습니다:\n  " + "\n  ".join(orphans)
+    )
+
+
 def test_every_table_the_pipeline_writes_has_something_that_reads_it():
     """⭐ 파이프라인이 채우는 표마다 **읽는 코드가 있는가** (결함 110·111).
 

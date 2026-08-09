@@ -1796,6 +1796,9 @@ class MemberOut(BaseModel):
     user_id: int
     name: str
     role_shares: dict[str, float]
+    # 이 사람의 GitHub 아이디 (결함 112). 안 이었으면 None —
+    # 화면이 "아직 연결 안 됨" 으로 그립니다.
+    github_login: str | None = None
 
 
 def _project_members(session: Session, project_id: int) -> list[MemberOut]:
@@ -1810,6 +1813,7 @@ def _project_members(session: Session, project_id: int) -> list[MemberOut]:
             user_id=member.user_id,
             name=user.name,
             role_shares={k: float(v) for k, v in (member.role_shares or {}).items()},
+            github_login=member.github_login,
         )
         for member, user in rows
     ]
@@ -1840,6 +1844,18 @@ class RoleIn(BaseModel):
     """역할 비중. `{"developer": 0.7, "planner": 0.3}` 처럼 겸직도 된다."""
 
     role_shares: dict[str, float]
+
+    model_config = {"extra": "forbid"}
+
+
+class GithubLoginIn(BaseModel):
+    """내 GitHub 아이디 (결함 112).
+
+    빈 문자열은 **연결 해제**입니다 — 잘못 적었을 때 지울 방법이 있어야
+    합니다. 그래서 `None`(안 건드림)과 `""`(지움)을 구분합니다.
+    """
+
+    github_login: str | None = None
 
     model_config = {"extra": "forbid"}
 
@@ -1912,6 +1928,94 @@ def set_my_role(
         user_id=user.id,
         name=user.name,
         role_shares={k: float(v) for k, v in cleaned.items()},
+        github_login=member.github_login,
+    )
+
+
+@app.patch("/api/projects/{project_id}/members/me/github", response_model=MemberOut)
+def set_my_github_login(
+    project_id: int, payload: GithubLoginIn, session: DbSession, user: CurrentUser
+) -> MemberOut:
+    """내 GitHub 아이디를 이 프로젝트의 나에게 잇는다 (결함 112).
+
+    ⭐ **이 칸에 값을 넣는 코드가 저장소에 0곳이었습니다.** 읽는 곳은
+    넷인데(이벤트 배분·백필·업무↔PR·연결 진단) 쓰는 곳은 시드와
+    테스트뿐이었습니다. 실제로 배포하면 이 칸은 영원히 NULL 이고,
+    그러면 **아무의 PR 도 주인을 못 찾습니다** — 오류 없이 기여도만
+    빕니다. 연결 진단은 이미 "GitHub 계정을 연결하지 않은 팀원이
+    있습니다" 라고 경고하고 있었는데, **연결할 자리가 없었습니다.**
+
+    ## 남의 아이디를 못 쓰게 한다
+
+    ⚠️ 이건 예의 문제가 아니라 **점수 문제**입니다. 남의 로그인을 적으면
+    그 사람의 PR·리뷰가 통째로 내 기여로 들어옵니다. 그래서 한 프로젝트
+    안에서 같은 아이디를 둘이 쓸 수 없습니다 — **대소문자를 무시하고**
+    비교합니다(`MinSu` 와 `minsu` 는 GitHub 에서 같은 사람입니다).
+
+    ⚠️ 이 검사가 **소유 증명은 아닙니다.** 아무도 안 쓴 아이디라면 남의
+    것이라도 적을 수 있습니다. 진짜 증명은 GitHub OAuth 가 필요한데
+    이 환경에는 네트워크가 없습니다 — `docs/17` §C 에 적어 뒀습니다.
+    대신 **바꿀 때마다 감사 로그에 남깁니다.** 기여도 분쟁에서 필요한
+    것은 지금 값이 아니라 누가 언제 그렇게 적었는가입니다.
+
+    경로가 `/members/me/...` 인 것은 역할 저장과 같은 이유입니다 —
+    **남의 id 를 넣을 자리 자체를 안 만듭니다.**
+    """
+    from teamflow.github.identity import clean_github_login, same_login
+
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    try:
+        cleaned = clean_github_login(payload.github_login)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    members = session.scalars(
+        select(m.Member).where(m.Member.project_id == project_id)
+    ).all()
+    mine = next(row for row in members if row.user_id == user.id)
+
+    if cleaned is not None:
+        taken = any(
+            row.user_id != user.id and same_login(row.github_login, cleaned)
+            for row in members
+        )
+        if taken:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                # ⚠️ 조사를 붙이지 않는 문장으로 씁니다. 아이디는 영문·숫자로
+                # 끝나 받침이 갈리는데, 서버에는 조사 계산기가 없습니다 —
+                # 만들면 화면과 **두 벌**이 됩니다. `josa.ts` 가 스스로
+                # 권하는 대로 문장을 바꾸는 쪽을 택했습니다.
+                f"'{cleaned}' — 이 프로젝트의 다른 팀원이 이미 쓰고 있는 아이디입니다",
+            )
+
+    before = mine.github_login
+    mine.github_login = cleaned
+
+    if before != cleaned:
+        # ⭐ **누가 어떤 GitHub 계정을 자기 것이라고 했는가**를 남긴다.
+        # 이 한 줄이 바뀌면 그 사람의 기여도가 통째로 바뀝니다.
+        session.add(
+            m.AuditLog(
+                project_id=project_id,
+                actor_id=user.id,
+                action="github_login_changed",
+                target=f"members/{user.id}",
+                before={"github_login": before},
+                after={"github_login": cleaned},
+                at=datetime.now(UTC),
+            )
+        )
+    session.flush()
+
+    return MemberOut(
+        user_id=user.id,
+        name=user.name,
+        role_shares={k: float(v) for k, v in (mine.role_shares or {}).items()},
+        github_login=mine.github_login,
     )
 
 
