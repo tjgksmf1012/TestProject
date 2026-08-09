@@ -162,6 +162,60 @@ def test_shares_sum_to_100(ids: Ids, full_coverage: CoverageStats):
     assert sum(m.share for m in result.members.values()) == pytest.approx(100.0)
 
 
+def test_the_event_count_always_matches_the_evidence_it_names(
+    ids: Ids, full_coverage: CoverageStats
+):
+    """⭐ 건수와 근거 목록은 **따로 계산되는 두 벌**이다.
+
+    `CategoryScore` 는 둘을 각각 받습니다.
+
+        evidence_ids=evidences[uid][category],
+        event_count=counts[uid][category],
+
+    화면은 "근거 3건" 이라고 말하고, 근거를 펼쳐 보는 화면이 생기면 그때
+    `evidence_ids` 를 읽습니다. **둘이 갈라지면** 사람은 3건이라고 들었는데
+    2건을 보게 됩니다 — 기여도에서 그건 "숨겼다" 로 읽힙니다.
+
+    이 저장소가 가장 자주 겪은 부류입니다: **두 벌이 있으면 한쪽만
+    고쳐진다.** 지금은 맞고, 앞으로도 맞는지는 이 검사가 봅니다.
+    """
+    profiles = {
+        1: DEFAULT_PROFILES[Role.DEVELOPER],
+        2: DEFAULT_PROFILES[Role.PLANNER],
+    }
+    events = {
+        1: [task_done(1, ids.next()) for _ in range(3)]
+        + [deadline(1, ids.next(), EventType.DEADLINE_MET) for _ in range(2)],
+        2: [task_done(2, ids.next())],
+    }
+    result = score_team(events, profiles, full_coverage)
+
+    checked = 0
+    for member in result.members.values():
+        for score in member.categories.values():
+            assert score.event_count == len(score.evidence_ids), (
+                f"{score.category}: 건수 {score.event_count} 인데 "
+                f"근거는 {len(score.evidence_ids)}개입니다"
+            )
+            checked += 1
+    assert checked > 0, "카테고리를 하나도 못 봤습니다 — 이 검사가 헛돌고 있습니다"
+
+
+def test_evidence_ids_are_the_real_event_ids(ids: Ids, full_coverage: CoverageStats):
+    """⚠️ 개수만 맞으면 안 됩니다. **그 이벤트의 id 여야** 합니다.
+
+    개수만 보면 근거를 통째로 엉뚱한 목록으로 바꿔도 통과합니다.
+    """
+    profiles = {1: DEFAULT_PROFILES[Role.DEVELOPER]}
+    mine = [task_done(1, ids.next()) for _ in range(3)]
+    events = {1: mine}
+
+    result = score_team(events, profiles, full_coverage)
+    task_score = result.members[1].categories[Category.TASK]
+
+    assert sorted(task_score.evidence_ids) == sorted(e.source_id for e in mine)
+
+
 def test_empty_categories_are_skipped(ids: Ids, full_coverage: CoverageStats):
     """팀 전체가 0인 카테고리는 제외되고 가중치가 재정규화된다."""
     profiles = {1: DEFAULT_PROFILES[Role.DEVELOPER], 2: DEFAULT_PROFILES[Role.DEVELOPER]}

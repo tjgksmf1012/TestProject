@@ -772,6 +772,8 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
     ['TrackHealth', 'src/lib/lobby/room.ts'],
     ['RosterEntry', 'src/lib/lobby/room.ts'],
     ['FinalRow', 'src/lib/contribution/final.ts'],
+    ['MemberScore', 'src/lib/contribution/view.ts'],
+    ['Category', 'src/lib/contribution/view.ts'],
   ];
 
   const EXEMPT: Record<string, string> = {
@@ -784,6 +786,16 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
     capture_confidence:
       '`coverage` 가 이미 "얼마나 담겼나" 를 말한다. 비슷한 숫자를 둘 띄우면 ' +
       '사람이 어느 쪽을 믿을지 모른다',
+    raw:
+      '정규화 전 원점수다. 화면은 `team_share`(팀 안에서의 비율)를 보여준다 — ' +
+      '같은 것을 뜻하는 숫자를 둘 띄우면 사람이 어느 쪽을 믿을지 모른다. ' +
+      '`capture_confidence` 와 같은 이유다',
+    evidence_ids:
+      '근거 **건수**는 `event_count` 로 이미 보여준다. 번호 자체는 사람에게 ' +
+      '읽히지 않으므로("이벤트 12, 45"), 근거를 **펼쳐 보는 화면**이 생길 때 ' +
+      '읽는다. 그 화면은 아직 없다 — 없는 것을 있는 척 그리지 않는다. ' +
+      '⚠️ 대신 `event_count` 와 이 목록의 길이가 갈라지지 않는지는 ' +
+      '`test_scoring.py` 가 지킨다(둘은 따로 계산되는 **두 벌**이다)',
   };
 
   /**
