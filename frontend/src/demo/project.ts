@@ -278,14 +278,16 @@ async function loadRoles(): Promise<void> {
   const me = (await meRes.json()) as { user_id: number };
   const mine = members.find((entry) => entry.user_id === me.user_id);
   renderRoles(mine?.role_shares ?? {});
-  $('role-message').textContent = `지금 ${describeRoles(mine?.role_shares)}`;
+  // ⚠️ 상태·문제·실패·성공이 **한 자리**에 옵니다. 그래서 `showNote` 로
+  // 색까지 같이 정합니다 — 글자만 바꾸면 실패가 상태처럼 보입니다 (결함 98).
+  showNote($('role-message'), `지금 ${describeRoles(mine?.role_shares)}`, 'plain');
 }
 
 async function saveRoles(): Promise<void> {
   const shares = rolesFromScreen();
   const problem = problemWith(shares);
   if (problem !== null) {
-    $('role-message').textContent = problem;
+    showNote($('role-message'), problem);
     return;
   }
   const response = await send(`/api/projects/${projectId}/members/me`, {
@@ -293,15 +295,15 @@ async function saveRoles(): Promise<void> {
     body: JSON.stringify({ role_shares: rolesToPayload(shares) }),
   });
   if (response === null) {
-    $('role-message').textContent = unreachableText('역할을 저장하지 못했습니다');
+    showNote($('role-message'), unreachableText('역할을 저장하지 못했습니다'));
     return;
   }
   const body = await response.json();
   if (!response.ok) {
-    $('role-message').textContent = detailText(body, '역할을 저장하지 못했습니다');
+    showNote($('role-message'), detailText(body, '역할을 저장하지 못했습니다'));
     return;
   }
-  $('role-message').textContent = `저장했습니다 — ${describeRoles(body.role_shares)}`;
+  showNote($('role-message'), `저장했습니다 — ${describeRoles(body.role_shares)}`, 'plain');
 }
 
 async function loadHealth(): Promise<void> {

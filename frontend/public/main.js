@@ -1585,6 +1585,7 @@ async function joinMeeting(id) {
     return;
   }
   $("who").textContent = `${(await me.json()).name} 님의 트랙으로 녹음합니다`;
+  showNote($("join-note"), "");
   const response = await trySend(
     () => fetch(`${apiBase}/api/meetings/${id}/tracks`, {
       method: "POST",
@@ -1597,7 +1598,7 @@ async function joinMeeting(id) {
     })
   );
   if (response === null) {
-    $("who").textContent = unreachableText("트랙에 참가하지 못했습니다");
+    showNote($("join-note"), unreachableText("트랙에 참가하지 못했습니다"));
     return;
   }
   if (isSessionExpired(response.status)) {
@@ -1606,10 +1607,10 @@ async function joinMeeting(id) {
   }
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    $("who").textContent = `트랙에 참가하지 못했습니다: ${detailText(
-      body,
-      `HTTP ${response.status}`
-    )}`;
+    showNote(
+      $("join-note"),
+      `트랙에 참가하지 못했습니다: ${detailText(body, `HTTP ${response.status}`)}`
+    );
     return;
   }
   const track = await response.json();
@@ -1641,8 +1642,7 @@ $("start").addEventListener("click", async () => {
 });
 async function tellServerWeAreDone(result) {
   if (!trackUrl) return;
-  $("finish-state").hidden = false;
-  $("finish-state").textContent = "녹음 종료를 서버에 알리는 중…";
+  showNote($("finish-state"), "녹음 종료를 서버에 알리는 중…", "plain");
   $("finish-retry").hidden = true;
   const body = completeBody({
     timeline: result.timeline,
@@ -1660,15 +1660,15 @@ async function tellServerWeAreDone(result) {
     })
   );
   if (response === null) {
-    $("finish-state").textContent = describeCompletionFailure(0);
+    showNote($("finish-state"), describeCompletionFailure(0));
     $("finish-retry").hidden = false;
     return;
   }
   if (!response.ok) {
     const body2 = await response.json().catch(() => null);
-    $("finish-state").textContent = describeCompletionFailure(
-      response.status,
-      detailText(body2, "")
+    showNote(
+      $("finish-state"),
+      describeCompletionFailure(response.status, detailText(body2, ""))
     );
     if (isSessionExpired(response.status)) {
       location.href = loginUrlFor(location.pathname + location.search);
@@ -1678,7 +1678,7 @@ async function tellServerWeAreDone(result) {
     return;
   }
   const done = await response.json();
-  $("finish-state").textContent = describeCompletion(done);
+  showNote($("finish-state"), describeCompletion(done), "plain");
   $("finish-retry").hidden = true;
   if (meetingId) {
     $("finish-next").hidden = false;

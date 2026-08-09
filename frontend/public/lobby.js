@@ -721,7 +721,7 @@ async function refresh() {
     progressLine = await getJson(`/api/meetings/${meetingId}/progress`).then((body) => String(body.message ?? "")).catch(() => "");
     render();
   } catch (err) {
-    $("sub").textContent = "불러오지 못했습니다";
+    showNote($("sub"), "불러오지 못했습니다");
     if (first) {
       clearSkeleton($("roster"));
       const box = $("blockers");
@@ -887,7 +887,7 @@ function render() {
   const room = roomStatus(statuses);
   renderRoster();
   renderMembers(statuses);
-  $("sub").textContent = `회의 ${meetingId} · 팀원 ${roster.length}명`;
+  showNote($("sub"), `회의 ${meetingId} · 팀원 ${roster.length}명`, "plain");
   $("room-message").textContent = room.message;
   $("progress").textContent = progressLine;
   const record = $("record");

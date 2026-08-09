@@ -63,6 +63,12 @@
   .rolesum { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-2) 0; }
   .rolesum.bad { color: var(--bad); }
   .rolestatus { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-3) 0 0; }
+  /* ⚠️ 이 한 줄이 없으면 `.bad` 를 붙여도 회색으로 남습니다 (결함 98).
+     `app.css` 의 `.bad` 와 특이도가 같은데, 화면별 <style> 이 **뒤에**
+     오므로 `.rolestatus` 가 이깁니다 — 결함 61 과 같은 부류입니다.
+     `.rolesum.bad` 와 `#del-result.bad` 는 이미 이렇게 적혀 있었고,
+     이 자리만 빠져 있었습니다. */
+  .rolestatus.bad { color: var(--bad); }
 </style>
 </head>
 <body>

@@ -24,6 +24,7 @@ import {
   type RosterPeer,
 } from '../lib/call/mesh.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { showNote } from '../lib/ui/failure.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -112,7 +113,9 @@ async function openMic(): Promise<void> {
     });
   } catch {
     micReady = false;
-    $('mic').textContent = '마이크를 열지 못했습니다. 브라우저 권한을 확인하세요.';
+    // 실패는 **빨갛게** (결함 98). 이 자리는 평소 "마이크가 켜졌습니다"
+    // 를 말하는 부제라, 같은 회색으로 쓰면 통화가 안 되는 이유를 놓칩니다.
+    showNote($('mic'), '마이크를 열지 못했습니다. 브라우저 권한을 확인하세요.');
     render();
     return;
   }
@@ -121,9 +124,11 @@ async function openMic(): Promise<void> {
   const track = localStream.getAudioTracks()[0];
   const settings = (track?.getSettings() ?? {}) as Record<string, unknown>;
   const problems = captureProblems(settings);
-  $('mic').textContent = problems.length
-    ? problems.join(' ')
-    : '마이크가 켜졌습니다 (에코 제거 켬 · 자동 게인 끔).';
+  showNote(
+    $('mic'),
+    problems.length ? problems.join(' ') : '마이크가 켜졌습니다 (에코 제거 켬 · 자동 게인 끔).',
+    problems.length ? 'bad' : 'plain',
+  );
 
   meterFrom(localStream);
   render();

@@ -232,6 +232,13 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/ui/failure.ts
+function showNote(slot, text, tone = "bad") {
+  slot.textContent = text;
+  slot.hidden = text === "";
+  slot.classList.toggle("bad", text !== "" && tone === "bad");
+}
+
 // src/lib/nav/links.ts
 var LABEL = {
   home: "홈",
@@ -526,7 +533,7 @@ async function openMic() {
     });
   } catch {
     micReady = false;
-    $("mic").textContent = "마이크를 열지 못했습니다. 브라우저 권한을 확인하세요.";
+    showNote($("mic"), "마이크를 열지 못했습니다. 브라우저 권한을 확인하세요.");
     render();
     return;
   }
@@ -534,7 +541,11 @@ async function openMic() {
   const track = localStream.getAudioTracks()[0];
   const settings = track?.getSettings() ?? {};
   const problems = captureProblems(settings);
-  $("mic").textContent = problems.length ? problems.join(" ") : "마이크가 켜졌습니다 (에코 제거 켬 · 자동 게인 끔).";
+  showNote(
+    $("mic"),
+    problems.length ? problems.join(" ") : "마이크가 켜졌습니다 (에코 제거 켬 · 자동 게인 끔).",
+    problems.length ? "bad" : "plain"
+  );
   meterFrom(localStream);
   render();
 }

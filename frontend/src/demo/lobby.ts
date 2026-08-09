@@ -160,7 +160,15 @@ async function refresh(): Promise<void> {
     // `#roster` 가 아니라 `#blockers` 에 넣는 이유: `#roster` 는
     // `<ul>` 이라 `<div>` 오류 상자를 넣을 수 없습니다. `#blockers` 는
     // 바로 위에 있고, 다음 성공에서 `renderRoster` 가 덮어씁니다.
-    $('sub').textContent = '불러오지 못했습니다';
+    // ⚠️ **색까지 같이 정합니다** (결함 98). 이 자리는 평소 "회의 1 ·
+    // 팀원 3명" 을 말하는 부제라, 실패를 같은 회색으로 쓰면 사람이
+    // 그냥 지나칩니다. 첫 로드에는 아래 `#blockers` 상자가 같이 뜨지만
+    // **회의 도중 폴링이 끊기면 이 한 줄이 전부**입니다.
+    //
+    // 녹음 화면의 `#who` 와 달리 자리를 나누지 않았습니다. 거기는 내
+    // **이름**을 잃지만, 여기 숫자는 지금 못 믿을 값이라 지우는 쪽이
+    // 맞습니다.
+    showNote($('sub'), '불러오지 못했습니다');
     if (first) {
       clearSkeleton($('roster'));
       const box = $('blockers');
@@ -419,7 +427,7 @@ function render(): void {
   renderRoster();
   renderMembers(statuses);
 
-  $('sub').textContent = `회의 ${meetingId} · 팀원 ${roster.length}명`;
+  showNote($('sub'), `회의 ${meetingId} · 팀원 ${roster.length}명`, 'plain');
   $('room-message').textContent = room.message;
   $('progress').textContent = progressLine;
 

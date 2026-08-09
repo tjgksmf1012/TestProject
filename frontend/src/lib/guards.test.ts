@@ -573,6 +573,64 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
     );
   });
 
+  it('⭐ 한 자리에 성공과 실패를 같이 쓰면 색도 같이 정한다 (결함 98)', () => {
+    // 위 가드는 이름이 `…-note` 인 자리만 봅니다. 그래서 **다른 이름의
+    // 자리**가 그대로 남아 있었습니다. 브라우저로 재 보니 프로젝트 화면의
+    // `#role-message` 는 네 가지 뜻이 **전부 같은 회색**이었습니다.
+    //
+    //     지금 개발 100%                 rgb(94,114,115)
+    //     합이 1 이어야 합니다 (지금 5)   rgb(94,114,115)
+    //     역할을 저장하지 못했습니다       rgb(94,114,115)   ← 실패
+    //     저장했습니다 — 개발 100%        rgb(94,114,115)
+    //
+    // ⚠️ **`.bad` 를 붙이는 것만으로는 안 됐습니다.** `.rolestatus` 와
+    // `app.css` 의 `.bad` 는 특이도가 같은데 화면별 `<style>` 이 뒤에
+    // 오므로 `.rolestatus` 가 이깁니다 — 결함 61 과 같은 부류라
+    // `.rolestatus.bad` 를 따로 적어야 했습니다.
+    //
+    // 규칙: 한 자리에 **실패와 성공을 둘 다** 쓰면서 색을 정하는 코드가
+    // 하나도 없으면 신고합니다. 실패만 쓰는 자리(칸반 `#result` 는 CSS 가
+    // 항상 빨강)는 대상이 아닙니다.
+    const LOOKS_FAILED = /unreachableText\(|detailText\(|describeHttpStatus\(|못했습니다|실패/;
+    const WRITE = /\$\('([\w-]+)'\)\s*\.textContent\s*=([^;]*);/g;
+
+    // ⚠️ **자리 단위로 세면 부분 되돌림을 놓칩니다.**
+    //
+    // 처음에는 "이 자리에 `showNote` 가 한 번이라도 있으면 통과" 였습니다.
+    // 그랬더니 다섯 줄 중 **두 줄만** 옛 모양으로 되돌려도 조용했습니다 —
+    // 남은 `showNote` 세 줄이 자리를 메워 주기 때문입니다. 한 줄만
+    // 새어 나가는 것이 실제로 더 흔한 회귀입니다.
+    //
+    // 그래서 **그 줄**을 봅니다. 실패를 직접 쓰는 줄은 자기 바로 옆에서
+    // 색을 정해야 합니다 (`review.ts` 가 `className` 을 바로 윗줄에서
+    // 정하는 모양이 통과해야 합니다).
+    const offenders: string[] = [];
+    for (const { rel, code } of demoSources()) {
+      const lines = code.split('\n');
+      const writesFine = new Set<string>();
+      for (const m of code.matchAll(WRITE)) {
+        const id = m[1] as string;
+        const value = m[2] as string;
+        // 빈 문자열은 "지운다" 지 성공이 아니다.
+        if (/^\s*''\s*$/.test(value)) continue;
+        if (!LOOKS_FAILED.test(value)) writesFine.add(id);
+      }
+      for (const m of code.matchAll(WRITE)) {
+        const id = m[1] as string;
+        if (!LOOKS_FAILED.test(m[2] as string) || !writesFine.has(id)) continue;
+        const at = code.slice(0, m.index).split('\n').length - 1;
+        const near = lines.slice(Math.max(0, at - 2), at + 3).join('\n');
+        const colored = new RegExp(`\\$\\('${id}'\\)\\s*\\.(className\\s*=|classList)`);
+        if (!colored.test(near)) offenders.push(`${rel}:${at + 1} → #${id}`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '실패와 성공이 같은 색으로 나옵니다 — `showNote(자리, 글자, 성공이면 \'plain\')` 을 쓰세요',
+    );
+  });
+
   it('⭐ 브라우저 예외를 화면에 붙이지 않는다', () => {
     // `전송 실패: ${String(err)}` → `전송 실패: TypeError: Failed to fetch`
     const offenders = demoSources()

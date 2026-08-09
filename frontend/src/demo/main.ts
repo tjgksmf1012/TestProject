@@ -190,6 +190,8 @@ async function joinMeeting(id: string): Promise<void> {
     return;
   }
   $('who').textContent = `${((await me.json()) as Me).name} 님의 트랙으로 녹음합니다`;
+  // 다시 들어올 때 지난 실패가 남아 있으면 안 된다.
+  showNote($('join-note'), '');
 
   const response = await trySend(() =>
     fetch(`${apiBase}/api/meetings/${id}/tracks`, {
@@ -206,7 +208,9 @@ async function joinMeeting(id: string): Promise<void> {
   if (response === null) {
     // 여기서 조용하면 녹음 버튼이 계속 비활성인 채로 남고, 사람은
     // **폰이 고장난 줄** 안다.
-    $('who').textContent = unreachableText('트랙에 참가하지 못했습니다');
+    // ⚠️ `#who` 를 덮지 않습니다 (결함 98). 거기는 **내가 누구인지**를
+    // 말하는 자리고, 실패로 덮으면 이름이 사라진 채 부제색으로 앉습니다.
+    showNote($('join-note'), unreachableText('트랙에 참가하지 못했습니다'));
     return;
   }
   if (isSessionExpired(response.status)) {
@@ -223,10 +227,10 @@ async function joinMeeting(id: string): Promise<void> {
     // 붙은 `as { detail?: string }` 를 찾았고, 여기는 `.text()` 라 안 걸렸습니다.
     // **같은 파일 아래쪽(`finish`)은 이미 `detailText` 를 쓰고 있었습니다.**
     const body = await response.json().catch(() => null);
-    $('who').textContent = `트랙에 참가하지 못했습니다: ${detailText(
-      body,
-      `HTTP ${response.status}`,
-    )}`;
+    showNote(
+      $('join-note'),
+      `트랙에 참가하지 못했습니다: ${detailText(body, `HTTP ${response.status}`)}`,
+    );
     return;
   }
 
@@ -281,8 +285,7 @@ $('start').addEventListener('click', async () => {
 async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
   if (!trackUrl) return; // 서버 없이 도는 로컬 실험 — 알릴 곳이 없다
 
-  $('finish-state').hidden = false;
-  $('finish-state').textContent = '녹음 종료를 서버에 알리는 중…';
+  showNote($('finish-state'), '녹음 종료를 서버에 알리는 중…', 'plain');
   $('finish-retry').hidden = true;
 
   const body = completeBody({
@@ -302,7 +305,9 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
     }),
   );
   if (response === null) {
-    $('finish-state').textContent = describeCompletionFailure(0);
+    // ⚠️ 여기가 회색이면 사람은 **녹음이 잘 끝난 줄 알고 나갑니다.**
+    // 청크가 다 안 올라간 상태라 회의 녹음이 통째로 없어질 수 있습니다.
+    showNote($('finish-state'), describeCompletionFailure(0));
     $('finish-retry').hidden = false;
     return;
   }
@@ -311,9 +316,9 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
     // `detail` 은 문자열일 수도 있고 422 의 **객체 배열**일 수도 있습니다.
     // 그대로 넘기면 화면에 `[object Object]` 가 나옵니다.
     const body = await response.json().catch(() => null);
-    $('finish-state').textContent = describeCompletionFailure(
-      response.status,
-      detailText(body, ''),
+    showNote(
+      $('finish-state'),
+      describeCompletionFailure(response.status, detailText(body, '')),
     );
     // 401 은 다시 눌러도 똑같다 — 로그인 화면으로 보낸다.
     if (isSessionExpired(response.status)) {
@@ -325,7 +330,7 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
   }
 
   const done = (await response.json()) as TrackCompleteResult;
-  $('finish-state').textContent = describeCompletion(done);
+  showNote($('finish-state'), describeCompletion(done), 'plain');
   $('finish-retry').hidden = true;
 
   // 로비로 돌아갈 길을 만들어 준다. 여기가 끝이 아니라 다음이 있다는

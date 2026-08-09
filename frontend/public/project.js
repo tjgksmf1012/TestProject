@@ -859,13 +859,13 @@ async function loadRoles() {
   const me = await meRes.json();
   const mine = members.find((entry) => entry.user_id === me.user_id);
   renderRoles(mine?.role_shares ?? {});
-  $("role-message").textContent = `지금 ${describeRoles(mine?.role_shares)}`;
+  showNote($("role-message"), `지금 ${describeRoles(mine?.role_shares)}`, "plain");
 }
 async function saveRoles() {
   const shares = rolesFromScreen();
   const problem = problemWith(shares);
   if (problem !== null) {
-    $("role-message").textContent = problem;
+    showNote($("role-message"), problem);
     return;
   }
   const response = await send(`/api/projects/${projectId}/members/me`, {
@@ -873,15 +873,15 @@ async function saveRoles() {
     body: JSON.stringify({ role_shares: toPayload(shares) })
   });
   if (response === null) {
-    $("role-message").textContent = unreachableText("역할을 저장하지 못했습니다");
+    showNote($("role-message"), unreachableText("역할을 저장하지 못했습니다"));
     return;
   }
   const body = await response.json();
   if (!response.ok) {
-    $("role-message").textContent = detailText(body, "역할을 저장하지 못했습니다");
+    showNote($("role-message"), detailText(body, "역할을 저장하지 못했습니다"));
     return;
   }
-  $("role-message").textContent = `저장했습니다 — ${describeRoles(body.role_shares)}`;
+  showNote($("role-message"), `저장했습니다 — ${describeRoles(body.role_shares)}`, "plain");
 }
 async function loadHealth() {
   let response;
