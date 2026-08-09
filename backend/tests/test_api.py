@@ -920,3 +920,103 @@ def test_an_outsider_cannot_confirm(client: TestClient, seeded):
         _final_url(seeded), json={"finals": [{"user_id": seeded["user_ids"][0]}]}
     )
     assert response.status_code in (403, 404)
+
+
+def test_meeting_becomes_confirmed_when_every_candidate_is_decided(
+    client: TestClient, seeded
+):
+    """⭐ **다 검토했는데도 "검토 필요" 였습니다** (결함 84).
+
+    화면에는 `confirmed` 라벨("검토 완료")도, 그 상태의 "다음에 할 일"
+    가지도, 승인 화면의 빈 상태 문구도 있었습니다. 그런데 **서버가 그 값을
+    한 번도 넣지 않았습니다.** 그래서 사람이 후보를 전부 결정해도 회의는
+    `needs_review` 로 남았고, 홈 화면은 남은 후보 0건을 보고 이렇게
+    말했습니다 —
+
+        검토 필요 — 검토할 업무 후보가 없습니다 — 회의에서 업무가 나오지 않았습니다
+
+    업무는 나왔고, 사람이 전부 검토한 뒤였습니다. 브라우저에서 재현했습니다.
+    """
+    meeting_id = seeded["meeting_id"]
+    with db_session.session_scope() as s:
+        s.get(m.Meeting, meeting_id).status = m.MeetingStatus.NEEDS_REVIEW.value
+
+    ids = seeded["candidate_ids"]
+    # 마지막 하나만 남기고 결정한다 — 아직 끝난 게 아니다
+    client.post(
+        f"/api/meetings/{meeting_id}/candidates/review",
+        json={
+            "reviewer_id": seeded["user_ids"][2],
+            "items": [{"candidate_id": cid, "approve": False} for cid in ids[:-1]],
+        },
+    )
+    with db_session.session_scope() as s:
+        assert s.get(m.Meeting, meeting_id).status == m.MeetingStatus.NEEDS_REVIEW.value
+
+    client.post(
+        f"/api/meetings/{meeting_id}/candidates/review",
+        json={
+            "reviewer_id": seeded["user_ids"][2],
+            "items": [{"candidate_id": ids[-1], "approve": False}],
+        },
+    )
+    with db_session.session_scope() as s:
+        assert s.get(m.Meeting, meeting_id).status == m.MeetingStatus.CONFIRMED.value
+
+
+def test_a_meeting_with_no_candidates_stays_in_needs_review(client: TestClient, seeded):
+    """⚠️ 후보가 **처음부터 0건**이면 옮기지 않습니다.
+
+    그 회의는 사람이 볼 것이 없었던 것이지 검토를 마친 것이 아닙니다.
+    화면의 "회의에서 업무가 나오지 않았습니다" 가 그때는 **맞는 말**이고,
+    두 상황을 가르는 것이 이 전이의 요점입니다. 뭉개면 결함 84 가
+    반대 방향으로 되살아납니다.
+    """
+    meeting_id = seeded["meeting_id"]
+    with db_session.session_scope() as s:
+        for cid in seeded["candidate_ids"]:
+            s.delete(s.get(m.MeetingTaskCandidate, cid))
+        s.get(m.Meeting, meeting_id).status = m.MeetingStatus.NEEDS_REVIEW.value
+
+    # ⚠️ **`items: []` 로는 이 자리를 못 밟습니다.** 엔드포인트가 `min_length=1`
+    # 로 422 를 돌려주기 때문입니다. 처음 쓴 이 테스트가 그래서 **아무것도 안
+    # 보고 통과했습니다** — 이 세션에서 "내 검사가 다른 이유로 통과 중" 을
+    # 겪은 일곱 번째입니다. 실제로 닿는 길은 **이미 사라진 후보 번호**를
+    # 보내는 것이고(재처리 뒤 옛 화면이 제출하면 그렇게 됩니다), 그때
+    # 후보 수가 0 인 회의가 confirmed 로 넘어가면 안 됩니다.
+    response = client.post(
+        f"/api/meetings/{meeting_id}/candidates/review",
+        json={
+            "reviewer_id": seeded["user_ids"][2],
+            "items": [{"candidate_id": seeded["candidate_ids"][0], "approve": False}],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["failures"], "사라진 후보는 실패로 보고돼야 합니다"
+
+    with db_session.session_scope() as s:
+        assert s.get(m.Meeting, meeting_id).status == m.MeetingStatus.NEEDS_REVIEW.value
+
+
+def test_confirming_does_not_run_over_a_failed_meeting(client: TestClient, seeded):
+    """처리에 실패한 회의를 검토했다고 덮어쓰지 않습니다.
+
+    `failed` 는 "트랙을 확인하세요" 를 띄우는 상태입니다. 남은 후보가
+    없다는 이유로 `confirmed` 로 옮기면 그 안내가 사라집니다.
+    """
+    meeting_id = seeded["meeting_id"]
+    with db_session.session_scope() as s:
+        s.get(m.Meeting, meeting_id).status = m.MeetingStatus.FAILED.value
+
+    client.post(
+        f"/api/meetings/{meeting_id}/candidates/review",
+        json={
+            "reviewer_id": seeded["user_ids"][2],
+            "items": [
+                {"candidate_id": cid, "approve": False}
+                for cid in seeded["candidate_ids"]
+            ],
+        },
+    )
+    with db_session.session_scope() as s:
+        assert s.get(m.Meeting, meeting_id).status == m.MeetingStatus.FAILED.value

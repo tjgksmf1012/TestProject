@@ -8,6 +8,7 @@ import {
   canApprove,
   canSubmit,
   describeBlocker,
+  describeSubmitResult,
   effectiveDeadline,
   emptyDraft,
   isBeforeIsoDate,
@@ -482,5 +483,31 @@ describe('assignee_hint', () => {
     // 원문만 보고 승인을 열어 주면 엉뚱한 사람에게 업무가 붙는다.
     const c = candidate({ assignee_id: null, assignee_hint: '민수님' });
     assert.equal(canApprove(c, emptyDraft(), CONTEXT), false);
+  });
+});
+
+describe('제출 결과 문구 (결함 85)', () => {
+  it('⭐ 등록이 0건이면 빈 꼬리표를 남기지 않는다', () => {
+    // 예전에는 `0건이 칸반에 등록됐습니다 (task )` 였습니다 — 괄호 안이
+    // 비어 사람은 앱이 뭔가 잃어버렸다고 읽습니다 (결함 58 과 같은 부류).
+    const text = describeSubmitResult(0, []);
+    assert.equal(text.includes('(task'), false, text);
+    assert.equal(text.includes('()'), false, text);
+    assert.equal(text.includes('반영'), true, text);
+  });
+
+  it('⭐ 거절을 실패라고 하지 않는다', () => {
+    // 후보 셋을 읽고 셋 다 거절한 것은 **정상적인 결정**입니다.
+    const text = describeSubmitResult(0, []);
+    assert.equal(/실패|오류|잘못/.test(text), false, text);
+  });
+
+  it('등록된 것이 있으면 번호를 말한다', () => {
+    assert.equal(describeSubmitResult(2, [7, 9]), '2건이 칸반에 등록됐습니다 (task 7, 9)');
+  });
+
+  it('⭐ 번호가 안 왔으면 지어내지 않고 건수만 말한다', () => {
+    assert.equal(describeSubmitResult(2, []), '2건이 칸반에 등록됐습니다');
+    assert.equal(describeSubmitResult(1, [Number.NaN]), '1건이 칸반에 등록됐습니다');
   });
 });

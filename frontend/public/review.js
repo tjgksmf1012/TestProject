@@ -235,6 +235,13 @@ function summarize(candidates2, drafts2, context2) {
 function canSubmit(summary) {
   return summary.blocked === 0 && summary.approving + summary.rejecting > 0;
 }
+function describeSubmitResult(approvedCount, taskIds) {
+  if (approvedCount === 0) {
+    return "검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다";
+  }
+  const numbers = taskIds.filter((id) => Number.isFinite(id));
+  return numbers.length === 0 ? `${approvedCount}건이 칸반에 등록됐습니다` : `${approvedCount}건이 칸반에 등록됐습니다 (task ${numbers.join(", ")})`;
+}
 
 // src/lib/auth/session.ts
 function loginUrlFor(pathWithQuery) {
@@ -799,7 +806,7 @@ $("submit").addEventListener("click", async () => {
   const result = await response.json();
   const failed = Object.entries(result.failures);
   $("result").className = failed.length ? "bad" : "ok";
-  $("result").textContent = failed.length ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` + failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join("/")}`).join(" · ") : `${result.approved_count}건이 칸반에 등록됐습니다 (task ${result.approved_task_ids.join(", ")})`;
+  $("result").textContent = failed.length ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` + failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join("/")}`).join(" · ") : describeSubmitResult(result.approved_count, result.approved_task_ids);
   drafts.clear();
   await load();
 });

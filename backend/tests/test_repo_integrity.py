@@ -764,3 +764,91 @@ def test_screen_text_does_not_space_korean_particles():
         + " | ".join(offenders)
         + ". 조사는 앞말에 붙여 쓰세요 (`PR에`, `App이`)."
     )
+
+
+def test_the_screens_know_every_meeting_status_the_server_can_set():
+    """⭐ 회의 상태 어휘가 서버 `MeetingStatus` 와 같아야 한다 (결함 84).
+
+    `Category` 에 이미 같은 그물을 쳐 뒀는데(위 참조) 회의 상태에는
+    없었습니다. 그래서 이런 일이 벌어졌습니다 —
+
+      · 화면에는 `confirmed` 라벨("검토 완료")과 그 상태의 "다음에 할 일"
+        가지가 있는데 **서버가 그 값을 한 번도 안 넣었습니다.** 사람이
+        후보를 전부 검토해도 회의는 `needs_review` 로 남았고, 홈 화면은
+        "회의에서 업무가 나오지 않았습니다" 라고 말했습니다. 업무는
+        나왔고 사람이 전부 검토한 뒤였습니다.
+
+    두 방향을 다 봅니다. 서버에만 있으면 홈 화면에 **영어 식별자가 그대로**
+    찍히고(`describeMeetingStatus` 는 모르는 값을 그대로 돌려줍니다),
+    화면에만 있으면 **아무도 못 타는 죽은 가지**입니다.
+    """
+    import re
+
+    from teamflow.db.models import MeetingStatus
+
+    source = (REPO_ROOT / "frontend" / "src" / "lib" / "home" / "next.ts").read_text()
+
+    block = re.search(
+        r"export const MEETING_STATUS_LABEL: Record<string, string> = \{(.*?)\};",
+        source,
+        re.DOTALL,
+    )
+    assert block is not None, "MEETING_STATUS_LABEL 을 찾지 못했습니다"
+    labelled = set(re.findall(r"^\s*(\w+):", block.group(1), re.MULTILINE))
+
+    expected = {s.value for s in MeetingStatus}
+    assert labelled == expected, (
+        "화면의 회의 상태 라벨이 서버 MeetingStatus 와 다릅니다.\n"
+        f"  서버에만 있음(홈에 영어로 찍힙니다): {sorted(expected - labelled)}\n"
+        f"  화면에만 있음(죽은 라벨입니다):      {sorted(labelled - expected)}"
+    )
+
+    # "다음에 할 일" 도 상태마다 있어야 한다. 라벨만 있고 가지가 없으면
+    # `default` 로 떨어져 "알 수 없는 상태입니다" 가 뜬다.
+    cases = set(re.findall(r"case '([a-z_]+)':", source))
+    assert expected <= cases, (
+        "`nextStepFor` 에 가지가 없는 상태가 있습니다: " f"{sorted(expected - cases)}"
+    )
+
+
+def test_every_meeting_status_has_someone_who_writes_it():
+    """⭐ **아무도 안 쓰는 상태를 두지 않는다** (결함 84 의 뿌리).
+
+    `confirmed` 는 모델 주석에도, 화면 라벨에도, 승인 화면의 빈 상태
+    문구에도 있었는데 **넣는 코드가 0곳**이었습니다. 이 저장소의 대표
+    실패 방식(`EventType` 생산자 가드·결함 63·75·83)이 회의 상태에서
+    반복된 것입니다.
+
+    `ast` 로 **`… .status = "값"`** 대입과 컬럼 기본값을 모읍니다.
+    글자를 찾는 대신 코드 모양을 보므로, 상수로 빼도 안 깨집니다.
+    """
+    import ast
+
+    from teamflow.db.models import MeetingStatus
+
+    written: set[str] = {MeetingStatus.PENDING.value}  # 컬럼 기본값
+    for path in (REPO_ROOT / "backend" / "teamflow").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if not (isinstance(target, ast.Attribute) and target.attr == "status"):
+                    continue
+                value = node.value
+                # `meeting.status = "confirmed"`
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    written.add(value.value)
+                # `meeting.status = MeetingStatus.CONFIRMED.value`
+                elif isinstance(value, ast.Attribute) and value.attr == "value":
+                    inner = value.value
+                    if isinstance(inner, ast.Attribute):
+                        member = getattr(MeetingStatus, inner.attr, None)
+                        if member is not None:
+                            written.add(member.value)
+
+    orphans = sorted({s.value for s in MeetingStatus} - written)
+    assert orphans == [], (
+        "넣는 코드가 없는 회의 상태입니다 — 화면이 그 상태를 설명하고 있어도 "
+        f"영원히 안 뜹니다: {orphans}"
+    )

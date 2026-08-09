@@ -11,6 +11,7 @@ docs/06-데이터-모델.md 를 SQLAlchemy 선언적 모델로 옮긴 것.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 
 from sqlalchemy import (
     JSON,
@@ -339,6 +340,37 @@ class TaskGithubLink(Base):
 # ══════════════════════════════════════════════════════════════
 
 
+class MeetingStatus(StrEnum):
+    """회의가 가질 수 있는 상태 — **여기가 유일한 출처다.**
+
+    ⭐ 화면(`lib/home/next.ts`)은 이 값마다 한국어 라벨과 "다음에 할 일" 을
+    가지고 있어야 한다. 어긋나면 홈 화면이 영어 식별자를 그대로 찍거나
+    (`describeMeetingStatus` 는 모르는 값을 그대로 돌려준다) 없는 상태를
+    설명하는 죽은 가지를 갖게 된다. `Category` 에 같은 그물을 이미 쳐 뒀고,
+    여기에도 친다 (`test_repo_integrity.py`).
+
+    ⚠️ **`CONFIRMED` 는 오랫동안 아무도 쓰지 않았다** (결함 84). 화면에는
+    "검토 완료" 라벨과 "검토를 마쳤습니다" 가지가 있었지만, 서버가 그 값을
+    한 번도 넣지 않아 사람이 후보를 전부 검토해도 회의는 `NEEDS_REVIEW` 로
+    남았습니다. 홈 화면은 그 회의를 이렇게 설명했습니다 —
+
+        검토 필요 — 검토할 업무 후보가 없습니다 — 회의에서 업무가 나오지 않았습니다
+
+    업무는 나왔고, 사람이 셋 다 검토한 뒤였습니다.
+    """
+
+    #: 녹음 중이거나 아직 전원이 끝나지 않음
+    PENDING = "pending"
+    #: 전원 종료 → 처리 대기. 이 전이가 중복 큐잉을 막는 자물쇠다
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    #: 후보가 나왔고 사람의 결정을 기다린다
+    NEEDS_REVIEW = "needs_review"
+    #: 사람이 후보를 **전부** 결정했다
+    CONFIRMED = "confirmed"
+    FAILED = "failed"
+
+
 class Meeting(Base):
     __tablename__ = "meetings"
 
@@ -349,10 +381,10 @@ class Meeting(Base):
     duration_sec: Mapped[int | None] = mapped_column(Integer)
     # multitrack | single  — docs/04 의 모드 A / 모드 B
     capture_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="multitrack")
-    # pending   : 녹음 중이거나 아직 전원이 끝나지 않음
-    # queued    : 전원 종료 → 처리 대기 (이 전이가 중복 큐잉을 막는 자물쇠다)
-    # processing | needs_review | confirmed | failed
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    #: 값의 뜻은 `MeetingStatus` 참조. 그쪽이 유일한 출처다.
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=MeetingStatus.PENDING.value
+    )
     # LLM이 만든 회의 요약. 근거는 utterances 에 남아 있고 여기엔 본문만 둔다.
     #
     # 이게 없던 동안 파이프라인은 요약을 만들어 Celery 페이로드에 실어 보낸 뒤

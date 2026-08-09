@@ -16,6 +16,7 @@ import {
   buildReviewPayload,
   canSubmit,
   describeBlocker,
+  describeSubmitResult,
   effectiveAssignee,
   effectiveDeadline,
   effectiveTitle,
@@ -365,7 +366,7 @@ $('submit').addEventListener('click', async () => {
   $('result').textContent = failed.length
     ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` +
       failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join('/')}`).join(' · ')
-    : `${result.approved_count}건이 칸반에 등록됐습니다 (task ${result.approved_task_ids.join(', ')})`;
+    : describeSubmitResult(result.approved_count, result.approved_task_ids);
 
   drafts.clear();
   await load();

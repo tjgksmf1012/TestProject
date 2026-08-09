@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from teamflow.db import models as m
@@ -144,7 +144,61 @@ def review_candidates(
         )
 
     session.flush()
+
+    # 4) 남은 후보가 없으면 이 회의는 **검토가 끝난 것**이다.
+    _confirm_if_all_reviewed(session, meeting_id)
+
+    session.flush()
     return outcome
+
+
+def _confirm_if_all_reviewed(session: Session, meeting_id: int) -> None:
+    """후보를 전부 결정했으면 회의를 `confirmed` 로 옮긴다 (결함 84).
+
+    ## 이걸 아무도 안 하고 있었다
+
+    화면에는 `confirmed` 라벨("검토 완료")도 있고 그 상태의 "다음에 할 일"
+    가지도 있었는데, **서버가 그 값을 한 번도 넣지 않았습니다.** 그래서
+    사람이 후보를 전부 검토해도 회의는 `needs_review` 로 남았고, 홈 화면은
+    남은 후보 0건을 보고 이렇게 말했습니다 —
+
+        검토 필요 — 검토할 업무 후보가 없습니다 — 회의에서 업무가 나오지 않았습니다
+
+    업무는 나왔고 사람이 전부 결정한 뒤입니다. 화면의 그 문장은 **후보가
+    처음부터 0건이었을 때** 를 위한 것인데, 두 상황이 같은 값으로 뭉개져
+    있었습니다.
+
+    ⚠️ **후보가 처음부터 0건이면 옮기지 않습니다.** 그 회의는 사람이 볼
+    것이 없었던 것이지 검토를 마친 것이 아니고, 화면의 "회의에서 업무가
+    나오지 않았습니다" 가 그때는 **맞는 말**입니다. 두 상황을 가르는 것이
+    이 함수의 요점입니다.
+
+    ⚠️ **되돌아갈 수 있습니다.** 파이프라인이 회의를 다시 처리하면
+    `needs_review` 로 되돌아가고, 새 후보가 생기면 다시 사람의 차례입니다.
+    여기서 `confirmed` 를 최종 상태로 못 박지 않습니다.
+    """
+    total = session.scalar(
+        select(func.count(m.MeetingTaskCandidate.id)).where(
+            m.MeetingTaskCandidate.meeting_id == meeting_id
+        )
+    )
+    if not total:
+        return
+
+    still_pending = session.scalar(
+        select(func.count(m.MeetingTaskCandidate.id)).where(
+            m.MeetingTaskCandidate.meeting_id == meeting_id,
+            m.MeetingTaskCandidate.review_status == CandidateStatus.PENDING.value,
+        )
+    )
+    if still_pending:
+        return
+
+    meeting = session.get(m.Meeting, meeting_id)
+    if meeting is None:
+        return
+    if meeting.status == m.MeetingStatus.NEEDS_REVIEW.value:
+        meeting.status = m.MeetingStatus.CONFIRMED.value
 
 
 def pending_candidates(

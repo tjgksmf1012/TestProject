@@ -351,3 +351,35 @@ export function summarize(
 export function canSubmit(summary: ReviewSummary): boolean {
   return summary.blocked === 0 && summary.approving + summary.rejecting > 0;
 }
+
+/**
+ * 제출하고 나서 사람에게 할 말 (결함 85).
+ *
+ * 예전에는 한 줄이었습니다.
+ *
+ *     `${approved}건이 칸반에 등록됐습니다 (task ${ids.join(', ')})`
+ *
+ * 전부 거절하면 `approved` 가 0 이고 `ids` 가 빈 배열이라 화면에 이렇게
+ * 나왔습니다 —
+ *
+ *     0건이 칸반에 등록됐습니다 (task )
+ *
+ * **꼬리표만 남고 안이 빈 것**은 결함 58(빈 `.note` 가 가로줄만 남김)과
+ * 같은 부류입니다. 사람은 괄호 안이 비어 있는 것을 보고 앱이 무언가
+ * 잃어버렸다고 읽습니다.
+ *
+ * 게다가 &#34;0건이 등록됐습니다&#34; 는 **한 일을 안 말합니다.** 그 사람은
+ * 후보 셋을 읽고 셋 다 거절한 참입니다. 등록이 0건인 것은 결과이지
+ * 아무 일도 안 일어난 것이 아닙니다.
+ */
+export function describeSubmitResult(approvedCount: number, taskIds: number[]): string {
+  if (approvedCount === 0) {
+    // ⚠️ 여기서 "실패" 라고 하지 않습니다. 거절은 정상적인 결정입니다.
+    return '검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다';
+  }
+  // 번호가 안 왔으면 지어내지 않고 건수만 말합니다.
+  const numbers = taskIds.filter((id) => Number.isFinite(id));
+  return numbers.length === 0
+    ? `${approvedCount}건이 칸반에 등록됐습니다`
+    : `${approvedCount}건이 칸반에 등록됐습니다 (task ${numbers.join(', ')})`;
+}
