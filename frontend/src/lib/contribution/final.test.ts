@@ -91,12 +91,64 @@ describe('확정 상태 문구', () => {
     strictEqual(text.includes('0'), false, '"0" 은 "확정값이 0" 으로 읽힌다');
   });
 
-  it('그대로 확정한 경우', () => {
-    strictEqual(describeFinals([row()], NAMES).includes('그대로'), true);
+  it('그대로 확정해도 **누가** 했는지 말한다', () => {
+    const text = describeFinals([row({ adjusted_by: 1 })], NAMES);
+    strictEqual(text.includes('그대로'), true);
+    strictEqual(text.includes('김민수님이 확정'), true, '그대로 두는 것도 사람의 확정이다');
   });
 
-  it('조정한 사람 이름을 말한다 — 조정에는 주체가 있어야 한다', () => {
-    const text = describeFinals([row({ final_value: 50, reason: '합의' })], NAMES);
-    strictEqual(text.includes('김민수'), true);
+  it('⭐ 조정한 사람과 조정당한 사람을 **가른다** (결함 95)', () => {
+    // ⚠️ 이 테스트는 전에 이랬습니다.
+    //
+    //     const text = describeFinals([row({ final_value: 50, … })], NAMES);
+    //     strictEqual(text.includes('김민수'), true);
+    //
+    // `row()` 의 `user_id` 가 1(김민수)이고 `adjusted_by` 는 9 였습니다.
+    // 화면은 **조정당한 사람**의 이름을 대고 있었는데, 그게 우연히
+    // 김민수라서 "조정한 사람 이름을 말한다" 는 이름의 테스트가
+    // 통과했습니다. **뜻은 맞고 자료가 그 뜻을 못 재는** 테스트입니다.
+    //
+    // 그래서 여기서는 **다른 사람**이 조정하게 둡니다.
+    const text = describeFinals(
+      [
+        row({ user_id: 2, system_value: 30, final_value: 50, adjusted_by: 1, reason: '발표를 도맡음' }),
+      ],
+      NAMES,
+    );
+    strictEqual(text.includes('김민수님이 확정'), true, '주어는 **조정한** 사람이다');
+    strictEqual(text.includes('이하늘님 50.0%'), true, '조정당한 사람은 대상으로 적는다');
+    strictEqual(
+      text.includes('이하늘님이 확정'),
+      false,
+      '조정당한 사람을 주어로 세우면 제 점수를 스스로 올린 것처럼 읽힌다',
+    );
+  });
+
+  it('⭐ 조정 이유를 보여준다 (결함 96)', () => {
+    // 이유가 없으면 `problemsWith` 와 서버가 둘 다 막습니다. 그렇게 받아
+    // 낸 값을 아무 데도 안 보여주면 받은 뜻이 없습니다.
+    const text = describeFinals(
+      [row({ user_id: 2, system_value: 30, final_value: 50, adjusted_by: 1, reason: '발표를 도맡음' })],
+      NAMES,
+    );
+    strictEqual(text.includes('발표를 도맡음'), true);
+    strictEqual(text.includes('시스템 30.0%'), true, '시스템 값을 지우지 않는다');
+  });
+
+  it('누가 눌렀는지 기록이 없으면 **지어내지 않는다**', () => {
+    const text = describeFinals([row({ adjusted_by: null })], NAMES);
+    strictEqual(text.includes('기록에 없습니다'), true);
+    strictEqual(text.includes('님이 확정'), false, '빈 자리를 아무 이름으로 메우지 않는다');
+  });
+
+  it('이유 없이 조정된 기록도 **0 이나 빈칸으로 말하지 않는다**', () => {
+    // 서버가 막으므로 정상 경로로는 안 생깁니다. 그래도 옛 자료나 직접
+    // 만진 DB 에서는 옵니다 — 그때 빈 괄호를 보여주면 "이유 없음" 인지
+    // "안 읽은 것" 인지 사람이 구분 못 합니다.
+    const text = describeFinals(
+      [row({ user_id: 2, system_value: 30, final_value: 50, adjusted_by: 1, reason: null })],
+      NAMES,
+    );
+    strictEqual(text.includes('이유가 남아 있지 않습니다'), true);
   });
 });

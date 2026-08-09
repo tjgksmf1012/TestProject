@@ -237,17 +237,33 @@ function toPayload(drafts, systemValues2) {
     };
   });
 }
+function person(id, names) {
+  const name = names.get(id) ?? `#${id}`;
+  return `${name}님`;
+}
+function confirmers(finals, names) {
+  const ids = [...new Set(finals.map((f) => f.adjusted_by))];
+  return ids.filter((id) => id !== null).map((id) => person(id, names));
+}
+var percent = (value) => `${value.toFixed(1)}%`;
 function describeFinals(finals, names) {
   if (finals.length === 0) return "아직 아무도 확정하지 않았습니다.";
   const first = finals[0];
   if (first === void 0) return "아직 아무도 확정하지 않았습니다.";
   const when = new Date(first.confirmed_at).toLocaleString("ko-KR");
+  const who = confirmers(finals, names).join(", ");
+  const did = who === "" ? "확정했습니다(누가 눌렀는지는 기록에 없습니다)" : `${withJosa(who, "이가")} 확정했습니다`;
   const adjusted = finals.filter((f) => !sameValue(f.final_value, f.system_value));
   if (adjusted.length === 0) {
-    return `${when}에 시스템 값 그대로 확정했습니다.`;
+    return `${when}에 ${did} — 시스템 값 그대로입니다.`;
   }
-  const who = adjusted.map((f) => names.get(f.user_id) ?? `#${f.user_id}`).join(", ");
-  return `${when}에 확정했습니다 — ${withJosa(who, "은는")} 시스템 값과 다르게 정했습니다.`;
+  const details = adjusted.map((f) => {
+    const reason = f.reason?.trim() ?? "";
+    const why = reason === "" ? "이유가 남아 있지 않습니다" : reason;
+    const target = person(f.user_id, names);
+    return `${target} ${percent(f.final_value)}(시스템 ${percent(f.system_value)}, 이유: ${why})`;
+  });
+  return `${when}에 ${did} — ${details.join(" · ")}`;
 }
 
 // src/lib/auth/session.ts

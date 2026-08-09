@@ -591,6 +591,7 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
   const PAYLOADS: [string, string][] = [
     ['TrackHealth', 'src/lib/lobby/room.ts'],
     ['RosterEntry', 'src/lib/lobby/room.ts'],
+    ['FinalRow', 'src/lib/contribution/final.ts'],
   ];
 
   const EXEMPT: Record<string, string> = {
@@ -603,6 +604,28 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
     capture_confidence:
       '`coverage` 가 이미 "얼마나 담겼나" 를 말한다. 비슷한 숫자를 둘 띄우면 ' +
       '사람이 어느 쪽을 믿을지 모른다',
+  };
+
+  /**
+   * **같은 이름의 칸이 다른 타입에도 있는** 경우. 값은 이 타입의 칸을
+   * 읽는다고 인정할 **정확한 조각**입니다.
+   *
+   * ⚠️ `.reason` 만 찾으면 `FinalRow.reason` 이 읽히는지 알 수 없습니다.
+   * 같은 파일의 `Draft.reason` 이 자리를 메웁니다.
+   *
+   *     if (… && !draft.reason.trim())      // Draft — 사람이 **적는** 칸
+   *     reason: draft.reason.trim() || …    // Draft
+   *
+   * 그래서 서버가 보낸 이유를 아무 화면도 안 보여주는 동안(결함 96) 이
+   * 가드는 조용했습니다. 결함 93 에서 겪은 "같은 이름의 다른 칸" 이
+   * **한 파일 안에서** 다시 난 것입니다 — "내 검사가 다른 이유로 통과 중"
+   * 아홉 번째.
+   *
+   * 변수 이름이 바뀌면 여기가 깨집니다. 그게 낫습니다 — 조용히 통과하는
+   * 것보다 시끄럽게 틀리는 편이 고칠 수 있습니다.
+   */
+  const AMBIGUOUS: Record<string, string> = {
+    reason: 'f.reason',
   };
 
   it('⭐ 서버 payload 의 칸은 화면이 읽거나, 안 읽는 이유가 적혀 있다', () => {
@@ -650,9 +673,24 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
     walk(join(ROOT, 'src'));
     strictEqual(sources.length >= 2, true, '이 타입들을 쓰는 파일을 못 찾았습니다');
 
+    // ⚠️ **문자열 안은 읽는 것이 아닙니다.**
+    //
+    // 확정 표를 그리는 코드에 이런 줄이 있습니다.
+    //
+    //     row.querySelector<HTMLInputElement>('.reason')
+    //
+    // 그건 **사람이 적어 넣는 입력 칸**을 찾는 CSS 선택자지, 서버가 보낸
+    // `reason` 을 보여주는 자리가 아닙니다. 글자만 같습니다.
+    const outsideStrings = (code: string): string =>
+      code.replace(/'[^'\n]*'|"[^"\n]*"/g, "''");
+
     const unread = fields.filter((f) => {
-      const read = new RegExp(`\\.${f}\\b`);
-      return !sources.some((code) => read.test(code));
+      const snippet = AMBIGUOUS[f];
+      const read =
+        snippet === undefined
+          ? new RegExp(`\\.${f}\\b`)
+          : new RegExp(snippet.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      return !sources.some((code) => read.test(outsideStrings(code)));
     });
 
     const unexplained = unread.filter((f) => !(f in EXEMPT));
@@ -666,6 +704,11 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
     // 다음 사람이 "이건 안 읽어도 되는구나" 로 읽습니다.
     const stale = Object.keys(EXEMPT).filter((f) => fields.includes(f) && !unread.includes(f));
     strictEqual(stale.join(', '), '', '이제 읽고 있습니다 — 면제 목록에서 빼세요');
+
+    // `AMBIGUOUS` 도 같이 늙습니다. 없는 칸에 대한 조각이 남아 있으면
+    // 다음 사람이 "이 칸은 특별히 챙기고 있구나" 로 잘못 읽습니다.
+    const orphan = Object.keys(AMBIGUOUS).filter((f) => !fields.includes(f));
+    strictEqual(orphan.join(', '), '', 'payload 에 없는 칸입니다 — AMBIGUOUS 에서 빼세요');
   });
 });
 
