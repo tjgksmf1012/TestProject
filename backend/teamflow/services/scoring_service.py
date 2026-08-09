@@ -277,7 +277,6 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         )
         or 0
     )
-    peer_expected = member_count * max(0, member_count - 1)
     peer_submitted = (
         session.scalar(
             select(func.count(m.PeerReview.id)).where(
@@ -286,6 +285,28 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         )
         or 0
     )
+    # ⚠️ **제출할 화면이 없습니다** (결함 105).
+    #
+    # `compute_confidence` 의 docstring 은 이렇게 약속합니다 — "데이터가
+    # 아예 없는 신호(분모 0)는 계산에서 제외한다. 예를 들어 동료평가
+    # 모듈을 안 쓰는 팀은 그 항목 때문에 신뢰도가 깎이지 않는다."
+    #
+    # 그런데 기대치를 `팀원 수 × (팀원 수 - 1)` 로 무조건 세우고 있었고,
+    # `PeerReview` 를 만드는 라우트도 화면도 **저장소에 0곳**이라
+    # 제출 수는 영원히 0 이었습니다. 그래서 분모가 0 이 아니게 되고,
+    # 신호가 제외되지 않고 **0.0 으로 신뢰도를 깎았습니다.**
+    #
+    #     다른 신호가 전부 완벽해도   0.9286  (1.0 이 아님)
+    #     사유에 영구히              "동료평가 미제출자가 있습니다"
+    #
+    # 사람이 **할 수 없는 일**을 안 했다고 깎는 것이고, 이 저장소가
+    # 지키는 "측정 불가 ≠ 0점" 을 정면으로 어깁니다. 기여도는 성적에
+    # 쓰일 수 있는 값입니다.
+    #
+    # 제출된 것이 하나라도 있으면 그때는 기대치를 셉니다 — **기능이
+    # 생기면 이 조건이 저절로 열립니다.** 그때는 안 낸 사람이 신뢰도를
+    # 깎는 것이 맞습니다.
+    peer_expected = member_count * max(0, member_count - 1) if peer_submitted else 0
 
     return CoverageStats(
         meetings_total=meetings_total,

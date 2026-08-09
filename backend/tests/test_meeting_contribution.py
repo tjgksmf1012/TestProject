@@ -393,6 +393,43 @@ def test_a_rule_classified_meeting_has_lower_confidence(world):
     assert compute_confidence(stats).components["utterance_classification"] == 0.0
 
 
+def test_peer_review_does_not_penalise_a_team_that_cannot_submit_one(world):
+    """⭐ **제출할 화면이 없는 것을 미제출로 세지 않는다** (결함 105).
+
+    `compute_confidence` 의 docstring 은 이렇게 약속합니다 — "데이터가
+    아예 없는 신호(분모 0)는 계산에서 제외한다. 예를 들어 동료평가
+    모듈을 안 쓰는 팀은 그 항목 때문에 신뢰도가 깎이지 않는다."
+
+    그런데 기대치를 `팀원 수 × (팀원 수 - 1)` 로 무조건 세우고 있었고,
+    `PeerReview` 를 만드는 라우트도 화면도 **저장소에 0곳**이라 제출 수는
+    영원히 0 이었습니다. 그래서 분모가 0 이 아니게 되고, 신호가 제외되지
+    않고 0.0 으로 신뢰도를 깎았습니다.
+
+        다른 신호가 전부 완벽해도   0.9286  (1.0 이 아님)
+        사유에 영구히              "동료평가 미제출자가 있습니다"
+
+    사람이 **할 수 없는 일**을 안 했다고 깎는 것이고, 이 저장소가 지키는
+    **측정 불가 ≠ 0점** 을 정면으로 어깁니다.
+    """
+    run(world)
+
+    with db_session.session_scope() as s:
+        stats = scoring_service.load_coverage(s, world["project_id"])
+
+    assert stats.peer_reviews_submitted == 0
+    assert stats.peer_reviews_expected == 0, (
+        "제출할 화면이 없는데 기대치를 세웠습니다 — 못 하는 일을 안 했다고 깎습니다"
+    )
+
+    breakdown = compute_confidence(stats)
+    assert "peer_completion" not in breakdown.components, (
+        "동료평가 신호가 계산에 들어갔습니다 — docstring 이 약속한 제외가 안 됩니다"
+    )
+    assert not any("동료평가" in r for r in breakdown.reasons), (
+        f"할 수 없는 일을 사유로 답니다: {breakdown.reasons}"
+    )
+
+
 def test_zero_score_labels_do_not_drag_the_classification_signal_down(world):
     """⭐ 잡담을 잡담으로 **맞게** 분류한 것이 신뢰도를 깎으면 안 됩니다.
 
