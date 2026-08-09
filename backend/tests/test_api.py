@@ -664,6 +664,124 @@ def test_meeting_members_404_for_unknown_meeting(client: TestClient, seeded):
 
 
 # ══════════════════════════════════════════════════════════════
+# 실패한 회의 다시 처리 (결함 114)
+# ══════════════════════════════════════════════════════════════
+
+
+def set_status(meeting_id: int, value: str) -> None:
+    with db_session.session_scope() as s:
+        s.get(m.Meeting, meeting_id).status = value
+
+
+def test_a_failed_meeting_can_be_processed_again(client: TestClient, seeded, engine):
+    """⭐ `failed` 는 **막다른 길이었다** (결함 114).
+
+    회의 상태를 쓰는 곳은 다섯인데 아무도 `pending` 으로 되돌리지 않고,
+    `try_finalize_meeting` 은 `status != "pending"` 이면 큐에 안 넣습니다.
+
+    그런데 홈 화면은 &#34;처리에 실패했습니다 — 트랙이 온전한지 확인하세요&#34;
+    를 **`actionable: true`** 로 보여주고 있었습니다. 가서 확인하고
+    **트랙이 멀쩡해도 할 수 있는 일이 없었습니다.**
+    """
+    set_status(seeded["meeting_id"], "failed")
+
+    response = client.post(f"/api/meetings/{seeded['meeting_id']}/reprocess")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "queued"
+
+    with db_session.session_scope() as s:
+        assert s.get(m.Meeting, seeded["meeting_id"]).status == "queued"
+
+
+def test_a_stuck_queued_meeting_can_be_pushed_again(client: TestClient, seeded, engine):
+    """워커가 죽어 있던 동안 큐잉된 회의도 풀 수 있어야 한다.
+
+    `queued` 인데 아무도 안 집어가면 그 회의는 영영 그대로입니다 —
+    브로커가 죽었을 때 `enqueue_meeting_processing` 은 **조용히 None 을
+    돌려주기** 때문입니다(요청을 실패시키지 않는 것이 그 함수의 규약).
+    """
+    set_status(seeded["meeting_id"], "queued")
+    assert client.post(f"/api/meetings/{seeded['meeting_id']}/reprocess").status_code == 200
+
+
+def test_a_meeting_that_did_not_fail_is_refused(client: TestClient, seeded, engine):
+    """⚠️ 검토 중인 회의를 다시 돌리면 **사람이 보던 후보가 사라집니다.**"""
+    set_status(seeded["meeting_id"], "needs_review")
+
+    response = client.post(f"/api/meetings/{seeded['meeting_id']}/reprocess")
+    assert response.status_code == 409
+    assert "다시 처리할 수 있습니다" in response.json()["detail"]
+
+
+def test_the_refusal_does_not_leak_the_internal_status_name(
+    client: TestClient, seeded, engine
+):
+    """오류 문구에 `needs_review` 같은 내부 이름을 넣지 않는다 (결함 78·86)."""
+    set_status(seeded["meeting_id"], "needs_review")
+    detail = client.post(f"/api/meetings/{seeded['meeting_id']}/reprocess").json()["detail"]
+
+    for internal in ("needs_review", "confirmed", "processing", "pending"):
+        assert internal not in detail, detail
+
+
+def test_a_reviewed_meeting_is_refused_with_the_count(
+    client: TestClient, seeded, engine
+):
+    """⭐ 사람이 이미 판단한 회의는 **큐에 넣기 전에** 막는다.
+
+    태스크도 `already_reviewed` 로 거절하지만 그건 큐에 들어간 **뒤**라,
+    화면에는 &#34;다시 처리를 시작했습니다&#34; 로 보이고 아무 일도 안 일어납니다.
+    """
+    set_status(seeded["meeting_id"], "failed")
+    with db_session.session_scope() as s:
+        candidate = s.scalars(
+            select(m.MeetingTaskCandidate).where(
+                m.MeetingTaskCandidate.meeting_id == seeded["meeting_id"]
+            )
+        ).first()
+        candidate.review_status = "approved"
+
+    response = client.post(f"/api/meetings/{seeded['meeting_id']}/reprocess")
+    assert response.status_code == 409
+    assert "1건" in response.json()["detail"]
+
+    with db_session.session_scope() as s:
+        assert s.get(m.Meeting, seeded["meeting_id"]).status == "failed", (
+            "거절했으면 상태도 그대로여야 한다"
+        )
+
+
+def test_asking_to_reprocess_is_always_logged(client: TestClient, seeded, engine):
+    """누가 다시 돌렸는지 남는다 — 재처리는 앞판의 결과를 지운다."""
+    set_status(seeded["meeting_id"], "failed")
+    client.post(f"/api/meetings/{seeded['meeting_id']}/reprocess")
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(
+            select(m.AuditLog).where(
+                m.AuditLog.action == "meeting_reprocess_requested"
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].before == {"status": "failed"}
+        assert rows[0].actor_id == seeded["user_ids"][0]
+
+
+def test_an_outsider_cannot_reprocess_someone_elses_meeting(
+    client: TestClient, seeded, engine
+):
+    set_status(seeded["meeting_id"], "failed")
+    with db_session.session_scope() as s:
+        outsider = m.User(name="외부인", email="out2@example.com")
+        s.add(outsider)
+        s.flush()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    assert client.post(f"/api/meetings/{seeded['meeting_id']}/reprocess").status_code == 403
+
+
+# ══════════════════════════════════════════════════════════════
 # 내 GitHub 아이디 (결함 112)
 # ══════════════════════════════════════════════════════════════
 

@@ -1757,6 +1757,101 @@ class MeetingProgressOut(BaseModel):
     detail: str = ""
     #: 화면에 그대로 쓸 한 줄. 서버와 화면이 **같은 문장**을 씁니다.
     message: str
+    #: 지금 다시 처리할 수 있는가 (결함 114).
+    #
+    # ⚠️ **판단을 서버가 합니다.** 화면이 상태를 보고 스스로 정하면
+    # "언제 다시 처리할 수 있는가" 규칙이 두 곳에 생기고 한쪽만
+    # 고쳐집니다 — `progress` 문구를 서버가 만드는 것과 같은 이유입니다.
+    can_reprocess: bool = False
+
+
+class ReprocessOut(BaseModel):
+    meeting_id: int
+    status: str
+    #: 화면에 그대로 쓸 한 줄.
+    message: str
+
+
+@app.post("/api/meetings/{meeting_id}/reprocess", response_model=ReprocessOut)
+def reprocess_meeting(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> ReprocessOut:
+    """실패한 회의를 **다시 처리한다** (결함 114).
+
+    ⭐ `failed` 는 **막다른 길이었습니다.** 회의 상태를 쓰는 곳은 다섯인데
+    (`queued`·`processing`·`failed`·`needs_review`·`confirmed`) **아무도
+    `pending` 으로 되돌리지 않았고**, `try_finalize_meeting` 은
+    `status != "pending"` 이면 큐에 넣지 않습니다.
+
+    그런데 화면은 이렇게 말하고 있었습니다.
+
+        처리에 실패했습니다 — 트랙이 온전한지 확인하세요   (actionable: true)
+
+    사람이 가서 확인하고 **트랙이 멀쩡해도 할 수 있는 일이 없었습니다.**
+    결함 112 와 같은 모양입니다 — 할 일을 알려 주고 그 일을 할 자리를
+    안 주는 것.
+
+    실패는 일시적인 이유로도 납니다(GPU 를 못 잡음·조각 하나가 깨짐·
+    워커가 죽음). 그때마다 **그 회의의 기여가 전원에게 영영 빕니다.**
+
+    ## 다시 도는 것이 안전한 이유
+
+    `persist_results_task` 는 재처리 경로를 이미 갖고 있습니다 — 앞판의
+    발화·후보·결정·회의 이벤트를 지우고, 발화를 지우기 **전에** 그
+    발화에서 나온 기여 이벤트를 먼저 잊습니다. 안 그러면 다시 돌 때마다
+    점수가 누적됩니다.
+
+    ⚠️ **사람이 이미 판단한 회의는 거절합니다.** 태스크도 같은 이유로
+    `already_reviewed` 를 돌려주지만, 그건 큐에 들어간 **뒤**라 화면에는
+    &#34;다시 처리를 시작했습니다&#34; 로 보이고 아무 일도 안 일어납니다.
+    여기서 미리 막고 이유를 말합니다.
+    """
+    meeting = _load_meeting_for(session, meeting_id, user)
+
+    if meeting.status not in ("failed", "queued"):
+        # ⚠️ 문구에 `meeting.status` 를 넣지 않습니다. 그건 내부 enum 이고,
+        # 그대로 띄우면 결함 78·86 이 반복됩니다. 한국어 어휘표는 화면이
+        # 들고 있으므로(`lib/home/next.ts`), 서버는 **조건**만 말합니다.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "처리에 실패했거나 큐에 걸린 회의만 다시 처리할 수 있습니다",
+        )
+
+    reviewed = session.scalar(
+        select(func.count())
+        .select_from(m.MeetingTaskCandidate)
+        .where(
+            m.MeetingTaskCandidate.meeting_id == meeting_id,
+            m.MeetingTaskCandidate.review_status != "pending",
+        )
+    )
+    if reviewed:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"이미 검토한 업무 후보가 {reviewed}건 있습니다. "
+            "다시 처리하면 그 근거가 끊어지므로, 먼저 검토를 되돌려야 합니다",
+        )
+
+    before = meeting.status
+    meeting.status = "queued"
+    session.add(
+        m.AuditLog(
+            project_id=meeting.project_id,
+            actor_id=user.id,
+            action="meeting_reprocess_requested",
+            target=f"meetings/{meeting_id}",
+            before={"status": before},
+            after={"status": "queued"},
+            at=datetime.now(UTC),
+        )
+    )
+    _enqueue_after_commit(session, meeting_id)
+
+    return ReprocessOut(
+        meeting_id=meeting_id,
+        status="queued",
+        message="다시 처리를 시작했습니다. 잠시 뒤 이 화면을 새로고침하세요.",
+    )
 
 
 @app.get("/api/meetings/{meeting_id}/progress", response_model=MeetingProgressOut)
@@ -1784,6 +1879,7 @@ def get_meeting_progress(
         percent=progress.percent if progress else None,
         detail=progress.detail if progress else "",
         message=progress_service.describe(progress, meeting_status=meeting.status),
+        can_reprocess=meeting.status in ("failed", "queued"),
     )
 
 

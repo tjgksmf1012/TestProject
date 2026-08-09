@@ -50,6 +50,7 @@ const apiBase = safeApiBase(params.get('api'), location.origin);
 let meId = 0;
 // 기여도 화면으로 넘어가려면 프로젝트 id 가 필요한데, 로비는 회의 id 만 안다.
 let projectId = 0;
+let canReprocess = false;
 
 const POLL_MS = 3_000;
 
@@ -149,7 +150,13 @@ async function refresh(): Promise<void> {
     // 문구는 **서버가 만든 것을 그대로** 씁니다. 여기서 다시 만들면
     // "0%" 와 "모름" 을 가르는 규칙이 두 곳에 생기고, 한쪽만 고쳐집니다.
     progressLine = await getJson(`/api/meetings/${meetingId}/progress`)
-      .then((body) => String((body as { message?: string }).message ?? ''))
+      .then((body) => {
+        const payload = body as { message?: string; can_reprocess?: boolean };
+        // ⚠️ **판단은 서버가 합니다** (결함 114). 여기서 상태를 보고
+        // 스스로 정하면 "언제 다시 처리할 수 있는가" 가 두 곳에 생깁니다.
+        canReprocess = payload.can_reprocess === true;
+        return String(payload.message ?? '');
+      })
       .catch(() => '');
 
     render();
@@ -321,6 +328,56 @@ async function forceFinish(): Promise<void> {
   }
 }
 
+function reprocessNote(text: string, tone: 'bad' | 'plain' = 'bad'): void {
+  showNote($('reprocess-note'), text, tone);
+}
+
+/**
+ * 실패한 회의를 다시 처리한다 (결함 114).
+ *
+ * ⚠️ **되돌릴 수 없는 일이라 먼저 묻습니다.** 다시 처리하면 앞판의
+ * 발화·후보·결정이 지워지고 새로 만들어집니다. 아직 아무도 검토하지
+ * 않았을 때만 서버가 받아 주지만, 그래도 사람이 알고 눌러야 합니다.
+ */
+async function reprocess(): Promise<void> {
+  const ok = confirm(
+    '이 회의를 처음부터 다시 처리합니다.\n' +
+      '앞서 만들어진 발화·업무 후보·결정은 지워지고 새로 만들어집니다.\n' +
+      '계속할까요?'
+  );
+  if (!ok) return;
+
+  reprocessNote('');
+  try {
+    const response = await trySend(() =>
+      fetch(`${apiBase}/api/meetings/${meetingId}/reprocess`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      }),
+    );
+    if (response === null) {
+      reprocessNote(unreachableText('다시 처리하지 못했습니다'));
+      return;
+    }
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      // 409 는 서버 문장이 그대로 사람에게 쓸 만합니다 —
+      // "이미 검토한 업무 후보가 1건 있습니다…"
+      reprocessNote(detailText(body, `다시 처리하지 못했습니다 (HTTP ${response.status})`));
+      return;
+    }
+    reprocessNote((body as { message?: string })?.message ?? '', 'plain');
+    await refresh();
+  } catch (err) {
+    console.error(err);
+    reprocessNote(describeUnexpected());
+  }
+}
+
 function renderRoster(): void {
   $('roster').innerHTML = roster
     .map((entry) => {
@@ -450,6 +507,7 @@ function render(): void {
   $('agree').classList.toggle('primary', !iAgreed);
 
   $('finish').hidden = !room.needsForceFinish;
+  $('reprocess').hidden = !canReprocess;
   // 처리가 끝나야 후보가 생긴다. 그 전에 눌러도 빈 화면이라 감춘다.
   $('review').hidden = room.recording > 0 || room.notJoined > 0 || tracks.length === 0;
 }
@@ -464,6 +522,9 @@ $('refuse').addEventListener('click', () => {
 });
 $('finish').addEventListener('click', () => {
   void whilePressed($('finish') as HTMLButtonElement, forceFinish);
+});
+$('reprocess').addEventListener('click', () => {
+  void whilePressed($('reprocess') as HTMLButtonElement, reprocess);
 });
 $('record').addEventListener('click', () => {
   location.href = `/index.html?meeting=${meetingId}`;

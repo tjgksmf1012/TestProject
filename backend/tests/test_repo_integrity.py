@@ -822,9 +822,12 @@ def test_the_reprocessing_cleanup_names_every_table_it_rewrites():
         if not isinstance(node, ast.For) or not isinstance(node.iter, ast.Tuple):
             continue
         for element in node.iter.elts:
-            if isinstance(element, ast.Attribute) and isinstance(element.value, ast.Name):
-                if element.value.id == "m":
-                    cleaned.add(element.attr)
+            if (
+                isinstance(element, ast.Attribute)
+                and isinstance(element.value, ast.Name)
+                and element.value.id == "m"
+            ):
+                cleaned.add(element.attr)
 
     assert cleaned, "정리 목록을 못 찾았습니다 — 이 검사가 헛돌고 있습니다"
 

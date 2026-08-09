@@ -660,6 +660,7 @@ var meetingId = Number(params.get("meeting") ?? "1");
 var apiBase = safeApiBase(params.get("api"), location.origin);
 var meId = 0;
 var projectId = 0;
+var canReprocess = false;
 var POLL_MS = 3e3;
 var $ = (id) => {
   const el = document.getElementById(id);
@@ -718,7 +719,11 @@ async function refresh() {
     roster = consent.roster;
     consentMessage = consent.message;
     tracks = trackBody.tracks;
-    progressLine = await getJson(`/api/meetings/${meetingId}/progress`).then((body) => String(body.message ?? "")).catch(() => "");
+    progressLine = await getJson(`/api/meetings/${meetingId}/progress`).then((body) => {
+      const payload = body;
+      canReprocess = payload.can_reprocess === true;
+      return String(payload.message ?? "");
+    }).catch(() => "");
     render();
   } catch (err) {
     showNote($("sub"), "불러오지 못했습니다");
@@ -829,6 +834,42 @@ async function forceFinish() {
     roomNote(describeUnexpected());
   }
 }
+function reprocessNote(text, tone = "bad") {
+  showNote($("reprocess-note"), text, tone);
+}
+async function reprocess() {
+  const ok = confirm(
+    "이 회의를 처음부터 다시 처리합니다.\n앞서 만들어진 발화·업무 후보·결정은 지워지고 새로 만들어집니다.\n계속할까요?"
+  );
+  if (!ok) return;
+  reprocessNote("");
+  try {
+    const response = await trySend(
+      () => fetch(`${apiBase}/api/meetings/${meetingId}/reprocess`, {
+        method: "POST",
+        credentials: "same-origin"
+      })
+    );
+    if (response === null) {
+      reprocessNote(unreachableText("다시 처리하지 못했습니다"));
+      return;
+    }
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      reprocessNote(detailText(body, `다시 처리하지 못했습니다 (HTTP ${response.status})`));
+      return;
+    }
+    reprocessNote(body?.message ?? "", "plain");
+    await refresh();
+  } catch (err) {
+    console.error(err);
+    reprocessNote(describeUnexpected());
+  }
+}
 function renderRoster() {
   $("roster").innerHTML = roster.map((entry) => {
     const state = consentStateOf(entry);
@@ -899,6 +940,7 @@ function render() {
   const iAgreed = roster.some((e) => e.user_id === meId && consentStateOf(e) === "granted");
   $("agree").classList.toggle("primary", !iAgreed);
   $("finish").hidden = !room.needsForceFinish;
+  $("reprocess").hidden = !canReprocess;
   $("review").hidden = room.recording > 0 || room.notJoined > 0 || tracks.length === 0;
 }
 $("agree").addEventListener("click", () => {
@@ -909,6 +951,9 @@ $("refuse").addEventListener("click", () => {
 });
 $("finish").addEventListener("click", () => {
   void whilePressed($("finish"), forceFinish);
+});
+$("reprocess").addEventListener("click", () => {
+  void whilePressed($("reprocess"), reprocess);
 });
 $("record").addEventListener("click", () => {
   location.href = `/index.html?meeting=${meetingId}`;

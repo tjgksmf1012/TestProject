@@ -125,6 +125,11 @@
          폴링이 방 상태로 덮으므로, 거기 쓴 실패 문구는 3초 뒤에 조용히
          사라집니다 (결함 90). 이 자리는 아무도 안 덮습니다. -->
     <p class="status" id="room-note" hidden></p>
+    <!-- ⚠️ 실패한 회의는 **막다른 길이었습니다** (결함 114). 홈 화면은
+         "트랙이 온전한지 확인하세요" 라고 보내면서, 확인하고 나면 할 수
+         있는 일을 안 줬습니다. -->
+    <button id="reprocess" hidden>다시 처리하기</button>
+    <p class="status" id="reprocess-note" hidden></p>
     <button id="review" hidden>업무 후보 검토</button>
     <button id="kanban">칸반 보기</button>
     <button id="contrib">기여도 보기</button>
