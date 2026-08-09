@@ -370,3 +370,38 @@ export function captureAlerts(track: TrackHealth | undefined): string[] {
     .map((w) => (typeof w.message === 'string' ? w.message.trim() : ''))
     .filter((message) => message !== '');
 }
+
+/**
+ * 이 사람이 **이미 답해 둔** ②③ 선택.
+ *
+ * ## 왜 필요한가 (결함 94)
+ *
+ * 로비의 ②③ 체크박스는 HTML 에 `checked` 로 박혀 있고, 화면은 그 값을
+ * **제출할 때만 읽었습니다.** 서버는 사람마다 저장된 답을 로스터에 실어
+ * 보내고 있었는데(`raw_audio_retention`·`voiceprint_storage`) 읽는 곳이
+ * 0곳이었습니다. 그래서 브라우저에서 이렇게 됩니다.
+ *
+ *     둘 다 끄고 제출 → 서버에 false 로 저장됨
+ *     새로고침        → **둘 다 다시 켜져 있음**
+ *
+ * 화면이 기록과 어긋나는 것만도 문제지만, 더 나쁜 것은 그 상태에서
+ * 사람이 &#34;동의합니다&#34; 를 한 번 더 누르면 화면이 `true` 를 보내
+ * **거부가 조용히 뒤집힌다**는 것입니다. 그러면
+ * `retention.purge_unconsented_audio()` 가 그 사람의 원본을 더 이상
+ * 지우지 않습니다 — 결함 67 이 고친 바로 그 구멍이 반대 방향으로
+ * 다시 뚫립니다.
+ *
+ * ⚠️ **아직 답을 안 했으면 기본값을 그대로 둡니다.** `null` 은 &#34;아직
+ * 응답 없음&#34; 이고 `false`(거부)와 다릅니다 — 이 저장소가 로스터에서
+ * 지키는 구분입니다.
+ */
+export function savedExtraConsents(
+  roster: readonly RosterEntry[],
+  userId: number,
+): { rawAudio: boolean | null; voiceprint: boolean | null } {
+  const mine = roster.find((entry) => entry.user_id === userId);
+  return {
+    rawAudio: mine?.raw_audio_retention ?? null,
+    voiceprint: mine?.voiceprint_storage ?? null,
+  };
+}

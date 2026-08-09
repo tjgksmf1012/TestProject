@@ -149,6 +149,13 @@ function captureAlerts(track) {
   if (track === void 0) return [];
   return (track.warnings ?? []).filter((w) => w !== null && typeof w === "object" && w.severity === "critical").map((w) => typeof w.message === "string" ? w.message.trim() : "").filter((message) => message !== "");
 }
+function savedExtraConsents(roster2, userId) {
+  const mine = roster2.find((entry) => entry.user_id === userId);
+  return {
+    rawAudio: mine?.raw_audio_retention ?? null,
+    voiceprint: mine?.voiceprint_storage ?? null
+  };
+}
 
 // src/lib/auth/session.ts
 function loginUrlFor(pathWithQuery) {
@@ -664,6 +671,7 @@ var checked = (id) => {
   return el instanceof HTMLInputElement ? el.checked : false;
 };
 var roster = [];
+var extraConsentsApplied = false;
 var progressLine = "";
 var tracks = [];
 var consentMessage = "";
@@ -832,6 +840,17 @@ function renderRoster() {
   box.hidden = blockers.length === 0;
   box.innerHTML = blockers.map((b) => `<p>${escapeHtml(b)}</p>`).join("");
   $("consent-message").textContent = consentMessage;
+  if (!extraConsentsApplied && roster.length > 0) {
+    const saved = savedExtraConsents(roster, meId);
+    setChecked("keep-audio", saved.rawAudio);
+    setChecked("keep-voiceprint", saved.voiceprint);
+    extraConsentsApplied = true;
+  }
+}
+function setChecked(id, value) {
+  if (value === null) return;
+  const el = document.getElementById(id);
+  if (el instanceof HTMLInputElement) el.checked = value;
 }
 function alertsHtml(track) {
   const alerts = captureAlerts(track);

@@ -20,6 +20,7 @@ import {
   describeConsent,
   memberStatuses,
   roomStatus,
+  savedExtraConsents,
   startBlockers,
   type MemberStatus,
   type RosterEntry,
@@ -65,6 +66,14 @@ const checked = (id: string): boolean => {
 };
 
 let roster: RosterEntry[] = [];
+/**
+ * 저장된 ②③ 선택을 체크박스에 **한 번만** 되돌려 놓았는가.
+ *
+ * ⚠️ 폴링이 3초마다 `render()` 를 부릅니다. 매번 서버 값으로 덮으면
+ * **사람이 방금 끈 체크가 3초 뒤에 다시 켜집니다** — 결함 90 과 같은
+ * 부류(폴링이 사람의 손을 덮는 것)를 여기서 되풀이하지 않습니다.
+ */
+let extraConsentsApplied = false;
 /** 처리 진행 문구. 서버가 만든 문장을 그대로 씁니다 (감사 #8). */
 let progressLine = '';
 let tracks: TrackHealth[] = [];
@@ -321,6 +330,24 @@ function renderRoster(): void {
   box.hidden = blockers.length === 0;
   box.innerHTML = blockers.map((b) => `<p>${escapeHtml(b)}</p>`).join('');
   $('consent-message').textContent = consentMessage;
+
+  // ⭐ 저장된 ②③ 을 화면에 되돌린다 (결함 94). 서버는 사람마다 답을
+  // 실어 보내고 있었는데 읽는 곳이 0곳이라, 거부하고 새로고침하면
+  // 체크가 다시 켜져 있었습니다.
+  if (!extraConsentsApplied && roster.length > 0) {
+    const saved = savedExtraConsents(roster, meId);
+    // `null` 은 **아직 답 안 함** — 화면의 기본값을 그대로 둡니다.
+    setChecked('keep-audio', saved.rawAudio);
+    setChecked('keep-voiceprint', saved.voiceprint);
+    extraConsentsApplied = true;
+  }
+}
+
+/** `null` 이면 손대지 않는다 — 답 안 한 것과 거부는 다르다. */
+function setChecked(id: string, value: boolean | null): void {
+  if (value === null) return;
+  const el = document.getElementById(id);
+  if (el instanceof HTMLInputElement) el.checked = value;
 }
 
 /** 기기가 남긴 경고를 목록으로. 없으면 빈 문자열 — 빈 상자를 안 만듭니다. */

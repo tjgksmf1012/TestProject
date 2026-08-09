@@ -587,6 +587,12 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
    * 화면이 **안 읽어도 되는** 칸과 그 이유. 비워 두면 안 됩니다 —
    * 근거 없는 면제는 다음 사람이 그냥 늘립니다 (결함 80 의 면제 목록과 같은 규칙).
    */
+  /** 서버가 실어 보내는 payload 타입들. 늘면 여기 한 줄. */
+  const PAYLOADS: [string, string][] = [
+    ['TrackHealth', 'src/lib/lobby/room.ts'],
+    ['RosterEntry', 'src/lib/lobby/room.ts'],
+  ];
+
   const EXEMPT: Record<string, string> = {
     track_id:
       '로비는 트랙을 **사람으로** 찾는다(`user_id`). 트랙 하나만 여는 화면이 없어 ' +
@@ -599,7 +605,7 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
       '사람이 어느 쪽을 믿을지 모른다',
   };
 
-  it('⭐ `TrackHealth` 의 칸은 화면이 읽거나, 안 읽는 이유가 적혀 있다', () => {
+  it('⭐ 서버 payload 의 칸은 화면이 읽거나, 안 읽는 이유가 적혀 있다', () => {
     // 서버는 `capture_warnings` 를 저장하고 트랙마다 실어 보냈고, 화면
     // 타입에도 `warnings` 가 있었습니다. **읽는 곳이 0곳이었습니다.**
     // 녹음 화면은 자기가 방금 잡은 경고를 보여주지만 그건 그 폰에서
@@ -608,13 +614,18 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
     //
     // 이 저장소의 대표 실패 방식(47·63·75·83·84)이 **타입 한 줄**로
     // 나타난 경우라 죽은 export 가드에도 안 걸렸습니다.
-    const room = readFileSync(join(ROOT, 'src', 'lib', 'lobby', 'room.ts'), 'utf8');
-    const block = /export interface TrackHealth \{([\s\S]*?)\n\}/.exec(room);
-    strictEqual(block !== null, true, 'room.ts 에서 TrackHealth 를 못 찾았습니다');
-
-    const body = codeOf(block?.[1] ?? '');
-    const fields = [...body.matchAll(/^\s*(\w+)\??:/gm)].map((m) => m[1] as string);
-    strictEqual(fields.length > 5, true, `칸을 못 읽었습니다 (${fields.length}개)`);
+    const fields: string[] = [];
+    const typeNames: string[] = [];
+    for (const [name, rel] of PAYLOADS) {
+      const source = readFileSync(join(ROOT, ...rel.split('/')), 'utf8');
+      const block = new RegExp(`export interface ${name} \\{([\\s\\S]*?)\\n\\}`).exec(source);
+      strictEqual(block !== null, true, `${rel} 에서 ${name} 을 못 찾았습니다`);
+      const body = codeOf(block?.[1] ?? '');
+      const own = [...body.matchAll(/^\s*(\w+)\??:/gm)].map((m) => m[1] as string);
+      strictEqual(own.length > 2, true, `${name}: 칸을 못 읽었습니다 (${own.length}개)`);
+      fields.push(...own);
+      typeNames.push(name);
+    }
 
     // ⚠️ **`TrackHealth` 를 아는 파일만** 봅니다.
     //
@@ -630,12 +641,14 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
         if (entry.isDirectory()) walk(full);
         else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
           const code = codeOf(readFileSync(full, 'utf8'));
-          if (/TrackHealth/.test(code)) sources.push(code);
+          if (typeNames.some((name) => new RegExp(`\\b${name}\\b`).test(code))) {
+            sources.push(code);
+          }
         }
       }
     };
     walk(join(ROOT, 'src'));
-    strictEqual(sources.length >= 2, true, 'TrackHealth 를 쓰는 파일을 못 찾았습니다');
+    strictEqual(sources.length >= 2, true, '이 타입들을 쓰는 파일을 못 찾았습니다');
 
     const unread = fields.filter((f) => {
       const read = new RegExp(`\\.${f}\\b`);

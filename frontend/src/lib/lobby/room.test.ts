@@ -11,6 +11,7 @@ import {
   isSilentTooLong,
   memberStatuses,
   roomStatus,
+  savedExtraConsents,
   startBlockers,
   summarizeConsent,
   type MemberStatus,
@@ -386,5 +387,38 @@ describe('기기가 남긴 경고 (결함 93)', () => {
     deepStrictEqual(captureAlerts(track([])), []);
     deepStrictEqual(captureAlerts(track(undefined)), []);
     deepStrictEqual(captureAlerts(undefined), []);
+  });
+});
+
+describe('저장된 ②③ 선택 (결함 94)', () => {
+  const entry = (over: Partial<RosterEntry>): RosterEntry =>
+    ({ user_id: 1, name: '김민수', recording: true, ...over }) as RosterEntry;
+
+  it('⭐ 저장된 거부를 그대로 돌려준다', () => {
+    const saved = savedExtraConsents(
+      [entry({ raw_audio_retention: false, voiceprint_storage: false })],
+      1,
+    );
+    deepStrictEqual(saved, { rawAudio: false, voiceprint: false });
+  });
+
+  it('⭐ 아직 답 안 한 것은 `null` — 거부와 다르다', () => {
+    // `null` 을 `false` 로 접으면 화면이 "거부함" 으로 그립니다.
+    deepStrictEqual(savedExtraConsents([entry({})], 1), { rawAudio: null, voiceprint: null });
+  });
+
+  it('남의 답을 내 것으로 쓰지 않는다', () => {
+    const roster = [
+      entry({ user_id: 2, name: '이하늘', raw_audio_retention: false }),
+      entry({ user_id: 1, raw_audio_retention: true }),
+    ];
+    deepStrictEqual(savedExtraConsents(roster, 1).rawAudio, true);
+  });
+
+  it('명단에 내가 없으면 둘 다 `null`', () => {
+    deepStrictEqual(savedExtraConsents([entry({ user_id: 9 })], 1), {
+      rawAudio: null,
+      voiceprint: null,
+    });
   });
 });
