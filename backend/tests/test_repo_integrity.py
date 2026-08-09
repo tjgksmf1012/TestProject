@@ -571,23 +571,134 @@ def test_the_seed_writes_gaps_in_the_same_shape_production_does():
     keys = set(re.findall(r'"([a-zA-Z_]+)":', written.group(1)))
     assert keys, "gap 키를 못 읽었습니다"
 
-    # 시드의 gaps= 블록만 본다.
-    block = re.search(r"gaps=\[\]\s*if usable\s*else \[(.*?)\n                    \],", seed, re.S)
-    assert block, "seed_demo 에서 gaps 블록을 못 찾았습니다"
+    # 시드의 구멍 표만 본다.
+    block = re.search(r"track_gaps: [^=]*= \[(.*?)\n        \]", seed, re.S)
+    assert block, "seed_demo 에서 track_gaps 표를 못 찾았습니다"
 
     # ⚠️ **항목마다** 봅니다. 합집합으로 보면 둘 중 하나만 틀렸을 때
     # 통과합니다 — 실제로 그렇게 짰다가 되돌림 검증에서 안 잡혔습니다.
     entries = re.findall(r"\{([^}]*)\}", block.group(1), re.S)
     assert entries, "gap 항목을 못 찾았습니다"
 
+    # `durationMs` 는 시드가 **계산해서** 채웁니다 (결함 99). 계산하는 줄이
+    # 있는지 따로 보고, 리터럴에서는 빼고 봅니다 — 손으로 적으면 다시
+    # 커버리지와 갈라집니다.
+    assert 'gap["durationMs"] = int(gap["endMs"]) - int(gap["startMs"])' in seed, (
+        "시드가 `durationMs` 를 계산하지 않습니다 — 손으로 적으면 갈라집니다"
+    )
+    literal_keys = keys - {"durationMs"}
+
     problems = []
     for i, entry in enumerate(entries):
         entry_keys = set(re.findall(r'"([a-zA-Z_]+)":', entry))
-        missing = keys - entry_keys
+        missing = literal_keys - entry_keys
         if missing:
             problems.append(f"{i}번째 항목에 {sorted(missing)} 없음 (쓴 것: {sorted(entry_keys)})")
 
     assert not problems, "시드가 운영과 다른 키를 씁니다:\n  " + "\n  ".join(problems)
+
+
+def test_the_seed_track_numbers_agree_with_the_production_formula():
+    """⭐ 시드의 커버리지·총 공백·구멍 목록이 **서로 맞는가** (결함 99).
+
+    운영은 셋을 **하나의 원천**에서 뽑습니다. `audio/assembly.py` 가
+
+        coverage    = 1 - total_gap_ms / duration_ms
+        total_gap_ms = 구멍 길이의 합
+
+    이라, 이 셋이 어긋난 트랙은 **API 가 만들 수 없습니다.** 그런데 시드는
+    셋을 각각 손으로 적고 있었고, 이렇게 갈라져 있었습니다.
+
+        이하늘  커버리지 98%  ·  총 공백 0        ·  구멍 0개
+        박지원  커버리지 42%  ·  총 공백 23.2분   ·  구멍 합 15분
+
+    화면에서는 이하늘이 100% 인 김민수와 **똑같이 꽉 찬 막대**로 보였고,
+    박지원은 빗금이 37.5% 인데 &#34;42% 커버리지&#34;(= 58% 빔)라고 말했습니다.
+    이 저장소의 시그니처가 &#34;구멍이 **언제** 생겼는지&#34; 인데, 시연 자료가
+    바로 그 질문에 답하지 못하고 있었습니다.
+
+    ⚠️ 그래서 시드는 **구멍만 적고 나머지는 계산**해야 합니다. 여기서는
+    그 계산이 실제로 있는지, 그리고 구멍 자체가 말이 되는지를 봅니다.
+    """
+    import ast
+    import re
+
+    seed_path = REPO_ROOT / "scripts" / "seed_demo.py"
+    seed = seed_path.read_text()
+
+    # ── ① 손으로 적은 숫자가 없는가 ──────────────────────────
+    #
+    # `coverages = [1.0, 0.98, 0.42]` 처럼 적으면 구멍과 갈라집니다.
+    tree = ast.parse(seed)
+    literal_assignments = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        if not any(n in {"coverages", "totals"} for n in names):
+            continue
+        if isinstance(node.value, ast.List) and all(
+            isinstance(e, ast.Constant) for e in node.value.elts
+        ):
+            literal_assignments.append(names[0])
+    assert not literal_assignments, (
+        f"{literal_assignments} 를 손으로 적었습니다 — 구멍에서 계산하세요 (결함 99)"
+    )
+
+    # 트랙에 넣는 값도 계산된 이름이어야 합니다.
+    for field in ("coverage", "total_gap_ms"):
+        hand = re.findall(rf"{field}=([0-9][0-9_.]*)", seed)
+        assert not hand, f"{field} 에 숫자를 직접 적었습니다: {hand}"
+
+    # ── ② 구멍 자체가 말이 되는가 ────────────────────────────
+    block = re.search(r"track_gaps: [^=]*= (\[.*?\n        \])", seed, re.S)
+    assert block, "track_gaps 표를 못 찾았습니다"
+    tracks = ast.literal_eval(block.group(1))
+
+    meeting_ms = re.search(r"MEETING_MS = ([0-9 *_]+)", seed)
+    assert meeting_ms, "MEETING_MS 를 못 찾았습니다"
+    duration = eval(meeting_ms.group(1))  # noqa: S307 — 이 파일 안의 상수식
+
+    problems = []
+    for i, gaps in enumerate(tracks):
+        spans = sorted((g["startMs"], g["endMs"]) for g in gaps)
+        for start, end in spans:
+            if end <= start:
+                problems.append(f"{i}번 트랙: 끝이 시작보다 앞입니다 ({start}~{end})")
+            if start < 0 or end > duration:
+                problems.append(f"{i}번 트랙: 회의({duration}ms) 밖입니다 ({start}~{end})")
+        for (s1, e1), (s2, _e2) in zip(spans, spans[1:], strict=False):
+            if s2 < e1:
+                problems.append(f"{i}번 트랙: 구멍이 겹칩니다 ({s1}~{e1} · {s2}~)")
+        total = sum(g["endMs"] - g["startMs"] for g in gaps)
+        if total > duration:
+            problems.append(f"{i}번 트랙: 구멍 합({total})이 회의보다 깁니다")
+
+    assert not problems, "시드의 구멍이 말이 안 됩니다:\n  " + "\n  ".join(problems)
+
+    # ── ③ 시연 의도가 남아 있는가 ────────────────────────────
+    #
+    # 트랙 하나는 **못 쓸 만큼** 끊겨 있어야 합니다. 그래야 &#34;측정 불가&#34;
+    # 표시가 화면에 나오고, 이 프로젝트가 지키려는 구분(측정 불가 ≠ 0점)을
+    # 시연에서 보여줄 수 있습니다.
+    service = (
+        REPO_ROOT / "backend" / "teamflow" / "services" / "recording_service.py"
+    ).read_text()
+    threshold = re.search(r"MIN_USABLE_COVERAGE = ([0-9.]+)", service)
+    assert threshold, "MIN_USABLE_COVERAGE 를 못 찾았습니다"
+    limit = float(threshold.group(1))
+
+    coverages = [
+        1 - sum(g["endMs"] - g["startMs"] for g in gaps) / duration for gaps in tracks
+    ]
+    assert any(c < limit for c in coverages), (
+        f"시드에 못 쓸 트랙이 없습니다 (커버리지 {[round(c, 3) for c in coverages]}, "
+        f"기준 {limit}) — '측정 불가' 화면을 시연할 수 없습니다"
+    )
+    assert any(c >= limit for c in coverages), "시드에 쓸 만한 트랙이 없습니다"
+    assert any(0 < (1 - c) for c in coverages if c >= limit), (
+        "쓸 만한데 **조금 끊긴** 트랙이 없습니다 — 작은 구멍이 그려지는지 볼 수 없습니다"
+    )
 
 
 # ══════════════════════════════════════════════════════════════

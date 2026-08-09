@@ -227,10 +227,46 @@ def seed(*, reset: bool) -> dict:
 
         # 트랙 셋. 박지원의 폰은 중간에 잠겨 커버리지가 낮다 —
         # "측정 불가" 표시가 화면에서 어떻게 보이는지 확인하려면 필요하다.
-        coverages = [1.0, 0.98, 0.42]
+        #
+        # ⚠️ **커버리지를 손으로 적지 않습니다** (결함 99). 운영 코드는 셋을
+        # 하나의 원천에서 뽑습니다 — `audio/assembly.py` 가
+        # `coverage = 1 - total_gap_ms / duration` 이고 `total_gap_ms` 는
+        # 구멍의 합입니다. 그래서 여기서도 **구멍만 적고 나머지는 계산**합니다.
+        #
+        # 손으로 적던 동안 이런 트랙이 나왔습니다.
+        #
+        #     이하늘  커버리지 98%  ·  총 공백 0  ·  구멍 0개
+        #     박지원  커버리지 42%  ·  총 공백 23.2분  ·  구멍 합 15분
+        #
+        # 운영이 만들 수 없는 상태입니다. 화면에서는 이하늘이 100% 인
+        # 김민수와 **똑같이 꽉 찬 막대**로 보였고, 박지원은 빗금이 37.5%
+        # 인데 "42% 커버리지"(= 58% 빔)라고 말했습니다. 이 저장소의
+        # 시그니처가 "구멍이 **언제** 생겼는지" 인데, 시연 자료가 바로 그
+        # 질문에 답하지 못하고 있었습니다. 결함 91 과 같은 부류입니다.
+        MEETING_MS = 40 * 60 * 1000
+        track_gaps: list[list[dict[str, object]]] = [
+            # 김민수 — 끊긴 데 없음
+            [],
+            # 이하늘 — 22분쯤 마이크가 48초 꺼져 있었다.
+            # `track_muted` 는 **서버가 절대 못 보는** 구멍이라
+            # (`assembly.GapReason` 주석) 클라이언트 보고로만 남는다.
+            [{"reason": "track_muted", "startMs": 1_320_000, "endMs": 1_368_000}],
+            # 박지원 — 폰이 잠겨 오래 멈췄고, 조각도 일부 유실됐다
+            [
+                {"reason": "recorder_stalled", "startMs": 600_000, "endMs": 1_560_000},
+                {"reason": "chunk_lost", "startMs": 1_680_000, "endMs": 2_112_000},
+            ],
+        ]
+        for gaps in track_gaps:
+            for gap in gaps:
+                gap["durationMs"] = int(gap["endMs"]) - int(gap["startMs"])  # type: ignore[arg-type]
+        totals = [sum(int(g["durationMs"]) for g in gaps) for gaps in track_gaps]
+        coverages = [round(1 - total / MEETING_MS, 3) for total in totals]
         # 정렬 보정값. 기준 트랙이 0 이고 나머지는 GCC-PHAT 이 추정한 값이다.
         offsets_ms = [0, 187, -64]
-        for user, coverage, offset_ms in zip(users, coverages, offsets_ms, strict=True):
+        for user, coverage, total_gap_ms, gaps, offset_ms in zip(
+            users, coverages, totals, track_gaps, offsets_ms, strict=True
+        ):
             usable = coverage >= 0.8
             s.add(
                 m.MeetingTrack(
@@ -243,8 +279,10 @@ def seed(*, reset: bool) -> dict:
                     offset_ms=offset_ms,
                     status="completed" if usable else "unusable",
                     coverage=coverage,
-                    total_gap_ms=0 if usable else 1_392_000,
-                    longest_gap_ms=0 if usable else 1_200_000,
+                    total_gap_ms=total_gap_ms,
+                    longest_gap_ms=max(
+                        (int(g["durationMs"]) for g in gaps), default=0
+                    ),
                     # ⚠️ **운영 코드와 같은 키**를 씁니다 (카멜).
                     # `recording_service._finalize` 가 이렇게 씁니다:
                     #     {"reason", "startMs", "endMs", "durationMs"}
@@ -252,22 +290,7 @@ def seed(*, reset: bool) -> dict:
                     # 이 값을 읽으면 **조용히 아무것도 안 그렸습니다** —
                     # 시연에서는 멀쩡해 보이는데 운영에서만 나오는 부류의
                     # 반대, 즉 시연에서만 안 나오는 결함이었습니다.
-                    gaps=[]
-                    if usable
-                    else [
-                        {
-                            "reason": "recorder_stalled",
-                            "startMs": 600_000,
-                            "endMs": 1_200_000,
-                            "durationMs": 600_000,
-                        },
-                        {
-                            "reason": "chunk_lost",
-                            "startMs": 1_500_000,
-                            "endMs": 1_800_000,
-                            "durationMs": 300_000,
-                        },
-                    ],
+                    gaps=gaps,
                 )
             )
         s.flush()
