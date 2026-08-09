@@ -314,8 +314,31 @@ def revoke_user_data(
     now = now or datetime.now(UTC)
     report = PurgeReport()
 
+    # ⚠️ **이 프로젝트의 트랙만** 지웁니다 (결함 101).
+    #
+    # 예전에는 `MeetingTrack.user_id == user_id` 만 걸었습니다. `project_id`
+    # 를 인자로 **받아 놓고 오디오 조회에는 안 쓴** 것입니다 — 바로 아래
+    # 성문은 `project_id` 로 좁히고 있었는데 한쪽만 좁혔습니다.
+    #
+    # 그래서 A 프로젝트 설정에서 "내 녹음 원본과 성문을 지웁니다" 를 누르면
+    # **B 팀·C 팀의 내 녹음 원본까지** 지워졌습니다. 되돌릴 수 없고, 그
+    # 팀들은 통보도 못 받고, 감사 로그는 A 프로젝트에만 남습니다. 아직
+    # 전사 전인 회의였다면 그 팀의 **회의록 자체가 안 만들어집니다.**
+    #
+    # 화면은 사람에게 이렇게 약속합니다 (`lib/privacy/deletion.ts`).
+    #
+    #     내 녹음 원본과 성문을 지웁니다.
+    #     되돌릴 수 없습니다. 회의록의 발화 텍스트는 남습니다.
+    #
+    # 그 약속은 **이 프로젝트 안에서** 한 것입니다. 동의한 범위를 넘는
+    # 삭제는 되돌릴 수 없으므로, 넓게 지우는 쪽으로 기울면 안 됩니다.
     track_ids = session.scalars(
-        select(m.MeetingTrack.id).where(m.MeetingTrack.user_id == user_id)
+        select(m.MeetingTrack.id)
+        .join(m.Meeting, m.Meeting.id == m.MeetingTrack.meeting_id)
+        .where(
+            m.MeetingTrack.user_id == user_id,
+            m.Meeting.project_id == project_id,
+        )
     ).all()
 
     if track_ids:

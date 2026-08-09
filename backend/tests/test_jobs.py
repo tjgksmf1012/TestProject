@@ -415,6 +415,61 @@ def test_user_deletion_request_removes_their_audio(session: Session, storage: Pa
     assert len(report.revoked_voiceprints) == 1
 
 
+def test_user_deletion_stays_inside_the_project(session: Session, storage: Path):
+    """⭐ **다른 프로젝트의 내 녹음은 안 지운다** (결함 101).
+
+    `revoke_user_data` 는 `project_id` 를 인자로 받으면서 오디오 조회에는
+    안 쓰고 있었습니다 — 바로 아래 성문은 그것으로 좁히는데 한쪽만
+    좁혔습니다. 그래서 A 프로젝트에서 삭제를 누르면 **B 팀의 내 녹음
+    원본까지** 지워졌습니다. 되돌릴 수 없고, B 팀은 통보도 못 받습니다.
+
+    ⚠️ 왜 안 잡혔나 — 기존 테스트 셋이 전부 **프로젝트 하나**만 만들고
+    불렀습니다. "다른 **사람**의 트랙은 건드리지 않는다" 는 확인했지만
+    "다른 **프로젝트**의 내 트랙" 은 아무도 안 쟀습니다. 뜻은 맞고 자료가
+    그 뜻을 못 재는 테스트였습니다 (결함 95 와 같은 모양).
+    """
+    project_id, meeting_id, user_id = seed_meeting(session)
+
+    # 같은 사람이 **다른 프로젝트**에서도 녹음했다.
+    other_project = m.Project(title="다른 팀", started_at=NOW)
+    session.add(other_project)
+    session.flush()
+    session.add(m.Member(project_id=other_project.id, user_id=user_id, role_shares={}))
+    other_meeting = m.Meeting(
+        project_id=other_project.id, started_at=NOW, status="confirmed", started_by=user_id
+    )
+    session.add(other_meeting)
+    session.flush()
+
+    here = m.MeetingTrack(meeting_id=meeting_id, user_id=user_id, started_at=NOW)
+    there = m.MeetingTrack(meeting_id=other_meeting.id, user_id=user_id, started_at=NOW)
+    session.add_all([here, there])
+    session.flush()
+
+    mine_here = make_asset(
+        session, storage, meeting_id,
+        name="here.opus", retention_until=NOW + timedelta(days=30), track_id=here.id,
+    )
+    mine_there = make_asset(
+        session, storage, other_meeting.id,
+        name="there.opus", retention_until=NOW + timedelta(days=30), track_id=there.id,
+    )
+
+    report = revoke_user_data(
+        session, user_id=user_id, project_id=project_id, storage_root=storage, now=NOW
+    )
+
+    assert mine_here.id in report.deleted_assets
+    assert not (storage / "here.opus").exists()
+
+    # ⭐ 다른 팀의 회의는 그대로 남아야 한다. 동의한 범위 밖이다.
+    assert mine_there.id not in report.deleted_assets
+    assert (storage / "there.opus").exists(), (
+        "다른 프로젝트의 내 녹음까지 지웠습니다 — 동의한 범위를 넘습니다"
+    )
+    assert mine_there.deleted_at is None
+
+
 def test_user_deletion_keeps_shared_transcript(session: Session, storage: Path):
     """전사는 다른 참석자의 회의록이기도 하므로 남긴다."""
     project_id, meeting_id, user_id = seed_meeting(session)
