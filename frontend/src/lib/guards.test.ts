@@ -508,6 +508,44 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
     );
   });
 
+  it('⭐ 실패 문구를 폴링이 덮는 자리에 쓰지 않는다 (결함 90)', () => {
+    // 로비는 3초마다 `render()` 를 돌려 방 상태를 다시 그립니다. 실패
+    // 문구를 그 자리(`#room-message`·`#consent-message`)에 쓰면 **3초 뒤에
+    // 조용히 사라집니다.** 브라우저로 재 보니 1.5초에는 있고 3.5초에는
+    // 없었고, 그 자리에는 원래 문장이 돌아와 있었습니다 —
+    //
+    //     1.5s  "동의를 제출하지 못했습니다 — 서버에 닿지 못했습니다…"
+    //     3.5s  "전원 동의했습니다. 녹음을 시작할 수 있습니다"
+    //
+    // 폰을 주머니에 넣었다 꺼내면 아무 일도 없었던 화면을 봅니다.
+    // 실패는 **아무도 안 덮는 자리**(`…-note`)에 씁니다 — 로그아웃(82)·
+    // 복사(81)가 이미 쓰던 방법입니다.
+    const source = readFileSync(join(DEMO, 'lobby.ts'), 'utf8');
+    const code = codeOf(source);
+    const offenders: string[] = [];
+    for (const id of ['room-message', 'consent-message']) {
+      // `render()` 안의 한 줄만 허용합니다. 그 밖에서 쓰면 덮입니다.
+      const writes = [...code.matchAll(new RegExp(`\\$\\('${id}'\\)\\.textContent\\s*=`, 'g'))];
+      if (writes.length > 1) offenders.push(`${id} 에 쓰는 곳이 ${writes.length}곳`);
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '실패 문구는 `roomNote`/`consentNote` 로 `…-note` 에 쓰세요',
+    );
+  });
+
+  it('⭐ 그 자리가 화면에 실제로 있다 (결함 90)', () => {
+    const html = readFileSync(join(PUBLIC, 'lobby.html'), 'utf8');
+    for (const id of ['room-note', 'consent-note']) {
+      strictEqual(
+        new RegExp(`id="${id}"`).test(html),
+        true,
+        `lobby.html 에 <p class="status" id="${id}" hidden> 이 없습니다`,
+      );
+    }
+  });
+
   it('⭐ 브라우저 예외를 화면에 붙이지 않는다', () => {
     // `전송 실패: ${String(err)}` → `전송 실패: TypeError: Failed to fetch`
     const offenders = demoSources()

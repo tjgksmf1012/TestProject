@@ -91,6 +91,11 @@
       <button id="refuse">거부</button>
     </div>
     <p class="status" id="consent-message"></p>
+    <!-- ⚠️ 실패 문구는 **여기** 씁니다 — `#consent-message` 는 3초마다
+         도는 폴링이 서버 문장으로 덮습니다 (결함 90). 실제로 재 보니
+         1.5초에는 실패 문구가 있고 3.5초에는 "전원 동의했습니다" 로
+         바뀌어 있었습니다. -->
+    <p class="status" id="consent-note" hidden></p>
   </section>
 
   <section class="panel">
@@ -108,6 +113,10 @@
     <!-- 브라우저 통화 (docs/15). 각자 자기 PC 에서 회의할 때 여기로 들어간다. -->
     <button id="call" disabled>통화로 회의하기</button>
     <button id="finish" hidden>강제 종료</button>
+    <!-- ⚠️ 실패 문구는 **여기** 씁니다. `#room-message` 는 3초마다 도는
+         폴링이 방 상태로 덮으므로, 거기 쓴 실패 문구는 3초 뒤에 조용히
+         사라집니다 (결함 90). 이 자리는 아무도 안 덮습니다. -->
+    <p class="status" id="room-note" hidden></p>
     <button id="review" hidden>업무 후보 검토</button>
     <button id="kanban">칸반 보기</button>
     <button id="contrib">기여도 보기</button>

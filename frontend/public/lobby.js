@@ -735,10 +735,11 @@ async function postConsent(consentType, consented) {
   );
 }
 async function submitConsent(consented) {
+  consentNote("");
   try {
     const response = await postConsent("recording", consented);
     if (response === null) {
-      $("consent-message").textContent = unreachableText("동의를 제출하지 못했습니다");
+      consentNote(unreachableText("동의를 제출하지 못했습니다"));
       return;
     }
     if (isSessionExpired(response.status)) {
@@ -747,10 +748,7 @@ async function submitConsent(consented) {
     }
     const body = await response.json();
     if (!response.ok) {
-      $("consent-message").textContent = detailText(
-        body,
-        "동의를 제출하지 못했습니다"
-      );
+      consentNote(detailText(body, "동의를 제출하지 못했습니다"));
       return;
     }
     if (consented) {
@@ -761,7 +759,9 @@ async function submitConsent(consented) {
       for (const [type, value] of extras) {
         const extra = await postConsent(type, value);
         if (extra === null || !extra.ok) {
-          $("consent-message").textContent = "녹음 동의는 접수됐지만 아래 두 항목을 저장하지 못했습니다. 다시 눌러 주세요.";
+          consentNote(
+            "녹음 동의는 접수됐지만 아래 두 항목을 저장하지 못했습니다. 다시 눌러 주세요."
+          );
           return;
         }
       }
@@ -771,14 +771,23 @@ async function submitConsent(consented) {
     render();
   } catch (err) {
     console.error(err);
-    $("consent-message").textContent = describeUnexpected();
+    consentNote(describeUnexpected());
   }
+}
+function consentNote(text) {
+  $("consent-note").textContent = text;
+  $("consent-note").hidden = text === "";
+}
+function roomNote(text) {
+  $("room-note").textContent = text;
+  $("room-note").hidden = text === "";
 }
 async function forceFinish() {
   const ok = confirm(
     "참가하지 않은 사람을 기다리지 않고 회의를 끝냅니다.\n그 사람의 발언은 기록되지 않습니다. 계속할까요?"
   );
   if (!ok) return;
+  roomNote("");
   try {
     const response = await trySend(
       () => fetch(`${apiBase}/api/meetings/${meetingId}/finish`, {
@@ -787,15 +796,23 @@ async function forceFinish() {
       })
     );
     if (response === null) {
-      $("room-message").textContent = unreachableText("회의를 끝내지 못했습니다");
+      roomNote(unreachableText("회의를 끝내지 못했습니다"));
       return;
     }
-    const body = await response.json();
-    $("room-message").textContent = body.message ?? "";
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      roomNote(detailText(body, `회의를 끝내지 못했습니다 (HTTP ${response.status})`));
+      return;
+    }
+    roomNote(body?.message ?? "");
     await refresh();
   } catch (err) {
     console.error(err);
-    $("room-message").textContent = describeUnexpected();
+    roomNote(describeUnexpected());
   }
 }
 function renderRoster() {

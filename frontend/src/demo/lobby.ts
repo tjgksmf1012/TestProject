@@ -190,10 +190,11 @@ async function postConsent(
 }
 
 async function submitConsent(consented: boolean): Promise<void> {
+  consentNote('');
   try {
     const response = await postConsent('recording', consented);
     if (response === null) {
-      $('consent-message').textContent = unreachableText('동의를 제출하지 못했습니다');
+      consentNote(unreachableText('동의를 제출하지 못했습니다'));
       return;
     }
     if (isSessionExpired(response.status)) {
@@ -202,10 +203,7 @@ async function submitConsent(consented: boolean): Promise<void> {
     }
     const body = await response.json();
     if (!response.ok) {
-      $('consent-message').textContent = detailText(
-        body,
-        '동의를 제출하지 못했습니다',
-      );
+      consentNote(detailText(body, '동의를 제출하지 못했습니다'));
       return;
     }
 
@@ -226,8 +224,9 @@ async function submitConsent(consented: boolean): Promise<void> {
       for (const [type, value] of extras) {
         const extra = await postConsent(type, value);
         if (extra === null || !extra.ok) {
-          $('consent-message').textContent =
-            '녹음 동의는 접수됐지만 아래 두 항목을 저장하지 못했습니다. 다시 눌러 주세요.';
+          consentNote(
+            '녹음 동의는 접수됐지만 아래 두 항목을 저장하지 못했습니다. 다시 눌러 주세요.',
+          );
           return;
         }
       }
@@ -240,8 +239,27 @@ async function submitConsent(consented: boolean): Promise<void> {
     // 여기까지 오는 것은 응답을 읽다 깨진 경우뿐이다 — 보내는 실패는
     // 위에서 `null` 로 끝난다. 원문은 콘솔에만 남긴다.
     console.error(err);
-    $('consent-message').textContent = describeUnexpected();
+    consentNote(describeUnexpected());
   }
+}
+
+/**
+ * 강제 종료의 결과를 적는 자리.
+ *
+ * ⚠️ **`#room-message` 가 아닙니다.** 저기는 `render()` 가 방 상태로
+ * 덮는 자리고, `render()` 는 3초마다 도는 폴링이 부릅니다. 실패 문구를
+ * 저기 쓰면 **3초 뒤에 조용히 사라집니다** — 브라우저로 재 보니
+ * 1.5초에는 있고 3.5초에는 없었습니다 (결함 90). 폰을 주머니에 넣었다
+ * 꺼내면 못 봅니다.
+ */
+function consentNote(text: string): void {
+  $('consent-note').textContent = text;
+  $('consent-note').hidden = text === '';
+}
+
+function roomNote(text: string): void {
+  $('room-note').textContent = text;
+  $('room-note').hidden = text === '';
 }
 
 async function forceFinish(): Promise<void> {
@@ -251,6 +269,7 @@ async function forceFinish(): Promise<void> {
   );
   if (!ok) return;
 
+  roomNote('');
   try {
     const response = await trySend(() =>
       fetch(`${apiBase}/api/meetings/${meetingId}/finish`, {
@@ -259,15 +278,29 @@ async function forceFinish(): Promise<void> {
       }),
     );
     if (response === null) {
-      $('room-message').textContent = unreachableText('회의를 끝내지 못했습니다');
+      roomNote(unreachableText('회의를 끝내지 못했습니다'));
       return;
     }
-    const body = await response.json();
-    $('room-message').textContent = body.message ?? '';
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    const body = await response.json().catch(() => null);
+    // ⚠️ 예전에는 `body.message ?? ''` 하나였습니다. 500 이 와도 `message`
+    // 가 없어 빈 문자열이 들어가고, 곧바로 폴링이 원래 문장을 되돌려
+    // 놓아 **화면이 누르기 전과 똑같아졌습니다.** 사람은 눌린 줄 압니다.
+    if (!response.ok) {
+      roomNote(detailText(body, `회의를 끝내지 못했습니다 (HTTP ${response.status})`));
+      return;
+    }
+    // ⚠️ 성공 문구도 `#room-message` 가 아니라 여기 씁니다. 저기 쓰면
+    // 바로 아래 `refresh()` 가, 아니면 3초 뒤 폴링이 덮습니다 —
+    // **"2개 트랙을 강제 종료했습니다" 라는 건수가 사라집니다.**
+    roomNote((body as { message?: string })?.message ?? '');
     await refresh();
   } catch (err) {
     console.error(err);
-    $('room-message').textContent = describeUnexpected();
+    roomNote(describeUnexpected());
   }
 }
 
