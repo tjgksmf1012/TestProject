@@ -114,7 +114,14 @@ var BLOCKER_TEXT = {
   unknown_assignee: "담당자가 이 프로젝트의 팀원이 아닙니다",
   already_approved: "이미 승인된 후보입니다",
   already_rejected: "이미 거절된 후보입니다",
-  no_evidence: "근거 발화가 없습니다 — 회의에 없던 내용일 수 있습니다"
+  no_evidence: "근거 발화가 없습니다 — 회의에 없던 내용일 수 있습니다",
+  // 아래 둘은 화면이 만들지 않는다. 서버만 낸다.
+  //
+  // 서버 문구는 "이 회의에 없는 후보입니다" 인데, 그것만 읽으면 사람은
+  // 무엇을 해야 할지 모른다. 이 코드가 나오는 경우는 하나뿐이다 —
+  // 화면이 들고 있는 목록이 서버보다 낡았다. 그래서 할 일을 같이 적는다.
+  unknown_candidate: "이 회의에 없는 후보입니다 — 목록이 오래됐습니다. 새로 고쳐 주세요",
+  no_reviewer: "로그인 정보가 확인되지 않았습니다 — 다시 로그인해 주세요"
 };
 function describeBlocker(code) {
   return BLOCKER_TEXT[code] ?? code;

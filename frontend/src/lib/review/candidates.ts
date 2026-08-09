@@ -64,7 +64,14 @@ export function emptyDraft(): Draft {
   return { decision: 'pending' };
 }
 
-/** 서버 `ApprovalError` 와 같은 코드를 쓴다. 갈라지면 안 된다. */
+/**
+ * 서버 `ApprovalError` 와 같은 코드를 쓴다. 갈라지면 안 된다.
+ *
+ * ⚠️ **서버가 낼 수 있는 코드를 하나도 빠짐없이** 적는다. 아래 일곱은
+ * 이 화면이 스스로도 판정하는 것이고, 마지막 둘은 **서버만 낸다** —
+ * 그래도 여기 있어야 한다. 없으면 `describeBlocker` 가 코드를 그대로
+ * 흘려보내 사람이 `unknown_candidate` 같은 내부 이름을 읽게 된다.
+ */
 export type BlockerCode =
   | 'missing_assignee'
   | 'missing_deadline'
@@ -72,7 +79,9 @@ export type BlockerCode =
   | 'unknown_assignee'
   | 'already_approved'
   | 'already_rejected'
-  | 'no_evidence';
+  | 'no_evidence'
+  | 'unknown_candidate'
+  | 'no_reviewer';
 
 export interface Blocker {
   code: BlockerCode;
@@ -87,6 +96,13 @@ const BLOCKER_TEXT: Record<BlockerCode, string> = {
   already_approved: '이미 승인된 후보입니다',
   already_rejected: '이미 거절된 후보입니다',
   no_evidence: '근거 발화가 없습니다 — 회의에 없던 내용일 수 있습니다',
+  // 아래 둘은 화면이 만들지 않는다. 서버만 낸다.
+  //
+  // 서버 문구는 "이 회의에 없는 후보입니다" 인데, 그것만 읽으면 사람은
+  // 무엇을 해야 할지 모른다. 이 코드가 나오는 경우는 하나뿐이다 —
+  // 화면이 들고 있는 목록이 서버보다 낡았다. 그래서 할 일을 같이 적는다.
+  unknown_candidate: '이 회의에 없는 후보입니다 — 목록이 오래됐습니다. 새로 고쳐 주세요',
+  no_reviewer: '로그인 정보가 확인되지 않았습니다 — 다시 로그인해 주세요',
 };
 
 /**

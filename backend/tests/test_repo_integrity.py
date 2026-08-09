@@ -211,6 +211,7 @@ def _screen_vocabularies():
     from teamflow.contribution.events import Category
     from teamflow.contribution.profiles import Role
     from teamflow.db.models import MeetingStatus
+    from teamflow.meeting.approval import ApprovalError
     from teamflow.services import task_service
 
     return [
@@ -244,6 +245,17 @@ def _screen_vocabularies():
             "frontend/src/lib/track/diagram.ts",
             "REASON_TEXT",
         ),
+        # 승인이 막힌 이유. 서버가 `failures` 로 코드만 내보내고 화면이
+        # 옮긴다. 화면이 스스로도 판정하는 코드가 일곱이라 **다 있는 줄
+        # 알기 쉬운데**, 서버만 내는 둘(`unknown_candidate`·`no_reviewer`)
+        # 이 빠져 있었다 — 목록이 낡은 채로 승인을 누르면 사람이
+        # `#999 unknown_candidate` 를 읽었다.
+        (
+            "승인이 막힌 이유",
+            {e.value for e in ApprovalError},
+            "frontend/src/lib/review/candidates.ts",
+            "BLOCKER_TEXT",
+        ),
     ]
 
 
@@ -254,8 +266,10 @@ def test_every_value_the_server_sends_has_a_korean_word_on_the_screen():
     problems: list[str] = []
     for name, expected, rel, table in _screen_vocabularies():
         source = (REPO_ROOT / rel).read_text()
+        # 키 타입이 `string` 이 아니라 좁은 유니온(`Record<BlockerCode, …>`)
+        # 인 표도 있다. 이름만 보고 찾으면 표가 바뀔 때 조용히 못 찾는다.
         block = re.search(
-            rf"{table}: Record<string, string> = \{{(.*?)\}};", source, re.DOTALL
+            rf"{table}: Record<[^,>]+, string> = \{{(.*?)\}};", source, re.DOTALL
         )
         if block is None:
             problems.append(f"{name}: {rel} 에서 {table} 을 못 찾았습니다")

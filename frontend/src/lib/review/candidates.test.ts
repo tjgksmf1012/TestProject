@@ -414,6 +414,15 @@ describe('describeBlocker', () => {
     // 삼키면 사용자가 원인을 영영 못 본다.
     assert.equal(describeBlocker('some_new_rule'), 'some_new_rule');
   });
+
+  it('화면이 만들지 않고 서버만 내는 코드도 한국어로 옮긴다 (결함 86)', () => {
+    // 이 둘은 `approvalBlockers` 가 절대 만들지 않는다. 그래서 화면 사전에
+    // 빠져 있었고, 목록이 낡은 채로 승인을 누르면 사람이 화면에서
+    // `#999 unknown_candidate` 를 읽었다 — 한국어 화면에 내부 이름이다.
+    for (const code of ['unknown_candidate', 'no_reviewer']) {
+      assert.notEqual(describeBlocker(code), code, `${code} 가 그대로 나옵니다`);
+    }
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
