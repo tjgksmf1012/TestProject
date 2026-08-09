@@ -133,13 +133,23 @@ def progress_client(redis_url: str | None) -> object | None:
 
 
 #: 단계 이름을 사람의 말로. **우리 용어를 화면에 내보내지 않습니다.**
+#:
+#: ⚠️ **`pipeline.Stage` 와 짝입니다** (결함 106). 예전에는 양방향으로
+#: 어긋나 있었습니다.
+#:
+#:     옮길 말이 없는 단계   done · failed · validate  → 전부 "처리 중"
+#:     죽은 라벨            diarize · persist         → 파이프라인에 없음
+#:
+#: `failed` 는 **일부러 안 넣습니다** — 실패는 진행 단계가 아니라 결과라,
+#: `describe` 가 회의 상태를 먼저 보고 답합니다. 나머지는 전부 있어야
+#: 하고 `test_repo_integrity` 가 그것을 지킵니다.
 STAGE_TEXT: dict[str, str] = {
     "load": "녹음 파일을 읽는 중",
     "align": "트랙 시각을 맞추는 중",
     "transcribe": "말을 글로 옮기는 중",
-    "diarize": "누가 말했는지 가리는 중",
     "analyze": "회의 내용을 정리하는 중",
-    "persist": "결과를 저장하는 중",
+    "validate": "결과를 검사하는 중",
+    "done": "정리가 끝났습니다",
 }
 
 
@@ -152,7 +162,21 @@ def describe(progress: Progress | None, *, meeting_status: str) -> str:
         처리 전/중 + 진행률 없음  → 아직 못 받았다. 기다리면 된다
         처리 끝    + 진행률 없음  → 끝난 것이다. 기다릴 필요 없다
     """
+    # ⚠️ **실패는 진행률보다 먼저 봅니다** (결함 106).
+    #
+    # 파이프라인은 죽을 때도 진행률을 남깁니다(`stage="failed", percent=0`).
+    # 진행률을 먼저 보면 그것이 이겨서, 이미 끝난 실패를 이렇게 말했습니다.
+    #
+    #     처리 중 · 0% — KeyError: 'samples'
+    #
+    # 팀은 **기다리기만 하고 다시 녹음하지 않습니다.** 그 회의의 기여는
+    # 전원에게 영영 빕니다. 실패는 진행 단계가 아니라 **결과**입니다.
+    if meeting_status == "failed":
+        return "처리에 실패했습니다"
+
     if progress is not None:
+        # 모르는 단계를 "처리 중" 으로 뭉개면 새 단계가 조용히 묻힙니다.
+        # `Stage` 전수가 여기 있는지는 `test_repo_integrity` 가 지킵니다.
         stage = STAGE_TEXT.get(progress.stage, "처리 중")
         line = f"{stage} · {progress.percent}%"
         return f"{line} — {progress.detail}" if progress.detail else line
@@ -160,6 +184,4 @@ def describe(progress: Progress | None, *, meeting_status: str) -> str:
     if meeting_status in ("queued", "processing"):
         # ⚠️ "0%" 가 아닙니다. 모르는 것과 안 한 것은 다릅니다.
         return "처리 중입니다 — 진행 상황은 아직 알 수 없습니다"
-    if meeting_status == "failed":
-        return "처리에 실패했습니다"
     return ""

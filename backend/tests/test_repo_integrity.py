@@ -711,6 +711,77 @@ def test_the_paired_constant_table_is_not_stale():
     assert declared, "'같은 값' 주석을 하나도 못 찾았습니다 — 이 검사가 헛돌고 있습니다"
 
 
+def test_every_pipeline_stage_has_words_a_person_can_read():
+    """⭐ 파이프라인 단계마다 **사람의 말**이 있는가 (결함 106).
+
+    어휘 표 여섯 개는 &#34;서버 값 → 화면 파일의 표&#34; 모양이라 이 짝을 못
+    담았습니다. `STAGE_TEXT` 는 **서버 안에서** 옮기기 때문입니다. 그래서
+    아무도 안 봤고, 양방향으로 어긋나 있었습니다.
+
+        옮길 말이 없는 단계   done · failed · validate  → 전부 "처리 중"
+        죽은 라벨            diarize · persist         → 파이프라인에 없음
+
+    실패한 회의가 이렇게 보였습니다.
+
+        처리 중 · 0% — KeyError: 'samples'
+
+    **"처리 중"** 이라고 하니 팀은 기다리기만 하고 다시 녹음하지 않습니다.
+    그 회의의 기여는 전원에게 영영 빕니다. 게다가 한글 화면에 파이썬 예외
+    원문이 붙습니다 — 결함 78·86 이 고친 바로 그 부류입니다.
+
+    ⚠️ `failed` 만 일부러 뺍니다. 실패는 진행 **단계**가 아니라 **결과**라,
+    `describe` 가 회의 상태를 먼저 보고 답합니다.
+    """
+    from teamflow.pipeline.meeting_pipeline import Stage
+    from teamflow.services.progress_service import STAGE_TEXT
+
+    stages = {v for k, v in vars(Stage).items() if not k.startswith("_")}
+    assert stages, "Stage 값을 못 읽었습니다"
+
+    #: 진행 단계가 아니라 결과라 화면 표에 없는 것. 근거 없이 늘리지 마세요.
+    NOT_A_STAGE = {
+        "failed": "실패는 결과다 — `describe` 가 회의 상태를 먼저 보고 답한다",
+    }
+
+    missing = sorted(stages - set(STAGE_TEXT) - set(NOT_A_STAGE))
+    assert not missing, (
+        f"이 단계들에 사람의 말이 없습니다: {missing} — "
+        '`STAGE_TEXT.get(stage, "처리 중")` 이 우리 용어를 "처리 중" 으로 뭉갭니다'
+    )
+
+    dead = sorted(set(STAGE_TEXT) - stages)
+    assert not dead, f"파이프라인에 없는 단계가 표에 있습니다: {dead} — 지우세요"
+
+    stale = sorted(set(NOT_A_STAGE) - stages)
+    assert not stale, f"이제 없는 단계입니다: {stale} — 면제 목록에서 빼세요"
+
+
+def test_the_pipeline_does_not_put_a_python_exception_on_the_screen():
+    """⭐ 실패 진행률에 **예외 원문을 싣지 않는다** (결함 106).
+
+    `reporter.report(...)` 가 남기는 값은 로비 화면으로 **그대로 나갑니다.**
+    한글 화면에 `KeyError: 'samples'` 가 뜨면 사람은 아무것도 못 얻고,
+    우리도 못 얻습니다(스택이 없으니). 원문은 `logger.exception` 이
+    스택까지 남깁니다.
+    """
+    import re
+
+    source = (
+        REPO_ROOT / "backend" / "teamflow" / "pipeline" / "meeting_pipeline.py"
+    ).read_text()
+
+    offenders = [
+        line.strip()
+        for line in source.splitlines()
+        if re.search(r"reporter\.report\([^)]*\bstr\(\s*exc\b", line)
+        or re.search(r"reporter\.report\([^)]*\bexc\b[^)]*\)", line)
+    ]
+    assert not offenders, (
+        "진행률에 예외 원문을 실었습니다 — 화면으로 그대로 나갑니다:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
 def test_the_seed_track_numbers_agree_with_the_production_formula():
     """⭐ 시드의 커버리지·총 공백·구멍 목록이 **서로 맞는가** (결함 99).
 

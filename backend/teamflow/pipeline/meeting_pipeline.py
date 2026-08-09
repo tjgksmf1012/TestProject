@@ -197,7 +197,11 @@ def process_meeting(
         logger.exception("meeting=%s 처리 실패", meeting_id)
         result.stage = Stage.FAILED
         result.error = str(exc)
-        reporter.report(meeting_id, Stage.FAILED, 0, str(exc))
+        # ⚠️ **예외 원문을 진행률에 싣지 않습니다** (결함 106). 이 값은
+        # 화면으로 그대로 나갑니다 — 한글 화면에 `KeyError: 'samples'` 가
+        # 뜨면 사람은 아무것도 못 얻습니다(결함 78·86 과 같은 부류).
+        # 원문은 바로 위 `logger.exception` 이 스택까지 남깁니다.
+        reporter.report(meeting_id, Stage.FAILED, 0)
         return result
 
 
