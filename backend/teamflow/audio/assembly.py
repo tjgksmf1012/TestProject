@@ -33,6 +33,7 @@ docs/04-회의-처리-파이프라인.md §2.6
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 import numpy as np
 
@@ -68,11 +69,29 @@ class PlacedChunk:
         return self.start_ms + self.duration_ms
 
 
+class GapReason(StrEnum):
+    """공백이 왜 생겼는가 — **여기가 유일한 출처다.**
+
+    ⚠️ 예전에는 `#: recorder_stalled | chunk_lost` 라는 **주석**이었다.
+    주석은 아무도 안 읽고 아무것도 못 막는다 — 값을 적어 놓고 읽는 곳이
+    없는 것은 이 저장소가 반복해 당한 모양이다(결함 74 의 `--ico`,
+    결함 84 의 `confirmed`). 화면(`lib/track/diagram.ts`)이 이 값마다
+    사람 문장을 가지고 있어야 하고, 그걸 테스트가 확인한다.
+    """
+
+    #: 조각 자체가 안 왔다 — 서버가 본 것
+    CHUNK_LOST = "chunk_lost"
+    #: 조각은 왔는데 그 사이에 시간이 비었다 — 녹음기가 멈춰 있었다
+    RECORDER_STALLED = "recorder_stalled"
+    #: 마이크가 꺼져 있었다. **서버는 알 수 없어** 클라이언트만 보고한다
+    TRACK_MUTED = "track_muted"
+
+
 @dataclass(frozen=True, slots=True)
 class Gap:
     start_ms: int
     end_ms: int
-    #: recorder_stalled | chunk_lost
+    #: 값의 뜻은 `GapReason` 참조. 그쪽이 유일한 출처다.
     reason: str
 
     @property

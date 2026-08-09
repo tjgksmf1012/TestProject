@@ -182,43 +182,164 @@ def test_every_script_the_screens_load_is_in_the_repository():
     )
 
 
-def test_the_screens_have_a_korean_label_for_every_category_the_server_sends():
-    """⭐ 기여도 화면의 카테고리 어휘가 서버 `Category` 와 같아야 한다.
+# ══════════════════════════════════════════════════════════════
+# 두 언어에 걸친 어휘 — 서버가 만드는 값마다 화면에 사람 말이 있는가
+# ══════════════════════════════════════════════════════════════
+#
+# ⭐ **이 저장소가 반복해 당한 부류입니다.**
+#
+#   · 기여도 화면 표에는 서버가 만들지 않는 `review`·`design`·`planning`
+#     이 있었고, 서버가 실제로 보내는 `schedule`·`peer` 가 없었습니다.
+#     `describeCategory` 는 모르는 값을 **그대로 돌려주므로** 예외도 콘솔
+#     경고도 없이 한글 화면에 영어 식별자가 찍혔습니다 —
+#     "schedule, peer 활동은 이번 계산에서 빠졌습니다."
+#   · 회의 상태 `confirmed` 는 화면에 라벨도 가지도 있었는데 **서버가 그
+#     값을 한 번도 안 넣었습니다** (결함 84). 사람이 후보를 전부 검토해도
+#     홈 화면은 "회의에서 업무가 나오지 않았습니다" 라고 말했습니다.
+#
+# 두 번 당하고 두 번 손으로 테스트를 썼습니다. 세 번째부터는 표로 둡니다 —
+# 나머지 어휘 넷(업무 상태·역할·공백 이유)은 지금 맞지만, **맞게 유지해
+# 주는 것이 아무것도 없었습니다.**
+#
+# ⚠️ 두 방향을 다 봅니다. 서버에만 있으면 화면에 **영어 식별자**가 찍히고,
+# 화면에만 있으면 **아무도 못 타는 죽은 가지**입니다.
 
-    어긋나 있었다. 화면 표에는 서버가 만들지 않는 `review`·`design`·
-    `planning` 이 있었고, 서버가 실제로 보내는 `schedule`·`peer` 가
-    없었다. `describeCategory` 는 모르는 값을 **그대로 돌려주므로**
-    예외도 콘솔 경고도 없이 한글 화면에 영어 식별자가 찍혔다:
 
-        "schedule, peer 활동은 이번 계산에서 빠졌습니다."
+def _screen_vocabularies():
+    """(이름, 서버 값들, 화면 파일, 화면 표 이름)."""
+    from teamflow.audio.assembly import GapReason
+    from teamflow.contribution.events import Category
+    from teamflow.contribution.profiles import Role
+    from teamflow.db.models import MeetingStatus
+    from teamflow.services import task_service
 
-    성적으로 이어질 수 있는 화면에서 학생이 자기 점수에서 무엇이
-    빠졌는지 읽을 수 없는 상태였다. 프런트 테스트는 그 잘못된 어휘를
-    그대로 고정하고 있어서 절대 잡지 못했다 — 두 언어에 걸친 규약은
-    한쪽 테스트로 못 잡으므로 여기서 잡는다.
+    return [
+        (
+            "기여 카테고리",
+            {c.value for c in Category},
+            "frontend/src/lib/contribution/view.ts",
+            "CATEGORY_LABEL",
+        ),
+        (
+            "회의 상태",
+            {s.value for s in MeetingStatus},
+            "frontend/src/lib/home/next.ts",
+            "MEETING_STATUS_LABEL",
+        ),
+        (
+            "업무 상태",
+            set(task_service.STATUSES),
+            "frontend/src/lib/kanban/board.ts",
+            "STATUS_LABEL",
+        ),
+        (
+            "역할",
+            {r.value for r in Role},
+            "frontend/src/lib/contribution/view.ts",
+            "ROLE_NAMES",
+        ),
+        (
+            "공백 이유",
+            {r.value for r in GapReason},
+            "frontend/src/lib/track/diagram.ts",
+            "REASON_TEXT",
+        ),
+    ]
+
+
+def test_every_value_the_server_sends_has_a_korean_word_on_the_screen():
+    """⭐ 서버 어휘와 화면 어휘가 **양쪽 다** 맞아야 한다."""
+    import re
+
+    problems: list[str] = []
+    for name, expected, rel, table in _screen_vocabularies():
+        source = (REPO_ROOT / rel).read_text()
+        block = re.search(
+            rf"{table}: Record<string, string> = \{{(.*?)\}};", source, re.DOTALL
+        )
+        if block is None:
+            problems.append(f"{name}: {rel} 에서 {table} 을 못 찾았습니다")
+            continue
+        labelled = set(re.findall(r"^\s*(\w+):", block.group(1), re.MULTILINE))
+        missing = sorted(expected - labelled)
+        dead = sorted(labelled - expected)
+        if missing:
+            problems.append(f"{name}: 서버에만 있음(화면에 영어로 찍힙니다) {missing}")
+        if dead:
+            problems.append(f"{name}: 화면에만 있음(죽은 라벨입니다) {dead}")
+
+    assert problems == [], "두 언어에 걸친 어휘가 어긋났습니다:\n" + "\n".join(
+        f"  {p}" for p in problems
+    )
+
+
+def test_the_vocabulary_table_itself_is_not_stale():
+    """표가 낡으면 **아무것도 안 보면서 통과**한다.
+
+    파일이 사라지거나 이름이 바뀌면 위 테스트가 &#34;못 찾았습니다&#34; 로
+    실패하지만, 값 집합이 비어 버리는 경우는 조용히 지나갑니다.
+    """
+    for name, expected, rel, _table in _screen_vocabularies():
+        assert expected, f"{name}: 서버 값이 하나도 없습니다 — 표가 낡았습니다"
+        assert (REPO_ROOT / rel).exists(), f"{name}: {rel} 이 없습니다"
+
+
+def test_the_screens_have_a_next_step_for_every_meeting_status():
+    """회의 상태는 라벨만으로 부족하다 — **다음에 할 일**도 있어야 한다.
+
+    라벨만 있고 가지가 없으면 `nextStepFor` 가 `default` 로 떨어져
+    "알 수 없는 상태입니다" 가 뜹니다.
     """
     import re
 
-    from teamflow.contribution.events import Category
+    from teamflow.db.models import MeetingStatus
 
-    source = (
-        REPO_ROOT / "frontend" / "src" / "lib" / "contribution" / "view.ts"
-    ).read_text()
+    source = (REPO_ROOT / "frontend" / "src" / "lib" / "home" / "next.ts").read_text()
+    cases = set(re.findall(r"case '([a-z_]+)':", source))
+    missing = sorted({s.value for s in MeetingStatus} - cases)
+    assert missing == [], f"`nextStepFor` 에 가지가 없는 상태입니다: {missing}"
 
-    block = re.search(
-        r"export const CATEGORY_LABEL: Record<string, string> = \{(.*?)\};",
-        source,
-        re.DOTALL,
-    )
-    assert block is not None, "CATEGORY_LABEL 을 찾지 못했습니다"
 
-    labelled = set(re.findall(r"^\s*(\w+):", block.group(1), re.MULTILINE))
-    expected = {c.value for c in Category}
+def test_every_meeting_status_has_someone_who_writes_it():
+    """⭐ **아무도 안 쓰는 상태를 두지 않는다** (결함 84 의 뿌리).
 
-    assert labelled == expected, (
-        "화면의 카테고리 라벨이 서버 Category 와 다릅니다.\n"
-        f"  서버에만 있음(화면에 영어로 찍힙니다): {sorted(expected - labelled)}\n"
-        f"  화면에만 있음(죽은 코드입니다):        {sorted(labelled - expected)}"
+    `confirmed` 는 모델 주석에도, 화면 라벨에도, 승인 화면의 빈 상태
+    문구에도 있었는데 **넣는 코드가 0곳**이었습니다. 이 저장소의 대표
+    실패 방식(`EventType` 생산자 가드·결함 63·75·83)이 회의 상태에서
+    반복된 것입니다.
+
+    `ast` 로 **`… .status = 값`** 대입과 컬럼 기본값을 모읍니다.
+    글자를 찾는 대신 코드 모양을 보므로, 상수로 빼도 안 깨집니다.
+    """
+    import ast
+
+    from teamflow.db.models import MeetingStatus
+
+    written: set[str] = {MeetingStatus.PENDING.value}  # 컬럼 기본값
+    for path in (REPO_ROOT / "backend" / "teamflow").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if not (isinstance(target, ast.Attribute) and target.attr == "status"):
+                    continue
+                value = node.value
+                # `meeting.status = "confirmed"`
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    written.add(value.value)
+                # `meeting.status = MeetingStatus.CONFIRMED.value`
+                elif isinstance(value, ast.Attribute) and value.attr == "value":
+                    inner = value.value
+                    if isinstance(inner, ast.Attribute):
+                        member = getattr(MeetingStatus, inner.attr, None)
+                        if member is not None:
+                            written.add(member.value)
+
+    orphans = sorted({s.value for s in MeetingStatus} - written)
+    assert orphans == [], (
+        "넣는 코드가 없는 회의 상태입니다 — 화면이 그 상태를 설명하고 있어도 "
+        f"영원히 안 뜹니다: {orphans}"
     )
 
 
@@ -766,89 +887,3 @@ def test_screen_text_does_not_space_korean_particles():
     )
 
 
-def test_the_screens_know_every_meeting_status_the_server_can_set():
-    """⭐ 회의 상태 어휘가 서버 `MeetingStatus` 와 같아야 한다 (결함 84).
-
-    `Category` 에 이미 같은 그물을 쳐 뒀는데(위 참조) 회의 상태에는
-    없었습니다. 그래서 이런 일이 벌어졌습니다 —
-
-      · 화면에는 `confirmed` 라벨("검토 완료")과 그 상태의 "다음에 할 일"
-        가지가 있는데 **서버가 그 값을 한 번도 안 넣었습니다.** 사람이
-        후보를 전부 검토해도 회의는 `needs_review` 로 남았고, 홈 화면은
-        "회의에서 업무가 나오지 않았습니다" 라고 말했습니다. 업무는
-        나왔고 사람이 전부 검토한 뒤였습니다.
-
-    두 방향을 다 봅니다. 서버에만 있으면 홈 화면에 **영어 식별자가 그대로**
-    찍히고(`describeMeetingStatus` 는 모르는 값을 그대로 돌려줍니다),
-    화면에만 있으면 **아무도 못 타는 죽은 가지**입니다.
-    """
-    import re
-
-    from teamflow.db.models import MeetingStatus
-
-    source = (REPO_ROOT / "frontend" / "src" / "lib" / "home" / "next.ts").read_text()
-
-    block = re.search(
-        r"export const MEETING_STATUS_LABEL: Record<string, string> = \{(.*?)\};",
-        source,
-        re.DOTALL,
-    )
-    assert block is not None, "MEETING_STATUS_LABEL 을 찾지 못했습니다"
-    labelled = set(re.findall(r"^\s*(\w+):", block.group(1), re.MULTILINE))
-
-    expected = {s.value for s in MeetingStatus}
-    assert labelled == expected, (
-        "화면의 회의 상태 라벨이 서버 MeetingStatus 와 다릅니다.\n"
-        f"  서버에만 있음(홈에 영어로 찍힙니다): {sorted(expected - labelled)}\n"
-        f"  화면에만 있음(죽은 라벨입니다):      {sorted(labelled - expected)}"
-    )
-
-    # "다음에 할 일" 도 상태마다 있어야 한다. 라벨만 있고 가지가 없으면
-    # `default` 로 떨어져 "알 수 없는 상태입니다" 가 뜬다.
-    cases = set(re.findall(r"case '([a-z_]+)':", source))
-    assert expected <= cases, (
-        "`nextStepFor` 에 가지가 없는 상태가 있습니다: " f"{sorted(expected - cases)}"
-    )
-
-
-def test_every_meeting_status_has_someone_who_writes_it():
-    """⭐ **아무도 안 쓰는 상태를 두지 않는다** (결함 84 의 뿌리).
-
-    `confirmed` 는 모델 주석에도, 화면 라벨에도, 승인 화면의 빈 상태
-    문구에도 있었는데 **넣는 코드가 0곳**이었습니다. 이 저장소의 대표
-    실패 방식(`EventType` 생산자 가드·결함 63·75·83)이 회의 상태에서
-    반복된 것입니다.
-
-    `ast` 로 **`… .status = "값"`** 대입과 컬럼 기본값을 모읍니다.
-    글자를 찾는 대신 코드 모양을 보므로, 상수로 빼도 안 깨집니다.
-    """
-    import ast
-
-    from teamflow.db.models import MeetingStatus
-
-    written: set[str] = {MeetingStatus.PENDING.value}  # 컬럼 기본값
-    for path in (REPO_ROOT / "backend" / "teamflow").rglob("*.py"):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Assign):
-                continue
-            for target in node.targets:
-                if not (isinstance(target, ast.Attribute) and target.attr == "status"):
-                    continue
-                value = node.value
-                # `meeting.status = "confirmed"`
-                if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                    written.add(value.value)
-                # `meeting.status = MeetingStatus.CONFIRMED.value`
-                elif isinstance(value, ast.Attribute) and value.attr == "value":
-                    inner = value.value
-                    if isinstance(inner, ast.Attribute):
-                        member = getattr(MeetingStatus, inner.attr, None)
-                        if member is not None:
-                            written.add(member.value)
-
-    orphans = sorted({s.value for s in MeetingStatus} - written)
-    assert orphans == [], (
-        "넣는 코드가 없는 회의 상태입니다 — 화면이 그 상태를 설명하고 있어도 "
-        f"영원히 안 뜹니다: {orphans}"
-    )
