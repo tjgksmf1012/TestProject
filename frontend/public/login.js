@@ -291,6 +291,6 @@ $("toggle").addEventListener("click", () => {
 });
 void fetch(`${apiBase}/api/auth/me`, { credentials: "same-origin" }).then((r) => {
   if (r.ok) location.href = next;
-});
+}).catch(() => void 0);
 render();
 bootApp();

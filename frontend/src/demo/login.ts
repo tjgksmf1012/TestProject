@@ -117,9 +117,18 @@ $('toggle').addEventListener('click', () => {
 });
 
 // 이미 로그인돼 있으면 굳이 다시 묻지 않는다.
-void fetch(`${apiBase}/api/auth/me`, { credentials: 'same-origin' }).then((r) => {
-  if (r.ok) location.href = next;
-});
+// 이미 로그인돼 있으면 곧바로 넘겨 준다. **닿지 못하면 아무 말도 안 한다** —
+// 아직 아무것도 안 한 사람에게 "서버에 닿지 못했습니다" 를 띄우면 놀랍니다.
+//
+// ⚠️ 그래도 `.catch` 는 있어야 합니다 (결함 115). 없으면 오프라인에서
+// `TypeError: Failed to fetch` 가 **처리되지 않은 거부**로 남아 콘솔에
+// 빨간 줄이 뜹니다 — 로그인은 이 제품의 첫 화면입니다. 말을 안 하는 것과
+// 오류를 흘리는 것은 다릅니다.
+void fetch(`${apiBase}/api/auth/me`, { credentials: 'same-origin' })
+  .then((r) => {
+    if (r.ok) location.href = next;
+  })
+  .catch(() => undefined);
 
 render();
 

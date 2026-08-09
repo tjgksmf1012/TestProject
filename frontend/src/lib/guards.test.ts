@@ -496,7 +496,9 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
       'src/demo/login.ts':
         '`void fetch(…/me)` 는 **이미 로그인돼 있으면 넘겨 주려는** 곁길입니다. ' +
         '닿지 못하면 로그인 폼이 그대로 남고, 그게 맞는 화면입니다 — ' +
-        '여기서 "서버에 닿지 못했습니다" 를 띄우면 아직 아무것도 안 한 사람을 놀래킵니다',
+        '여기서 "서버에 닿지 못했습니다" 를 띄우면 아직 아무것도 안 한 사람을 놀래킵니다. ' +
+        '⚠️ **말을 안 하는 것과 오류를 흘리는 것은 다릅니다** (결함 115) — ' +
+        '`.catch(() => undefined)` 로 거부를 삼킵니다. 아래 검사가 그것을 봅니다',
     };
 
     const offenders: string[] = [];
@@ -1185,6 +1187,57 @@ describe('한국어 조사 (결함 76)', () => {
       return sure.test(text) || maybe.test(text);
     });
     strictEqual(wronglyFlagged.join('\n'), '', '이건 띄어 쓰는 것이 맞는 말입니다');
+  });
+});
+
+describe('처리되지 않은 거부 (결함 115)', () => {
+  it('⭐ `void fetch(…)` 로 띄운 요청은 **`.catch` 로 닫는다**', () => {
+    // 결함 87 이후 바꾸는 요청은 전부 `trySend` 를 탑니다. 남은 것은
+    // **아무 말도 안 하기로 한 곁길**입니다 — 로그인 화면이 "이미
+    // 로그인돼 있나" 를 물어보는 자리가 그렇습니다.
+    //
+    // 말을 안 하는 것은 맞습니다. 그런데 `.catch` 가 없으면 오프라인에서
+    // `TypeError: Failed to fetch` 가 **처리되지 않은 거부**로 남습니다.
+    // 실제로 재 보니 그랬습니다 — `pageerror` 로 잡힙니다.
+    //
+    //     오프라인 로그인 화면: 폼은 그대로 · 안내 없음  ← 여기까지는 맞다
+    //     pageerror: TypeError: Failed to fetch          ← 이건 아니다
+    //
+    // **말을 안 하는 것과 오류를 흘리는 것은 다릅니다.** 로그인은 이
+    // 제품의 첫 화면이고, 시연에서 개발자 도구를 열면 그 빨간 줄이
+    // 첫 화면에 있습니다.
+    // ⚠️ **정규식으로 문장을 자르면 안 됩니다.** 처음에 `void fetch(`
+    // 부터 다음 `;` 까지로 잡았더니, 그 세미콜론이 `.then` **몸통 안**의
+    // 것이라 뒤에 붙은 `.catch` 를 못 봤습니다 — 이미 고쳐 둔 코드를
+    // 위반으로 신고했습니다. 괄호 깊이를 세어 문장 끝까지 갑니다.
+    const statementFrom = (code: string, start: number): string => {
+      let depth = 0;
+      for (let i = start; i < code.length; i += 1) {
+        const ch = code[i];
+        if (ch === '(' || ch === '{' || ch === '[') depth += 1;
+        else if (ch === ')' || ch === '}' || ch === ']') depth -= 1;
+        else if (ch === ';' && depth === 0) return code.slice(start, i + 1);
+      }
+      return code.slice(start);
+    };
+
+    const offenders: string[] = [];
+
+    for (const { name, source } of demoFiles()) {
+      const code = codeOf(source);
+      for (const hit of code.matchAll(/void\s+fetch\(/g)) {
+        const statement = statementFrom(code, hit.index ?? 0);
+        if (!statement.includes('.catch(')) {
+          offenders.push(`${name} → ${statement.split('\n')[0]?.trim()}`);
+        }
+      }
+    }
+
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`void fetch(…)` 에 `.catch` 가 없습니다 — 오프라인에서 처리되지 않은 거부가 남습니다',
+    );
   });
 });
 
