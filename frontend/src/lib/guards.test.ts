@@ -1024,6 +1024,10 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
       '위와 같음 — docs/11 의 청크 크기 근거',
   };
 
+  /** `import … from '…';` 을 걷어낸 것. 가져다 놓기만 한 이름은 안 센다. */
+  const withoutImports = (source: string): string =>
+    source.replace(/^import[\s\S]*?from\s+'[^']*';\s*$/gm, '');
+
   it('⭐ `lib/` 의 export 를 화면이 실제로 부른다', () => {
     const files: { rel: string; source: string }[] = [];
     const walk = (dir: string): void => {
@@ -1055,8 +1059,18 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
           [...source.matchAll(new RegExp(`^export (?:function|const) ${name}\\b`, 'gm'))].length;
         if (inOwnFile) continue;
 
+        // ⚠️ **`import` 줄은 쓰는 것이 아닙니다** (결함 97 에서 드러남).
+        //
+        // 확정 화면의 배선을 일부러 지워 보니 이 가드가 통과했습니다.
+        // `import { adjustmentsToRestore, BLIND_CONFIRM } from …` 줄이
+        // 남아 있어서 "다른 파일이 이름을 쓴다" 로 셌기 때문입니다.
+        // 이 가드의 이름이 "만들어 놓고 아무도 안 쓰는 것" 인데, 정작
+        // **가져다 놓고 안 쓰는 것**을 못 봤습니다.
+        //
+        // (`tsc --noEmit` 이 TS6133 으로 잡긴 합니다. 그건 `npm run
+        // check` 를 사람이 칠 때만 돕고, 이 가드는 `npm test` 로 돕니다.)
         const users = files.filter(
-          (f) => f.rel !== rel && new RegExp(`\\b${name}\\b`).test(f.source),
+          (f) => f.rel !== rel && new RegExp(`\\b${name}\\b`).test(withoutImports(f.source)),
         );
         if (users.length === 0) {
           offenders.push(`${key} — 아무도 안 씀`);
@@ -1070,6 +1084,35 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
       '',
       '화면이 안 부르는 export 입니다. 배선하거나, 지우거나, 근거를 적어 면제 목록에 넣으세요',
     );
+  });
+
+  it('⭐ 화면 파일 안에도 아무도 안 부르는 함수를 두지 않는다 (결함 97)', () => {
+    // 위 가드는 `lib/` 의 export 만 봅니다. 그래서 **화면 파일 안에서**
+    // 죽는 경우를 못 봤습니다. 결함 97 의 배선을 지워 보니 이랬습니다.
+    //
+    //     function restoreAdjustments(finals) { … }   // 아무도 안 부름
+    //     let finalsKnown = false;                    // 아무도 안 읽음
+    //
+    // `adjustmentsToRestore` 는 이 죽은 함수가 부르고 있어서 위 가드는
+    // "살아 있음" 으로 셌습니다. **죽은 것이 죽은 것을 부르면 둘 다
+    // 살아 보입니다.**
+    //
+    // ⚠️ `tsc --noEmit` 은 TS6133 으로 이걸 잡습니다. 그런데 `tsc` 는
+    // `npm install` 이 있어야 돌고, 이 저장소는 **설치 없이 도는 테스트**
+    // 를 약속합니다(`frontend/README.md`). 약속을 지키면서 같은 것을
+    // 보려면 여기 있어야 합니다.
+    const offenders: string[] = [];
+    for (const name of readdirSync(join(ROOT, 'src', 'demo'))) {
+      if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue;
+      const code = codeOf(readFileSync(join(ROOT, 'src', 'demo', name), 'utf8'));
+      for (const m of code.matchAll(/^(?:async )?function (\w+)/gm)) {
+        const fn = m[1] as string;
+        const uses = [...code.matchAll(new RegExp(`\\b${fn}\\b`, 'g'))].length;
+        // 선언 한 번 + 부르는 곳 한 번 = 최소 2
+        if (uses < 2) offenders.push(`demo/${name} → ${fn}`);
+      }
+    }
+    strictEqual(offenders.join('\n'), '', '만들어 놓고 아무도 안 부릅니다 — 배선하거나 지우세요');
   });
 
   it('면제 목록이 실재하는 자리를 가리킨다', () => {

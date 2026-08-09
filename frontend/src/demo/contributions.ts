@@ -26,6 +26,8 @@ import {
   type TeamScore,
 } from '../lib/contribution/view.ts';
 import {
+  adjustmentsToRestore,
+  BLIND_CONFIRM,
   describeFinals,
   problemsWith,
   toPayload,
@@ -58,6 +60,13 @@ const $ = (id: string): HTMLElement => {
 let people: Person[] = [];
 /** 마지막으로 그린 시스템 값. 확정 표가 이 값과 비교한다. */
 let systemValues = new Map<number, number>();
+/**
+ * 저장된 확정을 **읽어 왔는가** (결함 97).
+ *
+ * ⚠️ 기본값은 `false` 입니다. 아직 못 읽은 것과 "확정이 없다" 는 다르고,
+ * 헷갈리는 쪽으로 기울면 남의 조정을 지웁니다.
+ */
+let finalsKnown = false;
 
 function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
@@ -195,19 +204,51 @@ function draftsFromScreen(): Draft[] {
   });
 }
 
+/**
+ * 저장된 확정을 입력칸에 되돌려 놓는다 (결함 97).
+ *
+ * ⚠️ **판단은 `adjustmentsToRestore` 가 합니다.** 여기는 DOM 배선입니다.
+ * 어느 칸을 채울지를 여기서 정하기 시작하면 브라우저 없이 못 잽니다.
+ */
+function restoreAdjustments(finals: FinalRow[]): void {
+  const saved = adjustmentsToRestore(finals);
+  for (const row of $('finals').querySelectorAll<HTMLElement>('.final-row')) {
+    const mine = saved.get(Number(row.dataset['user']));
+    const val = row.querySelector<HTMLInputElement>('.val');
+    const reason = row.querySelector<HTMLInputElement>('.reason');
+    // ⚠️ 되돌릴 것이 없으면 **비웁니다**. 남겨 두면 다시 그려진 표에
+    // 지난 조정이 유령처럼 남습니다.
+    if (val) val.value = mine === undefined ? '' : String(mine.final_value);
+    if (reason) reason.value = mine?.reason ?? '';
+  }
+}
+
 async function loadFinals(): Promise<void> {
   const response = await get(`/api/projects/${projectId}/contributions/final`);
   if (!response.ok) {
     // 확정 조회가 실패해도 기여도 화면은 살아 있어야 한다.
+    // ⚠️ 다만 **확정은 막습니다** — 저장된 조정을 모르는 채로 확정하면
+    // 남의 조정을 말없이 지웁니다 (결함 97).
     $('final-state').textContent = '';
+    finalsKnown = false;
     return;
   }
   const body = (await response.json()) as { finals: FinalRow[] };
   const names = new Map(people.map((p) => [p.user_id, p.name]));
   $('final-state').textContent = describeFinals(body.finals, names);
+  restoreAdjustments(body.finals);
+  finalsKnown = true;
 }
 
 async function confirm(): Promise<void> {
+  // ⚠️ 저장된 확정을 못 읽었으면 여기서 멈춥니다 (결함 97). 입력칸이
+  // 비어 있는 것이 "시스템 값 그대로" 인지 "못 불러온 것" 인지 화면도
+  // 구분 못 하는 상태라, 그대로 보내면 남의 조정을 지웁니다.
+  if (!finalsKnown) {
+    showNote($('final-message'), BLIND_CONFIRM);
+    return;
+  }
+
   const drafts = draftsFromScreen();
   const problems = problemsWith(drafts, systemValues);
   if (problems.length > 0) {

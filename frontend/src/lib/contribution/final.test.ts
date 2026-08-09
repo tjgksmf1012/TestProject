@@ -1,7 +1,14 @@
 import { deepStrictEqual, strictEqual } from 'node:assert';
 import { describe, it } from 'node:test';
 
-import { describeFinals, problemsWith, toPayload, type Draft } from './final.ts';
+import {
+  adjustmentsToRestore,
+  describeFinals,
+  problemsWith,
+  toPayload,
+  type Draft,
+  type FinalRow,
+} from './final.ts';
 
 const SYSTEM = new Map([
   [1, 42.5],
@@ -150,5 +157,71 @@ describe('확정 상태 문구', () => {
       NAMES,
     );
     strictEqual(text.includes('이유가 남아 있지 않습니다'), true);
+  });
+});
+
+describe('저장된 조정을 입력칸에 되돌려 놓기 (결함 97)', () => {
+  const saved = (over: Partial<FinalRow> = {}): FinalRow => ({
+    user_id: 1,
+    system_value: 41.713,
+    final_value: 41.713,
+    adjusted_by: 1,
+    reason: null,
+    confirmed_at: '2026-09-01T12:00:00Z',
+    ...over,
+  });
+
+  it('⭐ 사람이 조정한 칸은 값과 이유를 그대로 돌려준다', () => {
+    const back = adjustmentsToRestore([
+      saved(),
+      saved({ user_id: 2, system_value: 33.552, final_value: 30, reason: '문서 작업이 많았습니다' }),
+    ]);
+    deepStrictEqual(back.get(2), { final_value: 30, reason: '문서 작업이 많았습니다' });
+  });
+
+  it('⭐ 안 건드린 칸은 **되돌리지 않는다** — 반올림이 새 조정으로 읽힌다', () => {
+    // 시스템 값 41.713 을 `41.7` 로 적어 놓으면 다음 확정에서
+    // `problemsWith` 가 "시스템 값과 다르니 이유를 적으라" 고 막습니다.
+    // 빈 칸은 원래 "시스템 값 그대로" 라는 뜻이고, 그 뜻이 맞습니다.
+    const back = adjustmentsToRestore([saved()]);
+    strictEqual(back.has(1), false);
+    strictEqual(back.size, 0);
+  });
+
+  it('이유 없이 조정된 옛 기록은 빈 문자열로 — `null` 을 입력칸에 넣지 않는다', () => {
+    const back = adjustmentsToRestore([saved({ final_value: 30, reason: null })]);
+    strictEqual(back.get(1)?.reason, '');
+  });
+
+  it('⭐ 되돌린 값을 그대로 다시 보내면 조정이 **유지된다**', () => {
+    // 이게 이 함수의 존재 이유입니다. 김민수가 자기 값만 고쳐도
+    // 이하늘의 30 이 살아남아야 합니다.
+    const system = new Map([
+      [1, 41.713],
+      [2, 33.552],
+    ]);
+    const back = adjustmentsToRestore([
+      saved(),
+      saved({ user_id: 2, system_value: 33.552, final_value: 30, reason: '문서 작업이 많았습니다' }),
+    ]);
+    // 화면이 되돌려 놓은 그대로 읽어 낸 초안
+    const drafts: Draft[] = [1, 2].map((id) => ({
+      user_id: id,
+      final_value: back.get(id)?.final_value ?? null,
+      reason: back.get(id)?.reason ?? '',
+    }));
+    deepStrictEqual(problemsWith(drafts, system), []);
+    deepStrictEqual(toPayload(drafts, system), [
+      { user_id: 1 },
+      { user_id: 2, final_value: 30, reason: '문서 작업이 많았습니다' },
+    ]);
+  });
+
+  it('⚠️ 되돌려 놓지 않으면 **말없이 지워진다** — 고치기 전 모습', () => {
+    // 입력칸이 비어 있으면 `toPayload` 는 값을 안 싣고, 서버는 안 실린
+    // 칸에 시스템 값을 씁니다. 30 과 이유가 33.552 로 되돌아갑니다.
+    const system = new Map([[2, 33.552]]);
+    const blank: Draft[] = [{ user_id: 2, final_value: null, reason: '' }];
+    deepStrictEqual(toPayload(blank, system), [{ user_id: 2 }]);
   });
 });

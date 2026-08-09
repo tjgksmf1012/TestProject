@@ -237,6 +237,15 @@ function toPayload(drafts, systemValues2) {
     };
   });
 }
+function adjustmentsToRestore(finals) {
+  const out = /* @__PURE__ */ new Map();
+  for (const f of finals) {
+    if (sameValue(f.final_value, f.system_value)) continue;
+    out.set(f.user_id, { final_value: f.final_value, reason: f.reason ?? "" });
+  }
+  return out;
+}
+var BLIND_CONFIRM = "지금 저장된 확정을 불러오지 못했습니다 — 이대로 확정하면 이전에 조정한 값이 지워질 수 있습니다. 새로고침한 뒤 다시 해 주세요.";
 function person(id, names) {
   const name = names.get(id) ?? `#${id}`;
   return `${name}님`;
@@ -644,6 +653,7 @@ var $ = (id) => {
 };
 var people = [];
 var systemValues = /* @__PURE__ */ new Map();
+var finalsKnown = false;
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
@@ -730,17 +740,34 @@ function draftsFromScreen() {
     };
   });
 }
+function restoreAdjustments(finals) {
+  const saved = adjustmentsToRestore(finals);
+  for (const row of $("finals").querySelectorAll(".final-row")) {
+    const mine = saved.get(Number(row.dataset["user"]));
+    const val = row.querySelector(".val");
+    const reason = row.querySelector(".reason");
+    if (val) val.value = mine === void 0 ? "" : String(mine.final_value);
+    if (reason) reason.value = mine?.reason ?? "";
+  }
+}
 async function loadFinals() {
   const response = await get(`/api/projects/${projectId}/contributions/final`);
   if (!response.ok) {
     $("final-state").textContent = "";
+    finalsKnown = false;
     return;
   }
   const body = await response.json();
   const names = new Map(people.map((p) => [p.user_id, p.name]));
   $("final-state").textContent = describeFinals(body.finals, names);
+  restoreAdjustments(body.finals);
+  finalsKnown = true;
 }
 async function confirm() {
+  if (!finalsKnown) {
+    showNote($("final-message"), BLIND_CONFIRM);
+    return;
+  }
   const drafts = draftsFromScreen();
   const problems = problemsWith(drafts, systemValues);
   if (problems.length > 0) {
