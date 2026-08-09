@@ -359,6 +359,39 @@ async function whilePressed(button, run) {
   }
 }
 
+// src/lib/review/minutes.ts
+function atText(startMs) {
+  if (!Number.isFinite(startMs) || startMs <= 0) return null;
+  const total = Math.floor(startMs / 1e3);
+  const mm = Math.floor(total / 60);
+  const ss = total % 60;
+  return `${mm}:${String(ss).padStart(2, "0")}`;
+}
+function describeIssue(issue) {
+  return {
+    content: issue.content.trim(),
+    at: atText(issue.start_ms),
+    evidenceCount: (issue.evidence_utterance_ids ?? []).length
+  };
+}
+function issueViews(issues) {
+  return issues.map(describeIssue).filter((v) => v.content !== "");
+}
+function agendaItems(agenda) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const raw of agenda) {
+    const item = raw.trim();
+    if (item === "" || seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+  }
+  return out;
+}
+function hasExtraMinutes(minutes) {
+  return agendaItems(minutes.next_agenda).length > 0 || issueViews(minutes.unresolved_issues).length > 0;
+}
+
 // src/lib/time/calendar.ts
 var TEAM_TIMEZONE = "Asia/Seoul";
 var FORMATTER = new Intl.DateTimeFormat("en-CA", {
@@ -704,11 +737,28 @@ async function load() {
   }
   render();
 }
+function renderMinutes() {
+  const agenda = agendaItems(meeting?.next_agenda ?? []);
+  const issues = issueViews(meeting?.unresolved_issues ?? []);
+  $("agenda-block").hidden = agenda.length === 0;
+  $("agenda").innerHTML = agenda.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  $("issues-block").hidden = issues.length === 0;
+  $("issues").innerHTML = issues.map((view) => {
+    const at = view.at === null ? "" : `<span class="at">${escapeHtml(view.at)}</span>`;
+    const why = view.evidenceCount === 0 ? '<span class="why none">근거 발화 없음</span>' : `<span class="why">근거 발화 ${view.evidenceCount}건</span>`;
+    return `<li>${at}<span class="what">${escapeHtml(view.content)}</span>${why}</li>`;
+  }).join("");
+  $("minutes").hidden = !hasExtraMinutes({
+    next_agenda: meeting?.next_agenda ?? [],
+    unresolved_issues: meeting?.unresolved_issues ?? []
+  });
+}
 function render() {
   const summary = summarize(candidates, drafts, context);
   const text = meeting?.summary ?? "";
   $("meeting-summary").hidden = text === "";
   $("meeting-summary").textContent = text;
+  renderMinutes();
   $("counts").textContent = `전체 ${summary.total} · 승인 ${summary.approving} · 거절 ${summary.rejecting} · 미결정 ${summary.pending}`;
   $("attention").hidden = summary.needsAttention === 0;
   $("attention").textContent = `확신도가 낮은 후보 ${summary.needsAttention}건이 아직 결정되지 않았습니다. 근거 발화를 확인하세요.`;

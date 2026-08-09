@@ -1662,6 +1662,21 @@ def list_project_meetings(
     ]
 
 
+class UnresolvedIssueOut(BaseModel):
+    """회의에서 답이 안 난 것 하나.
+
+    근거 발화를 같이 싣습니다 — 근거 없이 &#34;이게 미해결입니다&#34; 라고만
+    하면 사람은 확인할 방법이 없고, 이 저장소는 그런 값을 화면에
+    올리지 않기로 했습니다.
+    """
+
+    content: str
+    #: 언제 나온 얘기인가. 근거가 없으면 둘 다 0 — 시각을 지어내지 않는다.
+    start_ms: int
+    end_ms: int
+    evidence_utterance_ids: list[int]
+
+
 class MeetingDetail(BaseModel):
     id: int
     project_id: int
@@ -1672,6 +1687,17 @@ class MeetingDetail(BaseModel):
     # 처리가 끝나기 전에는 None. 실패한 회의도 None 이다 —
     # 빈 문자열로 내려보내면 화면이 "요약이 없는 회의" 로 그린다.
     summary: str | None
+    # 다음 회의에서 다룰 안건 (결함 110).
+    #
+    # ⚠️ 여기 없던 동안 이 값은 **DB 까지만 갔습니다.** LLM 이 만들고
+    # `validation` 이 근거까지 확인한 산출물인데, 내보내는 코드가 저장소
+    # 어디에도 없어서 **읽는 사람이 0명**이었습니다. 회의록의 절반이
+    # 조용히 사라지고 있었고 오류는 안 났습니다.
+    next_agenda: list[str] = []
+    # 회의에서 답이 안 난 것 (결함 111). `meeting_events` 의
+    # `unanswered_question` 행입니다 — 그 표도 **쓰기만 하고 읽는 곳이
+    # 0곳**이었습니다.
+    unresolved_issues: list[UnresolvedIssueOut] = []
 
 
 @app.get("/api/meetings/{meeting_id}", response_model=MeetingDetail)
@@ -1683,6 +1709,20 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
     Celery 페이로드에 실어 보낸 뒤 저장 태스크가 읽지 않고 버렸다.
     """
     meeting = _load_meeting_for(session, meeting_id, user)
+
+    # ⚠️ **회의록은 요약 하나가 아닙니다** (결함 110·111). 다음 안건과
+    # 미해결 사안도 LLM 이 만들고 검증까지 통과한 산출물인데, 여기서
+    # 안 실으면 DB 에만 남고 아무도 못 봅니다 — 위 docstring 이 말하는
+    # 그 일이 **같은 회의의 다른 칸에서 그대로 반복되고 있었습니다.**
+    issues = session.scalars(
+        select(m.MeetingEvent)
+        .where(
+            m.MeetingEvent.meeting_id == meeting.id,
+            m.MeetingEvent.event_type == "unanswered_question",
+        )
+        .order_by(m.MeetingEvent.start_ms, m.MeetingEvent.id)
+    ).all()
+
     return MeetingDetail(
         id=meeting.id,
         project_id=meeting.project_id,
@@ -1691,6 +1731,16 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
         started_at=meeting.started_at,
         capture_mode=meeting.capture_mode,
         summary=meeting.summary,
+        next_agenda=list(meeting.next_agenda or []),
+        unresolved_issues=[
+            UnresolvedIssueOut(
+                content=str(row.detail.get("content", "")),
+                start_ms=row.start_ms,
+                end_ms=row.end_ms,
+                evidence_utterance_ids=list(row.evidence_utterance_ids or []),
+            )
+            for row in issues
+        ],
     )
 
 

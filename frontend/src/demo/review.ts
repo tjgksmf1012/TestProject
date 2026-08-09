@@ -34,6 +34,12 @@ import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/htt
 import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
 import { failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
+import {
+  agendaItems,
+  hasExtraMinutes,
+  issueViews,
+  type UnresolvedIssue,
+} from '../lib/review/minutes.ts';
 import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { clearSkeleton, rows, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
@@ -49,6 +55,8 @@ interface MeetingInfo {
   title: string | null;
   status: string;
   summary: string | null;
+  next_agenda: string[];
+  unresolved_issues: UnresolvedIssue[];
 }
 
 const params = new URLSearchParams(location.search);
@@ -151,6 +159,42 @@ async function load(): Promise<void> {
 
 // ── 그리기 ──────────────────────────────────────────────────
 
+/**
+ * 회의록의 나머지 — 다음 안건 · 미해결 사안 (결함 110·111).
+ *
+ * ⚠️ **처리 전과 "정말 안 나왔다" 를 섞지 않습니다.** 아직 처리 중인
+ * 회의에 "다음 안건 없음" 을 띄우면 사람이 그걸 결과로 읽습니다. 그래서
+ * 있는 것만 그리고, 없으면 그 칸을 통째로 감춥니다 — 회의 상태는 이미
+ * 후보 목록 쪽이 말하고 있습니다.
+ */
+function renderMinutes(): void {
+  const agenda = agendaItems(meeting?.next_agenda ?? []);
+  const issues = issueViews(meeting?.unresolved_issues ?? []);
+
+  $('agenda-block').hidden = agenda.length === 0;
+  $('agenda').innerHTML = agenda.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+
+  $('issues-block').hidden = issues.length === 0;
+  $('issues').innerHTML = issues
+    .map((view) => {
+      // 시각은 근거가 있을 때만. 없으면 `0:00` 을 지어내지 않습니다.
+      const at = view.at === null ? '' : `<span class="at">${escapeHtml(view.at)}</span>`;
+      // ⚠️ 근거 0건도 **적습니다.** 감추면 근거 없는 사안이 근거 있는
+      // 것과 똑같아 보입니다.
+      const why =
+        view.evidenceCount === 0
+          ? '<span class="why none">근거 발화 없음</span>'
+          : `<span class="why">근거 발화 ${view.evidenceCount}건</span>`;
+      return `<li>${at}<span class="what">${escapeHtml(view.content)}</span>${why}</li>`;
+    })
+    .join('');
+
+  $('minutes').hidden = !hasExtraMinutes({
+    next_agenda: meeting?.next_agenda ?? [],
+    unresolved_issues: meeting?.unresolved_issues ?? [],
+  });
+}
+
 function render(): void {
   const summary = summarize(candidates, drafts, context);
 
@@ -159,6 +203,8 @@ function render(): void {
   const text = meeting?.summary ?? '';
   $('meeting-summary').hidden = text === '';
   $('meeting-summary').textContent = text;
+
+  renderMinutes();
 
   $('counts').textContent =
     `전체 ${summary.total} · 승인 ${summary.approving} · 거절 ${summary.rejecting} · ` +

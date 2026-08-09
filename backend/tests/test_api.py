@@ -663,6 +663,106 @@ def test_meeting_members_404_for_unknown_meeting(client: TestClient, seeded):
     assert client.get("/api/meetings/99999/members").status_code == 404
 
 
+# ══════════════════════════════════════════════════════════════
+# 회의록 — 요약 말고 나머지 (결함 110·111)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_the_meeting_carries_its_next_agenda(client: TestClient, seeded, engine):
+    """⭐ 다음 안건이 **DB 에만 남아 있었다** (결함 110).
+
+    LLM 이 만들고 `validation` 이 통과시킨 산출물인데, 내보내는 코드가
+    저장소 어디에도 없어서 **읽는 사람이 0명**이었습니다. 오류는 안
+    납니다 — 회의록의 한 칸이 조용히 사라질 뿐입니다.
+
+    `models.py` 의 그 칸에는 같은 일을 한 번 겪었다는 주석이 이미
+    붙어 있었습니다(&#34;`_serialize` 에 없어서 파이프라인 밖으로 나온 적이
+    없었다&#34;). 그때는 파이프라인 → DB 를 이었고, **DB → 화면이 그대로
+    남아 있었습니다.**
+    """
+    with db_session.session_scope() as s:
+        meeting = s.get(m.Meeting, seeded["meeting_id"])
+        meeting.next_agenda = ["배포 방식 결정", "진행 상황 공유"]
+
+    body = client.get(f"/api/meetings/{seeded['meeting_id']}").json()
+    assert body["next_agenda"] == ["배포 방식 결정", "진행 상황 공유"]
+
+
+def test_a_meeting_without_a_next_agenda_sends_an_empty_list(
+    client: TestClient, seeded
+):
+    """없으면 빈 목록. `null` 을 보내면 화면이 매번 그것을 가려야 한다."""
+    body = client.get(f"/api/meetings/{seeded['meeting_id']}").json()
+    assert body["next_agenda"] == []
+    assert body["unresolved_issues"] == []
+
+
+def test_the_meeting_carries_its_unresolved_issues(client: TestClient, seeded, engine):
+    """⭐ 미해결 사안도 **쓰기만 하고 읽는 곳이 0곳**이었다 (결함 111).
+
+    `meeting_events` 표는 파이프라인이 채우는데, 저장소 전체에서
+    그 표를 **읽는 코드가 하나도 없었습니다.**
+
+    근거 발화를 같이 싣습니다 — 근거 없이 &#34;이게 미해결입니다&#34; 라고만
+    하면 사람은 확인할 방법이 없습니다.
+    """
+    with db_session.session_scope() as s:
+        s.add(
+            m.MeetingEvent(
+                meeting_id=seeded["meeting_id"],
+                event_type="unanswered_question",
+                severity="info",
+                start_ms=32_000,
+                end_ms=38_000,
+                evidence_utterance_ids=[105],
+                detail={"content": "배포 방식을 정하지 못했습니다"},
+            )
+        )
+        # 다른 종류의 회의 이벤트는 이 칸에 섞이지 않는다.
+        s.add(
+            m.MeetingEvent(
+                meeting_id=seeded["meeting_id"],
+                event_type="topic_drift",
+                severity="info",
+                start_ms=1_000,
+                end_ms=2_000,
+                evidence_utterance_ids=[101],
+                detail={"content": "딴 얘기"},
+            )
+        )
+
+    body = client.get(f"/api/meetings/{seeded['meeting_id']}").json()
+
+    assert [i["content"] for i in body["unresolved_issues"]] == [
+        "배포 방식을 정하지 못했습니다"
+    ]
+    issue = body["unresolved_issues"][0]
+    assert issue["start_ms"] == 32_000
+    assert issue["evidence_utterance_ids"] == [105]
+
+
+def test_unresolved_issues_come_back_in_the_order_they_were_said(
+    client: TestClient, seeded, engine
+):
+    """회의 순서대로. 저장 순서로 나오면 사람이 회의를 되짚을 수 없다."""
+    with db_session.session_scope() as s:
+        for start in (30_000, 5_000, 18_000):
+            s.add(
+                m.MeetingEvent(
+                    meeting_id=seeded["meeting_id"],
+                    event_type="unanswered_question",
+                    severity="info",
+                    start_ms=start,
+                    end_ms=start + 1_000,
+                    evidence_utterance_ids=[101],
+                    detail={"content": f"{start}"},
+                )
+            )
+
+    body = client.get(f"/api/meetings/{seeded['meeting_id']}").json()
+    assert [i["start_ms"] for i in body["unresolved_issues"]] == [5_000, 18_000, 30_000]
+
+
 def test_candidate_without_evidence_cannot_be_approved(client: TestClient, seeded, engine):
     """⭐ 환각을 사람이 "고쳐서" 통과시키는 경로를 만들면 안 된다.
 

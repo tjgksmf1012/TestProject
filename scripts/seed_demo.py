@@ -311,6 +311,32 @@ def seed(*, reset: bool) -> dict:
             s.flush()
             utterance_ids.append(row.id)
 
+        # ⚠️ **회의록은 요약 하나가 아닙니다** (결함 110·111). 파이프라인은
+        # 다음 안건과 미해결 사안도 만들어 저장하는데, 그 둘을 **읽는 곳이
+        # 저장소에 0곳**이라 시연에서도 안 보였습니다. 여기서도 안 넣으면
+        # 배선을 고쳐도 시연 화면은 그대로 비어 있습니다.
+        #
+        # 근거는 지어내지 않습니다 — 다섯 번째 발화("배포는 아직 정하지
+        # 말고 다음 회의에서 다시 얘기해요")가 실제로 그 근거입니다.
+        # 운영도 이 모양입니다: `validation._check_evidence` 가 **근거가
+        # 없는 미해결 사안을 거부**하므로 저장된 것은 전부 근거를 답니다.
+        deferred = UTTERANCES[4]
+        s.add(
+            m.MeetingEvent(
+                meeting_id=meeting.id,
+                event_type="unanswered_question",
+                severity="info",
+                start_ms=deferred[1],
+                end_ms=deferred[2],
+                evidence_utterance_ids=[utterance_ids[4]],
+                detail={"content": "배포 방식을 정하지 못했습니다"},
+            )
+        )
+        # 요약 마지막 줄("배포 방식은 다음 회의로 미뤘습니다")과 같은 것을
+        # 가리킵니다 — 회의록 안에서 두 칸이 서로 어긋나 있으면 사람은
+        # 어느 쪽을 믿을지 모릅니다.
+        meeting.next_agenda = ["배포 방식 결정", "1주차 업무 진행 상황 공유"]
+
         user_ids = [u.id for u in users]
         for spec in build_candidates(utterance_ids, user_ids):
             s.add(

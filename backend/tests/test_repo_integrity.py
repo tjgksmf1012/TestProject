@@ -782,6 +782,64 @@ def test_the_pipeline_does_not_put_a_python_exception_on_the_screen():
     )
 
 
+def test_every_table_the_pipeline_writes_has_something_that_reads_it():
+    """⭐ 파이프라인이 채우는 표마다 **읽는 코드가 있는가** (결함 110·111).
+
+    이 저장소의 대표 실패 방식입니다 — 맞는 값을 만들어 저장까지 해
+    놓고 아무도 안 읽는 것. 오류도 안 나고 테스트도 통과합니다.
+
+    `meeting_events` 가 그랬습니다. 파이프라인이 미해결 사안을
+    `unanswered_question` 행으로 넣는데, **저장소 전체에서 그 표를 읽는
+    코드가 하나도 없었습니다.** 회의에서 답이 안 난 것이 DB 에만 쌓이고
+    사람은 영영 못 봤습니다.
+
+    ⚠️ **&#34;쓰는 곳&#34; 과 &#34;읽는 곳&#34; 을 구분해 셉니다.** `m.MeetingEvent(...)`
+    처럼 **생성자로 부르는 것은 쓰기**입니다. 그것까지 세면 쓰기만 있는
+    표가 &#34;쓰이고 있다&#34; 로 보입니다 — 결함 97 에서 겪은 것과 같은
+    함정입니다(죽은 것이 죽은 것을 부르면 둘 다 살아 보인다).
+    """
+    import ast
+
+    # 파이프라인이 채우고 사람이 봐야 하는 표. 내부 살림용 표(감사 로그·
+    # 잠금 등)는 화면이 없어도 되므로 대상이 아니다.
+    watched = {
+        "MeetingEvent": "회의에서 답이 안 난 것 · 비효율 구간",
+        "Decision": "회의 결정",
+        "MeetingTaskCandidate": "업무 후보",
+    }
+
+    reads: dict[str, list[str]] = {name: [] for name in watched}
+    root = REPO_ROOT / "backend" / "teamflow"
+
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        # 생성자 호출(`m.MeetingEvent(...)`)의 위치를 먼저 모아 둔다 —
+        # 그 자리는 쓰기지 읽기가 아니다.
+        writes = {
+            (node.lineno, node.col_offset)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in watched
+        }
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Attribute) or node.attr not in watched:
+                continue
+            if (node.lineno, node.col_offset) in writes:
+                continue
+            reads[node.attr].append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+
+    orphans = [
+        f"{name}({why}) — 쓰기만 있고 읽는 곳이 0곳"
+        for name, why in watched.items()
+        if not reads[name]
+    ]
+    assert not orphans, (
+        "파이프라인이 채우는데 아무도 안 읽는 표가 있습니다 — 사람이 영영 못 봅니다:\n  "
+        + "\n  ".join(orphans)
+    )
+
+
 def test_the_defect_log_does_not_claim_a_stale_count():
     """⭐ 결함 기록이 스스로 말하는 건수가 **실제와 맞는가**.
 
