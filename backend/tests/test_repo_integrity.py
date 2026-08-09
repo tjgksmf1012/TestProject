@@ -598,6 +598,119 @@ def test_the_seed_writes_gaps_in_the_same_shape_production_does():
     assert not problems, "시드가 운영과 다른 키를 씁니다:\n  " + "\n  ".join(problems)
 
 
+# ══════════════════════════════════════════════════════════════
+# 서버와 화면에 **같은 숫자가 두 벌** 있는 것
+# ══════════════════════════════════════════════════════════════
+
+#: 두 쪽이 반드시 같아야 하는 상수. `(뜻, 백엔드 파일, 백엔드 이름, 프런트 이름)`.
+#:
+#: 프런트 파일은 전부 `frontend/src/lib/recording/timeline.ts` 입니다 —
+#: 늘면 튜플에 파일을 더하세요.
+PAIRED_CONSTANTS = [
+    (
+        "이보다 짧은 공백은 보고하지 않는다",
+        "backend/teamflow/audio/assembly.py",
+        "MIN_REPORTED_GAP_MS",
+        "MIN_REPORTED_GAP_MS",
+    ),
+    (
+        "이만큼까지의 지연은 정상 지터로 본다",
+        "backend/teamflow/audio/assembly.py",
+        "STALL_TOLERANCE_MS",
+        "DEFAULT_STALL_TOLERANCE_MS",
+    ),
+    (
+        "이 아래면 트랙을 쓰지 않는다",
+        "backend/teamflow/services/recording_service.py",
+        "MIN_USABLE_COVERAGE",
+        "MIN_USABLE_COVERAGE",
+    ),
+]
+
+FRONT_CONSTANTS = "frontend/src/lib/recording/timeline.ts"
+
+
+def _number_after(source: str, name: str) -> str | None:
+    """`NAME = 123` 또는 `const NAME = 123;` 에서 숫자만."""
+    import re
+
+    hit = re.search(rf"\b{name}\s*(?::\s*[\w<>\[\]]+)?\s*=\s*([0-9][0-9_.]*)", source)
+    return hit.group(1).replace("_", "") if hit else None
+
+
+def test_the_same_number_on_both_sides_really_is_the_same():
+    """⭐ 서버와 화면에 두 벌로 있는 숫자가 **정말 같은가** (결함 100).
+
+    세 상수가 양쪽에 각각 적혀 있고, 주석이 스스로 그렇다고 말합니다.
+
+        # (프런트 timeline.ts 의 stallToleranceMs 와 같은 값)
+        STALL_TOLERANCE_MS = 300
+
+    **그런데 아무것도 그것을 지키지 않았습니다.** 주석은 아무도 안 읽고
+    아무것도 못 막습니다 — 이 저장소가 `GapReason` 에서 이미 배운 것입니다.
+
+    갈라지면 조용히 어긋납니다.
+
+    · `STALL_TOLERANCE_MS` — 화면은 공백으로 세고 서버는 안 셉니다.
+      그러면 커버리지는 낮은데 **구멍은 하나도 안 그려집니다.**
+      결함 99 에서 본 바로 그 그림이 이번엔 운영에서 납니다
+    · `MIN_USABLE_COVERAGE` — 녹음 화면은 &#34;쓸 만합니다&#34; 라고 하고 서버는
+      `unusable` 로 저장합니다. 사람은 어느 쪽을 믿을지 모릅니다
+    · `MIN_REPORTED_GAP_MS` — 짧은 공백을 한쪽만 세어 총합과 목록이
+      갈라집니다
+
+    셋 다 **오류 없이** 숫자만 어긋납니다. 이 저장소의 대표 실패 방식입니다.
+    """
+    front = (REPO_ROOT / FRONT_CONSTANTS).read_text()
+
+    problems = []
+    for meaning, rel, back_name, front_name in PAIRED_CONSTANTS:
+        back = (REPO_ROOT / rel).read_text()
+        back_value = _number_after(back, back_name)
+        front_value = _number_after(front, front_name)
+        if back_value is None:
+            problems.append(f"{rel} 에서 {back_name} 을 못 찾았습니다")
+            continue
+        if front_value is None:
+            problems.append(f"{FRONT_CONSTANTS} 에서 {front_name} 을 못 찾았습니다")
+            continue
+        if float(back_value) != float(front_value):
+            problems.append(
+                f"{meaning}: {back_name}={back_value} 인데 {front_name}={front_value} 입니다"
+            )
+
+    assert not problems, "서버와 화면의 숫자가 갈라졌습니다:\n  " + "\n  ".join(problems)
+
+
+def test_the_paired_constant_table_is_not_stale():
+    """표가 낡지 않았는가 — 주석이 &#34;같은 값&#34; 이라고 말하면 표에 있어야 한다.
+
+    ⚠️ 이 검사가 없으면 다음 사람이 상수를 하나 더 만들면서 같은 주석을
+    달고, 그건 아무도 안 지킵니다. 표를 늘리는 것이 규칙이 되게 합니다.
+    """
+    import re
+
+    declared = []
+    for rel in {rel for _, rel, _, _ in PAIRED_CONSTANTS} | {
+        "backend/teamflow/audio/assembly.py",
+        "backend/teamflow/services/recording_service.py",
+    }:
+        source = (REPO_ROOT / rel).read_text()
+        # `… 와 같은 값…` 주석 **바로 뒤**에 오는 상수 이름
+        for hit in re.finditer(
+            r"#[^\n]*(?:와|과) 같은 값[^\n]*\n([A-Z_][A-Z0-9_]*)\s*=", source
+        ):
+            declared.append((rel, hit.group(1)))
+
+    known = {(rel, name) for _, rel, name, _ in PAIRED_CONSTANTS}
+    missing = [f"{rel} 의 {name}" for rel, name in declared if (rel, name) not in known]
+    assert not missing, (
+        "주석이 '같은 값' 이라고 말하는데 표에 없습니다 — "
+        "`PAIRED_CONSTANTS` 에 넣으세요:\n  " + "\n  ".join(missing)
+    )
+    assert declared, "'같은 값' 주석을 하나도 못 찾았습니다 — 이 검사가 헛돌고 있습니다"
+
+
 def test_the_seed_track_numbers_agree_with_the_production_formula():
     """⭐ 시드의 커버리지·총 공백·구멍 목록이 **서로 맞는가** (결함 99).
 
