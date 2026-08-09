@@ -802,27 +802,30 @@ async function startBackfill() {
   const button = $("gh-backfill");
   const status = $("gh-backfill-status");
   button.disabled = true;
-  status.hidden = false;
-  status.textContent = "가져오는 중…";
+  showNote(status, "가져오는 중…", "plain");
   const response = await send(`/api/projects/${projectId}/github/backfill`, {
     method: "POST",
     body: JSON.stringify({})
   });
   if (response === null) {
     button.disabled = false;
-    status.textContent = unreachableText("가져오지 못했습니다");
+    showNote(status, unreachableText("가져오지 못했습니다"));
     return;
   }
   if (!response.ok) {
     button.disabled = false;
     const body = await response.json().catch(() => null);
-    status.textContent = detailText(
-      body,
-      `가져오지 못했습니다 (HTTP ${response.status})`
+    showNote(
+      status,
+      detailText(body, `가져오지 못했습니다 (HTTP ${response.status})`)
     );
     return;
   }
-  status.textContent = "가져오기를 시작했습니다. PR 수에 따라 몇 분 걸립니다 — 잠시 뒤 이 화면을 새로고침하면 반영된 범위가 바뀝니다.";
+  showNote(
+    status,
+    "가져오기를 시작했습니다. PR 수에 따라 몇 분 걸립니다 — 잠시 뒤 이 화면을 새로고침하면 반영된 범위가 바뀝니다.",
+    "plain"
+  );
 }
 function renderRoles(shares) {
   $("roles").innerHTML = ROLE_OPTIONS.map(

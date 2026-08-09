@@ -724,6 +724,35 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
     );
   });
 
+  it('⭐ 실패 문구를 **지역 변수**로도 직접 쓰지 않는다 (결함 104)', () => {
+    // 결함 98 의 가드는 `$('id').textContent =` 만 봅니다. 그래서 요소를
+    // **지역 변수에 담아 쓰는** 자리를 못 봤습니다.
+    //
+    //     const status = $('gh-backfill-status');
+    //     status.textContent = unreachableText('가져오지 못했습니다');
+    //
+    // GitHub 지난 활동 가져오기의 진행·실패·성공이 전부 같은 회색이었고,
+    // 그게 결함 98 의 **여섯 번째 자리**였습니다. 가드도 자기가 보는
+    // 모양만 봅니다.
+    const LOOKS_FAILED = /unreachableText\(|detailText\(|describeHttpStatus\(|못했습니다/;
+    const offenders: string[] = [];
+    for (const { rel, code } of demoSources()) {
+      for (const m of code.matchAll(/(?<!\)['"`])\b(\w+)\.textContent\s*=([^;]*);/g)) {
+        const name = m[1] as string;
+        if (name === 'e' || name === 'el') continue;
+        if (!LOOKS_FAILED.test(m[2] as string)) continue;
+        // 그 이름이 이 파일에서 요소를 담은 변수인가
+        if (!new RegExp(`const ${name}\\s*=\\s*\\$\\(`).test(code)) continue;
+        offenders.push(`${rel} → ${name}.textContent`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`showNote(자리, 글자, 성공이면 \'plain\')` 을 쓰세요 — 글자와 색이 갈라집니다',
+    );
+  });
+
   it('⭐ 브라우저 예외를 화면에 붙이지 않는다', () => {
     // `전송 실패: ${String(err)}` → `전송 실패: TypeError: Failed to fetch`
     const offenders = demoSources()

@@ -280,10 +280,17 @@ async function confirm(): Promise<void> {
     return;
   }
   if (!response.ok) {
-    const body = (await response.json()) as { detail?: unknown };
+    // ⚠️ **`.json()` 도 던집니다.** 500 이 HTML 오류 페이지를 돌려주면
+    // 파싱이 실패하고, 이 함수는 `whilePressed(…, confirm)` 안에서
+    // 불리므로 거부가 아무 데도 안 걸립니다. 그러면 직전에 쓴
+    // **"확정했습니다."** 가 화면에 그대로 남습니다 — 결함 87 이 고친
+    // 바로 그 자리가 다른 길로 다시 열려 있었습니다.
+    const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
     showNote(
       $('final-message'),
-      typeof body.detail === 'string' ? body.detail : '확정하지 못했습니다',
+      typeof body?.detail === 'string'
+        ? body.detail
+        : describeHttpStatus(response.status) ?? '확정하지 못했습니다',
     );
     return;
   }

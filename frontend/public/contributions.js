@@ -794,10 +794,10 @@ async function confirm() {
     return;
   }
   if (!response.ok) {
-    const body = await response.json();
+    const body = await response.json().catch(() => null);
     showNote(
       $("final-message"),
-      typeof body.detail === "string" ? body.detail : "확정하지 못했습니다"
+      typeof body?.detail === "string" ? body.detail : describeHttpStatus(response.status) ?? "확정하지 못했습니다"
     );
     return;
   }

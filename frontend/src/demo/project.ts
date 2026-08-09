@@ -204,8 +204,10 @@ async function startBackfill(): Promise<void> {
   const button = $('gh-backfill') as HTMLButtonElement;
   const status = $('gh-backfill-status');
   button.disabled = true;
-  status.hidden = false;
-  status.textContent = '가져오는 중…';
+  // ⚠️ 진행·실패·성공이 **한 자리**에 옵니다 (결함 98 의 여섯 번째 자리).
+  // 앞의 다섯은 요소를 id 로 바로 집어 가드가 잡았는데, 여기는 **지역 변수**라
+  // 못 봤습니다 — 가드도 자기가 보는 모양만 봅니다.
+  showNote(status, '가져오는 중…', 'plain');
 
   // ⚠️ `headers` 를 다시 주지 않습니다. `call()` 이 이미
   // `Content-Type` 을 넣는데, 여기서 `content-type` 을 또 주면
@@ -218,7 +220,7 @@ async function startBackfill(): Promise<void> {
   });
   if (response === null) {
     button.disabled = false;
-    status.textContent = unreachableText('가져오지 못했습니다');
+    showNote(status, unreachableText('가져오지 못했습니다'));
     return;
   }
 
@@ -227,9 +229,9 @@ async function startBackfill(): Promise<void> {
     // 409 는 "왜 안 되는지" 를 서버가 문장으로 줍니다 — 저장소가 없거나
     // App 자격 증명이 없거나. 그대로 보여 줍니다.
     const body = await response.json().catch(() => null);
-    status.textContent = detailText(
-      body,
-      `가져오지 못했습니다 (HTTP ${response.status})`,
+    showNote(
+      status,
+      detailText(body, `가져오지 못했습니다 (HTTP ${response.status})`),
     );
     return;
   }
@@ -237,9 +239,12 @@ async function startBackfill(): Promise<void> {
   // ⚠️ **"완료" 라고 말하지 않습니다.** 서버는 큐에 넣었을 뿐이고 워커가
   // 실제로 가져오는 데는 시간이 걸립니다. 여기서 완료라고 하면 사람은
   // 바로 기여도를 보러 가서 "안 늘었네" 라고 읽습니다.
-  status.textContent =
+  showNote(
+    status,
     '가져오기를 시작했습니다. PR 수에 따라 몇 분 걸립니다 — ' +
-    '잠시 뒤 이 화면을 새로고침하면 반영된 범위가 바뀝니다.';
+      '잠시 뒤 이 화면을 새로고침하면 반영된 범위가 바뀝니다.',
+    'plain',
+  );
 }
 
 /** 역할 칸을 그린다. 서버가 준 지금 값이 기본으로 들어간다. */
