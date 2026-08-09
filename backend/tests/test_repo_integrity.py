@@ -622,6 +622,7 @@ def test_the_seed_track_numbers_agree_with_the_production_formula():
     """
     import ast
     import re
+    from itertools import pairwise
 
     seed_path = REPO_ROOT / "scripts" / "seed_demo.py"
     seed = seed_path.read_text()
@@ -657,7 +658,11 @@ def test_the_seed_track_numbers_agree_with_the_production_formula():
 
     meeting_ms = re.search(r"MEETING_MS = ([0-9 *_]+)", seed)
     assert meeting_ms, "MEETING_MS 를 못 찾았습니다"
-    duration = eval(meeting_ms.group(1))  # noqa: S307 — 이 파일 안의 상수식
+    # `40 * 60 * 1000` 같은 상수식입니다. 곱셈만 직접 풉니다 —
+    # `eval` 은 시드가 바뀌면 무엇이든 실행하게 되므로 쓰지 않습니다.
+    duration = 1
+    for part in meeting_ms.group(1).split("*"):
+        duration *= int(part.strip().replace("_", ""))
 
     problems = []
     for i, gaps in enumerate(tracks):
@@ -667,7 +672,7 @@ def test_the_seed_track_numbers_agree_with_the_production_formula():
                 problems.append(f"{i}번 트랙: 끝이 시작보다 앞입니다 ({start}~{end})")
             if start < 0 or end > duration:
                 problems.append(f"{i}번 트랙: 회의({duration}ms) 밖입니다 ({start}~{end})")
-        for (s1, e1), (s2, _e2) in zip(spans, spans[1:], strict=False):
+        for (s1, e1), (s2, _e2) in pairwise(spans):
             if s2 < e1:
                 problems.append(f"{i}번 트랙: 구멍이 겹칩니다 ({s1}~{e1} · {s2}~)")
         total = sum(g["endMs"] - g["startMs"] for g in gaps)
@@ -696,7 +701,7 @@ def test_the_seed_track_numbers_agree_with_the_production_formula():
         f"기준 {limit}) — '측정 불가' 화면을 시연할 수 없습니다"
     )
     assert any(c >= limit for c in coverages), "시드에 쓸 만한 트랙이 없습니다"
-    assert any(0 < (1 - c) for c in coverages if c >= limit), (
+    assert any((1 - c) > 0 for c in coverages if c >= limit), (
         "쓸 만한데 **조금 끊긴** 트랙이 없습니다 — 작은 구멍이 그려지는지 볼 수 없습니다"
     )
 
