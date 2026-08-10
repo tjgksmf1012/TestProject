@@ -1790,6 +1790,126 @@ describe('CSS 토큰', () => {
   });
 });
 
+describe('메신저 셸 (docs/19)', () => {
+  it('⭐ 셸이 서는 너비를 CSS 와 JS 가 **같은 숫자로** 안다', () => {
+    // `.chan`(회의 채널)은 셸이 설 때만 보입니다. 그래서 `nav.ts` 는
+    // 좁은 화면에서 **요청조차 보내지 않습니다** — 안 보이는 것을 위해
+    // 폰의 데이터 요금을 쓰지 않으려고요.
+    //
+    // 그런데 그 판단이 **두 벌**입니다. CSS 는 `@media (min-width: 90rem)`
+    // 로, JS 는 `matchMedia('(min-width: 90rem)')` 로 각자 압니다. CSS 에서
+    // 이 숫자를 읽어 올 방법이 마땅치 않아 어쩔 수 없이 적었는데, 두 벌이
+    // 있으면 한쪽만 고쳐집니다 — 이 저장소가 반복해서 당한 그것입니다.
+    //
+    // 갈라지면 조용합니다. CSS 만 88rem 으로 내리면 88~90rem 구간에서
+    // **채널 목록이 보이는데 영영 비어 있습니다** (요청이 안 나가므로).
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const nav = readFileSync(join(DEMO, 'nav.ts'), 'utf8');
+
+    // ⚠️ **같은 너비의 미디어 쿼리가 여럿입니다.** 처음엔 `indexOf` 로
+    // 첫 번째만 봤고, 그건 `body { padding-inline }` 하나짜리 블록이라
+    // `.chan` 을 못 찾아 "0개" 가 나왔습니다 — 규칙이 아니라 **찾는
+    // 방법이 틀린** 것이었습니다.
+    const owner = [...css.matchAll(/@media\s*\(min-width:\s*([\d.]+rem)\)/g)]
+      .filter((m) => {
+        const at = m.index ?? 0;
+        const end = css.indexOf('\n}\n', at);
+        return /\.chan\s*\{/.test(css.slice(at, end === -1 ? undefined : end));
+      })
+      .map((m) => m[1] as string);
+    strictEqual(owner.length, 1, `.chan 을 품은 미디어 쿼리가 ${owner.length}개입니다`);
+
+    const inJs = nav.match(/min-width:\s*([\d.]+rem)/)?.[1];
+    strictEqual(
+      inJs,
+      owner[0],
+      `app.css 는 ${owner[0]} 에서 채널 목록을 보이는데 nav.ts 는 ${inJs} 를 봅니다`,
+    );
+  });
+
+  it('⭐ 셸 크롬에 `<ul><li>` 를 쓰지 않는다', () => {
+    // `renderNav` 가 만드는 것은 전부 `#tabs` **안에** 들어갑니다. 그런데
+    // `lobby.html` 과 `index.html` 이 `ul` 에 자기 규칙을 걸어 뒀습니다 —
+    // 화면별 `<style>` 은 app.css 보다 뒤에 오므로 그쪽이 이깁니다.
+    // 셸에서 목록 태그를 쓰면 그 두 화면에서만 조용히 모양이 깨집니다.
+    const nav = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    strictEqual(
+      /<\s*(ul|ol|li)\b/.test(nav),
+      false,
+      'nav.ts 가 목록 태그를 만듭니다 — div·a 로 그리세요 (docs/19 §10)',
+    );
+  });
+
+  it('⭐ 데이터가 오기 **전에** 빈 문구를 그리지 않는다', () => {
+    // 빈 문구를 미리 깔아 두면 회의가 있는 사람도 잠깐 "아직 연 회의가
+    // 없습니다" 를 봅니다. 텅 빈 화면이 "0건" 으로 읽히는 것과 같은
+    // 결함인데, 여기서는 화면이 **거짓말을 먼저** 합니다.
+    //
+    // 그래서 `emptyChannelsNote()` 는 **응답을 받은 뒤에만** 불려야
+    // 합니다 — `await` 보다 앞에서 부르면 그게 미리 깔린 것입니다.
+    // ⚠️ 함수 **이름을 박아 두지 않습니다.** 처음엔 `fillChannels` 를
+    // 찾았는데, 폰에서도 탭을 되살리려고 그 함수를 둘로 가르면서 빈 문구가
+    // 다른 함수로 옮겨 갔습니다. 이름을 박아 둔 검사는 그때 아무것도 못
+    // 찾고 **조용히 통과**합니다.
+    const nav = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    const emptyAt = nav.indexOf('emptyChannelsNote(');
+    strictEqual(emptyAt > -1, true, 'nav.ts 가 빈 문구를 아예 안 씁니다');
+
+    const fnAt = nav.lastIndexOf('function ', emptyAt);
+    strictEqual(fnAt > -1, true, '빈 문구를 쓰는 함수를 못 찾았습니다');
+    strictEqual(
+      nav.slice(fnAt, emptyAt).includes('await tryGet('),
+      true,
+      '응답을 받기 전에 빈 문구를 그립니다 — 회의가 있는 사람이 "없습니다" 를 봅니다',
+    );
+  });
+
+  it('⭐ 회의 안에서 프로젝트를 알아내면 **탭도 다시 그린다**', () => {
+    // 로비·검토는 주소에 `?meeting=` 만 있어서 처음 그릴 때 칸반·기여도·
+    // 설정 셋이 흐립니다. 채널 목록을 채우려면 어차피 프로젝트를 알아내야
+    // 하는데, 알고도 탭을 그대로 두면 **같은 화면이 서로 다른 말**을
+    // 합니다 — 채널 링크에는 `project=1` 이 붙어 있는데 탭은 "프로젝트를
+    // 고르면 열립니다" 입니다. 1600px 로비를 열어 보고 알았습니다.
+    //
+    // ⚠️ 그리고 이건 **폰에서도** 해야 합니다. 채널 목록은 폰에서 안
+    // 보이지만 탭 넷은 보이고, 주소창 없는 PWA 에서 흐린 탭 셋은 갇히는
+    // 길입니다. 그래서 너비를 보는 곳(`matchMedia`)보다 **앞에서** 다시
+    // 그려야 합니다.
+    const nav = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    const repaint = nav.indexOf('paint({ ...context, projectId })');
+    strictEqual(repaint > -1, true, '프로젝트를 알아낸 뒤 탭을 다시 안 그립니다');
+
+    const gate = nav.indexOf('matchMedia(');
+    strictEqual(
+      repaint < gate,
+      true,
+      '너비를 본 뒤에 탭을 다시 그립니다 — 폰의 로비에서 탭 셋이 흐린 채로 남습니다',
+    );
+  });
+
+  it('⭐ 껍데기 색을 본문 색과 섞어 쓰지 않는다', () => {
+    // 껍데기(`--chrome-*`)는 밝은 모드에서도 짙습니다. 본문 토큰
+    // (`--text`·`--surface`·`--line`)은 모드에 따라 뒤집힙니다. 셸 안에서
+    // 본문 토큰을 쓰면 **밝은 모드에서만** 글자가 사라집니다.
+    //
+    // 실험판 v4 에서 실제로 그랬습니다 — 실측 배경 rgb(18,33,31) 에
+    // 글자 rgb(22,33,31) 이었습니다. 화면에서는 그냥 빈 줄로 보입니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const at = css.indexOf('/* ── 회의 채널 ─');
+    strictEqual(at > -1, true, '셸의 회의 채널 블록을 못 찾았습니다');
+    const block = css.slice(at, css.indexOf('\n}\n', at));
+
+    const body = [...block.matchAll(/(?:color|background)\s*:\s*var\((--[a-z0-9-]+)\)/g)]
+      .map((m) => m[1] as string)
+      .filter((name) => !name.startsWith('--chrome-'));
+    strictEqual(
+      [...new Set(body)].join(', '),
+      '',
+      '셸 안에서 뒤집히는 본문 토큰을 씁니다 — `--chrome-*` 를 쓰세요',
+    );
+  });
+});
+
 describe('상태 화면 (지시서 §7)', () => {
   /** 목록을 **비동기로 채우는** 그릇. 화면과 그 그릇의 id. */
   const ASYNC_CONTAINERS: [string, string][] = [

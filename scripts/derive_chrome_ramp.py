@@ -19,6 +19,13 @@ import colorsys
 
 HUE = 183 / 360
 
+# 채널 상태 점의 색조. **Layer 1 의 의미색에서 색조만 빌려 옵니다** —
+# 값을 그대로 쓸 수는 없습니다. `--ok`·`--bad` 는 다크에서 뒤집히는데
+# 껍데기는 안 뒤집히므로, 밝은 모드 값(#136c46 · #a32020)을 그대로 얹으면
+# 껍데기(#161c1c) 위에서 각각 1.4:1 · 1.9:1 이 됩니다 — 안 보입니다.
+HUE_LIVE = 152 / 360  # --green-700 #136c46 의 색조
+HUE_BAD = 0 / 360     # --red-700   #a32020 의 색조
+
 
 def hsl_hex(h: float, s: float, ell: float) -> str:
     r, g, b = colorsys.hls_to_rgb(h, ell, s)
@@ -38,14 +45,16 @@ def ratio(a: str, b: str) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
-def find_lightness(base: str, target: float, *, sat: float, lighter: bool) -> tuple[str, float]:
+def find_lightness(
+    base: str, target: float, *, sat: float, lighter: bool, hue: float = HUE
+) -> tuple[str, float]:
     """`base` 에 대해 목표 대비를 **처음 넘는** 명도를 찾는다.
 
     0.1% 씩 훑는다 — 눈으로 고르는 것이 아니라 훑어서 찾는다.
     """
     steps = range(1, 1000) if lighter else range(999, 0, -1)
     for i in steps:
-        cand = hsl_hex(HUE, sat, i / 1000)
+        cand = hsl_hex(hue, sat, i / 1000)
         if ratio(cand, base) >= target:
             return cand, ratio(cand, base)
     raise SystemExit(f"목표 {target}:1 을 만족하는 명도가 없습니다 (base={base})")
@@ -75,6 +84,32 @@ CHROME_LINE, R_LINE = find_lightness(CHROME_800, 1.35, sat=SAT_SURFACE, lighter=
 SAT_ACCENT = 0.42
 CHROME_ACCENT, R_ACCENT = find_lightness(CHROME_800, 4.5, sat=SAT_ACCENT, lighter=True)
 
+# ── 채널 상태 점 ──────────────────────────────────────────────
+# 점은 글자가 아니라 **UI 컴포넌트**라 하한이 3:1 (WCAG 1.4.11). 다만 이건
+# 지름 8px 짜리라 하한에 붙여 두면 실제로 잘 안 보입니다 — 강조와 같은
+# 4.5 를 목표로 잡습니다.
+#
+# ⚠️ 점 색을 **다섯 개 만들지 않습니다.** 상태는 다섯인데 색은 셋입니다:
+#   open   초록 채움      "지금 열려 있다"
+#   failed 빨강 채움      "실패했다"
+#   todo   강조 채움      "내가 할 일이 남았다" (+ 오른쪽 개수 알약)
+#   working 보조색 **테두리만** — 속이 빈 것이 "아직 안 찼다" 를 말합니다
+#   done   보조색 채움
+# 색을 상태 수만큼 만들면 사람은 그 표를 외워야 합니다.
+CHROME_LIVE, R_LIVE = find_lightness(
+    CHROME_800, 4.5, sat=0.45, lighter=True, hue=HUE_LIVE
+)
+CHROME_BAD, R_BAD = find_lightness(CHROME_800, 4.5, sat=0.62, lighter=True, hue=HUE_BAD)
+
+# 개수 알약의 **글자색은 새 토큰이 아닙니다.**
+#
+# 처음엔 "--chrome-accent 위에서 4.5:1 인 어두운 색"을 따로 뽑았고
+# `#161c1d` 가 나왔습니다 — `--chrome-side`(#161c1c) 와 파랑 한 칸 차이인
+# 사실상 같은 색이었습니다. 강조가 기준면 대비 4.51:1 로 잡혀 있으니
+# **대비는 대칭**이라 기준면을 그대로 글자색으로 쓰면 같은 4.51:1 입니다.
+# 토큰을 하나 더 만들면 다음 사람이 "이 둘은 왜 다른가" 를 묻게 됩니다.
+CHROME_BADGE_FG, R_BADGE = CHROME_800, ratio(CHROME_800, CHROME_ACCENT)
+
 # ⚠️ 표면끼리는 **대비비로 재지 않는다.** `tokens.css` 는 표면 사다리를
 # "HSL 명도 간격 3.1% (지시서 §4.1 의 2~4%)" 로 판정한다. 대비비로 재면
 # 1.09:1 이 나오고 그걸 미달로 신고하게 되는데, 그건 내 잣대가 틀린 것이다.
@@ -90,6 +125,9 @@ rows = [
     ("--chrome-muted",  CHROME_MUTED, "중간 글자",         R_MUTED),
     ("--chrome-subtle", CHROME_SUBTLE, "보조 글자",        R_SUBTLE),
     ("--chrome-accent", CHROME_ACCENT, "강조 (현재 위치)",  R_ACCENT),
+    ("--chrome-live",   CHROME_LIVE, "채널 점 — 열림",     R_LIVE),
+    ("--chrome-bad",    CHROME_BAD, "채널 점 — 실패",      R_BAD),
+    ("(=--chrome-side)", CHROME_BADGE_FG, "개수 알약 글자",  R_BADGE),
 ]
 
 print(f"색조 183° 고정 · 채널 목록 기준면 {CHROME_800}\n")
@@ -121,6 +159,11 @@ checks = [
     ("보조 글자 on 선택",     CHROME_SUBTLE, CHROME_600, 3.0),
     ("강조 on 레일",         CHROME_ACCENT, CHROME_900, 4.5),
     ("강조 on 선택",         CHROME_ACCENT, CHROME_600, 3.0),
+    # 점은 **선택된 줄 위에도** 놓입니다 — 지금 보고 있는 회의가 그 줄입니다.
+    ("점(열림) on 선택",     CHROME_LIVE, CHROME_600, 3.0),
+    ("점(실패) on 선택",     CHROME_BAD, CHROME_600, 3.0),
+    ("점(작업중) on 선택",   CHROME_SUBTLE, CHROME_600, 3.0),
+    ("알약 글자 on 강조",    CHROME_BADGE_FG, CHROME_ACCENT, 4.5),
 ]
 worst = 99.0
 for label, fg, bg, need in checks:

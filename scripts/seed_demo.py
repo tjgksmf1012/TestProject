@@ -14,7 +14,10 @@
 
 무엇을 만드는가:
 
-    프로젝트 1 · 팀원 3 · 회의 1 (전원 동의, 종료됨)
+    프로젝트 1 · 팀원 3 · 회의 5
+      └ 알맹이가 있는 것은 **1주차 정기회의 하나**입니다 (전원 동의, 종료됨).
+        나머지 넷은 껍데기뿐 — 채널 목록이 한 줄이면 "회의는 방이다" 가
+        화면에서 안 보이고, 상태 점도 한 종류밖에 못 봅니다.
     발화 5건 (화자별)
     업무 후보 4건 — 이미 승인된 것 둘 / 담당자 없는 것 / 확신도 낮은 것
     결정 1건
@@ -371,6 +374,7 @@ def seed(*, reset: bool) -> dict:
         meeting_contribution_service.record_meeting(s, meeting)
 
         _seed_tasks(s, project.id, user_ids, meeting.id)
+        _seed_sibling_meetings(s, project.id, users[0].id)
 
         return {
             "project_id": project.id,
@@ -521,6 +525,50 @@ _TASKS: list[tuple[str, int, str, int | None, str | None]] = [
 # ⭐ '로그인 API 구현' 은 일부러 여기 없습니다. 승인 화면에 완전한 후보로
 # 떠 있고, 시연자가 그걸 승인하면 칸반에 카드가 **새로 생깁니다.** 미리
 # 넣어 두면 승인해도 아무 변화가 없거나(멱등이 아니면) 카드가 둘이 됩니다.
+
+
+def _seed_sibling_meetings(session, project_id: int, host_id: int) -> None:
+    """회의를 **여럿** 만든다. 내용은 없고 껍데기만.
+
+    ## 왜 필요한가
+
+    회의가 하나뿐이면 채널 목록이 **한 줄**입니다. 그러면 "회의는 페이지가
+    아니라 들어가고 나오는 방" 이라는 이 제품의 주장이 화면에서 안 보이고,
+    상태 점 다섯 종류(열림·처리중·검토필요·끝남·실패)도 한 번에 하나밖에
+    못 봅니다.
+
+    ⚠️ **발화도 후보도 트랙도 넣지 않습니다.** 여기서 만드는 것은
+    "목록에 서는 회의" 뿐입니다. 알맹이까지 흉내 내면 위의 1주차 회의와
+    구분이 안 되고, 시연에서 어느 것이 진짜 파이프라인을 거친 것인지
+    아무도 모르게 됩니다.
+
+    ⚠️ 제목 없는 회의를 **일부러 하나** 둡니다. 서버는 `title` 을
+    `null` 로 줄 수 있고, 화면은 그때 "회의 5" 처럼 번호로 불러야 합니다
+    (`channelLabel`). 그 자리가 실제로 그려지는지 눈으로 보려면 하나는
+    있어야 합니다.
+    """
+    others = [
+        # 아직 안 끝난 회의 — 채널 목록에서 초록 점. "지금 들어갈 수 있다"
+        ("스프린트 2 계획", timedelta(days=7), "pending"),
+        # 서버가 돌리는 중 — 속이 빈 점. 눌러도 아직 볼 것이 없다
+        ("DB 스키마 확정 논의", timedelta(days=4), "processing"),
+        # 제목을 안 지은 회의. 화면이 번호로 불러야 한다
+        (None, timedelta(days=2), "confirmed"),
+        # 처리에 실패한 회의 — 빨간 점. 숨기지 않습니다
+        ("중간발표 리허설", timedelta(days=1), "failed"),
+    ]
+    for title, offset, status in others:
+        session.add(
+            m.Meeting(
+                project_id=project_id,
+                title=title,
+                started_at=MEETING_START + offset,
+                duration_sec=30 * 60,
+                started_by=host_id,
+                capture_mode="multitrack",
+                status=status,
+            )
+        )
 
 
 def _seed_tasks(session, project_id: int, user_ids: list[int], meeting_id: int) -> None:

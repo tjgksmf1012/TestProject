@@ -29,13 +29,32 @@ BASE_ALIASES = {
     "primary": "--primary",
     "gap-tint": "--gap-tint",
     "기준면": "--chrome-side",
+    "선택줄": "--chrome-sel",
 }
 
-#: `--토큰: 값;  /* … 바탕 N.NN:1 … */` 한 줄에서 주장 하나를 뽑습니다.
-CLAIM = re.compile(
-    r"(--[a-z0-9-]+)\s*:\s*([^;]+);\s*/\*[^*]*?"
-    r"(surface|primary|gap-tint|기준면)\s+(\d+\.\d+):1"
-)
+#: `--토큰: 값;  /* … */` — 선언과 **바로 뒤에 붙은** 주석.
+#:
+#: ⚠️ 주석이 같은 줄에서 시작해야 합니다(`[ \t]*`). `\s*` 로 두면 주석 없는
+#: 선언이 저 아래 문단 주석을 자기 것으로 삼습니다.
+DECL = re.compile(r"(--[a-z0-9-]+)\s*:\s*([^;]+);[ \t]*/\*(.*?)\*/", re.S)
+
+#: 주석 안의 주장. **한 줄에 여러 개** 있을 수 있습니다 —
+#: `--chrome-live` 는 기준면과 선택줄 두 곳에서의 대비를 함께 적습니다.
+#:
+#: ⚠️ 처음엔 선언과 주장을 정규식 하나로 묶어 잡았고, 그래서 **둘째 주장은
+#: 아예 안 걸렸습니다.** 안 걸린 주장은 틀려도 통과합니다 — 이 파일이
+#: 막으려던 바로 그 모양(주석과 색이 갈라진다)이 검사 안에 생긴 것입니다.
+CLAIM = re.compile(r"(surface|primary|gap-tint|기준면|선택줄)\s+(\d+\.\d+):1")
+
+
+def _claims(text: str) -> list[tuple[str, str, float]]:
+    """`(토큰, 바탕 이름, 주장한 비율)` 을 전부 뽑습니다."""
+    found: list[tuple[str, str, float]] = []
+    for decl in DECL.finditer(text):
+        token, comment = decl.group(1), decl.group(3)
+        for claim in CLAIM.finditer(comment):
+            found.append((token, claim.group(1), float(claim.group(2))))
+    return found
 
 
 def _rel_lum(hex_color: str) -> float:
@@ -118,17 +137,16 @@ def test_every_contrast_claim_in_the_file_is_true(css: str):
     # `--primary-fg 7.83:1` 을 밝은 값(#ffffff)으로 재서 7.70 이 나왔습니다.
     # **파일이 틀린 게 아니라 이 검사가 틀렸습니다.** 이 저장소가 스물세 번
     # 겪은 그것입니다 — 새 검사 도구를 쓸 때마다 그 도구부터 틀립니다.
-    claims = [(m, False) for m in CLAIM.finditer(light)]
-    claims += [(m, True) for m in CLAIM.finditer(dark)]
+    claims = [(c, False) for c in _claims(light)]
+    claims += [(c, True) for c in _claims(dark)]
 
-    assert len(claims) >= 12, (
+    assert len(claims) >= 18, (
         f"대비 주장을 {len(claims)}개밖에 못 찾았습니다. 주석 모양이 바뀌었으면 "
         "이 검사도 같이 고치십시오 — 아무것도 못 찾은 검사는 언제나 통과합니다."
     )
 
     wrong: list[str] = []
-    for m, is_dark in claims:
-        token, base_word, claimed = m.group(1), m.group(3), float(m.group(4))
+    for (token, base_word, claimed), is_dark in claims:
         base = BASE_ALIASES[base_word]
         mode = "어두운" if is_dark else "밝은"
 
@@ -223,3 +241,50 @@ def test_the_chrome_surfaces_step_by_the_ladder_this_file_uses(css: str):
             f"{name} 이 기준면과 {gap:.1f}% 밖에 안 떨어졌습니다. "
             "상태는 사다리보다 크게 벌려야 눈에 띕니다."
         )
+
+
+def test_the_count_pill_reads_on_the_accent_it_sits_on(css: str):
+    """개수 알약 — **글자색을 따로 두지 않기로 한 결정**을 붙들어 둡니다.
+
+    채널 옆 "3" 알약은 바탕이 `--chrome-accent`, 글자가 `--chrome-side`
+    입니다. 글자색 토큰을 따로 뽑았더니 `#161c1d` 가 나왔는데 기준면과
+    파랑 한 칸 차이여서, 대비가 대칭인 점을 이용해 기준면을 그대로 썼습니다.
+
+    ⚠️ 그래서 이 쌍에는 **`--토큰: 값; /* 주장 */` 이 없습니다.** 위의
+    주석 검사가 못 보는 자리라는 뜻이고, 그러면 강조색을 손보는 날 알약이
+    조용히 안 읽히게 됩니다. 여기서 직접 잽니다.
+    """
+    light, dark = _blocks(css)
+    fg = _resolve("--chrome-side", light, dark, dark=False)
+    bg = _resolve("--chrome-accent", light, dark, dark=False)
+    assert fg is not None and bg is not None
+
+    ratio = contrast(fg, bg)
+    assert ratio >= 4.5, (
+        f"개수 알약이 {ratio:.2f}:1 입니다. 11px 굵은 글자라 큰 글자 예외"
+        "(3:1)를 못 씁니다 — 4.5:1 이 하한입니다."
+    )
+
+
+def test_the_channel_dots_are_visible_on_both_the_list_and_the_selected_row(css: str):
+    """채널 상태 점 셋이 **두 바탕 위 모두**에서 보이는가.
+
+    점은 기본 줄(`--chrome-side`) 위에도, 지금 보고 있는 회의의 선택 줄
+    (`--chrome-sel`) 위에도 놓입니다. 기준면만 재고 넘어가면 **선택된
+    회의의 점만 안 보이는** 상태가 됩니다 — 하필 지금 보고 있는 그 줄에서.
+
+    점은 글자가 아니라 UI 컴포넌트라 하한이 3:1 입니다 (WCAG 1.4.11).
+    """
+    light, dark = _blocks(css)
+    weak: list[str] = []
+    for dot in ("--chrome-live", "--chrome-bad", "--chrome-accent", "--chrome-subtle"):
+        color = _resolve(dot, light, dark, dark=False)
+        assert color is not None, f"{dot} 을 못 풀었습니다"
+        for bed, need in (("--chrome-side", 4.5), ("--chrome-sel", 3.0)):
+            base = _resolve(bed, light, dark, dark=False)
+            assert base is not None
+            ratio = contrast(color, base)
+            if ratio < need:
+                weak.append(f"{dot} on {bed}: {ratio:.2f}:1 (필요 {need})")
+
+    assert weak == [], "채널 점이 안 보입니다 — " + " | ".join(weak)

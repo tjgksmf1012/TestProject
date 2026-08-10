@@ -740,7 +740,11 @@ def test_my_projects_are_listed(client: TestClient, seeded: dict):
         body[0]
     )
     assert body[0]["member_count"] == 3
-    assert body[0]["meeting_count"] == 1
+    # 알맹이가 있는 1주차 회의 하나 + 껍데기 넷. 껍데기는 채널 목록을
+    # 보여 주려고 넣은 것입니다 — 회의가 하나뿐이면 목록이 한 줄이라
+    # "회의는 들어가고 나오는 방" 이 화면에서 안 보입니다
+    # (`_seed_sibling_meetings`).
+    assert body[0]["meeting_count"] == 5
 
 
 def test_the_project_list_is_the_permission_boundary(client: TestClient, seeded: dict):

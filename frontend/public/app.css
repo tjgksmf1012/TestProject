@@ -622,6 +622,23 @@ body.no-tabs.has-actionbar {
   pointer-events: none;
 }
 
+/* ── 회의 채널 — 셸이 설 때만 보인다 ──────────────────────────
+
+   `renderNav` 가 `#tabs` 안에 `.chan` 을 하나 붙입니다. 폰에서 `#tabs` 는
+   **아래 탭바 넷**이고 거기에 회의 목록이 들어갈 자리는 없습니다.
+
+   ⚠️ 숨기는 것이 막다른 길을 만들지 않는지 확인했습니다 — 폰에서 회의로
+   가는 길은 **홈 화면의 회의 카드**입니다. 그 길은 그대로 있고, 여기서
+   막는 것은 "늘 떠 있는 두 번째 길" 뿐입니다.
+
+   ⚠️ 여기서 `display: none` 이면 `nav.ts` 는 **회의 목록을 받아 오지
+   않습니다.** 안 보이는 것을 위해 데이터 요금을 쓰지 않습니다. (탭 넷을
+   되살리는 데 필요한 프로젝트 조회는 폰에서도 합니다 — 그건 보이니까요.)
+   둘이 같은 너비를 봐야 하므로 `guards.test.ts` 가 그 숫자를 맞춰 봅니다. */
+.chan {
+  display: none;
+}
+
 /* ══════════════════════════════════════════════════════════════
    목록
    ══════════════════════════════════════════════════════════════ */
@@ -1200,4 +1217,152 @@ pre {
   #tabs a[aria-disabled="true"] {
     color: var(--chrome-subtle);
   }
+
+  /* ── 회의 채널 ─────────────────────────────────────────
+
+     ⚠️ **탭 넷은 스크롤과 함께 밀려 올라가면 안 됩니다.** 한 학기 회의가
+     쌓이면 열이 화면을 넘는데, 열 전체를 스크롤시키면 제일 중요한
+     이동 수단 넷이 위로 사라집니다. 그래서 **회의 목록만** 스크롤합니다
+     (`min-height: 0` 이 있어야 flex 안에서 실제로 줄어듭니다). */
+  #tabs {
+    overflow: hidden;
+  }
+
+  #tabs a {
+    flex-shrink: 0;
+  }
+
+  .chan {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    gap: var(--sp-1);
+    margin-top: var(--sp-3);
+    border-top: 1px solid var(--chrome-line);
+    /* ⚠️ **`padding-top` 을 여기 주지 않습니다.** 줬더니 붙어 있는 머리말이
+       `top: 0`(= 안쪽 여백 **아래**)에 서고, 올라오는 줄들이 그 12px 띠를
+       **머리말 위로** 지나갔습니다. 34개를 굴려 보고 봤습니다. 여백은
+       머리말이 자기 `padding` 으로 갖습니다 — 그래야 바탕이 같이 덮습니다. */
+  }
+
+  /* ⚠️ 한글에 `text-transform: uppercase` 와 mono 를 걸지 않습니다.
+     실험판 v1 에서 그렇게 했다가 자간만 벌어지고 아무 효과가 없었습니다
+     — 한글에는 대문자가 없습니다 (docs/19 §3).
+
+     ⚠️ 목록을 끝까지 내리면 이 머리말이 **밀려 올라가 사라집니다.**
+     34개를 넣고 굴려 보고 알았습니다 — 그러면 남은 회의 줄들이 위쪽
+     탭 넷에 그대로 이어 붙어 한 덩어리로 읽힙니다. 붙여 둡니다.
+     (바탕색을 주지 않으면 밑에서 올라온 줄이 글자 위로 지나갑니다.) */
+  .chan-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    flex-shrink: 0;
+    margin: 0;
+    padding: var(--sp-3) var(--sp-3) 0;
+    background: var(--chrome-side);
+    font-size: var(--fs-caption);
+    font-weight: 600;
+    color: var(--chrome-subtle);
+    line-height: var(--sp-6);
+  }
+
+  .chan-row {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-icon);
+    height: var(--shell-row);
+    padding: 0 var(--sp-3);
+    border-radius: var(--r-ctrl);
+    color: var(--chrome-muted);
+    font-size: var(--fs-label);
+    text-decoration: none;
+  }
+
+  .chan-row:hover {
+    background: var(--chrome-hover);
+    color: var(--chrome-text);
+  }
+
+  /* 지금 보고 있는 회의 — 탭과 **같은 표시**를 씁니다. 다른 모양을 쓰면
+     "여기가 지금 위치" 라는 규칙을 두 번 배워야 합니다. */
+  .chan-row[aria-current="page"] {
+    position: relative;
+    background: var(--chrome-sel);
+    color: var(--chrome-text);
+  }
+
+  .chan-row[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 20%;
+    bottom: 20%;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--chrome-accent);
+  }
+
+  /* 회의 이름이 길면 줄이 늘어나는 게 아니라 **잘립니다.** 열 너비는
+     고정이고, 두 줄이 되면 줄 높이가 제각각이 되어 목록이 아니라
+     문단으로 읽힙니다. */
+  .chan-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── 상태 점 — 색은 셋, 넷째는 모양 ────────────────────
+
+     `--ok`·`--bad` 를 쓰지 않는 이유는 `tokens.css` 에 적어 뒀습니다:
+     그 둘은 다크에서 뒤집히는데 껍데기는 안 뒤집힙니다. */
+  .chan-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--r-round);
+    background: var(--chrome-subtle);
+  }
+
+  .chan-dot[data-state="open"]   { background: var(--chrome-live); }
+  .chan-dot[data-state="todo"]   { background: var(--chrome-accent); }
+  .chan-dot[data-state="failed"] { background: var(--chrome-bad); }
+
+  /* 속이 빈 점 = "아직 안 찼다". 색을 하나 더 만드는 대신 **모양**으로
+     가릅니다 — 색이 다섯이면 사람이 그 표를 외워야 합니다. */
+  .chan-dot[data-state="working"] {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--chrome-subtle);
+  }
+
+  /* 남은 업무 후보 수. 글자색이 `--chrome-side` 인 것은 실수가 아닙니다 —
+     대비가 대칭이라 강조색 위에서 4.51:1 이 그대로 나옵니다. */
+  .chan-count {
+    flex: 0 0 auto;
+    min-width: var(--sp-4);
+    padding: 0 var(--sp-1);
+    border-radius: var(--r-round);
+    background: var(--chrome-accent);
+    color: var(--chrome-side);
+    font-size: var(--fs-caption);
+    font-weight: 700;
+    line-height: var(--sp-4);
+    text-align: center;
+  }
+
+  /* 회의가 없을 때·잘렸을 때 하는 말. **빨강이 아닙니다** — 회의가 없는
+     것은 고장이 아니라 아직 시작하지 않은 것입니다. */
+  .chan-none {
+    margin: 0;
+    padding: var(--sp-1) var(--sp-3);
+    font-size: var(--fs-caption);
+    color: var(--chrome-subtle);
+    line-height: 1.5;
+  }
+}
 

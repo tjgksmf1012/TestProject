@@ -378,6 +378,9 @@ async function trySend(request) {
 function unreachableText(what) {
   return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
 }
+function tryGet(url) {
+  return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
+}
 
 // src/lib/privacy/deletion.ts
 function whatGetsDeleted() {
@@ -604,6 +607,60 @@ function contextFromSearch(current, search) {
   return { current, projectId: read("project"), meetingId: read("meeting") };
 }
 
+// src/lib/home/next.ts
+var MEETING_STATUS_LABEL = {
+  pending: "녹음 전 · 녹음 중",
+  queued: "처리 대기",
+  processing: "처리 중",
+  needs_review: "검토 필요",
+  confirmed: "검토 완료",
+  failed: "처리 실패"
+};
+function describeMeetingStatus(status) {
+  return MEETING_STATUS_LABEL[status] ?? status;
+}
+
+// src/lib/nav/channels.ts
+var STATE = {
+  pending: "open",
+  queued: "working",
+  processing: "working",
+  needs_review: "todo",
+  confirmed: "done",
+  failed: "failed"
+};
+function channelState(status) {
+  return STATE[status] ?? "working";
+}
+function channelLabel(meeting) {
+  const title = (meeting.title ?? "").trim();
+  return title === "" ? `회의 ${meeting.meeting_id}` : title;
+}
+function channelHref(meetingId, projectId2) {
+  const base = `/lobby.html?meeting=${meetingId}`;
+  return projectId2 != null && projectId2 > 0 ? `${base}&project=${projectId2}` : base;
+}
+function meetingChannels(meetings, context = {}) {
+  const { projectId: projectId2, currentMeetingId } = context;
+  return meetings.map((meeting) => ({
+    meetingId: meeting.meeting_id,
+    label: channelLabel(meeting),
+    href: channelHref(meeting.meeting_id, projectId2),
+    state: channelState(meeting.status),
+    stateLabel: describeMeetingStatus(meeting.status),
+    current: currentMeetingId != null && currentMeetingId === meeting.meeting_id,
+    pending: meeting.pending_candidates > 0 ? meeting.pending_candidates : null
+  }));
+}
+function emptyChannelsNote() {
+  return "아직 연 회의가 없습니다 — 설정에서 엽니다";
+}
+function channelAriaLabel(channel) {
+  const parts = [channel.label, channel.stateLabel];
+  if (channel.pending !== null) parts.push(`업무 후보 ${channel.pending}건 검토 대기`);
+  return parts.join(", ");
+}
+
 // src/lib/nav/icons.ts
 var PATHS = {
   // 지붕(3,11)-(12,3)-(21,11) + 몸통 x 5.5~18.5, y 9.5~20
@@ -627,8 +684,15 @@ function iconSvg(name) {
 // src/demo/nav.ts
 function renderNav(current) {
   const context = contextFromSearch(current, location.search);
+  paint(context);
+  const tabHost = document.getElementById("tabs");
+  if (tabHost) void fillChannels(tabHost, context);
+}
+function paint(context) {
   const tabHost = document.getElementById("tabs");
   if (tabHost) {
+    const chan = tabHost.querySelector(".chan") ?? document.createElement("div");
+    chan.className = "chan";
     tabHost.innerHTML = navTabs(context).map((tab) => {
       const href = tab.enabled ? ` href="${escapeHtml(tab.href)}"` : "";
       const disabled = tab.enabled ? "" : ' aria-disabled="true"';
@@ -636,12 +700,65 @@ function renderNav(current) {
       const title = tab.blockedReason ? ` title="${escapeHtml(tab.blockedReason)}"` : "";
       return `<a${href}${disabled}${marked}${title}><span class="ico">${iconSvg(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
     }).join("");
+    tabHost.append(chan);
   }
   const host = document.getElementById("nav");
   if (!host) return;
   const links = navLinks(context).map((link) => `<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`).join("");
   const notes = missingLinks(context).map((note) => `<span class="miss">${escapeHtml(note)}</span>`).join("");
   host.innerHTML = links + notes;
+}
+var SHELL_WIDTH = "(min-width: 90rem)";
+var CHANNEL_LIMIT = 20;
+async function fillChannels(tabHost, context) {
+  const apiBase2 = safeApiBase(new URLSearchParams(location.search).get("api"), location.origin);
+  const projectId2 = await resolveProjectId(apiBase2, context);
+  if (projectId2 === null) return;
+  if (context.projectId !== projectId2) paint({ ...context, projectId: projectId2 });
+  await listChannels(tabHost, apiBase2, { ...context, projectId: projectId2 });
+}
+async function listChannels(tabHost, apiBase2, context) {
+  const wide = window.matchMedia(SHELL_WIDTH);
+  if (!wide.matches) {
+    wide.addEventListener("change", () => void listChannels(tabHost, apiBase2, context), {
+      once: true
+    });
+    return;
+  }
+  const host = tabHost.querySelector(".chan");
+  if (!(host instanceof HTMLElement)) return;
+  const projectId2 = context.projectId;
+  const response = await tryGet(`${apiBase2}/api/projects/${projectId2}/meetings`);
+  if (response === null) {
+    host.innerHTML = `<p class="chan-head">회의</p><p class="chan-none">목록을 불러오지 못했습니다 — 연결을 확인해 주세요</p>`;
+    return;
+  }
+  if (!response.ok) return;
+  const meetings = await response.json();
+  const channels = meetingChannels(meetings, {
+    projectId: projectId2,
+    currentMeetingId: context.meetingId
+  });
+  host.innerHTML = `<p class="chan-head">회의</p>` + (channels.length === 0 ? `<p class="chan-none">${escapeHtml(emptyChannelsNote())}</p>` : renderChannels(channels));
+}
+async function resolveProjectId(apiBase2, context) {
+  if (context.projectId != null && context.projectId > 0) return context.projectId;
+  if (context.meetingId == null || context.meetingId <= 0) return null;
+  const response = await tryGet(`${apiBase2}/api/meetings/${context.meetingId}`);
+  if (response === null || !response.ok) return null;
+  const meeting = await response.json();
+  return typeof meeting.project_id === "number" ? meeting.project_id : null;
+}
+function renderChannels(channels) {
+  const shown = channels.slice(0, CHANNEL_LIMIT);
+  const rows2 = shown.map((channel) => {
+    const current = channel.current ? ' aria-current="page"' : "";
+    const count = channel.pending === null ? "" : `<span class="chan-count">${escapeHtml(String(channel.pending))}</span>`;
+    return `<a class="chan-row" href="${escapeHtml(channel.href)}"${current} aria-label="${escapeHtml(channelAriaLabel(channel))}"><span class="chan-dot" data-state="${escapeHtml(channel.state)}"></span><span class="chan-name">${escapeHtml(channel.label)}</span>` + count + `</a>`;
+  }).join("");
+  const hidden = channels.length - shown.length;
+  const more = hidden === 0 ? "" : `<p class="chan-none">그 밖에 ${escapeHtml(String(hidden))}개 — 홈에서 전부 봅니다</p>`;
+  return rows2 + more;
 }
 
 // src/lib/pwa/install.ts
