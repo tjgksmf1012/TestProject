@@ -902,26 +902,53 @@ function cardHtml(task, today) {
   </p>
   ${// ⭐ 이 프로젝트의 주장이 화면에서 보이는 지점.
   // 이게 없으면 이 화면은 그냥 할 일 목록이다.
-  task.origin ? `<p class="origin">${iconSvg("meeting")} ${escapeHtml(task.origin.meeting_title ?? "회의")}에서 나온 업무
-           · 근거 발화 ${task.origin.evidence_utterance_ids.length}건</p>` : '<p class="origin manual">손으로 만든 업무</p>'}
+  //
+  // ⚠️ **손으로 만든 업무는 아무 말도 안 합니다** (docs/19 §18).
+  // 예전에는 카드마다 "손으로 만든 업무" 를 적었는데, 그건 기본값이라
+  // 대부분의 카드에 붙었고 **회의 표시가 눈에 안 띄게** 만들었습니다.
+  // 없는 것이 곧 "손으로 만든 것" 입니다 — 그 설명은 접힌 곳에 있습니다.
+  task.origin ? `<p class="origin">${iconSvg("meeting")} ${escapeHtml(task.origin.meeting_title ?? "회의")}<span class="ev">근거 ${task.origin.evidence_utterance_ids.length}</span></p>` : ""}
   ${// ⭐ 대표 주장의 마지막 칸 — **이 업무가 어느 PR 로 끝났는가.**
   //
-  // `task_github_links` 표는 처음부터 있었지만 잇는 코드가 0곳이라
-  // 행이 한 번도 쓰인 적이 없었습니다. 여기가 그게 눈에 보이는 자리입니다.
+  // ⚠️ 안 붙은 카드의 **안내문은 접습니다.** 문장이 카드마다 똑같아서
+  // 다섯 장이면 같은 안내가 다섯 번 깔렸습니다. 붙은 것만 칩으로
+  // 보이고, 안 붙었을 때 무엇을 적어야 하는지는 아래 접힌 곳에 있습니다.
   githubHtml(task)}
-  ${warnings.length ? `<ul class="warn">${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("")}</ul>` : ""}
+  ${// 못 재는 자리 — **형태로** 말합니다. 전문은 접힌 곳에.
+  warnings.length ? '<p class="gapmark">기여도에 반영 안 됨</p>' : ""}
   <div class="moves">${moves}</div>
+  ${detailsHtml(task, warnings)}
 </article>`;
+}
+function detailsHtml(task, warnings) {
+  const lines = [];
+  if (task.origin === null || task.origin === void 0) {
+    lines.push("<p>손으로 만든 업무입니다 — 회의에서 나온 것이 아닙니다.</p>");
+  } else {
+    lines.push(
+      `<p>${escapeHtml(task.origin.meeting_title ?? "회의")}에서 나온 업무입니다 · 근거 발화 ${task.origin.evidence_utterance_ids.length}건</p>`
+    );
+  }
+  const links = task.github ?? [];
+  if (links.length === 0) {
+    lines.push(`<p>${escapeHtml(describeLinkState(task))}</p>`);
+  } else {
+    lines.push(`<p>${escapeHtml(describeLinkState(task))}</p>`);
+    for (const link of links) {
+      lines.push(`<p>${escapeHtml(describePull(link))} — ${escapeHtml(link.why)}</p>`);
+    }
+  }
+  for (const w of warnings) lines.push(`<p>${escapeHtml(w)}</p>`);
+  if (lines.length === 0) return "";
+  return `<details class="more"><summary>자세히</summary><div class="more-body">${lines.join("")}</div></details>`;
 }
 function githubHtml(task) {
   const links = sortLinks(task.github ?? []);
-  if (links.length === 0) {
-    return `<p class="gh none">${escapeHtml(describeLinkState(task))}</p>`;
-  }
+  if (links.length === 0) return "";
   const items = links.map(
-    (link) => `<li class="${link.confirmed ? "sure" : "guess"}">${escapeHtml(describePull(link))}<span class="why">${escapeHtml(link.why)}</span></li>`
+    (link) => `<li class="${link.confirmed ? "sure" : "guess"}" title="${escapeHtml(link.why)}">${escapeHtml(describePull(link))}</li>`
   ).join("");
-  return `<p class="gh">${escapeHtml(describeLinkState(task))}</p><ul class="gh-list">${items}</ul>`;
+  return `<ul class="gh-list">${items}</ul>`;
 }
 function render() {
   const today = todayInTeamCalendar();

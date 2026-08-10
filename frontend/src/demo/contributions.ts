@@ -157,20 +157,50 @@ function memberRow(member: MemberScore, uncertainty: UncertaintySpan | undefined
         : ''
     }
     ${
+      // ⚠️ **첫 줄만 보이고 나머지는 접습니다** (docs/19 §18).
+      //
+      // `readBeforeTheNumber` 는 측정 불가를 **맨 앞**에 놓습니다 — 이
+      // 숫자를 얼마나 믿을지 정하는 가장 큰 요인이라 그렇게 정렬해
+      // 뒀습니다. 그 판단을 여기서 그대로 씁니다: 맨 앞 하나는 늘 보이고,
+      // 나머지 신뢰도 사유는 접힌 곳에 있습니다.
+      //
+      // 예전에는 셋이 다 깔려서 사람 셋이면 아홉 줄이었고, 그 아홉 줄이
+      // 전부 비슷하게 생겨서 **정작 다른 한 줄(측정 불가)이 묻혔습니다.**
       notes.length
-        ? `<ul class="notes">${notes.map((n) => `<li>${withEmphasis(n)}</li>`).join('')}</ul>`
+        ? `<ul class="notes"><li>${withEmphasis(notes[0] ?? '')}</li></ul>`
         : ''
     }
     ${categories ? `<ul class="cats">${categories}</ul>` : ''}
-    ${
-      flags.length
-        ? `<ul class="flags">${flags.map((f) => `<li>${escapeHtml(f)}</li>`).join('')}</ul>
-           <p class="flagnote">표시만 합니다 — 이 신호로 점수를 깎지 않습니다.
-              판단은 팀이 합니다.</p>`
-        : ''
-    }
+    ${moreHtml(notes.slice(1), flags)}
   </div>
 </div>`;
+}
+
+/**
+ * 줄의 접힌 서랍 — **지운 것이 아니라 접은 것** (docs/19 §18).
+ *
+ * 신뢰도 사유 나머지와 조작 신호가 여기 있습니다. DOM 에 그대로 남으므로
+ * 낭독기도 브라우저 검색도 닿습니다.
+ *
+ * ⚠️ 조작 신호를 접는 것이 **감추는 것이 아닌** 이유: 이 신호는 원래
+ * "표시만 하고 점수를 깎지 않는다" 는 것이었습니다(docs/05 §5). 항상
+ * 펼쳐 두면 사람은 그것을 **판정**으로 읽습니다 — 접어 두는 편이 그
+ * 원칙에 더 맞습니다.
+ */
+function moreHtml(rest: readonly string[], flags: readonly string[]): string {
+  if (rest.length === 0 && flags.length === 0) return '';
+
+  const body =
+    (rest.length
+      ? `<ul class="notes">${rest.map((n) => `<li>${withEmphasis(n)}</li>`).join('')}</ul>`
+      : '') +
+    (flags.length
+      ? `<ul class="flags">${flags.map((f) => `<li>${escapeHtml(f)}</li>`).join('')}</ul>` +
+        '<p class="flagnote">표시만 합니다 — 이 신호로 점수를 깎지 않습니다. 판단은 팀이 합니다.</p>'
+      : '');
+
+  const label = flags.length ? '신뢰도 사유와 표시' : '신뢰도 사유';
+  return `<details class="more"><summary>${label}</summary><div class="more-body">${body}</div></details>`;
 }
 
 function render(score: TeamScore): void {

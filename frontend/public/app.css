@@ -1533,6 +1533,74 @@ pre {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   접기 — 정직함을 **산문으로** 구현하지 않기 (docs/19 §18)
+   ══════════════════════════════════════════════════════════════
+
+   이 저장소는 "말해 줘야 한다" 를 지키다가 그것을 **영구 인라인
+   문장**으로 구현했습니다. 칸반 카드 하나에 안내문이 넉 줄, 기여도
+   한 줄에 사유가 석 줄, 화면 아래에 문단이 둘씩 깔렸습니다. 화면이
+   인터페이스가 아니라 **교재**가 됐습니다.
+
+   ⚠️ 그렇다고 지우면 안 됩니다. 측정 불가·기여도 미반영·표식 안내는
+   이 제품의 윤리이자 사람이 실제로 필요로 하는 것입니다.
+
+   > **정직함은 "항상 보이기" 가 아니라 "언제나 닿을 수 있기" 입니다.**
+
+   그래서 지우지 않고 **접습니다.** 글은 DOM 에 그대로 남아
+   낭독기도 검색도 가드도 닿고, 화면만 조용해집니다.
+
+   ⚠️ `hidden` 이 아니라 `<details>` 입니다. `hidden` 은 낭독기에서도
+   사라집니다 — 그건 지운 것과 같습니다. */
+
+.more {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-caption);
+}
+
+.more > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: fit-content;
+  padding: var(--sp-1) 0;
+  color: var(--text-subtle);
+  cursor: pointer;
+  /* 기본 삼각형을 끄고 직접 그립니다 — 브라우저마다 모양이 다릅니다. */
+  list-style: none;
+}
+
+.more > summary::-webkit-details-marker { display: none; }
+
+.more > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  transition: transform var(--dur-hover) var(--ease-out);
+}
+
+.more[open] > summary::before { transform: rotate(90deg); }
+
+.more > summary:hover { color: var(--text-muted); }
+
+/* 펼친 내용 — 본문보다 한 단 조용하게. 여기 있는 것은 "알아 두면
+   좋은 것" 이지 지금 해야 할 일이 아닙니다. */
+.more-body {
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--line);
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.more-body p,
+.more-body li { margin: var(--sp-1) 0; }
+
+.more-body ul { list-style: none; padding: 0; margin: 0; }
+
+/* ══════════════════════════════════════════════════════════════
    맥락 패널 — 셋째 열 (docs/19 §14)
    ══════════════════════════════════════════════════════════════
 

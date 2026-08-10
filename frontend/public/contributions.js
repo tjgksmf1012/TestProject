@@ -954,13 +954,26 @@ function memberRow(member, uncertainty) {
 
   <div class="read-why">
     ${noEvidence ? '<p class="empty">이 사람의 활동이 아직 하나도 연결되지 않았습니다 — 0 이라는 뜻이 아니라 <strong>연결이 없다</strong>는 뜻입니다.</p>' : ""}
-    ${notes.length ? `<ul class="notes">${notes.map((n) => `<li>${withEmphasis(n)}</li>`).join("")}</ul>` : ""}
+    ${// ⚠️ **첫 줄만 보이고 나머지는 접습니다** (docs/19 §18).
+  //
+  // `readBeforeTheNumber` 는 측정 불가를 **맨 앞**에 놓습니다 — 이
+  // 숫자를 얼마나 믿을지 정하는 가장 큰 요인이라 그렇게 정렬해
+  // 뒀습니다. 그 판단을 여기서 그대로 씁니다: 맨 앞 하나는 늘 보이고,
+  // 나머지 신뢰도 사유는 접힌 곳에 있습니다.
+  //
+  // 예전에는 셋이 다 깔려서 사람 셋이면 아홉 줄이었고, 그 아홉 줄이
+  // 전부 비슷하게 생겨서 **정작 다른 한 줄(측정 불가)이 묻혔습니다.**
+  notes.length ? `<ul class="notes"><li>${withEmphasis(notes[0] ?? "")}</li></ul>` : ""}
     ${categories ? `<ul class="cats">${categories}</ul>` : ""}
-    ${flags.length ? `<ul class="flags">${flags.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>
-           <p class="flagnote">표시만 합니다 — 이 신호로 점수를 깎지 않습니다.
-              판단은 팀이 합니다.</p>` : ""}
+    ${moreHtml(notes.slice(1), flags)}
   </div>
 </div>`;
+}
+function moreHtml(rest, flags) {
+  if (rest.length === 0 && flags.length === 0) return "";
+  const body = (rest.length ? `<ul class="notes">${rest.map((n) => `<li>${withEmphasis(n)}</li>`).join("")}</ul>` : "") + (flags.length ? `<ul class="flags">${flags.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul><p class="flagnote">표시만 합니다 — 이 신호로 점수를 깎지 않습니다. 판단은 팀이 합니다.</p>` : "");
+  const label = flags.length ? "신뢰도 사유와 표시" : "신뢰도 사유";
+  return `<details class="more"><summary>${label}</summary><div class="more-body">${body}</div></details>`;
 }
 function render(score) {
   const warnings = teamWarnings(score, people);

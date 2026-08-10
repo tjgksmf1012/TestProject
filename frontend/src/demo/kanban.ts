@@ -87,47 +87,102 @@ function cardHtml(task: Task, today: string): string {
   ${
     // ⭐ 이 프로젝트의 주장이 화면에서 보이는 지점.
     // 이게 없으면 이 화면은 그냥 할 일 목록이다.
+    //
+    // ⚠️ **손으로 만든 업무는 아무 말도 안 합니다** (docs/19 §18).
+    // 예전에는 카드마다 "손으로 만든 업무" 를 적었는데, 그건 기본값이라
+    // 대부분의 카드에 붙었고 **회의 표시가 눈에 안 띄게** 만들었습니다.
+    // 없는 것이 곧 "손으로 만든 것" 입니다 — 그 설명은 접힌 곳에 있습니다.
     task.origin
-      ? `<p class="origin">${iconSvg('meeting')} ${escapeHtml(task.origin.meeting_title ?? '회의')}에서 나온 업무
-           · 근거 발화 ${task.origin.evidence_utterance_ids.length}건</p>`
-      : '<p class="origin manual">손으로 만든 업무</p>'
+      ? `<p class="origin">${iconSvg('meeting')} ` +
+        `${escapeHtml(task.origin.meeting_title ?? '회의')}` +
+        `<span class="ev">근거 ${task.origin.evidence_utterance_ids.length}</span></p>`
+      : ''
   }
   ${
     // ⭐ 대표 주장의 마지막 칸 — **이 업무가 어느 PR 로 끝났는가.**
     //
-    // `task_github_links` 표는 처음부터 있었지만 잇는 코드가 0곳이라
-    // 행이 한 번도 쓰인 적이 없었습니다. 여기가 그게 눈에 보이는 자리입니다.
+    // ⚠️ 안 붙은 카드의 **안내문은 접습니다.** 문장이 카드마다 똑같아서
+    // 다섯 장이면 같은 안내가 다섯 번 깔렸습니다. 붙은 것만 칩으로
+    // 보이고, 안 붙었을 때 무엇을 적어야 하는지는 아래 접힌 곳에 있습니다.
     githubHtml(task)
   }
   ${
-    warnings.length
-      ? `<ul class="warn">${warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>`
-      : ''
+    // 못 재는 자리 — **형태로** 말합니다. 전문은 접힌 곳에.
+    warnings.length ? '<p class="gapmark">기여도에 반영 안 됨</p>' : ''
   }
   <div class="moves">${moves}</div>
+  ${detailsHtml(task, warnings)}
 </article>`;
+}
+
+/**
+ * 카드의 접힌 서랍 — **지운 것이 아니라 접은 것** (docs/19 §18).
+ *
+ * 여기 들어가는 문장은 전부 예전에 카드에 항상 떠 있던 것입니다.
+ * DOM 에 그대로 남으므로 낭독기도 브라우저 검색도 닿습니다.
+ * `hidden` 이 아니라 `<details>` 인 이유가 그것입니다 — `hidden` 은
+ * 낭독기에서도 사라져서 지운 것과 같습니다.
+ *
+ * 아무것도 담을 게 없으면 **서랍 자체를 안 만듭니다.** 열었더니 비어
+ * 있는 서랍은 고장으로 읽힙니다.
+ */
+function detailsHtml(task: Task, warnings: readonly string[]): string {
+  const lines: string[] = [];
+
+  if (task.origin === null || task.origin === undefined) {
+    lines.push('<p>손으로 만든 업무입니다 — 회의에서 나온 것이 아닙니다.</p>');
+  } else {
+    lines.push(
+      `<p>${escapeHtml(task.origin.meeting_title ?? '회의')}에서 나온 업무입니다 · ` +
+        `근거 발화 ${task.origin.evidence_utterance_ids.length}건</p>`,
+    );
+  }
+
+  const links = task.github ?? [];
+  if (links.length === 0) {
+    lines.push(`<p>${escapeHtml(describeLinkState(task))}</p>`);
+  } else {
+    // 카드 표면에서는 색으로만 말한 것(확정/추정)을 여기서는 글로 남깁니다.
+    lines.push(`<p>${escapeHtml(describeLinkState(task))}</p>`);
+    for (const link of links) {
+      lines.push(`<p>${escapeHtml(describePull(link))} — ${escapeHtml(link.why)}</p>`);
+    }
+  }
+
+  for (const w of warnings) lines.push(`<p>${escapeHtml(w)}</p>`);
+
+  if (lines.length === 0) return '';
+  return (
+    '<details class="more"><summary>자세히</summary>' +
+    `<div class="more-body">${lines.join('')}</div></details>`
+  );
 }
 
 function githubHtml(task: Task): string {
   const links = sortLinks(task.github ?? []);
 
-  // ⚠️ 아무것도 안 붙었어도 침묵하지 않습니다. 빈 자리는 "PR 이 없구나" 가
-  // 아니라 "연결이 고장났나" 로도 읽히고, 무엇보다 **표식을 안 알려주면
-  // 아무도 안 적어서** 자동 연결이 영영 안 일어납니다.
-  if (links.length === 0) {
-    return `<p class="gh none">${escapeHtml(describeLinkState(task))}</p>`;
-  }
+  // ⚠️ 안 붙었을 때 **카드 표면에는 아무것도 안 그립니다.** 문장이
+  // 카드마다 똑같아서 보드 전체가 같은 안내로 덮였습니다. 침묵하는 것이
+  // 아니라 `detailsHtml` 이 접어서 들고 있습니다 — 표식을 안 알려주면
+  // 아무도 안 적어서 자동 연결이 영영 안 일어납니다.
+  if (links.length === 0) return '';
 
+  // ⚠️ 근거(`why`)를 **줄로 깔지 않습니다.** 확정과 추정은 이미 **색**이
+  // 말하고 있어서(초록/호박) 문장은 같은 말을 두 번 하는 것이었습니다.
+  // 링크 하나에 두 줄씩 붙어 카드가 길어졌습니다. 마우스를 올리면 뜨고,
+  // 접힌 서랍에도 그대로 있습니다 — 낭독기가 닿는 자리입니다.
   const items = links
     .map(
       (link) =>
-        `<li class="${link.confirmed ? 'sure' : 'guess'}">` +
-        `${escapeHtml(describePull(link))}` +
-        `<span class="why">${escapeHtml(link.why)}</span></li>`,
+        `<li class="${link.confirmed ? 'sure' : 'guess'}" title="${escapeHtml(link.why)}">` +
+        `${escapeHtml(describePull(link))}</li>`,
     )
     .join('');
 
-  return `<p class="gh">${escapeHtml(describeLinkState(task))}</p><ul class="gh-list">${items}</ul>`;
+  // ⚠️ `describeLinkState` 의 "PR 1건" 머리줄을 뺐습니다 — 바로 아래
+  // 목록이 그 수를 이미 보여 줍니다. 세는 문장은 목록이 길 때만 값이
+  // 있는데 여기 목록은 카드 하나에 한둘입니다.
+  return `<ul class="gh-list">${items}</ul>`;
 }
 
 function render(): void {
