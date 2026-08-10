@@ -38,16 +38,30 @@
   .read { display: grid; gap: var(--sp-3);
           padding: var(--sp-5) 0; border-bottom: 1px solid var(--line); }
   .read:first-child { border-top: 2px solid var(--text); }
+  .read:hover { background: linear-gradient(90deg,
+      color-mix(in srgb, var(--primary) 4%, transparent), transparent 60%); }
 
   @media (min-width: 48rem) {
-    .read { grid-template-columns: 9rem 8.5rem 9rem 1fr; gap: var(--sp-5); align-items: start; }
+    .read { grid-template-columns: 9rem 11rem 8rem 1fr; gap: var(--sp-5); align-items: start; }
   }
   .read-who .who { display: block; font-weight: 700; font-size: var(--fs-item); }
   .read-who .role { display: block; font-size: var(--fs-caption); color: var(--text-subtle); margin-top: var(--sp-1); }
 
   /* 구간이 주인공이다. 단일 점수를 크게 띄우지 않는다. */
-  .range { font-size: var(--fs-number); font-weight: 700; margin: 0; letter-spacing: -.03em;
-           line-height: 1; font-variant-numeric: tabular-nums; }
+  /* ⭐ **구간이 주인공이라면서 24px 이었습니다.** 본문 15px 과 한 대역이라
+     화면에서 무엇을 먼저 봐야 하는지가 안 보였습니다. 48px 로 올리고
+     잉크가 아래로 짙어지는 그라디언트를 씌웁니다.
+
+     ⚠️ 그라디언트 글자는 대비가 위험합니다. 브라우저로 렌더해 **픽셀에서
+     직접** 최악 대비를 쟀습니다 — 다크 12.99:1 · 라이트 13.54:1. */
+  /* ⚠️ **`%` 가 다음 줄로 떨어졌습니다.** 48px 글자에 열 폭이 136px 이라
+     `32~52%` 가 두 줄로 깨졌습니다 — 렌더해서 보고 알았습니다. 열을
+     넓히고 줄바꿈을 막습니다. */
+  .range { font-size: 3rem; font-weight: 800; margin: 0; letter-spacing: -.045em;
+           line-height: .95; font-variant-numeric: tabular-nums; white-space: nowrap;
+           background: linear-gradient(180deg, var(--text) 30%,
+             color-mix(in srgb, var(--text) 62%, var(--primary)) 100%);
+           -webkit-background-clip: text; background-clip: text; color: transparent; }
   .conf { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-2) 0 0; }
 
   /* ⚠️ **얼마나 모르는가**만 그립니다. 값의 절대 위치는 안 그립니다 —
@@ -56,7 +70,9 @@
      사람**이라, 이 그림은 팀을 줄 세우는 대신 어디를 더 재야 하는지를
      가리킵니다. 그래서 색도 결측과 같은 흙빛입니다. */
   .unc-bar { height: .5rem; border-radius: .125rem; background: var(--sunken); overflow: hidden; }
-  .unc-bar i { display: block; height: 100%; background: var(--gap); opacity: .8; }
+  .unc-bar i { display: block; height: 100%; border-radius: .125rem;
+              background: linear-gradient(90deg,
+                color-mix(in srgb, var(--gap) 55%, transparent), var(--gap)); }
   .unc-note { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-2) 0 0; }
   .unc-none { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0; }
 
@@ -70,7 +86,9 @@
   .cats li { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-label); padding: var(--sp-1) 0; }
   .cat { min-width: 3.5rem; color: var(--text-subtle); }
   .catbar { flex: 1; height: .375rem; border-radius: .2rem; background: color-mix(in srgb, currentColor 8%, transparent); }
-  .catbar i { display: block; height: 100%; border-radius: .2rem; background: color-mix(in srgb, var(--primary) 65%, transparent); }
+  .catbar i { display: block; height: 100%; border-radius: .2rem;
+             background: linear-gradient(90deg,
+               color-mix(in srgb, var(--primary) 40%, transparent), var(--primary)); }
   .catnum { min-width: 2.5rem; text-align: right; color: var(--text-subtle); font-variant-numeric: tabular-nums; }
 
   .flags li { font-size: var(--fs-label); color: var(--bad); padding: var(--sp-1) 0; }

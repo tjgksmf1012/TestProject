@@ -2022,6 +2022,32 @@ describe('메신저 셸 (docs/19)', () => {
   });
 });
 
+describe('그림자 (docs/19 §19)', () => {
+  it('⭐ **컨트롤 경계**를 그림자로 그리지 않는다', () => {
+    // `tokens.css` 가 `--line-strong` 을 만든 이유가 이것입니다 —
+    // 입력창이 어디서 시작하는지를 **선 하나**가 말합니다. 거기에
+    // 그림자를 얹으면 두 벌이 되고, 그림자가 안 보이는 환경(고대비
+    // 모드·인쇄)에서 한쪽만 남습니다.
+    //
+    // ⚠️ 예전에 두 파일이 "이 저장소는 box-shadow 가 0건" 이라고 적어
+    // 뒀는데, 셸을 만들며 장식용 그림자가 생겨 **그 문장이 거짓이
+    // 됐습니다.** 개수를 세는 규칙은 이렇게 낡습니다. 지켜야 하는 것은
+    // 개수가 아니라 **쓰임**이라, 그것을 봅니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const offenders: string[] = [];
+    for (const rule of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const selector = (rule[1] as string).trim();
+      if (!/\b(input|textarea|select|button)\b/.test(selector)) continue;
+      if (/box-shadow\s*:/.test(rule[2] as string)) offenders.push(selector);
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '컨트롤에 그림자를 걸었습니다 — 경계는 `--line-strong` 선 하나가 말합니다',
+    );
+  });
+});
+
 describe('상태 화면 (지시서 §7)', () => {
   /** 목록을 **비동기로 채우는** 그릇. 화면과 그 그릇의 id. */
   const ASYNC_CONTAINERS: [string, string][] = [
