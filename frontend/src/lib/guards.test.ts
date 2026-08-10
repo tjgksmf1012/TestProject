@@ -1920,7 +1920,7 @@ describe('메신저 셸 (docs/19)', () => {
     // 봅니다.
     const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
     const missing: string[] = [];
-    for (const name of ['chan', 'ctx']) {
+    for (const name of ['chan', 'ctx', 'rail']) {
       // 자리를 차지하는 장식(선·바탕)을 걸었다면 빈 경우를 반드시 빼야 합니다.
       const rule = new RegExp(`\\.${name}\\s*\\{[^}]*(border-top|border-left|background)`);
       if (!rule.test(css)) continue;
@@ -1933,6 +1933,48 @@ describe('메신저 셸 (docs/19)', () => {
       '',
       '선이나 바탕을 그리는데 `:empty { display: none }` 이 없습니다 — ' +
         '받아 올 것이 없는 화면에 빈 열·빈 줄이 남습니다',
+    );
+  });
+
+  it('⭐ 레일이 **설 때만** 그 자리를 잡는다', () => {
+    // 이 저장소가 같은 실수를 두 번 했습니다.
+    //
+    //   §11  `--shell-rail` 만큼 왼쪽을 비워 뒀는데 레일이 없어서
+    //        **아무것도 없는 72px** 이 생겼습니다
+    //   §13  `.chan` 이 빈 채로 `border-top` 을 그려서 **아무것도 없는
+    //        아래에 가로줄 하나**가 남았습니다
+    //
+    // 레일이 실제로 생기면서 그 자리를 다시 잡게 됐는데, 이번에는
+    // **프로젝트가 하나뿐이면 레일이 없습니다.** 그때도 자리를 잡으면
+    // 처음 그 결함으로 되돌아갑니다.
+    //
+    // 그래서 `--shell-rail` 을 쓰는 `body` 규칙은 **`.has-rail` 이
+    // 붙은 것뿐**이어야 합니다. 그 클래스는 `nav.ts` 가 프로젝트 수를
+    // 보고 붙입니다 — CSS 는 그걸 모릅니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+
+    const bare: string[] = [];
+    for (const rule of css.matchAll(/(^|\n)\s*(body[^{]*)\{([^}]*)\}/g)) {
+      const selector = (rule[2] as string).trim();
+      if (!/var\(--shell-rail\)/.test(rule[3] as string)) continue;
+      if (!/\.has-rail\b/.test(selector)) bare.push(selector);
+    }
+    strictEqual(
+      bare.join(', '),
+      '',
+      '`.has-rail` 없이 레일 자리를 잡습니다 — 프로젝트가 하나인 사람에게 ' +
+        '아무것도 없는 72px 이 생깁니다 (docs/19 §11 에서 한 번 당했습니다)',
+    );
+
+    // 그리고 그 클래스를 **실제로 붙이는 코드**가 있어야 합니다.
+    // 규칙만 있고 붙이는 곳이 없으면 레일은 영영 안 섭니다 — 이 저장소의
+    // 대표 결함인 "만들어 놓고 아무도 안 부름" 이 그 모양입니다.
+    const nav = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    strictEqual(
+      /classList\.add\('has-rail'\)/.test(nav) && /classList\.remove\('has-rail'\)/.test(nav),
+      true,
+      '`has-rail` 을 붙이거나 떼는 코드가 없습니다 — 붙이기만 하면 ' +
+        '프로젝트를 나간 뒤에도 72px 이 남습니다',
     );
   });
 

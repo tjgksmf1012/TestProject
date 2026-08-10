@@ -637,7 +637,8 @@ body.no-tabs.has-actionbar {
    둘이 같은 너비를 봐야 하므로 `guards.test.ts` 가 그 숫자를 맞춰 봅니다. */
 .chan,
 .chan-project,
-.ctx {
+.ctx,
+.rail {
   display: none;
 }
 
@@ -1148,6 +1149,123 @@ pre {
   body.no-tabs {
     padding-top: var(--sp-6);
     padding-left: var(--sp-8);
+  }
+
+  /* ── 프로젝트 레일 ──────────────────────────────────────
+
+     ⚠️ **이 자리는 한 번 걷어냈던 자리입니다.** 셸 1단계에서 레일 몫으로
+     72px 을 비워 뒀다가 "아무것도 없는 72px" 이 되어 통째로 뺐습니다
+     (§11). 그래서 자리는 **레일이 실제로 설 때만** 잡습니다.
+
+     `body.has-rail` 은 `nav.ts` 가 붙입니다 — CSS 는 프로젝트가 몇 개인지
+     모릅니다. 클래스가 없으면 채널 목록이 `left: 0` 에 그대로 붙어서
+     레일 없는 화면에 빈칸이 생기지 않습니다.
+
+     프로젝트가 **하나뿐이면 레일이 없습니다.** 갈 곳이 없으니까요. */
+  body.has-rail {
+    padding-left: calc(var(--shell-rail) + var(--shell-list) + var(--sp-8));
+  }
+
+  body.has-rail #tabs {
+    left: var(--shell-rail);
+  }
+
+  .rail {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 31;
+    width: var(--shell-rail);
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-3) 0;
+    overflow-y: auto;
+
+    /* 가장 깊은 면. 채널 목록(9.8%)보다 3.6% 아래입니다 */
+    background: var(--chrome-rail);
+    border-right: 1px solid var(--chrome-line);
+  }
+
+  /* `paintRail` 이 안 세울 때는 요소를 통째로 걷어내므로 여기까지 올 일이
+     없습니다. 그래도 둡니다 — 다른 두 열과 **같은 규칙**이어야 다음
+     사람이 "이 열만 왜 다르지" 를 묻지 않습니다. */
+  .rail:empty {
+    display: none;
+  }
+
+  .rail-item {
+    position: relative;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--sp-10);
+    height: var(--sp-10);
+
+    border-radius: var(--r-card);
+    background: var(--chrome-hover);
+    color: var(--chrome-muted);
+    text-decoration: none;
+  }
+
+  .rail-item:hover {
+    background: var(--chrome-sel);
+    color: var(--chrome-text);
+  }
+
+  /* 현재 위치 — 탭·채널과 **같은 표시**입니다. 왼쪽 3px 청록 막대.
+     세 곳이 다른 모양을 쓰면 "여기가 지금 위치" 를 세 번 배워야 합니다. */
+  .rail-item[aria-current="page"] {
+    background: var(--chrome-sel);
+    color: var(--chrome-text);
+  }
+
+  /* ⚠️ 처음엔 탭·채널과 똑같이 `left: -12px` 에 3px 막대를 뒀습니다.
+     렌더해서 보니 **거의 안 보였습니다** — 저기는 네모가 72px 안에
+     가운데 놓인 자리라, 막대가 열 가장자리에서 4px 쯤 떠서 열 안쪽의
+     어두운 바탕에 묻힙니다. 탭·채널에서는 막대가 열 맨 왼쪽 끝에
+     붙기 때문에 같은 값이 통했던 것입니다.
+
+     그래서 여기서는 **열 끝에 붙이고 더 길게** 합니다. 색과 굵기의
+     뜻은 그대로라 "여기가 지금 위치" 를 다시 배울 필요는 없습니다. */
+  .rail-item[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    left: calc(-1 * var(--sp-4));
+    top: 10%;
+    bottom: 10%;
+    width: var(--sp-1);
+    border-radius: 0 var(--r-badge) var(--r-badge) 0;
+    background: var(--chrome-accent);
+  }
+
+  /* 이름 첫 글자. 한글 한 글자가 들어가므로 mono 를 쓰지 않습니다 —
+     한글에 mono 를 걸면 자간만 벌어집니다 (§3 의 v1 실수). */
+  .rail-face {
+    font-size: var(--fs-item);
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  /* 검토할 회의가 있다 — **개수가 아니라 있다/없다.** 72px 안에 숫자를
+     넣으면 글자가 4px 이 됩니다. 개수는 홈과 채널 목록이 말합니다.
+
+     채널 목록에서 `할 일 남음` 이 청록인 것과 같은 색입니다. */
+  .rail-dot {
+    position: absolute;
+    top: calc(-1 * var(--sp-1));
+    right: calc(-1 * var(--sp-1));
+    width: var(--sp-3);
+    height: var(--sp-3);
+    border-radius: var(--r-round);
+    background: var(--chrome-accent);
+    /* 레일 바탕색 테두리로 네모에서 떼어 놓습니다 — 안 그러면 점이
+       네모 모서리에 붙어 한 덩어리로 보입니다. */
+    box-shadow: 0 0 0 2px var(--chrome-rail);
   }
 
   /* ── `#tabs` → 채널 목록 열 ─────────────────────────── */

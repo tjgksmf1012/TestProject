@@ -703,6 +703,36 @@ function emptyMembersNote() {
   return "팀원을 불러오지 못했습니다";
 }
 
+// src/lib/nav/rail.ts
+var STAYS = /* @__PURE__ */ new Set(["kanban", "contributions", "project"]);
+function railHref(screen, projectId2) {
+  const target = STAYS.has(screen) ? screen : "kanban";
+  return `/${target}.html?project=${projectId2}`;
+}
+function railInitial(title) {
+  const trimmed = (title ?? "").trim();
+  return Array.from(trimmed)[0] ?? "?";
+}
+function railIsWorthIt(projects) {
+  return projects.length >= 2;
+}
+function railItems(projects, screen, currentProjectId) {
+  return [...projects].sort((a, b) => a.project_id - b.project_id).map((project) => ({
+    projectId: project.project_id,
+    initial: railInitial(project.title),
+    label: project.title,
+    href: railHref(screen, project.project_id),
+    current: currentProjectId != null && currentProjectId === project.project_id,
+    needsReview: project.needs_review > 0
+  }));
+}
+function railAriaLabel(item) {
+  const parts = [item.label];
+  if (item.needsReview) parts.push("검토할 회의가 있습니다");
+  if (item.current) parts.push("지금 보는 프로젝트");
+  return parts.join(", ");
+}
+
 // src/lib/nav/icons.ts
 var PATHS = {
   // 지붕(3,11)-(12,3)-(21,11) + 몸통 x 5.5~18.5, y 9.5~20
@@ -730,12 +760,13 @@ function renderNav(current) {
   const tabHost = document.getElementById("tabs");
   if (tabHost) void fillChannels(tabHost, context);
 }
-function paint(context, projectTitle = null) {
+function paint(context, shell = {}) {
   const tabHost = document.getElementById("tabs");
   if (tabHost) {
     const chan = tabHost.querySelector(".chan") ?? document.createElement("div");
     chan.className = "chan";
-    const heading = `<p class="chan-project" title="${escapeHtml(shellHeading(projectTitle))}">${escapeHtml(shellHeading(projectTitle))}</p>`;
+    const name = shellHeading(shell.projectTitle);
+    const heading = `<p class="chan-project" title="${escapeHtml(name)}">${escapeHtml(name)}</p>`;
     tabHost.innerHTML = navTabs(context).map((tab) => {
       const href = tab.enabled ? ` href="${escapeHtml(tab.href)}"` : "";
       const disabled = tab.enabled ? "" : ' aria-disabled="true"';
@@ -750,12 +781,31 @@ function paint(context, projectTitle = null) {
       panel.className = "ctx";
       document.body.append(panel);
     }
+    paintRail(context, shell.projects ?? []);
   }
   const host = document.getElementById("nav");
   if (!host) return;
   const links = navLinks(context).map((link) => `<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`).join("");
   const notes = missingLinks(context).map((note) => `<span class="miss">${escapeHtml(note)}</span>`).join("");
   host.innerHTML = links + notes;
+}
+function paintRail(context, projects) {
+  const existing = document.querySelector(".rail");
+  if (!railIsWorthIt(projects)) {
+    existing?.remove();
+    document.body.classList.remove("has-rail");
+    return;
+  }
+  const rail = existing instanceof HTMLElement ? existing : document.createElement("nav");
+  rail.className = "rail";
+  rail.setAttribute("aria-label", "프로젝트");
+  rail.innerHTML = railItems(projects, context.current, context.projectId).map((item) => {
+    const current = item.current ? ' aria-current="page"' : "";
+    const dot = item.needsReview ? `<span class="rail-dot"></span>` : "";
+    return `<a class="rail-item" href="${escapeHtml(item.href)}"${current} title="${escapeHtml(item.label)}" aria-label="${escapeHtml(railAriaLabel(item))}"><span class="rail-face" aria-hidden="true">${escapeHtml(item.initial)}</span>` + dot + `</a>`;
+  }).join("");
+  if (existing === null) document.body.prepend(rail);
+  document.body.classList.add("has-rail");
 }
 var SHELL_WIDTH = "(min-width: 90rem)";
 var PANEL_WIDTH = "(min-width: 100rem)";
@@ -764,9 +814,10 @@ async function fillChannels(tabHost, context) {
   const apiBase2 = safeApiBase(new URLSearchParams(location.search).get("api"), location.origin);
   const projectId2 = await resolveProjectId(apiBase2, context);
   if (projectId2 === null) return;
-  const title = await resolveProjectTitle(apiBase2, projectId2);
+  const projects = await fetchProjects(apiBase2);
+  const title = projects.find((p) => p.project_id === projectId2)?.title ?? null;
   if (context.projectId !== projectId2 || title !== null) {
-    paint({ ...context, projectId: projectId2 }, title);
+    paint({ ...context, projectId: projectId2 }, { projectTitle: title, projects });
   }
   await Promise.all([
     listChannels(tabHost, apiBase2, { ...context, projectId: projectId2 }),
@@ -796,12 +847,11 @@ async function fillPanel(apiBase2, projectId2) {
   const note = unmeasurableNote(members);
   host.innerHTML = `<p class="ctx-head">${escapeHtml(panelHeading(members.length))}</p>` + rows2 + (note === null ? "" : `<p class="ctx-note">${escapeHtml(note)}</p>`);
 }
-async function resolveProjectTitle(apiBase2, projectId2) {
+async function fetchProjects(apiBase2) {
   const response = await tryGet(`${apiBase2}/api/projects`);
-  if (response === null || !response.ok) return null;
-  const projects = await response.json();
-  const mine = projects.find((p) => p.project_id === projectId2);
-  return typeof mine?.title === "string" ? mine.title : null;
+  if (response === null || !response.ok) return [];
+  const body = await response.json();
+  return Array.isArray(body) ? body : [];
 }
 async function listChannels(tabHost, apiBase2, context) {
   const wide = window.matchMedia(SHELL_WIDTH);

@@ -33,6 +33,12 @@ import {
   unmeasurableNote,
   type Member,
 } from '../lib/nav/panel.ts';
+import {
+  railAriaLabel,
+  railIsWorthIt,
+  railItems,
+  type RailProject,
+} from '../lib/nav/rail.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { tryGet } from '../lib/http/send.ts';
@@ -70,7 +76,14 @@ export function renderNav(current: ScreenId): void {
  * ⚠️ `.chan` 은 **지웠다 다시 만들지 않고 옮겨 붙입니다.** 새로 만들면
  * 이미 받아 놓은 회의 목록이 날아가고, 다시 받을 때까지 목록이 깜빡입니다.
  */
-function paint(context: NavContext, projectTitle: string | null = null): void {
+interface ShellData {
+  /** 열 머리말에 쓸 이름. 모르면 `null` */
+  projectTitle?: string | null;
+  /** 레일에 세울 프로젝트. 하나뿐이면 레일은 안 섭니다 */
+  projects?: readonly RailProject[];
+}
+
+function paint(context: NavContext, shell: ShellData = {}): void {
   const tabHost = document.getElementById('tabs');
   if (tabHost) {
     const chan = tabHost.querySelector('.chan') ?? document.createElement('div');
@@ -79,9 +92,8 @@ function paint(context: NavContext, projectTitle: string | null = null): void {
     // 열 맨 위 — **지금 어느 프로젝트인가.** 이름을 아직 모르면
     // `shellHeading` 이 제품 이름을 줍니다. 비워 두면 열이 화면마다
     // 다른 높이에서 시작합니다.
-    const heading =
-      `<p class="chan-project" title="${escapeHtml(shellHeading(projectTitle))}">` +
-      `${escapeHtml(shellHeading(projectTitle))}</p>`;
+    const name = shellHeading(shell.projectTitle);
+    const heading = `<p class="chan-project" title="${escapeHtml(name)}">${escapeHtml(name)}</p>`;
 
     tabHost.innerHTML = navTabs(context)
       .map((tab) => {
@@ -125,6 +137,8 @@ function paint(context: NavContext, projectTitle: string | null = null): void {
       panel.className = 'ctx';
       document.body.append(panel);
     }
+
+    paintRail(context, shell.projects ?? []);
   }
 
   const host = document.getElementById('nav');
@@ -138,6 +152,57 @@ function paint(context: NavContext, projectTitle: string | null = null): void {
     .join('');
 
   host.innerHTML = links + notes;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 프로젝트 레일
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 맨 왼쪽 72px.
+ *
+ * ⚠️ **`body.has-rail` 로 자리를 잡습니다.** CSS 는 프로젝트가 몇 개인지
+ * 모르므로, 세울지 말지를 여기서 정해 클래스로 알려 줍니다. 클래스가
+ * 없으면 채널 목록이 `left: 0` 에 그대로 붙습니다 — 레일이 없을 때
+ * **72px 이 비지 않는** 것이 이 방식의 요점입니다 (docs/19 §11).
+ */
+function paintRail(context: NavContext, projects: readonly RailProject[]): void {
+  const existing = document.querySelector('.rail');
+
+  if (!railIsWorthIt(projects)) {
+    // 하나뿐이면 세우지 않습니다. 이미 서 있었다면 걷어냅니다 —
+    // 프로젝트를 나가면 레일도 같이 사라져야 합니다.
+    existing?.remove();
+    document.body.classList.remove('has-rail');
+    return;
+  }
+
+  const rail = existing instanceof HTMLElement ? existing : document.createElement('nav');
+  rail.className = 'rail';
+  rail.setAttribute('aria-label', '프로젝트');
+
+  rail.innerHTML = railItems(projects, context.current, context.projectId)
+    .map((item) => {
+      const current = item.current ? ' aria-current="page"' : '';
+      // 검토거리는 **점 하나**입니다. 개수는 홈과 채널 목록이 말합니다 —
+      // 72px 안에 숫자를 넣으면 글자가 4px 짜리가 됩니다.
+      const dot = item.needsReview ? `<span class="rail-dot"></span>` : '';
+      return (
+        `<a class="rail-item" href="${escapeHtml(item.href)}"${current}` +
+        ` title="${escapeHtml(item.label)}"` +
+        ` aria-label="${escapeHtml(railAriaLabel(item))}">` +
+        `<span class="rail-face" aria-hidden="true">${escapeHtml(item.initial)}</span>` +
+        dot +
+        `</a>`
+      );
+    })
+    .join('');
+
+  // ⚠️ 본문보다 **앞**에 답니다. 레일은 화면 맨 왼쪽이고, 낭독기와 탭
+  // 이동도 그 순서로 읽는 것이 맞습니다. 맥락 패널이 뒤에 붙는 것과
+  // 짝입니다 — 그쪽은 곁다리라 본문 뒤입니다.
+  if (existing === null) document.body.prepend(rail);
+  document.body.classList.add('has-rail');
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -196,9 +261,10 @@ async function fillChannels(tabHost: HTMLElement, context: NavContext): Promise<
   // 폰의 로비에서 칸반·기여도·설정 셋이 흐린 채로 남습니다 — 주소창도
   // 뒤로가기도 없는 PWA 에서 그건 **갇히는 길**입니다. 브라우저로
   // 390px 로비를 열어 보고 알았습니다.
-  const title = await resolveProjectTitle(apiBase, projectId);
+  const projects = await fetchProjects(apiBase);
+  const title = projects.find((p) => p.project_id === projectId)?.title ?? null;
   if (context.projectId !== projectId || title !== null) {
-    paint({ ...context, projectId }, title);
+    paint({ ...context, projectId }, { projectTitle: title, projects });
   }
 
   await Promise.all([
@@ -260,7 +326,11 @@ async function fillPanel(apiBase: string, projectId: number): Promise<void> {
 }
 
 /**
- * 이 프로젝트의 이름.
+ * 내가 속한 프로젝트 전부.
+ *
+ * 열 머리말(이름)과 레일(전환)이 **같은 응답**을 씁니다. 따로 부르면 같은
+ * 것을 두 번 받아 오고, 두 응답이 어긋나는 순간(그 사이에 프로젝트가
+ * 하나 생기면) 머리말과 레일이 서로 다른 말을 합니다.
  *
  * ⚠️ **`GET /api/projects/{id}` 를 쓰지 않습니다.** 그쪽은 `ProjectDetail`
  * 이라 **초대 코드**를 함께 줍니다 ("초대 코드는 구성원에게만"). 이름
@@ -268,14 +338,13 @@ async function fillPanel(apiBase: string, projectId: number): Promise<void> {
  * 들어갈 이유가 없습니다.** 목록 쪽(`ProjectSummary`)에는 초대 코드가
  * 없고, 홈이 이미 쓰는 엔드포인트라 모양도 하나입니다.
  *
- * 못 알아내면 `null` — 부르는 쪽이 제품 이름으로 대신합니다.
+ * 못 받으면 빈 배열 — 부르는 쪽이 제품 이름으로 대신하고 레일은 안 섭니다.
  */
-async function resolveProjectTitle(apiBase: string, projectId: number): Promise<string | null> {
+async function fetchProjects(apiBase: string): Promise<RailProject[]> {
   const response = await tryGet(`${apiBase}/api/projects`);
-  if (response === null || !response.ok) return null;
-  const projects = (await response.json()) as { project_id?: number; title?: string }[];
-  const mine = projects.find((p) => p.project_id === projectId);
-  return typeof mine?.title === 'string' ? mine.title : null;
+  if (response === null || !response.ok) return [];
+  const body = (await response.json()) as unknown;
+  return Array.isArray(body) ? (body as RailProject[]) : [];
 }
 
 /**
