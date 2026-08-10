@@ -1842,3 +1842,74 @@ def test_every_field_the_screen_sends_is_read_by_the_handler():
         + ". 읽거나, 칸을 없애거나, `REQUEST_FIELDS_THE_HANDLER_NEED_NOT_READ` 에 "
         "근거와 함께 적으십시오. 안 읽는 칸은 200 을 돌려주면서 아무 일도 안 합니다."
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 문서가 코드보다 뒤처지는 두 자리 (2026-08-10)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_no_document_resurrects_the_call_claim_that_was_already_corrected():
+    """⭐ **한 번 정정한 문장을 되살리지 않는다.**
+
+    `docs/15` 에 &#34;실제로 통화해 본 적이 없습니다&#34; 라고 적혀 있었고,
+    `1597509` 에서 **과장이 아니라 반대 방향의 오류**로 정정했습니다 —
+    같은 기기 안에서는 host 후보로 직접 붙고, 3인 통화를 실제로 확인했습니다.
+    `docs/17` 이 그때 이렇게 적어 뒀습니다.
+
+        못 하는 것을 못 한다고 적는 건 정직이지만, **할 수 있는 것을
+        못 한다고 적는 건 그냥 틀린 것**이고 그 문장을 믿으면 아무도
+        확인을 안 하게 됩니다.
+
+    ⚠️ 그런데 `docs/18` 을 쓰면서 **그 문장을 다시 썼습니다.** 정정 기록이
+    저장소 안에 있는데도 그랬습니다. 기록은 사람을 못 막습니다 — 검사가
+    막아야 합니다.
+    """
+    import re
+
+    banned = re.compile(r"실제로 통화해\s*본 적이\s*없|여럿이 실제로 통화해\s*본 적은\s*없")
+    offenders: list[str] = []
+    for path in [*sorted(REPO_ROOT.glob("docs/*.md")), REPO_ROOT / "README.md"]:
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not banned.search(line):
+                continue
+            # 정정 **기록** 자체는 그 문장을 인용해야 합니다. 인용은 통과.
+            if "정정" in line or "틀렸" in line or "되살" in line or "예전" in line:
+                continue
+            offenders.append(f"{path.name}:{i}")
+
+    assert offenders == [], (
+        "이미 정정된 통화 문장이 되살아났습니다: "
+        + " | ".join(offenders)
+        + ". 확인된 것은 **같은 기기 안 3인 통화**이고, 확인 못 한 것은 서로 다른 "
+        "NAT 뒤·대칭 NAT(TURN)·가정용 업로드에서 5명입니다 (docs/17 §C)."
+    )
+
+
+def test_no_document_makes_the_bundle_a_required_setup_step():
+    """⭐ **번들은 일부러 커밋돼 있다.** 만들라고 안내하면 오히려 막힌다.
+
+    `.gitignore` 가 이유를 적어 뒀습니다 — 프런트에 런타임 의존성이 0개이고
+    &#34;설치 없이 연다&#34; 가 시연 경로의 전제라, Node 없이도 화면이 떠야 합니다.
+
+    ⚠️ 그런데 `docs/18` 의 설치 절차가 `npm install` 과 `build:demo` 를
+    **필수 단계로** 적고 &#34;건너뛰면 빈 화면&#34; 이라고까지 했습니다. 네트워크가
+    없는 평가용 PC 에서 그대로 따라 하면 **거기서 멈춥니다.**
+    """
+    tracked = {p for p in _tracked() if str(p).startswith("frontend/public/") and p.suffix == ".js"}
+    if not tracked:
+        pytest.skip("번들이 커밋돼 있지 않습니다 — 이 검사의 전제가 사라졌습니다")
+
+    banned = ("건너뛰면 화면이 스크립트를 못 받아", "번들을 만들지 않으면 빈 화면")
+    offenders: list[str] = []
+    for path in [*sorted(REPO_ROOT.glob("docs/*.md")), REPO_ROOT / "README.md"]:
+        text = path.read_text(encoding="utf-8")
+        for phrase in banned:
+            if phrase in text and "틀렸습니다" not in text:
+                offenders.append(f"{path.name} «{phrase}»")
+
+    assert offenders == [], (
+        "번들이 커밋돼 있는데 문서가 만들라고 요구합니다: "
+        + " | ".join(offenders)
+        + ". 소스를 고쳤을 때만 다시 만들면 됩니다."
+    )
