@@ -1075,3 +1075,129 @@ pre {
   color: var(--text-subtle);
   margin: var(--sp-4) 0 0;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   메신저 셸 — 넓은 화면에서 `#tabs` 를 채널 목록 열로 세운다
+   ══════════════════════════════════════════════════════════════
+
+   근거는 `docs/19-메신저-셸-전환.md` 입니다. 요약하면 —
+   이 제품의 모델(프로젝트=서버 · 회의=음성 채널 · 칸반/기여도=채널)이
+   메신저 구조와 거의 그대로 겹치고, 지금은 탭으로 페이지를 갈아 끼우는
+   구조라 **회의가 장소가 아니라 페이지**입니다.
+
+   ## ⚠️ 새 DOM 을 만들지 않습니다 — `#tabs` 를 세웁니다
+
+   `#tabs` 는 이미 `position: fixed` 이고 `src/demo/nav.ts` 가 채웁니다.
+   그 안의 링크가 곧 채널 목록 항목이므로, **id·링크·개수를 하나도 안 바꾸고
+   CSS 로 방향만 세로로 돌립니다.** 그래서
+
+     · `GLOBAL_IDS`(guards.test.ts) · `links.test.ts` · 막다른 길 검사가
+       전부 그대로 통과합니다
+     · **폰에서는 지금의 아래 탭바가 그대로 남습니다.** `docs/19 §9` 가
+       걱정한 "채널 목록이 접히면 회의로 갈 방법이 없다" 는 막다른 길이
+       **아예 생기지 않습니다** — 접는 것이 아니라 원래 모양으로 돌아가는
+       것이기 때문입니다
+
+   ## 왜 90rem(1440px)부터인가
+
+   48rem~90rem 에서는 위쪽 가로 내비가 이미 잘 돕니다. 열을 셋으로 가르려면
+   본문에 최소 720px 은 남겨야 하는데, 레일 72 + 목록 256 을 빼면
+   1440px 부터입니다. 그 아래에서 세로 열을 세우면 본문이 카드 두 장 폭이
+   되어 칸반이 오히려 나빠집니다.
+
+   ## 색은 `--chrome-*` 만 씁니다
+
+   ⚠️ **껍데기 색을 새로 만들지 마십시오.** `--chrome-*` 아홉은 계산값이고
+   `test_design_tokens.py` 가 대비를 매번 다시 잽니다. 내용 쪽 토큰
+   (`--surface`·`--text-subtle` 등)을 껍데기 위에 올리면 밝은 모드에서
+   4.34:1 로 미달합니다 — 실측했습니다 (`docs/19 §10`). */
+
+@media (min-width: 90rem) {
+  body {
+    /* 가운데 정렬을 풀고 왼쪽 열들 옆에 붙인다. */
+    max-width: none;
+    margin-inline: 0;
+    padding: var(--sp-6) var(--sp-8) var(--sp-10);
+    /* ⚠️ 레일 자리를 미리 비워 두지 않습니다. 처음에 `--shell-rail` 만큼
+       띄웠더니 **아무것도 없는 72px 이 왼쪽에 생겼습니다** (렌더해서 봤습니다).
+       레일은 프로젝트 전환용인데 그 화면이 아직 없습니다 — 없는 것을 위해
+       자리를 비워 두면 그건 빈칸이 아니라 결함입니다. 생길 때 더합니다. */
+    padding-left: calc(var(--shell-list) + var(--sp-8));
+  }
+
+  /* 셸이 서면 위쪽 가로 내비 자리가 필요 없다. */
+  body.no-tabs {
+    padding-top: var(--sp-6);
+    padding-left: var(--sp-8);
+  }
+
+  /* ── `#tabs` → 채널 목록 열 ─────────────────────────── */
+  #tabs {
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: auto;
+    width: var(--shell-list);
+    height: auto;
+
+    flex-direction: column;
+    justify-content: flex-start;
+    /* ⚠️ 처음에 2px 을 적었다가 4px 격자 가드에 잡혔습니다. 이 저장소는
+       4의 배수만 쓰고 6px 은 아이콘↔텍스트에만 허용합니다 (지시서 §4.3). */
+    gap: var(--sp-1);
+    padding: var(--sp-3) var(--sp-2);
+
+    background: var(--chrome-side);
+    backdrop-filter: none;
+    border: 0;
+    border-right: 1px solid var(--chrome-line);
+  }
+
+  #tabs a {
+    flex: 0 0 auto;
+    width: 100%;
+    height: var(--shell-row);
+    min-height: var(--shell-row);
+
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: var(--sp-icon);
+    padding: 0 var(--sp-3);
+
+    border-radius: var(--r-ctrl);
+    border-bottom: 0;
+    color: var(--chrome-muted);
+    font-size: var(--fs-label);
+  }
+
+  #tabs a .ico { --ico: 16px; }
+
+  #tabs a:hover {
+    background: var(--chrome-hover);
+    color: var(--chrome-text);
+  }
+
+  /* 현재 위치 — 배경을 올리고 **왼쪽 막대**를 붙인다.
+     배경만으로는 거의 안 보입니다 (docs/19 §3 에서 실측). */
+  #tabs a[aria-current="page"] {
+    position: relative;
+    background: var(--chrome-sel);
+    color: var(--chrome-text);
+    border-bottom-color: transparent;
+  }
+
+  #tabs a[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 20%;
+    bottom: 20%;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--chrome-accent);
+  }
+
+  #tabs a[aria-disabled="true"] {
+    color: var(--chrome-subtle);
+  }
+
