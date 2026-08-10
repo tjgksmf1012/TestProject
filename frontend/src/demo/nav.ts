@@ -23,6 +23,7 @@ import {
   channelAriaLabel,
   emptyChannelsNote,
   meetingChannels,
+  shellHeading,
   type MeetingChannel,
 } from '../lib/nav/channels.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
@@ -62,11 +63,18 @@ export function renderNav(current: ScreenId): void {
  * ⚠️ `.chan` 은 **지웠다 다시 만들지 않고 옮겨 붙입니다.** 새로 만들면
  * 이미 받아 놓은 회의 목록이 날아가고, 다시 받을 때까지 목록이 깜빡입니다.
  */
-function paint(context: NavContext): void {
+function paint(context: NavContext, projectTitle: string | null = null): void {
   const tabHost = document.getElementById('tabs');
   if (tabHost) {
     const chan = tabHost.querySelector('.chan') ?? document.createElement('div');
     chan.className = 'chan';
+
+    // 열 맨 위 — **지금 어느 프로젝트인가.** 이름을 아직 모르면
+    // `shellHeading` 이 제품 이름을 줍니다. 비워 두면 열이 화면마다
+    // 다른 높이에서 시작합니다.
+    const heading =
+      `<p class="chan-project" title="${escapeHtml(shellHeading(projectTitle))}">` +
+      `${escapeHtml(shellHeading(projectTitle))}</p>`;
 
     tabHost.innerHTML = navTabs(context)
       .map((tab) => {
@@ -90,6 +98,11 @@ function paint(context: NavContext): void {
         );
       })
       .join('');
+
+    // ⚠️ 머리말은 탭 **앞**에 넣습니다. `innerHTML` 에 같이 이어 붙이지
+    // 않는 이유는 위 `.map` 이 탭만 만드는 자리이기 때문입니다 — 거기에
+    // 다른 것을 섞으면 다음 사람이 탭 마크업을 고칠 때 같이 건드립니다.
+    tabHost.insertAdjacentHTML('afterbegin', heading);
 
     // 탭 넷 **뒤에** 회의 채널이 붙습니다. 서버에서 회의를 받아 오면
     // 그때 채웁니다 — 자세한 건 `fillChannels` 참고.
@@ -152,9 +165,31 @@ async function fillChannels(tabHost: HTMLElement, context: NavContext): Promise<
   // 폰의 로비에서 칸반·기여도·설정 셋이 흐린 채로 남습니다 — 주소창도
   // 뒤로가기도 없는 PWA 에서 그건 **갇히는 길**입니다. 브라우저로
   // 390px 로비를 열어 보고 알았습니다.
-  if (context.projectId !== projectId) paint({ ...context, projectId });
+  const title = await resolveProjectTitle(apiBase, projectId);
+  if (context.projectId !== projectId || title !== null) {
+    paint({ ...context, projectId }, title);
+  }
 
   await listChannels(tabHost, apiBase, { ...context, projectId });
+}
+
+/**
+ * 이 프로젝트의 이름.
+ *
+ * ⚠️ **`GET /api/projects/{id}` 를 쓰지 않습니다.** 그쪽은 `ProjectDetail`
+ * 이라 **초대 코드**를 함께 줍니다 ("초대 코드는 구성원에게만"). 이름
+ * 하나 때문에 그것을 칸반·기여도·로비·검토 **네 화면 메모리로 끌고
+ * 들어갈 이유가 없습니다.** 목록 쪽(`ProjectSummary`)에는 초대 코드가
+ * 없고, 홈이 이미 쓰는 엔드포인트라 모양도 하나입니다.
+ *
+ * 못 알아내면 `null` — 부르는 쪽이 제품 이름으로 대신합니다.
+ */
+async function resolveProjectTitle(apiBase: string, projectId: number): Promise<string | null> {
+  const response = await tryGet(`${apiBase}/api/projects`);
+  if (response === null || !response.ok) return null;
+  const projects = (await response.json()) as { project_id?: number; title?: string }[];
+  const mine = projects.find((p) => p.project_id === projectId);
+  return typeof mine?.title === 'string' ? mine.title : null;
 }
 
 /**

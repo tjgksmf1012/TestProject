@@ -557,6 +557,10 @@ function meetingChannels(meetings, context = {}) {
 function emptyChannelsNote() {
   return "아직 연 회의가 없습니다 — 설정에서 엽니다";
 }
+function shellHeading(projectTitle) {
+  const title = (projectTitle ?? "").trim();
+  return title === "" ? "TeamFlow" : title;
+}
 function channelAriaLabel(channel) {
   const parts = [channel.label, channel.stateLabel];
   if (channel.pending !== null) parts.push(`업무 후보 ${channel.pending}건 검토 대기`);
@@ -590,11 +594,12 @@ function renderNav(current) {
   const tabHost = document.getElementById("tabs");
   if (tabHost) void fillChannels(tabHost, context);
 }
-function paint(context) {
+function paint(context, projectTitle = null) {
   const tabHost = document.getElementById("tabs");
   if (tabHost) {
     const chan = tabHost.querySelector(".chan") ?? document.createElement("div");
     chan.className = "chan";
+    const heading = `<p class="chan-project" title="${escapeHtml(shellHeading(projectTitle))}">${escapeHtml(shellHeading(projectTitle))}</p>`;
     tabHost.innerHTML = navTabs(context).map((tab) => {
       const href = tab.enabled ? ` href="${escapeHtml(tab.href)}"` : "";
       const disabled = tab.enabled ? "" : ' aria-disabled="true"';
@@ -602,6 +607,7 @@ function paint(context) {
       const title = tab.blockedReason ? ` title="${escapeHtml(tab.blockedReason)}"` : "";
       return `<a${href}${disabled}${marked}${title}><span class="ico">${iconSvg(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
     }).join("");
+    tabHost.insertAdjacentHTML("afterbegin", heading);
     tabHost.append(chan);
   }
   const host = document.getElementById("nav");
@@ -616,8 +622,18 @@ async function fillChannels(tabHost, context) {
   const apiBase2 = safeApiBase(new URLSearchParams(location.search).get("api"), location.origin);
   const projectId2 = await resolveProjectId(apiBase2, context);
   if (projectId2 === null) return;
-  if (context.projectId !== projectId2) paint({ ...context, projectId: projectId2 });
+  const title = await resolveProjectTitle(apiBase2, projectId2);
+  if (context.projectId !== projectId2 || title !== null) {
+    paint({ ...context, projectId: projectId2 }, title);
+  }
   await listChannels(tabHost, apiBase2, { ...context, projectId: projectId2 });
+}
+async function resolveProjectTitle(apiBase2, projectId2) {
+  const response = await tryGet(`${apiBase2}/api/projects`);
+  if (response === null || !response.ok) return null;
+  const projects = await response.json();
+  const mine = projects.find((p) => p.project_id === projectId2);
+  return typeof mine?.title === "string" ? mine.title : null;
 }
 async function listChannels(tabHost, apiBase2, context) {
   const wide = window.matchMedia(SHELL_WIDTH);

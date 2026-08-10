@@ -8,6 +8,7 @@ import {
   channelState,
   emptyChannelsNote,
   meetingChannels,
+  shellHeading,
 } from './channels.ts';
 import { MEETING_STATUS_LABEL, type Meeting } from '../home/next.ts';
 
@@ -156,6 +157,19 @@ describe('channelAriaLabel', () => {
     const [channel] = meetingChannels([meeting({ pending_candidates: 0 })]);
     ok(channel);
     ok(!channelAriaLabel(channel).includes('검토 대기'), channelAriaLabel(channel));
+  });
+});
+
+describe('shellHeading', () => {
+  it('프로젝트 이름이 있으면 그것을 쓴다', () => {
+    strictEqual(shellHeading('졸업작품 TeamFlow'), '졸업작품 TeamFlow');
+  });
+
+  it('⭐ 프로젝트를 모르면 제품 이름 — 자리를 비우지 않는다', () => {
+    // 비우면 열이 화면마다 다른 높이에서 시작합니다.
+    for (const nothing of [undefined, null, '', '   ']) {
+      strictEqual(shellHeading(nothing), 'TeamFlow');
+    }
   });
 });
 

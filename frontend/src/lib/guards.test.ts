@@ -1875,16 +1875,50 @@ describe('메신저 셸 (docs/19)', () => {
     // 보이지만 탭 넷은 보이고, 주소창 없는 PWA 에서 흐린 탭 셋은 갇히는
     // 길입니다. 그래서 너비를 보는 곳(`matchMedia`)보다 **앞에서** 다시
     // 그려야 합니다.
+    // ⚠️ 처음엔 `paint({ ...context, projectId })` 를 **글자 그대로** 찾았고,
+    // 인자를 하나 더 붙이자마자(`, title`) 못 찾아서 깨졌습니다. 규칙이
+    // 깨진 게 아니라 **찾는 방법이 부러진** 것입니다. 지금은 순서를 봅니다:
+    //
+    //     await resolveProjectId(…)  →  paint(…)  →  matchMedia(…)
+    //
+    // 가운데가 빠지거나 마지막 뒤로 밀리면 잡습니다.
     const nav = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
-    const repaint = nav.indexOf('paint({ ...context, projectId })');
-    strictEqual(repaint > -1, true, '프로젝트를 알아낸 뒤 탭을 다시 안 그립니다');
-
+    const learn = nav.indexOf('await resolveProjectId(');
     const gate = nav.indexOf('matchMedia(');
+    strictEqual(learn > -1 && gate > -1, true, 'nav.ts 의 모양이 바뀌었습니다 — 이 검사도 고치세요');
+
+    const repaint = nav.indexOf('paint(', learn);
     strictEqual(
-      repaint < gate,
+      repaint > -1 && repaint < gate,
       true,
-      '너비를 본 뒤에 탭을 다시 그립니다 — 폰의 로비에서 탭 셋이 흐린 채로 남습니다',
+      '프로젝트를 알아낸 뒤 **너비를 보기 전에** 탭을 다시 그려야 합니다 — ' +
+        '안 그러면 폰의 로비에서 칸반·기여도·설정 셋이 흐린 채로 남습니다',
     );
+  });
+
+  it('⭐ 빈 채널 구역이 **선을 긋지 않는다**', () => {
+    // 홈에는 프로젝트 맥락이 없어서 회의를 받아 올 수 없고, 그 구역이 빈
+    // 채로 남습니다. 그런데 `border-top` 은 그려져서 **아무것도 없는
+    // 아래에 가로줄 하나**가 남았습니다 — 홈을 렌더해서 보고 알았습니다.
+    //
+    // 이 저장소에서 **두 번째**입니다. 처음은 프로젝트 레일 자리를 72px
+    // 미리 비워 둔 것이었습니다. 없는 것을 위해 자리를 잡아 두면 그건
+    // 빈칸이 아니라 결함입니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const at = css.indexOf('/* ── 회의 채널 ─');
+    strictEqual(at > -1, true, '셸의 회의 채널 블록을 못 찾았습니다');
+    const block = css.slice(at, css.indexOf('\n}\n', at));
+
+    // 자리를 차지하는 장식(선·여백)을 걸었다면 빈 경우를 반드시 빼야 합니다.
+    const decorates = /\.chan\s*\{[^}]*border-top/.test(block);
+    if (decorates) {
+      strictEqual(
+        /\.chan:empty\s*\{[^}]*display:\s*none/.test(block),
+        true,
+        '`.chan` 이 선을 긋는데 `.chan:empty { display: none }` 이 없습니다 — ' +
+          '홈처럼 회의를 못 받는 화면에 빈 가로줄이 남습니다',
+      );
+    }
   });
 
   it('⭐ 껍데기 색을 본문 색과 섞어 쓰지 않는다', () => {
