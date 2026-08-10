@@ -1754,3 +1754,91 @@ def test_every_maintenance_task_is_actually_scheduled():
         + ". 등록은 실행이 아닙니다 — 스케줄에 넣거나, 왜 수동으로만 도는지 "
         "주석으로 적으십시오."
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 요청 본문 — 보낸 값을 서버가 읽는가
+# ══════════════════════════════════════════════════════════════
+
+#: 핸들러가 직접 안 읽어도 되는 요청 칸과 **그 근거**.
+#:
+#: 지금은 비어 있습니다. 비어 있는 것이 정상입니다 — 채우게 되면
+#: 그때마다 왜 안 읽어도 되는지를 여기 적으십시오.
+REQUEST_FIELDS_THE_HANDLER_NEED_NOT_READ: dict[str, str] = {}
+
+
+def test_every_field_the_screen_sends_is_read_by_the_handler():
+    """⭐ **보낸 값을 서버가 안 읽으면 아무 일도 안 일어납니다.**
+
+    응답 쪽은 이미 가드가 있습니다 — 서버가 실어 보낸 칸을 아무 화면도
+    안 읽는 경우(결함 93·95·96). **반대 방향은 없었습니다.**
+
+    이쪽이 더 조용합니다. 응답의 안 읽는 칸은 &#34;화면에 뭔가 덜 나온다&#34;
+    지만, 요청의 안 읽는 칸은 **사람이 바꿨다고 믿는데 안 바뀐 것**입니다.
+    Pydantic 은 모르는 칸을 조용히 무시하고, 200 이 돌아오고, 화면은
+    &#34;저장했습니다&#34; 라고 말합니다. 결함 67(동의 ②③ 이 저장만 되고 아무
+    효과가 없었다)이 정확히 이 모양이었습니다.
+
+    ⚠️ 이 검사는 **핸들러가 그 인자의 속성으로 읽는지**만 봅니다. 인자를
+    통째로 헬퍼에 넘기면(`_apply(payload)`) 그 안은 안 봅니다 — 그런
+    핸들러가 생기면 여기서 거짓 신고가 납니다. 그때 검사를 넓히거나
+    `REQUEST_FIELDS_THE_HANDLER_NEED_NOT_READ` 에 근거와 함께 적으십시오.
+    """
+    import ast
+
+    main = REPO_ROOT / "backend" / "teamflow" / "api" / "main.py"
+    tree = ast.parse(main.read_text(encoding="utf-8"))
+
+    models: dict[str, list[tuple[str, int]]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and any(
+            isinstance(b, ast.Name) and b.id == "BaseModel" for b in node.bases
+        ):
+            models[node.name] = [
+                (stmt.target.id, stmt.lineno)
+                for stmt in node.body
+                if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
+            ]
+
+    checked = 0
+    unread: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if not any(
+            isinstance(deco, ast.Call)
+            and isinstance(deco.func, ast.Attribute)
+            and deco.func.attr in {"get", "post", "patch", "put", "delete"}
+            for deco in node.decorator_list
+        ):
+            continue
+        for arg in [*node.args.args, *node.args.kwonlyargs]:
+            model = arg.annotation.id if isinstance(arg.annotation, ast.Name) else None
+            if model not in models:
+                continue
+            checked += 1
+            read = {
+                sub.attr
+                for sub in ast.walk(node)
+                if isinstance(sub, ast.Attribute)
+                and isinstance(sub.value, ast.Name)
+                and sub.value.id == arg.arg
+            }
+            unread += [
+                f"{model}.{field} → {node.name}() (main.py:{line})"
+                for field, line in models[model]
+                if field not in read
+                and f"{model}.{field}" not in REQUEST_FIELDS_THE_HANDLER_NEED_NOT_READ
+            ]
+
+    assert checked >= 15, (
+        f"요청 본문 모델을 {checked}개밖에 못 찾았습니다. 라우트나 시그니처 모양이 "
+        "바뀌었으면 이 검사도 같이 고치십시오 — 아무것도 못 찾은 검사는 언제나 "
+        "통과합니다."
+    )
+    assert unread == [], (
+        "화면이 보낼 수 있는데 핸들러가 읽지 않는 칸이 있습니다: "
+        + " | ".join(unread)
+        + ". 읽거나, 칸을 없애거나, `REQUEST_FIELDS_THE_HANDLER_NEED_NOT_READ` 에 "
+        "근거와 함께 적으십시오. 안 읽는 칸은 200 을 돌려주면서 아무 일도 안 합니다."
+    )
