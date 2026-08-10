@@ -26,11 +26,14 @@ function describeRange(member) {
   if (low === high) return `${low}%`;
   return `${low}~${high}%`;
 }
-function rangeBar(member) {
-  const low = clamp(member.range_low, 0, 100);
-  const high = clamp(member.range_high, 0, 100);
-  const left = Math.min(low, high);
-  return { left, width: Math.max(Math.abs(high - low), 1) };
+function uncertaintySpans(members) {
+  const points = members.map((m) => Math.abs(clamp(m.range_high, 0, 100) - clamp(m.range_low, 0, 100)));
+  const widest = Math.max(0, ...points);
+  return members.map((member, i) => ({
+    userId: member.user_id,
+    points: points[i] ?? 0,
+    ratio: widest === 0 ? 0 : Math.round((points[i] ?? 0) / widest * 100)
+  }));
 }
 function clamp(value, min, max) {
   if (Number.isNaN(value)) return min;
@@ -395,7 +398,7 @@ async function whilePressed(button, run) {
 var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
 var wrap = (inner) => `<div class="sk-wrap" aria-hidden="true">${inner}</div>`;
 function scoreCards(count = 3) {
-  const one = '<article class="card">' + bar(40, "title") + bar(64, "line") + bar(100, "track") + bar(34, "line") + "</article>";
+  const one = `<div class="read"><div class="read-who">${bar(72, "title")}</div><div class="read-val">${bar(88, "line")}</div><div class="read-unc">${bar(100, "track")}</div><div class="read-why">${bar(90, "line")}${bar(64, "line")}</div></div>`;
   return wrap(one.repeat(Math.max(1, count)));
 }
 function showSkeleton(element, html) {
@@ -925,8 +928,7 @@ var get = (path) => tryGet(`${apiBase}${path}`);
 function withEmphasis(text) {
   return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
-function memberCard(member) {
-  const bar2 = rangeBar(member);
+function memberRow(member, uncertainty) {
   const notes = readBeforeTheNumber(member);
   const flags = integrityNotes(member);
   const noEvidence = hasNoEvidence(member);
@@ -934,27 +936,31 @@ function memberCard(member) {
     const share = Math.round(c.team_share * 100);
     return `<li><span class="cat">${escapeHtml(describeCategory(c.category))}</span><span class="catbar"><i style="width:${share}%"></i></span><span class="catnum">${c.event_count}건</span></li>`;
   }).join("");
+  const width = uncertainty?.ratio ?? 0;
+  const spread = uncertainty === void 0 || uncertainty.points === 0 ? '<p class="unc-none">구간이 없습니다 — 이 값은 확정적입니다</p>' : `<div class="unc-bar"><i style="width:${width}%"></i></div><p class="unc-note">모르는 폭 ${Math.round(uncertainty.points)}%p</p>`;
   return `
-<article class="card">
-  <header>
+<div class="read">
+  <div class="read-who">
     <span class="who">${escapeHtml(nameOf(member.user_id, people))}</span>
     <span class="role">${escapeHtml(roleOf(member, people))}</span>
-  </header>
+  </div>
 
-  <p class="range">${escapeHtml(describeRange(member))}</p>
-  <div class="rangebar"><i style="left:${bar2.left}%;width:${bar2.width}%"></i></div>
-  <p class="conf">신뢰도 ${escapeHtml(member.confidence_label)}</p>
+  <div class="read-val">
+    <p class="range">${escapeHtml(describeRange(member))}</p>
+    <p class="conf">신뢰도 ${escapeHtml(member.confidence_label)}</p>
+  </div>
 
-  ${noEvidence ? '<p class="empty">이 사람의 활동이 아직 하나도 연결되지 않았습니다 — 0 이라는 뜻이 아니라 <strong>연결이 없다</strong>는 뜻입니다.</p>' : ""}
+  <div class="read-unc">${spread}</div>
 
-  ${notes.length ? `<ul class="notes">${notes.map((n) => `<li>${withEmphasis(n)}</li>`).join("")}</ul>` : ""}
-
-  ${categories ? `<ul class="cats">${categories}</ul>` : ""}
-
-  ${flags.length ? `<ul class="flags">${flags.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>
-         <p class="flagnote">표시만 합니다 — 이 신호로 점수를 깎지 않습니다.
-            판단은 팀이 합니다.</p>` : ""}
-</article>`;
+  <div class="read-why">
+    ${noEvidence ? '<p class="empty">이 사람의 활동이 아직 하나도 연결되지 않았습니다 — 0 이라는 뜻이 아니라 <strong>연결이 없다</strong>는 뜻입니다.</p>' : ""}
+    ${notes.length ? `<ul class="notes">${notes.map((n) => `<li>${withEmphasis(n)}</li>`).join("")}</ul>` : ""}
+    ${categories ? `<ul class="cats">${categories}</ul>` : ""}
+    ${flags.length ? `<ul class="flags">${flags.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>
+           <p class="flagnote">표시만 합니다 — 이 신호로 점수를 깎지 않습니다.
+              판단은 팀이 합니다.</p>` : ""}
+  </div>
+</div>`;
 }
 function render(score) {
   const warnings = teamWarnings(score, people);
@@ -973,7 +979,9 @@ function render(score) {
     });
     return;
   }
-  $("members").innerHTML = orderForDisplay(score.members, people).map(memberCard).join("");
+  const shown = orderForDisplay(score.members, people);
+  const spans = new Map(uncertaintySpans(shown).map((s) => [s.userId, s]));
+  $("members").innerHTML = shown.map((ms) => memberRow(ms, spans.get(ms.user_id))).join("");
   systemValues = new Map(score.members.map((ms) => [ms.user_id, Number(ms.share.toFixed(3))]));
   renderFinalRows(score);
 }

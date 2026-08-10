@@ -138,17 +138,52 @@ export function describeRange(member: MemberScore): string {
   return `${low}~${high}%`;
 }
 
-/**
- * 구간 막대의 위치와 폭 (0~100 백분율).
+/*
+ * ⚠️ `rangeBar()` 를 **지웠습니다.**
  *
- * 폭을 최소 1% 로 잡습니다. 0 이면 막대가 사라져서 **구간이 아예 없는 것처럼**
- * 보이는데, 구간이 좁은 것과 구간이 없는 것은 다릅니다.
+ * 구간의 절대 위치(`left`)와 폭을 주던 함수인데, 화면이 위치를 그리지
+ * 않기로 하면서 부르는 곳이 0곳이 됐습니다 (아래 `uncertaintySpans` 참고).
+ *
+ * 처음에는 "다시 그릴 일이 생기면 여기 있습니다" 라며 남겨 뒀습니다.
+ * `guards.test.ts` 의 "lib 의 export 를 화면이 실제로 부른다" 가 그걸
+ * 잡았고, 그 판단이 맞습니다 — 이 저장소의 대표 결함이 **만들어 놓고
+ * 아무도 안 부르는 것**이고, "나중에 쓸지도" 는 그 결함을 남겨 두는
+ * 가장 흔한 변명입니다. 필요해지면 그때 다시 씁니다. git 이 기억합니다.
  */
-export function rangeBar(member: MemberScore): { left: number; width: number } {
-  const low = clamp(member.range_low, 0, 100);
-  const high = clamp(member.range_high, 0, 100);
-  const left = Math.min(low, high);
-  return { left, width: Math.max(Math.abs(high - low), 1) };
+
+/** 한 사람의 "얼마나 모르는가". */
+export interface UncertaintySpan {
+  userId: number;
+  /** 구간의 폭 (%p). 클수록 덜 안다 */
+  points: number;
+  /** 팀에서 가장 넓은 구간 대비 (0~100). 막대 길이로 쓴다 */
+  ratio: number;
+}
+
+/**
+ * 구간의 **폭**만 뽑는다 — 값이 아니라 **우리 측정의 불확실성**.
+ *
+ * ## 이 막대가 비교하는 것은 사람이 아닙니다
+ *
+ * 길이가 긴 사람은 "기여가 큰 사람" 이 아니라 **"우리가 가장 모르는
+ * 사람"** 입니다. 그래서 이 그림은 팀을 줄 세우지 않고, 오히려 어디를
+ * 더 재야 하는지를 가리킵니다.
+ *
+ * ⚠️ 길이는 **팀에서 가장 넓은 구간** 기준입니다. 0~100 을 쓰면 폭 12%p 와
+ * 20%p 가 둘 다 짧은 막대가 되어 차이가 안 보입니다 — 그러면 그릴 이유가
+ * 없습니다.
+ *
+ * ⚠️ 전원이 폭 0 이면(완전히 확정된 이상적인 경우) **전부 0** 을 돌려
+ * 줍니다. 그때 100 을 주면 "다 모른다" 로 보이는데 정반대입니다.
+ */
+export function uncertaintySpans(members: readonly MemberScore[]): UncertaintySpan[] {
+  const points = members.map((m) => Math.abs(clamp(m.range_high, 0, 100) - clamp(m.range_low, 0, 100)));
+  const widest = Math.max(0, ...points);
+  return members.map((member, i) => ({
+    userId: member.user_id,
+    points: points[i] ?? 0,
+    ratio: widest === 0 ? 0 : Math.round(((points[i] ?? 0) / widest) * 100),
+  }));
 }
 
 function clamp(value: number, min: number, max: number): number {

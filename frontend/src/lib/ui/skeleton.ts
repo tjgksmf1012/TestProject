@@ -32,9 +32,9 @@
  *
  * ## ⚠️ 격자를 다시 선언하지 않습니다
  *
- * `#board` 는 이미 `class="board"` 이고 `#members` 는 이미
- * `class="score-grid"` 입니다. 스켈레톤이 그 클래스를 **또** 달면
- * 격자 안에 격자가 생겨, 카드 셋이 한 칸에 우겨넣어집니다.
+ * `#board` 는 이미 `class="board"` 입니다. 스켈레톤이 그 클래스를 **또**
+ * 달면 격자 안에 격자가 생겨, 카드 셋이 한 칸에 우겨넣어집니다.
+ * (`#members` 는 격자를 뗐습니다 — 판독 줄이 세로로 쌓입니다.)
  *
  * 그래서 겉껍질 `.sk-wrap` 은 `display: contents` 입니다 — 레이아웃에서
  * 사라지고, 안의 카드들이 **그릇의 격자에 직접** 놓입니다.
@@ -63,20 +63,24 @@ export function projectCards(count = 2): string {
 }
 
 /**
- * 기여도의 사람별 카드.
+ * 기여도의 사람별 **판독 줄**.
  *
- * 실제 카드는 이름 · 구간 문구 · **구간 막대** · 신뢰도 입니다.
- * 막대 자리를 비워 두는 것이 중요합니다 — 이 화면의 주인공이라,
- * 나중에 나타나면서 아래를 밀어내면 읽던 자리를 잃습니다.
+ * ⚠️ 예전에는 `class="card"` 였습니다. 화면이 카드에서 규칙선 줄로
+ * 바뀌었는데(docs/19 §16) 여기가 그대로였다면 **카드가 잠깐 떴다가
+ * 줄로 튀었을 것**입니다 — 이 파일이 막으려던 바로 그 모양입니다.
+ *
+ * 실제 줄은 네 칸입니다: 이름 · 구간 문구 · **모르는 폭 막대** · 근거.
+ * 막대 자리를 비워 두는 것이 중요합니다 — 나중에 나타나면서 아래를
+ * 밀어내면 읽던 자리를 잃습니다.
  */
 export function scoreCards(count = 3): string {
   const one =
-    '<article class="card">' +
-    bar(40, 'title') +
-    bar(64, 'line') +
-    bar(100, 'track') +
-    bar(34, 'line') +
-    '</article>';
+    '<div class="read">' +
+    `<div class="read-who">${bar(72, 'title')}</div>` +
+    `<div class="read-val">${bar(88, 'line')}</div>` +
+    `<div class="read-unc">${bar(100, 'track')}</div>` +
+    `<div class="read-why">${bar(90, 'line')}${bar(64, 'line')}</div>` +
+    '</div>';
   return wrap(one.repeat(Math.max(1, count)));
 }
 

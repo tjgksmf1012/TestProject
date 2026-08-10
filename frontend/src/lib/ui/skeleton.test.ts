@@ -102,14 +102,19 @@ describe('모양이 실제 화면에서 왔다', () => {
     // 스켈레톤용 클래스를 따로 만들면, 공용 CSS 가 바뀔 때 스켈레톤만
     // 옛 모양으로 남습니다. 그러면 내용이 도착하는 순간 화면이 튑니다.
     ok(projectCards().includes('class="card"'), '홈은 카드 모양이어야 합니다');
-    ok(scoreCards().includes('class="card"'), '기여도는 카드 모양이어야 합니다');
+    // ⚠️ 기여도는 **카드가 아니라 판독 줄**입니다 (docs/19 §16). 여기가
+    // `card` 로 남아 있으면 카드가 잠깐 떴다가 줄로 튑니다 — 이 검사가
+    // 막으려던 그 모양입니다.
+    ok(scoreCards().includes('class="read"'), '기여도는 판독 줄 모양이어야 합니다');
+    ok(!scoreCards().includes('class="card"'), '기여도 스켈레톤에 옛 카드가 남아 있습니다');
     ok(board().includes('class="col"'), '칸반은 열 모양이어야 합니다');
   });
 
   it('⭐ 격자 클래스를 **다시 선언하지 않는다**', () => {
-    // `#board` 는 이미 `class="board"` 이고 `#members` 는 이미
-    // `class="score-grid"` 입니다. 스켈레톤이 그 클래스를 또 달면
-    // 격자 안에 격자가 생겨 카드 셋이 한 칸에 우겨넣어집니다.
+    // `#board` 는 이미 `class="board"` 입니다. 스켈레톤이 그 클래스를 또
+    // 달면 격자 안에 격자가 생겨 카드 셋이 한 칸에 우겨넣어집니다.
+    // (`#members` 는 이제 격자가 아닙니다 — 판독 줄이 세로로 쌓입니다.
+    //  그래도 `score-grid` 를 되살리지 못하게 계속 봅니다.)
     // 겉껍질은 `display: contents` 로 레이아웃에서 사라집니다.
     for (const [name, html] of WRAPPED) {
       ok(!html.includes('score-grid'), `${name} 이 격자를 다시 선언합니다`);
@@ -133,7 +138,7 @@ describe('모양이 실제 화면에서 왔다', () => {
 
   it('개수를 넘기면 그만큼 나온다', () => {
     strictEqual([...projectCards(5).matchAll(/class="card"/g)].length, 5);
-    strictEqual([...scoreCards(2).matchAll(/class="card"/g)].length, 2);
+    strictEqual([...scoreCards(2).matchAll(/class="read"/g)].length, 2);
     strictEqual([...rows(7).matchAll(/class="sk-line"/g)].length, 7);
     strictEqual([...rowItems(4).matchAll(/<li /g)].length, 4);
   });
@@ -142,6 +147,7 @@ describe('모양이 실제 화면에서 왔다', () => {
     // 빈 스켈레톤은 "다 불러왔는데 아무것도 없다" 로 읽힙니다.
     strictEqual([...projectCards(0).matchAll(/class="card"/g)].length, 1);
     strictEqual([...board(-1).matchAll(/class="col"/g)].length, 1);
+    strictEqual([...scoreCards(0).matchAll(/class="read"/g)].length, 1);
     strictEqual([...rows(0).matchAll(/class="sk-line"/g)].length, 1);
     strictEqual([...rowItems(0).matchAll(/<li /g)].length, 1);
   });

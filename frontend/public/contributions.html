@@ -21,22 +21,48 @@
   .warnings { margin: var(--sp-4) 0; padding: .75rem var(--sp-4); border-radius: .5rem; font-size: var(--fs-label); background: color-mix(in srgb, var(--warn) 12%, transparent); }
   .warnings p { margin: var(--sp-1) 0; }
 
-  .card { border: 1px solid var(--line); border-radius: .75rem; padding: var(--sp-4); margin-bottom: var(--sp-4); }
-  .card header { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-2); }
-  .who { font-weight: 700; font-size: var(--fs-title); }
-  .role { font-size: var(--fs-caption); color: var(--text-subtle); }
+  /* ══ 판독 줄 — 카드를 걷어냈습니다 (docs/19 §16) ══════════
+
+     카드 셋을 가로로 늘어놓은 판형은 어느 SaaS 화면과도 구분되지
+     않았고, 더 나쁘게는 이 화면이 하는 말과 어긋났습니다. 카드는
+     **완결된 결과**처럼 보이는 그릇인데 여기 있는 것은 범위와
+     신뢰도와 못 잰 구간입니다.
+
+     지금은 제도 도면처럼 규칙선으로만 나눕니다 — `tokens.css` 가
+     맨 위에 적어 둔 방향(Marey 의 운행도표, "빈 곳이 정보")을
+     이 화면에서도 지키는 것입니다. */
+  /* ⚠️ **폰이 먼저입니다.** 네 칸을 390px 에 밀어 넣었더니 가로로 222px 이
+     넘쳤습니다 (실측). 이 저장소는 가로 넘침 0 을 지켜 왔고, 폰에서
+     가로 스크롤이 생기면 읽던 자리를 잃습니다. 좁은 화면에서는 한 칸씩
+     쌓고, 자리가 있을 때만 네 칸으로 폅니다. */
+  .read { display: grid; gap: var(--sp-3);
+          padding: var(--sp-5) 0; border-bottom: 1px solid var(--line); }
+  .read:first-child { border-top: 2px solid var(--text); }
+
+  @media (min-width: 48rem) {
+    .read { grid-template-columns: 9rem 8.5rem 9rem 1fr; gap: var(--sp-5); align-items: start; }
+  }
+  .read-who .who { display: block; font-weight: 700; font-size: var(--fs-item); }
+  .read-who .role { display: block; font-size: var(--fs-caption); color: var(--text-subtle); margin-top: var(--sp-1); }
 
   /* 구간이 주인공이다. 단일 점수를 크게 띄우지 않는다. */
-  .range { font-size: var(--fs-number); font-weight: 700; margin: 0; font-variant-numeric: tabular-nums; }
-  /* 구간 막대는 공용 `.range` 로 옮겼습니다 (app.css).
-     캡이 구간의 양끝을 가리켜야 하는데, 여기 있던 규칙은 캡이
-     없어서 "19~29%" 가 그냥 채워진 막대로 보였습니다. */
-  .rangebar { margin: var(--sp-2) 0 .5rem; }
-  .conf { font-size: var(--fs-label); color: var(--text-subtle); margin: 0; }
+  .range { font-size: var(--fs-number); font-weight: 700; margin: 0; letter-spacing: -.03em;
+           line-height: 1; font-variant-numeric: tabular-nums; }
+  .conf { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-2) 0 0; }
+
+  /* ⚠️ **얼마나 모르는가**만 그립니다. 값의 절대 위치는 안 그립니다 —
+     세로 줄로 세우면 그건 같은 자에 세운 막대그래프, 곧 순위표입니다.
+     길이가 긴 사람은 기여가 큰 사람이 아니라 **우리가 가장 모르는
+     사람**이라, 이 그림은 팀을 줄 세우는 대신 어디를 더 재야 하는지를
+     가리킵니다. 그래서 색도 결측과 같은 흙빛입니다. */
+  .unc-bar { height: .5rem; border-radius: .125rem; background: var(--sunken); overflow: hidden; }
+  .unc-bar i { display: block; height: 100%; background: var(--gap); opacity: .8; }
+  .unc-note { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-2) 0 0; }
+  .unc-none { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0; }
 
   /* ⚠️ `::before` 로 마커를 찍으므로 목록 기본 불릿을 꺼야 한다.
      안 끄면 "• · 동료평가…" 처럼 마커가 두 개 찍힌다. */
-  .notes, .cats, .flags { list-style: none; padding-left: 0; margin: var(--sp-2) 0 0; }
+  .notes, .cats, .flags { list-style: none; padding-left: 0; margin: 0 0 var(--sp-2); }
   .notes li { font-size: var(--fs-label); color: var(--warn); padding: var(--sp-1) 0; }
   .notes li::before { content: "· "; }
   .notes strong { color: var(--bad); }
@@ -68,7 +94,7 @@
 
   <div id="warnings" class="warnings" hidden></div>
 
-  <div id="members" class="score-grid"></div>
+  <div id="members"></div>
 
   <p class="note" id="notice"></p>
 
@@ -98,8 +124,14 @@
     <br /><br />
     숫자는 구간입니다. 신뢰도가 낮을수록 구간이 넓어지고, 그 넓이가 "이 값을
     얼마나 믿을 수 있는가"를 말합니다. <strong>측정하지 못한 영역은 0이
-    아닙니다</strong> — 나머지 활동으로 추정한 값이고, 그 사실을 카드에
+    아닙니다</strong> — 나머지 활동으로 추정한 값이고, 그 사실을 각 줄에
     적어 둡니다.
+    <br /><br />
+    <strong>막대는 값이 아니라 "얼마나 모르는가"입니다.</strong> 값의 자리를
+    그림으로 그리면 세 사람이 같은 자에 서게 되고, 그건 순위표입니다. 그래서
+    값은 글자로만 적고, 막대는 구간의 <strong>넓이</strong>만 그립니다 —
+    막대가 긴 사람은 기여가 큰 사람이 아니라 <strong>우리가 가장 모르는
+    사람</strong>이고, 그 자리가 다음에 더 재야 할 곳입니다.
   </p>
 
   <script type="module" src="/contributions.js"></script>

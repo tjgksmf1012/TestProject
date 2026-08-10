@@ -17,7 +17,8 @@ import {
   integrityNotes,
   nameOf,
   orderForDisplay,
-  rangeBar,
+  uncertaintySpans,
+  type UncertaintySpan,
   readBeforeTheNumber,
   roleOf,
   teamWarnings,
@@ -90,8 +91,26 @@ function withEmphasis(text: string): string {
   return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 }
 
-function memberCard(member: MemberScore): string {
-  const bar = rangeBar(member);
+/**
+ * 한 사람의 판독 줄.
+ *
+ * ## ⚠️ 카드에서 줄로 바꿨습니다 (docs/19 §16)
+ *
+ * 카드 셋을 가로로 늘어놓은 판형은 **어느 SaaS 화면과도 구분되지 않았고**,
+ * 더 나쁘게는 이 화면이 하는 말과 어긋났습니다. 카드는 "완결된 결과" 처럼
+ * 보이는 그릇인데, 여기 있는 것은 **범위와 신뢰도와 못 잰 구간**입니다.
+ *
+ * 지금은 제도 도면처럼 규칙선으로만 나눕니다 — 값은 글자로, 그림은
+ * "얼마나 모르는가" 하나만.
+ *
+ * ## ⚠️ 구간의 **절대 위치를 그리지 않습니다**
+ *
+ * 세로 줄로 세우자 세 사람의 막대가 같은 0~100 축에 정렬됐고, 그 순간
+ * 막대그래프이자 **순위표**가 됐습니다 (렌더해서 보고 알았습니다).
+ * 값은 `describeRange` 가 글자로 정확히 말하므로 막대는 그 말의 반복일
+ * 뿐이었고, 반복하는 쪽이 순위를 만들었습니다.
+ */
+function memberRow(member: MemberScore, uncertainty: UncertaintySpan | undefined): string {
   const notes = readBeforeTheNumber(member);
   const flags = integrityNotes(member);
   const noEvidence = hasNoEvidence(member);
@@ -107,40 +126,51 @@ function memberCard(member: MemberScore): string {
     })
     .join('');
 
+  // 폭 0 은 "완전히 확정" 이라 그릴 것이 없습니다. 0px 막대를 그리면
+  // 사람은 그것을 "막대가 안 나왔다(고장)" 로 읽습니다.
+  const width = uncertainty?.ratio ?? 0;
+  const spread =
+    uncertainty === undefined || uncertainty.points === 0
+      ? '<p class="unc-none">구간이 없습니다 — 이 값은 확정적입니다</p>'
+      : `<div class="unc-bar"><i style="width:${width}%"></i></div>` +
+        `<p class="unc-note">모르는 폭 ${Math.round(uncertainty.points)}%p</p>`;
+
   return `
-<article class="card">
-  <header>
+<div class="read">
+  <div class="read-who">
     <span class="who">${escapeHtml(nameOf(member.user_id, people))}</span>
     <span class="role">${escapeHtml(roleOf(member, people))}</span>
-  </header>
+  </div>
 
-  <p class="range">${escapeHtml(describeRange(member))}</p>
-  <div class="rangebar"><i style="left:${bar.left}%;width:${bar.width}%"></i></div>
-  <p class="conf">신뢰도 ${escapeHtml(member.confidence_label)}</p>
+  <div class="read-val">
+    <p class="range">${escapeHtml(describeRange(member))}</p>
+    <p class="conf">신뢰도 ${escapeHtml(member.confidence_label)}</p>
+  </div>
 
-  ${
-    noEvidence
-      ? '<p class="empty">이 사람의 활동이 아직 하나도 연결되지 않았습니다 — ' +
-        '0 이라는 뜻이 아니라 <strong>연결이 없다</strong>는 뜻입니다.</p>'
-      : ''
-  }
+  <div class="read-unc">${spread}</div>
 
-  ${
-    notes.length
-      ? `<ul class="notes">${notes.map((n) => `<li>${withEmphasis(n)}</li>`).join('')}</ul>`
-      : ''
-  }
-
-  ${categories ? `<ul class="cats">${categories}</ul>` : ''}
-
-  ${
-    flags.length
-      ? `<ul class="flags">${flags.map((f) => `<li>${escapeHtml(f)}</li>`).join('')}</ul>
-         <p class="flagnote">표시만 합니다 — 이 신호로 점수를 깎지 않습니다.
-            판단은 팀이 합니다.</p>`
-      : ''
-  }
-</article>`;
+  <div class="read-why">
+    ${
+      noEvidence
+        ? '<p class="empty">이 사람의 활동이 아직 하나도 연결되지 않았습니다 — ' +
+          '0 이라는 뜻이 아니라 <strong>연결이 없다</strong>는 뜻입니다.</p>'
+        : ''
+    }
+    ${
+      notes.length
+        ? `<ul class="notes">${notes.map((n) => `<li>${withEmphasis(n)}</li>`).join('')}</ul>`
+        : ''
+    }
+    ${categories ? `<ul class="cats">${categories}</ul>` : ''}
+    ${
+      flags.length
+        ? `<ul class="flags">${flags.map((f) => `<li>${escapeHtml(f)}</li>`).join('')}</ul>
+           <p class="flagnote">표시만 합니다 — 이 신호로 점수를 깎지 않습니다.
+              판단은 팀이 합니다.</p>`
+        : ''
+    }
+  </div>
+</div>`;
 }
 
 function render(score: TeamScore): void {
@@ -167,7 +197,13 @@ function render(score: TeamScore): void {
     return;
   }
 
-  $('members').innerHTML = orderForDisplay(score.members, people).map(memberCard).join('');
+  const shown = orderForDisplay(score.members, people);
+  // ⚠️ 폭 막대의 길이는 **팀에서 가장 넓은 구간** 기준이라, 한 사람만
+  // 보고는 정할 수 없습니다. 그래서 목록 전체로 한 번에 계산합니다.
+  const spans = new Map(uncertaintySpans(shown).map((s) => [s.userId, s]));
+  $('members').innerHTML = shown
+    .map((ms) => memberRow(ms, spans.get(ms.user_id)))
+    .join('');
 
   systemValues = new Map(score.members.map((ms) => [ms.user_id, Number(ms.share.toFixed(3))]));
   renderFinalRows(score);

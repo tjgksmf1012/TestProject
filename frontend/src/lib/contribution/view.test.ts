@@ -10,7 +10,7 @@ import {
   integrityNotes,
   nameOf,
   orderForDisplay,
-  rangeBar,
+  uncertaintySpans,
   readBeforeTheNumber,
   roleOf,
   teamWarnings,
@@ -128,30 +128,55 @@ describe('describeRange', () => {
   });
 });
 
-describe('rangeBar', () => {
-  it('구간의 시작과 폭을 준다', () => {
-    deepStrictEqual(rangeBar(member({ range_low: 20, range_high: 35 })), {
-      left: 20,
-      width: 15,
-    });
+describe('uncertaintySpans', () => {
+  it('⭐ 폭은 구간의 너비다 — 값이 아니라 **모르는 양**', () => {
+    const spans = uncertaintySpans([
+      member({ user_id: 1, range_low: 32, range_high: 52 }),
+      member({ user_id: 2, range_low: 26, range_high: 41 }),
+    ]);
+    deepStrictEqual(spans.map((s) => s.points), [20, 15]);
   });
 
-  it('⭐ 폭이 0 이어도 막대가 사라지지 않는다', () => {
-    // 좁은 구간과 구간이 없는 것은 다르다. 사라지면 후자로 읽힌다.
-    strictEqual(rangeBar(member({ range_low: 40, range_high: 40 })).width, 1);
+  it('⭐ 길이는 **팀에서 가장 넓은 구간** 기준이다', () => {
+    // 0~100 을 쓰면 12%p 와 20%p 가 둘 다 짧은 막대가 되어 차이가 안 보입니다.
+    const spans = uncertaintySpans([
+      member({ user_id: 1, range_low: 32, range_high: 52 }),
+      member({ user_id: 2, range_low: 19, range_high: 31 }),
+    ]);
+    deepStrictEqual(spans.map((s) => s.ratio), [100, 60]);
   });
 
-  it('뒤집힌 구간도 그린다', () => {
-    deepStrictEqual(rangeBar(member({ range_low: 50, range_high: 30 })), {
-      left: 30,
-      width: 20,
-    });
+  it('⚠️ 전원이 폭 0 이면 전부 0 이다 — 100 을 주면 정반대로 읽힌다', () => {
+    // 폭 0 은 완전히 확정된 이상적인 경우입니다. "다 모른다" 가 아닙니다.
+    const spans = uncertaintySpans([
+      member({ user_id: 1, range_low: 40, range_high: 40 }),
+      member({ user_id: 2, range_low: 20, range_high: 20 }),
+    ]);
+    deepStrictEqual(spans.map((s) => s.ratio), [0, 0]);
   });
 
-  it('100 을 넘는 값은 잘라낸다', () => {
-    const bar = rangeBar(member({ range_low: -5, range_high: 140 }));
-    strictEqual(bar.left, 0);
-    strictEqual(bar.width, 100);
+  it('빈 팀은 빈 배열', () => {
+    deepStrictEqual(uncertaintySpans([]), []);
+  });
+
+  it('⚠️ 뒤집힌 구간도 폭을 낸다 — 지운 `rangeBar` 가 알던 것', () => {
+    const [only] = uncertaintySpans([member({ range_low: 50, range_high: 30 })]);
+    strictEqual(only?.points, 20);
+  });
+
+  it('⚠️ 0~100 밖의 값은 잘라낸다 — 지운 `rangeBar` 가 알던 것', () => {
+    const [only] = uncertaintySpans([member({ range_low: -5, range_high: 140 })]);
+    strictEqual(only?.points, 100);
+  });
+
+  it('⚠️ 이 막대는 사람을 비교하지 않는다 — 가장 긴 쪽이 가장 모르는 쪽이다', () => {
+    // 기여가 가장 적은 사람이 가장 긴 막대를 가질 수 있어야 합니다.
+    const [small, big] = uncertaintySpans([
+      member({ user_id: 1, range_low: 5, range_high: 45 }),   // 작은 값, 넓은 구간
+      member({ user_id: 2, range_low: 60, range_high: 65 }),  // 큰 값, 좁은 구간
+    ]);
+    strictEqual(small?.ratio, 100);
+    strictEqual(big?.ratio, 13);
   });
 });
 
