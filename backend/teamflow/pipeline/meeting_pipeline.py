@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from teamflow.audio import multitrack as mt
-from teamflow.jobs.gpu_lock import GpuBusy, LockBackend, gpu_lease
+from teamflow.jobs.gpu_lock import GpuBusy, GpuLease, GpuLeaseLost, LockBackend, gpu_lease
 from teamflow.meeting.resolve import TeamMemberName
 from teamflow.meeting.schema import format_transcript
 from teamflow.meeting.validation import ValidationResult, validate_analysis
@@ -141,10 +141,14 @@ def process_meeting(
         if lock_backend is not None:
             with gpu_lease(lock_backend, job_id=f"meeting:{meeting_id}", ttl=gpu_ttl) as lease:
                 result.segments = _transcribe_tracks(
-                    tracks, aligned, analysis, transcriber, reporter, meeting_id
+                    tracks, aligned, analysis, transcriber, reporter, meeting_id, lease=lease
                 )
-                # 긴 회의는 TTL을 넘길 수 있다. 다음 GPU 단계 전에 갱신한다.
-                lease.extend()
+                # ⚠️ 여기서 **한 번 더** 확인한다. 트랙 하나가 통째로 TTL 보다
+                # 길면 트랙 머리의 갱신도 늦으므로, ASR 이 끝난 시점에 리스가
+                # 아직 내 것인지 물어본다. 아니면 이 결과는 GPU 를 둘이 나눠
+                # 쓰며 만든 것이라 믿을 수 없다.
+                if not lease.extend():
+                    raise GpuLeaseLost(f"meeting:{meeting_id}")
         else:
             result.segments = _transcribe_tracks(
                 tracks, aligned, analysis, transcriber, reporter, meeting_id
@@ -193,7 +197,11 @@ def process_meeting(
         logger.exception("meeting=%s 처리 실패", meeting_id)
         result.stage = Stage.FAILED
         result.error = str(exc)
-        reporter.report(meeting_id, Stage.FAILED, 0, str(exc))
+        # ⚠️ **예외 원문을 진행률에 싣지 않습니다** (결함 106). 이 값은
+        # 화면으로 그대로 나갑니다 — 한글 화면에 `KeyError: 'samples'` 가
+        # 뜨면 사람은 아무것도 못 얻습니다(결함 78·86 과 같은 부류).
+        # 원문은 바로 위 `logger.exception` 이 스택까지 남깁니다.
+        reporter.report(meeting_id, Stage.FAILED, 0)
         return result
 
 
@@ -221,11 +229,26 @@ def _transcribe_tracks(
     transcriber: Transcriber,
     reporter: ProgressReporter,
     meeting_id: int,
+    *,
+    lease: GpuLease | None = None,
 ) -> list[TranscribedSegment]:
     """트랙별로 ASR을 돌리고 시간순으로 합친다.
 
     누출을 제거한 신호를 넣기 때문에 같은 발언이 여러 트랙에서
     중복 인식되지 않는다.
+
+    ## ⚠️ 리스는 여기서 갱신한다
+
+    예전에는 `with` 블록 **끝**에서 `lease.extend()` 를 한 번 불렀습니다.
+    그 다음 줄이 `release()` 라 아무 효과가 없었습니다 — 갱신하고 바로
+    놓아 준 셈입니다.
+
+    1시간 회의의 ASR 은 TTL(기본 30분)을 넘깁니다. 그러면 만료된 락을
+    다른 워커가 잡고, 같은 GPU 에 모델이 둘 올라가 CUDA OOM 으로 **두 회의가
+    같이 죽습니다.** 그런데 파이프라인은 예외 없이 `done` 을 돌려줍니다.
+
+    `transcribe` 는 리스트를 돌려주는 한 번의 호출이라 그 안에는 끼어들
+    지점이 없습니다. 그래서 **트랙 머리마다** 갱신합니다.
     """
     sample_rate = tracks[0].sample_rate
     segments: list[TranscribedSegment] = []
@@ -235,6 +258,12 @@ def _transcribe_tracks(
     ]
 
     for index, (track, signal) in enumerate(zip(tracks, cleaned, strict=True)):
+        # 분기보다 먼저 둔다 — "매 바퀴 갱신" 이 조건 없는 규칙이어야
+        # 나중에 분기가 하나 더 늘어도 갱신이 빠지지 않는다.
+        # (건너뛰는 데는 시간이 안 걸리므로 순서 자체는 지금 무해하다.)
+        if lease is not None and not lease.extend():
+            raise GpuLeaseLost(f"meeting:{meeting_id}")
+
         # 이 트랙 주인이 실제로 말한 구간이 없으면 ASR을 돌리지 않는다.
         # 무음에 ASR을 돌리면 환청(hallucinated transcript)이 나온다.
         if analysis.speaking_ms(index) <= 0:

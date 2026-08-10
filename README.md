@@ -4,8 +4,17 @@
 > 회의에서 나온 결정을 실제 업무와 코드 활동까지 연결한다.
 
 **현재 상태: 설계 확정 + GPU 없이 검증 가능한 전 구간 구현 완료.**
-기여도 엔진, 회의 처리 파이프라인, 녹음 수집(클라이언트·서버)까지 동작하고
-테스트로 고정돼 있습니다. 남은 것은 **모델 구현(GPU 필요)** 과 **화면**입니다.
+기여도 엔진, 회의 처리 파이프라인, 녹음 수집(클라이언트·서버), 브라우저
+통화(WebRTC), 화면 열 개까지 동작하고 테스트로 고정돼 있습니다.
+
+**남은 것 하나** — 모델 구현(GPU 필요).
+회의 → 업무 → GitHub → 기여도 경로는 **끝까지 이어졌습니다.**
+지금 순서와 근거는 [`docs/08` §4.1](docs/08-MVP-로드맵.md) 에 있습니다.
+
+> ⚠️ **2026-08-07 방향 전환** — 주력이 **PC 브라우저 + 통화**가 됐습니다
+> ([`docs/15`](docs/15-PC-우선-방향.md)). 모바일은 지운 게 아니라 뒤로 미뤘고,
+> `docs/04` 의 **오디오 설정 두 개가 원격에서는 반대**가 됩니다.
+
 이 저장소는 "무엇을 어떻게 만들 것인가"를 검증·기록하고, 검증된 것부터 코드로 옮기는 곳입니다.
 
 ---
@@ -81,17 +90,19 @@
 | [01. 사실검증](docs/01-사실검증-2026-08.md) | 원본 자료의 기술적 주장을 2026-08 기준으로 검증. 정정 13건 |
 | [02. 모델 선정과 VRAM 예산](docs/02-모델-선정과-VRAM-예산.md) | 10~16GB VRAM에서 실제로 무엇이 돌아가는가. 티어별 구성 |
 | [03. 시스템 아키텍처](docs/03-시스템-아키텍처.md) | FastAPI 단일 백엔드, GPU 배타 락, GitHub App |
-| [04. 회의 처리 파이프라인](docs/04-회의-처리-파이프라인.md) | 멀티트랙 녹음, ASR/화자 파이프라인, 출력 스키마 |
+| [04. 회의 처리 파이프라인](docs/04-회의-처리-파이프라인.md) | 멀티트랙 녹음, ASR/화자 파이프라인, 출력 스키마. **배치 1(같은 방)/2(각자 PC)로 오디오 설정이 반대** |
 | [05. 기여도 산정 설계](docs/05-기여도-산정-설계.md) | 조작 저항성, 역할별 가중치, 출력 형식, 금지사항 |
 | [06. 데이터 모델](docs/06-데이터-모델.md) | 제안서 스키마 + 재계산 구조 + 법적 요구사항 반영 |
 | [07. 법적·윤리 요구사항](docs/07-법적-윤리-요구사항.md) | 통신비밀보호법 · 개인정보보호법 · 윤리 제약 |
-| [08. MVP 로드맵](docs/08-MVP-로드맵.md) | 범위 축소안 + 조정된 16주 일정 |
-| [09. 리스크와 검증 실험](docs/09-리스크와-검증-실험.md) | 지금 당장 돌릴 실험 5개 + 위험 등록부 |
+| [08. MVP 로드맵](docs/08-MVP-로드맵.md) | 범위 축소안 + 16주 일정 + **§4.1 방향 전환 이후의 순서** ⭐ 지금 계획 |
+| [09. 리스크와 검증 실험](docs/09-리스크와-검증-실험.md) | 지금 당장 돌릴 실험 6개 + 위험 등록부 |
 | [10. 열린 질문](docs/10-열린-질문.md) | 결정이 필요한 10가지 |
 | [11. 비용 제로 구성](docs/11-비용-제로-구성.md) | 전 구성요소 비용 감사, 함정 4개, 학생 무료 리소스 |
 | [12. CCTV 영상 기반 화자판정](docs/12-CCTV-영상-기반-화자판정.md) | 모드 C 법적·기술 검토, 모드 비교, 융합 설계 |
 | [13. 화면 구조 (IA)](docs/13-화면-구조.md) | 화면 일곱 개가 어떻게 이어지는가, 각 화면의 책임, 아직 없는 화면 |
 | [15. PC 우선 방향](docs/15-PC-우선-방향.md) | **지금 방향** — 브라우저 통화로 회의, GitHub 최우선, 모바일은 보류 |
+| [18. 사용설명서](docs/18-사용설명서.md) | **처음 여는 사람용** — 실제 화면 열둘로 따라가는 안내. 되는 것과 안 되는 것 ⭐ |
+| [17. 결함 기록](docs/17-결함-기록.md) | 만들면서 찾은 조용한 결함 여든하나 — 재현 방법과 되돌림 확인 |
 | [14. 모바일](docs/14-모바일.md) | 왜 앱이어야 하는가, PWA + 안드로이드 셸, 폰 기준 UI/UX, 비용 근거 |
 | [원본 자료](docs/원본자료/) | ChatGPT 대화 전문, 제안서 텍스트 추출본 |
 
@@ -107,12 +118,12 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 기여도 이벤트 모델 | ✅ | `backend/teamflow/contribution/events.py` |
 | diff 필터 (조작 저항성 핵심) | ✅ | `backend/teamflow/contribution/diff_filter.py` |
 | GitHub 이벤트 정규화 | ✅ | `backend/teamflow/contribution/github_ingest.py` |
-| 역할별 가중치 프로파일 | ✅ | `backend/teamflow/contribution/profiles.py` |
+| 역할별 가중치 프로파일 | ✅ | `backend/teamflow/contribution/profiles.py` + `PATCH /api/projects/{id}/members/me` + 프로젝트 화면 |
 | 신뢰도·조정범위 계산 | ✅ | `backend/teamflow/contribution/confidence.py` |
 | **측정 불가 처리 (0점과 구분)** | ✅ | `backend/teamflow/contribution/scoring.py` |
 | 기여도 산정 엔진 | ✅ | `backend/teamflow/contribution/scoring.py` |
-| DB 스키마 (26개 테이블) | ✅ | `backend/teamflow/db/models.py` |
-| **조작 저항성 테스트** | ✅ **24 시나리오** | `backend/tests/test_anti_gaming.py` |
+| DB 스키마 (28개 테이블) | ✅ | `backend/teamflow/db/models.py` |
+| **조작 저항성 테스트** | ✅ **11 시나리오 · 24 케이스** | `backend/tests/test_anti_gaming.py` |
 | 환경 진단 스크립트 | ✅ | `scripts/check_env.py` |
 | LLM 출력 스키마 (guided decoding) | ✅ | `backend/teamflow/meeting/schema.py` |
 | 환각 방어 (근거 발화 검증) | ✅ | `backend/teamflow/meeting/validation.py` |
@@ -120,10 +131,15 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **회의→후보→승인→칸반 흐름** | ✅ **11주차 게이트** | `backend/teamflow/meeting/approval.py` |
 | **FastAPI 앱 + 통합 테스트** | ✅ | `backend/teamflow/api/main.py` |
 | **GitHub 웹훅 (HMAC 서명 검증)** | ✅ | `backend/teamflow/github/webhook.py` |
+| **GitHub 연결 진단** (배달이 오는지·이름 오타·팀원 계정) | ✅ | `backend/teamflow/github/connection.py` |
+| **업무 ↔ PR 연결** (확정/추정 구분·근거 표시) | ✅ | `backend/teamflow/github/linking.py` |
+| **발언 유형 분류** (8라벨·규칙 기준선·확신 하한) | ✅ | `backend/teamflow/meeting/utterance_types.py` |
+| **회의 발화 → 기여 이벤트** | ✅ | `backend/teamflow/services/meeting_contribution_service.py` |
+| **통화 시그널링** (인증·중계 규칙·메시 상한) | 🟡 서버만, 실측 불가 | `backend/teamflow/call/` |
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
 | docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
 | **Dockerfile (api·gpu, ffmpeg 포함)** | ⚠️ 빌드 미검증 | `docker/` |
-| **Alembic 마이그레이션** | ✅ 26개 테이블 | `backend/migrations/` |
+| **Alembic 마이그레이션** | ✅ 28개 테이블 | `backend/migrations/` |
 | GPU 배타 락 (TTL·소유권 검증) | ✅ | `backend/teamflow/jobs/gpu_lock.py` |
 | **보존기간 삭제 잡** (법적 요구사항) | ✅ | `backend/teamflow/jobs/retention.py` |
 | **멀티트랙 정렬 (GCC-PHAT)** | ✅ | `backend/teamflow/audio/multitrack.py` |
@@ -170,18 +186,20 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **화면 간 이동** (막다른 길 없음) | ✅ | `frontend/src/lib/nav/`, [docs/13](docs/13-화면-구조.md) |
 | **모바일 우선 화면 + 앱 설치(PWA)** | ✅ (보류) | `frontend/public/app.css`·`sw.js`, [docs/14](docs/14-모바일.md) |
 | **안드로이드 셸** (화면 꺼도 녹음 유지) | 🔨 빌드 미확인 (보류) | `android/`, [docs/14](docs/14-모바일.md) |
-| **브라우저 통화로 회의** (WebRTC) | ❌ 다음 작업 | [docs/15](docs/15-PC-우선-방향.md) |
+| **브라우저 통화로 회의** (WebRTC 메시 5명 · 헤드폰 확인) | ✅ 같은 기기 3인 통화로 확인 / **실제 네트워크는 미검증** | `backend/teamflow/call/`, `frontend/src/lib/call/`, `public/call.html` |
+| **PC 화면** (48rem↑ 상단 탭·칸반 3열 가로) | ✅ | `frontend/public/app.css`, [docs/15](docs/15-PC-우선-방향.md) §4.7 |
+| **GitHub 백필** (연결 전 활동 + 커버리지 표시) | ✅ 배선·멱등·잘림 처리 / **실제 HTTP 미검증** | `backend/teamflow/github/backfill.py`, [docs/15](docs/15-PC-우선-방향.md) §4.8 |
 | 프로젝트 만들기·회의 열기 **화면** | ⬜ | API 는 있음. 가입 후 첫 사용자가 할 게 없습니다 |
 | **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
 | **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ⚠️ 실측 미검증 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 937 passed
+.venv/bin/python -m pytest backend/tests/ -q     # 1289 passed (2026-08)
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 472 passed, 설치 불필요
+cd frontend && npm test                          # 778 passed (2026-08), 설치 불필요
 cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
 .venv/bin/python scripts/make_icons.py           # 앱 아이콘 (stdlib 만 씀)
 
@@ -203,6 +221,7 @@ ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend --rel
 
 - `http://localhost:8000/home.html` — **여기부터.** 내 프로젝트와 회의, 다음에 할 일
 - `http://localhost:8000/lobby.html?meeting=1` — **회의 로비** (동의 → 상태 → 종료)
+- `http://localhost:8000/call.html?meeting=1` — **통화** (WebRTC 메시, 5명까지)
 - `http://localhost:8000/?meeting=1` — 녹음 화면 (서버 트랙에 참가)
 - `http://localhost:8000/` — 녹음 화면 (서버 없이, 실기기 실험 5)
 - `http://localhost:8000/review.html?meeting=1` — 업무 후보 승인 화면

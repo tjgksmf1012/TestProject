@@ -16,6 +16,7 @@ import {
   buildReviewPayload,
   canSubmit,
   describeBlocker,
+  describeSubmitResult,
   effectiveAssignee,
   effectiveDeadline,
   effectiveTitle,
@@ -29,6 +30,18 @@ import {
 } from '../lib/review/candidates.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { attr, escapeHtml } from '../lib/html.ts';
+import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
+import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
+import { failureHtml } from '../lib/ui/failure.ts';
+import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
+import {
+  agendaItems,
+  hasExtraMinutes,
+  issueViews,
+  type UnresolvedIssue,
+} from '../lib/review/minutes.ts';
+import { todayInTeamCalendar } from '../lib/time/calendar.ts';
+import { clearSkeleton, rows, showSkeleton } from '../lib/ui/skeleton.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -42,6 +55,8 @@ interface MeetingInfo {
   title: string | null;
   status: string;
   summary: string | null;
+  next_agenda: string[];
+  unresolved_issues: UnresolvedIssue[];
 }
 
 const params = new URLSearchParams(location.search);
@@ -55,14 +70,7 @@ const drafts = new Map<number, Draft>();
 let candidates: Candidate[] = [];
 let members: Member[] = [];
 let meeting: MeetingInfo | null = null;
-let context: ReviewContext = { memberIds: [], today: todayIso() };
-
-/** 로컬 자정 기준 오늘. `toISOString()` 은 UTC 라 한국에서 하루 어긋난다. */
-function todayIso(): string {
-  const now = new Date();
-  const pad = (n: number): string => String(n).padStart(2, '0');
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
+let context: ReviewContext = { memberIds: [], today: todayInTeamCalendar() };
 
 const $ = (id: string): HTMLElement => {
   const el = document.getElementById(id);
@@ -90,18 +98,24 @@ function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 
-const get = (path: string): Promise<Response> =>
-  fetch(`${apiBase}${path}`, { credentials: 'same-origin' });
+// ⚠️ **읽기도 `tryGet` 을 거칩니다** (결함 102). 여기는 유일하게 말을
+// 하긴 했는데, `error.message` 를 그대로 붙여 화면에 **`Failed to fetch`**
+// 가 나왔습니다 (결함 103).
+const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
 
-async function load(): Promise<void> {
+/** 받아 오기만 한다. **그리지 않는다** — `load()` 의 주석 참고. */
+async function fetchAll(): Promise<'expired' | 'unreachable' | 'ok'> {
   const [candidateRes, memberRes, meetingRes] = await Promise.all([
     get(`/api/meetings/${meetingId}/candidates`),
     get(`/api/meetings/${meetingId}/members`),
     get(`/api/meetings/${meetingId}`),
   ]);
+  // 셋 중 하나라도 닿지 못했으면 그건 연결 문제입니다 (결함 102).
+  if (candidateRes === null || memberRes === null || meetingRes === null) {
+    return 'unreachable';
+  }
   if ([candidateRes, memberRes, meetingRes].some((r) => isSessionExpired(r.status))) {
-    goToLogin();
-    return;
+    return 'expired';
   }
   if (!candidateRes.ok) throw new Error(`후보 조회 실패 (HTTP ${candidateRes.status})`);
   if (!memberRes.ok) throw new Error(`팀원 조회 실패 (HTTP ${memberRes.status})`);
@@ -110,11 +124,76 @@ async function load(): Promise<void> {
   candidates = sortForReview((await candidateRes.json()) as Candidate[]);
   members = (await memberRes.json()) as Member[];
   meeting = (await meetingRes.json()) as MeetingInfo;
-  context = { memberIds: members.map((m) => m.user_id), today: todayIso() };
+  context = { memberIds: members.map((m) => m.user_id), today: todayInTeamCalendar() };
+  return 'ok';
+}
+
+async function load(): Promise<void> {
+  // ⚠️ 받아 오기와 그리기를 나눕니다. 스켈레톤을 걷는 것은
+  // `whileLoading` 의 `finally` 라, 그 안에서 그리면 방금 그린 것을
+  // 곧바로 지울 수 있습니다.
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($('list'), rows(3)),
+    () => clearSkeleton($('list')),
+  );
+
+  if (result === 'expired') {
+    goToLogin();
+    return;
+  }
+  if (result === 'unreachable') {
+    $('list').innerHTML = failureHtml({
+      what: unreachableText('업무 후보를 불러오지 못했습니다.'),
+      retry: true,
+    });
+    $('list')
+      .querySelector<HTMLButtonElement>('.retry')
+      ?.addEventListener('click', () => {
+        void load();
+      });
+    return;
+  }
   render();
 }
 
 // ── 그리기 ──────────────────────────────────────────────────
+
+/**
+ * 회의록의 나머지 — 다음 안건 · 미해결 사안 (결함 110·111).
+ *
+ * ⚠️ **처리 전과 "정말 안 나왔다" 를 섞지 않습니다.** 아직 처리 중인
+ * 회의에 "다음 안건 없음" 을 띄우면 사람이 그걸 결과로 읽습니다. 그래서
+ * 있는 것만 그리고, 없으면 그 칸을 통째로 감춥니다 — 회의 상태는 이미
+ * 후보 목록 쪽이 말하고 있습니다.
+ */
+function renderMinutes(): void {
+  const agenda = agendaItems(meeting?.next_agenda ?? []);
+  const issues = issueViews(meeting?.unresolved_issues ?? []);
+
+  $('agenda-block').hidden = agenda.length === 0;
+  $('agenda').innerHTML = agenda.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+
+  $('issues-block').hidden = issues.length === 0;
+  $('issues').innerHTML = issues
+    .map((view) => {
+      // 시각은 근거가 있을 때만. 없으면 `0:00` 을 지어내지 않습니다.
+      const at = view.at === null ? '' : `<span class="at">${escapeHtml(view.at)}</span>`;
+      // ⚠️ 근거 0건도 **적습니다.** 감추면 근거 없는 사안이 근거 있는
+      // 것과 똑같아 보입니다.
+      const why =
+        view.evidenceCount === 0
+          ? '<span class="why none">근거 발화 없음</span>'
+          : `<span class="why">근거 발화 ${view.evidenceCount}건</span>`;
+      return `<li>${at}<span class="what">${escapeHtml(view.content)}</span>${why}</li>`;
+    })
+    .join('');
+
+  $('minutes').hidden = !hasExtraMinutes({
+    next_agenda: meeting?.next_agenda ?? [],
+    unresolved_issues: meeting?.unresolved_issues ?? [],
+  });
+}
 
 function render(): void {
   const summary = summarize(candidates, drafts, context);
@@ -124,6 +203,8 @@ function render(): void {
   const text = meeting?.summary ?? '';
   $('meeting-summary').hidden = text === '';
   $('meeting-summary').textContent = text;
+
+  renderMinutes();
 
   $('counts').textContent =
     `전체 ${summary.total} · 승인 ${summary.approving} · 거절 ${summary.rejecting} · ` +
@@ -138,8 +219,57 @@ function render(): void {
   $('blocked').textContent = `승인하려는 후보 ${summary.blocked}건에 빠진 정보가 있습니다.`;
 
   ($('submit') as HTMLButtonElement).disabled = !canSubmit(summary);
+
+  // ⚠️ 후보가 0건이면 목록이 통째로 빕니다. 그 화면은 고장으로
+  // 읽히는데, 실제로는 셋 중 하나입니다 — 아직 처리 중이거나, 처리를
+  // 마쳤는데 뽑을 게 없었거나, 처리에 실패했거나. **사람이 할 일이
+  // 각각 다릅니다.** 앞은 기다리면 되고, 가운데는 기다려도 안 바뀌고,
+  // 뒤는 트랙을 봐야 합니다. 하나로 덮으면 영원히 새로고침합니다.
+  if (candidates.length === 0) {
+    $('list').innerHTML = emptyHtml(emptyReviewState());
+    return;
+  }
+
   $('list').innerHTML = candidates.map(cardHtml).join('');
   wireCards();
+}
+
+/** 후보가 0건일 때, **회의 상태에 따라** 다른 말을 한다. */
+function emptyReviewState(): EmptyState {
+  const status = meeting?.status ?? '';
+  const what = '여기에는 회의에서 뽑은 업무 후보가 나옵니다.';
+
+  if (status === 'queued' || status === 'processing') {
+    return {
+      what,
+      why: '녹음을 아직 처리하는 중입니다.',
+      how: '끝나면 여기에 후보가 나옵니다. 잠시 뒤에 새로고침하세요.',
+    };
+  }
+  if (status === 'failed') {
+    return {
+      what,
+      why: '녹음 처리에 실패해서 후보를 만들지 못했습니다.',
+      how: '로비에서 트랙이 온전한지 확인하세요 — 끊긴 구간이 많으면 처리가 실패합니다.',
+      action: { label: '트랙 상태 보기', href: `/lobby.html?meeting=${meetingId}` },
+    };
+  }
+  if (status === 'confirmed') {
+    return {
+      what,
+      why: '이 회의의 후보는 모두 검토를 마쳤습니다.',
+      how: '승인한 업무는 칸반에 있습니다.',
+      action: { label: '칸반 보기', href: `/kanban.html?meeting=${meetingId}` },
+    };
+  }
+  // needs_review 인데 0건 — 처리는 끝났고 뽑을 게 없었습니다.
+  // **고장이 아니라 결과입니다.** 그렇게 말해 줘야 합니다.
+  return {
+    what,
+    why: '처리는 끝났는데 업무로 뽑을 만한 발언이 없었습니다 — 고장이 아닙니다.',
+    how: '회의에서 누가·무엇을·언제까지 하기로 했는지 말하면 그 발언이 후보가 됩니다.',
+    action: { label: '칸반 보기', href: `/kanban.html?meeting=${meetingId}` },
+  };
 }
 
 function cardHtml(candidate: Candidate): string {
@@ -257,52 +387,69 @@ function wireCards(): void {
 
 // ── 제출 ────────────────────────────────────────────────────
 
-$('submit').addEventListener('click', async () => {
-  let payload;
-  try {
-    payload = buildReviewPayload(candidates, drafts, context);
-  } catch (error) {
-    alert(error instanceof Error ? error.message : String(error));
-    return;
-  }
+$('submit').addEventListener('click', () => {
+  // 누르는 동안 잠근다 (결함 89). ⚠️ 원래 상태로 되돌리므로, 결정한
+  // 항목이 없어 잠겨 있어야 하는 경우가 요청 한 번에 풀리지 않는다.
+  void whilePressed($('submit') as HTMLButtonElement, async () => {
+    let payload;
+    try {
+      payload = buildReviewPayload(candidates, drafts, context);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error));
+      return;
+    }
 
-  const response = await fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    credentials: 'same-origin',
+    const response = await trySend(() =>
+      fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'same-origin',
+      }),
+    );
+
+    if (response === null) {
+      $('result').textContent = unreachableText('제출하지 못했습니다');
+      $('result').className = 'bad';
+      return;
+    }
+
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+
+    if (!response.ok) {
+      $('result').textContent = `제출 실패 (HTTP ${response.status})`;
+      $('result').className = 'bad';
+      return;
+    }
+
+    const result = (await response.json()) as {
+      approved_count: number;
+      approved_task_ids: number[];
+      failures: Record<string, string[]>;
+    };
+
+    const failed = Object.entries(result.failures);
+    $('result').className = failed.length ? 'bad' : 'ok';
+    $('result').textContent = failed.length
+      ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` +
+        failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join('/')}`).join(' · ')
+      : describeSubmitResult(result.approved_count, result.approved_task_ids);
+
+    drafts.clear();
+    await load();
   });
-
-  if (isSessionExpired(response.status)) {
-    goToLogin();
-    return;
-  }
-
-  if (!response.ok) {
-    $('result').textContent = `제출 실패 (HTTP ${response.status})`;
-    $('result').className = 'bad';
-    return;
-  }
-
-  const result = (await response.json()) as {
-    approved_count: number;
-    approved_task_ids: number[];
-    failures: Record<string, string[]>;
-  };
-
-  const failed = Object.entries(result.failures);
-  $('result').className = failed.length ? 'bad' : 'ok';
-  $('result').textContent = failed.length
-    ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` +
-      failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join('/')}`).join(' · ')
-    : `${result.approved_count}건이 칸반에 등록됐습니다 (task ${result.approved_task_ids.join(', ')})`;
-
-  drafts.clear();
-  await load();
 });
 
 async function start(): Promise<void> {
   const response = await get('/api/auth/me');
+  // 닿지 못한 것을 만료로 읽으면 이유도 모른 채 로그아웃당합니다.
+  if (response === null) {
+    await load();
+    return;
+  }
   if (!response.ok) {
     goToLogin();
     return;
@@ -313,8 +460,24 @@ async function start(): Promise<void> {
 }
 
 start().catch((error: unknown) => {
-  $('result').className = 'bad';
-  $('result').textContent = error instanceof Error ? error.message : String(error);
+  // ⚠️ 목록 자리에 씁니다. 예전에는 화면 맨 아래 `#result` 에만 한 줄
+  // 남겼는데, 그러면 목록은 **텅 빈 채**로 있고 사람은 후보가 0건인
+  // 줄 압니다 — 실패와 0건이 같은 모양이 됩니다.
+  // ⚠️ 예전에는 `error.message` 를 `help` 에 붙였습니다 (결함 103).
+  // 연결이 끊기면 한글 화면에 **`Failed to fetch`** 가 그대로 나왔습니다 —
+  // 결함 87 이 금지한 바로 그것인데, 그 가드는 `${String(err)}` 만 봐서
+  // **변수에 담아 쓰는 이 모양을 놓쳤습니다.** 원문은 콘솔에 남깁니다.
+  console.error('업무 후보 조회 실패', error);
+  $('list').innerHTML = failureHtml({
+    what: '업무 후보를 불러오지 못했습니다.',
+    help: describeUnexpected(),
+    retry: true,
+  });
+  $('list')
+    .querySelector<HTMLButtonElement>('.retry')
+    ?.addEventListener('click', () => {
+      void load();
+    });
 });
 
 renderNav('review');

@@ -37,6 +37,18 @@ class CoverageStats:
     tracks_total: int = 0
     tracks_usable: int = 0
 
+    # 발언 유형을 무엇이 매겼는가.
+    #
+    # ⚠️ 이 신호가 없으면 **규칙 기반 기준선으로 매긴 회의가 학습 모델로
+    # 매긴 회의와 똑같은 신뢰도로 보입니다.** 규칙은 문말 어미만 보므로
+    # 반어·인용·농담을 구분하지 못하고, 그 오차가 그대로 회의 기여도에
+    # 들어갑니다. 얼마나 믿을 만한 근거로 계산했는지가 곧 신뢰도입니다.
+    #
+    # 분모는 **점수가 매겨진 발화**입니다. `social`·`other` 는 어차피
+    # 0점이라 분류가 틀려도 점수가 안 움직입니다.
+    utterances_scored: int = 0
+    utterances_model_classified: int = 0
+
     project_days: int = 0
     github_connected_days: int = 0
 
@@ -68,6 +80,9 @@ _WEIGHTS: dict[str, float] = {
     "meeting_recording": 1.0,
     "speaker_certainty": 1.5,  # 화자 오류는 기여도로 직접 전파되므로 가중치가 높다
     "track_quality": 1.5,  # 끊긴 트랙도 마찬가지다 — 안 들린 말은 세지지 않는다
+    # 화자 오류와 같은 이유로 높다. 발언 유형이 틀리면 1.0점짜리 의견이
+    # 5.0점짜리 결정이 되고, 그 오차가 그대로 회의 기여도가 된다.
+    "utterance_classification": 1.5,
     "github_coverage": 1.0,
     "peer_completion": 0.5,
 }
@@ -76,6 +91,9 @@ _REASON_TEXT: dict[str, str] = {
     "meeting_recording": "녹음되지 않은 회의가 있습니다",
     "speaker_certainty": "화자가 확정되지 않은 발화가 있습니다",
     "track_quality": "녹음이 끊긴 트랙이 있습니다 — 해당 팀원의 발언량은 측정할 수 없습니다",
+    "utterance_classification": (
+        "발언 유형을 규칙 기반 기준선으로 매겼습니다 — 반어·인용·농담을 구분하지 못합니다"
+    ),
     "github_coverage": "GitHub 연결 이전 기간의 활동이 누락되었습니다",
     "peer_completion": "동료평가 미제출자가 있습니다",
 }
@@ -91,6 +109,9 @@ def compute_confidence(stats: CoverageStats, *, threshold: float = 0.9) -> Confi
         "meeting_recording": _ratio(stats.meetings_recorded, stats.meetings_total),
         "speaker_certainty": _ratio(stats.utterances_speaker_certain, stats.utterances_total),
         "track_quality": _ratio(stats.tracks_usable, stats.tracks_total),
+        "utterance_classification": _ratio(
+            stats.utterances_model_classified, stats.utterances_scored
+        ),
         "github_coverage": _ratio(stats.github_connected_days, stats.project_days),
         "peer_completion": _ratio(stats.peer_reviews_submitted, stats.peer_reviews_expected),
     }

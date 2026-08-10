@@ -95,6 +95,12 @@ class SourceKind(StrEnum):
 
     GITHUB_EVENT = "github_event"
     TASK = "task"
+    # ⚠️ 마감일 변경은 **업무와 다른 네임스페이스**다. `TASK` 를 쓰면 두 가지가
+    # 한꺼번에 깨진다. (1) 같은 업무를 여러 번 미루면 두 번째부터 유니크
+    # 제약에 막혀 "3회 이상" 문턱을 영원히 못 넘는다. (2) 근거 id 목록에
+    # 업무 id 와 변경 id 가 섞여, 되짚어 가면 엉뚱한 업무가 나온다 —
+    # GitHub 이슈 번호와 업무 번호를 섞었던 결함 39 와 같은 실수다.
+    DEADLINE_CHANGE = "deadline_change"
     UTTERANCE = "utterance"
     MEETING = "meeting"
     DOCUMENT = "document"

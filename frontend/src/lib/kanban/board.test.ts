@@ -1,19 +1,24 @@
 import { deepStrictEqual, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { TEAM_TIMEZONE, teamDateOf } from '../time/calendar.ts';
+
 import {
   daysBetween,
+  describeLinkState,
+  describePull,
   describeStatus,
   isDueSoon,
   isOverdue,
-  localDateOf,
   nextStatuses,
   sortForBoard,
+  sortLinks,
   statusPatch,
   summarize,
   taskWarnings,
   toColumns,
   type Task,
+  type TaskGithubLink,
 } from './board.ts';
 
 const TODAY = '2026-09-10';
@@ -28,6 +33,8 @@ function task(over: Partial<Task> = {}): Task {
     deadline: '2026-09-20',
     completed_at: null,
     origin: null,
+    marker: 'TASK-1',
+    github: [],
     ...over,
   };
 }
@@ -142,33 +149,53 @@ describe('isOverdue', () => {
     strictEqual(isOverdue(late, TODAY), true);
   });
 
-  it('⭐ 한국에서 마감 다음날 새벽에 끝낸 것은 지연이다', () => {
+  it('⭐ 마감 다음날 새벽에 끝낸 것은 지연이다', () => {
     // 서버는 `completed_at` 을 UTC 순간으로 주고 `deadline` 은 달력 날짜로
     // 준다. 앞 10자를 자르면 UTC 달력일이 나오는데, 한국 시각 9월 5일
     // 01:00 은 UTC 로 9월 4일이다 — 그대로 비교하면 마감 9월 4일을 넘긴
     // 업무가 "제때" 로 읽힌다. 오차가 한쪽으로만 나서 **지연을 과소보고만
     // 한다.**
-    const previous = process.env.TZ;
-    process.env.TZ = 'Asia/Seoul';
-    try {
-      const late = task({
-        status: 'done',
-        deadline: '2026-09-04',
-        completed_at: '2026-09-04T16:00:00Z', // KST 09-05 01:00
-      });
-      strictEqual(localDateOf('2026-09-04T16:00:00Z'), '2026-09-05');
-      strictEqual(isOverdue(late, TODAY), true);
+    const late = task({
+      status: 'done',
+      deadline: '2026-09-04',
+      completed_at: '2026-09-04T16:00:00Z', // KST 09-05 01:00
+    });
+    strictEqual(teamDateOf('2026-09-04T16:00:00Z'), '2026-09-05');
+    strictEqual(isOverdue(late, TODAY), true);
 
-      // 같은 날 안에서 끝낸 것은 지연이 아니다 (KST 09-04 23:00).
-      const onTime = task({
-        status: 'done',
-        deadline: '2026-09-04',
-        completed_at: '2026-09-04T14:00:00Z',
-      });
-      strictEqual(isOverdue(onTime, TODAY), false);
+    // 같은 날 안에서 끝낸 것은 지연이 아니다 (KST 09-04 23:00).
+    const onTime = task({
+      status: 'done',
+      deadline: '2026-09-04',
+      completed_at: '2026-09-04T14:00:00Z',
+    });
+    strictEqual(isOverdue(onTime, TODAY), false);
+  });
+
+  it('⭐ 보는 사람의 시간대를 바꿔도 판정이 달라지지 않는다 (결함 109)', () => {
+    // 예전에는 `Date#getFullYear()` 를 썼다 — **보는 사람의 달력**이다.
+    // 그래서 같은 업무가 서울에서는 "지연", 뉴욕에서는 "제때" 였다.
+    // 서버는 결함 107 을 고치며 팀 달력 하나를 정했는데 화면은 몰랐다.
+    const late = task({
+      status: 'done',
+      deadline: '2026-09-04',
+      completed_at: '2026-09-04T16:00:00Z',
+    });
+
+    const previous = process.env.TZ;
+    try {
+      for (const zone of ['Asia/Seoul', 'America/New_York', 'UTC', 'Pacific/Kiritimati']) {
+        process.env.TZ = zone;
+        strictEqual(teamDateOf('2026-09-04T16:00:00Z'), '2026-09-05', zone);
+        strictEqual(isOverdue(late, TODAY), true, zone);
+      }
     } finally {
       process.env.TZ = previous;
     }
+  });
+
+  it('팀 달력은 한국 시간이다 — 서버 `project_timezone` 과 같은 값', () => {
+    strictEqual(TEAM_TIMEZONE, 'Asia/Seoul');
   });
 
   it('완료 시각이 이상한 문자열이면 지연으로 몰지 않는다', () => {
@@ -176,7 +203,7 @@ describe('isOverdue', () => {
       isOverdue(task({ status: 'done', deadline: '2026-09-01', completed_at: 'x' }), TODAY),
       false,
     );
-    strictEqual(localDateOf('x'), null);
+    strictEqual(teamDateOf('x'), null);
   });
 
   it('완료됐는데 완료 시각이 없으면 지연으로 몰지 않는다', () => {
@@ -298,6 +325,7 @@ describe('summarize', () => {
       overdue: 0,
       fromMeetings: 0,
       unassigned: 0,
+      withPulls: 0,
     });
   });
 });
@@ -322,5 +350,111 @@ describe('statusPatch', () => {
     const body = statusPatch('done');
     deepStrictEqual(body, { status: 'done' });
     strictEqual('deadline' in body, false);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// GitHub 연결 — docs/08 §5.1 필수 경로의 마지막 눈에 보이는 칸
+// ══════════════════════════════════════════════════════════════
+
+function link(over: Partial<TaskGithubLink> = {}): TaskGithubLink {
+  return {
+    event_id: 1,
+    repo: 'team/teamflow',
+    number: 42,
+    title: '로그인 API',
+    actor_login: 'minsu-dev',
+    merged_at: '2026-09-01T12:00:00Z',
+    relevance: 1,
+    confirmed: true,
+    why: 'PR 에 TASK 번호가 적혀 있습니다',
+    ...over,
+  };
+}
+
+describe('describePull', () => {
+  it('저장소#번호 제목', () => {
+    strictEqual(describePull(link()), 'team/teamflow#42 로그인 API');
+  });
+
+  it('번호를 모르면 저장소만', () => {
+    strictEqual(describePull(link({ number: null, title: null })), 'team/teamflow');
+  });
+});
+
+describe('sortLinks', () => {
+  it('⭐ 확정이 추정보다 위에 온다', () => {
+    // 사람은 위에서부터 읽는다. 추정이 위에 있으면 그게 사실로 보인다.
+    const sorted = sortLinks([
+      link({ event_id: 1, relevance: 0.3, confirmed: false }),
+      link({ event_id: 2, relevance: 1, confirmed: true }),
+    ]);
+    deepStrictEqual(
+      sorted.map((l) => l.event_id),
+      [2, 1],
+    );
+  });
+
+  it('같은 확신도면 최근 것이 위', () => {
+    const sorted = sortLinks([
+      link({ event_id: 1, merged_at: '2026-09-01T00:00:00Z' }),
+      link({ event_id: 2, merged_at: '2026-09-05T00:00:00Z' }),
+    ]);
+    deepStrictEqual(
+      sorted.map((l) => l.event_id),
+      [2, 1],
+    );
+  });
+
+  it('원본을 건드리지 않는다', () => {
+    const original = [link({ event_id: 1, relevance: 0.3 }), link({ event_id: 2 })];
+    sortLinks(original);
+    deepStrictEqual(
+      original.map((l) => l.event_id),
+      [1, 2],
+    );
+  });
+});
+
+describe('describeLinkState', () => {
+  it('⭐ 붙은 게 없으면 무엇을 적어야 하는지 알려준다', () => {
+    // ⚠️ 여기서 침묵하면 아무도 표식을 안 적고, 자동 연결은 영영 안 일어난다.
+    const text = describeLinkState(task({ marker: 'TASK-7' }));
+    strictEqual(text.includes('TASK-7'), true);
+  });
+
+  it('전부 확정이면 건수만', () => {
+    strictEqual(describeLinkState(task({ github: [link(), link()] })), 'PR 2건');
+  });
+
+  it('⭐ 전부 추정이면 확인이 필요하다고 말한다', () => {
+    const text = describeLinkState(
+      task({ github: [link({ confirmed: false, relevance: 0.3 })] }),
+    );
+    strictEqual(text.includes('추정'), true);
+    strictEqual(text.includes('확인'), true);
+  });
+
+  it('섞여 있으면 몇 건씩인지', () => {
+    const text = describeLinkState(
+      task({ github: [link(), link({ confirmed: false, relevance: 0.6 })] }),
+    );
+    strictEqual(text, 'PR 2건 (확정 1 · 추정 1)');
+  });
+
+  it('서버가 github 를 안 보내도 터지지 않는다', () => {
+    const broken = task();
+    delete (broken as { github?: TaskGithubLink[] }).github;
+    strictEqual(describeLinkState(broken).includes('없습니다'), true);
+  });
+});
+
+describe('summarize — withPulls', () => {
+  it('⭐ 회의→업무→GitHub 이 끝까지 도는 업무가 몇 개인가', () => {
+    const summary = summarize(
+      [task({ id: 1, github: [link()] }), task({ id: 2 }), task({ id: 3, github: [link()] })],
+      TODAY,
+    );
+    strictEqual(summary.withPulls, 2);
   });
 });

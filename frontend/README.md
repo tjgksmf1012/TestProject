@@ -8,7 +8,7 @@
 
 ```bash
 cd frontend
-npm test          # 235개, 설치 없이 바로 돌아갑니다
+npm test          # 778개, 설치 없이 바로 돌아갑니다
 ```
 
 **테스트는 의존성 0개입니다.** Node 22.18+ 가 TypeScript 를 그대로 실행하고

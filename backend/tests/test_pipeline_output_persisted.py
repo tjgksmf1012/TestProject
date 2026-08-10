@@ -583,3 +583,120 @@ def test_no_hint_leaves_both_fields_empty(seeded):
         new = s.scalars(select(m.Decision)).one()
         assert new.supersedes_id is None
         assert new.supersedes_hint is None
+
+
+# ══════════════════════════════════════════════════════════════
+# 회의 → 기여 이벤트 (기여도 세 다리 중 마지막)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_processing_a_meeting_creates_contribution_events(seeded):
+    """⭐ **그 전까지 운영 코드에 0곳이었습니다.**
+
+    `scoring.py` 는 발언 유형별 가중치를 정확히 알고 있었는데 그 이벤트를
+    만드는 코드가 없었습니다. 즉 운영에서 회의 기여도는 언제나 0이었고,
+    시연 화면의 숫자는 손으로 넣은 것이었습니다.
+    """
+    persist_results_task(seeded["meeting_id"], payload(seeded))
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(
+            select(m.ContributionEventRow).where(
+                m.ContributionEventRow.source_kind == "utterance"
+            )
+        ).all()
+    assert rows, "발화에서 기여 이벤트가 하나도 나오지 않았습니다"
+
+
+def test_reprocessing_a_meeting_does_not_double_the_contribution(seeded):
+    """⭐ **재처리할 때마다 점수가 누적되면 안 됩니다.**
+
+    `persist_results_task` 는 발화를 지우고 새로 만듭니다. 옛 발화에 딸린
+    기여 이벤트를 같이 지우지 않으면 같은 회의가 두 번 계산됩니다.
+    화면에는 아무 오류도 안 뜨고 점수만 두 배가 됩니다.
+    """
+    persist_results_task(seeded["meeting_id"], payload(seeded))
+    with db_session.session_scope() as s:
+        first = s.query(m.ContributionEventRow).count()
+
+    persist_results_task(seeded["meeting_id"], payload(seeded))
+    with db_session.session_scope() as s:
+        second = s.query(m.ContributionEventRow).count()
+
+    assert second == first
+
+
+def test_the_utterance_type_column_is_filled_by_the_pipeline(seeded):
+    """스키마에 처음부터 있었지만 저장 단계에서 **한 번도 채워지지 않았습니다.**"""
+    persist_results_task(seeded["meeting_id"], payload(seeded))
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(select(m.Utterance)).all()
+    assert rows
+    assert all(row.utterance_type is not None for row in rows)
+
+
+# ══════════════════════════════════════════════════════════════
+# ② 원본 보관 거부 — **부르는 곳이 있는가** (docs/07 §2.3)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_persisting_results_deletes_the_originals_of_those_who_refused(
+    seeded, tmp_path, monkeypatch
+):
+    """⭐ 함수만 만들고 **부르는 곳이 없으면** 정확히 같은 결함이다.
+
+    이 저장소가 반복해 겪은 실패입니다 — `renderNav`(결함 47),
+    `extract_task_refs`(결함 12), 진행률 읽기(감사 #8), `DEADLINE_CHANGED`
+    (결함 63). 그래서 존재가 아니라 **호출**을 셉니다.
+
+    전사가 끝나는 지점이 여기입니다. 발화가 이미 저장됐으므로 원본이
+    없어도 회의록은 남습니다 — "텍스트만 남김" 이 그 뜻입니다.
+    """
+    from teamflow.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "audio_storage_root", tmp_path, raising=False)
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "teamflow.tasks.meeting_tasks.get_settings", lambda: settings, raising=True
+    )
+
+    refuser, agreer = seeded["user_ids"]
+    (tmp_path / "refused.opus").write_bytes(b"voice")
+    (tmp_path / "kept.opus").write_bytes(b"voice")
+
+    with db_session.session_scope() as s:
+        meeting_id = seeded["meeting_id"]
+        s.add_all(
+            [
+                m.RecordingConsent(
+                    meeting_id=meeting_id, user_id=refuser, consented=False,
+                    consent_type="raw_audio_retention", consented_at=NOW,
+                ),
+                m.RecordingConsent(
+                    meeting_id=meeting_id, user_id=agreer, consented=True,
+                    consent_type="raw_audio_retention", consented_at=NOW,
+                ),
+                m.AudioAsset(
+                    meeting_id=meeting_id, track_id=seeded["track_ids"][0],
+                    storage_key="refused.opus", encryption_key_id="k1",
+                    kind="raw", bytes=5, retention_until=NOW,
+                ),
+                m.AudioAsset(
+                    meeting_id=meeting_id, track_id=seeded["track_ids"][1],
+                    storage_key="kept.opus", encryption_key_id="k1",
+                    kind="raw", bytes=5, retention_until=NOW,
+                ),
+            ]
+        )
+
+    out = persist_results_task(seeded["meeting_id"], payload(seeded))
+
+    assert out["audio_purged"] == 1
+    assert not (tmp_path / "refused.opus").exists(), "거부한 사람의 원본이 남았다"
+    assert (tmp_path / "kept.opus").exists(), "동의한 사람 것까지 지우면 데이터 손실이다"
+
+    # 텍스트는 남는다 — 그게 "텍스트만 남김" 의 뜻이다.
+    with db_session.session_scope() as s:
+        assert s.scalars(select(m.Utterance)).all()

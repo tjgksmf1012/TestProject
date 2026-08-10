@@ -102,7 +102,15 @@ class ValidationResult:
 
     @property
     def incomplete_candidates(self) -> list[ResolvedCandidate]:
-        """담당자나 마감일이 빠진 후보. 승인 화면에서 경고로 표시한다."""
+        """담당자나 마감일이 빠진 후보 (제안서 6.5 '불완전 업무').
+
+        ⚠️ **화면이 이 값을 받아 쓰지는 않습니다.** 예전 독스트링은
+        "승인 화면에서 경고로 표시한다" 라고 적혀 있었는데, 화면은
+        `approvalBlockers` 로 **자기가 다시 셉니다** — 사람이 그 자리에서
+        고른 담당자·마감일(`draft`)까지 봐야 하므로 여기서 센 값은 화면에
+        닿는 순간 이미 낡습니다. 그러니 이건 화면용이 아니라 **파이프라인이
+        자기 출력을 점검하는 값**입니다 (결함 116 에서 바로잡았습니다).
+        """
         return [c for c in self.candidates if not c.is_complete]
 
 

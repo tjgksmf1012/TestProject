@@ -10,7 +10,7 @@ docs/05-기여도-산정-설계.md §1
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -31,6 +31,84 @@ from teamflow.contribution.profiles import (
 from teamflow.contribution.scoring import MeasurementGap, TeamScoreResult, score_team
 from teamflow.db import models as m
 from teamflow.jobs import retention
+from teamflow.meeting import utterance_types as ut
+from teamflow.meeting.utterance_types import CLASSIFIER_MODEL
+from teamflow.services import task_service
+
+
+def kept_promises(session: Session, project_id: int) -> set[tuple[int, int]]:
+    """지켜진 약속 — `(발화 id, 사람 id)`.
+
+    ## 왜 이게 저장이 아니라 계산인가
+
+    `scoring.py` 는 약속을 지켰으면 6.0, 아니면 1.5 를 줍니다. 그런데
+    약속을 **지켰는지는 회의가 끝난 뒤에 정해집니다.** 회의를 처리하는
+    시점에 판정해서 메타데이터에 얼려 두면, 다음 주에 그 업무를 끝내도
+    점수가 1.5 에 머뭅니다 — 지킨 사람이 안 지킨 사람과 같아집니다.
+
+    그래서 산정할 때마다 다시 봅니다. 이 파일 맨 위의 원칙 그대로입니다.
+
+        점수 = f(불변 이벤트 로그, 가중치 버전, 역할)
+
+    ## 무엇을 근거로 지켰다고 하는가
+
+        약속 발화 → 그 발화를 근거로 인용한 업무 후보
+                  → 승인되어 만들어진 업무 → **완료**
+
+    이 프로젝트가 주장하는 사슬 그대로입니다. 그래서 6.0 을 받은 사람은
+    **어느 말이 어느 업무가 됐는지** 화면에서 되짚을 수 있습니다.
+
+    ⚠️ **담당자가 약속한 본인이어야 합니다.** 민수가 하겠다고 한 일을
+    하늘이 끝냈으면 민수는 약속을 지킨 게 아닙니다. 이걸 안 보면
+    "말만 하고 남이 하게 두는" 쪽이 가장 이득을 봅니다.
+
+    ⚠️ **업무 하나가 약속 하나를 지웁니다.** 같은 회의에서 "제가
+    하겠습니다" 를 세 번 말하면 근거 발화가 셋이 될 수 있고, 그걸 다
+    인정하면 4.5 가 18 이 됩니다 — **반복이 점수가 됩니다.** 가장
+    이른 약속 하나만 인정합니다.
+    """
+    rows = session.execute(
+        select(
+            m.MeetingTaskCandidate.evidence_utterance_ids,
+            m.Task.id,
+            m.Task.assignee_id,
+        )
+        .join(m.Task, m.Task.id == m.MeetingTaskCandidate.created_task_id)
+        .where(
+            m.Task.project_id == project_id,
+            m.Task.status == task_service.DONE,
+            m.Task.assignee_id.is_not(None),
+        )
+    ).all()
+
+    cited: set[int] = set()
+    for evidence, _task_id, _assignee in rows:
+        cited.update(evidence or ())
+    if not cited:
+        return set()
+
+    # 인용된 발화 중 **약속**인 것만. 결정·질문이 근거로 붙어 있어도
+    # 그건 약속을 지킨 근거가 아닙니다.
+    promises = {
+        row.id: (row.speaker_id, row.start_ms)
+        for row in session.scalars(
+            select(m.Utterance).where(
+                m.Utterance.id.in_(cited),
+                m.Utterance.utterance_type == ut.COMMITMENT,
+            )
+        )
+    }
+
+    kept: set[tuple[int, int]] = set()
+    for evidence, _task_id, assignee in rows:
+        mine = [
+            (promises[uid][1], uid)
+            for uid in (evidence or ())
+            if uid in promises and promises[uid][0] == assignee
+        ]
+        if mine:
+            kept.add((min(mine)[1], assignee))
+    return kept
 
 
 def load_events(session: Session, project_id: int) -> dict[int, list[ContributionEvent]]:
@@ -40,8 +118,17 @@ def load_events(session: Session, project_id: int) -> dict[int, list[Contributio
         )
     ).all()
 
+    kept = kept_promises(session, project_id)
+
     by_user: dict[int, list[ContributionEvent]] = {}
     for row in rows:
+        metadata = dict(row.event_metadata or {})
+
+        # ⭐ 저장된 값이 있어도 **덮어씁니다.** 얼려 둔 판정은 낡은
+        # 판정이고, 낡은 쪽이 이기면 위 docstring 의 이유가 무너집니다.
+        if row.event_type == EventType.UTT_COMMITMENT.value:
+            metadata["fulfilled"] = (row.source_id, row.user_id) in kept
+
         by_user.setdefault(row.user_id, []).append(
             ContributionEvent(
                 user_id=row.user_id,
@@ -50,7 +137,7 @@ def load_events(session: Session, project_id: int) -> dict[int, list[Contributio
                 source_kind=SourceKind(row.source_kind),
                 source_id=row.source_id,
                 magnitude=float(row.magnitude or 0.0),
-                metadata=dict(row.event_metadata or {}),
+                metadata=metadata,
             )
         )
     return by_user
@@ -142,14 +229,47 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         or 0
     )
 
+    # 점수가 매겨진 발화를 무엇이 분류했는가.
+    #
+    # ⚠️ 분모가 **점수 매겨진 발화**인 이유: `social`·`other` 는 0점이라
+    # 분류가 틀려도 점수가 안 움직입니다. 그것까지 세면 잡담이 많은 회의가
+    # 분류 신뢰도를 끌어내립니다 — 잡담을 잡담으로 맞게 분류한 것인데도.
+    scored_events = session.execute(
+        select(
+            m.ContributionEventRow.event_metadata, m.ContributionEventRow.event_type
+        ).where(
+            m.ContributionEventRow.project_id == project_id,
+            m.ContributionEventRow.source_kind == "utterance",
+        )
+    ).all()
+    utterances_scored = 0
+    utterances_model = 0
+    for metadata, event_type in scored_events:
+        if event_type in ("utt_social", "utt_other"):
+            continue
+        utterances_scored += 1
+        if (metadata or {}).get("classifier") == CLASSIFIER_MODEL:
+            utterances_model += 1
+
     project = session.get(m.Project, project_id)
     project_days = 0
     github_days = 0
     if project and project.started_at:
         end = project.deadline or datetime.now(project.started_at.tzinfo)
         project_days = max(0, (end - project.started_at).days)
-        if project.github_connected_at:
-            github_days = max(0, (end - project.github_connected_at).days)
+        # ⚠️ `github_connected_at`(이름을 **적어 넣은** 시각)이 아니라
+        # `github_verified_at`(서명된 배달이 **처음 도착한** 시각)입니다.
+        #
+        # 예전에는 앞엣것을 썼습니다. 그래서 저장소 이름을 적기만 하면 —
+        # 오타여도, App 을 설치하지 않았어도 — `github_coverage` 가 1.0 이
+        # 됐습니다. GitHub 이벤트가 **0건**인 프로젝트가 "신뢰도 보통" 으로
+        # 나왔습니다.
+        #
+        # 신뢰도는 "얼마나 많은 근거로 계산했는가" 입니다. 근거가 없는데
+        # 높게 나오면 그건 신뢰도가 아니라 거짓말이고, 이 시스템에서는
+        # 성적에 쓰일 수 있는 값을 뒷받침하는 숫자입니다.
+        if project.github_verified_at:
+            github_days = max(0, (end - project.github_verified_at).days)
 
     member_count = (
         session.scalar(
@@ -157,7 +277,6 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         )
         or 0
     )
-    peer_expected = member_count * max(0, member_count - 1)
     peer_submitted = (
         session.scalar(
             select(func.count(m.PeerReview.id)).where(
@@ -166,6 +285,28 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         )
         or 0
     )
+    # ⚠️ **제출할 화면이 없습니다** (결함 105).
+    #
+    # `compute_confidence` 의 docstring 은 이렇게 약속합니다 — "데이터가
+    # 아예 없는 신호(분모 0)는 계산에서 제외한다. 예를 들어 동료평가
+    # 모듈을 안 쓰는 팀은 그 항목 때문에 신뢰도가 깎이지 않는다."
+    #
+    # 그런데 기대치를 `팀원 수 × (팀원 수 - 1)` 로 무조건 세우고 있었고,
+    # `PeerReview` 를 만드는 라우트도 화면도 **저장소에 0곳**이라
+    # 제출 수는 영원히 0 이었습니다. 그래서 분모가 0 이 아니게 되고,
+    # 신호가 제외되지 않고 **0.0 으로 신뢰도를 깎았습니다.**
+    #
+    #     다른 신호가 전부 완벽해도   0.9286  (1.0 이 아님)
+    #     사유에 영구히              "동료평가 미제출자가 있습니다"
+    #
+    # 사람이 **할 수 없는 일**을 안 했다고 깎는 것이고, 이 저장소가
+    # 지키는 "측정 불가 ≠ 0점" 을 정면으로 어깁니다. 기여도는 성적에
+    # 쓰일 수 있는 값입니다.
+    #
+    # 제출된 것이 하나라도 있으면 그때는 기대치를 셉니다 — **기능이
+    # 생기면 이 조건이 저절로 열립니다.** 그때는 안 낸 사람이 신뢰도를
+    # 깎는 것이 맞습니다.
+    peer_expected = member_count * max(0, member_count - 1) if peer_submitted else 0
 
     return CoverageStats(
         meetings_total=meetings_total,
@@ -174,6 +315,8 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         utterances_speaker_certain=utterances_certain,
         tracks_total=tracks_total,
         tracks_usable=tracks_usable,
+        utterances_scored=utterances_scored,
+        utterances_model_classified=utterances_model,
         project_days=project_days,
         github_connected_days=min(github_days, project_days) if project_days else 0,
         peer_reviews_expected=peer_expected,
@@ -357,3 +500,61 @@ def compute(session: Session, project_id: int) -> TeamScoreResult:
         load_coverage(session, project_id),
         unmeasurable=load_measurement_gaps(session, project_id),
     )
+
+
+def persist_run(
+    session: Session,
+    project_id: int,
+    result: TeamScoreResult,
+    *,
+    now: datetime | None = None,
+) -> m.ScoreRun:
+    """이번 계산을 **스냅샷으로 못 박는다.**
+
+    ## 왜 필요한가
+
+    기여도는 조회할 때마다 이벤트 로그에서 **다시 계산합니다**(`compute`).
+    그게 맞습니다 — 가중치를 바꿔도 과거가 오염되지 않고, 모든 숫자에
+    근거가 붙습니다.
+
+    그런데 사람이 "이 값으로 확정한다" 고 말하려면 **그 순간의 값**이
+    고정돼 있어야 합니다. 안 그러면 확정한 뒤에 이벤트가 하나 더 들어오는
+    것만으로 확정값이 가리키던 근거가 달라집니다.
+
+    `score_runs` · `score_results` 는 처음부터 스키마에 있었는데 **쓰는
+    코드가 0곳**이었습니다. 그래서 `final_contributions` 도 영원히 빈
+    테이블이었고, `docs/05` §5 가 ❌ 로 금지한 **"시스템이 확정"** 쪽으로
+    실제 동작했습니다.
+
+    ## 언제 부르는가
+
+    **확정할 때만.** 조회할 때마다 부르면 화면을 열 때마다 행이 쌓입니다.
+    """
+    now = now or datetime.now(UTC)
+    run = m.ScoreRun(
+        project_id=project_id,
+        algo_version=result.algo_version,
+        computed_at=now,
+    )
+    session.add(run)
+    session.flush()
+
+    for member in result.members.values():
+        for score in member.categories.values():
+            session.add(
+                m.ScoreResult(
+                    run_id=run.id,
+                    user_id=member.user_id,
+                    category=score.category.value,
+                    raw_value=score.raw,
+                    # 이 카테고리가 그 사람 점수에 실제로 기여한 몫.
+                    # 팀 내 점유율 × 재정규화된 가중치 (scoring.py 와 같은 식).
+                    weighted=score.team_share * score.weight,
+                    confidence=member.confidence.value,
+                    range_low=member.range_low,
+                    range_high=member.range_high,
+                    evidence_ids=list(score.evidence_ids),
+                )
+            )
+    session.flush()
+    return run

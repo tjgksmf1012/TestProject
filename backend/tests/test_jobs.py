@@ -19,7 +19,9 @@ from teamflow.jobs.gpu_lock import (
     wait_for_gpu,
 )
 from teamflow.jobs.retention import (
+    REASON_CONSENT_REFUSED,
     purge_expired_audio,
+    purge_unconsented_audio,
     revoke_project_voiceprints,
     revoke_user_data,
 )
@@ -413,6 +415,61 @@ def test_user_deletion_request_removes_their_audio(session: Session, storage: Pa
     assert len(report.revoked_voiceprints) == 1
 
 
+def test_user_deletion_stays_inside_the_project(session: Session, storage: Path):
+    """⭐ **다른 프로젝트의 내 녹음은 안 지운다** (결함 101).
+
+    `revoke_user_data` 는 `project_id` 를 인자로 받으면서 오디오 조회에는
+    안 쓰고 있었습니다 — 바로 아래 성문은 그것으로 좁히는데 한쪽만
+    좁혔습니다. 그래서 A 프로젝트에서 삭제를 누르면 **B 팀의 내 녹음
+    원본까지** 지워졌습니다. 되돌릴 수 없고, B 팀은 통보도 못 받습니다.
+
+    ⚠️ 왜 안 잡혔나 — 기존 테스트 셋이 전부 **프로젝트 하나**만 만들고
+    불렀습니다. "다른 **사람**의 트랙은 건드리지 않는다" 는 확인했지만
+    "다른 **프로젝트**의 내 트랙" 은 아무도 안 쟀습니다. 뜻은 맞고 자료가
+    그 뜻을 못 재는 테스트였습니다 (결함 95 와 같은 모양).
+    """
+    project_id, meeting_id, user_id = seed_meeting(session)
+
+    # 같은 사람이 **다른 프로젝트**에서도 녹음했다.
+    other_project = m.Project(title="다른 팀", started_at=NOW)
+    session.add(other_project)
+    session.flush()
+    session.add(m.Member(project_id=other_project.id, user_id=user_id, role_shares={}))
+    other_meeting = m.Meeting(
+        project_id=other_project.id, started_at=NOW, status="confirmed", started_by=user_id
+    )
+    session.add(other_meeting)
+    session.flush()
+
+    here = m.MeetingTrack(meeting_id=meeting_id, user_id=user_id, started_at=NOW)
+    there = m.MeetingTrack(meeting_id=other_meeting.id, user_id=user_id, started_at=NOW)
+    session.add_all([here, there])
+    session.flush()
+
+    mine_here = make_asset(
+        session, storage, meeting_id,
+        name="here.opus", retention_until=NOW + timedelta(days=30), track_id=here.id,
+    )
+    mine_there = make_asset(
+        session, storage, other_meeting.id,
+        name="there.opus", retention_until=NOW + timedelta(days=30), track_id=there.id,
+    )
+
+    report = revoke_user_data(
+        session, user_id=user_id, project_id=project_id, storage_root=storage, now=NOW
+    )
+
+    assert mine_here.id in report.deleted_assets
+    assert not (storage / "here.opus").exists()
+
+    # ⭐ 다른 팀의 회의는 그대로 남아야 한다. 동의한 범위 밖이다.
+    assert mine_there.id not in report.deleted_assets
+    assert (storage / "there.opus").exists(), (
+        "다른 프로젝트의 내 녹음까지 지웠습니다 — 동의한 범위를 넘습니다"
+    )
+    assert mine_there.deleted_at is None
+
+
 def test_user_deletion_keeps_shared_transcript(session: Session, storage: Path):
     """전사는 다른 참석자의 회의록이기도 하므로 남긴다."""
     project_id, meeting_id, user_id = seed_meeting(session)
@@ -444,3 +501,95 @@ def test_user_deletion_is_audited(session: Session, storage: Path):
     ).all()
     assert len(logs) == 1
     assert logs[0].actor_id == user_id
+
+
+# ══════════════════════════════════════════════════════════════
+# ② 원본 보관 동의를 거부한 사람 (docs/07 §2.3)
+# ══════════════════════════════════════════════════════════════
+
+
+def _track_with_consent(
+    session: Session, meeting_id: int, user_id: int, *, raw_audio: bool | None
+) -> m.MeetingTrack:
+    track = m.MeetingTrack(
+        meeting_id=meeting_id, user_id=user_id, started_at=NOW, offset_ms=0
+    )
+    session.add(track)
+    if raw_audio is not None:
+        session.add(
+            m.RecordingConsent(
+                meeting_id=meeting_id,
+                user_id=user_id,
+                consented=raw_audio,
+                consent_type="raw_audio_retention",
+                consented_at=NOW,
+            )
+        )
+    session.flush()
+    return track
+
+
+def test_refusing_raw_audio_retention_actually_deletes_the_original(
+    session: Session, storage: Path
+):
+    """⭐ `docs/07` §2.3 이 이렇게 적어 뒀습니다.
+
+        ② 거부 → 전사 완료 후 원본 즉시 삭제. 텍스트만 남김.
+
+    저장만 되고 **아무 효과가 없었습니다.** 거부한 사람의 원본이 동의한
+    사람과 똑같이 30일 남았습니다. DB 에는 '거부' 로, 화면에는 '거부' 로
+    표시되면서 실제 처리는 동의한 것과 같았습니다 — 동의 기록 자체가
+    사실과 다른 상태이고, 분쟁에서 가장 나쁜 형태입니다.
+    """
+    _, meeting_id, user_id = seed_meeting(session)
+    refused = _track_with_consent(session, meeting_id, user_id, raw_audio=False)
+    asset = make_asset(
+        session,
+        storage,
+        meeting_id,
+        name="refused.opus",
+        retention_until=NOW + timedelta(days=30),
+        track_id=refused.id,
+    )
+
+    report = purge_unconsented_audio(
+        session, meeting_id=meeting_id, storage_root=storage, now=NOW
+    )
+
+    assert report.ok
+    assert asset.id in report.deleted_assets
+    assert not (storage / "refused.opus").exists()
+    assert session.get(m.AudioAsset, asset.id).deleted_reason == REASON_CONSENT_REFUSED
+
+
+def test_the_others_originals_are_left_alone(session: Session, storage: Path):
+    """⚠️ 거부하지 **않은** 사람 것까지 지우면 그건 데이터 손실이다.
+
+    동의한 사람과 아직 아무 답도 안 한 사람은 보존기간을 그대로 따른다 —
+    ② 는 명시적 거부일 때만 효력이 있다.
+    """
+    _, meeting_id, user_id = seed_meeting(session)
+    agreed_user = m.User(name="이하늘", email="haneul@example.com")
+    session.add(agreed_user)
+    session.flush()
+
+    agreed = _track_with_consent(session, meeting_id, agreed_user.id, raw_audio=True)
+    silent = _track_with_consent(session, meeting_id, user_id, raw_audio=None)
+    keep_a = make_asset(
+        session, storage, meeting_id, name="agreed.opus",
+        retention_until=NOW + timedelta(days=30), track_id=agreed.id,
+    )
+    keep_b = make_asset(
+        session, storage, meeting_id, name="silent.opus",
+        retention_until=NOW + timedelta(days=30), track_id=silent.id,
+    )
+
+    report = purge_unconsented_audio(
+        session, meeting_id=meeting_id, storage_root=storage, now=NOW
+    )
+
+    assert report.deleted_assets == []
+    assert (storage / "agreed.opus").exists()
+    assert (storage / "silent.opus").exists()
+    assert session.get(m.AudioAsset, keep_a.id).deleted_at is None
+    assert session.get(m.AudioAsset, keep_b.id).deleted_at is None

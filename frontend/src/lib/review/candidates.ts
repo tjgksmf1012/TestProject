@@ -1,3 +1,5 @@
+
+import { withJosa } from '../text/josa.ts';
 /**
  * 업무 후보 검토 로직.
  *
@@ -62,7 +64,14 @@ export function emptyDraft(): Draft {
   return { decision: 'pending' };
 }
 
-/** 서버 `ApprovalError` 와 같은 코드를 쓴다. 갈라지면 안 된다. */
+/**
+ * 서버 `ApprovalError` 와 같은 코드를 쓴다. 갈라지면 안 된다.
+ *
+ * ⚠️ **서버가 낼 수 있는 코드를 하나도 빠짐없이** 적는다. 아래 일곱은
+ * 이 화면이 스스로도 판정하는 것이고, 마지막 둘은 **서버만 낸다** —
+ * 그래도 여기 있어야 한다. 없으면 `describeBlocker` 가 코드를 그대로
+ * 흘려보내 사람이 `unknown_candidate` 같은 내부 이름을 읽게 된다.
+ */
 export type BlockerCode =
   | 'missing_assignee'
   | 'missing_deadline'
@@ -70,7 +79,9 @@ export type BlockerCode =
   | 'unknown_assignee'
   | 'already_approved'
   | 'already_rejected'
-  | 'no_evidence';
+  | 'no_evidence'
+  | 'unknown_candidate'
+  | 'no_reviewer';
 
 export interface Blocker {
   code: BlockerCode;
@@ -85,6 +96,13 @@ const BLOCKER_TEXT: Record<BlockerCode, string> = {
   already_approved: '이미 승인된 후보입니다',
   already_rejected: '이미 거절된 후보입니다',
   no_evidence: '근거 발화가 없습니다 — 회의에 없던 내용일 수 있습니다',
+  // 아래 둘은 화면이 만들지 않는다. 서버만 낸다.
+  //
+  // 서버 문구는 "이 회의에 없는 후보입니다" 인데, 그것만 읽으면 사람은
+  // 무엇을 해야 할지 모른다. 이 코드가 나오는 경우는 하나뿐이다 —
+  // 화면이 들고 있는 목록이 서버보다 낡았다. 그래서 할 일을 같이 적는다.
+  unknown_candidate: '이 회의에 없는 후보입니다 — 목록이 오래됐습니다. 새로 고쳐 주세요',
+  no_reviewer: '로그인 정보가 확인되지 않았습니다 — 다시 로그인해 주세요',
 };
 
 /**
@@ -246,7 +264,7 @@ export function buildReviewPayload(
       const blockers = approvalBlockers(candidate, draft, context);
       if (blockers.length > 0) {
         throw new Error(
-          `후보 ${candidate.id} 를 승인할 수 없습니다: ${blockers
+          `${withJosa(`후보 ${candidate.id}`, '을를')} 승인할 수 없습니다: ${blockers
             .map((b) => b.message)
             .join(', ')}`,
         );
@@ -348,4 +366,36 @@ export function summarize(
 
 export function canSubmit(summary: ReviewSummary): boolean {
   return summary.blocked === 0 && summary.approving + summary.rejecting > 0;
+}
+
+/**
+ * 제출하고 나서 사람에게 할 말 (결함 85).
+ *
+ * 예전에는 한 줄이었습니다.
+ *
+ *     `${approved}건이 칸반에 등록됐습니다 (task ${ids.join(', ')})`
+ *
+ * 전부 거절하면 `approved` 가 0 이고 `ids` 가 빈 배열이라 화면에 이렇게
+ * 나왔습니다 —
+ *
+ *     0건이 칸반에 등록됐습니다 (task )
+ *
+ * **꼬리표만 남고 안이 빈 것**은 결함 58(빈 `.note` 가 가로줄만 남김)과
+ * 같은 부류입니다. 사람은 괄호 안이 비어 있는 것을 보고 앱이 무언가
+ * 잃어버렸다고 읽습니다.
+ *
+ * 게다가 &#34;0건이 등록됐습니다&#34; 는 **한 일을 안 말합니다.** 그 사람은
+ * 후보 셋을 읽고 셋 다 거절한 참입니다. 등록이 0건인 것은 결과이지
+ * 아무 일도 안 일어난 것이 아닙니다.
+ */
+export function describeSubmitResult(approvedCount: number, taskIds: number[]): string {
+  if (approvedCount === 0) {
+    // ⚠️ 여기서 "실패" 라고 하지 않습니다. 거절은 정상적인 결정입니다.
+    return '검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다';
+  }
+  // 번호가 안 왔으면 지어내지 않고 건수만 말합니다.
+  const numbers = taskIds.filter((id) => Number.isFinite(id));
+  return numbers.length === 0
+    ? `${approvedCount}건이 칸반에 등록됐습니다`
+    : `${approvedCount}건이 칸반에 등록됐습니다 (task ${numbers.join(', ')})`;
 }

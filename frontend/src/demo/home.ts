@@ -24,6 +24,13 @@ import {
   titleProblem,
 } from '../lib/project/setup.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { detailText } from '../lib/http/detail.ts';
+import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
+import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
+import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
+import { clearSkeleton, projectCards, showSkeleton } from '../lib/ui/skeleton.ts';
+import { renderNav } from './nav.ts';
+import { wireLogout } from './logout.ts';
 import { bootApp } from './pwa.ts';
 
 const params = new URLSearchParams(location.search);
@@ -42,8 +49,9 @@ function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 
-const get = (path: string): Promise<Response> =>
-  fetch(`${apiBase}${path}`, { credentials: 'same-origin', cache: 'no-store' });
+// ⚠️ **읽기도 `tryGet` 을 거칩니다** (결함 102) — 맨 `fetch` 는 닿지
+// 못하면 던지고, 프로젝트 목록이 텅 빈 채로 남았습니다.
+const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
 
 function meetingHtml(meeting: Meeting): string {
   const step = nextStepFor(meeting);
@@ -85,21 +93,26 @@ function projectHtml(project: Project, meetings: Meeting[]): string {
 </section>`;
 }
 
-async function load(): Promise<void> {
+/** 받아 오기만 한다. **그리지 않는다** — 아래 주석 참고. */
+async function fetchAll(): Promise<
+  | { kind: 'expired' }
+  | { kind: 'unreachable' }
+  | { kind: 'failed'; status: number }
+  | { kind: 'ok'; html: string; hasProjects: boolean }
+> {
   const response = await get('/api/projects');
-  if (isSessionExpired(response.status)) {
-    goToLogin();
-    return;
-  }
-  if (!response.ok) {
-    $('projects').textContent = `불러오지 못했습니다 (HTTP ${response.status})`;
-    return;
-  }
+  // 닿지 못한 것과 세션이 끊긴 것은 다릅니다 (결함 102).
+  if (response === null) return { kind: 'unreachable' };
+  if (isSessionExpired(response.status)) return { kind: 'expired' };
+  if (!response.ok) return { kind: 'failed', status: response.status };
 
   const projects = orderProjects((await response.json()) as Project[]);
   if (projects.length === 0) {
-    $('projects').innerHTML = `<p class="empty">${escapeHtml(emptyProjectsMessage())}</p>`;
-    return;
+    return {
+      kind: 'ok',
+      hasProjects: false,
+      html: `<p class="empty">${escapeHtml(emptyProjectsMessage())}</p>`,
+    };
   }
 
   // 프로젝트마다 회의를 받아 옵니다. 한 사람이 속한 프로젝트는 많아야
@@ -108,14 +121,71 @@ async function load(): Promise<void> {
   const meetings = await Promise.all(
     projects.map((p) =>
       get(`/api/projects/${p.project_id}/meetings`).then((r) =>
-        r.ok ? (r.json() as Promise<Meeting[]>) : [],
+        r?.ok ? (r.json() as Promise<Meeting[]>) : [],
       ),
     ),
   );
 
-  $('projects').innerHTML = projects
-    .map((project, index) => projectHtml(project, meetings[index] ?? []))
-    .join('');
+  return {
+    kind: 'ok',
+    hasProjects: true,
+    html: projects.map((p, i) => projectHtml(p, meetings[i] ?? [])).join(''),
+  };
+}
+
+async function load(): Promise<void> {
+  // ⚠️ **받아 오기와 그리기를 나눕니다.** 스켈레톤을 걷는 것은
+  // `whileLoading` 의 `finally` 이므로, 그 안에서 그리면 방금 그린
+  // 것을 곧바로 지울 수 있습니다. 순서는 언제나
+  // 받아 오기 → 스켈레톤 걷기 → 그리기 입니다.
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($('projects'), projectCards()),
+    () => clearSkeleton($('projects')),
+  );
+
+  if (result.kind === 'expired') {
+    goToLogin();
+    return;
+  }
+  if (result.kind === 'failed') {
+    $('projects').innerHTML = failureHtml({
+      what: '프로젝트 목록을 불러오지 못했습니다.',
+      help: describeHttpStatus(result.status) ?? undefined,
+      code: `HTTP ${result.status}`,
+      retry: true,
+    });
+    $('projects')
+      .querySelector<HTMLButtonElement>('.retry')
+      ?.addEventListener('click', () => {
+        void load();
+      });
+    return;
+  }
+  if (result.kind === 'unreachable') {
+    // 텅 빈 목록은 "프로젝트가 없다" 로 읽힙니다 — 실패와 0건이 같은
+    // 모양이 되면 안 됩니다 (결함 102).
+    $('projects').innerHTML = failureHtml({
+      what: unreachableText('프로젝트를 불러오지 못했습니다.'),
+      retry: true,
+    });
+    $('projects')
+      .querySelector<HTMLButtonElement>('.retry')
+      ?.addEventListener('click', () => {
+        void load();
+      });
+    return;
+  }
+  $('projects').innerHTML = result.html;
+
+  // ⚠️ **한 화면에 주 버튼은 하나** (지시서 §8).
+  //
+  // 프로젝트가 이미 있으면 각 회의 카드의 "다음 할 일" 버튼이 주
+  // 동작입니다 — 사람이 홈에 오는 이유가 그것입니다. 그때 "만들기"
+  // 까지 청록으로 칠하면 **무엇부터 눌러야 하는지가 사라집니다.**
+  //
+  // 반대로 하나도 없으면 만들기가 유일한 길이므로 주 버튼이 맞습니다.
+  $('create').classList.toggle('primary', !result.hasProjects);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -141,16 +211,22 @@ $('create').addEventListener('click', () => {
   if (problem) return say(problem);
 
   say('');
-  void fetch(`${apiBase}/api/projects`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    body: JSON.stringify({ title: raw.trim() }),
-  }).then(async (response) => {
+  // ⚠️ 누르는 동안 잠근다. 답이 늦으면 사람은 한 번 더 누르고,
+  // 이 요청은 **멱등이 아니라** 누른 만큼 프로젝트가 생긴다 (결함 89).
+  void whilePressed($('create') as HTMLButtonElement, async () => {
+    const response = await trySend(() =>
+      fetch(`${apiBase}/api/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ title: raw.trim() }),
+      }),
+    );
+    if (response === null) return say(unreachableText('만들지 못했습니다'));
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
-      const body = (await response.json().catch(() => ({}))) as { detail?: string };
-      return say(body.detail ?? `만들지 못했습니다 (HTTP ${response.status})`);
+      const body = await response.json().catch(() => null);
+      return say(detailText(body, `만들지 못했습니다 (HTTP ${response.status})`));
     }
     // 만든 직후에는 혼자다. 목록으로 돌려보내면 초대 코드를 한 번 더
     // 찾아가야 하므로, 코드가 있는 화면으로 바로 보낸다.
@@ -165,16 +241,20 @@ $('join').addEventListener('click', () => {
   if (problem) return say(problem);
 
   say('');
-  void fetch(`${apiBase}/api/projects/join`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    body: JSON.stringify({ invite_code: normalizeCode(raw) }),
-  }).then(async (response) => {
+  void whilePressed($('join') as HTMLButtonElement, async () => {
+    const response = await trySend(() =>
+      fetch(`${apiBase}/api/projects/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ invite_code: normalizeCode(raw) }),
+      }),
+    );
+    if (response === null) return say(unreachableText('참가하지 못했습니다'));
     if (!response.ok) {
       if (isSessionExpired(response.status)) return goToLogin();
-      const body = (await response.json().catch(() => ({}))) as { detail?: string };
-      return say(body.detail ?? `참가하지 못했습니다 (HTTP ${response.status})`);
+      const body = await response.json().catch(() => null);
+      return say(detailText(body, `참가하지 못했습니다 (HTTP ${response.status})`));
     }
     // 이미 구성원이어도 성공이다 — 그때는 그냥 그 프로젝트로 간다.
     const joined = (await response.json()) as { project_id: number };
@@ -188,17 +268,15 @@ input('code').addEventListener('blur', () => {
   if (clean.length === CODE_LENGTH) input('code').value = formatCode(clean);
 });
 
-$('logout').addEventListener('click', () => {
-  void fetch(`${apiBase}/api/auth/logout`, {
-    method: 'POST',
-    credentials: 'same-origin',
-  }).then(() => {
-    location.href = '/login.html';
-  });
-});
+wireLogout({ button: $('logout') as HTMLButtonElement, note: $('logout-note'), apiBase });
 
 async function start(): Promise<void> {
   const me = await get('/api/auth/me');
+  // 닿지 못한 것을 만료로 읽으면 이유도 모른 채 로그아웃당합니다.
+  if (me === null) {
+    await load();
+    return;
+  }
   if (!me.ok) {
     goToLogin();
     return;
@@ -208,6 +286,11 @@ async function start(): Promise<void> {
 }
 
 void start();
+
+// 홈은 프로젝트를 아직 안 고른 상태라 칸반·기여도·설정 탭이 흐리게 나옵니다.
+// 그래도 **그려야** 합니다 — 안 그리면 `<nav id="tabs">` 가 빈 채로 남고,
+// PC 에서는 그게 아무것도 없는 줄로 화면 위에 그어집니다.
+renderNav('home');
 
 // 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
 bootApp();

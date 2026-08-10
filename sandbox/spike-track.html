@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>스파이크 — 트랙 다이어그램 3변주</title>
+<!--
+  ⚠️ 버릴 코드입니다 (지시서 §3 Stage C).
+  프로덕션에 손대지 않고 **판단 재료**만 만듭니다.
+
+  시그니처 후보: 트랙 다이어그램
+    회의 하나를 가로 시간축으로 펼치고 사람마다 한 줄.
+    말한 구간은 채워지고 · 안 말한 구간은 비고 · 녹음이 끊긴 구간은 구멍.
+
+  근거: Marey 열차 운행도표(1885). 시간축 위의 평행선, 빈 곳이 정보.
+  검증할 것: 이걸 지우면 잃는 정보가 있는가 (지시서 §11-B 11번)
+-->
+<style>
+  /* ── 후보 토큰. 안 A "운행도표" — 청록 잉크 ─────────────── */
+  :root {
+    --paper:      #fbfcfc;
+    --surface:    #f2f5f5;
+    --sunken:     #e7ecec;
+    /* ⚠️ 경계선이 **두 단계**입니다. 이게 감사 결함 3번의 진짜 원인이었습니다 —
+       지금 app.css 는 `--line` 하나로 카드 구분선과 입력창 테두리를 같이 그립니다.
+       컨트롤 경계는 3:1 이 필요하고(WCAG 1.4.11) 장식 구분선은 아닌데,
+       하나로 묶으면 둘 중 하나는 반드시 틀립니다. 지시서 §4.1 Layer 2 가
+       `--border` 와 `--border-strong` 을 나눠 둔 이유입니다. */
+    --line:       #d3dcdc;   /* 장식 — 카드·구분선. 대비 요구 없음 */
+    --line-strong:#719294;   /* 컨트롤 — 입력창·버튼. surface 대비 3.07:1 (계산값) */
+    --line-soft:  #e2e9e9;   /* 눈금 */
+    --ink:        #12201f;   /* paper 16.32:1 */
+    --ink-mid:    #40514f;
+    --ink-soft:   #5e7273;   /* surface 4.64:1 (계산값) */
+    --accent:     #0d5c63;   /* 제도 도면의 잉크. paper 7.49:1 */
+    --accent-tint:#dcebec;
+    --gap:        #ae7747;   /* 구멍 — 흙빛. **빨강이 아님**: 오류가 아니라 결측이다 */
+    --gap-tint:   #f0e4d8;   /* gap 대비 3.04:1 (계산값) */
+
+    --tick: 1px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 32px 96px;
+    background: var(--paper); color: var(--ink);
+    word-break: keep-all; overflow-wrap: break-word;
+  }
+  .wrap { max-width: 72rem; margin-inline: auto; }
+
+  h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.035em; margin: 0 0 4px; }
+  h2 { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.02em; margin: 48px 0 4px; }
+  .sub { color: var(--ink-soft); font-size: 0.875rem; line-height: 1.7; margin: 0 0 24px; max-width: 42rem; }
+  .tag { display:inline-block; font-size:.75rem; font-weight:600; letter-spacing:0;
+         color: var(--accent); background: var(--accent-tint);
+         padding: 2px 8px; border-radius: 4px; margin-bottom: 8px; }
+
+  /* ══════════════════════════════════════════════════════
+     트랙 다이어그램 — 공통
+     ══════════════════════════════════════════════════════ */
+  .diagram { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 20px; }
+
+  .axis {
+    display: grid; grid-template-columns: 84px 1fr; align-items: center;
+    font-size: .75rem; color: var(--ink-soft);
+  }
+  .axis .marks { display: flex; justify-content: space-between; }
+
+  .track-row {
+    display: grid; grid-template-columns: 84px 1fr; align-items: center;
+    gap: 0 12px; margin-top: 8px;
+  }
+  .who { font-size: .8125rem; font-weight: 600; text-align: right; letter-spacing: -0.015em; }
+  .who .cov { display:block; font-weight: 400; font-size: .6875rem; color: var(--ink-soft); }
+
+  /* 트랙 자체 — 시간축 위의 한 줄 */
+  .track {
+    position: relative; height: 22px; border-radius: 3px;
+    background: var(--sunken);
+    /* 세로 눈금 — 반복 모티프 ① */
+    background-image: repeating-linear-gradient(
+      to right, var(--line-soft) 0 var(--tick), transparent var(--tick) calc(100% / 6));
+    background-size: calc(100% / 6) 100%;
+    overflow: hidden;
+  }
+  .seg { position: absolute; top: 0; bottom: 0; }
+  .seg.talk { background: var(--accent); }
+  .seg.gap  {
+    background: var(--gap-tint);
+    /* 구멍은 빗금. 색만으로 구분하지 않는다 (§7 상태 배지 규칙과 같은 원리) */
+    background-image: repeating-linear-gradient(
+      -45deg, var(--gap) 0 1px, transparent 1px 6px);
+  }
+  /* 결정이 나온 순간 — 세로선 */
+  .decide { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ink); }
+  .decide::after {
+    content: ""; position: absolute; top: -3px; left: -2px;
+    width: 6px; height: 6px; background: var(--ink); border-radius: 50%;
+  }
+
+  .legend { display: flex; gap: 16px; margin-top: 16px; font-size: .75rem; color: var(--ink-mid); flex-wrap: wrap; }
+  .legend i { display:inline-block; width: 14px; height: 10px; border-radius: 2px;
+              vertical-align: -1px; margin-right: 6px; }
+  .legend .l-talk i { background: var(--accent); }
+  .legend .l-gap i  { background: var(--gap-tint);
+    background-image: repeating-linear-gradient(-45deg, var(--gap) 0 1px, transparent 1px 6px); }
+  .legend .l-dec i  { background: var(--ink); width: 2px; height: 12px; }
+
+  /* ══════════════════════════════════════════════════════
+     변주별 차이
+     ══════════════════════════════════════════════════════ */
+  /* 변주 1 — 조밀. 트랙 얇게, 여백 적게 */
+  #v1 .track { height: 14px; }
+  #v1 .track-row { margin-top: 4px; }
+  #v1 .diagram { padding: 14px; }
+
+  /* 변주 2 — 기본 (위 공통값) */
+
+  /* 변주 3 — 여유. 트랙 두껍게, 이름 왼쪽 정렬, 눈금 강조 */
+  #v3 .track { height: 34px; border-radius: 4px; }
+  #v3 .track-row { margin-top: 14px; grid-template-columns: 96px 1fr; }
+  #v3 .who { text-align: left; font-size: .875rem; }
+  #v3 .diagram { padding: 28px; }
+  #v3 .track {
+    background-image: repeating-linear-gradient(
+      to right, var(--line) 0 var(--tick), transparent var(--tick) calc(100% / 6));
+  }
+
+  /* ── 축소판 — 다른 화면에서 반복될 모습 ─────────────────── */
+  .mini-demo { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 16px; margin-top: 16px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 16px; }
+  .card h3 { margin: 0 0 4px; font-size: .9375rem; font-weight: 600; letter-spacing: -0.015em; }
+  .card .meta { font-size: .75rem; color: var(--ink-soft); margin-bottom: 10px; }
+  .mini { height: 6px; border-radius: 2px; background: var(--sunken); position: relative; overflow: hidden;
+          background-image: repeating-linear-gradient(to right, var(--line-soft) 0 1px, transparent 1px calc(100% / 6)); }
+  .mini .seg { border-radius: 0; }
+
+  /* 구간 막대 — 기여도의 축소판. 점이 아니라 구간 */
+  .range { height: 8px; border-radius: 3px; background: var(--sunken); position: relative; margin-top: 6px; }
+  .range span { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; }
+  .range::before, .range::after {
+    content: ""; position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--ink-mid);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>스파이크 — 트랙 다이어그램</h1>
+  <p class="sub">
+    회의 하나를 가로 시간축으로 펼치고 사람마다 한 줄. 말한 구간은 채워지고,
+    안 말한 구간은 비고, <strong>녹음이 끊긴 구간은 빗금 구멍</strong>으로 남습니다.
+    세로선은 결정이 나온 순간입니다. 근거는 Marey 의 1885년 열차 운행도표 —
+    시간축 위의 평행선, 그리고 <strong>빈 곳이 정보</strong>라는 발상입니다.
+  </p>
+
+  <!-- ── 변주 1 ─────────────────────────────────────────── -->
+  <h2>변주 1 — 조밀</h2>
+  <p class="sub">트랙 14px. 회의가 열 개여도 한 화면에 들어옵니다. 대신 구멍이 작아 눈에 덜 띕니다.</p>
+  <div id="v1" class="diagram"></div>
+
+  <!-- ── 변주 2 ─────────────────────────────────────────── -->
+  <h2>변주 2 — 기본</h2>
+  <p class="sub">트랙 22px. 구멍이 읽히면서 목록에도 쓸 수 있는 크기입니다.</p>
+  <div id="v2" class="diagram"></div>
+
+  <!-- ── 변주 3 ─────────────────────────────────────────── -->
+  <h2>변주 3 — 여유</h2>
+  <p class="sub">트랙 34px, 눈금 강조. 회의 하나를 자세히 볼 때. 목록에는 못 씁니다.</p>
+  <div id="v3" class="diagram"></div>
+
+  <!-- ── 축소판 반복 ────────────────────────────────────── -->
+  <h2>축소판 — 다른 화면에서의 반복</h2>
+  <p class="sub">
+    지시서 §3 Stage B 의 4번 조건: 시그니처는 다른 페이지에서 축소판으로 반복 가능해야 합니다.
+  </p>
+  <div class="mini-demo">
+    <div class="card">
+      <span class="tag">칸반 카드</span>
+      <h3>DB 스키마 정리</h3>
+      <div class="meta">박지원 · 1주차 정기회의에서 나온 업무</div>
+      <div class="mini" id="m1"></div>
+      <div class="meta" style="margin:6px 0 0">근거 발화 1건 · 이 회의의 21분 지점</div>
+    </div>
+    <div class="card">
+      <span class="tag">기여도 카드</span>
+      <h3>박지원 <span style="font-weight:400;color:var(--ink-soft);font-size:.8125rem">developer</span></h3>
+      <div class="meta">19~29% · 신뢰도 낮음</div>
+      <div class="range"><span style="left:19%;right:71%"></span></div>
+      <div class="meta" style="margin:8px 0 0">회의 기여를 측정하지 못했습니다</div>
+      <div class="mini" id="m2" style="margin-top:6px"></div>
+    </div>
+    <div class="card">
+      <span class="tag">로비 · 트랙 건강</span>
+      <h3>참가자 상태</h3>
+      <div class="meta">커버리지 42% — 이 사람의 발언량은 측정할 수 없습니다</div>
+      <div class="mini" id="m3"></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="l-talk"><i></i>말한 구간</span>
+    <span class="l-gap"><i></i>녹음이 끊긴 구간 (측정 불가)</span>
+    <span class="l-dec"><i></i>결정이 나온 순간</span>
+  </div>
+
+</div>
+
+<script type="module">
+// 시연 데이터 — 실제 시드와 같은 모양. 30분 회의, 3명.
+// 박지원은 폰이 죽어 커버리지 42%.
+const MEETING_MS = 30 * 60 * 1000;
+const PEOPLE = [
+  { name: '김민수', cov: 100, talk: [[60,220],[380,520],[900,1010],[1500,1620]], gaps: [] },
+  { name: '이하늘', cov: 98,  talk: [[240,360],[640,760],[1120,1240],[1660,1720]], gaps: [] },
+  { name: '박지원', cov: 42,  talk: [[560,620],[1260,1340]], gaps: [[700,1100],[1400,1500]] },
+];
+const DECISIONS = [520, 1240, 1620]; // 초
+
+const pct = (sec) => (sec * 1000 / MEETING_MS) * 100;
+
+function renderDiagram(host) {
+  const axis = document.createElement('div');
+  axis.className = 'axis';
+  axis.innerHTML =
+    '<div></div><div class="marks">' +
+    ['0분','5','10','15','20','25','30분'].map((t) => `<span>${t}</span>`).join('') +
+    '</div>';
+  host.append(axis);
+
+  for (const p of PEOPLE) {
+    const row = document.createElement('div');
+    row.className = 'track-row';
+    const who = document.createElement('div');
+    who.className = 'who';
+    who.innerHTML = `${p.name}<span class="cov">커버리지 ${p.cov}%</span>`;
+
+    const track = document.createElement('div');
+    track.className = 'track';
+    for (const [a, b] of p.gaps) {
+      const s = document.createElement('div');
+      s.className = 'seg gap';
+      s.style.left = pct(a) + '%';
+      s.style.width = (pct(b) - pct(a)) + '%';
+      s.title = '녹음이 끊긴 구간 — 이 사이의 발언은 측정할 수 없습니다';
+      track.append(s);
+    }
+    for (const [a, b] of p.talk) {
+      const s = document.createElement('div');
+      s.className = 'seg talk';
+      s.style.left = pct(a) + '%';
+      s.style.width = (pct(b) - pct(a)) + '%';
+      track.append(s);
+    }
+    row.append(who, track);
+    host.append(row);
+  }
+
+  // 결정선은 트랙 위를 가로지른다 — 마지막 트랙에만 얹어 시각적으로 관통시킨다
+  const rows = host.querySelectorAll('.track');
+  for (const at of DECISIONS) {
+    rows.forEach((t) => {
+      const d = document.createElement('div');
+      d.className = 'decide';
+      d.style.left = pct(at) + '%';
+      d.title = '결정이 나온 순간';
+      t.append(d);
+    });
+  }
+}
+
+for (const id of ['v1', 'v2', 'v3']) renderDiagram(document.getElementById(id));
+
+// 축소판
+function renderMini(host, person) {
+  for (const [a, b] of person.gaps) {
+    const s = document.createElement('div');
+    s.className = 'seg gap';
+    s.style.left = pct(a) + '%'; s.style.width = (pct(b) - pct(a)) + '%';
+    host.append(s);
+  }
+  for (const [a, b] of person.talk) {
+    const s = document.createElement('div');
+    s.className = 'seg talk';
+    s.style.left = pct(a) + '%'; s.style.width = (pct(b) - pct(a)) + '%';
+    host.append(s);
+  }
+}
+renderMini(document.getElementById('m1'), PEOPLE[2]);
+renderMini(document.getElementById('m2'), PEOPLE[2]);
+renderMini(document.getElementById('m3'), PEOPLE[2]);
+</script>
+</body>
+</html>

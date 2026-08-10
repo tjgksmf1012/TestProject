@@ -25,6 +25,16 @@ export interface RosterEntry {
   voiceprint_storage?: boolean | null;
 }
 
+/**
+ * 녹음하던 기기가 남긴 경고 한 줄. 서버가 `complete_track` 에 저장한
+ * 그대로입니다 — 문구는 **녹음 클라이언트가 만든 한국어**입니다.
+ */
+export interface CaptureWarning {
+  setting?: string;
+  severity?: string;
+  message?: string;
+}
+
 /** 서버의 `GET /api/meetings/{id}/tracks` 의 `tracks[]` 한 줄. */
 export interface TrackHealth {
   track_id: number;
@@ -33,8 +43,37 @@ export interface TrackHealth {
   coverage: number | null;
   total_gap_ms: number | null;
   capture_confidence: number | null;
-  warnings: unknown[];
+  /**
+   * 녹음하던 기기가 남긴 경고. **서버가 이미 보내고 있었습니다.**
+   *
+   * ⚠️ 오래도록 `unknown[]` 으로 받아만 두고 **읽는 곳이 0곳**이었습니다
+   * (결함 93). 녹음 화면은 자기가 방금 잡은 경고를 보여주지만, 그건
+   * 그 폰에서 그 순간에만 보입니다. 업로드돼 저장된 뒤로는 **아무 화면도
+   * 이 값을 안 봤습니다** — 로비가 &#34;누구 폰이 잘못됐나&#34; 를 보는
+   * 곳인데도요.
+   *
+   * ⚠️ **완료된 트랙에만 들어 있습니다.** `capture_warnings` 는 참가할
+   * 때 `[]` 로 만들어지고 `complete_track` 에서만 채워집니다 — 녹음
+   * 중에는 언제나 비어 있습니다(결함 83 과 같은 시점 문제). 그래서 이
+   * 값은 &#34;회의 중 경보&#34; 가 아니라 **&#34;끝난 뒤 이 사람 녹음을
+   * 얼마나 믿을지&#34;** 입니다.
+   */
+  warnings?: CaptureWarning[];
   stop_reason: string | null;
+  /* ── 아래 셋은 **구멍이 언제 생겼는지** 그리기 위한 값입니다.
+     "42% 가 비었다" 와 "12분에 끊겼다" 는 다른 말이고, 뒤쪽이라야
+     사람이 무엇을 확인할지 압니다 (docs/16 Stage E). */
+  gaps?: { reason?: string; startMs: number; endMs: number }[];
+  started_at?: string | null;
+  ended_at?: string | null;
+  /* ── 아래 둘은 **회의 중에** 폰이 살아 있는지 보는 값입니다 (결함 83).
+     `coverage` 와 `total_gap_ms` 는 `complete_track` 에서만 채워지므로
+     녹음 중에는 언제나 null 입니다. 그래서 아래 `verdictOf` 의 `broken`·
+     `at_risk` 가지가 **회의가 끝나기 전에는 한 번도 못 탔습니다.** */
+  /** 지금까지 서버가 받은 조각 수. */
+  chunk_count?: number;
+  /** 마지막 소식 이후 흐른 밀리초. 녹음 중이 아니면 null. **서버가 잰다.** */
+  silent_ms?: number | null;
 }
 
 export type ConsentState = 'granted' | 'refused' | 'pending';
@@ -155,12 +194,57 @@ function verdictOf(track: TrackHealth | undefined): TrackVerdict {
   if (track.status === 'recording') {
     if (coverage !== null && coverage < MIN_USABLE_COVERAGE) return 'broken';
     if ((track.total_gap_ms ?? 0) >= WARN_GAP_MS) return 'at_risk';
+    // ⭐ **여기까지는 녹음 중에 한 번도 못 탑니다** (결함 83). 위 두 값은
+    // 트랙이 끝나야 채워지니까요. 회의 중에 실제로 알 수 있는 것은
+    // "마지막으로 소식이 온 지 얼마나 됐나" 하나뿐입니다.
+    //
+    // ⚠️ 문턱은 새로 만들지 않고 `WARN_GAP_MS` 를 그대로 씁니다. "이만큼
+    // 끊기면 사람에게 알린다" 는 판단은 이미 이 파일이 하고 있었고, 다른
+    // 숫자를 지어내면 같은 뜻에 값이 둘이 됩니다.
+    if (isSilentTooLong(track)) return 'at_risk';
     return 'healthy';
   }
 
   // 종료됨. 서버가 실제 청크로 커버리지를 다시 계산한 뒤다.
   if (track.status === 'completed') return 'finished';
   return 'broken'; // unusable | aborted
+}
+
+/**
+ * 회의 중에 이 트랙이 조용한 지 오래됐는가 (결함 83).
+ *
+ * ⚠️ 시간은 **서버가 잽니다.** 조각의 시각은 녹음하는 폰의 동기화된 시계
+ * 기준이고, 로비를 보는 사람의 브라우저 시계는 그것과 다를 수 있습니다.
+ * 여기서 빼면 시계가 어긋난 만큼 전부 죽은 것으로 보이거나 전부 멀쩡한
+ * 것으로 보입니다 — 운행도표의 축 문제와 같습니다.
+ *
+ * ⚠️ **모르면 경고하지 않습니다.** `silent_ms` 가 없는 서버(옛 버전)에서는
+ * 판단하지 않습니다. 없는 근거로 "폰을 확인하세요" 를 띄우면, 다음부터
+ * 사람은 이 경고를 안 믿습니다.
+ */
+export function isSilentTooLong(track: TrackHealth): boolean {
+  const silent = track.silent_ms;
+  if (silent === null || silent === undefined) return false;
+  return silent >= WARN_GAP_MS;
+}
+
+/**
+ * 무엇을 확인해야 하는지까지 말한다.
+ *
+ * 조각이 **한 개도** 안 온 것과, 오다가 끊긴 것은 **할 일이 다릅니다.**
+ * 앞은 녹음을 아예 시작 안 했을 수 있고, 뒤는 화면이 꺼졌을 가능성이 큽니다.
+ */
+function describeAtRisk(track: TrackHealth | undefined): string {
+  const silentMs = track?.silent_ms;
+  if (silentMs !== null && silentMs !== undefined) {
+    const seconds = Math.round(silentMs / 1000);
+    const howLong = seconds >= 60 ? `${Math.round(seconds / 60)}분째` : `${seconds}초째`;
+    return (track?.chunk_count ?? 0) === 0
+      ? `${howLong} 녹음이 한 조각도 안 왔습니다 — 그 폰에서 녹음을 시작했는지 확인해 주세요`
+      : `${howLong} 녹음이 안 올라옵니다 — 폰 화면을 켜 주세요`;
+  }
+  const gapSeconds = Math.round((track?.total_gap_ms ?? 0) / 1000);
+  return `녹음이 끊기고 있습니다 (공백 ${gapSeconds}초) — 폰 화면을 켜 주세요`;
 }
 
 function messageFor(verdict: TrackVerdict, track: TrackHealth | undefined): string {
@@ -173,7 +257,7 @@ function messageFor(verdict: TrackVerdict, track: TrackHealth | undefined): stri
     case 'healthy':
       return '녹음 중';
     case 'at_risk':
-      return `녹음이 끊기고 있습니다 (공백 ${Math.round((track?.total_gap_ms ?? 0) / 1000)}초) — 폰 화면을 켜 주세요`;
+      return describeAtRisk(track);
     case 'broken':
       // ⚠️ "0" 이 아니라 "측정 불가" 다. 이 구분이 이 프로젝트의 전부다.
       return percent === null
@@ -262,5 +346,62 @@ export function roomStatus(statuses: readonly MemberStatus[]): RoomStatus {
     // 녹음 중인 사람이 없는데 참가 안 한 사람이 남아 있으면 사람이 풀어야 한다.
     needsForceFinish: anyJoined && recording === 0 && notJoined > 0,
     message,
+  };
+}
+
+/**
+ * 이 트랙에서 **사람에게 보여줄** 경고 문구들.
+ *
+ * ⚠️ `critical` 만 올립니다. 녹음 클라이언트는 `warning` 도 남기는데
+ * (예: 표본율이 권장값과 다름), 그건 트랙을 못 쓰게 만들지 않습니다.
+ * 로비에 다 쏟으면 진짜 문제가 묻힙니다 — 이 화면은 &#34;누가 문제인가&#34;
+ * 를 한눈에 보는 곳입니다.
+ *
+ * ⚠️ **문구를 여기서 만들지 않습니다.** 기기가 남긴 말을 그대로 씁니다.
+ * 여기서 다시 쓰면 같은 사실에 두 문장이 생기고, 한쪽만 고쳐집니다.
+ *
+ * ⚠️ 모양이 이상하면 **버립니다.** 저장된 JSON 이라 무엇이든 들어올 수
+ * 있고, `[object Object]` 를 화면에 띄우는 것보다 안 띄우는 게 낫습니다.
+ */
+export function captureAlerts(track: TrackHealth | undefined): string[] {
+  if (track === undefined) return [];
+  return (track.warnings ?? [])
+    .filter((w) => w !== null && typeof w === 'object' && w.severity === 'critical')
+    .map((w) => (typeof w.message === 'string' ? w.message.trim() : ''))
+    .filter((message) => message !== '');
+}
+
+/**
+ * 이 사람이 **이미 답해 둔** ②③ 선택.
+ *
+ * ## 왜 필요한가 (결함 94)
+ *
+ * 로비의 ②③ 체크박스는 HTML 에 `checked` 로 박혀 있고, 화면은 그 값을
+ * **제출할 때만 읽었습니다.** 서버는 사람마다 저장된 답을 로스터에 실어
+ * 보내고 있었는데(`raw_audio_retention`·`voiceprint_storage`) 읽는 곳이
+ * 0곳이었습니다. 그래서 브라우저에서 이렇게 됩니다.
+ *
+ *     둘 다 끄고 제출 → 서버에 false 로 저장됨
+ *     새로고침        → **둘 다 다시 켜져 있음**
+ *
+ * 화면이 기록과 어긋나는 것만도 문제지만, 더 나쁜 것은 그 상태에서
+ * 사람이 &#34;동의합니다&#34; 를 한 번 더 누르면 화면이 `true` 를 보내
+ * **거부가 조용히 뒤집힌다**는 것입니다. 그러면
+ * `retention.purge_unconsented_audio()` 가 그 사람의 원본을 더 이상
+ * 지우지 않습니다 — 결함 67 이 고친 바로 그 구멍이 반대 방향으로
+ * 다시 뚫립니다.
+ *
+ * ⚠️ **아직 답을 안 했으면 기본값을 그대로 둡니다.** `null` 은 &#34;아직
+ * 응답 없음&#34; 이고 `false`(거부)와 다릅니다 — 이 저장소가 로스터에서
+ * 지키는 구분입니다.
+ */
+export function savedExtraConsents(
+  roster: readonly RosterEntry[],
+  userId: number,
+): { rawAudio: boolean | null; voiceprint: boolean | null } {
+  const mine = roster.find((entry) => entry.user_id === userId);
+  return {
+    rawAudio: mine?.raw_audio_retention ?? null,
+    voiceprint: mine?.voiceprint_storage ?? null,
   };
 }

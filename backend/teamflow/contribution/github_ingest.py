@@ -58,6 +58,51 @@ class PullRequest:
         )
 
 
+def reviews_to_events(
+    reviews: list[Review],
+    *,
+    pr_id: int,
+    pr_number: int,
+    author_id: int | None,
+) -> list[ContributionEvent]:
+    """리뷰들을 기여 이벤트로. **남에게 준 리뷰만** 센다.
+
+    ⚠️ `author_id` 가 `None` 일 수 있습니다 (결함 62). 작성자를 팀원에게
+    붙이지 못한 PR — 외부 기여자나 봇 — 이 그렇습니다. 그때도 **우리
+    팀원이 준 리뷰는 그 사람의 기여**입니다. 예전에는 이 루프가
+    `pr_to_events` 안에만 있어서, 작성자를 못 붙이면 리뷰까지 통째로
+    사라졌습니다.
+
+    작성자가 `None` 이면 자기 리뷰 제외 규칙은 아무도 걸러내지 않습니다 —
+    작성자를 모르는데 "작성자 본인" 을 가려낼 수는 없고, 그 로그인이
+    팀원에 없다는 것은 리뷰어로도 못 붙는다는 뜻이므로 안전합니다.
+    """
+    events: list[ContributionEvent] = []
+    for review in reviews:
+        if author_id is not None and review.reviewer_id == author_id:
+            continue
+        if not review.is_substantive:
+            continue
+        events.append(
+            ContributionEvent(
+                user_id=review.reviewer_id,
+                event_type=EventType.REVIEW_GIVEN,
+                occurred_at=review.submitted_at,
+                source_kind=SourceKind.GITHUB_EVENT,
+                # PR id 와 리뷰어 id 를 조합해 유일 키를 만든다.
+                # 같은 사람이 한 PR에 여러 번 리뷰해도 한 번만 센다.
+                #
+                # ⚠️ 이 식이 **두 경로에서 같아야** 합니다. 나중에 작성자가
+                # 로그인을 등록해 그 PR 이 다시 처리되면, 같은 리뷰가 같은
+                # source_id 로 와서 `persist_events` 가 막아 줍니다.
+                source_id=pr_id * 100_000 + review.reviewer_id,
+                magnitude=float(review.comment_count),
+                metadata={"pr_number": pr_number, "state": review.state},
+            )
+        )
+    return events
+
+
 def pr_to_events(pr: PullRequest) -> list[ContributionEvent]:
     """병합된 PR 하나를 기여 이벤트들로 변환한다.
 
@@ -95,25 +140,11 @@ def pr_to_events(pr: PullRequest) -> list[ContributionEvent]:
             )
         )
 
-    # 남에게 준 리뷰만 센다. 받은 리뷰는 기여가 아니다.
-    for review in pr.reviews:
-        if review.reviewer_id == pr.author_id:
-            continue
-        if not review.is_substantive:
-            continue
-        events.append(
-            ContributionEvent(
-                user_id=review.reviewer_id,
-                event_type=EventType.REVIEW_GIVEN,
-                occurred_at=review.submitted_at,
-                source_kind=SourceKind.GITHUB_EVENT,
-                # PR id 와 리뷰어 id 를 조합해 유일 키를 만든다.
-                # 같은 사람이 한 PR에 여러 번 리뷰해도 한 번만 센다.
-                source_id=pr.id * 100_000 + review.reviewer_id,
-                magnitude=float(review.comment_count),
-                metadata={"pr_number": pr.number, "state": review.state},
-            )
+    events.extend(
+        reviews_to_events(
+            pr.reviews, pr_id=pr.id, pr_number=pr.number, author_id=pr.author_id
         )
+    )
 
     # PR이 이슈를 닫았다면 해결로 기록
     for issue_id in pr.closes_issue_ids:

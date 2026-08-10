@@ -43,6 +43,8 @@ from teamflow.config import get_settings
 from teamflow.contribution.events import CATEGORY_OF, EventType
 from teamflow.db import models as m
 from teamflow.db import session as db_session
+from teamflow.projects import invites
+from teamflow.services import meeting_contribution_service
 
 PROJECT_TITLE = "TeamFlow 시연 프로젝트"
 
@@ -168,6 +170,15 @@ def seed(*, reset: bool) -> dict:
             title=PROJECT_TITLE,
             started_at=MEETING_START - timedelta(days=14),
             github_repo="tjgksmf1012/teamflow-demo",
+            # ⚠️ **API 가 만드는 프로젝트와 같은 모양이어야 한다** (결함 91).
+            #
+            # 이게 없던 동안 시연 프로젝트만 `invite_code` 가 NULL 이었다.
+            # 화면은 정직하게 `(없음)` 을 띄우고 복사 버튼을 잠갔지만
+            # (결함 71), 그 결과 **시연에서 팀원을 초대할 방법이 없었다** —
+            # 이 제품의 첫 화면이 "시작하는 두 가지 방법" 인데 그중 하나가
+            # 막힌 채였다. 제품이 만들 수 없는 상태를 시드가 만들고 있었고,
+            # 그 상태로 화면을 재고 캡처해 왔다.
+            invite_code=invites.generate_code(),
         )
         s.add(project)
         s.flush()
@@ -216,10 +227,46 @@ def seed(*, reset: bool) -> dict:
 
         # 트랙 셋. 박지원의 폰은 중간에 잠겨 커버리지가 낮다 —
         # "측정 불가" 표시가 화면에서 어떻게 보이는지 확인하려면 필요하다.
-        coverages = [1.0, 0.98, 0.42]
+        #
+        # ⚠️ **커버리지를 손으로 적지 않습니다** (결함 99). 운영 코드는 셋을
+        # 하나의 원천에서 뽑습니다 — `audio/assembly.py` 가
+        # `coverage = 1 - total_gap_ms / duration` 이고 `total_gap_ms` 는
+        # 구멍의 합입니다. 그래서 여기서도 **구멍만 적고 나머지는 계산**합니다.
+        #
+        # 손으로 적던 동안 이런 트랙이 나왔습니다.
+        #
+        #     이하늘  커버리지 98%  ·  총 공백 0  ·  구멍 0개
+        #     박지원  커버리지 42%  ·  총 공백 23.2분  ·  구멍 합 15분
+        #
+        # 운영이 만들 수 없는 상태입니다. 화면에서는 이하늘이 100% 인
+        # 김민수와 **똑같이 꽉 찬 막대**로 보였고, 박지원은 빗금이 37.5%
+        # 인데 "42% 커버리지"(= 58% 빔)라고 말했습니다. 이 저장소의
+        # 시그니처가 "구멍이 **언제** 생겼는지" 인데, 시연 자료가 바로 그
+        # 질문에 답하지 못하고 있었습니다. 결함 91 과 같은 부류입니다.
+        MEETING_MS = 40 * 60 * 1000
+        track_gaps: list[list[dict[str, object]]] = [
+            # 김민수 — 끊긴 데 없음
+            [],
+            # 이하늘 — 22분쯤 마이크가 48초 꺼져 있었다.
+            # `track_muted` 는 **서버가 절대 못 보는** 구멍이라
+            # (`assembly.GapReason` 주석) 클라이언트 보고로만 남는다.
+            [{"reason": "track_muted", "startMs": 1_320_000, "endMs": 1_368_000}],
+            # 박지원 — 폰이 잠겨 오래 멈췄고, 조각도 일부 유실됐다
+            [
+                {"reason": "recorder_stalled", "startMs": 600_000, "endMs": 1_560_000},
+                {"reason": "chunk_lost", "startMs": 1_680_000, "endMs": 2_112_000},
+            ],
+        ]
+        for gaps in track_gaps:
+            for gap in gaps:
+                gap["durationMs"] = int(gap["endMs"]) - int(gap["startMs"])  # type: ignore[arg-type]
+        totals = [sum(int(g["durationMs"]) for g in gaps) for gaps in track_gaps]
+        coverages = [round(1 - total / MEETING_MS, 3) for total in totals]
         # 정렬 보정값. 기준 트랙이 0 이고 나머지는 GCC-PHAT 이 추정한 값이다.
         offsets_ms = [0, 187, -64]
-        for user, coverage, offset_ms in zip(users, coverages, offsets_ms, strict=True):
+        for user, coverage, total_gap_ms, gaps, offset_ms in zip(
+            users, coverages, totals, track_gaps, offsets_ms, strict=True
+        ):
             usable = coverage >= 0.8
             s.add(
                 m.MeetingTrack(
@@ -232,11 +279,18 @@ def seed(*, reset: bool) -> dict:
                     offset_ms=offset_ms,
                     status="completed" if usable else "unusable",
                     coverage=coverage,
-                    total_gap_ms=0 if usable else 1_392_000,
-                    longest_gap_ms=0 if usable else 1_200_000,
-                    gaps=[]
-                    if usable
-                    else [{"start_ms": 600_000, "end_ms": 1_800_000, "reason": "recorder_stalled"}],
+                    total_gap_ms=total_gap_ms,
+                    longest_gap_ms=max(
+                        (int(g["durationMs"]) for g in gaps), default=0
+                    ),
+                    # ⚠️ **운영 코드와 같은 키**를 씁니다 (카멜).
+                    # `recording_service._finalize` 가 이렇게 씁니다:
+                    #     {"reason", "startMs", "endMs", "durationMs"}
+                    # 예전 시드는 `start_ms`(스네이크)였고, 그래서 화면이
+                    # 이 값을 읽으면 **조용히 아무것도 안 그렸습니다** —
+                    # 시연에서는 멀쩡해 보이는데 운영에서만 나오는 부류의
+                    # 반대, 즉 시연에서만 안 나오는 결함이었습니다.
+                    gaps=gaps,
                 )
             )
         s.flush()
@@ -256,6 +310,32 @@ def seed(*, reset: bool) -> dict:
             s.add(row)
             s.flush()
             utterance_ids.append(row.id)
+
+        # ⚠️ **회의록은 요약 하나가 아닙니다** (결함 110·111). 파이프라인은
+        # 다음 안건과 미해결 사안도 만들어 저장하는데, 그 둘을 **읽는 곳이
+        # 저장소에 0곳**이라 시연에서도 안 보였습니다. 여기서도 안 넣으면
+        # 배선을 고쳐도 시연 화면은 그대로 비어 있습니다.
+        #
+        # 근거는 지어내지 않습니다 — 다섯 번째 발화("배포는 아직 정하지
+        # 말고 다음 회의에서 다시 얘기해요")가 실제로 그 근거입니다.
+        # 운영도 이 모양입니다: `validation._check_evidence` 가 **근거가
+        # 없는 미해결 사안을 거부**하므로 저장된 것은 전부 근거를 답니다.
+        deferred = UTTERANCES[4]
+        s.add(
+            m.MeetingEvent(
+                meeting_id=meeting.id,
+                event_type="unanswered_question",
+                severity="info",
+                start_ms=deferred[1],
+                end_ms=deferred[2],
+                evidence_utterance_ids=[utterance_ids[4]],
+                detail={"content": "배포 방식을 정하지 못했습니다"},
+            )
+        )
+        # 요약 마지막 줄("배포 방식은 다음 회의로 미뤘습니다")과 같은 것을
+        # 가리킵니다 — 회의록 안에서 두 칸이 서로 어긋나 있으면 사람은
+        # 어느 쪽을 믿을지 모릅니다.
+        meeting.next_agenda = ["배포 방식 결정", "1주차 업무 진행 상황 공유"]
 
         user_ids = [u.id for u in users]
         for spec in build_candidates(utterance_ids, user_ids):
@@ -282,6 +362,14 @@ def seed(*, reset: bool) -> dict:
         )
 
         _seed_contribution_events(s, project.id, user_ids)
+
+        # ⭐ 회의 발화 → 기여 이벤트. **운영 코드와 같은 함수**를 부릅니다.
+        #
+        # 시연 데이터를 손으로 만들면 시연과 운영이 갈라집니다. 실제로
+        # 그랬습니다 — 배선이 0곳인 동안에도 시연 화면에는 회의 기여도가
+        # 멀쩡히 떠 있어서, 운영에서 언제나 0이라는 사실이 가려졌습니다.
+        meeting_contribution_service.record_meeting(s, meeting)
+
         _seed_tasks(s, project.id, user_ids, meeting.id)
 
         return {
@@ -324,21 +412,23 @@ _EVENTS: list[tuple[int, str, str, float, int]] = [
     (0, "review_given", "github_event", 1.0, 2),
     (0, "review_given", "github_event", 1.0, 4),
     (0, "task_completed", "task", 1.0, 3),
-    (0, "utt_proposal", "utterance", 1.0, 0),
-    (0, "utt_decision", "utterance", 1.0, 0),
     (1, "pr_merged", "github_event", 90.0, 2),
     (1, "review_given", "github_event", 1.0, 3),
     (1, "task_completed", "task", 1.0, 2),
     (1, "task_completed", "task", 1.0, 5),
-    (1, "utt_question", "utterance", 1.0, 0),
-    (1, "utt_answer", "utterance", 1.0, 0),
-    (1, "utt_commitment", "utterance", 1.0, 0),
     (2, "pr_merged", "github_event", 120.0, 4),
     (2, "review_given", "github_event", 1.0, 5),
     (2, "task_completed", "task", 1.0, 4),
-    # 박지원의 회의 발언은 없다 — 폰이 죽어서 **기록되지 않았다.**
-    # 트랙 커버리지 0.42 가 그 사실을 남기고, 기여도 엔진이 그걸 읽어
-    # 회의 카테고리를 "측정 불가" 로 뺀다.
+    # ⚠️ `utt_*` 는 **여기 없습니다.** 예전에는 손으로 넣었는데, 이제
+    # 회의 발화에서 진짜로 만들어집니다(`meeting_contribution_service`).
+    #
+    # 손으로 넣으면 시연은 되는데 실제 파이프라인에서는 안 되는 상태를
+    # 못 알아챕니다 — 실제로 그랬습니다. 배선이 0곳인 동안에도 시연
+    # 화면에는 회의 기여도가 멀쩡히 떠 있었습니다.
+    #
+    # 박지원의 회의 기여는 트랙 커버리지 0.42 때문에 **측정 불가**로
+    # 빠집니다. 발언은 기록됐지만(폰이 10분 뒤에 죽었다) 그 사람의
+    # 발언량을 비교에 쓸 수 없기 때문입니다.
 ]
 
 
@@ -482,7 +572,71 @@ def _seed_tasks(session, project_id: int, user_ids: list[int], meeting_id: int) 
             origin.review_status = "approved"
             origin.reviewed_by = reviewer
             origin.created_task_id = task.id
+            if status == "done":
+                _seed_merged_pull_request(session, project_id, task, user_ids[owner])
     session.flush()
+
+
+def _seed_merged_pull_request(session, project_id: int, task, user_id: int) -> None:
+    """완료된 업무 하나에 병합된 PR 을 붙인다.
+
+    ⭐ **이게 없으면 시연에서 마지막 칸이 안 보입니다.**
+
+        회의 녹음 → 자막 → 업무 후보 → 승인 → 칸반
+            → **관련 PR 병합 → 업무 카드에 수행 근거**   ← 여기
+            → 기여도
+
+    docs/08 §5.1 의 필수 경로이고, 여기까지 화면에서 보여야 이 프로젝트가
+    "회의록 만드는 툴" 과 다르다는 주장이 성립합니다.
+
+    ⚠️ 연결을 손으로 만들지 않고 **운영 코드와 같은 함수**(`link_pull_request`)
+    를 부릅니다. 손으로 넣으면 시연은 되는데 실제 웹훅에서는 안 되는 상태를
+    못 알아챕니다 — 이 저장소에서 반복해서 나온 실패 방식입니다.
+    """
+    from teamflow.github.linking import task_marker
+    from teamflow.services import task_link_service
+
+    login = session.scalar(
+        select(m.Member.github_login).where(
+            m.Member.project_id == project_id, m.Member.user_id == user_id
+        )
+    )
+    merged_at = (task.completed_at or MEETING_START) + timedelta(hours=2)
+
+    event = m.GithubEvent(
+        project_id=project_id,
+        delivery_id=f"seed-pr-{task.id}",
+        repo="tjgksmf1012/teamflow-demo",
+        event_type="pull_request.merged",
+        actor_login=login or "minsu-dev",
+        actor_user_id=user_id,
+        ref=f"feat/{task.id}-schema",
+        payload={
+            "action": "closed",
+            "repository": {"full_name": "tjgksmf1012/teamflow-demo"},
+            "pull_request": {
+                "number": 17,
+                "title": f"{task.title}",
+                # 시연자가 화면에서 볼 표식과 **같은 것**을 씁니다.
+                "body": f"회의에서 정한 대로 정리했습니다.\n\n{task_marker(task.id)}",
+                "merged": True,
+                "merged_at": merged_at.isoformat(),
+                "user": {"login": login or "minsu-dev"},
+                "head": {"ref": f"feat/{task.id}-schema"},
+            },
+        },
+        occurred_at=merged_at,
+    )
+    session.add(event)
+    session.flush()
+
+    linked = task_link_service.link_pull_request(session, event)
+    if not linked:
+        # 조용히 넘어가면 시연 직전에 카드가 비어 있는 걸 발견합니다.
+        raise SystemExit(
+            f"업무 {task.id} 에 PR 을 잇지 못했습니다. "
+            "link_pull_request 나 표식 규칙이 바뀌었는지 확인하세요."
+        )
 
 
 def _delete_project(session, project_id: int) -> None:

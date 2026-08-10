@@ -13,8 +13,19 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import event, func, select
@@ -22,9 +33,15 @@ from sqlalchemy.orm import Session
 
 from teamflow.audio.chunk_store import ChunkStore
 from teamflow.auth import passwords
+from teamflow.call import rooms as call_rooms
+from teamflow.call import signaling as call_signaling_module
 from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
+from teamflow.db import session as db_session
 from teamflow.db.session import get_db
+from teamflow.github import backfill as gh_backfill
+from teamflow.github import connection as gh_connection
+from teamflow.github import linking as gh_linking
 from teamflow.github import webhook as gh
 from teamflow.jobs import retention
 from teamflow.logging_config import configure_logging
@@ -33,7 +50,10 @@ from teamflow.projects import invites
 from teamflow.services import (
     approval_service,
     auth_service,
+    github_connection_service,
+    progress_service,
     recording_service,
+    task_link_service,
     task_service,
 )
 from teamflow.tasks import dispatch
@@ -349,9 +369,12 @@ class CandidateOut(BaseModel):
     # 확신도를 깎은 이유. 숫자만으로는 무엇을 확인해야 할지 알 수 없다.
     warnings: list[str] = []
 
-    @property
-    def is_complete(self) -> bool:
-        return self.assignee_id is not None and self.deadline is not None
+    # ⚠️ 여기 `is_complete` 프로퍼티가 있었습니다 (결함 116). Pydantic 은
+    # 프로퍼티를 **직렬화하지 않으므로** 화면은 그 값을 받은 적이 없고,
+    # 서버 안에서도 부르는 곳이 0곳이었습니다. "담당자·마감일이 다 찼는가"
+    # 를 실제로 판정하는 것은 화면의 `approvalBlockers` 입니다 — 그쪽은
+    # 사람이 고른 값(`draft`)까지 보므로 여기서는 애초에 같은 답을 낼 수
+    # 없습니다. 셋째 사본을 두면 언젠가 서로 다른 답을 냅니다.
 
 
 class ReviewItem(BaseModel):
@@ -447,6 +470,20 @@ def _enqueue_github_after_commit(session: Session, event_id: int) -> None:
     @event.listens_for(session, "after_commit", once=True)
     def _fire(_session: Session) -> None:  # pragma: no cover - 커밋 시점에 실행된다
         dispatch.enqueue_github_ingest(event_id)
+
+
+def _enqueue_backfill_after_commit(
+    session: Session, project_id: int, limit: int
+) -> None:
+    """커밋 뒤에 백필을 큐에 넣는다.
+
+    같은 이유입니다 — 워커가 커밋보다 먼저 도착하면 방금 정한 상한도,
+    저장소 이름 변경도 못 본 채로 시작합니다.
+    """
+
+    @event.listens_for(session, "after_commit", once=True)
+    def _fire(_session: Session) -> None:  # pragma: no cover - 커밋 시점에 실행된다
+        dispatch.enqueue_github_backfill(project_id, limit)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -585,7 +622,8 @@ def create_project(payload: ProjectIn, session: DbSession, user: CurrentUser) ->
     project = m.Project(
         title=payload.title,
         started_at=datetime.now(UTC),
-        github_repo=payload.github_repo,
+        # PATCH 와 **같은 문**을 지난다 (`_checked_repo` 주석 참고).
+        github_repo=_checked_repo(session, payload.github_repo),
         invite_code=_fresh_invite_code(session),
     )
     session.add(project)
@@ -633,9 +671,12 @@ def get_project(project_id: int, session: DbSession, user: CurrentUser) -> Proje
         project_id=project.id,
         title=project.title,
         github_repo=project.github_repo,
-        # 설치 id 자체는 내보내지 않습니다 — 화면이 쓸 일이 없고,
-        # 연결 여부만 알면 됩니다.
-        github_connected=project.github_installation_id is not None,
+        # ⚠️ "연결됨" 은 **서명된 배달이 실제로 도착했다** 는 뜻입니다.
+        #
+        # 예전에는 설치 id 가 있으면 참이었는데, 그 id 는 화면에서 아무
+        # 숫자나 보내면 채워졌습니다. 즉 아무것도 확인하지 않고 "연결됨" 을
+        # 보여 주고 있었습니다. 설치 id 자체는 여전히 내보내지 않습니다.
+        github_connected=project.github_verified_at is not None,
         invite_code=invites.format_code(project.invite_code or ""),
         member_count=int(count or 0),
     )
@@ -645,10 +686,61 @@ class ProjectPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     #: `owner/repo`. 빈 문자열이면 연결을 끊습니다.
     github_repo: str | None = Field(default=None, max_length=255)
-    github_installation_id: int | None = None
+
+    # ⚠️ `github_installation_id` 는 **일부러 없습니다.**
+    #
+    # 예전에는 여기 있었고, 화면에서 아무 숫자나 보내면 그대로 저장됐습니다.
+    # 워커는 그 값으로 `build_client()` 를 불러 **그 설치의 액세스 토큰을
+    # 발급**합니다. 즉 이 팀과 아무 상관 없는 설치의 권한으로 GitHub API 를
+    # 부르게 만들 수 있었습니다.
+    #
+    # 지금은 서명이 검증된 웹훅 본문의 `installation.id` 로만 채웁니다
+    # (`services/github_connection_service.record_delivery`). 요청 본문의
+    # id 를 FK 나 권한에 그대로 쓰던 결함(`member_ids`)과 같은 부류입니다.
+    model_config = {"extra": "forbid"}
 
 
 _REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+
+
+def _checked_repo(session: Session, repo: str | None, *, exclude: int | None = None) -> str | None:
+    """저장소 값을 받아들이기 전에 거치는 **한 개의** 문.
+
+    ⚠️ 이 검사 둘이 PATCH 에만 있었습니다. 만들기(`POST /api/projects`)는
+    같은 값을 그냥 저장했고, 화면이 마침 만들 때 저장소를 안 보내서 아무도
+    몰랐습니다 — **API 는 화면보다 오래 삽니다.**
+
+    그래서 두 경로가 같은 함수를 지나게 했습니다. 한쪽에만 검사를 더하면
+    다음 사람이 또 한쪽을 빠뜨립니다.
+    """
+    if repo is None:
+        return None
+    repo = repo.strip()
+    if not repo:
+        return ""
+
+    # 웹훅은 `repository.full_name` 으로 프로젝트를 찾습니다. 주소 전체를
+    # 넣으면 **영원히 못 찾습니다** — 오류도 안 나고 기여도만 비어 있습니다.
+    if not _REPO_PATTERN.match(repo):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "저장소는 `owner/repo` 형식이어야 합니다 (주소 전체가 아니라)",
+        )
+
+    # ⚠️ 대조는 **대소문자를 무시하고** 합니다. `team/x` 와 `team/X` 를
+    # 다른 저장소로 보면, 웹훅이 왔을 때 어느 프로젝트에 붙을지 정해지지
+    # 않습니다. DB 의 유니크 제약이 최종 방어이고 이건 사람에게 이유를
+    # 말해 주기 위한 검사입니다.
+    query = select(m.Project.id).where(
+        m.Project.github_repo_key == gh_connection.repo_key(repo)
+    )
+    if exclude is not None:
+        query = query.where(m.Project.id != exclude)
+    if session.scalar(query):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "다른 프로젝트가 이미 이 저장소를 쓰고 있습니다"
+        )
+    return repo
 
 
 @app.patch("/api/projects/{project_id}", response_model=ProjectDetail)
@@ -670,28 +762,16 @@ def patch_project(
         project.title = payload.title
 
     if payload.github_repo is not None:
-        repo = payload.github_repo.strip()
-        if repo and not _REPO_PATTERN.match(repo):
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "저장소는 `owner/repo` 형식이어야 합니다 (주소 전체가 아니라)",
-            )
-        taken = session.scalar(
-            select(m.Project.id).where(
-                m.Project.github_repo == repo, m.Project.id != project_id
-            )
-        )
-        if repo and taken:
-            # 웹훅은 저장소로 프로젝트를 찾습니다. 둘이 같은 저장소를 가리키면
-            # 한쪽만 이벤트를 받고 다른 쪽은 이유 없이 빕니다.
-            raise HTTPException(
-                status.HTTP_409_CONFLICT, "다른 프로젝트가 이미 이 저장소를 쓰고 있습니다"
-            )
+        repo = _checked_repo(session, payload.github_repo, exclude=project_id) or ""
+
+        # 저장소를 바꾸면 확인도 없던 일이 됩니다. 앞 저장소에서 배달이 왔다는
+        # 사실이 **새 저장소가 연결됐다는 근거가 되지는 않습니다.**
+        if not gh_connection.same_repo(project.github_repo, repo):
+            project.github_verified_at = None
+            project.github_installation_id = None
+
         project.github_repo = repo or None
         project.github_connected_at = datetime.now(UTC) if repo else None
-
-    if payload.github_installation_id is not None:
-        project.github_installation_id = payload.github_installation_id or None
 
     session.flush()
     return get_project(project_id, session, user)
@@ -720,7 +800,7 @@ def join_project(payload: JoinIn, session: DbSession, user: CurrentUser) -> Join
     if not invites.looks_like_code(code):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "코드 형식이 올바르지 않습니다 — 8자이고 0·O·1·I·L 은 쓰지 않습니다",
+            "코드 형식이 올바르지 않습니다 — 8자이고 0·O·1·I·L은 쓰지 않습니다",
         )
 
     project = session.scalars(
@@ -764,6 +844,226 @@ def rotate_invite_code(
     project.invite_code = _fresh_invite_code(session)
     session.flush()
     return get_project(project_id, session, user)
+
+
+class GithubHealthOut(BaseModel):
+    """GitHub 연결 진단. docs/15 §4.2 의 1번.
+
+    "틀리면 오류 없이 기여도만 빕니다" 를 없애기 위한 화면입니다. 그래서
+    상태만이 아니라 **왜 그렇게 봤는지(detail)** 와 **지금 할 일(next_step)**
+    을 같이 내보냅니다. 상태만 보여 주면 사람은 못 고칩니다.
+    """
+
+    code: str
+    headline: str
+    detail: str
+    severity: str
+    next_step: str | None
+    warnings: list[str]
+
+    repo: str | None
+    #: 서명된 배달이 처음 도착한 시각. None 이면 **아직 확인되지 않았습니다.**
+    verified_at: datetime | None
+    delivery_count: int
+    last_delivery_at: datetime | None
+
+    #: "이 수치는 언제부터의 활동인가" 한 줄. 범위를 안 밝힌 숫자는
+    #: **전부를 센 것처럼** 읽힙니다.
+    coverage: str
+    backfilled_at: datetime | None
+    backfilled_to: datetime | None
+
+
+@app.get("/api/projects/{project_id}/github", response_model=GithubHealthOut)
+def github_health(
+    project_id: int, session: DbSession, user: CurrentUser, settings: AppSettings
+) -> GithubHealthOut:
+    """이 프로젝트의 GitHub 연결이 실제로 살아 있는가.
+
+    구성원만 볼 수 있습니다. 안 붙은 배달(오타 후보)이 여기 섞여 나가므로,
+    아무나 부를 수 있으면 **App 이 설치된 저장소를 캐내는 도구**가 됩니다.
+    무엇을 보여 주고 무엇을 감추는지는 `github/connection.looks_like_typo_of`
+    에 적어 두었습니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    facts = github_connection_service.collect_facts(
+        session,
+        project_id,
+        app_credentials_present=bool(
+            getattr(settings, "github_app_id", None)
+            and getattr(settings, "github_private_key", None)
+        ),
+        webhook_secret_present=bool(getattr(settings, "github_webhook_secret", None)),
+    )
+    state = gh_connection.diagnose(facts)
+
+    return GithubHealthOut(
+        code=state.code,
+        headline=state.headline,
+        detail=state.detail,
+        severity=state.severity,
+        next_step=state.next_step,
+        warnings=state.warnings,
+        repo=facts.repo,
+        verified_at=facts.verified_at,
+        delivery_count=facts.delivery_count,
+        last_delivery_at=facts.last_delivery_at,
+        coverage=gh_connection.describe_coverage(facts),
+        backfilled_at=facts.backfilled_at,
+        backfilled_to=facts.backfilled_to,
+    )
+
+
+class BackfillIn(BaseModel):
+    """가져올 상한. 안 주면 기본값(200)."""
+
+    limit: int | None = Field(default=None, ge=1, le=gh_backfill.MAX_LIMIT)
+
+
+@app.post(
+    "/api/projects/{project_id}/github/backfill",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_github_backfill(
+    project_id: int,
+    body: BackfillIn,
+    session: DbSession,
+    user: CurrentUser,
+    settings: AppSettings,
+) -> dict:
+    """연결 **전**의 병합 PR 을 가져온다.
+
+    ⚠️ 구성원만입니다. 아무나 부를 수 있으면 남의 저장소를 향해 GitHub
+    API 를 대신 두들기게 만들 수 있고, 그건 그 팀의 rate limit 을 태웁니다.
+
+    202 를 돌려주고 워커가 합니다. PR 하나에 API 를 네 번 부르므로 200건
+    이면 800 요청이고, HTTP 요청 하나가 그걸 기다릴 수는 없습니다.
+    """
+    project = session.get(m.Project, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    if not project.github_repo:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "저장소가 연결되지 않았습니다. 먼저 owner/repo를 저장하세요.",
+        )
+    # 자격 증명이 없으면 워커가 아무것도 못 합니다. 202 로 받아 두고
+    # 조용히 아무 일도 안 일어나면, 사람은 화면만 보고 기다립니다.
+    if not (
+        getattr(settings, "github_app_id", None)
+        and getattr(settings, "github_private_key", None)
+        and project.github_installation_id
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "서버에 GitHub App 자격 증명이 없거나 App이 아직 이 저장소에 "
+            "설치되지 않았습니다. 지난 활동을 가져오려면 그것부터 필요합니다.",
+        )
+
+    limit = gh_backfill.clamp_limit(body.limit)
+    _enqueue_backfill_after_commit(session, project_id, limit)
+    return {"status": "queued", "project_id": project_id, "limit": limit}
+
+
+# ══════════════════════════════════════════════════════════════
+# 통화 시그널링 (docs/15 §3)
+# ══════════════════════════════════════════════════════════════
+#
+# 목소리는 여기를 지나가지 않습니다. SDP·ICE 만 오가고, 그 다음부터
+# 사람들끼리 직접 연결합니다. 막는 규칙은 `call/signaling.py` 에 있고
+# 36개 테스트가 붙습니다.
+#
+# ⚠️ **이 환경에서 실제 통화를 해 볼 수 없습니다** — 네트워크가 없습니다.
+# 여기서 확인되는 것은 주선 규칙까지이고, 목소리가 실제로 오가는지는
+# `docs/09` 실험 6 에서 확인합니다.
+
+
+@app.websocket("/api/meetings/{meeting_id}/call")
+async def call_signaling(websocket: WebSocket, meeting_id: int) -> None:
+    """통화 주선 통로.
+
+    ⚠️ **인증과 구성원 확인을 `accept()` 앞에서** 합니다. 받아 놓고
+    나중에 끊으면 그 사이에 명단이 이미 샙니다 — 이 소켓이 붙자마자
+    받는 첫 메시지가 "지금 누가 회의에 있는가" 입니다.
+    """
+    with db_session.session_scope() as session:
+        user = auth_service.resolve_session(
+            session, websocket.cookies.get(auth_service.COOKIE_NAME)
+        )
+        if user is None:
+            # 1008 = policy violation. WS 에는 401 이 없습니다.
+            await websocket.close(code=1008, reason="로그인이 필요합니다")
+            return
+
+        meeting = session.get(m.Meeting, meeting_id)
+        if meeting is None:
+            await websocket.close(code=1008, reason="회의를 찾을 수 없습니다")
+            return
+
+        member = session.scalar(
+            select(m.Member.id).where(
+                m.Member.project_id == meeting.project_id,
+                m.Member.user_id == user.id,
+            )
+        )
+        if member is None:
+            await websocket.close(code=1008, reason="이 프로젝트의 구성원이 아닙니다")
+            return
+
+        user_id, user_name = user.id, user.name
+
+    # 헤드폰은 **자기 신고**입니다(docs/15 §2.3). 브라우저가 확인할 방법이
+    # 없어서 막지는 못하고, 대신 방에 있는 전원이 지금 보게 합니다.
+    headphones = websocket.query_params.get("headphones") != "no"
+
+    await websocket.accept()
+    peer = call_signaling_module.Peer(
+        user_id=user_id,
+        name=user_name,
+        connection_id=uuid4().hex,
+        joined_at=datetime.now(UTC),
+        headphones=headphones,
+    )
+
+    async def send(body: dict[str, Any]) -> None:
+        await websocket.send_json(body)
+
+    decision = await call_rooms.rooms.try_join(peer, meeting_id, send)
+    if not decision.allowed:
+        await websocket.send_json(
+            {"kind": "rejected", "code": decision.code, "reason": decision.reason}
+        )
+        await websocket.close(code=1008, reason=decision.code)
+        return
+
+    await call_rooms.rooms.announce(meeting_id)
+    try:
+        while True:
+            message = await websocket.receive_json()
+            if not isinstance(message, dict):
+                continue
+            current = call_rooms.rooms.state(meeting_id).by_connection(
+                peer.connection_id
+            )
+            if current is None:
+                # 다른 연결에 밀려났습니다(같은 사람이 새로고침). 조용히 끝냅니다.
+                break
+            outcome = await call_rooms.rooms.relay(meeting_id, current, message)
+            if not outcome.allowed:
+                # ⚠️ 조용히 버리면 화면은 상대가 안 받은 줄 모르고 기다립니다.
+                await websocket.send_json(
+                    {"kind": "refused", "code": outcome.code, "reason": outcome.reason}
+                )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await call_rooms.rooms.part(meeting_id, peer.connection_id)
+        await call_rooms.rooms.announce(meeting_id)
 
 
 class MeetingIn(BaseModel):
@@ -1365,6 +1665,21 @@ def list_project_meetings(
     ]
 
 
+class UnresolvedIssueOut(BaseModel):
+    """회의에서 답이 안 난 것 하나.
+
+    근거 발화를 같이 싣습니다 — 근거 없이 &#34;이게 미해결입니다&#34; 라고만
+    하면 사람은 확인할 방법이 없고, 이 저장소는 그런 값을 화면에
+    올리지 않기로 했습니다.
+    """
+
+    content: str
+    #: 언제 나온 얘기인가. 근거가 없으면 둘 다 0 — 시각을 지어내지 않는다.
+    start_ms: int
+    end_ms: int
+    evidence_utterance_ids: list[int]
+
+
 class MeetingDetail(BaseModel):
     id: int
     project_id: int
@@ -1375,6 +1690,17 @@ class MeetingDetail(BaseModel):
     # 처리가 끝나기 전에는 None. 실패한 회의도 None 이다 —
     # 빈 문자열로 내려보내면 화면이 "요약이 없는 회의" 로 그린다.
     summary: str | None
+    # 다음 회의에서 다룰 안건 (결함 110).
+    #
+    # ⚠️ 여기 없던 동안 이 값은 **DB 까지만 갔습니다.** LLM 이 만들고
+    # `validation` 이 근거까지 확인한 산출물인데, 내보내는 코드가 저장소
+    # 어디에도 없어서 **읽는 사람이 0명**이었습니다. 회의록의 절반이
+    # 조용히 사라지고 있었고 오류는 안 났습니다.
+    next_agenda: list[str] = []
+    # 회의에서 답이 안 난 것 (결함 111). `meeting_events` 의
+    # `unanswered_question` 행입니다 — 그 표도 **쓰기만 하고 읽는 곳이
+    # 0곳**이었습니다.
+    unresolved_issues: list[UnresolvedIssueOut] = []
 
 
 @app.get("/api/meetings/{meeting_id}", response_model=MeetingDetail)
@@ -1386,6 +1712,20 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
     Celery 페이로드에 실어 보낸 뒤 저장 태스크가 읽지 않고 버렸다.
     """
     meeting = _load_meeting_for(session, meeting_id, user)
+
+    # ⚠️ **회의록은 요약 하나가 아닙니다** (결함 110·111). 다음 안건과
+    # 미해결 사안도 LLM 이 만들고 검증까지 통과한 산출물인데, 여기서
+    # 안 실으면 DB 에만 남고 아무도 못 봅니다 — 위 docstring 이 말하는
+    # 그 일이 **같은 회의의 다른 칸에서 그대로 반복되고 있었습니다.**
+    issues = session.scalars(
+        select(m.MeetingEvent)
+        .where(
+            m.MeetingEvent.meeting_id == meeting.id,
+            m.MeetingEvent.event_type == "unanswered_question",
+        )
+        .order_by(m.MeetingEvent.start_ms, m.MeetingEvent.id)
+    ).all()
+
     return MeetingDetail(
         id=meeting.id,
         project_id=meeting.project_id,
@@ -1394,6 +1734,155 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
         started_at=meeting.started_at,
         capture_mode=meeting.capture_mode,
         summary=meeting.summary,
+        next_agenda=list(meeting.next_agenda or []),
+        unresolved_issues=[
+            UnresolvedIssueOut(
+                content=str(row.detail.get("content", "")),
+                start_ms=row.start_ms,
+                end_ms=row.end_ms,
+                evidence_utterance_ids=list(row.evidence_utterance_ids or []),
+            )
+            for row in issues
+        ],
+    )
+
+
+class MeetingProgressOut(BaseModel):
+    """회의 처리가 어디까지 갔는가.
+
+    ⚠️ `stage` 가 `None` 이면 **모르는 것**입니다. 0% 가 아닙니다 —
+    아직 못 받았을 수도, 이미 끝났을 수도, 이 배포에 Redis 가 없을
+    수도 있습니다. 화면이 그 셋을 "멈춰 있다" 로 읽으면 안 됩니다.
+    """
+
+    stage: str | None = None
+    percent: int | None = None
+    detail: str = ""
+    #: 화면에 그대로 쓸 한 줄. 서버와 화면이 **같은 문장**을 씁니다.
+    message: str
+    #: 지금 다시 처리할 수 있는가 (결함 114).
+    #
+    # ⚠️ **판단을 서버가 합니다.** 화면이 상태를 보고 스스로 정하면
+    # "언제 다시 처리할 수 있는가" 규칙이 두 곳에 생기고 한쪽만
+    # 고쳐집니다 — `progress` 문구를 서버가 만드는 것과 같은 이유입니다.
+    can_reprocess: bool = False
+
+
+class ReprocessOut(BaseModel):
+    meeting_id: int
+    status: str
+    #: 화면에 그대로 쓸 한 줄.
+    message: str
+
+
+@app.post("/api/meetings/{meeting_id}/reprocess", response_model=ReprocessOut)
+def reprocess_meeting(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> ReprocessOut:
+    """실패한 회의를 **다시 처리한다** (결함 114).
+
+    ⭐ `failed` 는 **막다른 길이었습니다.** 회의 상태를 쓰는 곳은 다섯인데
+    (`queued`·`processing`·`failed`·`needs_review`·`confirmed`) **아무도
+    `pending` 으로 되돌리지 않았고**, `try_finalize_meeting` 은
+    `status != "pending"` 이면 큐에 넣지 않습니다.
+
+    그런데 화면은 이렇게 말하고 있었습니다.
+
+        처리에 실패했습니다 — 트랙이 온전한지 확인하세요   (actionable: true)
+
+    사람이 가서 확인하고 **트랙이 멀쩡해도 할 수 있는 일이 없었습니다.**
+    결함 112 와 같은 모양입니다 — 할 일을 알려 주고 그 일을 할 자리를
+    안 주는 것.
+
+    실패는 일시적인 이유로도 납니다(GPU 를 못 잡음·조각 하나가 깨짐·
+    워커가 죽음). 그때마다 **그 회의의 기여가 전원에게 영영 빕니다.**
+
+    ## 다시 도는 것이 안전한 이유
+
+    `persist_results_task` 는 재처리 경로를 이미 갖고 있습니다 — 앞판의
+    발화·후보·결정·회의 이벤트를 지우고, 발화를 지우기 **전에** 그
+    발화에서 나온 기여 이벤트를 먼저 잊습니다. 안 그러면 다시 돌 때마다
+    점수가 누적됩니다.
+
+    ⚠️ **사람이 이미 판단한 회의는 거절합니다.** 태스크도 같은 이유로
+    `already_reviewed` 를 돌려주지만, 그건 큐에 들어간 **뒤**라 화면에는
+    &#34;다시 처리를 시작했습니다&#34; 로 보이고 아무 일도 안 일어납니다.
+    여기서 미리 막고 이유를 말합니다.
+    """
+    meeting = _load_meeting_for(session, meeting_id, user)
+
+    if meeting.status not in ("failed", "queued"):
+        # ⚠️ 문구에 `meeting.status` 를 넣지 않습니다. 그건 내부 enum 이고,
+        # 그대로 띄우면 결함 78·86 이 반복됩니다. 한국어 어휘표는 화면이
+        # 들고 있으므로(`lib/home/next.ts`), 서버는 **조건**만 말합니다.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "처리에 실패했거나 큐에 걸린 회의만 다시 처리할 수 있습니다",
+        )
+
+    reviewed = session.scalar(
+        select(func.count())
+        .select_from(m.MeetingTaskCandidate)
+        .where(
+            m.MeetingTaskCandidate.meeting_id == meeting_id,
+            m.MeetingTaskCandidate.review_status != "pending",
+        )
+    )
+    if reviewed:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"이미 검토한 업무 후보가 {reviewed}건 있습니다. "
+            "다시 처리하면 그 근거가 끊어지므로, 먼저 검토를 되돌려야 합니다",
+        )
+
+    before = meeting.status
+    meeting.status = "queued"
+    session.add(
+        m.AuditLog(
+            project_id=meeting.project_id,
+            actor_id=user.id,
+            action="meeting_reprocess_requested",
+            target=f"meetings/{meeting_id}",
+            before={"status": before},
+            after={"status": "queued"},
+            at=datetime.now(UTC),
+        )
+    )
+    _enqueue_after_commit(session, meeting_id)
+
+    return ReprocessOut(
+        meeting_id=meeting_id,
+        status="queued",
+        message="다시 처리를 시작했습니다. 잠시 뒤 이 화면을 새로고침하세요.",
+    )
+
+
+@app.get("/api/meetings/{meeting_id}/progress", response_model=MeetingProgressOut)
+def get_meeting_progress(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> MeetingProgressOut:
+    """처리가 어디까지 갔는지 (감사 #8).
+
+    `pipeline/steps.py` 의 `RedisProgress` 는 처음부터 진행률을 쓰고
+    있었고 그 docstring 은 "API가 SSE로 프런트에 흘린다" 고 적어 두고
+    있었습니다. **그 API 가 없었습니다.** 쓰기만 하고 읽는 곳이 0곳이라,
+    1시간 회의를 10분 처리하는 동안 화면이 할 수 있는 말은 "처리 중"
+    뿐이었습니다 — 멈춘 건지 도는 건지도 몰랐습니다.
+
+    ⚠️ **SSE 가 아니라 읽기 엔드포인트입니다.** 로비는 이미 3초마다
+    폴링하고, 이 저장소는 그 이유를 `lobby.ts` 에 적어 뒀습니다 —
+    "SSE·WebSocket 을 붙이면 서버에 상태가 생기고, 그건 이 화면 하나
+    때문에 지불하기엔 비쌉니다." 그 판단을 뒤집을 이유가 없습니다.
+    """
+    meeting = _load_meeting_for(session, meeting_id, user)
+    client = progress_service.progress_client(get_settings().redis_url)
+    progress = progress_service.read_progress(client, meeting_id)
+    return MeetingProgressOut(
+        stage=progress.stage if progress else None,
+        percent=progress.percent if progress else None,
+        detail=progress.detail if progress else "",
+        message=progress_service.describe(progress, meeting_status=meeting.status),
+        can_reprocess=meeting.status in ("failed", "queued"),
     )
 
 
@@ -1406,6 +1895,9 @@ class MemberOut(BaseModel):
     user_id: int
     name: str
     role_shares: dict[str, float]
+    # 이 사람의 GitHub 아이디 (결함 112). 안 이었으면 None —
+    # 화면이 "아직 연결 안 됨" 으로 그립니다.
+    github_login: str | None = None
 
 
 def _project_members(session: Session, project_id: int) -> list[MemberOut]:
@@ -1420,6 +1912,7 @@ def _project_members(session: Session, project_id: int) -> list[MemberOut]:
             user_id=member.user_id,
             name=user.name,
             role_shares={k: float(v) for k, v in (member.role_shares or {}).items()},
+            github_login=member.github_login,
         )
         for member, user in rows
     ]
@@ -1444,6 +1937,185 @@ def list_project_members(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
     return _project_members(session, project_id)
+
+
+class RoleIn(BaseModel):
+    """역할 비중. `{"developer": 0.7, "planner": 0.3}` 처럼 겸직도 된다."""
+
+    role_shares: dict[str, float]
+
+    model_config = {"extra": "forbid"}
+
+
+class GithubLoginIn(BaseModel):
+    """내 GitHub 아이디 (결함 112).
+
+    빈 문자열은 **연결 해제**입니다 — 잘못 적었을 때 지울 방법이 있어야
+    합니다. 그래서 `None`(안 건드림)과 `""`(지움)을 구분합니다.
+    """
+
+    github_login: str | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+@app.patch("/api/projects/{project_id}/members/me", response_model=MemberOut)
+def set_my_role(
+    project_id: int, payload: RoleIn, session: DbSession, user: CurrentUser
+) -> MemberOut:
+    """**내** 역할을 정한다.
+
+    ## 왜 필요한가
+
+    가입도 초대도 `role_shares={"developer": 1.0}` 을 하드코딩하고 있었고,
+    이걸 바꾸는 API 도 화면도 없었습니다. 그래서 `PLANNER`·`DESIGNER`
+    프로파일과 `blended_profile` 은 **실사용 경로로 도달 불가**였고,
+    기획자·디자이너 팀원의 기여도가 **개발자 가중치로** 계산됐습니다.
+
+    기획자 프로파일은 코드 0% · 문서 30% 인데 개발자로 계산하면 코드 35% ·
+    문서 5% 입니다. 문서만 쓴 사람이 이유 없이 낮게 나옵니다 — 그리고
+    **오류는 어디에도 안 납니다.**
+
+    ## ⚠️ 본인만 바꿉니다
+
+    역할은 가중치를 바꾸고, 가중치는 점수를 바꿉니다. 남이 내 역할을
+    바꿀 수 있으면 그건 **남의 점수를 바꾸는 일**입니다. 업무를 옮기는
+    것(누구나 가능)과 다릅니다 — 업무는 사실의 기록이고 역할은 판단의
+    전제입니다.
+
+    그래서 경로가 `/members/me` 입니다. 남의 id 를 넣을 자리 자체가
+    없습니다 — 요청 본문의 id 를 믿던 결함(`member_ids`)과 같은 부류를
+    설계로 막습니다.
+
+    바꾼 사실은 감사 로그에 남습니다. 역할을 유리한 쪽으로 옮겨 두는
+    것도 조작이고, 그건 사람이 볼 수 있어야 합니다.
+    """
+    from teamflow.contribution.profiles import clean_role_shares
+
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    try:
+        cleaned = clean_role_shares(payload.role_shares)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    member = session.scalars(
+        select(m.Member).where(
+            m.Member.project_id == project_id, m.Member.user_id == user.id
+        )
+    ).one()
+    before = dict(member.role_shares or {})
+    member.role_shares = cleaned
+
+    if before != cleaned:
+        session.add(
+            m.AuditLog(
+                project_id=project_id,
+                actor_id=user.id,
+                action="weights_changed",
+                target=f"members/{user.id}",
+                before={"role_shares": before},
+                after={"role_shares": cleaned},
+                at=datetime.now(UTC),
+            )
+        )
+    session.flush()
+
+    return MemberOut(
+        user_id=user.id,
+        name=user.name,
+        role_shares={k: float(v) for k, v in cleaned.items()},
+        github_login=member.github_login,
+    )
+
+
+@app.patch("/api/projects/{project_id}/members/me/github", response_model=MemberOut)
+def set_my_github_login(
+    project_id: int, payload: GithubLoginIn, session: DbSession, user: CurrentUser
+) -> MemberOut:
+    """내 GitHub 아이디를 이 프로젝트의 나에게 잇는다 (결함 112).
+
+    ⭐ **이 칸에 값을 넣는 코드가 저장소에 0곳이었습니다.** 읽는 곳은
+    넷인데(이벤트 배분·백필·업무↔PR·연결 진단) 쓰는 곳은 시드와
+    테스트뿐이었습니다. 실제로 배포하면 이 칸은 영원히 NULL 이고,
+    그러면 **아무의 PR 도 주인을 못 찾습니다** — 오류 없이 기여도만
+    빕니다. 연결 진단은 이미 "GitHub 계정을 연결하지 않은 팀원이
+    있습니다" 라고 경고하고 있었는데, **연결할 자리가 없었습니다.**
+
+    ## 남의 아이디를 못 쓰게 한다
+
+    ⚠️ 이건 예의 문제가 아니라 **점수 문제**입니다. 남의 로그인을 적으면
+    그 사람의 PR·리뷰가 통째로 내 기여로 들어옵니다. 그래서 한 프로젝트
+    안에서 같은 아이디를 둘이 쓸 수 없습니다 — **대소문자를 무시하고**
+    비교합니다(`MinSu` 와 `minsu` 는 GitHub 에서 같은 사람입니다).
+
+    ⚠️ 이 검사가 **소유 증명은 아닙니다.** 아무도 안 쓴 아이디라면 남의
+    것이라도 적을 수 있습니다. 진짜 증명은 GitHub OAuth 가 필요한데
+    이 환경에는 네트워크가 없습니다 — `docs/17` §C 에 적어 뒀습니다.
+    대신 **바꿀 때마다 감사 로그에 남깁니다.** 기여도 분쟁에서 필요한
+    것은 지금 값이 아니라 누가 언제 그렇게 적었는가입니다.
+
+    경로가 `/members/me/...` 인 것은 역할 저장과 같은 이유입니다 —
+    **남의 id 를 넣을 자리 자체를 안 만듭니다.**
+    """
+    from teamflow.github.identity import clean_github_login, same_login
+
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    try:
+        cleaned = clean_github_login(payload.github_login)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    members = session.scalars(
+        select(m.Member).where(m.Member.project_id == project_id)
+    ).all()
+    mine = next(row for row in members if row.user_id == user.id)
+
+    if cleaned is not None:
+        taken = any(
+            row.user_id != user.id and same_login(row.github_login, cleaned)
+            for row in members
+        )
+        if taken:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                # ⚠️ 조사를 붙이지 않는 문장으로 씁니다. 아이디는 영문·숫자로
+                # 끝나 받침이 갈리는데, 서버에는 조사 계산기가 없습니다 —
+                # 만들면 화면과 **두 벌**이 됩니다. `josa.ts` 가 스스로
+                # 권하는 대로 문장을 바꾸는 쪽을 택했습니다.
+                f"'{cleaned}' — 이 프로젝트의 다른 팀원이 이미 쓰고 있는 아이디입니다",
+            )
+
+    before = mine.github_login
+    mine.github_login = cleaned
+
+    if before != cleaned:
+        # ⭐ **누가 어떤 GitHub 계정을 자기 것이라고 했는가**를 남긴다.
+        # 이 한 줄이 바뀌면 그 사람의 기여도가 통째로 바뀝니다.
+        session.add(
+            m.AuditLog(
+                project_id=project_id,
+                actor_id=user.id,
+                action="github_login_changed",
+                target=f"members/{user.id}",
+                before={"github_login": before},
+                after={"github_login": cleaned},
+                at=datetime.now(UTC),
+            )
+        )
+    session.flush()
+
+    return MemberOut(
+        user_id=user.id,
+        name=user.name,
+        role_shares={k: float(v) for k, v in (mine.role_shares or {}).items()},
+        github_login=mine.github_login,
+    )
 
 
 @app.get("/api/meetings/{meeting_id}/members", response_model=list[MemberOut])
@@ -1564,15 +2236,35 @@ async def github_webhook(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "필수 헤더가 없습니다")
 
     payload = await request.json()
+
+    # ── 연결 기록 ──────────────────────────────────────────────
+    #
+    # ⚠️ **저장할 이벤트인지 판단하기 전에** 합니다. 배달이 왔다는 사실
+    # 자체가 "이 저장소에 App 이 설치돼 있다" 는 증거이고, 그 증거는
+    # 우리가 그 이벤트를 쓰든 말든 똑같이 유효합니다.
+    #
+    # 특히 `ping` — App 을 설치하면 GitHub 이 **가장 먼저** 보내는 것이고
+    # 아래 `normalize` 는 이걸 버립니다. 여기서 안 잡으면 방금 연결을 마친
+    # 팀에게도 "아직 아무 배달도 없습니다" 가 나갑니다.
+    delivered_repo = (payload.get("repository") or {}).get("full_name")
+    project = None
+    if delivered_repo:
+        project = github_connection_service.record_delivery(
+            session,
+            repo=delivered_repo,
+            installation_id=(payload.get("installation") or {}).get("id"),
+        )
+
     normalized = gh.normalize(x_github_event, x_github_delivery, payload)
     if normalized is None:
         return {"status": "ignored", "event": x_github_event}
 
-    project = session.scalar(
-        select(m.Project).where(m.Project.github_repo == normalized.repo)
-    )
     if project is None:
         # 연결되지 않은 저장소. 조용히 무시한다 — 존재 여부를 알려주지 않는다.
+        #
+        # 다만 **흔적은 남겼습니다**(`record_delivery`). 그게 없으면 저장소
+        # 이름 오타는 증거를 남기지 않고, 팀은 기여도가 왜 비는지 영원히
+        # 알 수 없습니다. 남기는 것은 저장소 이름과 횟수뿐입니다.
         return {"status": "ignored", "reason": "unlinked_repo"}
 
     # 중복 방어. 웹훅은 재전송되고 백필과 겹칠 수 있다.
@@ -1607,6 +2299,18 @@ async def github_webhook(
     session.add(row)
     session.flush()
 
+    # ── 업무 ↔ PR 잇기 ────────────────────────────────────────
+    #
+    # docs/08 §5.1 필수 경로의 "관련 PR 병합 → 업무 카드에 수행 근거 표시".
+    # `task_github_links` 표는 처음부터 있었는데 **행이 한 번도 쓰인 적이
+    # 없었습니다** — 잇는 코드가 0곳이었습니다.
+    #
+    # ⚠️ 워커가 아니라 **여기서** 하는 이유는
+    # `services/task_link_service.py` 모듈 주석에 있습니다. 요약하면
+    # 워커 경로가 GitHub App 자격 증명이 없으면 통째로 건너뛰는데,
+    # 연결에는 API 도 자격 증명도 필요 없기 때문입니다.
+    linked = task_link_service.link_pull_request(session, row)
+
     # 병합된 PR 만 기여 이벤트가 됩니다. 나머지는 원본만 남깁니다.
     #
     # ⚠️ **커밋 뒤에** 큐에 넣습니다. 여기서 바로 넣으면 워커가 그 사이에
@@ -1624,6 +2328,7 @@ async def github_webhook(
         "event_type": normalized.event_type,
         "linked_user": actor_user_id,
         "queued": queued,
+        "linked_tasks": [ref.task_id for ref in linked],
     }
 
 
@@ -1645,6 +2350,27 @@ class TaskOriginOut(BaseModel):
     evidence_utterance_ids: list[int]
 
 
+class TaskGithubOut(BaseModel):
+    """이 업무로 이어진 GitHub 활동.
+
+    ⚠️ **근거(`why`)를 같이 싣습니다.** 연결만 보여주면 사람은 그걸 믿을지
+    말지 정할 수 없고, 틀린 연결을 고칠 수도 없습니다. `#12` 로 추정한
+    것과 `TASK-12` 가 적혀 있던 것은 신뢰도가 다릅니다.
+    """
+
+    event_id: int
+    repo: str
+    #: PR 번호. 본문에서 못 읽으면 None.
+    number: int | None
+    title: str | None
+    actor_login: str
+    merged_at: datetime
+    #: 1.0 이면 확정, 그 아래는 추정.
+    relevance: float
+    confirmed: bool
+    why: str
+
+
 class TaskOut(BaseModel):
     id: int
     title: str
@@ -1653,6 +2379,9 @@ class TaskOut(BaseModel):
     deadline: date | None
     completed_at: datetime | None
     origin: TaskOriginOut | None
+    #: 사람이 PR 에 적어야 하는 표식. 안 보여주면 아무도 안 적습니다.
+    marker: str = ""
+    github: list[TaskGithubOut] = Field(default_factory=list)
 
 
 class TaskBoardOut(BaseModel):
@@ -1661,22 +2390,58 @@ class TaskBoardOut(BaseModel):
     tasks: list[TaskOut]
 
 
+def _github_for_tasks(
+    session: Session, task_ids: list[int]
+) -> dict[int, list[TaskGithubOut]]:
+    out: dict[int, list[TaskGithubOut]] = {}
+    for task_id, pairs in task_link_service.links_for_tasks(session, task_ids).items():
+        # `event` 로 이름 짓지 않습니다 — 이 모듈은 sqlalchemy 의 `event` 를
+        # import 하고 있어서 조용히 가려집니다.
+        for link, row in pairs:
+            pull = (row.payload or {}).get("pull_request") or {}
+            relevance = float(link.relevance)
+            out.setdefault(task_id, []).append(
+                TaskGithubOut(
+                    event_id=row.id,
+                    repo=row.repo,
+                    number=pull.get("number"),
+                    title=pull.get("title"),
+                    actor_login=row.actor_login,
+                    merged_at=row.occurred_at,
+                    relevance=relevance,
+                    confirmed=relevance >= gh_linking.CONFIRMED_THRESHOLD,
+                    why=gh_linking.describe_source(link.link_source),
+                )
+            )
+    return out
+
+
 @app.get("/api/projects/{project_id}/tasks", response_model=TaskBoardOut)
 def list_tasks(project_id: int, session: DbSession, user: CurrentUser) -> TaskBoardOut:
     """칸반 보드가 읽는 목록.
 
-    **어느 회의에서 나왔는지를 같이 싣습니다.** 그게 없으면 이 화면은 그냥
-    할 일 목록이고, 이 프로젝트의 주장(회의 결정 → 칸반 업무)을 화면에서
-    확인할 방법이 없습니다.
+    **어느 회의에서 나왔는지와 어느 PR 로 끝났는지를 같이 싣습니다.** 그게
+    없으면 이 화면은 그냥 할 일 목록이고, 이 프로젝트의 주장
+    (회의 결정 → 칸반 업무 → GitHub 활동)을 화면에서 확인할 방법이 없습니다.
     """
     if session.get(m.Project, project_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
 
+    rows = task_service.list_tasks(session, project_id)
+    github = _github_for_tasks(session, [row["id"] for row in rows])
+
     return TaskBoardOut(
         project_id=project_id,
         statuses=list(task_service.STATUSES),
-        tasks=[TaskOut(**row) for row in task_service.list_tasks(session, project_id)],
+        tasks=[
+            TaskOut(
+                **row,
+                marker=gh_linking.task_marker(row["id"]),
+                github=github.get(row["id"], []),
+            )
+            for row in rows
+        ],
     )
 
 
@@ -1775,6 +2540,186 @@ class ScoreOut(BaseModel):
     notice: str = (
         "이 수치는 활동 기록에 기반한 참고값입니다. 최종 기여도는 팀이 합의하여 확정합니다."
     )
+
+
+class FinalIn(BaseModel):
+    """확정 한 건. `final_value` 를 안 보내면 시스템 값을 그대로 받아들인다."""
+
+    user_id: int
+    final_value: float | None = None
+    reason: str | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+class FinalsIn(BaseModel):
+    finals: list[FinalIn]
+
+    model_config = {"extra": "forbid"}
+
+
+class FinalOut(BaseModel):
+    user_id: int
+    system_value: float
+    final_value: float
+    adjusted_by: int | None
+    reason: str | None
+    confirmed_at: datetime
+
+
+class FinalsOut(BaseModel):
+    run_id: int
+    finals: list[FinalOut]
+    notice: str = (
+        "이 값은 사람이 확정한 것입니다. 시스템 값과 다르면 그 이유가 함께 남습니다."
+    )
+
+
+@app.get("/api/projects/{project_id}/contributions/final", response_model=FinalsOut)
+def read_final_contributions(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> FinalsOut:
+    """확정된 기여도. 아직 확정 전이면 `run_id: 0` 에 빈 목록."""
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    rows = session.scalars(
+        select(m.FinalContribution).where(m.FinalContribution.project_id == project_id)
+    ).all()
+    return FinalsOut(
+        run_id=rows[0].run_id if rows else 0,
+        finals=[
+            FinalOut(
+                user_id=r.user_id,
+                system_value=float(r.system_value),
+                final_value=float(r.final_value),
+                adjusted_by=r.adjusted_by,
+                reason=r.reason,
+                confirmed_at=r.confirmed_at,
+            )
+            for r in sorted(rows, key=lambda r: r.user_id)
+        ],
+    )
+
+
+@app.post(
+    "/api/projects/{project_id}/contributions/final",
+    response_model=FinalsOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def confirm_contributions(
+    project_id: int, payload: FinalsIn, session: DbSession, user: CurrentUser
+) -> FinalsOut:
+    """**사람이** 기여도를 확정한다.
+
+    `docs/05` §5 는 "최종 점수를 시스템이 확정" 을 ❌ 로 금지합니다. 그런데
+    확정을 남길 자리가 API 에도 화면에도 없어서, 배포 상태에서 존재하는
+    값은 시스템이 계산한 숫자뿐이었습니다 — 금지한 쪽으로 실제 동작한
+    것입니다.
+
+    ## 여기서 지키는 것
+
+    · **시스템 값을 지우지 않습니다.** `system_value` 와 `final_value` 를
+      나란히 남깁니다. 둘이 다르면 나중에 "왜 달랐나" 를 물을 수 있습니다
+    · **누가 바꿨는지 남깁니다** (`adjusted_by`). 조정은 판단이고, 판단에는
+      주체가 있어야 이의를 제기할 상대가 생깁니다
+    · **바꿨으면 이유를 받습니다.** 시스템 값과 다른데 이유가 없으면
+      거절합니다 — 근거 없는 조정은 근거 없는 점수와 같습니다
+    · 확정 시점의 계산을 `score_runs`·`score_results` 로 **못 박습니다**.
+      안 그러면 확정 뒤에 이벤트가 하나 더 들어오는 것만으로 확정값이
+      가리키던 근거가 달라집니다
+
+    ⚠️ **누가 확정할 수 있는가** — 지금은 **구성원 누구나**입니다. 이
+    저장소에 팀장·교수 역할 개념이 아직 없습니다. 남의 업무를 옮기는 것도
+    같은 규칙이고(그리고 감사 로그에 남고), 여기도 `adjusted_by` 로
+    남습니다. 역할이 생기면 여기부터 좁혀야 합니다.
+    """
+    from teamflow.services import scoring_service
+
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    result = scoring_service.compute(session, project_id)
+    if not result.members:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "확정할 기여도가 없습니다. 활동 기록이 하나도 없습니다",
+        )
+
+    members = {
+        uid
+        for uid in session.scalars(
+            select(m.Member.user_id).where(m.Member.project_id == project_id)
+        ).all()
+    }
+    unknown = sorted({f.user_id for f in payload.finals} - members)
+    if unknown:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"이 프로젝트의 구성원이 아닙니다: {unknown}"
+        )
+
+    now = datetime.now(UTC)
+    run = scoring_service.persist_run(session, project_id, result, now=now)
+
+    # 확정은 **덮어쓴다**. 다시 확정하면 새 run 을 가리키게 된다 —
+    # 이전 확정이 어떤 계산 위에서 이뤄졌는지는 감사 로그에 남는다.
+    existing = {
+        row.user_id: row
+        for row in session.scalars(
+            select(m.FinalContribution).where(
+                m.FinalContribution.project_id == project_id
+            )
+        ).all()
+    }
+
+    for item in payload.finals:
+        score = result.members.get(item.user_id)
+        # 계산 결과에 없는 구성원 = 활동 기록이 0건. 시스템 값은 0 이지만
+        # 그건 "안 했다" 가 아니라 "이 계산에 잡힌 게 없다" 다.
+        system_value = round(score.share, 3) if score else 0.0
+        final_value = system_value if item.final_value is None else item.final_value
+
+        if abs(final_value - system_value) > 1e-9 and not (item.reason or "").strip():
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"시스템 값과 다르게 확정하려면 이유가 필요합니다 (user_id={item.user_id})",
+            )
+
+        row = existing.get(item.user_id)
+        before = (
+            {"final_value": float(row.final_value), "run_id": row.run_id} if row else None
+        )
+        if row is None:
+            row = m.FinalContribution(project_id=project_id, user_id=item.user_id)
+            session.add(row)
+        row.run_id = run.id
+        row.system_value = system_value
+        row.final_value = final_value
+        row.adjusted_by = user.id
+        row.reason = (item.reason or "").strip() or None
+        row.confirmed_at = now
+
+        session.add(
+            m.AuditLog(
+                project_id=project_id,
+                actor_id=user.id,
+                action="score_adjusted",
+                target=f"final_contributions/{project_id}:{item.user_id}",
+                before=before,
+                after={
+                    "run_id": run.id,
+                    "system_value": system_value,
+                    "final_value": final_value,
+                    "reason": row.reason,
+                },
+                at=now,
+            )
+        )
+
+    session.flush()
+    return read_final_contributions(project_id, session, user)
 
 
 @app.get("/api/projects/{project_id}/contributions", response_model=ScoreOut)

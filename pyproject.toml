@@ -69,3 +69,13 @@ ignore = [
 "backend/migrations/versions/*" = ["E501"]
 # env.py 는 teamflow 를 import 하기 전에 sys.path 를 조작해야 한다.
 "backend/migrations/env.py" = ["E402"]
+# 픽스처를 다른 테스트 모듈에서 가져다 쓴다. pytest 는 **이름으로** 픽스처를
+# 찾으므로 매개변수 이름이 import 한 이름과 같아야 하고, 그러면 F811 이
+# 뜹니다. 진짜 재정의가 아닙니다.
+#
+# ⚠️ 테스트 전반에서 F811 을 끄지는 않습니다. 테스트 함수 이름이 겹치면
+# **뒤엣것이 앞엣것을 조용히 덮어써서 한 쪽이 아예 안 돕니다** — 그건
+# 이 저장소가 잡아야 하는 부류라 그물을 남겨 둡니다.
+"backend/tests/test_github_health_api.py" = ["F811"]
+"backend/tests/test_task_pr_link.py" = ["F811"]
+"backend/tests/test_call_api.py" = ["F811"]

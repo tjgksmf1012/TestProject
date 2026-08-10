@@ -248,7 +248,7 @@ function checkSync(estimate, { toleranceMs = SYNC_TOLERANCE_MS } = {}) {
   if (estimate.maxErrorMs > toleranceMs) {
     return {
       ok: false,
-      reason: `시각 오차 상한 ${estimate.maxErrorMs.toFixed(0)}ms 가 허용치 ${toleranceMs}ms 를 넘습니다 (네트워크가 느립니다)`
+      reason: `시각 오차 상한 ${estimate.maxErrorMs.toFixed(0)}ms가 허용치 ${toleranceMs}ms를 넘습니다 (네트워크가 느립니다)`
     };
   }
   if (estimate.spreadMs > toleranceMs) {
@@ -479,6 +479,111 @@ function toTimelineInput(state) {
   };
 }
 
+// src/lib/text/josa.ts
+var PAIRS = {
+  은는: ["은", "는"],
+  이가: ["이", "가"],
+  을를: ["을", "를"],
+  과와: ["과", "와"],
+  으로로: ["으로", "로"]
+};
+var DIGIT_HAS_FINAL = {
+  "0": true,
+  // 영
+  "1": true,
+  // 일
+  "2": false,
+  // 이
+  "3": true,
+  // 삼
+  "4": false,
+  // 사
+  "5": false,
+  // 오
+  "6": true,
+  // 육
+  "7": true,
+  // 칠
+  "8": true,
+  // 팔
+  "9": false
+  // 구
+};
+var LETTER_HAS_FINAL = {
+  a: false,
+  // 에이
+  b: false,
+  // 비
+  c: false,
+  // 씨
+  d: false,
+  // 디
+  e: false,
+  // 이
+  f: true,
+  // 에프
+  g: false,
+  // 지
+  h: false,
+  // 에이치
+  i: false,
+  // 아이
+  j: false,
+  // 제이
+  k: false,
+  // 케이
+  l: true,
+  // 엘
+  m: true,
+  // 엠
+  n: true,
+  // 엔
+  o: false,
+  // 오
+  p: false,
+  // 피
+  q: false,
+  // 큐
+  r: true,
+  // 알
+  s: true,
+  // 에스
+  t: false,
+  // 티
+  u: false,
+  // 유
+  v: false,
+  // 브이
+  w: false,
+  // 더블유
+  x: true,
+  // 엑스
+  y: false,
+  // 와이
+  z: false
+  // 지
+};
+function hasFinalConsonant(word) {
+  const trimmed = word.trim();
+  if (trimmed === "") return null;
+  const last = trimmed[trimmed.length - 1];
+  const code = last.codePointAt(0) ?? 0;
+  if (code >= 44032 && code <= 55203) {
+    return (code - 44032) % 28 !== 0;
+  }
+  if (last in DIGIT_HAS_FINAL) return DIGIT_HAS_FINAL[last];
+  const lower = last.toLowerCase();
+  if (lower in LETTER_HAS_FINAL) return LETTER_HAS_FINAL[lower];
+  return null;
+}
+function josa(word, pair) {
+  const [withFinal, withoutFinal] = PAIRS[pair];
+  return hasFinalConsonant(word) === true ? withFinal : withoutFinal;
+}
+function withJosa(word, pair) {
+  return `${word}${josa(word, pair)}`;
+}
+
 // src/lib/recording/timeline.ts
 var DEFAULT_STALL_TOLERANCE_MS = 300;
 var MIN_REPORTED_GAP_MS = 100;
@@ -623,7 +728,7 @@ function describeTimeline(timeline) {
     return `녹음이 끊김 없이 완료됐습니다 (${formatDuration(timeline.durationMs)})`;
   }
   const reasons = new Set(timeline.gaps.map((g) => REASON_LABEL[g.reason]));
-  return `${formatDuration(timeline.totalGapMs)} 가 비었습니다 (${[...reasons].join(", ")}). 가장 긴 공백 ${formatDuration(timeline.longestGapMs)}, 커버리지 ${(timeline.coverage * 100).toFixed(1)}%`;
+  return `${withJosa(formatDuration(timeline.totalGapMs), "이가")} 비었습니다 (${[...reasons].join(", ")}). 가장 긴 공백 ${formatDuration(timeline.longestGapMs)}, 커버리지 ${(timeline.coverage * 100).toFixed(1)}%`;
 }
 function formatDuration(ms) {
   const total = Math.round(ms / 1e3);
@@ -809,7 +914,10 @@ var RecordingClient = class {
     this.#timesliceMs = options.timesliceMs ?? DEFAULT_TIMESLICE_MS;
     this.#clock = new ClockTracker(options.monotonic);
     this.#queue = new UploadQueue(options.upload, options.uploadOptions);
-    this.#dispatch({ type: "SECURE_CONTEXT", secure: options.media.isSecureContext() });
+    this.#state = reduce(this.#state, {
+      type: "SECURE_CONTEXT",
+      secure: options.media.isSecureContext()
+    });
   }
   get state() {
     return this.#state;
@@ -1079,6 +1187,47 @@ function isSessionExpired(status) {
   return status === 401;
 }
 
+// src/lib/http/detail.ts
+function isValidationList(value) {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "object" && item !== null);
+}
+function fieldOf(items) {
+  for (const item of items) {
+    if (!Array.isArray(item.loc)) continue;
+    const named = item.loc.filter(
+      (part) => typeof part === "string" && part !== "body"
+    );
+    if (named.length > 0) return named[named.length - 1];
+  }
+  return "";
+}
+function detailText(body, fallback) {
+  if (typeof body !== "object" || body === null) return fallback;
+  const detail = body.detail;
+  if (typeof detail === "string" && detail.trim() !== "") return detail;
+  if (isValidationList(detail)) {
+    const field = fieldOf(detail);
+    const where = field ? ` (${field})` : "";
+    return `보낸 값이 올바르지 않습니다${where} — 화면 문제입니다. 새로고침해도 같으면 알려 주세요.`;
+  }
+  return fallback;
+}
+
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+function tryGet(url) {
+  return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
+}
+
 // src/lib/html.ts
 var ESCAPES = {
   "&": "&amp;",
@@ -1089,6 +1238,49 @@ var ESCAPES = {
 };
 function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
+}
+
+// src/lib/ui/failure.ts
+function showNote(slot, text, tone = "bad") {
+  slot.textContent = text;
+  slot.hidden = text === "";
+  slot.classList.toggle("bad", text !== "" && tone === "bad");
+}
+
+// src/lib/ui/pending.ts
+async function whilePressed(button, run) {
+  const was = button.disabled;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute("aria-busy");
+  }
+}
+
+// src/lib/ui/copy.ts
+async function copyText(text, clipboard) {
+  if (clipboard === void 0 || clipboard === null) return "unavailable";
+  if (typeof clipboard.writeText !== "function") return "unavailable";
+  try {
+    await clipboard.writeText(text);
+    return "copied";
+  } catch {
+    return "refused";
+  }
+}
+function describeCopy(outcome, what) {
+  if (outcome === "copied") return "복사됨";
+  const how = `${withJosa(what, "을를")} 길게 눌러 직접 복사하세요`;
+  if (outcome === "unavailable") {
+    return `이 주소에서는 브라우저가 복사를 막습니다 — ${how}`;
+  }
+  return `복사하지 못했습니다 — ${how}`;
+}
+function copySucceeded(outcome) {
+  return outcome === "copied";
 }
 
 // src/lib/nav/links.ts
@@ -1151,10 +1343,11 @@ function missingLinks(context) {
   return notes;
 }
 var TAB_ICON = {
-  home: "🏠",
-  kanban: "📋",
-  contributions: "📊",
-  project: "⚙️"
+  home: "home",
+  kanban: "board",
+  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
+  contributions: "track",
+  project: "sliders"
 };
 var TAB_ORDER = ["home", "kanban", "contributions", "project"];
 function navTabs(context) {
@@ -1173,7 +1366,7 @@ function navTabs(context) {
     return {
       screen,
       label: LABEL[screen],
-      icon: TAB_ICON[screen] ?? "•",
+      icon: TAB_ICON[screen] ?? "sliders",
       // 못 가는 탭에 주소를 주면 눌렸을 때 `?project=null` 로 간다.
       href: enabled ? href : "",
       current: context.current === screen,
@@ -1192,6 +1385,26 @@ function contextFromSearch(current, search) {
   return { current, projectId: read("project"), meetingId: read("meeting") };
 }
 
+// src/lib/nav/icons.ts
+var PATHS = {
+  // 지붕(3,11)-(12,3)-(21,11) + 몸통 x 5.5~18.5, y 9.5~20
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5.5 9.5V20h13V9.5"/>',
+  // 보드 3~21 × 4~20, 세로 칸막이 x=9·15 — 열 셋이 칸반의 전부다
+  board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
+  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
+  // 가운데 줄은 **끊겨 있습니다.** 그 구멍이 이 화면의 값어치입니다.
+  track: '<path d="M4 6h13"/><path d="M4 12h5M12 12h6"/><path d="M4 18h10"/>',
+  // 말풍선 — 칸반 카드의 "회의에서 나온 업무" 표시.
+  // ⚠️ 예전에는 `🗣` 였습니다. 그 자리는 **이 제품의 대표 주장이 카드에
+  // 보이는 곳**이라, 기기마다 다른 그림이 나오면 안 됩니다.
+  meeting: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 16v4l4-4"/>',
+  // 슬라이더 — 손잡이가 있어 트랙 아이콘과 헷갈리지 않는다
+  sliders: '<path d="M4 8h16M4 16h16"/><circle cx="14" cy="8" r="2.5"/><circle cx="9" cy="16" r="2.5"/>'
+};
+function iconSvg(name) {
+  return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + PATHS[name] + "</svg>";
+}
+
 // src/demo/nav.ts
 function renderNav(current) {
   const context = contextFromSearch(current, location.search);
@@ -1202,7 +1415,7 @@ function renderNav(current) {
       const disabled = tab.enabled ? "" : ' aria-disabled="true"';
       const marked = tab.current ? ' aria-current="page"' : "";
       const title = tab.blockedReason ? ` title="${escapeHtml(tab.blockedReason)}"` : "";
-      return `<a${href}${disabled}${marked}${title}><span class="ico" aria-hidden="true">${escapeHtml(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
+      return `<a${href}${disabled}${marked}${title}><span class="ico">${iconSvg(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
     }).join("");
   }
   const host = document.getElementById("nav");
@@ -1230,7 +1443,7 @@ function describeInstall(state) {
     case "promptable":
       return "앱으로 설치하면 주소창 없이 전체 화면으로 열리고, 홈 화면에서 바로 들어옵니다.";
     case "manual-ios":
-      return '아이폰에서는 공유 버튼(⬆️) → "홈 화면에 추가" 를 누르면 앱처럼 쓸 수 있습니다.';
+      return '아이폰에서는 화면 아래 가운데의 공유 버튼(상자에서 위로 나가는 화살표) → "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있습니다.';
     case "installed":
       return "";
     case "in-shell":
@@ -1338,6 +1551,7 @@ var wakeLock = null;
 var resyncTimer = null;
 var elapsedTimer = null;
 var summary = null;
+var lastRow = null;
 function render() {
   const state = client.state;
   $("phase").textContent = PHASE_LABEL[state.phase] ?? state.phase;
@@ -1359,7 +1573,7 @@ var PHASE_LABEL = {
   idle: "준비 중",
   ready: "시작 가능",
   recording: "녹음 중",
-  interrupted: "⚠️ 화면이 가려짐",
+  interrupted: "화면이 가려짐",
   stopping: "마무리 중",
   completed: "완료",
   failed: "오류"
@@ -1368,28 +1582,42 @@ $("consent").addEventListener("click", () => {
   client.setConsent("all_confirmed");
 });
 async function joinMeeting(id) {
-  const me = await fetch(`${apiBase}/api/auth/me`, { credentials: "same-origin" });
+  const me = await tryGet(`${apiBase}/api/auth/me`);
+  if (me === null) {
+    showNote($("join-note"), unreachableText("회의에 들어가지 못했습니다"));
+    return;
+  }
   if (!me.ok) {
     location.href = loginUrlFor(location.pathname + location.search);
     return;
   }
   $("who").textContent = `${(await me.json()).name} 님의 트랙으로 녹음합니다`;
-  const response = await fetch(`${apiBase}/api/meetings/${id}/tracks`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      started_at: (/* @__PURE__ */ new Date()).toISOString(),
-      device_label: navigator.userAgent.slice(0, 100)
-    }),
-    credentials: "same-origin"
-  });
+  showNote($("join-note"), "");
+  const response = await trySend(
+    () => fetch(`${apiBase}/api/meetings/${id}/tracks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        started_at: (/* @__PURE__ */ new Date()).toISOString(),
+        device_label: navigator.userAgent.slice(0, 100)
+      }),
+      credentials: "same-origin"
+    })
+  );
+  if (response === null) {
+    showNote($("join-note"), unreachableText("트랙에 참가하지 못했습니다"));
+    return;
+  }
   if (isSessionExpired(response.status)) {
     location.href = loginUrlFor(location.pathname + location.search);
     return;
   }
   if (!response.ok) {
-    const detail = await response.text();
-    $("who").textContent = `트랙에 참가하지 못했습니다: ${detail}`;
+    const body = await response.json().catch(() => null);
+    showNote(
+      $("join-note"),
+      `트랙에 참가하지 못했습니다: ${detailText(body, `HTTP ${response.status}`)}`
+    );
     return;
   }
   const track = await response.json();
@@ -1421,8 +1649,7 @@ $("start").addEventListener("click", async () => {
 });
 async function tellServerWeAreDone(result) {
   if (!trackUrl) return;
-  $("finish-state").hidden = false;
-  $("finish-state").textContent = "녹음 종료를 서버에 알리는 중…";
+  showNote($("finish-state"), "녹음 종료를 서버에 알리는 중…", "plain");
   $("finish-retry").hidden = true;
   const body = completeBody({
     timeline: result.timeline,
@@ -1431,24 +1658,24 @@ async function tellServerWeAreDone(result) {
     warnings: result.warnings,
     timesliceMs: result.timesliceMs
   });
-  let response;
-  try {
-    response = await fetch(`${trackUrl}/complete`, {
+  const response = await trySend(
+    () => fetch(`${trackUrl}/complete`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify(body)
-    });
-  } catch {
-    $("finish-state").textContent = describeCompletionFailure(0);
+    })
+  );
+  if (response === null) {
+    showNote($("finish-state"), describeCompletionFailure(0));
     $("finish-retry").hidden = false;
     return;
   }
   if (!response.ok) {
-    const detail = await response.json().catch(() => ({}));
-    $("finish-state").textContent = describeCompletionFailure(
-      response.status,
-      detail.detail
+    const body2 = await response.json().catch(() => null);
+    showNote(
+      $("finish-state"),
+      describeCompletionFailure(response.status, detailText(body2, ""))
     );
     if (isSessionExpired(response.status)) {
       location.href = loginUrlFor(location.pathname + location.search);
@@ -1458,7 +1685,7 @@ async function tellServerWeAreDone(result) {
     return;
   }
   const done = await response.json();
-  $("finish-state").textContent = describeCompletion(done);
+  showNote($("finish-state"), describeCompletion(done), "plain");
   $("finish-retry").hidden = true;
   if (meetingId) {
     $("finish-next").hidden = false;
@@ -1476,7 +1703,13 @@ $("stop").addEventListener("click", async () => {
   await tellServerWeAreDone(summary);
 });
 $("finish-retry").addEventListener("click", () => {
-  if (summary) void tellServerWeAreDone(summary);
+  const done = summary;
+  if (done) {
+    void whilePressed(
+      $("finish-retry"),
+      () => tellServerWeAreDone(done)
+    );
+  }
 });
 document.addEventListener("visibilitychange", () => {
   client.setHidden(document.visibilityState === "hidden");
@@ -1492,12 +1725,20 @@ function showResult(result) {
   $("gaps").innerHTML = result.timeline.gaps.length ? result.timeline.gaps.map(
     (g) => `<li><code>${g.reason}</code> ${(g.durationMs / 1e3).toFixed(1)}초 (${((g.startMs - result.timeline.startedAtMs) / 1e3).toFixed(0)}초 지점)</li>`
   ).join("") : '<li class="ok">공백 없음</li>';
-  $("row").textContent = `| ${navigator.userAgent.slice(0, 40)} | ${$("wakelock").checked ? "있음" : "없음"} | ${(result.timeline.coverage * 100).toFixed(1)}% | ${(result.timeline.longestGapMs / 1e3).toFixed(1)}초 | ${[...new Set(result.timeline.gaps.map((g) => g.reason))].join(", ") || "-"} |`;
+  lastRow = `| ${navigator.userAgent.slice(0, 40)} | ${$("wakelock").checked ? "있음" : "없음"} | ${(result.timeline.coverage * 100).toFixed(1)}% | ${(result.timeline.longestGapMs / 1e3).toFixed(1)}초 | ${[...new Set(result.timeline.gaps.map((g) => g.reason))].join(", ") || "-"} |`;
+  $("row").textContent = lastRow;
 }
-$("copy").addEventListener("click", async () => {
-  await navigator.clipboard.writeText($("row").textContent ?? "");
-  $("copy").textContent = "복사됨";
-  setTimeout(() => $("copy").textContent = "표에 붙일 한 줄 복사", 1500);
+$("copy").addEventListener("click", () => {
+  if (lastRow === null) return;
+  void copyText(lastRow, navigator.clipboard).then((outcome) => {
+    if (copySucceeded(outcome)) {
+      showNote($("copy-note"), "");
+      $("copy").textContent = describeCopy(outcome, "한 줄");
+      setTimeout(() => $("copy").textContent = "표에 붙일 한 줄 복사", 1500);
+      return;
+    }
+    showNote($("copy-note"), describeCopy(outcome, "한 줄"));
+  });
 });
 render();
 renderNav("record");

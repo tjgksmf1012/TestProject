@@ -1,0 +1,86 @@
+"""팀 달력 (결함 107·108).
+
+이 저장소는 시각을 전부 UTC 로 저장합니다. 그건 옳습니다. 틀린 것은
+**그 순간을 "며칠" 로 읽을 때 `.date()` 를 쓴 것**입니다. 그건 UTC
+달력일이라, 한국(UTC+9)에서는 밤 9시 이후가 통째로 하루 앞으로 밀립니다.
+
+UTC 는 KST 보다 항상 뒤이므로 이 오차는 무작위가 아닙니다. **늘 날짜를
+앞당기는 쪽으로만** 기웁니다.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from teamflow.clock import local_date
+from teamflow.meeting.resolve import resolve_deadline
+
+KST = ZoneInfo("Asia/Seoul")
+
+
+def test_the_team_calendar_is_the_one_these_tests_assume():
+    """이 파일의 날짜는 전부 KST 기준이다. 설정이 바뀌면 여기서 먼저 안다."""
+    from teamflow.clock import team_zone
+
+    assert team_zone() == KST
+
+
+@pytest.mark.parametrize(
+    ("moment", "expected"),
+    [
+        # KST 로 같은 날 — UTC 도 같은 날.
+        (datetime(2026, 9, 4, 10, 0, tzinfo=UTC), date(2026, 9, 4)),
+        # KST 23:00 — 아직 같은 날. 경계 바로 앞.
+        (datetime(2026, 9, 4, 14, 0, tzinfo=UTC), date(2026, 9, 4)),
+        # KST 00:00 — 날짜가 넘어간 첫 순간. `.date()` 는 아직 09-04 라 한다.
+        (datetime(2026, 9, 4, 15, 0, tzinfo=UTC), date(2026, 9, 5)),
+        (datetime(2026, 9, 4, 16, 0, tzinfo=UTC), date(2026, 9, 5)),
+    ],
+)
+def test_an_instant_becomes_the_day_the_team_was_living(
+    moment: datetime, expected: date
+):
+    assert local_date(moment) == expected
+
+
+def test_a_naive_datetime_is_read_as_utc():
+    """SQLite 는 tzinfo 를 잃고 돌려준다.
+
+    그때 조용히 **로컬 시간으로 읽으면** 저장한 값과 다른 순간이 됩니다.
+    이 저장소는 naive datetime 을 UTC 로만 저장하므로 UTC 로 되살립니다.
+    """
+    naive = datetime(2026, 9, 4, 16, 0)
+    assert local_date(naive) == local_date(naive.replace(tzinfo=UTC))
+    assert local_date(naive) == date(2026, 9, 5)
+
+
+def test_a_late_night_meeting_does_not_shift_its_own_deadlines():
+    """⭐ 결함 108 — 새벽 회의에서 "다음 주 월요일" 이 **회의 당일**이 됐다.
+
+    `meeting_tasks` 는 `meeting.started_at.date()` 를 `resolve_deadline`
+    의 기준일로 넘기고 있었습니다. 새벽 1시에 시작한 월요일 회의는 UTC
+    로는 아직 일요일이라, 요일까지 하루 밀립니다 — 그리고 "다음 주"는
+    요일에서 주를 세므로 **주 단위로** 틀립니다.
+
+        회의 시작 2026-09-07 01:00 KST (월) = 09-06 16:00Z (일)
+        "다음 주 월요일"   UTC기준 09-07   팀달력 09-14
+
+    UTC 기준 값 09-07 은 회의가 열린 바로 그 날입니다. 승인 화면에는
+    **이미 지난 마감**이 뜹니다.
+    """
+    started = datetime(2026, 9, 7, 1, 0, tzinfo=KST)  # 월요일 새벽 1시
+    team_day = local_date(started)
+    utc_day = started.astimezone(UTC).date()
+
+    assert team_day == date(2026, 9, 7), "팀은 월요일에 모였다"
+    assert utc_day == date(2026, 9, 6), "UTC 로는 아직 일요일 — 이게 함정이었다"
+
+    assert resolve_deadline("다음 주 월요일까지", team_day).value == date(2026, 9, 14)
+    assert resolve_deadline("내일까지", team_day).value == date(2026, 9, 8)
+    assert resolve_deadline("3일 안에", team_day).value == date(2026, 9, 10)
+
+    # 되돌리면 이렇게 된다 — 마감이 **회의 당일**로 잡힌다.
+    assert resolve_deadline("다음 주 월요일까지", utc_day).value == date(2026, 9, 7)

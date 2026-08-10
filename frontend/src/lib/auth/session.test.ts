@@ -3,10 +3,11 @@ import { describe, it } from 'node:test';
 
 import {
   MIN_PASSWORD_LENGTH,
-  apiBaseFromLocation,
   describeAuthFailure,
+  describeLogoutFailure,
   isSessionExpired,
   loginUrlFor,
+  logoutOutcome,
   safeApiBase,
   safeRedirect,
   validateLogin,
@@ -196,19 +197,68 @@ describe('safeApiBase', () => {
   });
 });
 
-describe('apiBaseFromLocation', () => {
-  it('주소창에서 읽어도 같은 판단을 한다', () => {
+describe('주소창에서 읽어도 같은 판단을 한다', () => {
+  // 화면들은 `safeApiBase(params.get('api'), location.origin)` 를 직접
+  // 씁니다. 예전에는 그걸 감싼 `apiBaseFromLocation` 이 따로 있었는데
+  // **부르는 화면이 0곳**이었습니다 — 테스트만 그 길을 지나고 있었던
+  // 셈이라 지웠습니다. 여기 있던 경우는 화면이 실제로 지나는 길로
+  // 옮겼습니다. 공격 사례를 같이 잃으면 안 되니까요.
+  const fromSearch = (search: string, pageOrigin: string): string =>
+    safeApiBase(new URLSearchParams(search).get('api'), pageOrigin);
+
+  it('남의 오리진은 거절한다', () => {
     strictEqual(
-      apiBaseFromLocation('?api=https://evil.example&next=/home.html', 'https://teamflow.example'),
+      fromSearch('?api=https://evil.example&next=/home.html', 'https://teamflow.example'),
       '',
-    );
-    strictEqual(
-      apiBaseFromLocation('?api=http://localhost:8000', 'http://localhost:5173'),
-      'http://localhost:8000',
     );
   });
 
+  it('로컬끼리는 통과한다', () => {
+    strictEqual(fromSearch('?api=http://localhost:8000', 'http://localhost:5173'), 'http://localhost:8000');
+  });
+
   it('파라미터가 없으면 빈 값', () => {
-    strictEqual(apiBaseFromLocation('', 'https://teamflow.example'), '');
+    strictEqual(fromSearch('', 'https://teamflow.example'), '');
+  });
+});
+
+describe('로그아웃 (결함 82)', () => {
+  it('끊겼으면 done', () => {
+    strictEqual(logoutOutcome(200), 'done');
+    strictEqual(logoutOutcome(204), 'done');
+  });
+
+  it('⭐ 401 도 done — 서버가 이 세션을 모른다는 뜻이다', () => {
+    // 실패로 처리하면 이미 만료된 사람이 로그아웃 버튼에 갇힙니다.
+    strictEqual(logoutOutcome(401), 'done');
+  });
+
+  it('⭐ 서버가 못 끊었으면 still-signed-in — 화면을 옮기면 거짓말이 된다', () => {
+    for (const status of [500, 502, 503, 400, 403, 404]) {
+      strictEqual(logoutOutcome(status), 'still-signed-in', `HTTP ${status}`);
+    }
+  });
+
+  it('⭐ 요청 자체가 실패해도 still-signed-in', () => {
+    // `fetch` 가 거절되는 경우(네트워크 끊김). 예전에는 `.catch` 가 없어서
+    // 버튼이 죽은 것처럼 보였습니다.
+    strictEqual(logoutOutcome(null), 'still-signed-in');
+  });
+
+  it('⭐ 못 끊었을 때 지금 상태와 할 일을 같이 말한다', () => {
+    const offline = describeLogoutFailure(null);
+    strictEqual(offline.includes('서버에 연결하지 못했습니다'), true);
+    strictEqual(offline.includes('로그인 상태가 그대로 남아'), true);
+    strictEqual(offline.includes('다시 눌러'), true);
+
+    const broken = describeLogoutFailure(500);
+    strictEqual(broken.includes('HTTP 500'), true);
+    strictEqual(broken.includes('로그인 상태가 그대로 남아'), true);
+  });
+
+  it('짝 표기를 내보내지 않는다', () => {
+    for (const status of [null, 500]) {
+      strictEqual(/[은는이가을를]\(/.test(describeLogoutFailure(status)), false);
+    }
   });
 });

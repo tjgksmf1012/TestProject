@@ -29,7 +29,8 @@ app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
-    timezone="Asia/Seoul",
+    # 두 벌이 되지 않게 설정에서 읽습니다 (결함 107).
+    timezone=settings.project_timezone,
     enable_utc=True,
     # 워커가 죽어도 잡을 잃지 않는다. 회의 처리는 몇 분씩 걸려서
     # 중간에 워커가 재시작되면 통째로 날아간다.

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -149,26 +148,18 @@ def normalize(
     return None
 
 
-# ── 업무 ↔ 코드 활동 연결 ─────────────────────────────────────
+# ── 업무 ↔ 코드 활동 연결은 `github/linking.py` 로 옮겼습니다 ──────
 #
-# docs/03 §4.3의 3단 폴백 중 1·2단계 (명시적 참조).
-# 3단계(임베딩 유사도)는 pgvector가 붙은 뒤에 추가한다.
-
-_ISSUE_REF = re.compile(r"#(\d+)")
-_TASK_REF = re.compile(r"\b(?:TASK|TF)[-_]?(\d+)\b", re.IGNORECASE)
-_BRANCH_REF = re.compile(r"(?:^|/)(\d+)[-_]")
-
-
-def extract_task_refs(*texts: str | None) -> set[int]:
-    """커밋 메시지·PR 본문·브랜치명에서 업무 번호를 뽑는다.
-
-    ``#123``, ``TASK-123``, ``feat/123-login`` 형태를 인식한다.
-    """
-    refs: set[int] = set()
-    for text in texts:
-        if not text:
-            continue
-        refs.update(int(m) for m in _ISSUE_REF.findall(text))
-        refs.update(int(m) for m in _TASK_REF.findall(text))
-        refs.update(int(m) for m in _BRANCH_REF.findall(text))
-    return refs
+# 여기 `extract_task_refs(*texts)` 가 있었습니다. 호출자도 테스트도 0이었고,
+# 그래서 **세 가지를 한꺼번에 틀리고 있다는 사실이 드러난 적이 없었습니다.**
+#
+#     extract_task_refs("2026-08-07 회의 정리")  → {2026}
+#     extract_task_refs("1000-line refactor")   → {1000}
+#     extract_task_refs("Closes #12")           → {12}   ← GitHub 이슈 번호
+#     extract_task_refs("TASK-12")              → {12}   ← 우리 업무 번호
+#
+# 브랜치용 패턴(`숫자-`)을 자유 텍스트에도 적용해서 **날짜와 줄 수가 업무
+# 번호**가 됐고, GitHub 이슈 번호와 우리 업무 번호가 **같은 집합에** 섞였습니다.
+#
+# 지운 이유: 남겨 두면 다음 사람이 이걸 부릅니다. 고친 것은
+# `teamflow/github/linking.py` 에 있고 33개 테스트가 붙습니다.

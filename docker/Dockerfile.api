@@ -52,4 +52,9 @@ COPY frontend/public/ frontend/public/
 RUN mkdir -p /var/teamflow/audio
 
 EXPOSE 8000
+# ⚠️ **워커를 늘리지 마세요.** 통화 시그널링 방이 프로세스 메모리에
+# 있어서(`backend/teamflow/call/rooms.py`), 워커가 둘이면 같은 회의의 두
+# 사람이 서로 다른 방에 들어가 서로를 못 봅니다 — 그리고 오류가 안 납니다.
+# 늘리려면 방을 Redis pub/sub 으로 옮겨야 합니다.
+# `test_packaging.py::test_the_api_runs_as_a_single_worker` 가 지킵니다.
 CMD ["uvicorn", "teamflow.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

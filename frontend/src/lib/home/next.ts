@@ -96,7 +96,7 @@ export function nextStepFor(meeting: Meeting): NextStep {
       return {
         href: `/review.html?meeting=${id}`,
         label: `업무 후보 ${meeting.pending_candidates}건 검토`,
-        reason: '승인해야 칸반에 등록됩니다 — AI 가 만든 업무는 사람을 거칩니다',
+        reason: '승인해야 칸반에 등록됩니다 — AI가 만든 업무는 사람을 거칩니다',
         actionable: true,
       };
 

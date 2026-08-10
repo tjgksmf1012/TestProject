@@ -11,6 +11,7 @@ docs/06-데이터-모델.md 를 SQLAlchemy 선언적 모델로 옮긴 것.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 
 from sqlalchemy import (
     JSON,
@@ -28,7 +29,9 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
+
+from teamflow.github.connection import repo_key
 
 # ── dialect 변형 ──────────────────────────────────────────────
 #
@@ -133,11 +136,67 @@ class Project(Base):
     # 그 프로젝트는 코드를 발급받기 전까지 **참가할 수 없어야** 합니다.
     # 빈 코드를 "아무나 통과" 로 읽으면 안 됩니다.
     invite_code: Mapped[str | None] = mapped_column(String(16), unique=True)
+    #: 사람이 적은 표기 그대로. 화면과 링크는 이걸 씁니다.
     github_repo: Mapped[str | None] = mapped_column(String(255))
+    # ⚠️ 웹훅이 프로젝트를 찾는 데 쓰는 **대조용** 표기(소문자).
+    #
+    # `github_repo` 로 직접 찾으면 대소문자가 하나만 달라도 못 찾고,
+    # 웹훅은 "연결되지 않은 저장소" 로 조용히 버려집니다. 사유는
+    # `teamflow/github/connection.py` 맨 위에 있습니다.
+    #
+    # unique 인 이유: 두 프로젝트가 같은 저장소를 가리키면 웹훅이 **어느
+    # 쪽에 붙을지 정해지지 않습니다.** 응용 코드의 검사만으로는 동시에
+    # 들어온 두 요청을 막을 수 없어 DB 제약으로 못 박습니다.
+    #
+    # 제약이 아니라 유니크 **인덱스**인 이유는 `__table_args__` 에 있습니다.
+    github_repo_key: Mapped[str | None] = mapped_column(String(255))
+    # ⚠️ **요청 본문으로 받지 않습니다.** 서명이 검증된 배달의
+    # `installation.id` 로만 채웁니다. 화면에서 받으면 남의 설치 id 를 적어
+    # 서버가 그 설치의 토큰을 발급하게 만들 수 있습니다.
     github_installation_id: Mapped[int | None] = mapped_column(BigInteger)
-    # GitHub 연결 시각. 이 이전 기간은 백필로 채우며, 신뢰도 계산에 쓰인다.
+    # 저장소 이름을 **적어 넣은** 시각. 연결됐다는 뜻이 아닙니다.
     github_connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ⚠️ 서명된 배달이 **처음 도착한** 시각. 이게 연결의 유일한 증거입니다.
+    #
+    # 신뢰도 계산은 이 값을 씁니다(`github_connected_at` 이 아니라).
+    # 이름을 적었다는 사실만으로 신뢰도가 오르면, GitHub 데이터가 0건인
+    # 프로젝트가 "근거가 충분한 점수" 로 보입니다.
+    github_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 백필을 **마지막으로 돌린** 시각. NULL 이면 한 번도 안 돌렸다는 뜻입니다.
+    github_backfilled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    # ⚠️ **이 시각 이후는 GitHub 에 물어봤다**는 뜻입니다.
+    #
+    # 이 한 칸이 "기여도가 빈 것" 과 "활동이 없던 것" 을 가릅니다.
+    # 없으면 화면은 둘을 구분해서 말할 수 없고, 연결 전에 제일 많이
+    # 일한 사람이 제일 적게 일한 것으로 보입니다 — 오류는 어디에도
+    # 안 납니다.
+    github_backfilled_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = _now()
+
+    # 유니크 **제약**이 아니라 유니크 **인덱스**입니다. SQLite 는
+    # `ALTER TABLE ... ADD CONSTRAINT` 를 지원하지 않아 마이그레이션이
+    # 인덱스로만 이걸 만들 수 있습니다. 모델도 같은 것으로 맞춰 둡니다 —
+    # 다르게 두면 테스트가 만드는 스키마와 배포되는 스키마가 갈라지고,
+    # 그건 이 프로젝트가 반복해서 당한 실패 방식입니다.
+    __table_args__ = (
+        Index("uq_projects_github_repo_key", "github_repo_key", unique=True),
+    )
+
+    @validates("github_repo")
+    def _keep_the_lookup_key_in_step(self, _field: str, value: str | None) -> str | None:
+        """대조용 표기를 **여기서** 맞춥니다.
+
+        저장소를 바꾸는 자리마다 손으로 둘을 같이 쓰게 하면, 언젠가 한쪽을
+        빠뜨리고 그 순간부터 웹훅이 조용히 사라집니다. 이 프로젝트에서
+        반복해서 나온 실패 방식이라 아예 못 어긋나게 묶어 둡니다.
+        """
+        cleaned = value.strip() if value else None
+        self.github_repo_key = repo_key(cleaned)
+        return cleaned or None
 
 
 class Member(Base):
@@ -235,6 +294,34 @@ class GithubEvent(Base):
     )
 
 
+class GithubUnlinkedDelivery(Base):
+    """서명은 맞는데 **어느 프로젝트에도 안 붙은** 배달의 흔적.
+
+    ⚠️ 이 표가 없으면 저장소 이름 오타는 **증거를 남기지 않습니다.**
+    웹훅 처리기는 202 를 돌려주고 본문을 버리며, 사람이 볼 수 있는 곳에는
+    아무것도 남지 않습니다. 팀은 PR 을 계속 병합하는데 기여도만 비고,
+    무엇을 고쳐야 하는지 알 방법이 없습니다.
+
+    **무엇을 남기고 무엇을 안 남기는가** — 저장소 이름과 시각·횟수만
+    남깁니다. 본문·작성자·PR 제목은 남기지 않습니다. 어느 프로젝트에도
+    안 붙은 배달은 **이 시스템의 자료가 아니고**, 우리는 그걸 보관할
+    근거가 없습니다. 진단에 필요한 것은 "이 이름으로 몇 번 왔다" 뿐입니다.
+
+    저장소당 한 행입니다. 계속 쌓이지 않습니다.
+    """
+
+    __tablename__ = "github_unlinked_deliveries"
+
+    id: Mapped[int] = _pk()
+    #: 대조용 소문자 표기. 이걸로 중복을 막습니다.
+    repo_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    #: GitHub 이 보낸 정식 표기. 화면이 "이걸로 고치세요" 라고 말할 때 씁니다.
+    repo: Mapped[str] = mapped_column(String(255), nullable=False)
+    delivery_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    first_seen_at: Mapped[datetime] = _now()
+    last_seen_at: Mapped[datetime] = _now()
+
+
 class TaskGithubLink(Base):
     __tablename__ = "task_github_links"
 
@@ -253,6 +340,37 @@ class TaskGithubLink(Base):
 # ══════════════════════════════════════════════════════════════
 
 
+class MeetingStatus(StrEnum):
+    """회의가 가질 수 있는 상태 — **여기가 유일한 출처다.**
+
+    ⭐ 화면(`lib/home/next.ts`)은 이 값마다 한국어 라벨과 "다음에 할 일" 을
+    가지고 있어야 한다. 어긋나면 홈 화면이 영어 식별자를 그대로 찍거나
+    (`describeMeetingStatus` 는 모르는 값을 그대로 돌려준다) 없는 상태를
+    설명하는 죽은 가지를 갖게 된다. `Category` 에 같은 그물을 이미 쳐 뒀고,
+    여기에도 친다 (`test_repo_integrity.py`).
+
+    ⚠️ **`CONFIRMED` 는 오랫동안 아무도 쓰지 않았다** (결함 84). 화면에는
+    "검토 완료" 라벨과 "검토를 마쳤습니다" 가지가 있었지만, 서버가 그 값을
+    한 번도 넣지 않아 사람이 후보를 전부 검토해도 회의는 `NEEDS_REVIEW` 로
+    남았습니다. 홈 화면은 그 회의를 이렇게 설명했습니다 —
+
+        검토 필요 — 검토할 업무 후보가 없습니다 — 회의에서 업무가 나오지 않았습니다
+
+    업무는 나왔고, 사람이 셋 다 검토한 뒤였습니다.
+    """
+
+    #: 녹음 중이거나 아직 전원이 끝나지 않음
+    PENDING = "pending"
+    #: 전원 종료 → 처리 대기. 이 전이가 중복 큐잉을 막는 자물쇠다
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    #: 후보가 나왔고 사람의 결정을 기다린다
+    NEEDS_REVIEW = "needs_review"
+    #: 사람이 후보를 **전부** 결정했다
+    CONFIRMED = "confirmed"
+    FAILED = "failed"
+
+
 class Meeting(Base):
     __tablename__ = "meetings"
 
@@ -263,10 +381,10 @@ class Meeting(Base):
     duration_sec: Mapped[int | None] = mapped_column(Integer)
     # multitrack | single  — docs/04 의 모드 A / 모드 B
     capture_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="multitrack")
-    # pending   : 녹음 중이거나 아직 전원이 끝나지 않음
-    # queued    : 전원 종료 → 처리 대기 (이 전이가 중복 큐잉을 막는 자물쇠다)
-    # processing | needs_review | confirmed | failed
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    #: 값의 뜻은 `MeetingStatus` 참조. 그쪽이 유일한 출처다.
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=MeetingStatus.PENDING.value
+    )
     # LLM이 만든 회의 요약. 근거는 utterances 에 남아 있고 여기엔 본문만 둔다.
     #
     # 이게 없던 동안 파이프라인은 요약을 만들어 Celery 페이로드에 실어 보낸 뒤
@@ -503,8 +621,20 @@ class ContributionEventRow(Base):
 
     __table_args__ = (
         # 웹훅 재전송·백필 중복 방어. 이게 없으면 점수가 부풀려진다.
+        #
+        # ⚠️ `user_id` 가 **들어가 있어야 합니다.** 없으면 하나의 근거에서
+        # 여러 사람의 이벤트가 나올 수 없습니다 — 회의 하나에 참석자가
+        # 셋이면 `meeting_attended` 가 **한 명만 기록되고 나머지 둘은
+        # IntegrityError 로 조용히 사라집니다.**
+        #
+        # 웹훅 중복 방어는 그대로입니다. GitHub 이벤트는 행위자가 하나라
+        # `user_id` 가 붙어도 같은 행으로 막힙니다.
         UniqueConstraint(
-            "source_kind", "source_id", "event_type", name="uq_contribution_source"
+            "source_kind",
+            "source_id",
+            "event_type",
+            "user_id",
+            name="uq_contribution_source",
         ),
         Index("ix_contrib_project_user_time", "project_id", "user_id", "occurred_at"),
     )

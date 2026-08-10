@@ -101,3 +101,55 @@ def blended_profile(shares: dict[Role, float]) -> ScoringProfile:
     primary = max(shares, key=lambda r: shares[r])
     label = "+".join(f"{r.value}:{shares[r] / total:.2f}" for r in sorted(shares, key=str))
     return ScoringProfile(role=primary, weights=merged, version=f"blend({label})")
+
+
+def clean_role_shares(raw: dict[str, float] | None) -> dict[str, float]:
+    """사람이 보낸 역할 비중을 **받아들일 수 있는 모양으로** 검사한다.
+
+    ## 왜 여기 있나
+
+    가입·초대가 `{"developer": 1.0}` 을 하드코딩하고 있었고, 이걸 바꾸는
+    API 도 화면도 없었습니다. 그래서 `PLANNER`·`DESIGNER` 프로파일과
+    `blended_profile` 은 **실사용 경로로 도달 불가**였고, 기획자·디자이너
+    팀원의 기여도가 **개발자 가중치로** 계산됐습니다.
+
+    기획자 프로파일은 코드 0%, 문서 30% 인데 개발자로 계산하면 코드 35%,
+    문서 5% 입니다. 문서만 쓴 사람이 이유 없이 낮게 나옵니다 — 오류는
+    어디에도 안 납니다.
+
+    ## 검사하는 것
+
+    ⚠️ **합이 1 이 아니면 거절합니다.** `blended_profile` 은 합으로 나눠
+    정규화하므로 `{"developer": 5, "planner": 5}` 도 "돌아가긴" 합니다.
+    그런데 그러면 화면에 적힌 숫자와 실제 비중이 달라지고, 사람은 자기가
+    적은 값이 그대로 쓰인다고 믿습니다. 받아들일 때 막는 편이 낫습니다.
+
+    ⚠️ **0 은 빼고 저장합니다.** `{"developer": 1.0, "planner": 0.0}` 은
+    겸직이 아니라 개발자입니다. 남겨 두면 `blended_profile` 이 이름표를
+    `blend(developer:1.00+planner:0.00)` 로 만들어 화면이 겸직처럼 보입니다.
+    """
+    if not raw:
+        raise ValueError("역할을 하나 이상 골라야 합니다")
+
+    cleaned: dict[str, float] = {}
+    for key, value in raw.items():
+        try:
+            role = Role(key)
+        except ValueError as exc:
+            known = ", ".join(sorted(r.value for r in Role))
+            raise ValueError(f"모르는 역할입니다: {key} (가능: {known})") from exc
+        share = float(value)
+        if share < 0:
+            raise ValueError(f"역할 비중은 음수일 수 없습니다: {key}={share}")
+        if share > 0:
+            cleaned[role.value] = share
+
+    if not cleaned:
+        raise ValueError("역할 비중이 전부 0 입니다")
+
+    total = sum(cleaned.values())
+    # 0.1 씩 세 번이면 0.30000000000000004 가 된다. 화면에서 온 값이라
+    # 부동소수 오차는 통과시키되, 0.9 나 1.1 은 막는다.
+    if abs(total - 1.0) > 1e-6:
+        raise ValueError(f"역할 비중의 합이 1 이어야 합니다 (지금 {total:g})")
+    return cleaned

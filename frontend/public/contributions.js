@@ -41,7 +41,7 @@ function readBeforeTheNumber(member) {
   for (const gap of member.measurement_gaps ?? []) {
     const category = gap.category ? describeCategory(gap.category) : "일부 활동";
     lines.push(
-      `${category} 기여를 **측정하지 못했습니다** — ${gap.reason ?? "사유 미기록"}. 0 으로 계산하지 않고 나머지 활동으로 추정했습니다.`
+      `${category} 기여를 **측정하지 못했습니다** — ${gap.reason ?? "사유 미기록"}. 0으로 계산하지 않고 나머지 활동으로 추정했습니다.`
     );
   }
   lines.push(...member.confidence_reasons);
@@ -59,7 +59,7 @@ function teamWarnings(score, people2) {
   if (unmeasured.length > 0) {
     const names = unmeasured.map((m) => nameOf(m.user_id, people2)).join(", ");
     warnings.push(
-      `${names} 님은 일부 활동을 측정하지 못했습니다. 그 영역은 0 이 아니라 나머지 활동으로 추정한 값입니다.`
+      `${names} 님은 일부 활동을 측정하지 못했습니다. 그 영역은 0이 아니라 나머지 활동으로 추정한 값입니다.`
     );
   }
   const shaky = score.members.filter((m) => m.confidence < LOW_CONFIDENCE);
@@ -83,6 +83,196 @@ function categoriesForDisplay(member) {
 }
 function hasNoEvidence(member) {
   return member.categories.every((c) => c.event_count === 0);
+}
+var ROLE_NAMES = {
+  developer: "개발",
+  planner: "기획",
+  designer: "디자인"
+};
+function roleLabel(key) {
+  return ROLE_NAMES[key] ?? key;
+}
+function roleOf(member, people2) {
+  const shares = people2.find((p) => p.user_id === member.user_id)?.role_shares;
+  const named = Object.entries(shares ?? {}).filter(([, v]) => v > 0);
+  if (named.length === 0) return roleLabel(member.role);
+  if (named.length === 1) return roleLabel(named[0]?.[0] ?? member.role);
+  return named.sort((a, b) => b[1] - a[1]).map(([key, value]) => `${roleLabel(key)} ${Math.round(value * 100)}%`).join(" · ");
+}
+
+// src/lib/text/josa.ts
+var PAIRS = {
+  은는: ["은", "는"],
+  이가: ["이", "가"],
+  을를: ["을", "를"],
+  과와: ["과", "와"],
+  으로로: ["으로", "로"]
+};
+var DIGIT_HAS_FINAL = {
+  "0": true,
+  // 영
+  "1": true,
+  // 일
+  "2": false,
+  // 이
+  "3": true,
+  // 삼
+  "4": false,
+  // 사
+  "5": false,
+  // 오
+  "6": true,
+  // 육
+  "7": true,
+  // 칠
+  "8": true,
+  // 팔
+  "9": false
+  // 구
+};
+var LETTER_HAS_FINAL = {
+  a: false,
+  // 에이
+  b: false,
+  // 비
+  c: false,
+  // 씨
+  d: false,
+  // 디
+  e: false,
+  // 이
+  f: true,
+  // 에프
+  g: false,
+  // 지
+  h: false,
+  // 에이치
+  i: false,
+  // 아이
+  j: false,
+  // 제이
+  k: false,
+  // 케이
+  l: true,
+  // 엘
+  m: true,
+  // 엠
+  n: true,
+  // 엔
+  o: false,
+  // 오
+  p: false,
+  // 피
+  q: false,
+  // 큐
+  r: true,
+  // 알
+  s: true,
+  // 에스
+  t: false,
+  // 티
+  u: false,
+  // 유
+  v: false,
+  // 브이
+  w: false,
+  // 더블유
+  x: true,
+  // 엑스
+  y: false,
+  // 와이
+  z: false
+  // 지
+};
+function hasFinalConsonant(word) {
+  const trimmed = word.trim();
+  if (trimmed === "") return null;
+  const last = trimmed[trimmed.length - 1];
+  const code = last.codePointAt(0) ?? 0;
+  if (code >= 44032 && code <= 55203) {
+    return (code - 44032) % 28 !== 0;
+  }
+  if (last in DIGIT_HAS_FINAL) return DIGIT_HAS_FINAL[last];
+  const lower = last.toLowerCase();
+  if (lower in LETTER_HAS_FINAL) return LETTER_HAS_FINAL[lower];
+  return null;
+}
+function josa(word, pair) {
+  const [withFinal, withoutFinal] = PAIRS[pair];
+  return hasFinalConsonant(word) === true ? withFinal : withoutFinal;
+}
+function withJosa(word, pair) {
+  return `${word}${josa(word, pair)}`;
+}
+
+// src/lib/contribution/final.ts
+function sameValue(a, b) {
+  return Math.abs(a - b) < 1e-9;
+}
+function problemsWith(drafts, systemValues2) {
+  const problems = [];
+  for (const draft of drafts) {
+    if (draft.final_value === null) continue;
+    if (Number.isNaN(draft.final_value)) {
+      problems.push(`숫자가 아닌 값이 있습니다 (${draft.user_id})`);
+      continue;
+    }
+    const system = systemValues2.get(draft.user_id);
+    if (system === void 0) continue;
+    if (!sameValue(draft.final_value, system) && !draft.reason.trim()) {
+      problems.push("시스템 값과 다르게 확정하려면 이유를 적어야 합니다");
+    }
+  }
+  return [...new Set(problems)];
+}
+function toPayload(drafts, systemValues2) {
+  return drafts.map((draft) => {
+    const system = systemValues2.get(draft.user_id);
+    const untouched = draft.final_value === null || system !== void 0 && sameValue(draft.final_value, system);
+    if (untouched) return { user_id: draft.user_id };
+    return {
+      user_id: draft.user_id,
+      final_value: draft.final_value,
+      reason: draft.reason.trim() || void 0
+    };
+  });
+}
+function adjustmentsToRestore(finals) {
+  const out = /* @__PURE__ */ new Map();
+  for (const f of finals) {
+    if (sameValue(f.final_value, f.system_value)) continue;
+    out.set(f.user_id, { final_value: f.final_value, reason: f.reason ?? "" });
+  }
+  return out;
+}
+var BLIND_CONFIRM = "지금 저장된 확정을 불러오지 못했습니다 — 이대로 확정하면 이전에 조정한 값이 지워질 수 있습니다. 새로고침한 뒤 다시 해 주세요.";
+function person(id, names) {
+  const name = names.get(id) ?? `#${id}`;
+  return `${name}님`;
+}
+function confirmers(finals, names) {
+  const ids = [...new Set(finals.map((f) => f.adjusted_by))];
+  return ids.filter((id) => id !== null).map((id) => person(id, names));
+}
+var percent = (value) => `${value.toFixed(1)}%`;
+function describeFinals(finals, names) {
+  if (finals.length === 0) return "아직 아무도 확정하지 않았습니다.";
+  const first = finals[0];
+  if (first === void 0) return "아직 아무도 확정하지 않았습니다.";
+  const when = new Date(first.confirmed_at).toLocaleString("ko-KR");
+  const who = confirmers(finals, names).join(", ");
+  const did = who === "" ? "확정했습니다(누가 눌렀는지는 기록에 없습니다)" : `${withJosa(who, "이가")} 확정했습니다`;
+  const adjusted = finals.filter((f) => !sameValue(f.final_value, f.system_value));
+  if (adjusted.length === 0) {
+    return `${when}에 ${did} — 시스템 값 그대로입니다.`;
+  }
+  const details = adjusted.map((f) => {
+    const reason = f.reason?.trim() ?? "";
+    const why = reason === "" ? "이유가 남아 있지 않습니다" : reason;
+    const target = person(f.user_id, names);
+    return `${target} ${percent(f.final_value)}(시스템 ${percent(f.system_value)}, 이유: ${why})`;
+  });
+  return `${when}에 ${did} — ${details.join(" · ")}`;
 }
 
 // src/lib/auth/session.ts
@@ -114,6 +304,21 @@ function isSessionExpired(status) {
   return status === 401;
 }
 
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+function tryGet(url) {
+  return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
+}
+
 // src/lib/html.ts
 var ESCAPES = {
   "&": "&amp;",
@@ -124,6 +329,82 @@ var ESCAPES = {
 };
 function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
+}
+
+// src/lib/ui/empty.ts
+function emptyHtml(state) {
+  const action = state.action ? `<a class="btn btn-primary" href="${escapeHtml(state.action.href)}">${escapeHtml(state.action.label)}</a>` : "";
+  return `<div class="empty-state"><p class="what">${escapeHtml(state.what)}</p><p class="why">${escapeHtml(state.why)}</p><p class="how">${escapeHtml(state.how)}</p>` + action + "</div>";
+}
+
+// src/lib/ui/failure.ts
+function describeHttpStatus(status) {
+  if (status === 401) return "로그인이 풀렸습니다.";
+  if (status === 403) return "이 프로젝트의 구성원만 볼 수 있습니다.";
+  if (status === 404) return "찾을 수 없습니다 — 주소가 바뀌었거나 지워졌습니다.";
+  if (status === 429) return "요청이 너무 잦습니다. 잠시 뒤에 다시 해 보세요.";
+  if (status >= 500) return "서버 쪽 문제입니다. 팀이 고칠 수 있는 것이 아닙니다.";
+  return null;
+}
+function failureHtml(failure) {
+  const code = failure.code === void 0 || failure.code === "" ? "" : `<p class="code">오류 코드 ${escapeHtml(String(failure.code))}</p>`;
+  const help = failure.help ? `<p class="why">${escapeHtml(failure.help)}</p>` : "";
+  const retry = failure.retry ? '<button type="button" class="retry">다시 불러오기</button>' : "";
+  return `<div class="failure-state" role="alert"><p class="what">${escapeHtml(failure.what)}</p>` + help + retry + code + "</div>";
+}
+function showNote(slot, text, tone = "bad") {
+  slot.textContent = text;
+  slot.hidden = text === "";
+  slot.classList.toggle("bad", text !== "" && tone === "bad");
+}
+
+// src/lib/ui/pending.ts
+var LOADING_DELAY_MS = 200;
+var browserTimers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (id) => {
+    clearTimeout(id);
+  }
+};
+async function whileLoading(work, show, hide, timers = browserTimers, delayMs = LOADING_DELAY_MS) {
+  let shown = false;
+  const timer = timers.set(() => {
+    shown = true;
+    show();
+  }, delayMs);
+  try {
+    return await work;
+  } finally {
+    timers.clear(timer);
+    if (shown) hide();
+  }
+}
+async function whilePressed(button, run) {
+  const was = button.disabled;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute("aria-busy");
+  }
+}
+
+// src/lib/ui/skeleton.ts
+var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
+var wrap = (inner) => `<div class="sk-wrap" aria-hidden="true">${inner}</div>`;
+function scoreCards(count = 3) {
+  const one = '<article class="card">' + bar(40, "title") + bar(64, "line") + bar(100, "track") + bar(34, "line") + "</article>";
+  return wrap(one.repeat(Math.max(1, count)));
+}
+function showSkeleton(element, html) {
+  element.setAttribute("aria-busy", "true");
+  element.innerHTML = html;
+}
+function clearSkeleton(element) {
+  element.removeAttribute("aria-busy");
+  if (element.innerHTML.includes('class="sk')) element.innerHTML = "";
 }
 
 // src/lib/nav/links.ts
@@ -186,10 +467,11 @@ function missingLinks(context) {
   return notes;
 }
 var TAB_ICON = {
-  home: "🏠",
-  kanban: "📋",
-  contributions: "📊",
-  project: "⚙️"
+  home: "home",
+  kanban: "board",
+  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
+  contributions: "track",
+  project: "sliders"
 };
 var TAB_ORDER = ["home", "kanban", "contributions", "project"];
 function navTabs(context) {
@@ -208,7 +490,7 @@ function navTabs(context) {
     return {
       screen,
       label: LABEL[screen],
-      icon: TAB_ICON[screen] ?? "•",
+      icon: TAB_ICON[screen] ?? "sliders",
       // 못 가는 탭에 주소를 주면 눌렸을 때 `?project=null` 로 간다.
       href: enabled ? href : "",
       current: context.current === screen,
@@ -227,6 +509,26 @@ function contextFromSearch(current, search) {
   return { current, projectId: read("project"), meetingId: read("meeting") };
 }
 
+// src/lib/nav/icons.ts
+var PATHS = {
+  // 지붕(3,11)-(12,3)-(21,11) + 몸통 x 5.5~18.5, y 9.5~20
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5.5 9.5V20h13V9.5"/>',
+  // 보드 3~21 × 4~20, 세로 칸막이 x=9·15 — 열 셋이 칸반의 전부다
+  board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
+  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
+  // 가운데 줄은 **끊겨 있습니다.** 그 구멍이 이 화면의 값어치입니다.
+  track: '<path d="M4 6h13"/><path d="M4 12h5M12 12h6"/><path d="M4 18h10"/>',
+  // 말풍선 — 칸반 카드의 "회의에서 나온 업무" 표시.
+  // ⚠️ 예전에는 `🗣` 였습니다. 그 자리는 **이 제품의 대표 주장이 카드에
+  // 보이는 곳**이라, 기기마다 다른 그림이 나오면 안 됩니다.
+  meeting: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 16v4l4-4"/>',
+  // 슬라이더 — 손잡이가 있어 트랙 아이콘과 헷갈리지 않는다
+  sliders: '<path d="M4 8h16M4 16h16"/><circle cx="14" cy="8" r="2.5"/><circle cx="9" cy="16" r="2.5"/>'
+};
+function iconSvg(name) {
+  return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + PATHS[name] + "</svg>";
+}
+
 // src/demo/nav.ts
 function renderNav(current) {
   const context = contextFromSearch(current, location.search);
@@ -237,7 +539,7 @@ function renderNav(current) {
       const disabled = tab.enabled ? "" : ' aria-disabled="true"';
       const marked = tab.current ? ' aria-current="page"' : "";
       const title = tab.blockedReason ? ` title="${escapeHtml(tab.blockedReason)}"` : "";
-      return `<a${href}${disabled}${marked}${title}><span class="ico" aria-hidden="true">${escapeHtml(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
+      return `<a${href}${disabled}${marked}${title}><span class="ico">${iconSvg(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
     }).join("");
   }
   const host = document.getElementById("nav");
@@ -265,7 +567,7 @@ function describeInstall(state) {
     case "promptable":
       return "앱으로 설치하면 주소창 없이 전체 화면으로 열리고, 홈 화면에서 바로 들어옵니다.";
     case "manual-ios":
-      return '아이폰에서는 공유 버튼(⬆️) → "홈 화면에 추가" 를 누르면 앱처럼 쓸 수 있습니다.';
+      return '아이폰에서는 화면 아래 가운데의 공유 버튼(상자에서 위로 나가는 화살표) → "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있습니다.';
     case "installed":
       return "";
     case "in-shell":
@@ -353,12 +655,17 @@ var $ = (id) => {
   return el;
 };
 var people = [];
+var systemValues = /* @__PURE__ */ new Map();
+var finalsKnown = false;
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
-var get = (path) => fetch(`${apiBase}${path}`, { credentials: "same-origin", cache: "no-store" });
+var get = (path) => tryGet(`${apiBase}${path}`);
+function withEmphasis(text) {
+  return escapeHtml(text).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
 function memberCard(member) {
-  const bar = rangeBar(member);
+  const bar2 = rangeBar(member);
   const notes = readBeforeTheNumber(member);
   const flags = integrityNotes(member);
   const noEvidence = hasNoEvidence(member);
@@ -370,16 +677,16 @@ function memberCard(member) {
 <article class="card">
   <header>
     <span class="who">${escapeHtml(nameOf(member.user_id, people))}</span>
-    <span class="role">${escapeHtml(member.role)}</span>
+    <span class="role">${escapeHtml(roleOf(member, people))}</span>
   </header>
 
   <p class="range">${escapeHtml(describeRange(member))}</p>
-  <div class="track"><i style="left:${bar.left}%;width:${bar.width}%"></i></div>
+  <div class="rangebar"><i style="left:${bar2.left}%;width:${bar2.width}%"></i></div>
   <p class="conf">신뢰도 ${escapeHtml(member.confidence_label)}</p>
 
   ${noEvidence ? '<p class="empty">이 사람의 활동이 아직 하나도 연결되지 않았습니다 — 0 이라는 뜻이 아니라 <strong>연결이 없다</strong>는 뜻입니다.</p>' : ""}
 
-  ${notes.length ? `<ul class="notes">${notes.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul>` : ""}
+  ${notes.length ? `<ul class="notes">${notes.map((n) => `<li>${withEmphasis(n)}</li>`).join("")}</ul>` : ""}
 
   ${categories ? `<ul class="cats">${categories}</ul>` : ""}
 
@@ -396,27 +703,159 @@ function render(score) {
   $("meta").textContent = `${score.algo_version} · ${new Date(
     score.computed_at
   ).toLocaleString("ko-KR")} 기준`;
+  if (score.members.length === 0) {
+    $("members").innerHTML = emptyHtml({
+      what: "여기에는 팀원별 기여 구간과 그 근거가 나옵니다.",
+      why: "아직 이을 활동이 하나도 없습니다 — 아무도 안 했다는 뜻이 아닙니다.",
+      how: "회의를 녹음하거나 GitHub 저장소를 연결하면 활동이 여기로 이어집니다.",
+      action: { label: "프로젝트 설정", href: `/project.html?project=${projectId}` }
+    });
+    return;
+  }
   $("members").innerHTML = orderForDisplay(score.members, people).map(memberCard).join("");
+  systemValues = new Map(score.members.map((ms) => [ms.user_id, Number(ms.share.toFixed(3))]));
+  renderFinalRows(score);
 }
-async function load() {
+function renderFinalRows(score) {
+  const rows = orderForDisplay(score.members, people);
+  $("finals").innerHTML = rows.map((ms) => {
+    const name = escapeHtml(nameOf(ms.user_id, people));
+    const system = (systemValues.get(ms.user_id) ?? 0).toFixed(1);
+    return `<div class="final-row" data-user="${ms.user_id}">
+        <span class="who">${name}</span>
+        <span class="sys">시스템 ${system}%</span>
+        <label>확정 <input type="number" class="val" step="0.1" min="0" max="100"
+          placeholder="${system}" aria-label="${name} 확정값" /></label>
+        <span class="why"><input type="text" class="reason"
+          placeholder="시스템 값과 다르게 정했다면 이유" aria-label="${name} 조정 이유" /></span>
+      </div>`;
+  }).join("");
+}
+function draftsFromScreen() {
+  return [...$("finals").querySelectorAll(".final-row")].map((row) => {
+    const raw = row.querySelector(".val")?.value.trim() ?? "";
+    return {
+      user_id: Number(row.dataset["user"]),
+      // 빈 칸은 **0 이 아니라 "안 건드렸다"** 다. Number('') 가 0 이라
+      // 여기서 안 가르면 아무것도 안 적은 사람이 0점으로 확정된다.
+      final_value: raw === "" ? null : Number(raw),
+      reason: row.querySelector(".reason")?.value ?? ""
+    };
+  });
+}
+function restoreAdjustments(finals) {
+  const saved = adjustmentsToRestore(finals);
+  for (const row of $("finals").querySelectorAll(".final-row")) {
+    const mine = saved.get(Number(row.dataset["user"]));
+    const val = row.querySelector(".val");
+    const reason = row.querySelector(".reason");
+    if (val) val.value = mine === void 0 ? "" : String(mine.final_value);
+    if (reason) reason.value = mine?.reason ?? "";
+  }
+}
+async function loadFinals() {
+  const response = await get(`/api/projects/${projectId}/contributions/final`);
+  if (response === null || !response.ok) {
+    $("final-state").textContent = "";
+    finalsKnown = false;
+    return;
+  }
+  const body = await response.json();
+  const names = new Map(people.map((p) => [p.user_id, p.name]));
+  $("final-state").textContent = describeFinals(body.finals, names);
+  restoreAdjustments(body.finals);
+  finalsKnown = true;
+}
+async function confirm() {
+  if (!finalsKnown) {
+    showNote($("final-message"), BLIND_CONFIRM);
+    return;
+  }
+  const drafts = draftsFromScreen();
+  const problems = problemsWith(drafts, systemValues);
+  if (problems.length > 0) {
+    showNote($("final-message"), problems.join(" · "));
+    return;
+  }
+  const response = await trySend(
+    () => fetch(`${apiBase}/api/projects/${projectId}/contributions/final`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ finals: toPayload(drafts, systemValues) }),
+      credentials: "same-origin"
+    })
+  );
+  if (response === null) {
+    showNote($("final-message"), unreachableText("확정하지 못했습니다"));
+    return;
+  }
+  if (isSessionExpired(response.status)) {
+    goToLogin();
+    return;
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    showNote(
+      $("final-message"),
+      typeof body?.detail === "string" ? body.detail : describeHttpStatus(response.status) ?? "확정하지 못했습니다"
+    );
+    return;
+  }
+  showNote($("final-message"), "확정했습니다.", "plain");
+  await loadFinals();
+}
+async function fetchAll() {
   const [scoreRes, memberRes] = await Promise.all([
     get(`/api/projects/${projectId}/contributions`),
     get(`/api/projects/${projectId}/members`)
   ]);
-  if (isSessionExpired(scoreRes.status)) {
+  if (scoreRes === null) return { kind: "unreachable" };
+  if (isSessionExpired(scoreRes.status)) return { kind: "expired" };
+  if (!scoreRes.ok) return { kind: "failed", status: scoreRes.status };
+  if (memberRes?.ok) people = await memberRes.json();
+  return { kind: "ok", score: await scoreRes.json() };
+}
+async function load() {
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($("members"), scoreCards()),
+    () => clearSkeleton($("members"))
+  );
+  if (result.kind === "expired") {
     goToLogin();
     return;
   }
-  if (!scoreRes.ok) {
-    $("warnings").hidden = false;
-    $("warnings").textContent = scoreRes.status === 403 ? "이 프로젝트의 구성원만 기여도를 볼 수 있습니다." : `기여도를 불러오지 못했습니다 (HTTP ${scoreRes.status})`;
+  if (result.kind === "unreachable") {
+    $("members").innerHTML = failureHtml({
+      what: unreachableText("기여도를 불러오지 못했습니다."),
+      retry: true
+    });
+    $("members").querySelector(".retry")?.addEventListener("click", () => {
+      void load();
+    });
     return;
   }
-  if (memberRes.ok) people = await memberRes.json();
-  render(await scoreRes.json());
+  if (result.kind === "failed") {
+    $("members").innerHTML = failureHtml({
+      what: "기여도를 불러오지 못했습니다.",
+      help: describeHttpStatus(result.status) ?? void 0,
+      code: `HTTP ${result.status}`,
+      retry: true
+    });
+    $("members").querySelector(".retry")?.addEventListener("click", () => {
+      void load();
+    });
+    return;
+  }
+  render(result.score);
+  await loadFinals();
 }
 async function start() {
   const me = await get("/api/auth/me");
+  if (me === null) {
+    await load();
+    return;
+  }
   if (!me.ok) {
     goToLogin();
     return;
@@ -424,6 +863,9 @@ async function start() {
   $("who").textContent = `${(await me.json()).name} 님이 보고 있습니다`;
   await load();
 }
+$("confirm").addEventListener("click", () => {
+  void whilePressed($("confirm"), confirm);
+});
 void start();
 renderNav("contributions");
 bootApp();

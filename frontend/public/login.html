@@ -13,15 +13,20 @@
 <link rel="manifest" href="/manifest.webmanifest" />
 <link rel="icon" href="/icon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
 <link rel="stylesheet" href="/app.css" />
 <title>로그인 — TeamFlow</title>
 <style>
 
-  #submit { background: #2563eb; color: #fff; border-color: #2563eb; font-weight: 600; margin-top: .5rem; }
-  #submit:disabled { opacity: .6; cursor: progress; }
-  #toggle { border: 0; color: var(--dim); margin-top: .75rem; text-decoration: underline; }
+  /* ⚠️ 예전에는 여기서 `background: #2563eb`(파랑)를 손으로 칠했습니다
+     (결함 59). 나머지 여덟 화면은 전부 `class="primary"`(청록
+     `--primary`)를 쓰는데, **사람이 제일 먼저 보는 화면만** 다른
+     색이었습니다. 색은 이제 `button.primary` 가 정합니다. */
+  #submit { margin-top: var(--sp-2); }
+  #submit:disabled { cursor: progress; }
+  #toggle { border: 0; color: var(--text-subtle); margin-top: var(--sp-3); text-decoration: underline; }
 
-  .error p { margin: .125rem 0; }
+  .error p { margin: var(--sp-1) 0; }
 
 </style>
 </head>
@@ -41,12 +46,12 @@
     <label>비밀번호
       <input id="password" type="password" autocomplete="current-password" />
     </label>
-    <button id="submit" type="submit">로그인</button>
+    <button id="submit" class="primary" type="submit">로그인</button>
   </form>
   <button id="toggle" type="button">처음이신가요? 가입하기</button>
 
   <p class="note">
-    비밀번호는 scrypt 로 해싱해 저장하고, 세션 토큰은 원문이 아니라
+    비밀번호는 scrypt로 해싱해 저장하고, 세션 토큰은 원문이 아니라
     해시만 남깁니다. 로그아웃하면 서버에서 세션을 끊습니다.
   </p>
 

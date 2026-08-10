@@ -147,11 +147,6 @@ export function safeApiBase(raw: string | null, pageOrigin: string): string {
   return target.origin + target.pathname.replace(/\/+$/, '');
 }
 
-/** 브라우저에서 쓰는 형태. 테스트는 위 순수 함수를 직접 부른다. */
-export function apiBaseFromLocation(search: string, pageOrigin: string): string {
-  return safeApiBase(new URLSearchParams(search).get('api'), pageOrigin);
-}
-
 /**
  * 서버 응답을 사람이 읽을 문구로.
  *
@@ -177,4 +172,62 @@ export function describeAuthFailure(status: number, detail?: string): string {
  */
 export function isSessionExpired(status: number): boolean {
   return status === 401;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 로그아웃 — **끊겼는지 확인하고 나서** 화면을 옮긴다
+//
+// 화면 둘이 이렇게 쓰고 있었습니다.
+//
+//     void fetch(`${apiBase}/api/auth/logout`, { method: 'POST' })
+//       .then(() => { location.href = '/login.html'; });
+//
+// `fetch` 는 500 이든 502 든 **정상적으로 resolve 합니다.** 그래서 서버가
+// 세션을 못 끊어도 화면은 로그인 화면으로 갑니다. 그 사람은 로그아웃했다고
+// 믿고 자리를 뜨는데 **세션 토큰은 살아 있습니다.**
+//
+// 이건 서버가 자기 docstring 에 적어 둔 바로 그 상황입니다 —
+//
+//     "쿠키만 지우면 토큰은 살아 있습니다. 그 토큰이 어딘가에 복사돼
+//      있으면 로그아웃한 줄 알고 있는 동안 남이 그 계정으로 들어옵니다."
+//
+// 서버는 `revoke()` 로 제대로 끊는데, 화면이 그 성공 여부를 안 봤습니다.
+// 학교 실습실 공용 PC 에서 이 회의 음성과 기여도 점수에 남이 들어옵니다.
+//
+// ⚠️ 그리고 네트워크가 끊기면 프로미스가 **거절**되고 `.catch` 가 없어서
+// 버튼이 죽은 것처럼 보입니다. 반대 방향의 같은 결함입니다.
+
+/** 로그아웃 요청의 결말. */
+export type LogoutResult =
+  /** 서버에서 세션이 끊겼다. 화면을 옮겨도 된다. */
+  | 'done'
+  /** 못 끊었다. **옮기면 거짓말이 된다.** */
+  | 'still-signed-in';
+
+/**
+ * HTTP 상태로 결말을 정한다. 요청 자체가 실패했으면 `null` 을 준다.
+ *
+ * ⭐ 401 은 **성공으로 봅니다.** 서버가 이 세션을 모른다는 뜻이므로 그
+ * 토큰으로는 아무도 못 들어옵니다. 여기서 실패로 처리하면 이미 만료된
+ * 사람이 로그아웃 버튼에 갇힙니다.
+ */
+export function logoutOutcome(status: number | null): LogoutResult {
+  if (status === null) return 'still-signed-in';
+  if (status === 401) return 'done';
+  if (status >= 200 && status < 300) return 'done';
+  return 'still-signed-in';
+}
+
+/**
+ * 못 끊었을 때 사람에게 할 말.
+ *
+ * **무엇이 사실인지**(아직 로그인돼 있다)와 **할 일**(다시 누르기)을
+ * 같이 말합니다. "로그아웃 실패" 만으로는 지금 상태가 뭔지 모릅니다.
+ */
+export function describeLogoutFailure(status: number | null): string {
+  const why =
+    status === null
+      ? '서버에 연결하지 못했습니다'
+      : `서버가 처리하지 못했습니다 (HTTP ${status})`;
+  return `로그아웃하지 못했습니다 — ${why}. 이 기기에 로그인 상태가 그대로 남아 있으니 다시 눌러 주세요.`;
 }

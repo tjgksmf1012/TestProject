@@ -40,6 +40,11 @@ import {
 } from '../lib/shell/bridge.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
+import { detailText } from '../lib/http/detail.ts';
+import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
+import { showNote } from '../lib/ui/failure.ts';
+import { whilePressed } from '../lib/ui/pending.ts';
+import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { renderNav } from './nav.ts';
 import type { SyncTransport } from '../lib/recording/client.ts';
@@ -117,6 +122,9 @@ let summary: RecordingSummary | null = null;
 
 // ── 화면 ────────────────────────────────────────────────────
 
+/** 마지막으로 만든 실험 표 한 줄. **화면 글자가 아니라 여기서** 복사한다 (결함 71). */
+let lastRow: string | null = null;
+
 function render(): void {
   const state = client.state;
   $('phase').textContent = PHASE_LABEL[state.phase] ?? state.phase;
@@ -154,7 +162,7 @@ const PHASE_LABEL: Record<string, string> = {
   idle: '준비 중',
   ready: '시작 가능',
   recording: '녹음 중',
-  interrupted: '⚠️ 화면이 가려짐',
+  interrupted: '화면이 가려짐',
   stopping: '마무리 중',
   completed: '완료',
   failed: '오류',
@@ -176,30 +184,60 @@ $('consent').addEventListener('click', () => {
  * 선언했고, 그래서 남의 트랙에 목소리를 올릴 수 있었다.
  */
 async function joinMeeting(id: string): Promise<void> {
-  const me = await fetch(`${apiBase}/api/auth/me`, { credentials: 'same-origin' });
+  // ⚠️ 읽기도 `tryGet` 을 거칩니다 (결함 102). 맨 `fetch` 는 닿지 못하면
+  // 던지는데, 이 함수는 `void joinMeeting(…)` 으로 불려 거부가 아무 데도
+  // 안 걸립니다 — 화면은 아무 말도 안 하고 녹음 버튼만 비활성입니다.
+  const me = await tryGet(`${apiBase}/api/auth/me`);
+  if (me === null) {
+    showNote($('join-note'), unreachableText('회의에 들어가지 못했습니다'));
+    return;
+  }
   if (!me.ok) {
     location.href = loginUrlFor(location.pathname + location.search);
     return;
   }
   $('who').textContent = `${((await me.json()) as Me).name} 님의 트랙으로 녹음합니다`;
+  // 다시 들어올 때 지난 실패가 남아 있으면 안 된다.
+  showNote($('join-note'), '');
 
-  const response = await fetch(`${apiBase}/api/meetings/${id}/tracks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      started_at: new Date().toISOString(),
-      device_label: navigator.userAgent.slice(0, 100),
+  const response = await trySend(() =>
+    fetch(`${apiBase}/api/meetings/${id}/tracks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        started_at: new Date().toISOString(),
+        device_label: navigator.userAgent.slice(0, 100),
+      }),
+      credentials: 'same-origin',
     }),
-    credentials: 'same-origin',
-  });
+  );
 
+  if (response === null) {
+    // 여기서 조용하면 녹음 버튼이 계속 비활성인 채로 남고, 사람은
+    // **폰이 고장난 줄** 안다.
+    // ⚠️ `#who` 를 덮지 않습니다 (결함 98). 거기는 **내가 누구인지**를
+    // 말하는 자리고, 실패로 덮으면 이름이 사라진 채 부제색으로 앉습니다.
+    showNote($('join-note'), unreachableText('트랙에 참가하지 못했습니다'));
+    return;
+  }
   if (isSessionExpired(response.status)) {
     location.href = loginUrlFor(location.pathname + location.search);
     return;
   }
   if (!response.ok) {
-    const detail = await response.text();
-    $('who').textContent = `트랙에 참가하지 못했습니다: ${detail}`;
+    // ⚠️ 예전에는 `await response.text()` 였습니다. 그러면 화면에
+    // **본문 JSON 이 그대로** 나옵니다 —
+    //
+    //     트랙에 참가하지 못했습니다: {"detail":"녹음에 동의하지 않았습니다"}
+    //
+    // 결함 51 과 같은 부류인데 그때 안 잡혔습니다. 그 수색은 `.json()` 뒤에
+    // 붙은 `as { detail?: string }` 를 찾았고, 여기는 `.text()` 라 안 걸렸습니다.
+    // **같은 파일 아래쪽(`finish`)은 이미 `detailText` 를 쓰고 있었습니다.**
+    const body = await response.json().catch(() => null);
+    showNote(
+      $('join-note'),
+      `트랙에 참가하지 못했습니다: ${detailText(body, `HTTP ${response.status}`)}`,
+    );
     return;
   }
 
@@ -254,8 +292,7 @@ $('start').addEventListener('click', async () => {
 async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
   if (!trackUrl) return; // 서버 없이 도는 로컬 실험 — 알릴 곳이 없다
 
-  $('finish-state').hidden = false;
-  $('finish-state').textContent = '녹음 종료를 서버에 알리는 중…';
+  showNote($('finish-state'), '녹음 종료를 서버에 알리는 중…', 'plain');
   $('finish-retry').hidden = true;
 
   const body = completeBody({
@@ -266,25 +303,29 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
     timesliceMs: result.timesliceMs,
   });
 
-  let response: Response;
-  try {
-    response = await fetch(`${trackUrl}/complete`, {
+  const response = await trySend(() =>
+    fetch(`${trackUrl}/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       body: JSON.stringify(body),
-    });
-  } catch {
-    $('finish-state').textContent = describeCompletionFailure(0);
+    }),
+  );
+  if (response === null) {
+    // ⚠️ 여기가 회색이면 사람은 **녹음이 잘 끝난 줄 알고 나갑니다.**
+    // 청크가 다 안 올라간 상태라 회의 녹음이 통째로 없어질 수 있습니다.
+    showNote($('finish-state'), describeCompletionFailure(0));
     $('finish-retry').hidden = false;
     return;
   }
 
   if (!response.ok) {
-    const detail = (await response.json().catch(() => ({}))) as { detail?: string };
-    $('finish-state').textContent = describeCompletionFailure(
-      response.status,
-      detail.detail,
+    // `detail` 은 문자열일 수도 있고 422 의 **객체 배열**일 수도 있습니다.
+    // 그대로 넘기면 화면에 `[object Object]` 가 나옵니다.
+    const body = await response.json().catch(() => null);
+    showNote(
+      $('finish-state'),
+      describeCompletionFailure(response.status, detailText(body, '')),
     );
     // 401 은 다시 눌러도 똑같다 — 로그인 화면으로 보낸다.
     if (isSessionExpired(response.status)) {
@@ -296,7 +337,7 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
   }
 
   const done = (await response.json()) as TrackCompleteResult;
-  $('finish-state').textContent = describeCompletion(done);
+  showNote($('finish-state'), describeCompletion(done), 'plain');
   $('finish-retry').hidden = true;
 
   // 로비로 돌아갈 길을 만들어 준다. 여기가 끝이 아니라 다음이 있다는
@@ -323,7 +364,13 @@ $('stop').addEventListener('click', async () => {
 });
 
 $('finish-retry').addEventListener('click', () => {
-  if (summary) void tellServerWeAreDone(summary);
+  // 답이 늦으면 사람은 "다시 시도" 를 연달아 누른다 (결함 89).
+  const done = summary;
+  if (done) {
+    void whilePressed($('finish-retry') as HTMLButtonElement, () =>
+      tellServerWeAreDone(done),
+    );
+  }
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -351,18 +398,32 @@ function showResult(result: RecordingSummary): void {
     : '<li class="ok">공백 없음</li>';
 
   // docs/09 실험 5 표에 그대로 붙여 넣을 수 있는 한 줄
-  $('row').textContent =
+  lastRow =
     `| ${navigator.userAgent.slice(0, 40)} | ` +
     `${($('wakelock') as HTMLInputElement).checked ? '있음' : '없음'} | ` +
     `${(result.timeline.coverage * 100).toFixed(1)}% | ` +
     `${(result.timeline.longestGapMs / 1000).toFixed(1)}초 | ` +
     `${[...new Set(result.timeline.gaps.map((g) => g.reason))].join(', ') || '-'} |`;
+  $('row').textContent = lastRow;
 }
 
-$('copy').addEventListener('click', async () => {
-  await navigator.clipboard.writeText($('row').textContent ?? '');
-  $('copy').textContent = '복사됨';
-  setTimeout(() => ($('copy').textContent = '표에 붙일 한 줄 복사'), 1500);
+$('copy').addEventListener('click', () => {
+  // ⚠️ **화면 글자가 아니라 데이터에서 복사합니다** (결함 71 과 같은 자리).
+  // `#row` 를 다시 읽으면, 화면이 아직 안 그려졌거나 다른 코드가 그 자리를
+  // 건드린 순간 엉뚱한 것이 클립보드로 갑니다.
+  if (lastRow === null) return;
+  // ⚠️ 그리고 **안 됐을 때 그렇다고 말합니다** (결함 81). 이 화면은 실기기
+  // 실험용이라 폰에서 `http://` 로 여는 경우가 많은데, 거기서는
+  // `navigator.clipboard` 가 아예 없습니다.
+  void copyText(lastRow, navigator.clipboard).then((outcome) => {
+    if (copySucceeded(outcome)) {
+      showNote($('copy-note'), '');
+      $('copy').textContent = describeCopy(outcome, '한 줄');
+      setTimeout(() => ($('copy').textContent = '표에 붙일 한 줄 복사'), 1500);
+      return;
+    }
+    showNote($('copy-note'), describeCopy(outcome, '한 줄'));
+  });
 });
 
 render();

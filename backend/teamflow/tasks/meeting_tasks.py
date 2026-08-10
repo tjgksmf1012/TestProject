@@ -18,12 +18,15 @@ from celery import Task
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from teamflow.clock import local_date
 from teamflow.config import get_settings
 from teamflow.db import models as m
 from teamflow.db.session import session_scope
+from teamflow.jobs import retention
 from teamflow.jobs.gpu_lock import GpuBusy
 from teamflow.meeting.resolve import TeamMemberName
 from teamflow.pipeline.meeting_pipeline import PipelineResult, Stage, process_meeting
+from teamflow.services import meeting_contribution_service
 from teamflow.tasks import app
 
 logger = logging.getLogger(__name__)
@@ -98,7 +101,17 @@ def process_meeting_task(self: Task, meeting_id: int) -> dict:
         meeting.status = "processing"
         project_id = meeting.project_id
         capture_mode = meeting.capture_mode
-        meeting_date = meeting.started_at.date()
+        # ⚠️ **팀 달력의 날짜여야 합니다** (결함 108). 이 값은 곧바로
+        # `resolve_deadline` 의 기준일이 되어 "내일"·"다음 주 월요일" 같은
+        # 표현을 실제 날짜로 바꿉니다. `.date()` 는 UTC 달력일이라 새벽에
+        # 시작한 회의에서 하루가 어긋납니다 — 요일까지 어긋나면 주 단위로
+        # 틀립니다.
+        #
+        #     회의 시작 2026-09-07 01:00 KST (월) = 09-06 16:00Z (일)
+        #     "내일까지"        UTC기준 09-07  팀달력 09-08
+        #     "다음 주 월요일"   UTC기준 09-07  팀달력 09-14
+        #                       ↑ 회의 당일이 마감이 된다
+        meeting_date = local_date(meeting.started_at)
 
         members = [
             TeamMemberName(user_id=user_id, name=name)
@@ -314,7 +327,21 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
                 "reviewed": len(reviewed),
             }
 
-        for model in (m.Utterance, m.MeetingTaskCandidate, m.Decision):
+        # ⚠️ **발화를 지우기 전에** 그 발화에서 나온 기여 이벤트를 지운다.
+        #
+        # 발화가 사라진 뒤에는 어떤 이벤트가 이 회의 것이었는지 알 방법이
+        # 없다. 안 지우면 재처리할 때마다 같은 회의가 한 번씩 더 계산돼
+        # **점수가 누적된다.**
+        meeting_contribution_service.forget_meeting_events(session, meeting_id)
+
+        # ⚠️ **`MeetingEvent` 도 여기 있어야 합니다** (결함 113). 미해결
+        # 사안은 이 표에 들어가는데 정리 목록에 없어서, 재처리할 때마다
+        # 같은 사안이 한 벌씩 더 쌓였습니다.
+        #
+        # 결함 111 **전에는 아무도 못 봤습니다** — 그 표를 읽는 화면이
+        # 0곳이었기 때문입니다. 화면에 올리자 중복이 그대로 보이게
+        # 됐습니다. **안 보이던 것이 안 틀렸던 것은 아닙니다.**
+        for model in (m.Utterance, m.MeetingTaskCandidate, m.Decision, m.MeetingEvent):
             for row in session.scalars(
                 select(model).where(model.meeting_id == meeting_id)
             ).all():
@@ -455,9 +482,41 @@ def persist_results_task(meeting_id: int, payload: dict) -> dict:
         # 승인 전에는 절대 tasks 로 넘어가지 않는다.
         meeting.status = "needs_review"
 
+        # ── 회의 → 기여 이벤트 ────────────────────────────────
+        #
+        # 기여도의 세 다리 중 마지막. 그 전까지 **운영 코드에 0곳**이라
+        # 운영에서 회의 기여도는 언제나 0이었다.
+        #
+        # 승인 전에 만드는 이유: 이건 **업무**가 아니라 **발언 기록**이다.
+        # 업무 후보는 사람이 승인해야 칸반에 올라가지만, "누가 무엇을
+        # 말했는가" 는 승인을 기다릴 성질이 아니다 — 회의록에 이미 있는
+        # 사실이고, 틀린 라벨은 발화 자체를 고쳐서 바로잡는다.
+        contribution = meeting_contribution_service.record_meeting(session, meeting)
+
+        # ── ② 원본 보관을 거부한 사람의 녹음 삭제 ─────────────
+        #
+        # `docs/07` §2.3 — "② 거부 → **전사 완료 후 원본 즉시 삭제.**
+        # 텍스트만 남김." 여기가 전사가 끝난 바로 그 지점입니다. 발화가
+        # 이미 저장됐으므로 원본이 없어도 회의록은 남습니다.
+        #
+        # ⚠️ 실패해도 회의 처리를 되돌리지 않습니다. 파일 하나를 못 지웠다고
+        # 방금 만든 회의록을 통째로 버리면 손해가 더 큽니다. 못 지운 것은
+        # 보고서에 남고, 보존기간이 지나면 매일 도는 잡이 다시 집어갑니다.
+        purged = retention.purge_unconsented_audio(
+            session,
+            meeting_id=meeting_id,
+            storage_root=get_settings().audio_storage_root,
+        )
+        if purged.failed:
+            logger.error(
+                "meeting=%s 원본 보관 거부분을 못 지웠습니다: %s", meeting_id, purged.failed
+            )
+
     return {
         "meeting_id": meeting_id,
         "status": "needs_review",
+        "audio_purged": len(purged.deleted_assets),
         "utterances": len(payload["segments"]),
         "candidates": len(payload["candidates"]),
+        "contribution": contribution,
     }

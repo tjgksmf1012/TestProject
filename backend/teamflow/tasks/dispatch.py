@@ -70,3 +70,26 @@ def enqueue_github_ingest(event_id: int) -> str | None:
     except Exception:
         logger.exception("github_event %s 수집을 큐에 넣지 못했습니다", event_id)
         return None
+
+
+def enqueue_github_backfill(project_id: int, limit: int) -> str | None:
+    """연결 전 활동을 채우는 잡을 CPU 큐에 넣는다.
+
+    ⚠️ 여기는 `retry=False` 가 **아닙니다.** 웹훅과 달리 이건 사람이 버튼을
+    눌러 시작합니다. 브로커가 잠깐 느릴 때 조용히 포기하면, 화면은
+    "가져오는 중" 이라고 말했는데 아무 일도 안 일어난 채로 끝납니다 —
+    그러고 나면 사람은 기여도가 왜 안 늘었는지 알 방법이 없습니다.
+
+    실패하면 None 을 돌려주고 로그를 남깁니다. 다시 누르면 됩니다 —
+    백필은 이미 있는 PR 을 건너뛰므로 두 번 눌러도 안전합니다.
+    """
+    try:
+        from teamflow.tasks.github_tasks import backfill_project_task
+
+        result = backfill_project_task.apply_async(
+            args=[project_id, limit], ignore_result=True
+        )
+        return str(result.id)
+    except Exception:
+        logger.exception("project %s 백필을 큐에 넣지 못했습니다", project_id)
+        return None

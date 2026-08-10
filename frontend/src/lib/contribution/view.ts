@@ -65,6 +65,8 @@ export interface TeamScore {
 export interface Person {
   user_id: number;
   name: string;
+  /** 역할 비중. 겸직이면 둘 이상이 들어 있다. */
+  role_shares?: Record<string, number>;
 }
 
 /**
@@ -169,7 +171,7 @@ export function readBeforeTheNumber(member: MemberScore): string[] {
     // ⚠️ "0" 이라고 쓰지 않는다. 측정하지 못한 것과 하지 않은 것은 다르다.
     lines.push(
       `${category} 기여를 **측정하지 못했습니다** — ${gap.reason ?? '사유 미기록'}. ` +
-        '0 으로 계산하지 않고 나머지 활동으로 추정했습니다.',
+        '0으로 계산하지 않고 나머지 활동으로 추정했습니다.',
     );
   }
 
@@ -209,7 +211,7 @@ export function teamWarnings(score: TeamScore, people: readonly Person[]): strin
     const names = unmeasured.map((m) => nameOf(m.user_id, people)).join(', ');
     warnings.push(
       `${names} 님은 일부 활동을 측정하지 못했습니다. ` +
-        '그 영역은 0 이 아니라 나머지 활동으로 추정한 값입니다.',
+        '그 영역은 0이 아니라 나머지 활동으로 추정한 값입니다.',
     );
   }
 
@@ -248,4 +250,52 @@ export function categoriesForDisplay(member: MemberScore): Category[] {
 /** 근거가 하나도 없는 숫자인가. 있으면 화면이 그렇게 말해야 한다. */
 export function hasNoEvidence(member: MemberScore): boolean {
   return member.categories.every((c) => c.event_count === 0);
+}
+
+/**
+ * 카드에 적을 역할.
+ *
+ * ⚠️ 서버의 `role` 은 **주 역할 하나**입니다. `blended_profile` 이
+ * `max(shares)` 로 고르는데, 개발 50% · 기획 50% 처럼 **동률이면 어느
+ * 쪽이 나올지 사전 순에 달립니다.** 그러면 같은 비중을 가진 두 사람이
+ * 서로 다른 이름표를 답니다.
+ *
+ * 더 나쁜 건 절반만 말한다는 것입니다. 기획 60% · 개발 40% 인 사람의
+ * 카드에 `planner` 만 적히면, 그 사람의 코드 활동이 왜 가중치가 낮은지
+ * 읽을 수 없습니다. 가중치를 정한 값 그대로 보여 줍니다.
+ *
+ * 비중을 모르면(명단을 못 받은 경우) 서버가 준 주 역할을 그대로 씁니다 —
+ * **지어내지 않습니다.**
+ */
+const ROLE_NAMES: Record<string, string> = {
+  developer: '개발',
+  planner: '기획',
+  designer: '디자인',
+};
+
+/**
+ * 역할의 한국어 이름.
+ *
+ * ⚠️ 역할 설정 화면은 &#34;개발/기획/디자인&#34; 이라고 쓰는데 기여도 카드는
+ * `developer` 라고 썼습니다. **같은 개념을 두 이름으로 부르면** 사람은
+ * 그게 같은 것인지 확신하지 못합니다.
+ *
+ * 모르는 값은 **그대로 돌려줍니다.** 서버가 역할을 하나 더 만들었는데
+ * 화면이 모르면, 지어낸 한국어보다 영어 식별자가 정직합니다 —
+ * `describeCategory` 와 같은 규칙입니다.
+ */
+export function roleLabel(key: string): string {
+  return ROLE_NAMES[key] ?? key;
+}
+
+export function roleOf(member: MemberScore, people: Person[]): string {
+  const shares = people.find((p) => p.user_id === member.user_id)?.role_shares;
+  const named = Object.entries(shares ?? {}).filter(([, v]) => v > 0);
+  if (named.length === 0) return roleLabel(member.role);
+  if (named.length === 1) return roleLabel(named[0]?.[0] ?? member.role);
+
+  return named
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, value]) => `${roleLabel(key)} ${Math.round(value * 100)}%`)
+    .join(' · ');
 }

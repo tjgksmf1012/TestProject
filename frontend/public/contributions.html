@@ -13,36 +13,52 @@
 <link rel="manifest" href="/manifest.webmanifest" />
 <link rel="icon" href="/icon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
 <link rel="stylesheet" href="/app.css" />
 <title>기여도 — TeamFlow</title>
 <style>
 
-  .warnings { margin: 1rem 0; padding: .75rem .9rem; border-radius: .5rem; font-size: .875rem; background: color-mix(in srgb, var(--warn) 12%, transparent); }
-  .warnings p { margin: .2rem 0; }
+  .warnings { margin: var(--sp-4) 0; padding: .75rem var(--sp-4); border-radius: .5rem; font-size: var(--fs-label); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .warnings p { margin: var(--sp-1) 0; }
 
-  .card { border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; margin-bottom: .9rem; }
-  .card header { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .5rem; }
-  .who { font-weight: 700; font-size: 1.0625rem; }
-  .role { font-size: .75rem; color: var(--dim); }
+  .card { border: 1px solid var(--line); border-radius: .75rem; padding: var(--sp-4); margin-bottom: var(--sp-4); }
+  .card header { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+  .who { font-weight: 700; font-size: var(--fs-title); }
+  .role { font-size: var(--fs-caption); color: var(--text-subtle); }
 
   /* 구간이 주인공이다. 단일 점수를 크게 띄우지 않는다. */
-  .range { font-size: 1.5rem; font-weight: 700; margin: 0; font-variant-numeric: tabular-nums; }
-  .track { position: relative; height: .5rem; border-radius: .25rem; background: color-mix(in srgb, currentColor 8%, transparent); margin: .4rem 0 .5rem; }
-  .track i { position: absolute; top: 0; bottom: 0; border-radius: .25rem; background: var(--bar); }
-  .conf { font-size: .8125rem; color: var(--dim); margin: 0; }
+  .range { font-size: var(--fs-number); font-weight: 700; margin: 0; font-variant-numeric: tabular-nums; }
+  /* 구간 막대는 공용 `.range` 로 옮겼습니다 (app.css).
+     캡이 구간의 양끝을 가리켜야 하는데, 여기 있던 규칙은 캡이
+     없어서 "19~29%" 가 그냥 채워진 막대로 보였습니다. */
+  .rangebar { margin: var(--sp-2) 0 .5rem; }
+  .conf { font-size: var(--fs-label); color: var(--text-subtle); margin: 0; }
 
-  .notes li { font-size: .8125rem; color: var(--warn); padding: .15rem 0; }
+  /* ⚠️ `::before` 로 마커를 찍으므로 목록 기본 불릿을 꺼야 한다.
+     안 끄면 "• · 동료평가…" 처럼 마커가 두 개 찍힌다. */
+  .notes, .cats, .flags { list-style: none; padding-left: 0; margin: var(--sp-2) 0 0; }
+  .notes li { font-size: var(--fs-label); color: var(--warn); padding: var(--sp-1) 0; }
   .notes li::before { content: "· "; }
+  .notes strong { color: var(--bad); }
 
-  .cats li { display: flex; align-items: center; gap: .5rem; font-size: .8125rem; padding: .2rem 0; }
-  .cat { min-width: 3.5rem; color: var(--dim); }
+  .cats li { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-label); padding: var(--sp-1) 0; }
+  .cat { min-width: 3.5rem; color: var(--text-subtle); }
   .catbar { flex: 1; height: .375rem; border-radius: .2rem; background: color-mix(in srgb, currentColor 8%, transparent); }
-  .catbar i { display: block; height: 100%; border-radius: .2rem; background: color-mix(in srgb, var(--bar) 65%, transparent); }
-  .catnum { min-width: 2.5rem; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .catbar i { display: block; height: 100%; border-radius: .2rem; background: color-mix(in srgb, var(--primary) 65%, transparent); }
+  .catnum { min-width: 2.5rem; text-align: right; color: var(--text-subtle); font-variant-numeric: tabular-nums; }
 
-  .flags li { font-size: .8125rem; color: var(--bad); padding: .15rem 0; }
+  .flags li { font-size: var(--fs-label); color: var(--bad); padding: var(--sp-1) 0; }
   .flags li::before { content: "⚑ "; }
-  .flagnote { font-size: .75rem; color: var(--dim); margin: .25rem 0 0; }
+  .flagnote { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-1) 0 0; }
+  /* 확정 표 — 한 줄 = 한 사람. 시스템 값과 확정값이 **나란히** 보여야
+     둘이 다르다는 사실이 눈에 들어온다. */
+  .final-row { display: grid; grid-template-columns: 1fr auto auto; gap: var(--sp-2);
+               align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
+  .final-row:first-child { border-top: 0; }
+  .final-row .sys { font-size: var(--fs-label); color: var(--text-subtle); }
+  .final-row input[type="number"] { width: 5.5rem; font-size: var(--fs-input); }
+  .final-row .why { grid-column: 1 / -1; }
+  .final-row .why input { width: 100%; font-size: var(--fs-input); }
     </style>
 </head>
 <body>
@@ -52,16 +68,36 @@
 
   <div id="warnings" class="warnings" hidden></div>
 
-  <div id="members"></div>
+  <div id="members" class="score-grid"></div>
 
   <p class="note" id="notice"></p>
+
+  <!-- ⭐ 확정. `docs/05` §5 는 "최종 점수를 시스템이 확정" 을 ❌ 로 금지한다.
+       그런데 확정을 남길 자리가 화면에도 API 에도 없어서, 배포 상태에서
+       존재하는 값은 시스템이 계산한 숫자뿐이었다 — 금지한 쪽으로 실제
+       동작한 것이다. `src/demo/contributions.ts` 가 채운다. -->
+  <section class="panel" id="final-panel">
+    <h2>확정</h2>
+    <p class="sub" id="final-state"></p>
+    <div id="finals"></div>
+    <div class="row" style="margin-top:.75rem">
+      <button id="confirm" class="primary">이 값으로 확정</button>
+    </div>
+    <p class="status" id="final-message"></p>
+    <p class="note">
+      시스템 값은 <strong>참고값</strong>입니다. 다르게 확정하려면 각 칸에 값을
+      적고 <strong>이유</strong>를 함께 적으세요 — 이유 없는 조정은 근거 없는
+      점수와 같습니다. 시스템 값은 지워지지 않고 나란히 남습니다.
+    </p>
+  </section>
+
   <p class="note">
     <strong>순위는 제공하지 않습니다.</strong> 목록은 이름 순이고, 점수 순으로
     정렬하지 않습니다 — 리더보드를 안 그려도 목록이 점수 순이면 사람들은 1등과
     꼴찌를 읽습니다.
     <br /><br />
     숫자는 구간입니다. 신뢰도가 낮을수록 구간이 넓어지고, 그 넓이가 "이 값을
-    얼마나 믿을 수 있는가" 를 말합니다. <strong>측정하지 못한 영역은 0 이
+    얼마나 믿을 수 있는가"를 말합니다. <strong>측정하지 못한 영역은 0이
     아닙니다</strong> — 나머지 활동으로 추정한 값이고, 그 사실을 카드에
     적어 둡니다.
   </p>

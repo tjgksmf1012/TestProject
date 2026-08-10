@@ -112,7 +112,25 @@ export class RecordingClient {
     this.#timesliceMs = options.timesliceMs ?? DEFAULT_TIMESLICE_MS;
     this.#clock = new ClockTracker(options.monotonic);
     this.#queue = new UploadQueue(options.upload, options.uploadOptions);
-    this.#dispatch({ type: 'SECURE_CONTEXT', secure: options.media.isSecureContext() });
+
+    // ⚠️ **생성자에서 `#dispatch` 를 부르면 안 됩니다.**
+    //
+    // `#dispatch` 는 `onStateChange` 를 부르는데, 그 시점에는 아직
+    // `const client = new RecordingClient(...)` 의 대입이 끝나지 않았습니다.
+    // 콜백이 `client.state` 를 읽으면 **`client` 가 undefined** 입니다.
+    //
+    // 실제로 그랬습니다 — 녹음 화면이 열리자마자
+    // `Cannot read properties of undefined (reading 'state')` 로 죽었고,
+    // 브라우저로 띄워 보고서야 알았습니다. 화면 코드에는 자동 테스트가
+    // 없고, 이 클래스의 테스트는 콜백 안에서 자기 자신을 읽지 않습니다.
+    //
+    // 호출자가 올바르게 대응할 방법이 없는 구조라 여기서 고칩니다.
+    // 초기 사실은 **이벤트가 아니라 초기 상태**로 넣습니다 — 아무도
+    // 아직 듣고 있지 않은 시점의 '변화' 는 변화가 아닙니다.
+    this.#state = reduce(this.#state, {
+      type: 'SECURE_CONTEXT',
+      secure: options.media.isSecureContext(),
+    });
   }
 
   get state(): SessionState {

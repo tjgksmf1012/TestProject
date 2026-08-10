@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from teamflow.audio.multitrack import DEFAULT_SAMPLE_RATE
-from teamflow.jobs.gpu_lock import FakeRedis, GpuBusy, acquire
+from teamflow.jobs.gpu_lock import LOCK_KEY, FakeRedis, GpuBusy, acquire
 from teamflow.meeting.llm import FakeLLMClient
 from teamflow.meeting.resolve import TeamMemberName
 from teamflow.meeting.schema import Decision, MeetingAnalysis, TaskCandidate
@@ -283,6 +283,99 @@ def test_gpu_lock_released_even_when_asr_fails():
     result = run(lock_backend=redis, transcriber=ExplodingTranscriber())
     assert not result.ok
     acquire(redis, job_id="next-meeting")  # 락이 풀려 있어야 한다
+
+
+@dataclass
+class SlowTranscriber:
+    """ASR 이 도는 동안 시계를 민다. 그리고 매번 남이 GPU 를 뺏어가는지 본다.
+
+    실제 상황을 그대로 옮긴 것입니다 — 1시간짜리 회의의 ASR 은 TTL(30분)보다
+    오래 걸리고, 그 사이 gpu 큐를 보는 다른 워커가 재시도를 계속합니다.
+    """
+
+    redis: FakeRedis
+    seconds_per_track: float
+    inner: FakeTranscriber = field(default_factory=FakeTranscriber)
+    stolen_by: list[str] = field(default_factory=list)
+
+    def transcribe(self, samples, sample_rate, *, language="ko"):
+        self.redis.advance(self.seconds_per_track)
+        try:
+            lease = acquire(self.redis, job_id="다른-회의")
+        except GpuBusy:
+            pass
+        else:
+            self.stolen_by.append(lease.token)
+        return self.inner.transcribe(samples, sample_rate, language=language)
+
+
+def test_gpu_lease_is_renewed_while_asr_runs():
+    """⭐ 락이 막으려던 바로 그 상황 — ASR 도중에 남이 같은 GPU 를 잡는 것.
+
+    갱신이 **해제 직전에 한 번**만 불리던 동안, 트랙 둘을 도는 40분짜리
+    ASR 은 TTL 30분을 그냥 넘겼습니다. 그 순간부터 다른 회의가 같은 GPU 를
+    잡고, 둘 다 모델을 VRAM 에 올려 CUDA OOM 으로 죽습니다. 그런데
+    파이프라인은 예외 없이 `done` 을 돌려줍니다 — 조용합니다.
+    """
+    redis = FakeRedis()
+    slow = SlowTranscriber(redis, seconds_per_track=1200.0)  # 트랙당 20분
+
+    result = run(lock_backend=redis, transcriber=slow, gpu_ttl=1800)
+
+    assert slow.stolen_by == [], "ASR 이 도는 중에 남이 GPU 를 잡았다"
+    assert result.ok
+
+
+def test_losing_the_lease_mid_asr_is_not_silent():
+    """⚠️ 뺏긴 뒤에도 조용히 `done` 을 돌려주면, 두 ASR 이 다툰 결과가
+    멀쩡한 회의록으로 저장된다. 실패로 만들어 큐가 다시 태우게 한다."""
+    redis = FakeRedis()
+
+    @dataclass
+    class Thief:
+        inner: FakeTranscriber = field(default_factory=FakeTranscriber)
+
+        def transcribe(self, samples, sample_rate, *, language="ko"):
+            # 남이 강제로 가져간 상황을 만든다 (TTL 만료 후 획득과 같은 결과).
+            redis.store[LOCK_KEY] = ("다른-회의:deadbeef", redis.now + 1800)
+            return self.inner.transcribe(samples, sample_rate, language=language)
+
+    result = run(lock_backend=redis, transcriber=Thief())
+
+    assert not result.ok
+    assert result.stage == Stage.FAILED
+    assert "GPU" in result.error
+
+
+def one_track_meeting() -> list[LoadedTrack]:
+    """모드 B — 한 기기가 방 전체를 녹음한다. 트랙이 **하나**뿐이다."""
+    room = quiet(6.0, seed=21)
+    voice = speech(2.0, seed=3)
+    room[0 : len(voice)] += voice
+    return [LoadedTrack(track_id=20, user_id=1, samples=room, sample_rate=SR)]
+
+
+def test_a_single_track_longer_than_the_ttl_is_caught_too():
+    """⚠️ 트랙 머리 갱신만으로는 **모드 B** 를 못 지킨다.
+
+    트랙이 하나면 머리 갱신은 딱 한 번, ASR 시작 전에 일어납니다. 그
+    한 번의 `transcribe` 호출이 통째로 TTL 보다 길면 그 안에서 만료되고,
+    다음 머리는 오지 않습니다. 그래서 ASR 이 끝난 뒤에 한 번 더 묻습니다.
+
+    이 경우를 안 만들어 본 동안 "ASR 후 확인" 을 지워도 테스트가 전부
+    통과했습니다 — 트랙이 둘이라 **다음 트랙 머리**가 대신 잡고 있었습니다.
+    """
+    redis = FakeRedis()
+    slow = SlowTranscriber(redis, seconds_per_track=2400.0)  # 한 트랙이 40분
+
+    result = run(
+        tracks=one_track_meeting(), lock_backend=redis, transcriber=slow, gpu_ttl=1800
+    )
+
+    assert slow.stolen_by, "이 시나리오는 ASR 도중 만료가 실제로 일어나야 한다"
+    assert not result.ok, "뺏긴 채로 만든 회의록을 성공으로 돌려주면 안 된다"
+    assert result.stage == Stage.FAILED
+    assert "GPU" in result.error
 
 
 # ══════════════════════════════════════════════════════════════

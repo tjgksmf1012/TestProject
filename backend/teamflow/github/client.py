@@ -93,6 +93,8 @@ class PullRequestDetails:
 class GitHubClient(Protocol):
     def pull_request_details(self, repo: str, number: int) -> PullRequestDetails: ...
 
+    def list_closed_pull_requests(self, repo: str, *, limit: int) -> list[Any]: ...
+
 
 class FakeGitHubClient:
     """테스트·시연용. 미리 넣어 둔 응답을 돌려준다.
@@ -101,9 +103,15 @@ class FakeGitHubClient:
     **그 뒤의 전 구간**을 실제로 돌려 보기 위한 것입니다.
     """
 
-    def __init__(self, responses: dict[tuple[str, int], PullRequestDetails] | None = None):
+    def __init__(
+        self,
+        responses: dict[tuple[str, int], PullRequestDetails] | None = None,
+        listings: dict[str, list[Any]] | None = None,
+    ):
         self.responses = responses or {}
+        self.listings = listings or {}
         self.calls: list[tuple[str, int]] = []
+        self.list_calls: list[tuple[str, int]] = []
 
     def pull_request_details(self, repo: str, number: int) -> PullRequestDetails:
         self.calls.append((repo, number))
@@ -111,6 +119,10 @@ class FakeGitHubClient:
             return self.responses[(repo, number)]
         except KeyError as exc:
             raise GitHubError(f"준비된 응답이 없습니다: {repo}#{number}", status=404) from exc
+
+    def list_closed_pull_requests(self, repo: str, *, limit: int) -> list[Any]:
+        self.list_calls.append((repo, limit))
+        return list(self.listings.get(repo, []))[:limit]
 
 
 class HttpGitHubClient:
@@ -210,6 +222,55 @@ class HttpGitHubClient:
             review_comments=self._paged(f"/repos/{repo}/pulls/{number}/comments"),
         )
 
+    def list_closed_pull_requests(self, repo: str, *, limit: int) -> list[Any]:
+        """닫힌 PR 목록. 백필이 "무엇이 있었는가" 를 알아내는 유일한 길입니다.
+
+        ⚠️ **`state=closed` 이지 `state=merged` 가 아닙니다.** GitHub 에는
+        merged 필터가 없습니다. 닫히기만 하고 병합 안 된 것이 섞여 오므로
+        `merged_at` 이 있는 것만 골라야 합니다 — 안 고르면 **거절된 PR 이
+        기여가 됩니다.** 거르는 것은 `backfill.plan` 이 합니다.
+
+        ⚠️ 정렬을 `updated` 로 겁니다. `created` 로 걸면 오래된 PR 에 최근
+        댓글이 달려도 뒤로 밀려 나가고, `merged_at` 순서와도 어긋납니다.
+        어차피 `backfill.plan` 이 병합 시각으로 다시 정렬하지만, 상한에
+        걸릴 때 **어떤 것이 후보에 들어오는지**가 여기서 정해집니다.
+        """
+        from teamflow.github.backfill import PullRequestSummary
+
+        rows: list[dict[str, Any]] = []
+        pages = max(1, min(MAX_FILE_PAGES, -(-limit // PER_PAGE)))
+        for page in range(1, pages + 1):
+            batch = self._get(
+                f"/repos/{repo}/pulls",
+                {
+                    "state": "closed",
+                    "sort": "updated",
+                    "direction": "desc",
+                    "per_page": PER_PAGE,
+                    "page": page,
+                },
+            ).json()
+            rows.extend(batch)
+            if len(batch) < PER_PAGE:
+                break
+            if len(rows) >= limit:
+                break
+
+        summaries: list[Any] = []
+        for row in rows[:limit]:
+            merged_at = _parse_iso(row.get("merged_at"))
+            summaries.append(
+                PullRequestSummary(
+                    number=row.get("number", 0),
+                    merged_at=merged_at,
+                    author_login=(row.get("user") or {}).get("login", ""),
+                    title=row.get("title") or "",
+                    body=row.get("body"),
+                    head_ref=(row.get("head") or {}).get("ref"),
+                )
+            )
+        return summaries
+
     def _paged(self, path: str) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for page in range(1, MAX_FILE_PAGES + 1):
@@ -226,6 +287,23 @@ class HttpGitHubClient:
             MAX_FILE_PAGES,
         )
         return rows
+
+
+def _parse_iso(value: str | None) -> Any:
+    """GitHub 의 `2026-05-01T12:00:00Z` → aware datetime. 못 읽으면 None.
+
+    ⚠️ 여기서 예외를 던지면 **PR 하나의 이상한 값이 백필 전체를 죽입니다.**
+    못 읽은 것은 "병합 안 됨" 으로 흘러가고, 그건 안 세는 쪽이라 안전합니다.
+    """
+    from datetime import datetime
+
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("병합 시각을 읽지 못했습니다: %r", value)
+        return None
 
 
 def _classify(response: httpx.Response, message: str) -> GitHubError:

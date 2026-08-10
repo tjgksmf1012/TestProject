@@ -13,62 +13,133 @@
 <link rel="manifest" href="/manifest.webmanifest" />
 <link rel="icon" href="/icon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
 <link rel="stylesheet" href="/app.css" />
 <title>회의 로비 — TeamFlow</title>
 <style>
 
-  section { border: 1px solid var(--line); border-radius: .625rem; padding: .875rem 1rem; margin-bottom: 1rem; }
 
-  li { display: flex; align-items: baseline; gap: .5rem; padding: .5rem 0; border-top: 1px solid var(--line); }
+  /* 참가자 한 명 = 한 줄. 이름·상태가 위, 커버리지 막대가 아래.
+     막대는 **한 줄을 통째로** 써야 42% 와 98% 의 차이가 보입니다. */
+  li { display: grid; grid-template-columns: 6rem 1fr; gap: var(--sp-1) var(--sp-2);
+       padding: var(--sp-2) 0; border-top: 1px solid var(--line); align-items: baseline; }
   li:first-child { border-top: 0; }
-  .name { font-weight: 600; min-width: 4.5rem; }
-  .state { font-size: .8125rem; color: var(--dim); flex: 1; }
+  .name { font-weight: 600; }
+  .state { font-size: var(--fs-label); color: var(--text-subtle); }
+  /* 트랙은 이름 칸 아래가 아니라 **상태 칸 아래**로. */
+  li .tl { grid-column: 2; }
+
+  /* 기기가 남긴 경고도 같은 칸으로 (결함 93).
+     ⚠️ 이걸 안 걸면 첫 칸(6rem)에 떨어져 **한 줄에 한두 낱말**씩
+     쪼개집니다. 넘침은 0px 이라 수치 검사는 통과하고, 캡처를 눈으로
+     봐야만 보입니다 — 이 PR 에서 반복해 겪은 그대로입니다.
+     상태 칸(2열)만 써도 180px 이라 여전히 좁아, **줄 전체**를 씁니다. */
+  li .warn { grid-column: 1 / -1; margin: 0; padding-left: 1.1em; }
+  li .warn li { display: list-item; grid-template-columns: none; padding: 0; border-top: 0; }
+
+  /* 시간축 — 트랙과 같은 격자에 맞춘다. 안 맞으면 눈금이 가리키는
+     시각이 트랙의 그 자리와 어긋난다. */
+  .axis { display: grid; grid-template-columns: 6rem 1fr; gap: 0 var(--sp-2);
+          margin: 0 0 var(--sp-1); font-size: var(--fs-caption); color: var(--text-subtle); }
+  .axis .marks { display: flex; justify-content: space-between; }
   .granted { color: var(--ok); } .refused { color: var(--bad); } .pending { color: var(--warn); }
   .broken .state, .at_risk .state { color: var(--warn); }
   .broken .state { color: var(--bad); }
 
-  button.primary:disabled { background: transparent; color: var(--dim); border-color: var(--line); font-weight: 400; cursor: not-allowed; }
-  button + button { margin-top: .5rem; }
+  button.primary:disabled { background: transparent; color: var(--text-subtle); border-color: var(--line); font-weight: 400; cursor: not-allowed; }
+  button + button { margin-top: var(--sp-2); }
  .row button { margin-top: 0; }
-  .blockers { margin: 0 0 .75rem; padding: .625rem .875rem; border-radius: .5rem; background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: .875rem; }
-  .blockers p { margin: .125rem 0; }
-  .status { font-size: .875rem; color: var(--dim); margin: .75rem 0 0; }
+  .blockers { margin: 0 0 var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: .5rem; background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: var(--fs-label); }
+  .blockers p { margin: var(--sp-1) 0; }
+
+  /* ②③ 은 녹음 동의와 **다른 무게**다. 테두리로 묶어 한 덩어리로 보이게 하되
+     시각적 비중은 낮춘다 — 주 동작은 아래 "동의합니다" 하나다. */
+  .extras { margin: var(--sp-3) 0 0; padding: var(--sp-2) var(--sp-3) var(--sp-3);
+            border: 1px solid var(--line); border-radius: var(--r-card); }
+  .extras legend { padding: 0 var(--sp-1); font-size: var(--fs-label); color: var(--text-subtle); }
+  /* ⚠️ 예전에는 여기에 `display: grid; grid-template-columns: auto 1fr` 이
+     있었습니다. 그리드 항목이 **셋**(체크박스 · 글자 · `.hint`)이라
+     `.hint` 가 1열로 떨어지고, 그 열이 설명 글 너비만큼 벌어졌습니다.
+     설명이 라벨 글자보다 **223px 왼쪽**에 찍혔습니다 (결함 72).
+     지금은 글자와 설명을 한 `<span>` 에 넣고 `app.css` 의
+     `label:has(> input[type=checkbox])` 규칙(flex)을 그대로 씁니다. */
+  .extras label { margin: var(--sp-2) 0 0; font-size: var(--fs-label); }
+  .extras .hint { display: block; color: var(--text-subtle); font-size: var(--fs-caption); }
     </style>
 </head>
 <body>
   <h1 id="title">회의 로비</h1>
-  <p class="sub" id="sub">불러오는 중…</p>
+  <!-- 비워 둔다. 정적 "불러오는 중…" 은 **언제나** 한 번 깜빡입니다.
+       로딩 표시는 `src/lib/ui/pending.ts` 가 200ms 뒤에 켭니다. -->
+  <p class="sub" id="sub"></p>
   <p class="sub" id="who"></p>
 
-  <section>
+  <section class="panel">
     <h2>동의</h2>
     <div id="blockers" class="blockers" hidden></div>
     <ul id="roster"></ul>
+
+    <!-- ②③ 은 **따로** 묻는다 (docs/07 §2.3). 녹음 동의에 묶어 버리면
+         "녹음은 되지만 원본은 남기기 싫다" 를 말할 방법이 없다.
+         거부해도 회의는 그대로 진행된다 — 그게 분리해서 받는 이유다. -->
+    <fieldset class="extras">
+      <legend>따로 받는 동의</legend>
+      <!-- ⚠️ 글자와 설명을 **한 상자에** 넣습니다. 형제로 두면 체크박스
+           옆 열이 아니라 그 아래 열로 떨어집니다 (결함 72). -->
+      <label><input type="checkbox" id="keep-audio" checked />
+        <span>원본 음성 파일 보관
+          <span class="hint">거부하면 회의록을 만든 뒤 바로 지웁니다</span></span></label>
+      <label><input type="checkbox" id="keep-voiceprint" checked />
+        <span>목소리 특징 저장
+          <span class="hint">거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다</span></span></label>
+    </fieldset>
+
     <div class="row" style="margin-top:.75rem">
       <button id="agree" class="primary">동의합니다</button>
       <button id="refuse">거부</button>
     </div>
     <p class="status" id="consent-message"></p>
+    <!-- ⚠️ 실패 문구는 **여기** 씁니다 — `#consent-message` 는 3초마다
+         도는 폴링이 서버 문장으로 덮습니다 (결함 90). 실제로 재 보니
+         1.5초에는 실패 문구가 있고 3.5초에는 "전원 동의했습니다" 로
+         바뀌어 있었습니다. -->
+    <p class="status" id="consent-note" hidden></p>
   </section>
 
-  <section>
+  <section class="panel">
     <h2>참가자 상태</h2>
+    <p id="axis" class="axis" hidden></p>
     <ul id="members"></ul>
     <p class="status" id="room-message"></p>
+    <!-- 처리가 어디까지 갔는지. 파이프라인이 Redis 에 쓰던 것을 처음으로
+         읽어 옵니다 — 그전까지 이 자리에 쓸 말이 없었습니다 (감사 #8). -->
+    <p class="status" id="progress"></p>
   </section>
 
-  <section>
+  <section class="panel">
     <button id="record" class="primary" disabled>녹음 화면으로</button>
+    <!-- 브라우저 통화 (docs/15). 각자 자기 PC 에서 회의할 때 여기로 들어간다. -->
+    <button id="call" disabled>통화로 회의하기</button>
     <button id="finish" hidden>강제 종료</button>
+    <!-- ⚠️ 실패 문구는 **여기** 씁니다. `#room-message` 는 3초마다 도는
+         폴링이 방 상태로 덮으므로, 거기 쓴 실패 문구는 3초 뒤에 조용히
+         사라집니다 (결함 90). 이 자리는 아무도 안 덮습니다. -->
+    <p class="status" id="room-note" hidden></p>
+    <!-- ⚠️ 실패한 회의는 **막다른 길이었습니다** (결함 114). 홈 화면은
+         "트랙이 온전한지 확인하세요" 라고 보내면서, 확인하고 나면 할 수
+         있는 일을 안 줬습니다. -->
+    <button id="reprocess" hidden>다시 처리하기</button>
+    <p class="status" id="reprocess-note" hidden></p>
     <button id="review" hidden>업무 후보 검토</button>
     <button id="kanban">칸반 보기</button>
     <button id="contrib">기여도 보기</button>
     <button id="logout">로그아웃</button>
+    <p class="status" id="logout-note" hidden></p>
   </section>
 
   <p class="note">
-    주소에는 <code>?meeting=1</code> 만 붙습니다. <strong>내가 누구인지는
-    서버가 세션에서 읽습니다</strong> — 예전에는 <code>?me=1</code> 로
+    주소에는 <code>?meeting=1</code>만 붙습니다. <strong>내가 누구인지는
+    서버가 세션에서 읽습니다</strong> — 예전에는 <code>?me=1</code>로
     스스로 선언했고, 그래서 누구나 남을 사칭할 수 있었습니다.
   </p>
 

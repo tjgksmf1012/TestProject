@@ -28,7 +28,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from teamflow.audio import assembly
@@ -47,6 +47,44 @@ class ConsentError(Exception):
 
 class TrackError(Exception):
     """트랙 상태가 맞지 않는다."""
+
+
+# ── 트랙 상태를 사람 말로 ────────────────────────────────────
+#
+# ⚠️ 예전에는 이렇게 나갔습니다 (결함 78).
+#
+#     트랙에 참가하지 못했습니다: 이미 종료된 트랙입니다 (status=completed)
+#
+# 두 가지가 잘못됐습니다.
+#
+#   1. **`status=completed` 는 우리 내부 이름**입니다. 사람은 그걸 보고
+#      앱이 고장 났다고 읽습니다 — 결함 73(본문 JSON)·76(`은(는)`)과
+#      같은 부류입니다. 화면에 나가는 글자는 사람의 말이어야 합니다.
+#   2. **다음 할 일이 없습니다.** 결함 48 에서 배운 것이 그것입니다 —
+#      나쁜 건 어색함이 아니라, 사람이 무엇을 해야 할지 모르는 것입니다.
+#
+# ⚠️ **모르는 상태는 지어내지 않습니다.** 아래 표에 없는 값이 오면 그 값을
+# 그대로 보여 줍니다. 그럴듯한 문장을 지어내면 사람은 없는 상황을 믿습니다
+# (결함 70 의 "모르는 역할은 그대로 둔다" 와 같은 규칙).
+# ⚠️ **상태 문장과 다음 할 일을 나눠 둡니다.** 무슨 일이 있었는지는 상태가
+# 정하지만, 무엇을 해야 하는지는 **어디서 막혔는지**가 정합니다. 녹음 화면을
+# 열다 막힌 사람과, 이미 녹음 중이던 폰이 청크를 더 보내다 막힌 경우는
+# 해야 할 일이 다릅니다.
+_TRACK_STATE_MESSAGE: dict[str, str] = {
+    "completed": "이 회의의 녹음은 이미 끝났습니다",
+    "unusable": "이 트랙은 녹음이 너무 많이 끊겨 쓸 수 없습니다",
+    "aborted": "이 트랙은 강제 종료됐습니다",
+}
+
+
+def describe_track_state(status: str) -> str:
+    """트랙 상태 → 사람이 읽을 한 줄. 모르는 값은 **그대로** 돌려준다."""
+    known = _TRACK_STATE_MESSAGE.get(status)
+    if known is not None:
+        return known
+    # 모르는 상태. 지어내지 않고 있는 그대로 — 그래야 다음 사람이 이 표에
+    # 빠진 값이 있다는 걸 알아챈다.
+    return f"이 트랙은 지금 녹음을 받을 수 없습니다 (상태: {status})"
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,7 +355,9 @@ def join_track(
 
     if track is not None:
         if track.status != "recording":
-            raise TrackError(f"이미 종료된 트랙입니다 (status={track.status})")
+            raise TrackError(
+                f"{describe_track_state(track.status)} — 로비에서 회의 상태를 확인하세요."
+            )
         return track
 
     track = m.MeetingTrack(
@@ -361,7 +401,9 @@ def store_chunk(
     """
     track = _load_track(session, meeting_id, track_id)
     if track.status != "recording":
-        raise TrackError(f"녹음이 끝난 트랙입니다 (status={track.status})")
+        raise TrackError(
+            f"{describe_track_state(track.status)} — 더 이상 녹음을 보낼 수 없습니다."
+        )
 
     # 매 청크마다 확인한다. 회의 도중에 철회할 수 있기 때문이다.
     # 본인 동의를 먼저 본다 — 혼자 철회한 경우 전체 검사만으로는 막히지 않는다
@@ -590,12 +632,65 @@ def register_audio_asset(
 
 
 def track_health(session: Session, meeting_id: int) -> list[dict]:
-    """회의의 트랙별 상태. 승인 화면에서 "이 트랙은 못 씁니다"를 띄우는 근거."""
+    """회의의 트랙별 상태. 승인 화면에서 "이 트랙은 못 씁니다"를 띄우는 근거.
+
+    ⭐ **녹음 중인 트랙에는 `coverage` 도 `total_gap_ms` 도 없습니다.**
+    둘 다 `complete_track` 에서만 채워지므로, 회의가 끝나기 전에는 NULL 입니다.
+    그동안 로비는 모든 트랙을 "녹음 중" 이라고 불렀습니다 — 폰이 죽어
+    조각이 한 개도 안 와도 똑같이 "녹음 중" 이었습니다 (결함 83).
+
+    로비의 존재 이유가 **회의 중에** 망가지는 폰을 찾는 것인데, 그걸 할 수
+    있는 시점이 회의가 끝난 뒤였습니다. 그때는 이미 그 회의를 못 살립니다.
+
+    그래서 **살아 있다는 신호**를 같이 줍니다.
+
+        chunk_count  지금까지 받은 조각 수
+        silent_ms    마지막 소식 이후 흐른 시간 (조각이 없으면 시작 시각 기준)
+
+    ⚠️ 시간을 **서버가 잽니다.** 조각의 `client_at_ms` 는 녹음하는 폰의
+    동기화된 시계 기준이고, 로비를 보는 사람의 브라우저 시계는 그것과
+    다를 수 있습니다. 화면에서 빼면 시계가 어긋난 만큼 전부 죽은 것으로
+    보이거나 전부 멀쩡한 것으로 보입니다 — 운행도표의 축 문제와 같습니다.
+
+    ⚠️ 판단은 여기서 하지 않습니다. 문턱값(`WARN_GAP_MS`)과 문구는 화면이
+    정합니다. 여기서는 **재기만** 합니다.
+    """
     tracks = session.scalars(
         select(m.MeetingTrack)
         .where(m.MeetingTrack.meeting_id == meeting_id)
         .order_by(m.MeetingTrack.id)
     ).all()
+
+    # 트랙마다 따로 세면 N번 왕복한다. 한 번에 가져온다.
+    track_ids = [t.id for t in tracks]
+    signs: dict[int, tuple[int, datetime | None]] = {}
+    if track_ids:
+        rows = session.execute(
+            select(
+                m.TrackChunk.track_id,
+                func.count(m.TrackChunk.id),
+                func.max(m.TrackChunk.received_at),
+            )
+            .where(m.TrackChunk.track_id.in_(track_ids))
+            .group_by(m.TrackChunk.track_id)
+        ).all()
+        signs = {row[0]: (row[1], row[2]) for row in rows}
+
+    now = now_utc()
+
+    def _silent_ms(track: m.MeetingTrack) -> int | None:
+        """마지막 소식 이후 흐른 밀리초. 녹음 중이 아니면 뜻이 없어 None."""
+        if track.status != "recording":
+            return None
+        _, last_at = signs.get(track.id, (0, None))
+        # 아직 한 조각도 안 왔으면 **참가한 순간**이 마지막 소식이다.
+        since = last_at or track.started_at
+        if since is None:
+            return None
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=UTC)
+        return max(0, int((now - since).total_seconds() * 1000))
+
     return [
         {
             "track_id": t.id,
@@ -608,6 +703,21 @@ def track_health(session: Session, meeting_id: int) -> list[dict]:
             ),
             "warnings": t.capture_warnings,
             "stop_reason": t.stop_reason,
+            # ── 아래 셋은 **화면이 어디가 끊겼는지 그리기 위한** 읽기
+            #    전용 값입니다 (docs/16 Stage E).
+            #
+            #    이게 없는 동안 화면은 "42% 가 비었다" 까지만 말할 수
+            #    있었습니다. 사람이 정말 알아야 하는 것은 **언제** 끊겼나
+            #    입니다 — 회의 중이면 지금 폰을 확인하면 되고, 끝난 뒤면
+            #    어느 결정이 그 구간에 있었는지 되짚을 수 있습니다.
+            #
+            #    ⚠️ 새 계산이 아닙니다. 전부 이미 저장돼 있던 값입니다.
+            "gaps": t.gaps or [],
+            "started_at": t.started_at,
+            "ended_at": t.ended_at,
+            # ── 살아 있다는 신호 (결함 83). 위 docstring 참고.
+            "chunk_count": signs.get(t.id, (0, None))[0],
+            "silent_ms": _silent_ms(t),
         }
         for t in tracks
     ]

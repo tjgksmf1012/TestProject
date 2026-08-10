@@ -37,6 +37,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from teamflow.clock import local_date
 from teamflow.contribution.events import CATEGORY_OF, EventType, SourceKind
 from teamflow.db import models as m
 
@@ -114,6 +115,8 @@ def _emit(
     source_id: int,
     occurred_at: datetime,
     magnitude: float = 1.0,
+    source_kind: SourceKind = SourceKind.TASK,
+    metadata: dict | None = None,
 ) -> bool:
     """기여 이벤트 하나. 이미 있으면 아무 일도 하지 않는다.
 
@@ -124,7 +127,7 @@ def _emit(
     """
     exists = session.scalar(
         select(m.ContributionEventRow.id).where(
-            m.ContributionEventRow.source_kind == SourceKind.TASK.value,
+            m.ContributionEventRow.source_kind == source_kind.value,
             m.ContributionEventRow.source_id == source_id,
             m.ContributionEventRow.event_type == event_type.value,
         )
@@ -139,20 +142,26 @@ def _emit(
             occurred_at=occurred_at,
             category=CATEGORY_OF[event_type].value,
             event_type=event_type.value,
-            source_kind=SourceKind.TASK.value,
+            source_kind=source_kind.value,
             source_id=source_id,
             magnitude=magnitude,
-            event_metadata={},
+            event_metadata=metadata or {},
         )
     )
     return True
 
 
-def _record_completion(session: Session, task: m.Task, completed_at: datetime) -> None:
+def _record_completion(
+    session: Session, task: m.Task, completed_at: datetime, *, actor_id: int | None = None
+) -> None:
     """완료가 기여도에 도달하는 유일한 경로.
 
     담당자가 없는 업무는 이벤트를 만들지 않습니다 — 누구의 기여인지 모르는
     완료를 아무에게나 붙일 수는 없습니다.
+
+    `actor_id` 는 **누른 사람**입니다. 점수는 담당자에게 가지만, 누가
+    눌렀는지를 이벤트에도 실어 둡니다 — 감사 로그와 기여 이벤트는 다른
+    표라, 둘 중 하나만 보고 판단하는 사람이 반드시 생깁니다.
     """
     if task.assignee_id is None:
         logger.info(
@@ -167,6 +176,7 @@ def _record_completion(session: Session, task: m.Task, completed_at: datetime) -
         event_type=EventType.TASK_COMPLETED,
         source_id=task.id,
         occurred_at=completed_at,
+        metadata={"completed_by": actor_id} if actor_id is not None else None,
     )
 
     # ⚠️ **마감 준수는 업무 하나당 딱 한 번만 판정한다.**
@@ -196,7 +206,18 @@ def _record_completion(session: Session, task: m.Task, completed_at: datetime) -
         # 마감일이 없으면 준수 여부를 물을 수 없다. **지켰다고 치지 않는다.**
         return
 
-    met = completed_at.date() <= deadline.date()
+    # ⚠️ **팀이 사는 달력으로 봅니다** (결함 107). `.date()` 는 UTC
+    # 달력일이라 한국(UTC+9)에서는 사람이 보는 날짜와 다릅니다.
+    #
+    #     완료 2026-09-04T16:00Z = KST 09-05 01:00   마감 09-04
+    #     UTC 로 보면   09-04 <= 09-04  → 제때  ← 틀림
+    #     KST 로 보면   09-05 >  09-04  → 늦음
+    #
+    # 칸반 화면(`kanban/board.ts` 의 `localDateOf`)은 이미 로컬 달력으로
+    # 고쳐 놓고 그 이유를 주석에 길게 적어 뒀습니다. **서버만 안 고쳐져
+    # 있었습니다** — 같은 업무를 칸반은 "늦음", 기여도는 "제때" 로
+    # 말했습니다. 사람은 어느 쪽을 믿을지 모릅니다.
+    met = local_date(completed_at) <= local_date(deadline)
     _emit(
         session,
         project_id=task.project_id,
@@ -251,6 +272,17 @@ def _change_deadline(
 
     마감을 계속 뒤로 미루면 준수율이 저절로 올라갑니다. 점수를 깎지는
     않지만, 변경 횟수를 남기지 않으면 그 조작이 보이지 않습니다.
+
+    ## ⚠️ 감사 표만으로는 탐지가 죽어 있었다
+
+    `task_deadline_changes` 행은 처음부터 남고 있었습니다. 그런데
+    `scoring._detect_integrity_flags` 는 그 표를 보지 않습니다 —
+    `DEADLINE_CHANGED` **기여 이벤트**를 셉니다. 만드는 곳이 0곳이라
+    `frequent_deadline_change` 플래그는 **한 번도 뜰 수 없었습니다.**
+    `docs/09` 실험 4 가 검증하겠다고 적어 둔 바로 그 플래그입니다.
+
+    둘 다 남깁니다. 목적이 다릅니다 — 감사 표는 **누가 언제 왜** 바꿨는지,
+    기여 이벤트는 **그 사람의 준수율을 그대로 읽어도 되는가**입니다.
     """
     new_value = (
         datetime.combine(deadline, datetime.min.time(), tzinfo=UTC) if deadline else None
@@ -259,16 +291,37 @@ def _change_deadline(
     if (old_value.date() if old_value else None) == (deadline or None):
         return
 
-    session.add(
-        m.TaskDeadlineChange(
-            task_id=task.id,
-            changed_by=actor_id,
-            old_deadline=old_value,
-            new_deadline=new_value,
-            reason=reason,
-        )
+    change = m.TaskDeadlineChange(
+        task_id=task.id,
+        changed_by=actor_id,
+        old_deadline=old_value,
+        new_deadline=new_value,
+        reason=reason,
     )
+    session.add(change)
     task.deadline = new_value
+
+    if task.assignee_id is None:
+        # 담당자가 없으면 흔들릴 준수율도 없다. 변경 이력은 위에서 이미 남겼다.
+        return
+
+    # `change.id` 가 있어야 변경마다 다른 근거를 가리킬 수 있다.
+    session.flush()
+    _emit(
+        session,
+        project_id=task.project_id,
+        # ⭐ **담당자**에게 붙인다. 바꾼 사람이 아니다.
+        # `_detect_integrity_flags` 가 이 사람의 met/missed 건수와 비교하므로,
+        # 바꾼 사람에게 붙이면 두 사람의 숫자를 섞은 비율이 된다.
+        # 남이 바꿨다는 사실은 아래 `changed_by` 로 근거에 남는다.
+        user_id=task.assignee_id,
+        event_type=EventType.DEADLINE_CHANGED,
+        source_kind=SourceKind.DEADLINE_CHANGE,
+        source_id=change.id,
+        occurred_at=_now(),
+        magnitude=0.0,
+        metadata={"task_id": task.id, "changed_by": actor_id},
+    )
 
 
 def _change_status(session: Session, task: m.Task, status: str, actor_id: int) -> None:
@@ -278,7 +331,28 @@ def _change_status(session: Session, task: m.Task, status: str, actor_id: int) -
     if status == DONE:
         completed_at = _now()
         task.completed_at = completed_at
-        _record_completion(session, task, completed_at)
+        # ⭐ **점수가 생기는 순간**을 기록한다.
+        #
+        # 예전에는 되돌리기(아래)에만 감사 로그가 있었습니다. 그런데 이
+        # 저장소는 아무나 남의 업무를 완료로 옮길 수 있는 것이 정상
+        # 동작이고, 기여 이벤트는 **담당자** 앞으로 생깁니다. 그래서
+        # 누가 눌렀는지가 어디에도 안 남았습니다 — 한 번도 되돌린 적이
+        # 없는 프로젝트는 `audit_logs` 가 통째로 비어 있었습니다.
+        #
+        # 밀어주기·대리 완료 의심이 제기됐을 때 답할 재료가 필요합니다.
+        # 시스템이 판정하지는 않습니다. 사람이 볼 수 있게만 합니다.
+        session.add(
+            m.AuditLog(
+                project_id=task.project_id,
+                actor_id=actor_id,
+                action="task_completed",
+                target=f"task:{task.id}",
+                before={"status": before},
+                after={"status": status},
+                at=completed_at,
+            )
+        )
+        _record_completion(session, task, completed_at, actor_id=actor_id)
         return
 
     if before == DONE:

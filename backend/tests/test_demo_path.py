@@ -901,3 +901,62 @@ def test_the_app_shell_is_actually_reachable(client: TestClient):
             assert kind in response.headers["content-type"], (
                 f"{path} → {response.headers['content-type']}"
             )
+
+
+# ══════════════════════════════════════════════════════════════
+# 대표 주장의 마지막 칸 — 관련 PR 이 업무 카드에 붙는가
+# ══════════════════════════════════════════════════════════════
+
+
+def test_the_demo_shows_a_pull_request_on_a_task_card(client: TestClient, seeded):
+    """⭐ docs/08 §5.1 의 필수 경로가 **화면에서 끝까지 보이는가.**
+
+        회의 녹음 → 자막 → 업무 후보 → 승인 → 칸반
+            → **관련 PR 병합 → 업무 카드에 수행 근거**   ← 이 테스트
+            → 기여도
+
+    이게 안 보이면 이 프로젝트는 "회의록 만드는 툴" 과 구별되지 않습니다.
+    """
+    board = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()
+
+    with_pulls = [task for task in board["tasks"] if task["github"]]
+    assert with_pulls, "시연 데이터에 PR 이 붙은 업무가 하나도 없습니다"
+
+    link = with_pulls[0]["github"][0]
+    assert link["confirmed"] is True
+    assert link["number"] == 17
+    assert link["actor_login"]
+    assert "TASK" in link["why"]
+
+
+def test_the_demo_task_that_came_from_a_meeting_is_the_one_with_the_pr(
+    client: TestClient, seeded
+):
+    """회의에서 나온 업무에 PR 이 붙어야 경로가 **한 줄로** 이어집니다.
+
+    손으로 만든 업무에만 PR 이 붙으면 회의와 GitHub 이 각각 따로 있는
+    것이지 이어진 게 아닙니다.
+    """
+    board = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()
+
+    linked = [task for task in board["tasks"] if task["github"]]
+    assert any(task["origin"] is not None for task in linked)
+
+
+def test_every_demo_task_tells_people_what_to_write(client: TestClient, seeded):
+    """표식을 안 보여주면 아무도 안 적고 자동 연결은 영영 안 일어납니다."""
+    board = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()
+
+    for task in board["tasks"]:
+        assert task["marker"] == f"TASK-{task['id']}"
+
+
+def test_seeding_twice_does_not_double_the_links(client: TestClient, seeded):
+    """`--reset` 을 두 번 해도 카드에 같은 PR 이 두 번 뜨면 안 됩니다."""
+    seed_demo.seed(reset=True)
+    login_as(client, seeded["user_ids"][0])
+
+    board = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()
+    for task in board["tasks"]:
+        numbers = [link["event_id"] for link in task["github"]]
+        assert len(numbers) == len(set(numbers))

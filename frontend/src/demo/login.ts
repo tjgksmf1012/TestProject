@@ -6,6 +6,8 @@
  * 여기는 DOM 배선일 뿐입니다.
  */
 
+import { detailText } from '../lib/http/detail.ts';
+import { describeUnexpected, trySend, unreachableText } from '../lib/http/send.ts';
 import { describeAuthFailure, safeApiBase, safeRedirect, validateLogin, validateSignup, type FormProblem } from '../lib/auth/session.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { bootApp } from './pwa.ts';
@@ -69,28 +71,36 @@ async function submit(): Promise<void> {
   try {
     const path = mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
     const body = mode === 'signup' ? { name, email, password } : { email, password };
-    const response = await fetch(`${apiBase}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      // 쿠키를 받으려면 필요하다. 같은 오리진이면 기본값도 same-origin 이지만,
-      // 개발 중에 ?api= 로 다른 주소를 붙였을 때 조용히 로그인이 안 되는 걸
-      // 막는다.
-      credentials: 'same-origin',
-    });
+    const response = await trySend(() =>
+      fetch(`${apiBase}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        // 쿠키를 받으려면 필요하다. 같은 오리진이면 기본값도 same-origin 이지만,
+        // 개발 중에 ?api= 로 다른 주소를 붙였을 때 조용히 로그인이 안 되는 걸
+        // 막는다.
+        credentials: 'same-origin',
+      }),
+    );
+    if (response === null) {
+      showMessage(unreachableText(mode === 'signup' ? '가입하지 못했습니다' : '로그인하지 못했습니다'));
+      return;
+    }
 
     if (!response.ok) {
-      const detail = await response
-        .json()
-        .then((b: { detail?: string }) => b.detail)
-        .catch(() => undefined);
+      // 422 는 `detail` 이 **객체 배열**입니다. 그대로 넘기면 로그인
+      // 실패 문구 자리에 `[object Object]` 가 나옵니다.
+      const body = await response.json().catch(() => null);
+      const detail = detailText(body, '') || undefined;
       showMessage(describeAuthFailure(response.status, detail));
       return;
     }
 
     location.href = next;
   } catch (err) {
-    showMessage(`연결하지 못했습니다: ${String(err)}`);
+    // 보내는 실패는 위에서 `null` 로 끝난다. 여기는 응답을 읽다 깨진 경우다.
+    console.error(err);
+    showMessage(describeUnexpected());
   } finally {
     button.disabled = false;
   }
@@ -107,9 +117,18 @@ $('toggle').addEventListener('click', () => {
 });
 
 // 이미 로그인돼 있으면 굳이 다시 묻지 않는다.
-void fetch(`${apiBase}/api/auth/me`, { credentials: 'same-origin' }).then((r) => {
-  if (r.ok) location.href = next;
-});
+// 이미 로그인돼 있으면 곧바로 넘겨 준다. **닿지 못하면 아무 말도 안 한다** —
+// 아직 아무것도 안 한 사람에게 "서버에 닿지 못했습니다" 를 띄우면 놀랍니다.
+//
+// ⚠️ 그래도 `.catch` 는 있어야 합니다 (결함 115). 없으면 오프라인에서
+// `TypeError: Failed to fetch` 가 **처리되지 않은 거부**로 남아 콘솔에
+// 빨간 줄이 뜹니다 — 로그인은 이 제품의 첫 화면입니다. 말을 안 하는 것과
+// 오류를 흘리는 것은 다릅니다.
+void fetch(`${apiBase}/api/auth/me`, { credentials: 'same-origin' })
+  .then((r) => {
+    if (r.ok) location.href = next;
+  })
+  .catch(() => undefined);
 
 render();
 

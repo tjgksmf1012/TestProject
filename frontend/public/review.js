@@ -1,3 +1,108 @@
+// src/lib/text/josa.ts
+var PAIRS = {
+  은는: ["은", "는"],
+  이가: ["이", "가"],
+  을를: ["을", "를"],
+  과와: ["과", "와"],
+  으로로: ["으로", "로"]
+};
+var DIGIT_HAS_FINAL = {
+  "0": true,
+  // 영
+  "1": true,
+  // 일
+  "2": false,
+  // 이
+  "3": true,
+  // 삼
+  "4": false,
+  // 사
+  "5": false,
+  // 오
+  "6": true,
+  // 육
+  "7": true,
+  // 칠
+  "8": true,
+  // 팔
+  "9": false
+  // 구
+};
+var LETTER_HAS_FINAL = {
+  a: false,
+  // 에이
+  b: false,
+  // 비
+  c: false,
+  // 씨
+  d: false,
+  // 디
+  e: false,
+  // 이
+  f: true,
+  // 에프
+  g: false,
+  // 지
+  h: false,
+  // 에이치
+  i: false,
+  // 아이
+  j: false,
+  // 제이
+  k: false,
+  // 케이
+  l: true,
+  // 엘
+  m: true,
+  // 엠
+  n: true,
+  // 엔
+  o: false,
+  // 오
+  p: false,
+  // 피
+  q: false,
+  // 큐
+  r: true,
+  // 알
+  s: true,
+  // 에스
+  t: false,
+  // 티
+  u: false,
+  // 유
+  v: false,
+  // 브이
+  w: false,
+  // 더블유
+  x: true,
+  // 엑스
+  y: false,
+  // 와이
+  z: false
+  // 지
+};
+function hasFinalConsonant(word) {
+  const trimmed = word.trim();
+  if (trimmed === "") return null;
+  const last = trimmed[trimmed.length - 1];
+  const code = last.codePointAt(0) ?? 0;
+  if (code >= 44032 && code <= 55203) {
+    return (code - 44032) % 28 !== 0;
+  }
+  if (last in DIGIT_HAS_FINAL) return DIGIT_HAS_FINAL[last];
+  const lower = last.toLowerCase();
+  if (lower in LETTER_HAS_FINAL) return LETTER_HAS_FINAL[lower];
+  return null;
+}
+function josa(word, pair) {
+  const [withFinal, withoutFinal] = PAIRS[pair];
+  return hasFinalConsonant(word) === true ? withFinal : withoutFinal;
+}
+function withJosa(word, pair) {
+  return `${word}${josa(word, pair)}`;
+}
+
 // src/lib/review/candidates.ts
 function emptyDraft() {
   return { decision: "pending" };
@@ -9,7 +114,14 @@ var BLOCKER_TEXT = {
   unknown_assignee: "담당자가 이 프로젝트의 팀원이 아닙니다",
   already_approved: "이미 승인된 후보입니다",
   already_rejected: "이미 거절된 후보입니다",
-  no_evidence: "근거 발화가 없습니다 — 회의에 없던 내용일 수 있습니다"
+  no_evidence: "근거 발화가 없습니다 — 회의에 없던 내용일 수 있습니다",
+  // 아래 둘은 화면이 만들지 않는다. 서버만 낸다.
+  //
+  // 서버 문구는 "이 회의에 없는 후보입니다" 인데, 그것만 읽으면 사람은
+  // 무엇을 해야 할지 모른다. 이 코드가 나오는 경우는 하나뿐이다 —
+  // 화면이 들고 있는 목록이 서버보다 낡았다. 그래서 할 일을 같이 적는다.
+  unknown_candidate: "이 회의에 없는 후보입니다 — 목록이 오래됐습니다. 새로 고쳐 주세요",
+  no_reviewer: "로그인 정보가 확인되지 않았습니다 — 다시 로그인해 주세요"
 };
 function describeBlocker(code) {
   return BLOCKER_TEXT[code] ?? code;
@@ -69,7 +181,7 @@ function buildReviewPayload(candidates2, drafts2, context2) {
       const blockers = approvalBlockers(candidate, draft, context2);
       if (blockers.length > 0) {
         throw new Error(
-          `후보 ${candidate.id} 를 승인할 수 없습니다: ${blockers.map((b) => b.message).join(", ")}`
+          `${withJosa(`후보 ${candidate.id}`, "을를")} 승인할 수 없습니다: ${blockers.map((b) => b.message).join(", ")}`
         );
       }
     }
@@ -130,6 +242,13 @@ function summarize(candidates2, drafts2, context2) {
 function canSubmit(summary) {
   return summary.blocked === 0 && summary.approving + summary.rejecting > 0;
 }
+function describeSubmitResult(approvedCount, taskIds) {
+  if (approvedCount === 0) {
+    return "검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다";
+  }
+  const numbers = taskIds.filter((id) => Number.isFinite(id));
+  return numbers.length === 0 ? `${approvedCount}건이 칸반에 등록됐습니다` : `${approvedCount}건이 칸반에 등록됐습니다 (task ${numbers.join(", ")})`;
+}
 
 // src/lib/auth/session.ts
 function loginUrlFor(pathWithQuery) {
@@ -173,6 +292,140 @@ function escapeHtml(text) {
 }
 function attr(value) {
   return `"${escapeHtml(String(value))}"`;
+}
+
+// src/lib/http/send.ts
+async function trySend(request) {
+  try {
+    return await request();
+  } catch {
+    return null;
+  }
+}
+function unreachableText(what) {
+  return `${what} — 서버에 닿지 못했습니다. 연결을 확인하고 다시 시도해 주세요.`;
+}
+function describeUnexpected() {
+  return "알 수 없는 오류가 생겼습니다 — 새로고침해도 같으면 알려 주세요.";
+}
+function tryGet(url) {
+  return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
+}
+
+// src/lib/ui/empty.ts
+function emptyHtml(state) {
+  const action = state.action ? `<a class="btn btn-primary" href="${escapeHtml(state.action.href)}">${escapeHtml(state.action.label)}</a>` : "";
+  return `<div class="empty-state"><p class="what">${escapeHtml(state.what)}</p><p class="why">${escapeHtml(state.why)}</p><p class="how">${escapeHtml(state.how)}</p>` + action + "</div>";
+}
+
+// src/lib/ui/failure.ts
+function failureHtml(failure) {
+  const code = failure.code === void 0 || failure.code === "" ? "" : `<p class="code">오류 코드 ${escapeHtml(String(failure.code))}</p>`;
+  const help = failure.help ? `<p class="why">${escapeHtml(failure.help)}</p>` : "";
+  const retry = failure.retry ? '<button type="button" class="retry">다시 불러오기</button>' : "";
+  return `<div class="failure-state" role="alert"><p class="what">${escapeHtml(failure.what)}</p>` + help + retry + code + "</div>";
+}
+
+// src/lib/ui/pending.ts
+var LOADING_DELAY_MS = 200;
+var browserTimers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (id) => {
+    clearTimeout(id);
+  }
+};
+async function whileLoading(work, show, hide, timers = browserTimers, delayMs = LOADING_DELAY_MS) {
+  let shown = false;
+  const timer = timers.set(() => {
+    shown = true;
+    show();
+  }, delayMs);
+  try {
+    return await work;
+  } finally {
+    timers.clear(timer);
+    if (shown) hide();
+  }
+}
+async function whilePressed(button, run) {
+  const was = button.disabled;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  try {
+    return await run();
+  } finally {
+    button.disabled = was;
+    button.removeAttribute("aria-busy");
+  }
+}
+
+// src/lib/review/minutes.ts
+function atText(startMs) {
+  if (!Number.isFinite(startMs) || startMs <= 0) return null;
+  const total = Math.floor(startMs / 1e3);
+  const mm = Math.floor(total / 60);
+  const ss = total % 60;
+  return `${mm}:${String(ss).padStart(2, "0")}`;
+}
+function describeIssue(issue) {
+  return {
+    content: issue.content.trim(),
+    at: atText(issue.start_ms),
+    evidenceCount: (issue.evidence_utterance_ids ?? []).length
+  };
+}
+function issueViews(issues) {
+  return issues.map(describeIssue).filter((v) => v.content !== "");
+}
+function agendaItems(agenda) {
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const raw of agenda) {
+    const item = raw.trim();
+    if (item === "" || seen.has(item)) continue;
+    seen.add(item);
+    out.push(item);
+  }
+  return out;
+}
+function hasExtraMinutes(minutes) {
+  return agendaItems(minutes.next_agenda).length > 0 || issueViews(minutes.unresolved_issues).length > 0;
+}
+
+// src/lib/time/calendar.ts
+var TEAM_TIMEZONE = "Asia/Seoul";
+var FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TEAM_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit"
+});
+function isoFrom(at) {
+  const parts = new Map(FORMATTER.formatToParts(at).map((p) => [p.type, p.value]));
+  return `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}`;
+}
+function todayInTeamCalendar(now = /* @__PURE__ */ new Date()) {
+  return isoFrom(now);
+}
+
+// src/lib/ui/skeleton.ts
+var bar = (width, kind = "") => `<span class="sk${kind ? ` sk-${kind}` : ""}" style="width:${width}%"></span>`;
+var wrap = (inner) => `<div class="sk-wrap" aria-hidden="true">${inner}</div>`;
+var ROW_WIDTHS = [86, 64, 74, 58, 80];
+function rows(count = 3) {
+  const list = Array.from(
+    { length: Math.max(1, count) },
+    (_, i) => `<div class="sk-line">${bar(ROW_WIDTHS[i % ROW_WIDTHS.length] ?? 70, "line")}</div>`
+  ).join("");
+  return wrap(list);
+}
+function showSkeleton(element, html) {
+  element.setAttribute("aria-busy", "true");
+  element.innerHTML = html;
+}
+function clearSkeleton(element) {
+  element.removeAttribute("aria-busy");
+  if (element.innerHTML.includes('class="sk')) element.innerHTML = "";
 }
 
 // src/lib/nav/links.ts
@@ -235,10 +488,11 @@ function missingLinks(context2) {
   return notes;
 }
 var TAB_ICON = {
-  home: "🏠",
-  kanban: "📋",
-  contributions: "📊",
-  project: "⚙️"
+  home: "home",
+  kanban: "board",
+  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
+  contributions: "track",
+  project: "sliders"
 };
 var TAB_ORDER = ["home", "kanban", "contributions", "project"];
 function navTabs(context2) {
@@ -257,7 +511,7 @@ function navTabs(context2) {
     return {
       screen,
       label: LABEL[screen],
-      icon: TAB_ICON[screen] ?? "•",
+      icon: TAB_ICON[screen] ?? "sliders",
       // 못 가는 탭에 주소를 주면 눌렸을 때 `?project=null` 로 간다.
       href: enabled ? href : "",
       current: context2.current === screen,
@@ -276,6 +530,26 @@ function contextFromSearch(current, search) {
   return { current, projectId: read("project"), meetingId: read("meeting") };
 }
 
+// src/lib/nav/icons.ts
+var PATHS = {
+  // 지붕(3,11)-(12,3)-(21,11) + 몸통 x 5.5~18.5, y 9.5~20
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5.5 9.5V20h13V9.5"/>',
+  // 보드 3~21 × 4~20, 세로 칸막이 x=9·15 — 열 셋이 칸반의 전부다
+  board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
+  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
+  // 가운데 줄은 **끊겨 있습니다.** 그 구멍이 이 화면의 값어치입니다.
+  track: '<path d="M4 6h13"/><path d="M4 12h5M12 12h6"/><path d="M4 18h10"/>',
+  // 말풍선 — 칸반 카드의 "회의에서 나온 업무" 표시.
+  // ⚠️ 예전에는 `🗣` 였습니다. 그 자리는 **이 제품의 대표 주장이 카드에
+  // 보이는 곳**이라, 기기마다 다른 그림이 나오면 안 됩니다.
+  meeting: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 16v4l4-4"/>',
+  // 슬라이더 — 손잡이가 있어 트랙 아이콘과 헷갈리지 않는다
+  sliders: '<path d="M4 8h16M4 16h16"/><circle cx="14" cy="8" r="2.5"/><circle cx="9" cy="16" r="2.5"/>'
+};
+function iconSvg(name) {
+  return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + PATHS[name] + "</svg>";
+}
+
 // src/demo/nav.ts
 function renderNav(current) {
   const context2 = contextFromSearch(current, location.search);
@@ -286,7 +560,7 @@ function renderNav(current) {
       const disabled = tab.enabled ? "" : ' aria-disabled="true"';
       const marked = tab.current ? ' aria-current="page"' : "";
       const title = tab.blockedReason ? ` title="${escapeHtml(tab.blockedReason)}"` : "";
-      return `<a${href}${disabled}${marked}${title}><span class="ico" aria-hidden="true">${escapeHtml(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
+      return `<a${href}${disabled}${marked}${title}><span class="ico">${iconSvg(tab.icon)}</span><span>${escapeHtml(tab.label)}</span></a>`;
     }).join("");
   }
   const host = document.getElementById("nav");
@@ -314,7 +588,7 @@ function describeInstall(state) {
     case "promptable":
       return "앱으로 설치하면 주소창 없이 전체 화면으로 열리고, 홈 화면에서 바로 들어옵니다.";
     case "manual-ios":
-      return '아이폰에서는 공유 버튼(⬆️) → "홈 화면에 추가" 를 누르면 앱처럼 쓸 수 있습니다.';
+      return '아이폰에서는 화면 아래 가운데의 공유 버튼(상자에서 위로 나가는 화살표) → "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있습니다.';
     case "installed":
       return "";
     case "in-shell":
@@ -400,12 +674,7 @@ var drafts = /* @__PURE__ */ new Map();
 var candidates = [];
 var members = [];
 var meeting = null;
-var context = { memberIds: [], today: todayIso() };
-function todayIso() {
-  const now = /* @__PURE__ */ new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
+var context = { memberIds: [], today: todayInTeamCalendar() };
 var $ = (id) => {
   const el = document.getElementById(id);
   if (!el) throw new Error(`요소 없음: ${id}`);
@@ -424,16 +693,18 @@ function update(id, patch) {
 function goToLogin() {
   location.href = loginUrlFor(location.pathname + location.search);
 }
-var get = (path) => fetch(`${apiBase}${path}`, { credentials: "same-origin" });
-async function load() {
+var get = (path) => tryGet(`${apiBase}${path}`);
+async function fetchAll() {
   const [candidateRes, memberRes, meetingRes] = await Promise.all([
     get(`/api/meetings/${meetingId}/candidates`),
     get(`/api/meetings/${meetingId}/members`),
     get(`/api/meetings/${meetingId}`)
   ]);
+  if (candidateRes === null || memberRes === null || meetingRes === null) {
+    return "unreachable";
+  }
   if ([candidateRes, memberRes, meetingRes].some((r) => isSessionExpired(r.status))) {
-    goToLogin();
-    return;
+    return "expired";
   }
   if (!candidateRes.ok) throw new Error(`후보 조회 실패 (HTTP ${candidateRes.status})`);
   if (!memberRes.ok) throw new Error(`팀원 조회 실패 (HTTP ${memberRes.status})`);
@@ -441,22 +712,98 @@ async function load() {
   candidates = sortForReview(await candidateRes.json());
   members = await memberRes.json();
   meeting = await meetingRes.json();
-  context = { memberIds: members.map((m) => m.user_id), today: todayIso() };
+  context = { memberIds: members.map((m) => m.user_id), today: todayInTeamCalendar() };
+  return "ok";
+}
+async function load() {
+  const result = await whileLoading(
+    fetchAll(),
+    () => showSkeleton($("list"), rows(3)),
+    () => clearSkeleton($("list"))
+  );
+  if (result === "expired") {
+    goToLogin();
+    return;
+  }
+  if (result === "unreachable") {
+    $("list").innerHTML = failureHtml({
+      what: unreachableText("업무 후보를 불러오지 못했습니다."),
+      retry: true
+    });
+    $("list").querySelector(".retry")?.addEventListener("click", () => {
+      void load();
+    });
+    return;
+  }
   render();
+}
+function renderMinutes() {
+  const agenda = agendaItems(meeting?.next_agenda ?? []);
+  const issues = issueViews(meeting?.unresolved_issues ?? []);
+  $("agenda-block").hidden = agenda.length === 0;
+  $("agenda").innerHTML = agenda.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  $("issues-block").hidden = issues.length === 0;
+  $("issues").innerHTML = issues.map((view) => {
+    const at = view.at === null ? "" : `<span class="at">${escapeHtml(view.at)}</span>`;
+    const why = view.evidenceCount === 0 ? '<span class="why none">근거 발화 없음</span>' : `<span class="why">근거 발화 ${view.evidenceCount}건</span>`;
+    return `<li>${at}<span class="what">${escapeHtml(view.content)}</span>${why}</li>`;
+  }).join("");
+  $("minutes").hidden = !hasExtraMinutes({
+    next_agenda: meeting?.next_agenda ?? [],
+    unresolved_issues: meeting?.unresolved_issues ?? []
+  });
 }
 function render() {
   const summary = summarize(candidates, drafts, context);
   const text = meeting?.summary ?? "";
   $("meeting-summary").hidden = text === "";
   $("meeting-summary").textContent = text;
+  renderMinutes();
   $("counts").textContent = `전체 ${summary.total} · 승인 ${summary.approving} · 거절 ${summary.rejecting} · 미결정 ${summary.pending}`;
   $("attention").hidden = summary.needsAttention === 0;
   $("attention").textContent = `확신도가 낮은 후보 ${summary.needsAttention}건이 아직 결정되지 않았습니다. 근거 발화를 확인하세요.`;
   $("blocked").hidden = summary.blocked === 0;
   $("blocked").textContent = `승인하려는 후보 ${summary.blocked}건에 빠진 정보가 있습니다.`;
   $("submit").disabled = !canSubmit(summary);
+  if (candidates.length === 0) {
+    $("list").innerHTML = emptyHtml(emptyReviewState());
+    return;
+  }
   $("list").innerHTML = candidates.map(cardHtml).join("");
   wireCards();
+}
+function emptyReviewState() {
+  const status = meeting?.status ?? "";
+  const what = "여기에는 회의에서 뽑은 업무 후보가 나옵니다.";
+  if (status === "queued" || status === "processing") {
+    return {
+      what,
+      why: "녹음을 아직 처리하는 중입니다.",
+      how: "끝나면 여기에 후보가 나옵니다. 잠시 뒤에 새로고침하세요."
+    };
+  }
+  if (status === "failed") {
+    return {
+      what,
+      why: "녹음 처리에 실패해서 후보를 만들지 못했습니다.",
+      how: "로비에서 트랙이 온전한지 확인하세요 — 끊긴 구간이 많으면 처리가 실패합니다.",
+      action: { label: "트랙 상태 보기", href: `/lobby.html?meeting=${meetingId}` }
+    };
+  }
+  if (status === "confirmed") {
+    return {
+      what,
+      why: "이 회의의 후보는 모두 검토를 마쳤습니다.",
+      how: "승인한 업무는 칸반에 있습니다.",
+      action: { label: "칸반 보기", href: `/kanban.html?meeting=${meetingId}` }
+    };
+  }
+  return {
+    what,
+    why: "처리는 끝났는데 업무로 뽑을 만한 발언이 없었습니다 — 고장이 아닙니다.",
+    how: "회의에서 누가·무엇을·언제까지 하기로 했는지 말하면 그 발언이 후보가 됩니다.",
+    action: { label: "칸반 보기", href: `/kanban.html?meeting=${meetingId}` }
+  };
 }
 function cardHtml(candidate) {
   const draft = draftOf(candidate.id);
@@ -543,38 +890,51 @@ function wireCards() {
     card.querySelector(".clear")?.addEventListener("click", decide("pending"));
   }
 }
-$("submit").addEventListener("click", async () => {
-  let payload;
-  try {
-    payload = buildReviewPayload(candidates, drafts, context);
-  } catch (error) {
-    alert(error instanceof Error ? error.message : String(error));
-    return;
-  }
-  const response = await fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-    credentials: "same-origin"
+$("submit").addEventListener("click", () => {
+  void whilePressed($("submit"), async () => {
+    let payload;
+    try {
+      payload = buildReviewPayload(candidates, drafts, context);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    const response = await trySend(
+      () => fetch(`${apiBase}/api/meetings/${meetingId}/candidates/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "same-origin"
+      })
+    );
+    if (response === null) {
+      $("result").textContent = unreachableText("제출하지 못했습니다");
+      $("result").className = "bad";
+      return;
+    }
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    if (!response.ok) {
+      $("result").textContent = `제출 실패 (HTTP ${response.status})`;
+      $("result").className = "bad";
+      return;
+    }
+    const result = await response.json();
+    const failed = Object.entries(result.failures);
+    $("result").className = failed.length ? "bad" : "ok";
+    $("result").textContent = failed.length ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` + failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join("/")}`).join(" · ") : describeSubmitResult(result.approved_count, result.approved_task_ids);
+    drafts.clear();
+    await load();
   });
-  if (isSessionExpired(response.status)) {
-    goToLogin();
-    return;
-  }
-  if (!response.ok) {
-    $("result").textContent = `제출 실패 (HTTP ${response.status})`;
-    $("result").className = "bad";
-    return;
-  }
-  const result = await response.json();
-  const failed = Object.entries(result.failures);
-  $("result").className = failed.length ? "bad" : "ok";
-  $("result").textContent = failed.length ? `${result.approved_count}건 승인, ${failed.length}건 실패: ` + failed.map(([id, codes]) => `#${id} ${codes.map(describeBlocker).join("/")}`).join(" · ") : `${result.approved_count}건이 칸반에 등록됐습니다 (task ${result.approved_task_ids.join(", ")})`;
-  drafts.clear();
-  await load();
 });
 async function start() {
   const response = await get("/api/auth/me");
+  if (response === null) {
+    await load();
+    return;
+  }
   if (!response.ok) {
     goToLogin();
     return;
@@ -584,8 +944,15 @@ async function start() {
   await load();
 }
 start().catch((error) => {
-  $("result").className = "bad";
-  $("result").textContent = error instanceof Error ? error.message : String(error);
+  console.error("업무 후보 조회 실패", error);
+  $("list").innerHTML = failureHtml({
+    what: "업무 후보를 불러오지 못했습니다.",
+    help: describeUnexpected(),
+    retry: true
+  });
+  $("list").querySelector(".retry")?.addEventListener("click", () => {
+    void load();
+  });
 });
 renderNav("review");
 bootApp();

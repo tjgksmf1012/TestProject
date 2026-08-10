@@ -1,15 +1,20 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { deepStrictEqual, strictEqual } from 'node:assert/strict';
 
 import {
   MIN_USABLE_COVERAGE,
+  WARN_GAP_MS,
   canStart,
+  captureAlerts,
   consentStateOf,
   describeConsent,
+  isSilentTooLong,
   memberStatuses,
   roomStatus,
+  savedExtraConsents,
   startBlockers,
   summarizeConsent,
+  type MemberStatus,
   type RosterEntry,
   type TrackHealth,
 } from './room.ts';
@@ -265,5 +270,155 @@ describe('roomStatus', () => {
       track(3, { status: 'aborted', coverage: 0 }),
     ]);
     strictEqual(roomStatus(statuses).broken, 2);
+  });
+});
+
+describe('회의 중에 폰이 죽었는가 (결함 83)', () => {
+  // ⭐ 이 저장소의 대표 실패 방식이 로비에서 일어났습니다.
+  //
+  // `verdictOf` 의 `broken`·`at_risk` 가지는 `coverage` 와 `total_gap_ms`
+  // 를 보는데, 그 둘은 `complete_track` 에서만 채워집니다. 즉 **회의가
+  // 끝나야** 값이 생깁니다. 그동안 로비는 모든 트랙을 "녹음 중" 이라고
+  // 불렀습니다 — 조각이 한 개도 안 와도 똑같이.
+  //
+  // 로비의 존재 이유가 회의 **중에** 망가지는 폰을 찾는 것인데, 그걸 할
+  // 수 있는 시점이 회의가 끝난 뒤였습니다. 그때는 못 살립니다.
+  const recording = (extra: Partial<TrackHealth>): TrackHealth => ({
+    track_id: 1,
+    user_id: 3,
+    status: 'recording',
+    coverage: null,
+    total_gap_ms: null,
+    capture_confidence: null,
+    warnings: [],
+    stop_reason: null,
+    ...extra,
+  });
+
+  const roster = [{ user_id: 3, name: '박지원', recording: true }];
+
+  const only = (track: TrackHealth): MemberStatus => {
+    const [status] = memberStatuses(roster as never, [track]);
+    if (status === undefined) throw new Error('상태가 없습니다');
+    return status;
+  };
+
+  it('⭐ 조각이 한 개도 안 오면 "녹음 중" 이라고 하지 않는다', () => {
+    const status = only(recording({ chunk_count: 0, silent_ms: 90_000 }));
+    strictEqual(status.verdict, 'at_risk');
+    strictEqual(status.message.includes('한 조각도 안 왔습니다'), true);
+    strictEqual(status.message.includes('녹음을 시작했는지'), true);
+  });
+
+  it('⭐ 오다가 끊긴 것은 다른 말을 한다 — 할 일이 다르다', () => {
+    const status = only(recording({ chunk_count: 42, silent_ms: 75_000 }));
+    strictEqual(status.verdict, 'at_risk');
+    strictEqual(status.message.includes('안 올라옵니다'), true);
+    strictEqual(status.message.includes('폰 화면을 켜'), true);
+  });
+
+  it('막 참가해 아직 조용한 것은 경고하지 않는다', () => {
+    // 문턱(WARN_GAP_MS) 아래면 정상입니다. 참가 직후마다 경고를 띄우면
+    // 사람이 이 경고를 안 믿게 됩니다.
+    const status = only(recording({ chunk_count: 0, silent_ms: 3_000 }));
+    strictEqual(status.verdict, 'healthy');
+    strictEqual(status.message, '녹음 중');
+  });
+
+  it('문턱 정확히 위/아래', () => {
+    strictEqual(isSilentTooLong(recording({ silent_ms: WARN_GAP_MS })), true);
+    strictEqual(isSilentTooLong(recording({ silent_ms: WARN_GAP_MS - 1 })), false);
+  });
+
+  it('⭐ 서버가 이 값을 안 주면 판단하지 않는다', () => {
+    // 없는 근거로 "폰을 확인하세요" 를 띄우면 다음부터 아무도 안 믿습니다.
+    strictEqual(isSilentTooLong(recording({})), false);
+    strictEqual(isSilentTooLong(recording({ silent_ms: null })), false);
+    strictEqual(only(recording({})).verdict, 'healthy');
+  });
+
+  it('⭐ 분 단위로 넘어가면 분으로 읽는다', () => {
+    const status = only(recording({ chunk_count: 5, silent_ms: 300_000 }));
+    strictEqual(status.message.includes('5분째'), true);
+  });
+
+  it('끝난 트랙에는 이 판단을 쓰지 않는다', () => {
+    // 종료된 트랙은 서버가 실제 청크로 커버리지를 다시 계산한 뒤다.
+    const done = recording({ status: 'completed', coverage: 0.98, silent_ms: null });
+    strictEqual(only(done).verdict, 'finished');
+  });
+});
+
+describe('기기가 남긴 경고 (결함 93)', () => {
+  const track = (warnings: unknown): TrackHealth =>
+    ({
+      track_id: 1,
+      user_id: 1,
+      status: 'completed',
+      coverage: 1,
+      total_gap_ms: 0,
+      capture_confidence: 1,
+      stop_reason: null,
+      warnings,
+    }) as TrackHealth;
+
+  it('⭐ critical 만 올린다', () => {
+    const alerts = captureAlerts(
+      track([
+        { severity: 'critical', message: '마이크가 회의 중에 바뀌었습니다' },
+        { severity: 'warning', message: '표본율이 권장값과 다릅니다' },
+      ]),
+    );
+    deepStrictEqual(alerts, ['마이크가 회의 중에 바뀌었습니다']);
+  });
+
+  it('문구를 여기서 만들지 않는다 — 기기가 남긴 말을 그대로', () => {
+    deepStrictEqual(captureAlerts(track([{ severity: 'critical', message: '가나다' }])), ['가나다']);
+  });
+
+  it('⭐ 모양이 이상하면 버린다 — `[object Object]` 를 띄우지 않는다', () => {
+    deepStrictEqual(
+      captureAlerts(track([null, 'text', { severity: 'critical' }, { severity: 'critical', message: '   ' }])),
+      [],
+    );
+  });
+
+  it('경고가 없거나 트랙이 없으면 빈 배열', () => {
+    deepStrictEqual(captureAlerts(track([])), []);
+    deepStrictEqual(captureAlerts(track(undefined)), []);
+    deepStrictEqual(captureAlerts(undefined), []);
+  });
+});
+
+describe('저장된 ②③ 선택 (결함 94)', () => {
+  const entry = (over: Partial<RosterEntry>): RosterEntry =>
+    ({ user_id: 1, name: '김민수', recording: true, ...over }) as RosterEntry;
+
+  it('⭐ 저장된 거부를 그대로 돌려준다', () => {
+    const saved = savedExtraConsents(
+      [entry({ raw_audio_retention: false, voiceprint_storage: false })],
+      1,
+    );
+    deepStrictEqual(saved, { rawAudio: false, voiceprint: false });
+  });
+
+  it('⭐ 아직 답 안 한 것은 `null` — 거부와 다르다', () => {
+    // `null` 을 `false` 로 접으면 화면이 "거부함" 으로 그립니다.
+    deepStrictEqual(savedExtraConsents([entry({})], 1), { rawAudio: null, voiceprint: null });
+  });
+
+  it('남의 답을 내 것으로 쓰지 않는다', () => {
+    const roster = [
+      entry({ user_id: 2, name: '이하늘', raw_audio_retention: false }),
+      entry({ user_id: 1, raw_audio_retention: true }),
+    ];
+    deepStrictEqual(savedExtraConsents(roster, 1).rawAudio, true);
+  });
+
+  it('명단에 내가 없으면 둘 다 `null`', () => {
+    deepStrictEqual(savedExtraConsents([entry({ user_id: 9 })], 1), {
+      rawAudio: null,
+      voiceprint: null,
+    });
   });
 });

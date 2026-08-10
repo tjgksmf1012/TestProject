@@ -381,6 +381,46 @@ def test_two_projects_cannot_claim_the_same_repository(client: TestClient, peopl
     assert response.status_code == 409
 
 
+def test_creating_a_project_checks_the_repository_the_same_way(
+    client: TestClient, people: dict
+):
+    """⚠️ 검사가 **PATCH 에만** 있었다. 만들 때는 그냥 통과했다.
+
+    위 두 테스트(`_a_repository_url_is_refused`, `_two_projects_cannot_claim_`)가
+    전부 PATCH 를 지나가는 동안, `POST /api/projects` 는 같은 값을 검사 없이
+    저장했습니다. 화면이 마침 만들 때 저장소를 안 보내서 아무도 몰랐습니다 —
+    API 는 화면보다 오래 삽니다.
+
+    주소를 넣으면 웹훅이 영원히 그 프로젝트를 못 찾고, 오류도 안 납니다.
+    """
+    login_as(client, people["founder"])
+
+    response = client.post(
+        "/api/projects", json={"title": "주소", "github_repo": "https://github.com/team/x"}
+    )
+    assert response.status_code == 400
+    assert "owner/repo" in response.json()["detail"]
+
+
+def test_creating_a_project_cannot_steal_a_claimed_repository(
+    client: TestClient, people: dict
+):
+    """같은 저장소를 만들기로 두 번 잡으면 409 다 — 500 이 아니라.
+
+    유니크 제약이 최종 방어이긴 했지만, 만들기 경로에는 그 앞에 아무 검사도
+    없어서 **처리되지 않은 IntegrityError** 가 났습니다. 사용자에게는
+    "서버 오류" 로 보이고, 무엇을 고쳐야 하는지 알 수 없습니다.
+    """
+    login_as(client, people["founder"])
+    first = create_project(client, "A")["project_id"]
+    client.patch(f"/api/projects/{first}", json={"github_repo": "team/teamflow"})
+
+    response = client.post(
+        "/api/projects", json={"title": "B", "github_repo": "Team/TeamFlow"}
+    )
+    assert response.status_code == 409, response.text
+
+
 def test_clearing_the_repository_disconnects(client: TestClient, people: dict):
     login_as(client, people["founder"])
     project_id = create_project(client)["project_id"]
@@ -392,18 +432,149 @@ def test_clearing_the_repository_disconnects(client: TestClient, people: dict):
         assert s.get(m.Project, project_id).github_connected_at is None
 
 
+def test_nobody_can_write_the_installation_id_through_the_api(
+    client: TestClient, people: dict
+):
+    """⭐ **이 자리에 있던 테스트가 결함을 고정하고 있었습니다.**
+
+    예전 테스트는 `{"github_installation_id": 12345}` 를 보내고 응답에 그
+    숫자가 안 나오는지만 봤습니다. 나가는 길은 막혀 있었지만 **들어오는 길이
+    열려 있었고**, 테스트는 그걸 정상으로 못 박고 있었습니다.
+
+    설치 id 는 워커가 `build_client()` 로 **그 설치의 액세스 토큰을 발급**할
+    때 씁니다. 아무 숫자나 써 넣을 수 있다는 것은, 이 팀과 아무 상관 없는
+    설치의 권한으로 GitHub API 를 부르게 만들 수 있다는 뜻입니다.
+    요청 본문의 id 를 권한에 그대로 쓰던 `member_ids` 결함과 같은 부류입니다.
+
+    이제 이 필드는 스키마에 아예 없고, 보내면 422 로 거절합니다. 조용히
+    무시하면 보낸 쪽은 저장된 줄 압니다.
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    response = client.patch(
+        f"/api/projects/{project_id}", json={"github_installation_id": 12345}
+    )
+
+    assert response.status_code == 422
+    with db_session.session_scope() as s:
+        assert s.get(m.Project, project_id).github_installation_id is None
+
+
 def test_the_installation_id_is_never_sent_back(client: TestClient, people: dict):
     """화면이 쓸 일이 없습니다 — 연결 여부만 알면 됩니다."""
     login_as(client, people["founder"])
     project_id = create_project(client)["project_id"]
 
+    with db_session.session_scope() as s:
+        s.get(m.Project, project_id).github_installation_id = 12345
+
+    body = client.get(f"/api/projects/{project_id}").json()
+
+    assert "github_installation_id" not in body
+    assert "12345" not in str(body)
+
+
+def test_connected_means_a_signed_delivery_arrived_not_that_a_name_was_typed(
+    client: TestClient, people: dict
+):
+    """⭐ "연결됨" 의 뜻이 바뀝니다.
+
+    예전에는 설치 id 가 있으면 참이었고, 그 id 는 화면에서 아무 숫자나
+    보내면 채워졌습니다. 즉 **아무것도 확인하지 않고** "연결됨" 을 보여
+    주고 있었습니다.
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
     body = client.patch(
-        f"/api/projects/{project_id}", json={"github_installation_id": 12345}
+        f"/api/projects/{project_id}", json={"github_repo": "team/teamflow"}
+    ).json()
+    assert body["github_connected"] is False
+
+    with db_session.session_scope() as s:
+        s.get(m.Project, project_id).github_verified_at = NOW
+
+    assert client.get(f"/api/projects/{project_id}").json()["github_connected"] is True
+
+
+def test_changing_the_repository_throws_away_the_old_proof(
+    client: TestClient, people: dict
+):
+    """앞 저장소에서 배달이 왔다는 사실은 **새 저장소의 근거가 아닙니다.**"""
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+    client.patch(f"/api/projects/{project_id}", json={"github_repo": "team/teamflow"})
+
+    with db_session.session_scope() as s:
+        project = s.get(m.Project, project_id)
+        project.github_verified_at = NOW
+        project.github_installation_id = 555
+
+    body = client.patch(
+        f"/api/projects/{project_id}", json={"github_repo": "team/other"}
+    ).json()
+
+    assert body["github_connected"] is False
+    with db_session.session_scope() as s:
+        assert s.get(m.Project, project_id).github_installation_id is None
+
+
+def test_fixing_only_the_letter_case_keeps_the_proof(client: TestClient, people: dict):
+    """대소문자만 고친 것은 **저장소를 바꾼 게 아닙니다.**
+
+    이걸 바뀐 것으로 보면, 표기를 정리한 순간 연결이 끊긴 것처럼 보이고
+    신뢰도가 근거 없이 떨어집니다.
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+    client.patch(f"/api/projects/{project_id}", json={"github_repo": "team/teamflow"})
+
+    with db_session.session_scope() as s:
+        s.get(m.Project, project_id).github_verified_at = NOW
+
+    body = client.patch(
+        f"/api/projects/{project_id}", json={"github_repo": "Team/TeamFlow"}
     ).json()
 
     assert body["github_connected"] is True
-    assert "github_installation_id" not in body
-    assert "12345" not in str(body)
+
+
+def test_the_lookup_key_cannot_drift_from_the_repository(
+    client: TestClient, people: dict
+):
+    """⭐ 둘이 어긋나면 웹훅이 조용히 사라집니다.
+
+    저장소를 바꾸는 자리마다 손으로 둘을 같이 쓰게 하면 언젠가 빠뜨립니다.
+    모델이 묶어 두고 있는지 확인합니다.
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    for typed in ("Team/TeamFlow", "team/teamflow", "  OTHER/Repo  ", ""):
+        client.patch(f"/api/projects/{project_id}", json={"github_repo": typed})
+        with db_session.session_scope() as s:
+            project = s.get(m.Project, project_id)
+            expected = typed.strip().lower() or None
+            assert project.github_repo_key == expected
+            assert project.github_repo == (typed.strip() or None)
+
+
+def test_two_projects_cannot_claim_the_same_repo_in_different_case(
+    client: TestClient, people: dict
+):
+    """⭐ 대소문자를 무시하고 찾게 된 순간 **이게 막히지 않으면** 배달이
+    어느 프로젝트에 붙을지 정해지지 않습니다."""
+    login_as(client, people["founder"])
+    first = create_project(client, "A")["project_id"]
+    second = create_project(client, "B")["project_id"]
+
+    client.patch(f"/api/projects/{first}", json={"github_repo": "team/teamflow"})
+    response = client.patch(
+        f"/api/projects/{second}", json={"github_repo": "TEAM/TeamFlow"}
+    )
+
+    assert response.status_code == 409
 
 
 def test_renaming_a_project(client: TestClient, people: dict):
@@ -469,3 +640,130 @@ def test_the_whole_first_run_works(client: TestClient, people: dict):
     assert client.post("/api/projects/join", json={"invite_code": code}).status_code == 200
     assert len(client.get(f"/api/projects/{project_id}/meetings").json()) == 1
     assert len(client.get(f"/api/projects/{project_id}/members").json()) == 2
+
+
+# ══════════════════════════════════════════════════════════════
+# 역할 — 이 값이 기여도 가중치를 정한다
+# ══════════════════════════════════════════════════════════════
+
+
+def test_everyone_starts_as_a_developer_and_can_change_it(
+    client: TestClient, people: dict
+):
+    """⭐ 기획자·디자이너 프로파일이 **실사용 경로로 도달 불가**였다.
+
+    가입도 초대도 `role_shares={"developer": 1.0}` 을 하드코딩했고 바꾸는
+    API 가 없었습니다. 기획자 프로파일은 코드 0% · 문서 30% 인데 개발자로
+    계산하면 코드 35% · 문서 5% 입니다 — 문서만 쓴 사람이 이유 없이 낮게
+    나오고, **오류는 어디에도 안 납니다.**
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    before = client.get(f"/api/projects/{project_id}/members").json()
+    assert before[0]["role_shares"] == {"developer": 1.0}, "기본값"
+
+    response = client.patch(
+        f"/api/projects/{project_id}/members/me",
+        json={"role_shares": {"developer": 0.6, "planner": 0.4}},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["role_shares"] == {"developer": 0.6, "planner": 0.4}
+
+    after = client.get(f"/api/projects/{project_id}/members").json()
+    assert after[0]["role_shares"] == {"developer": 0.6, "planner": 0.4}
+
+
+def test_the_new_role_actually_reaches_the_scoring(client: TestClient, people: dict):
+    """⭐ 저장만 되고 산정이 안 읽으면 고친 게 아니다.
+
+    기획자는 코드 가중치가 0 입니다. 역할을 바꾸면 같은 이벤트로도
+    카테고리 가중치가 달라져야 합니다.
+    """
+    from teamflow.contribution.profiles import Role
+    from teamflow.services import scoring_service
+
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    with db_session.session_scope() as s:
+        profiles = scoring_service.load_profiles(s, project_id)
+        assert profiles[people["founder"]].role is Role.DEVELOPER
+
+    client.patch(
+        f"/api/projects/{project_id}/members/me",
+        json={"role_shares": {"planner": 1.0}},
+    )
+
+    with db_session.session_scope() as s:
+        profile = scoring_service.load_profiles(s, project_id)[people["founder"]]
+        assert profile.role is Role.PLANNER, "산정이 새 역할을 안 읽습니다"
+
+
+def test_a_role_change_is_logged(client: TestClient, people: dict):
+    """역할은 가중치를 바꾸고 가중치는 점수를 바꾼다. 유리한 쪽으로
+    옮겨 두는 것도 조작이고, 그건 사람이 볼 수 있어야 한다."""
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+    client.patch(
+        f"/api/projects/{project_id}/members/me",
+        json={"role_shares": {"designer": 1.0}},
+    )
+
+    with db_session.session_scope() as s:
+        log = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "weights_changed")
+        ).one()
+        assert log.actor_id == people["founder"]
+        assert log.before["role_shares"] == {"developer": 1.0}
+        assert log.after["role_shares"] == {"designer": 1.0}
+
+
+def test_a_bad_split_is_refused_with_a_reason(client: TestClient, people: dict):
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    for bad, word in (
+        ({"developer": 0.5, "planner": 0.2}, "합이 1"),
+        ({"tester": 1.0}, "모르는 역할"),
+        ({}, "골라야"),
+    ):
+        response = client.patch(
+            f"/api/projects/{project_id}/members/me", json={"role_shares": bad}
+        )
+        assert response.status_code == 400, (bad, response.text)
+        assert word in response.json()["detail"], (bad, response.json())
+
+
+def test_there_is_no_way_to_set_someone_elses_role(client: TestClient, people: dict):
+    """⚠️ 남의 역할을 바꾸는 것은 **남의 점수를 바꾸는 일**이다.
+
+    경로가 `/members/me` 라 남의 id 를 넣을 자리 자체가 없습니다 —
+    요청 본문의 id 를 믿던 결함(`member_ids`)과 같은 부류를 설계로
+    막습니다. 그래도 누가 우회를 시도할 수 있으니 확인해 둡니다.
+    """
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    # 남의 id 를 경로에 넣어 보기
+    assert client.patch(
+        f"/api/projects/{project_id}/members/{people['joiner']}",
+        json={"role_shares": {"planner": 1.0}},
+    ).status_code in (404, 405, 422)
+
+    # 본문에 몰래 실어 보기 — `extra: forbid` 가 막는다
+    assert client.patch(
+        f"/api/projects/{project_id}/members/me",
+        json={"role_shares": {"planner": 1.0}, "user_id": people["joiner"]},
+    ).status_code == 422
+
+
+def test_an_outsider_cannot_set_a_role(client: TestClient, people: dict):
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    login_as(client, people["stranger"])
+    assert client.patch(
+        f"/api/projects/{project_id}/members/me",
+        json={"role_shares": {"planner": 1.0}},
+    ).status_code in (403, 404)

@@ -403,6 +403,46 @@ describe('RecordingClient — 상태 알림', () => {
     client.setConsent('all_confirmed');
     client.setConsent('all_confirmed'); // 같은 값 → 알림 없음
 
-    assert.deepEqual(seen, ['idle', 'idle', 'idle', 'ready']);
+    assert.deepEqual(seen, ['idle', 'idle', 'ready']);
+  });
+
+  it('⭐ 생성자는 알림을 보내지 않는다', () => {
+    // ⚠️ **호출자가 대응할 방법이 없기 때문입니다.**
+    //
+    // `const client = new RecordingClient({ onStateChange: () => render() })`
+    // 에서 생성자가 콜백을 부르면, 그 시점에는 `client` 대입이 아직
+    // 끝나지 않았습니다. 콜백이 `client.state` 를 읽으면 undefined 입니다.
+    //
+    // 실제로 녹음 화면이 열리자마자 그 오류로 죽었고, **브라우저로 띄워
+    // 보고서야** 알았습니다 — 화면 코드에는 자동 테스트가 없고 이 파일의
+    // 테스트는 콜백 안에서 자기 자신을 읽지 않았습니다.
+    const seen: string[] = [];
+    const h = harness();
+    let self: RecordingClient | undefined;
+
+    self = new RecordingClient({
+      monotonic: h.clock.now,
+      media: h.media,
+      sync: h.sync,
+      upload: { send: async () => {} },
+      // 화면이 실제로 하는 것과 같은 모양 — 콜백 안에서 자기를 읽는다.
+      onStateChange: () => seen.push(self!.state.phase),
+      uploadOptions: { sleep: async () => {} },
+    });
+
+    assert.deepEqual(seen, [], '생성자가 콜백을 불렀습니다');
+  });
+
+  it('생성자가 알림을 안 보내도 보안 컨텍스트는 반영돼 있다', () => {
+    // 알림을 없앤 대가로 사실까지 잃으면 안 됩니다.
+    const h = harness();
+    const client = new RecordingClient({
+      monotonic: h.clock.now,
+      media: h.media,
+      sync: h.sync,
+      upload: { send: async () => {} },
+      uploadOptions: { sleep: async () => {} },
+    });
+    assert.equal(client.state.secureContext, h.media.isSecureContext());
   });
 });

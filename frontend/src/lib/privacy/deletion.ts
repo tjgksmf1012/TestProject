@@ -1,3 +1,4 @@
+import { withJosa } from '../text/josa.ts';
 /**
  * 내 녹음 지우기 — 화면이 할 말.
  *
@@ -142,7 +143,9 @@ export function describeOutcome(result: RevokeResult): DeletionOutcome {
   }
   return {
     text:
-      `${parts.join('과 ')}을 지웠습니다 (${describeFreed(result.freed_bytes)} 확보). ` +
+      // ⚠️ `…을` 을 글자로 붙이지 않는다. 지금은 목록이 늘 `…건` 으로
+      // 끝나 맞지만, 단위를 바꾸는 순간 조용히 틀린 조사가 된다 (결함 88).
+      `${withJosa(parts.join('과 '), '을를')} 지웠습니다 (${describeFreed(result.freed_bytes)} 확보). ` +
       '되돌릴 수 없습니다.',
     needsRetry: false,
     deletedSomething: true,

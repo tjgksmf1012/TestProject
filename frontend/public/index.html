@@ -13,13 +13,13 @@
 <link rel="manifest" href="/manifest.webmanifest" />
 <link rel="icon" href="/icon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
 <link rel="stylesheet" href="/app.css" />
     <title>녹음 생존율 테스트 — TeamFlow AI</title>
     <style>
 
-      section { border: 1px solid var(--line); border-radius: .75rem; padding: 1rem; margin-bottom: 1rem; }
 
-      li { padding: .25rem 0; }
+      li { padding: var(--sp-1) 0; }
       li::before { content: "· "; opacity: .5; }
       li.ok { color: var(--ok); }
       li.ok::before { content: "✓ "; }
@@ -28,28 +28,35 @@
       li.info { opacity: .7; }
 
       #phase {
-        display: inline-block; padding: .3rem .7rem; border-radius: 999px;
-        font-size: .8rem; font-weight: 600;
+        display: inline-block; padding: var(--sp-1) var(--sp-3); border-radius: 999px;
+        font-size: var(--fs-label); font-weight: 600;
         background: color-mix(in srgb, currentColor 10%, transparent);
       }
-      #phase[data-phase="recording"] { background: var(--bad); color: #fff; }
-      #phase[data-phase="interrupted"] { background: var(--warn); color: #fff; }
-      #phase[data-phase="completed"] { background: var(--ok); color: #fff; }
-      #verdict { font-weight: 600; margin: 0 0 .75rem; }
+      #phase[data-phase="recording"] { background: var(--bad); color: var(--on-semantic); }
+      #phase[data-phase="interrupted"] { background: var(--warn); color: var(--on-semantic); }
+      #phase[data-phase="completed"] { background: var(--ok); color: var(--on-semantic); }
+      #verdict { font-weight: 600; margin: 0 0 var(--sp-3); }
       #verdict.ok { color: var(--ok); }
       #verdict.bad { color: var(--bad); }
       #row {
         display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: .7rem; white-space: pre-wrap; word-break: break-all;
+        font-size: var(--fs-caption); white-space: pre-wrap; word-break: break-all;
         background: color-mix(in srgb, currentColor 6%, transparent);
-        padding: .6rem; border-radius: .4rem; margin: .75rem 0;
+        padding: var(--sp-2); border-radius: var(--r-badge); margin: var(--sp-3) 0;
       }
-      label.check { display: flex; align-items: center; gap: .5rem; font-size: .875rem; padding: .5rem 0; }
+      /* 배치는 `app.css` 의 `label:has(> input[type=checkbox])` 가 합니다 —
+         여기서 다시 적으면 두 곳이 어긋납니다. 크기만 이 화면 것으로. */
+      label.check { font-size: var(--fs-label); }
     </style>
   </head>
   <body>
     <h1>녹음 생존율 테스트</h1>
     <p id="who" class="sub"></p>
+    <!-- ⚠️ 참가 실패는 **여기** 씁니다. 예전에는 `#who` 를 덮어써서
+         "김민수 님의 트랙으로 녹음합니다" 가 사라지고 그 자리에 실패가
+         부제색(회색)으로 앉았습니다 (결함 98). 로비의 `#room-note` 와
+         같은 약입니다 (결함 90). -->
+    <p id="join-note" class="status" hidden></p>
     <p class="sub">
       docs/09 실험 5 — 폰이 회의 끝까지 녹음을 유지하는지 확인합니다.
       <strong>모드 A(멀티트랙)의 성립 여부</strong>가 여기서 결정됩니다.
@@ -59,13 +66,13 @@
          정하고 15개 테스트가 붙습니다. -->
     <p id="safety" class="banner"></p>
 
-    <section>
+    <section class="panel">
       <h2>상태</h2>
       <p><span id="phase">준비 중</span> <span id="elapsed"></span></p>
       <ul id="blockers"></ul>
     </section>
 
-    <section>
+    <section class="panel">
       <h2>준비</h2>
       <button id="consent">1. 녹음에 동의</button>
       <button id="permission">2. 마이크 권한 + 시각 동기화</button>
@@ -74,20 +81,20 @@
         화면 꺼짐 방지(Wake Lock) 사용
       </label>
       <p class="note">
-        Wake Lock 을 껐다 켰다 하며 각각 측정하세요. iOS 는 16.4+, 설치형 PWA 는 18.4+ 부터 동작합니다.
+        Wake Lock을 껐다 켰다 하며 각각 측정하세요. iOS는 16.4 이상, 설치형 PWA는 18.4 이상에서 동작합니다.
       </p>
     </section>
 
-    <section>
+    <section class="panel">
       <h2>캡처 설정 확인</h2>
       <ul id="warnings"></ul>
       <p class="note">
-        <code>autoGainControl</code> 이 안 꺼지면 조용한 트랙이 증폭되고,
-        <code>noiseSuppression</code> 이 안 꺼지면 트랙 정렬의 근거인 누출이 지워집니다.
+        <code>autoGainControl</code>이 안 꺼지면 조용한 트랙이 증폭되고,
+        <code>noiseSuppression</code>이 안 꺼지면 트랙 정렬의 근거인 누출이 지워집니다.
       </p>
     </section>
 
-    <section>
+    <section class="panel">
       <h2>녹음</h2>
       <button id="start" class="primary" disabled>녹음 시작</button>
       <button id="stop" disabled>정지</button>
@@ -102,7 +109,7 @@
       </p>
     </section>
 
-    <section id="result" hidden>
+    <section id="result" class="panel" hidden>
       <h2>결과</h2>
 
       <!-- 서버에 "끝났다" 고 알렸는가. 이걸 알리지 않으면 트랙이 영원히
@@ -122,9 +129,10 @@
       <ul id="gaps"></ul>
       <code id="row"></code>
       <button id="copy">표에 붙일 한 줄 복사</button>
+      <p class="status" id="copy-note" hidden></p>
       <p class="note">
         커버리지 <strong>95% 미만</strong>이면(화면 켜둠 + Wake Lock 조건에서)
-        모드 A 를 주력에서 내려야 합니다. 배터리 소모가 시간당 30% 를 넘으면
+        모드 A를 주력에서 내려야 합니다. 배터리 소모가 시간당 30%를 넘으면
         2시간 회의를 못 버팁니다.
       </p>
     </section>

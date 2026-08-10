@@ -9,6 +9,8 @@
  * 서버 응답만으로는 사람이 무엇을 고쳐야 할지 알 수 없는 경우뿐입니다.
  */
 
+import { withJosa } from '../text/josa.ts';
+
 /** 서버 `projects/invites.py` 와 같아야 한다. */
 export const CODE_LENGTH = 8;
 export const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -46,7 +48,7 @@ export function codeProblem(raw: string): string | null {
   if (bad.length > 0) {
     // 어떤 글자가 문제인지 말합니다. "형식이 틀렸습니다" 만으로는
     // 여덟 글자 중 어디를 고쳐야 하는지 알 수 없습니다.
-    return `코드에 쓰지 않는 글자가 있습니다: ${[...new Set(bad)].join(', ')} — 0·O·1·I·L 은 쓰지 않습니다`;
+    return `코드에 쓰지 않는 글자가 있습니다: ${[...new Set(bad)].join(', ')} — 0·O·1·I·L은 쓰지 않습니다`;
   }
   return null;
 }
@@ -103,4 +105,53 @@ export function nextStepAfterCreate(memberCount: number): string {
     return '아직 혼자입니다. 아래 초대 코드를 팀원에게 알려 주세요 — 다 모인 뒤에 회의를 여는 게 좋습니다.';
   }
   return '팀원이 모였습니다. 회의를 열면 로비에서 동의를 받고 녹음을 시작할 수 있습니다.';
+}
+
+/** 코드가 없을 때 코드 자리에 쓸 말. */
+export const NO_CODE = '(없음)';
+
+/**
+ * 클립보드에 넣을 것.
+ *
+ * ⚠️ **화면에 보이는 글자를 그대로 복사하면 안 됩니다.** 코드가 없을 때
+ * 코드 자리에는 `(없음)` 이 적혀 있고, 그걸 복사하면 클립보드에 문자열
+ * `(없음)` 이 들어갑니다. 그리고 버튼은 **"복사됨"** 이라고 말합니다.
+ *
+ * 그 사람은 그걸 카톡으로 보냅니다. 받은 사람은 `(없음)` 을 참가 칸에
+ * 넣고 "코드가 없습니다" 를 봅니다 — 그리고 **자기가 잘못 받아 적었다고
+ * 생각합니다.** 이 저장소가 초대 코드에서 `0/O`·`1/I/L` 을 뺀 이유와
+ * 같은 종류의 실패입니다.
+ *
+ * 그래서 표시용 문자열이 아니라 **데이터**에서 만듭니다. 없으면 `null` 을
+ * 돌려주고, 부르는 쪽이 복사를 아예 하지 않습니다.
+ */
+export function codeToCopy(inviteCode: string | null | undefined): string | null {
+  const raw = (inviteCode ?? '').trim();
+  // ⭐ **코드 모양일 때만** 복사합니다. 이미 있는 검사를 씁니다 — 여기서
+  // 새 규칙을 만들면 참가 칸이 받아 주는 것과 복사되는 것이 어긋납니다.
+  if (codeProblem(raw) !== null) return null;
+  // 서버가 하이픈·공백을 걷어내므로 보기 좋은 형태로 보내도 통합니다.
+  return formatCode(raw);
+}
+
+
+/**
+ * GitHub 계정이 이어졌는지 화면에 쓸 한 줄 (결함 112).
+ *
+ * ⚠️ **비어 있을 때 아무 말도 안 하면 안 됩니다.** 그 상태가 바로 그
+ * 사람의 PR 이 주인을 못 찾는 상태이고, 화면에는 그냥 빈 칸으로
+ * 보입니다 — 사람은 안 적어도 되는 칸으로 읽습니다.
+ *
+ * 연결 진단도 같은 말을 하지만 그건 **프로젝트를 만든 사람**이 보는
+ * 자리입니다. 자기 칸 옆에서 자기 상태를 말해 줘야 자기가 고칩니다.
+ */
+export function githubLoginStatus(login: string | null): string {
+  const value = (login ?? '').trim();
+  if (value === '') {
+    return '아직 연결하지 않았습니다 — 이 상태로는 내 PR이 기여도에 들어가지 않습니다.';
+  }
+  // ⚠️ 조사는 **계산**합니다 (결함 76·88). GitHub 아이디는 영문·숫자로
+  // 끝나고, `minsu-dev` 는 "브이" 로 읽어 받침이 없고 `hong7` 은 "칠"
+  // 이라 받침이 있습니다 — `로`/`으로` 가 갈립니다.
+  return `지금 ${withJosa(value, '으로로')} 이어져 있습니다.`;
 }

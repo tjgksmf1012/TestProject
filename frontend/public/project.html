@@ -13,43 +13,118 @@
 <link rel="manifest" href="/manifest.webmanifest" />
 <link rel="icon" href="/icon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
 <link rel="stylesheet" href="/app.css" />
 <title>프로젝트 설정 — TeamFlow</title>
 <style>
   /* 되돌릴 수 없는 동작. 다른 구역과 눈에 띄게 달라야 하지만,
      겁주는 붉은 상자로 만들지는 않는다 — 이건 권리 행사다. */
   .danger { border: 1px solid color-mix(in srgb, var(--bad) 35%, var(--line)); }
-  .danger .label { font-size: .8125rem; font-weight: 600; color: var(--dim); margin: .875rem 0 .25rem; }
-  .danger ul.plain li { font-size: .875rem; color: var(--dim); padding: .125rem 0; }
+  .danger .label { font-size: var(--fs-label); font-weight: 600; color: var(--text-subtle); margin: var(--sp-4) 0 .25rem; }
+  .danger ul.plain li { font-size: var(--fs-label); color: var(--text-subtle); padding: var(--sp-1) 0; }
   .danger ul.plain li::before { content: "· "; }
-  .danger-btn { margin-top: 1rem; border-color: var(--bad); color: var(--bad); }
-  #del-result { font-size: .9375rem; margin-top: .75rem; }
+  .danger-btn { margin-top: var(--sp-4); border-color: var(--bad); color: var(--bad); }
+  #del-result { font-size: var(--fs-body); margin-top: var(--sp-3); }
   #del-result.bad { color: var(--bad); }
 
-  section { border: 1px solid var(--line); border-radius: .625rem; padding: .875rem 1rem; margin-bottom: 1rem; }
 
   #code { font: 700 1.5rem/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; }
-  #next { font-size: .875rem; margin: .5rem 0 0; }
-  #gh-state, #members { font-size: .8125rem; color: var(--dim); margin: .25rem 0 0; }
-  #error { color: var(--bad); font-size: .875rem; margin-top: 1rem; }
+  /* 코드가 **없을 때**는 코드 조판을 벗긴다. 안 그러면 `(없음)` 이 값처럼
+     읽힌다 (결함 71 의 뒷면). */
+  #code.none { font: inherit; letter-spacing: normal; color: var(--text-subtle); }
+  #next { font-size: var(--fs-label); margin: var(--sp-2) 0 0; }
+  #members { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-1) 0 0; }
 
+  /* 연결 진단. 심각도에 따라 왼쪽 띠 색만 바뀐다 — 상자 전체를 붉게
+     칠하면 경고와 오류가 같은 무게로 보이고, 둘 다 무시하게 된다. */
+  .health { margin-top: var(--sp-4); padding: .75rem var(--sp-4); border-radius: .5rem;
+            border: 1px solid var(--line); border-left-width: 3px;
+            background: color-mix(in srgb, var(--line) 12%, transparent); }
+  .health.ok   { border-left-color: var(--ok); }
+  .health.warn { border-left-color: var(--warn); }
+  .health.bad  { border-left-color: var(--bad); }
+  .health-headline { font-size: var(--fs-body); font-weight: 600; margin: 0; }
+  .health-detail { font-size: var(--fs-label); color: var(--text-subtle); margin: .375rem 0 0; }
+  /* 지금 할 일. 이것만 눈에 들어와도 고칠 수 있어야 한다. */
+  .health-next { font-size: var(--fs-label); margin: var(--sp-2) 0 0; font-weight: 600; }
+  .health-warnings { margin: var(--sp-2) 0 0; }
+  .health-warnings li { font-size: var(--fs-label); color: var(--text-subtle); padding: var(--sp-1) 0; }
+  .health-warnings li::before { content: "⚠ "; }
+  .health-activity { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-2) 0 0; }
+  .health code { font: inherit; font-weight: 700; }
+  #error { color: var(--bad); font-size: var(--fs-label); margin-top: var(--sp-4); }
+
+  /* 역할 — 한 줄 = 한 역할. 합이 눈에 보여야 1 을 맞출 수 있다. */
+  .roles label { display: grid; grid-template-columns: 6rem 5.5rem 1fr; gap: var(--sp-2);
+                 align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
+  .roles label:first-child { border-top: 0; }
+  .roles input { font-size: var(--fs-input); }
+  .roles .hint { font-size: var(--fs-caption); color: var(--text-subtle); }
+  .rolesum { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-2) 0; }
+  .rolesum.bad { color: var(--bad); }
+  .rolestatus { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-3) 0 0; }
+  /* ⚠️ 이 한 줄이 없으면 `.bad` 를 붙여도 회색으로 남습니다 (결함 98).
+     `app.css` 의 `.bad` 와 특이도가 같은데, 화면별 <style> 이 **뒤에**
+     오므로 `.rolestatus` 가 이깁니다 — 결함 61 과 같은 부류입니다.
+     `.rolesum.bad` 와 `#del-result.bad` 는 이미 이렇게 적혀 있었고,
+     이 자리만 빠져 있었습니다. */
+  .rolestatus.bad { color: var(--bad); }
 </style>
 </head>
 <body>
   <h1 id="title-heading">프로젝트</h1>
   <p class="sub" id="members"></p>
 
-  <section>
+  <!-- ⭐ 역할. 이 값이 기여도 **가중치**를 정한다 — 기획자는 코드 0% · 문서 30%,
+       개발자는 코드 35% · 문서 5%. 바꿀 자리가 없던 동안 전원이 개발자로
+       계산돼, 문서만 쓴 사람이 이유 없이 낮게 나왔고 오류는 안 났다.
+       `src/demo/project.ts` 가 채운다. -->
+  <section class="panel">
+    <h2>내 역할</h2>
+    <p class="sub">기여도 가중치가 여기서 정해집니다. 겸직이면 둘 이상에 나눠 적으세요.</p>
+    <div id="roles" class="roles"></div>
+    <p class="rolesum" id="role-sum"></p>
+    <button id="save-roles" type="button">역할 저장</button>
+    <p class="rolestatus" id="role-message"></p>
+    <p class="note">
+      <strong>내 역할만 바꿉니다.</strong> 역할은 가중치를 바꾸고 가중치는 점수를
+      바꿉니다 — 남이 내 역할을 바꿀 수 있으면 그건 남의 점수를 바꾸는 일입니다.
+      바꾼 사실은 기록에 남습니다.
+    </p>
+  </section>
+
+  <!-- ⚠️ 이 칸이 비어 있으면 **그 사람의 PR 이 주인을 못 찾습니다**
+       (결함 112). 읽는 곳은 넷인데(이벤트 배분·백필·업무↔PR·연결 진단)
+       값을 넣는 자리가 저장소에 0곳이었습니다 — 연결 진단은 "연결하지
+       않은 팀원이 있습니다" 라고 경고하면서 연결할 곳을 안 줬습니다. -->
+  <section class="panel">
+    <h2>내 GitHub 계정</h2>
+    <p class="sub">이 아이디로 올린 PR·리뷰가 내 기여도로 들어옵니다. 안 적으면 활동이 주인을 못 찾습니다.</p>
+    <label class="row">
+      <input id="gh-login" type="text" placeholder="minsu-dev" autocomplete="off" spellcheck="false" />
+    </label>
+    <button id="save-gh-login" type="button">계정 저장</button>
+    <p class="rolestatus" id="gh-login-message"></p>
+    <p class="note">
+      <strong>내 계정만 바꿉니다.</strong> 한 프로젝트에서 같은 아이디를 둘이 쓸 수 없습니다 —
+      남의 아이디를 적으면 그 사람의 PR이 내 기여가 되기 때문입니다. 바꾼 사실은 기록에 남습니다.
+    </p>
+  </section>
+
+  <section class="panel">
     <h2>팀원 초대</h2>
     <p id="code">····</p>
     <div class="row">
       <button id="copy" type="button">코드 복사</button>
       <button id="rotate" type="button">코드 새로 만들기</button>
     </div>
+    <!-- 복사가 안 됐을 때 왜 안 됐는지 (결함 81). 버튼 글자에 넣으면
+         360px 에서 옆 버튼과 겹칩니다 — 결함 77 과 같은 자리입니다. -->
+    <p class="status" id="copy-note" hidden></p>
     <p id="next"></p>
   </section>
 
-  <section>
+  <section class="panel">
     <h2>회의 열기</h2>
     <label>회의 제목 (선택)
       <input id="meeting-title" type="text" placeholder="1주차 정기회의" />
@@ -57,7 +132,7 @@
     <button id="open-meeting" class="primary" type="button">회의를 열고 로비로</button>
   </section>
 
-  <section>
+  <section class="panel">
     <h2>설정</h2>
     <label>프로젝트 이름
       <input id="title" type="text" />
@@ -68,7 +143,34 @@
       <input id="repo" type="text" placeholder="owner/repo" />
     </label>
     <button id="save-repo" type="button">저장소 연결</button>
-    <p id="gh-state"></p>
+
+    <!-- ══════════════════════════════════════════════════════
+         연결 진단 (docs/15 §4.2)
+
+         ⚠️ 이 구역이 없던 동안, 저장소 이름을 잘못 적으면 **아무 오류도
+         나지 않고 기여도만 비었습니다.** 사람은 그걸 "활동을 안 했다" 로
+         읽습니다. 이 값은 성적에 쓰일 수 있으므로 조용히 0 이 되는 것은
+         버그가 아니라 오답입니다.
+
+         그래서 상태만이 아니라 **왜 그렇게 봤는지**와 **지금 할 일**을
+         같이 보여줍니다. 상태만 보여주면 사람은 못 고칩니다.
+         ══════════════════════════════════════════════════════ -->
+    <div id="gh-health" class="health">
+      <!-- 비워 둔다. 이 요청은 거의 언제나 200ms 안에 끝나서, 여기
+           적어 둔 문구는 화면을 열 때마다 한 번 깜빡이기만 합니다. -->
+      <p id="gh-headline" class="health-headline"></p>
+      <p id="gh-detail" class="health-detail"></p>
+      <p id="gh-next" class="health-next" hidden></p>
+      <ul id="gh-warnings" class="plain health-warnings"></ul>
+      <p id="gh-activity" class="health-activity" hidden></p>
+    </div>
+
+    <!-- 연결 **전**의 PR 을 가져온다.
+         웹훅은 연결한 순간부터 오므로, 그 전에 제일 많이 일한 사람이
+         제일 적게 일한 것으로 보인다. 오류는 어디에도 안 난다. -->
+    <p id="gh-coverage" class="sub" hidden></p>
+    <button id="gh-backfill" type="button" hidden>지난 활동 가져오기</button>
+    <p id="gh-backfill-status" class="sub" hidden></p>
   </section>
 
   <!-- ══════════════════════════════════════════════════════
@@ -78,7 +180,7 @@
        마찰을 넣지 않되, 되돌릴 수 없다는 것과 기여도에 무슨 일이
        일어나는지를 누르기 **전에** 말합니다.
        ══════════════════════════════════════════════════════ -->
-  <section class="danger">
+  <section class="panel danger">
     <h2>내 녹음 지우기</h2>
     <p class="sub">
       이 프로젝트에 남아 있는 <strong>내 목소리</strong>를 지웁니다.
@@ -107,7 +209,7 @@
     새로 만들어 두는 게 좋습니다 — 지금 코드는 그 즉시 통하지 않습니다.
     <br /><br />
     저장소는 <code>owner/repo</code> 형식입니다. 주소를 붙여넣어도 고쳐서
-    저장합니다 — 웹훅이 <code>repository.full_name</code> 으로 프로젝트를
+    저장합니다 — 웹훅이 <code>repository.full_name</code>으로 프로젝트를
     찾기 때문에, 형식이 틀리면 <strong>오류 없이 기여도만 비어 있게</strong>
     됩니다.
   </p>
