@@ -26,6 +26,13 @@ import {
   shellHeading,
   type MeetingChannel,
 } from '../lib/nav/channels.ts';
+import {
+  emptyMembersNote,
+  panelHeading,
+  panelMembers,
+  unmeasurableNote,
+  type Member,
+} from '../lib/nav/panel.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { tryGet } from '../lib/http/send.ts';
@@ -107,6 +114,17 @@ function paint(context: NavContext, projectTitle: string | null = null): void {
     // 탭 넷 **뒤에** 회의 채널이 붙습니다. 서버에서 회의를 받아 오면
     // 그때 채웁니다 — 자세한 건 `fillChannels` 참고.
     tabHost.append(chan);
+
+    // 셋째 열 — 맥락 패널. `#tabs` 밖이라 **body 끝에** 답니다.
+    //
+    // ⚠️ 자리는 `position: fixed` 가 잡습니다. DOM 순서는 화면 배치와
+    // 상관없지만 **낭독기와 탭 이동 순서**에는 그대로 걸립니다. 본문보다
+    // 앞에 두면 화면을 열 때마다 팀원 명단을 먼저 듣게 됩니다.
+    if (document.querySelector('.ctx') === null) {
+      const panel = document.createElement('aside');
+      panel.className = 'ctx';
+      document.body.append(panel);
+    }
   }
 
   const host = document.getElementById('nav');
@@ -134,6 +152,19 @@ function paint(context: NavContext, projectTitle: string | null = null): void {
  * 어쩔 수 없이 적었고, 대신 `guards.test.ts` 가 둘이 같은지 봅니다.
  */
 const SHELL_WIDTH = '(min-width: 90rem)';
+
+/**
+ * 맥락 패널이 서는 너비. **채널 목록보다 넓습니다.**
+ *
+ * 90rem(1440px)에서 셋째 열까지 세우면 본문에 836px 밖에 안 남고, 칸반은
+ * 거기서 열 셋을 나눠 써야 합니다 — 한 열이 270px 이 됩니다. 카드 안에
+ * "연결된 PR이 없습니다 — PR 제목이나 본문에 TASK-3을 적으면 붙습니다"
+ * 같은 문장이 들어가는 화면이라 그 폭에서는 글이 뭉갭니다.
+ *
+ * 그래서 패널은 100rem(1600px)부터입니다. 그 사이 폭에서는 **두 열**로
+ * 섭니다 — 접히는 게 아니라 원래 모양입니다.
+ */
+const PANEL_WIDTH = '(min-width: 100rem)';
 
 const CHANNEL_LIMIT = 20;
 
@@ -170,7 +201,62 @@ async function fillChannels(tabHost: HTMLElement, context: NavContext): Promise<
     paint({ ...context, projectId }, title);
   }
 
-  await listChannels(tabHost, apiBase, { ...context, projectId });
+  await Promise.all([
+    listChannels(tabHost, apiBase, { ...context, projectId }),
+    fillPanel(apiBase, projectId),
+  ]);
+}
+
+/**
+ * 맥락 패널 — 셋째 열. **패널이 설 만큼 넓을 때만** 받아 옵니다.
+ *
+ * 담는 것과 왜 계획보다 좁은지는 `lib/nav/panel.ts` 에 적어 뒀습니다.
+ */
+async function fillPanel(apiBase: string, projectId: number): Promise<void> {
+  const host = document.querySelector('.ctx');
+  if (!(host instanceof HTMLElement)) return;
+
+  const wide = window.matchMedia(PANEL_WIDTH);
+  if (!wide.matches) {
+    wide.addEventListener('change', () => void fillPanel(apiBase, projectId), { once: true });
+    return;
+  }
+
+  const response = await tryGet(`${apiBase}/api/projects/${projectId}/members`);
+  // ⚠️ 닿지 못한 것과 팀원이 없는 것은 다릅니다. 그런데 이 패널은
+  // **본문이 아니라 곁다리**라, 못 받았다고 빨간 말을 띄우면 화면이
+  // 하려던 일과 상관없는 경고가 옆에 섭니다. 조용히 비웁니다 —
+  // `.ctx:empty` 가 열 자체를 접습니다.
+  if (response === null || !response.ok) return;
+
+  const members = panelMembers((await response.json()) as Member[]);
+  if (members.length === 0) {
+    host.innerHTML = `<p class="ctx-note">${escapeHtml(emptyMembersNote())}</p>`;
+    return;
+  }
+
+  const rows = members
+    .map((row) => {
+      const roles =
+        row.roles === null ? '' : `<p class="ctx-roles">${escapeHtml(row.roles)}</p>`;
+      // 못 재는 사람의 점에만 이유를 답니다. 마우스를 올리면 뜹니다.
+      const why = row.note === null ? '' : ` title="${escapeHtml(row.note)}"`;
+      return (
+        `<div class="ctx-row" aria-label="${escapeHtml(row.ariaLabel)}">` +
+        `<p class="ctx-name">` +
+        `<span class="ctx-dot" data-state="${escapeHtml(row.state)}"${why}></span>` +
+        `${escapeHtml(row.name)}</p>` +
+        roles +
+        `</div>`
+      );
+    })
+    .join('');
+
+  const note = unmeasurableNote(members);
+  host.innerHTML =
+    `<p class="ctx-head">${escapeHtml(panelHeading(members.length))}</p>` +
+    rows +
+    (note === null ? '' : `<p class="ctx-note">${escapeHtml(note)}</p>`);
 }
 
 /**

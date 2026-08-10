@@ -567,6 +567,55 @@ function channelAriaLabel(channel) {
   return parts.join(", ");
 }
 
+// src/lib/contribution/roles.ts
+var ROLE_OPTIONS = [
+  { key: "developer", label: "개발", hint: "코드 35% · 업무 30%" },
+  { key: "planner", label: "기획", hint: "문서 30% · 업무 30% · 코드 0%" },
+  { key: "designer", label: "디자인", hint: "문서 35% · 업무 30% · 코드 0%" }
+];
+function roleSummary(shares) {
+  const entries = Object.entries(shares ?? {}).filter(([, v]) => v > 0);
+  if (entries.length === 0) return null;
+  const label = (key) => ROLE_OPTIONS.find((o) => o.key === key)?.label ?? key;
+  if (entries.length === 1) return `${label(entries[0]?.[0] ?? "")} 100%`;
+  return entries.sort((a, b) => b[1] - a[1]).map(([key, value]) => `${label(key)} ${Math.round(value * 100)}%`).join(" · ");
+}
+
+// src/lib/nav/panel.ts
+var UNMEASURABLE = "GitHub 아이디를 아직 연결하지 않아 코드 활동을 못 잽니다";
+function measureState(githubLogin) {
+  return (githubLogin ?? "").trim() === "" ? "unmeasurable" : "measured";
+}
+function panelMembers(members) {
+  return members.map((member) => {
+    const roles = roleSummary(member.role_shares);
+    const state = measureState(member.github_login);
+    const note = state === "unmeasurable" ? UNMEASURABLE : null;
+    const spoken = [member.name];
+    if (roles !== null) spoken.push(roles);
+    if (note !== null) spoken.push(note);
+    return {
+      userId: member.user_id,
+      name: member.name,
+      roles,
+      state,
+      note,
+      ariaLabel: spoken.join(", ")
+    };
+  });
+}
+function panelHeading(count) {
+  return `팀원 ${count}명`;
+}
+function unmeasurableNote(members) {
+  const count = members.filter((m) => m.state === "unmeasurable").length;
+  if (count === 0) return null;
+  return `${count}명은 GitHub 아이디가 없어 코드 활동이 기여도에 안 들어갑니다 — 설정에서 각자 연결합니다`;
+}
+function emptyMembersNote() {
+  return "팀원을 불러오지 못했습니다";
+}
+
 // src/lib/nav/icons.ts
 var PATHS = {
   // 지붕(3,11)-(12,3)-(21,11) + 몸통 x 5.5~18.5, y 9.5~20
@@ -609,6 +658,11 @@ function paint(context, projectTitle = null) {
     }).join("");
     tabHost.insertAdjacentHTML("afterbegin", heading);
     tabHost.append(chan);
+    if (document.querySelector(".ctx") === null) {
+      const panel = document.createElement("aside");
+      panel.className = "ctx";
+      document.body.append(panel);
+    }
   }
   const host = document.getElementById("nav");
   if (!host) return;
@@ -617,6 +671,7 @@ function paint(context, projectTitle = null) {
   host.innerHTML = links + notes;
 }
 var SHELL_WIDTH = "(min-width: 90rem)";
+var PANEL_WIDTH = "(min-width: 100rem)";
 var CHANNEL_LIMIT = 20;
 async function fillChannels(tabHost, context) {
   const apiBase2 = safeApiBase(new URLSearchParams(location.search).get("api"), location.origin);
@@ -626,7 +681,33 @@ async function fillChannels(tabHost, context) {
   if (context.projectId !== projectId2 || title !== null) {
     paint({ ...context, projectId: projectId2 }, title);
   }
-  await listChannels(tabHost, apiBase2, { ...context, projectId: projectId2 });
+  await Promise.all([
+    listChannels(tabHost, apiBase2, { ...context, projectId: projectId2 }),
+    fillPanel(apiBase2, projectId2)
+  ]);
+}
+async function fillPanel(apiBase2, projectId2) {
+  const host = document.querySelector(".ctx");
+  if (!(host instanceof HTMLElement)) return;
+  const wide = window.matchMedia(PANEL_WIDTH);
+  if (!wide.matches) {
+    wide.addEventListener("change", () => void fillPanel(apiBase2, projectId2), { once: true });
+    return;
+  }
+  const response = await tryGet(`${apiBase2}/api/projects/${projectId2}/members`);
+  if (response === null || !response.ok) return;
+  const members = panelMembers(await response.json());
+  if (members.length === 0) {
+    host.innerHTML = `<p class="ctx-note">${escapeHtml(emptyMembersNote())}</p>`;
+    return;
+  }
+  const rows = members.map((row) => {
+    const roles = row.roles === null ? "" : `<p class="ctx-roles">${escapeHtml(row.roles)}</p>`;
+    const why = row.note === null ? "" : ` title="${escapeHtml(row.note)}"`;
+    return `<div class="ctx-row" aria-label="${escapeHtml(row.ariaLabel)}"><p class="ctx-name"><span class="ctx-dot" data-state="${escapeHtml(row.state)}"${why}></span>${escapeHtml(row.name)}</p>` + roles + `</div>`;
+  }).join("");
+  const note = unmeasurableNote(members);
+  host.innerHTML = `<p class="ctx-head">${escapeHtml(panelHeading(members.length))}</p>` + rows + (note === null ? "" : `<p class="ctx-note">${escapeHtml(note)}</p>`);
 }
 async function resolveProjectTitle(apiBase2, projectId2) {
   const response = await tryGet(`${apiBase2}/api/projects`);

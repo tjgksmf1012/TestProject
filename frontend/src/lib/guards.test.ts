@@ -11,7 +11,7 @@
  * 통과하기 때문에 사람이 알아챌 방법이 없습니다.
  */
 
-import { strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, strictEqual } from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1810,20 +1810,30 @@ describe('메신저 셸 (docs/19)', () => {
     // 첫 번째만 봤고, 그건 `body { padding-inline }` 하나짜리 블록이라
     // `.chan` 을 못 찾아 "0개" 가 나왔습니다 — 규칙이 아니라 **찾는
     // 방법이 틀린** 것이었습니다.
-    const owner = [...css.matchAll(/@media\s*\(min-width:\s*([\d.]+rem)\)/g)]
-      .filter((m) => {
-        const at = m.index ?? 0;
-        const end = css.indexOf('\n}\n', at);
-        return /\.chan\s*\{/.test(css.slice(at, end === -1 ? undefined : end));
-      })
-      .map((m) => m[1] as string);
-    strictEqual(owner.length, 1, `.chan 을 품은 미디어 쿼리가 ${owner.length}개입니다`);
+    //
+    // ⚠️ 그리고 이제 셸의 너비는 **하나가 아닙니다.** 채널 목록은 90rem,
+    // 맥락 패널은 100rem 부터입니다. 그래서 "첫 번째 숫자끼리" 비교하면
+    // 안 되고, 두 파일이 아는 **너비 집합**을 통째로 맞춰 봅니다.
+    const inCss = new Set(
+      [...css.matchAll(/@media\s*\(min-width:\s*([\d.]+rem)\)/g)]
+        .filter((m) => {
+          const at = m.index ?? 0;
+          const end = css.indexOf('\n}\n', at);
+          const block = css.slice(at, end === -1 ? undefined : end);
+          return /\.chan\s*\{/.test(block) || /\.ctx\s*\{/.test(block);
+        })
+        .map((m) => m[1] as string),
+    );
+    strictEqual(inCss.size, 2, `셸 열을 품은 미디어 쿼리가 ${inCss.size}개입니다 (둘이어야 합니다)`);
 
-    const inJs = nav.match(/min-width:\s*([\d.]+rem)/)?.[1];
-    strictEqual(
-      inJs,
-      owner[0],
-      `app.css 는 ${owner[0]} 에서 채널 목록을 보이는데 nav.ts 는 ${inJs} 를 봅니다`,
+    const inJs = new Set(
+      [...nav.matchAll(/min-width:\s*([\d.]+rem)/g)].map((m) => m[1] as string),
+    );
+    deepStrictEqual(
+      [...inJs].sort(),
+      [...inCss].sort(),
+      `app.css 와 nav.ts 가 아는 셸 너비가 다릅니다 — ` +
+        `그 사이 폭에서 열이 보이는데 영영 빕니다 (요청이 안 나가므로)`,
     );
   });
 
@@ -1904,21 +1914,26 @@ describe('메신저 셸 (docs/19)', () => {
     // 이 저장소에서 **두 번째**입니다. 처음은 프로젝트 레일 자리를 72px
     // 미리 비워 둔 것이었습니다. 없는 것을 위해 자리를 잡아 두면 그건
     // 빈칸이 아니라 결함입니다.
+    // ⚠️ 처음엔 `.chan` **하나만** 봤습니다. 그래서 맥락 패널에서
+    // `.ctx:empty` 를 지워도 **조용히 통과**했습니다 — 284px 짜리 빈 열이
+    // 생기는데도요. 일부러 지워 보고 알았습니다. 셸이 세우는 열을 전부
+    // 봅니다.
     const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
-    const at = css.indexOf('/* ── 회의 채널 ─');
-    strictEqual(at > -1, true, '셸의 회의 채널 블록을 못 찾았습니다');
-    const block = css.slice(at, css.indexOf('\n}\n', at));
-
-    // 자리를 차지하는 장식(선·여백)을 걸었다면 빈 경우를 반드시 빼야 합니다.
-    const decorates = /\.chan\s*\{[^}]*border-top/.test(block);
-    if (decorates) {
-      strictEqual(
-        /\.chan:empty\s*\{[^}]*display:\s*none/.test(block),
-        true,
-        '`.chan` 이 선을 긋는데 `.chan:empty { display: none }` 이 없습니다 — ' +
-          '홈처럼 회의를 못 받는 화면에 빈 가로줄이 남습니다',
-      );
+    const missing: string[] = [];
+    for (const name of ['chan', 'ctx']) {
+      // 자리를 차지하는 장식(선·바탕)을 걸었다면 빈 경우를 반드시 빼야 합니다.
+      const rule = new RegExp(`\\.${name}\\s*\\{[^}]*(border-top|border-left|background)`);
+      if (!rule.test(css)) continue;
+      if (!new RegExp(`\\.${name}:empty\\s*\\{[^}]*display:\\s*none`).test(css)) {
+        missing.push(`.${name}`);
+      }
     }
+    strictEqual(
+      missing.join(', '),
+      '',
+      '선이나 바탕을 그리는데 `:empty { display: none }` 이 없습니다 — ' +
+        '받아 올 것이 없는 화면에 빈 열·빈 줄이 남습니다',
+    );
   });
 
   it('⭐ 껍데기 색을 본문 색과 섞어 쓰지 않는다', () => {
@@ -1928,19 +1943,40 @@ describe('메신저 셸 (docs/19)', () => {
     //
     // 실험판 v4 에서 실제로 그랬습니다 — 실측 배경 rgb(18,33,31) 에
     // 글자 rgb(22,33,31) 이었습니다. 화면에서는 그냥 빈 줄로 보입니다.
-    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
-    const at = css.indexOf('/* ── 회의 채널 ─');
-    strictEqual(at > -1, true, '셸의 회의 채널 블록을 못 찾았습니다');
-    const block = css.slice(at, css.indexOf('\n}\n', at));
+    /**
+     * 뒤집히는데도 **일부러** 껍데기에 쓰는 것. 비워 두면 안 됩니다 —
+     * 근거 없는 면제는 다음 사람이 그냥 늘립니다.
+     */
+    const ALLOWED: Record<string, string> = {
+      '--gap': // 결측 = 흙빛. 뒤집히지만 **두 값 다** 껍데기 위에서 읽힙니다
+        '`test_a_gap_is_still_clay_not_red_even_on_the_chrome` 가 밝은·어두운 ' +
+        '양쪽을 껍데기 바탕에 대고 재서 3:1 을 넘는지 매번 확인합니다. ' +
+        '결측을 빨강이나 회색으로 바꾸지 않기로 한 결정이 이 색에 걸려 있어 ' +
+        '`--chrome-*` 로 옮길 수 없습니다',
+    };
 
-    const body = [...block.matchAll(/(?:color|background)\s*:\s*var\((--[a-z0-9-]+)\)/g)]
-      .map((m) => m[1] as string)
-      .filter((name) => !name.startsWith('--chrome-'));
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const offenders: string[] = [];
+    // ⚠️ 셸 블록이 **둘**입니다. 회의 채널만 보면 맥락 패널은 무사통과합니다.
+    for (const marker of ['/* ── 회의 채널 ─', '   맥락 패널 — 셋째 열']) {
+      const at = css.indexOf(marker);
+      strictEqual(at > -1, true, `셸 블록을 못 찾았습니다: ${marker}`);
+      const block = css.slice(at, css.indexOf('\n}\n', at));
+      for (const m of block.matchAll(/(?:color|background)\s*:\s*var\((--[a-z0-9-]+)\)/g)) {
+        const name = m[1] as string;
+        if (name.startsWith('--chrome-') || name in ALLOWED) continue;
+        offenders.push(name);
+      }
+    }
     strictEqual(
-      [...new Set(body)].join(', '),
+      [...new Set(offenders)].join(', '),
       '',
       '셸 안에서 뒤집히는 본문 토큰을 씁니다 — `--chrome-*` 를 쓰세요',
     );
+
+    // 면제 목록이 낡지 않았는가 — 안 쓰는 것이 남아 있으면 빼야 합니다.
+    const stale = Object.keys(ALLOWED).filter((name) => !css.includes(`var(${name})`));
+    strictEqual(stale.join(', '), '', '이제 안 씁니다 — 면제 목록에서 빼세요');
   });
 });
 
