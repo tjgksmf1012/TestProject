@@ -269,15 +269,29 @@ def test_every_session_gets_a_different_token(engine, team: dict):
     assert len(tokens) == 5
 
 
-def test_purge_removes_expired_sessions_only(engine, team: dict):
+def test_an_expired_session_stops_working_but_stays_in_the_record(engine, team: dict):
+    """⭐ 만료는 **판정**이지 삭제가 아닙니다 (결함 116).
+
+    `UserSession` 모델은 "행을 지우지 않는 이유는 감사 때문" 이라고 적어
+    뒀습니다 — 학기 말 기여도 분쟁에서 "누가 언제 로그인해 있었는가" 를
+    확인할 거리이기 때문입니다. 그런데 `auth_service` 에는 만료된 행을
+    **지우는** 함수가 있었고, 독스트링은 유지보수 잡이 부른다고
+    단언했습니다. 배선됐다면 그 기록이 매일 사라졌을 것입니다.
+
+    지울 이유도 없습니다 — 아래 두 줄이 그것을 말합니다. 행이 남아 있어도
+    그 토큰으로는 아무것도 못 합니다.
+    """
     with db_session.session_scope() as s:
-        _live, _ = auth_service.issue_session(s, user_id=team["members"][0])
-        _dead, row = auth_service.issue_session(s, user_id=team["members"][0])
+        live, _ = auth_service.issue_session(s, user_id=team["members"][0])
+        dead, row = auth_service.issue_session(s, user_id=team["members"][0])
         row.expires_at = datetime.now(UTC) - timedelta(days=1)
 
     with db_session.session_scope() as s:
-        assert auth_service.purge_expired(s) == 1
-        assert len(s.scalars(select(m.UserSession)).all()) == 1
+        # 만료된 토큰은 그 자리에서 거절됩니다 — 잡이 돌기를 기다리지 않습니다.
+        assert auth_service.resolve_session(s, dead) is None
+        assert auth_service.resolve_session(s, live) is not None
+        # 그리고 두 행 다 남아 있습니다. 이게 감사 기록입니다.
+        assert len(s.scalars(select(m.UserSession)).all()) == 2
 
 
 def test_email_case_is_folded(engine):

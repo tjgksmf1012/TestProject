@@ -55,28 +55,24 @@ class ChunkStore:
         """
         return f"meetings/{int(meeting_id)}/tracks/{int(track_id)}"
 
-    def delete_track(self, meeting_id: int, track_id: int) -> int:
-        """트랙의 청크를 전부 지운다. 지운 바이트를 돌려준다.
-
-        보존기간이 지난 원본을 실제로 없애는 유일한 경로입니다. 이게
-        없어서 `ChunkStore` 에는 **삭제 메서드 자체가 없었고**, 결국
-        음성이 무기한 남았습니다.
-
-        디렉터리가 없어도 오류가 아닙니다 — 이미 지워진 것뿐입니다.
-        """
-        directory = self.track_dir(meeting_id, track_id)
-        if not directory.is_dir():
-            return 0
-
-        freed = 0
-        for path in sorted(directory.iterdir()):
-            if path.is_file():
-                freed += path.stat().st_size
-                path.unlink()
-        # 빈 디렉터리를 남기지 않는다. 남기면 다음 실행에서 "있다" 로
-        # 보이고, 사람이 저장소를 들여다볼 때 아직 있는 줄 안다.
-        directory.rmdir()
-        return freed
+    # ⚠️ **여기에는 삭제가 없습니다. 삭제는 `jobs/retention.py` 한 곳입니다**
+    # (결함 116).
+    #
+    # 예전에는 `delete_track(meeting_id, track_id)` 가 있었고 독스트링이
+    # **"보존기간이 지난 원본을 실제로 없애는 유일한 경로"** 라고
+    # 단언했습니다. 실제로는 부르는 곳이 **0곳**이었고, 진짜 삭제는
+    # `retention._safe_remove` 가 `storage_key` 로 하고 있었습니다.
+    # 지우는 코드가 **두 벌**이었고, 그중 한 벌만 살아 있었습니다.
+    #
+    # 남은 쪽이 맞습니다. 보존기간 삭제의 입력은 `audio_assets` 행이라
+    # 손에 있는 것은 정수 둘이 아니라 `storage_key` 문자열이고, 그 문자열은
+    # **DB 에서 옵니다** — `../` 가 섞여 들어올 수 있으므로 저장 루트 밖을
+    # 거부하는 검사가 붙어야 합니다. 여기 있던 사본에는 그 검사가 없었고,
+    # 있을 필요도 없었습니다(정수로만 경로를 만드니까). 두 벌을 합치면
+    # 그 차이가 지워집니다.
+    #
+    # 이 클래스가 경로의 **주인**인 것은 그대로입니다 — `storage_key` 가
+    # 그 다리입니다.
 
     def chunk_path(self, meeting_id: int, track_id: int, seq: int) -> Path:
         if seq < 0:

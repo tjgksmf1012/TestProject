@@ -1591,3 +1591,166 @@ def test_screen_text_does_not_space_korean_particles():
     )
 
 
+
+
+# ══════════════════════════════════════════════════════════════
+# 정리 잡 — 부르는 곳이 있는가 (결함 116)
+# ══════════════════════════════════════════════════════════════
+
+#: 호출자가 없어도 되는 정리 함수와 **그 근거**.
+#:
+#: ⚠️ 근거 없이 이름만 추가하지 마십시오. 이 표는 "왜 안 불려도 되는가"
+#: 를 코드 안에 들고 있으라고 있는 것입니다 — 그냥 통과시키려고 이름을
+#: 적으면 가드가 아니라 장식이 됩니다.
+CLEANUP_WITHOUT_A_CALLER = {
+    "revoke_all_for_user": (
+        "사고 대응용입니다. 비밀번호를 바꿨거나 기기를 잃었을 때 파이썬 셸에서 "
+        "한 줄로 모든 세션을 끊습니다. 화면이 없는 것이 의도이고, 함수 자신의 "
+        "독스트링이 그렇게 적어 뒀습니다 — 사고가 났을 때부터 코드를 짜는 것과 "
+        "다릅니다."
+    ),
+}
+
+
+def _cleanup_functions() -> dict[str, str]:
+    """`teamflow/jobs/`·`teamflow/services/` 안의 `purge_*`·`revoke_*` 정의."""
+    import ast
+
+    found: dict[str, str] = {}
+    for folder in ("jobs", "services"):
+        for path in sorted((REPO_ROOT / "backend" / "teamflow" / folder).glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                if not node.name.startswith(("purge_", "revoke_")):
+                    continue
+                found[node.name] = f"{folder}/{path.name}:{node.lineno}"
+    return found
+
+
+def _call_counts(names: set[str]) -> dict[str, int]:
+    """teamflow 안에서 그 이름을 **부르는** 곳의 수. 정의는 안 셉니다."""
+    import ast
+
+    counts = dict.fromkeys(names, 0)
+    for path in sorted((REPO_ROOT / "backend" / "teamflow").rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            called = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else None
+            )
+            if called in counts:
+                counts[called] += 1
+    return counts
+
+
+def test_every_cleanup_function_has_something_that_calls_it():
+    """⭐ **지우는 코드는 안 불려도 조용합니다** (결함 116).
+
+    `auth_service.purge_expired` 는 만료된 `user_sessions` 행을 지우면서
+    독스트링에 **"유지보수 잡에서 부릅니다"** 라고 단언했습니다. 그 잡은
+    없었습니다 — `tasks/maintenance.py` 에도 `beat_schedule` 에도 없었고,
+    부르는 곳이 **0곳**이었습니다.
+
+    이 부류가 조용한 이유는 두 겹입니다.
+
+      · **안 부르면** 아무 일도 안 일어납니다. 오류도 로그도 없습니다.
+        디스크가 차거나 보존기간이 지난 데이터가 남거나 — 몇 달 뒤에,
+        코드가 아니라 **운영에서** 드러납니다
+      · **부르면** 되돌릴 수 없습니다. 지우는 코드라서 그렇습니다
+
+    실제로 이 저장소는 앞의 것을 이미 한 번 겪었습니다. 성문 폐기 태스크가
+    선언만 되고 스케줄이 없었습니다 — 문서가 "가장 민감한 데이터" 라고
+    분류한 생체인식정보였습니다. 그 교훈이 `beat_schedule` 주석에만 남고
+    **검사로는 안 남아** 있었습니다. 이 테스트가 그 자리입니다.
+    """
+    defined = _cleanup_functions()
+    counts = _call_counts(set(defined))
+
+    orphans = [
+        f"{name} ({defined[name]})"
+        for name, hits in sorted(counts.items())
+        if hits == 0 and name not in CLEANUP_WITHOUT_A_CALLER
+    ]
+
+    assert orphans == [], (
+        "지우는 함수인데 teamflow 안에 부르는 곳이 없습니다: "
+        + " | ".join(orphans)
+        + ". 배선하거나, 지우거나, `CLEANUP_WITHOUT_A_CALLER` 에 **근거와 함께** "
+        "적으십시오. 독스트링에 '잡에서 부릅니다' 라고 적는 것은 배선이 아닙니다."
+    )
+
+
+def test_the_cleanup_allowlist_does_not_name_functions_that_are_gone():
+    """면제 표가 낡으면 다음 사람이 "검토된 목록" 으로 읽습니다."""
+    defined = _cleanup_functions()
+    stale = sorted(set(CLEANUP_WITHOUT_A_CALLER) - set(defined))
+    assert stale == [], (
+        f"`CLEANUP_WITHOUT_A_CALLER` 에 이제 없는 함수가 있습니다: {stale}. "
+        "지우십시오."
+    )
+
+
+def test_every_maintenance_task_is_actually_scheduled():
+    """⭐ **선언된 태스크와 도는 태스크는 다릅니다** (결함 116).
+
+    `@app.task` 를 붙이면 태스크가 **등록**될 뿐입니다. 누가 부르지
+    않으면 영원히 안 돕니다. 이 저장소는 그걸 한 번 겪었습니다 — 끝난
+    프로젝트의 성문을 폐기하는 태스크가 선언돼 있고 독스트링에 "목적 외
+    보관이 된다" 라고까지 적혀 있는데 `beat_schedule` 에 없었습니다.
+
+    그때 고치면서 주석은 남겼지만 **검사는 안 남겼습니다.** 다음에 정리
+    태스크를 하나 더 만들면 같은 자리에서 같은 방식으로 빠집니다.
+    """
+    import ast
+
+    tasks_dir = REPO_ROOT / "backend" / "teamflow" / "tasks"
+    tree = ast.parse((tasks_dir / "maintenance.py").read_text(encoding="utf-8"))
+
+    declared: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        for deco in node.decorator_list:
+            if not isinstance(deco, ast.Call):
+                continue
+            for kw in deco.keywords:
+                if kw.arg == "name" and isinstance(kw.value, ast.Constant):
+                    declared[str(kw.value.value)] = f"maintenance.py:{node.lineno}"
+
+    assert declared, (
+        "`tasks/maintenance.py` 에서 `@app.task(name=...)` 를 하나도 못 찾았습니다. "
+        "데코레이터 모양이 바뀌었으면 이 검사도 같이 고치십시오 — 아무것도 못 "
+        "찾은 검사는 언제나 통과합니다."
+    )
+
+    # `beat_schedule=` 아래의 문자열을 전부 모읍니다. 어느 항목의 어느 키인지는
+    # 안 봅니다 — 이름이 거기 **적혀 있기만** 하면 스케줄에 걸린 것입니다.
+    app_tree = ast.parse((tasks_dir / "__init__.py").read_text(encoding="utf-8"))
+    scheduled: set[str] = set()
+    for node in ast.walk(app_tree):
+        if isinstance(node, ast.keyword) and node.arg == "beat_schedule":
+            scheduled |= {
+                sub.value
+                for sub in ast.walk(node.value)
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str)
+            }
+
+    missing = sorted(
+        f"{name} ({where})" for name, where in declared.items() if name not in scheduled
+    )
+    assert missing == [], (
+        "선언만 되고 `beat_schedule` 에 없는 유지보수 태스크가 있습니다: "
+        + " | ".join(missing)
+        + ". 등록은 실행이 아닙니다 — 스케줄에 넣거나, 왜 수동으로만 도는지 "
+        "주석으로 적으십시오."
+    )

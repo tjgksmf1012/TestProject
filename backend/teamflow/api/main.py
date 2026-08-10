@@ -369,9 +369,12 @@ class CandidateOut(BaseModel):
     # 확신도를 깎은 이유. 숫자만으로는 무엇을 확인해야 할지 알 수 없다.
     warnings: list[str] = []
 
-    @property
-    def is_complete(self) -> bool:
-        return self.assignee_id is not None and self.deadline is not None
+    # ⚠️ 여기 `is_complete` 프로퍼티가 있었습니다 (결함 116). Pydantic 은
+    # 프로퍼티를 **직렬화하지 않으므로** 화면은 그 값을 받은 적이 없고,
+    # 서버 안에서도 부르는 곳이 0곳이었습니다. "담당자·마감일이 다 찼는가"
+    # 를 실제로 판정하는 것은 화면의 `approvalBlockers` 입니다 — 그쪽은
+    # 사람이 고른 값(`draft`)까지 보므로 여기서는 애초에 같은 답을 낼 수
+    # 없습니다. 셋째 사본을 두면 언젠가 서로 다른 답을 냅니다.
 
 
 class ReviewItem(BaseModel):

@@ -176,11 +176,32 @@ def revoke_all_for_user(session: Session, user_id: int) -> int:
     return len(rows)
 
 
-def purge_expired(session: Session) -> int:
-    """만료된 세션 행 삭제. 유지보수 잡에서 부릅니다."""
-    rows = session.scalars(
-        select(m.UserSession).where(m.UserSession.expires_at < _now())
-    ).all()
-    for row in rows:
-        session.delete(row)
-    return len(rows)
+# ⚠️ **세션 정리 잡은 없습니다. 일부러 없습니다** (결함 116).
+#
+# 예전에는 여기 `purge_expired(session)` 가 있었습니다 — 만료된
+# `user_sessions` 행을 `session.delete()` 로 지우고, 독스트링은
+# **"유지보수 잡에서 부릅니다"** 라고 단언했습니다. 그런데 그 잡은
+# 없었습니다. `tasks/maintenance.py` 에도, `beat_schedule` 에도
+# 없었습니다. 부르는 곳이 **0곳**이었습니다.
+#
+# 안 불린 것이 다행이었습니다. `UserSession` 모델은 이렇게 적어 뒀습니다.
+#
+#     로그아웃 시각. 행을 지우지 않는 이유는 감사 때문입니다 —
+#     "누가 언제 로그인해 있었는가" 는 기여도 분쟁에서 확인할 거리가 됩니다.
+#
+# 그 잡을 배선했다면 **모델이 지키겠다고 적어 둔 그 기록을 매일 지웠을
+# 것**입니다. 학기 말 분쟁에서 확인할 것이 남아 있지 않습니다. 조용히,
+# 되돌릴 수 없게.
+#
+# 지울 이유도 없습니다. 만료 판정은 `resolve_session` 이 `expires_at` 으로
+# 그 자리에서 합니다 — 행이 남아 있어도 그 토큰으로는 아무것도 못 합니다.
+# `token_hash` 는 무작위 32바이트의 sha256 이라 되돌릴 수도 없습니다.
+# **지워서 얻는 것은 없고 잃는 것은 감사 기록입니다.**
+#
+# 그래서 함수를 지웠습니다. 남겨 두면 다음 사람이 독스트링을 믿고
+# 배선합니다 — 이 저장소가 결함 63 에서 겪은 바로 그 모양입니다
+# (맞는 함수가 있고 아무도 안 부름). 다만 이쪽은 **불렀다면 더 나빴습니다.**
+#
+# 정리가 정말 필요해지면 지우는 것이 아니라 `token_hash` 만 비우는 쪽으로
+# 가야 합니다. 그때는 감사 기록을 무엇까지 남길지부터 정하는 것이 먼저고,
+# 그건 코드가 아니라 정책 문제입니다 (docs/07 §2.4).
