@@ -92,6 +92,42 @@ function callArgs(code: string, fnName: string): string[] {
  * 보면 버튼에 **안 이어진** 깃발이 통과합니다 — 이 저장소가 반복해 당한
  * "만들어 놓고 아무도 안 부름" 이 규칙 안에서 재현되는 자리입니다.
  */
+/** `const 이름 = … => { … }` 의 **몸통**. 중괄호 짝을 맞춰 떼어 옵니다. */
+function bodyOf(code: string, name: string): string {
+  const at = new RegExp(`\\bconst ${name}\\s*=`).exec(code);
+  if (at === null) return '';
+  const open = code.indexOf('{', at.index);
+  if (open === -1) return '';
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === '{') depth++;
+    else if (code[i] === '}') {
+      depth--;
+      if (depth === 0) return code.slice(open + 1, i);
+    }
+  }
+  return '';
+}
+
+/** 이 핸들러가 (한 단계 건너서라도) 서버를 바꾸러 가는가. */
+function mutates(code: string, name: string, seen = new Set<string>()): boolean {
+  if (seen.has(name)) return false;
+  seen.add(name);
+  const body = bodyOf(code, name);
+  if (body === '') return false;
+  if (/trySend\(/.test(body)) return true;
+  // `create` 가 `send(...)` 를 부르는 모양. 한 단계만 따라갑니다.
+  for (const [, called] of body.matchAll(/\b(?:void\s+)?([a-z]\w*)\(/g)) {
+    if (mutates(code, called as string, seen)) return true;
+  }
+  return false;
+}
+
+/** `<button …>` 여는 태그들. 속성 블록만 돌려줍니다. */
+function buttonTags(code: string): string[] {
+  return [...code.matchAll(/<button\b([^>]*)>/g)].map((m) => m[1] as string);
+}
+
 function locksDeclaratively(code: string): boolean {
   for (const m of code.matchAll(/\bset([A-Z]\w*)\(true\)/g)) {
     const suffix = m[1] as string;
@@ -692,6 +728,29 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
       offenders.join(', '),
       '',
       '`whilePressed(button, () => …)` 로 누르는 동안 잠그세요',
+    );
+
+    // ⚠️ **위 검사는 파일 단위입니다** — "이 화면이 잠그는가" 만 봅니다.
+    // 심어 보고 알았습니다: 홈에서 `만들기` 의 `disabled` 를 떼도 옆의
+    // `참가` 가 아직 갖고 있어서 **통과했습니다.**
+    //
+    // 그게 바로 결함 89 가 적어 둔 모양입니다 — "잠그는 곳과 안 잠그는
+    // 곳이 섞여 있던 것이 결함입니다." 파일 단위로 세면 그 섞임을
+    // 영영 못 봅니다. 그래서 **버튼 하나씩** 봅니다.
+    const loose: string[] = [];
+    for (const { rel, code } of demoSources()) {
+      if (!rel.endsWith('.tsx') || !/trySend\(/.test(code)) continue;
+      for (const attrs of buttonTags(code)) {
+        const handler = /onClick=\{([a-z]\w*)\}/.exec(attrs)?.[1];
+        if (handler === undefined) continue; // 인라인 화살표는 이름이 없다
+        if (!mutates(code, handler)) continue; // 서버를 안 바꾸면 잠글 것도 없다
+        if (!/disabled=\{/.test(attrs)) loose.push(`${rel} → onClick={${handler}}`);
+      }
+    }
+    strictEqual(
+      loose.join(', '),
+      '',
+      '서버를 바꾸는 버튼인데 누르는 동안 안 잠깁니다',
     );
   });
 
@@ -2400,7 +2459,7 @@ describe('그림자 (docs/19 §19)', () => {
 describe('상태 화면 (지시서 §7)', () => {
   /** 목록을 **비동기로 채우는** 그릇. 화면과 그 그릇의 id. */
   const ASYNC_CONTAINERS: [string, string][] = [
-    ['home.ts', 'projects'],
+    ['home.tsx', 'projects'],
     ['contributions.ts', 'members'],
     ['kanban.tsx', 'board'],
     ['review.tsx', 'list'],

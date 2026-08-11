@@ -104,43 +104,14 @@
 </style>
 </head>
 <body>
-  <header class="head">
-    <h1>TeamFlow</h1>
-    <p class="lede">
-      회의는 녹음 → 처리 → 사람이 검토 → 칸반 순서로 갑니다.
-      각 회의 아래 문구가 지금 어느 단계인지와 다음에 할 일을 말합니다.
-    </p>
-    <p class="by" id="who" hidden></p>
-  </header>
+  <!-- ⭐ **상태가 있는 것은 React 가 그립니다** (docs/19 §24) —
+       머리말·프로젝트 목록·시작하기 폼. 여기에 같은 마크업을 남겨 두면
+       두 벌이 되고, React 가 마운트하는 순간 지워집니다.
 
-
-  <!-- 비워 둔다. "불러오는 중…" 을 여기 적어 두면 **언제나** 한 번
-       깜빡입니다 — 대부분의 요청은 200ms 안에 끝나기 때문입니다.
-       로딩 표시는 `src/lib/ui/pending.ts` 가 늦게 켭니다. -->
-  <div id="projects"></div>
-
-  <section class="start">
-    <h2>시작하기</h2>
-    <div class="field">
-      <p class="hint">만들면 초대 코드가 나옵니다. 그 코드를 팀원에게 알려 주세요.</p>
-      <div class="row">
-        <input id="new-title" type="text" placeholder="새 프로젝트 이름" maxlength="200"
-               autocomplete="off" />
-        <button id="create" type="button" class="primary">만들기</button>
-      </div>
-    </div>
-
-    <div class="field">
-      <p class="hint">팀원에게 코드를 받았다면 여기에 넣으세요.</p>
-      <div class="row">
-        <input id="code" type="text" placeholder="초대 코드 (ABCD-EFGH)" maxlength="12"
-               autocomplete="off" autocapitalize="characters" spellcheck="false" />
-        <button id="join" type="button">참가</button>
-      </div>
-    </div>
-
-    <p id="start-error" class="error" hidden></p>
-  </section>
+       ⚠️ 아래의 설치 안내와 로그아웃은 **HTML 에 그대로 둡니다.**
+       `pwa.ts`·`logout.ts` 가 DOM 을 직접 만져서 채우고, 그 두 모듈은
+       화면 여덟이 함께 씁니다 — React 용으로 다시 쓰면 두 벌이 됩니다. -->
+  <div id="app"></div>
 
   <!-- 설치 안내. `src/demo/pwa.ts` 가 채우고, 설치할 방법이 없으면
        비워 둡니다 — 아이폰과 안드로이드가 완전히 다릅니다. -->

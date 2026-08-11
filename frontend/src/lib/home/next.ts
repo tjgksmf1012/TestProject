@@ -29,8 +29,18 @@ export interface Meeting {
 }
 
 export interface NextStep {
-  /** 이동할 주소. 비어 있으면 버튼을 만들지 않는다. */
-  href: string;
+  /**
+   * 이동할 주소. **갈 곳이 없으면 `null`** 이고, 그때는 버튼을 안 만듭니다.
+   *
+   * ⚠️ 예전에는 빈 문자열이 그 뜻이었습니다. 화면이 `step.href ? … : ''`
+   * 로 참·거짓만 보면 맞게 돌지만, React 로 옮기며 `!== null` 로 적었더니
+   * **빈 `<a>` 가 그려졌습니다** — 글자 없는 작은 상자가 처리 중인 회의
+   * 줄에 떴고, 눌러도 아무 데도 안 갑니다. 렌더해서 보고 알았습니다.
+   *
+   * 빈 문자열은 "없음" 처럼 **생기지 않았습니다.** `null` 은 타입이
+   * 강제하므로 같은 실수를 다시 할 수 없습니다.
+   */
+  href: string | null;
   label: string;
   /** 왜 지금 이걸 하는가. 버튼만 있으면 사람은 왜 눌러야 하는지 모른다. */
   reason: string;
@@ -77,7 +87,7 @@ export function nextStepFor(meeting: Meeting): NextStep {
     case 'queued':
     case 'processing':
       return {
-        href: '',
+        href: null,
         label: '',
         reason: '처리 중입니다 — 끝나면 검토할 업무 후보가 나옵니다',
         actionable: false,
