@@ -10,6 +10,8 @@ import {
   integrityNotes,
   nameOf,
   orderForDisplay,
+  uncertaintyDots,
+  uncertaintyDotsNote,
   uncertaintySpans,
   readBeforeTheNumber,
   roleOf,
@@ -434,5 +436,59 @@ describe('카드에 적을 역할', () => {
   it('0 인 역할은 안 보인다', () => {
     const people = [{ user_id: 1, name: '김민수', role_shares: { developer: 1, planner: 0 } }];
     strictEqual(roleOf(member(), people), '개발');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 모르는 폭을 셀 수 있는 점으로 (docs/19 §26)
+// ══════════════════════════════════════════════════════════════
+
+describe('uncertaintyDots', () => {
+  it('점 하나가 4%p 다', () => {
+    strictEqual(uncertaintyDots(20), 5);
+    strictEqual(uncertaintyDots(12), 3);
+    strictEqual(uncertaintyDots(4), 1);
+  });
+
+  it('⭐ **0 으로 내림하지 않는다**', () => {
+    // 폭이 1%p 라도 "모르는 게 있다" 는 사실입니다. 점이 0 개면 화면에서
+    // 그것이 **완전히 확정** 으로 보이는데, 그건 다른 말입니다.
+    strictEqual(uncertaintyDots(1), 1);
+    strictEqual(uncertaintyDots(0.3), 1);
+  });
+
+  it('폭이 0 이면 점도 0 — 확정된 것에 점을 찍지 않는다', () => {
+    strictEqual(uncertaintyDots(0), 0);
+  });
+
+  it('이상한 값에 점을 찍지 않는다', () => {
+    strictEqual(uncertaintyDots(Number.NaN), 0);
+    strictEqual(uncertaintyDots(-5), 0);
+  });
+
+  it('⭐ 구간은 0~100 이라 점이 스물다섯을 넘지 않는다', () => {
+    // 넘으면 한 줄이 화면 밖으로 나가고, 그건 값이 아니라 고장으로 보입니다.
+    strictEqual(uncertaintyDots(100), 25);
+    strictEqual(uncertaintyDots(9999), 25);
+  });
+
+  it('⭐ 개수가 **절대량**이다 — 팀 구성에 따라 안 변한다', () => {
+    // 예전 막대는 팀에서 가장 넓은 구간 대비 길이였습니다. 그러면 같은
+    // 20%p 라도 팀에 따라 길이가 달라지고, 긴 막대가 "남보다 더 모른다"
+    // 로 읽힙니다 — 그건 사람을 비교하는 그림입니다.
+    strictEqual(uncertaintyDots(20), uncertaintyDots(20));
+    strictEqual(uncertaintyDots(20) > uncertaintyDots(8), true);
+  });
+});
+
+describe('uncertaintyDotsNote', () => {
+  it('점 하나가 몇 %p 인지 말한다 — 안 말하면 셀 이유가 없다', () => {
+    const note = uncertaintyDotsNote(20);
+    strictEqual(note.includes('20%p'), true, note);
+    strictEqual(note.includes('4%p'), true, note);
+  });
+
+  it('확정된 값에는 다른 말을 한다', () => {
+    strictEqual(uncertaintyDotsNote(0).includes('확정적'), true);
   });
 });

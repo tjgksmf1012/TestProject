@@ -94,11 +94,24 @@
      길이가 긴 사람은 기여가 큰 사람이 아니라 **우리가 가장 모르는
      사람**이라, 이 그림은 팀을 줄 세우는 대신 어디를 더 재야 하는지를
      가리킵니다. 그래서 색도 결측과 같은 흙빛입니다. */
-  .unc-bar { height: var(--sp-1); border-radius: var(--r-badge); background: var(--sunken);
-             overflow: hidden; margin-top: var(--sp-4); }
-  .unc-bar i { display: block; height: 100%; border-radius: var(--r-badge);
-              background: linear-gradient(90deg,
-                color-mix(in srgb, var(--gap) 55%, transparent), var(--gap)); }
+  /* ⭐ **막대에서 셀 수 있는 점으로** (docs/19 §26).
+
+     불확실성 시각화 연구(CHI 2016·2018 · 임상 5포맷 비교)가 한결같이
+     말하는 것은 **빈도 표현이 연속 표현보다 정확하게 읽힌다**는 것입니다 —
+     사람은 길이를 눈대중하는 것보다 개수를 세는 쪽을 훨씬 잘합니다.
+
+     ⚠️ 원래 형태(quantile dotplot)를 **그대로 가져오지 않았습니다.**
+     그건 값 축 위에 점을 뿌리는데, 여기서 그러면 세 사람의 점이 같은
+     축에 세로로 정렬되고 그건 이미 두 번 걷어낸 순위표입니다.
+     위치가 아니라 **개수**로만 씁니다 — 점 하나가 4%p.
+
+     ⚠️ 예전 막대는 **팀에서 가장 넓은 구간 대비** 길이였습니다. 같은
+     20%p 라도 팀 구성에 따라 길이가 달라져서, 긴 막대가 "남보다 더
+     모른다" 로 읽혔습니다. 점은 절대량이라 옆 사람과 무관합니다. */
+  .unc-dots { display: flex; flex-wrap: wrap; gap: var(--sp-1);
+              margin-top: var(--sp-4); max-width: 11rem; }
+  .unc-dots i { width: var(--sp-2); height: var(--sp-2); border-radius: var(--r-round);
+                background: var(--gap); }
   .unc-note { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-2) 0 0; }
   .unc-none { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-4) 0 0; }
 

@@ -17,6 +17,8 @@ import {
   integrityNotes,
   nameOf,
   orderForDisplay,
+  uncertaintyDots,
+  uncertaintyDotsNote,
   uncertaintySpans,
   type UncertaintySpan,
   readBeforeTheNumber,
@@ -139,12 +141,26 @@ function memberRow(member: MemberScore, uncertainty: UncertaintySpan | undefined
 
   // 폭 0 은 "완전히 확정" 이라 그릴 것이 없습니다. 0px 막대를 그리면
   // 사람은 그것을 "막대가 안 나왔다(고장)" 로 읽습니다.
-  const width = uncertainty?.ratio ?? 0;
+  // ⭐ **막대에서 셀 수 있는 점으로** (docs/19 §26).
+  //
+  // 불확실성 시각화 연구가 한결같이 말하는 것은 빈도 표현이 연속 표현보다
+  // 정확하게 읽힌다는 것입니다 — 사람은 길이를 눈대중하는 것보다 개수를
+  // 세는 쪽을 훨씬 잘합니다.
+  //
+  // ⚠️ 그런데 원래 형태(quantile dotplot)는 **값 축 위에** 점을 뿌립니다.
+  // 여기서 그러면 세 사람의 점이 같은 축에 세로로 정렬되고, 그건 이
+  // 저장소가 이미 두 번 걷어낸 순위표입니다. 게다가 우리에게는 분포가
+  // 없어서 점을 뿌리려면 **모양을 지어내야** 합니다.
+  //
+  // 그래서 기제만 가져왔습니다 — 위치가 아니라 **개수**로만.
+  const dots = uncertaintyDots(uncertainty?.points ?? 0);
   const spread =
-    uncertainty === undefined || uncertainty.points === 0
-      ? '<p class="unc-none">구간이 없습니다 — 이 값은 확정적입니다</p>'
-      : `<div class="unc-bar"><i style="width:${width}%"></i></div>` +
-        `<p class="unc-note">모르는 폭 ${Math.round(uncertainty.points)}%p</p>`;
+    dots === 0
+      ? `<p class="unc-none">${escapeHtml(uncertaintyDotsNote(0))}</p>`
+      : `<div class="unc-dots" role="img" aria-label="${escapeHtml(
+          uncertaintyDotsNote(uncertainty?.points ?? 0),
+        )}">${'<i></i>'.repeat(dots)}</div>` +
+        `<p class="unc-note">${escapeHtml(uncertaintyDotsNote(uncertainty?.points ?? 0))}</p>`;
 
   return `
 <div class="read">

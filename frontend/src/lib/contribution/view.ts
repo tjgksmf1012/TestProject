@@ -186,6 +186,54 @@ export function uncertaintySpans(members: readonly MemberScore[]): UncertaintySp
   }));
 }
 
+/**
+ * 모르는 폭을 **셀 수 있는 점**으로 (docs/19 §26).
+ *
+ * ## 왜 막대가 아니라 점인가
+ *
+ * 불확실성 시각화 연구(CHI 2016·2018, 그리고 임상 5포맷 비교)가 한결같이
+ * 말하는 것은 **빈도 표현(frequency framing)이 연속 표현보다 정확하게
+ * 읽힌다**는 것입니다. 사람은 길이를 눈대중하는 것보다 개수를 세는 쪽을
+ * 훨씬 잘합니다.
+ *
+ * ## ⚠️ 그런데 quantile dotplot 을 그대로 가져오지 않았습니다
+ *
+ * 원래 형태는 **값 축 위에** 점을 뿌립니다. 이 화면에서 그러면 세 사람의
+ * 점이 같은 0~100 축에 세로로 정렬되고, 그건 이 저장소가 이미 두 번
+ * 걷어낸 **순위표**입니다 (기여도 막대의 절대 위치 · 카테고리 막대).
+ * 게다가 우리에게는 분포가 없습니다 — 구간의 양 끝뿐이라, 점을 뿌리려면
+ * **분포 모양을 지어내야** 합니다. 그건 이 저장소가 금지한 것입니다.
+ *
+ * 그래서 연구가 말하는 **기제**만 가져왔습니다: 값을 **세어지는 양**으로
+ * 바꾸되, 위치가 아니라 **개수**로만 씁니다.
+ *
+ *     점 하나 = 4%p 의 "모름"
+ *
+ * ⚠️ 예전 막대는 **팀에서 가장 넓은 구간 대비** 길이였습니다. 그러면
+ * 같은 20%p 라도 팀 구성에 따라 길이가 달라지고, 긴 막대가 "남보다 더
+ * 모른다" 로 읽힙니다. 점은 **절대량**입니다 — 다섯 개면 20%p 이고,
+ * 옆 사람이 몇 개든 상관없습니다.
+ */
+export const POINTS_PER_DOT = 4;
+
+/** 한 줄에 그릴 점 개수. 0 이면 그릴 것이 없다는 뜻입니다. */
+export function uncertaintyDots(points: number): number {
+  if (!Number.isFinite(points) || points <= 0) return 0;
+  // ⚠️ **0 으로 내림하지 않습니다.** 폭이 1%p 라도 "모르는 게 있다" 는
+  // 사실이고, 점이 0 개면 화면에서 그것이 **완전히 확정** 으로 보입니다.
+  // 반올림 대신 올림인 이유가 그것입니다.
+  const dots = Math.ceil(points / POINTS_PER_DOT);
+  // 한 줄에 스물다섯이면 100%p — 그보다 넓을 수 없습니다(구간이 0~100).
+  return Math.min(dots, Math.ceil(100 / POINTS_PER_DOT));
+}
+
+/** 점 개수를 사람 말로. 화면이 숫자를 지어내지 않게 여기서 만듭니다. */
+export function uncertaintyDotsNote(points: number): string {
+  const dots = uncertaintyDots(points);
+  if (dots === 0) return '구간이 없습니다 — 이 값은 확정적입니다';
+  return `모르는 폭 ${Math.round(points)}%p · 점 하나가 ${POINTS_PER_DOT}%p`;
+}
+
 function clamp(value: number, min: number, max: number): number {
   if (Number.isNaN(value)) return min;
   return Math.min(Math.max(value, min), max);
