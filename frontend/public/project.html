@@ -24,7 +24,11 @@
   .danger ul.plain li { font-size: var(--fs-label); color: var(--text-subtle); padding: var(--sp-1) 0; }
   .danger ul.plain li::before { content: "· "; }
   .danger-btn { margin-top: var(--sp-4); border-color: var(--bad); color: var(--bad); }
-  #del-result { font-size: var(--fs-body); margin-top: var(--sp-3); }
+  /* ⚠️ `margin-top` 을 여기 적으면 안 됩니다 — 이 자리는 `.status` 이고
+     그 규칙이 같은 값을 이미 줍니다. id(1,0,0)로 다시 적으면 공용
+     `[role='status']:empty { margin: 0 }` 을 이겨서, 안내가 없을 때도
+     빈 줄이 12px 자리를 차지합니다. 크기만 남깁니다. */
+  #del-result { font-size: var(--fs-body); }
   #del-result.bad { color: var(--bad); }
 
 

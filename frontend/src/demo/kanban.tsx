@@ -472,7 +472,9 @@ function Kanban() {
         </div>
       )}
 
-      <p id="result">{error}</p>
+      {/* 옮기기가 실패했을 때만 글이 찹니다. `role="status"` 라 낭독기도
+          듣습니다 — 비었을 때는 공용 CSS 가 여백을 걷습니다. */}
+      <p id="result" role="status">{error}</p>
       {footer}
     </>
   );

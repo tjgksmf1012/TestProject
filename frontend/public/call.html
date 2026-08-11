@@ -97,7 +97,10 @@
   @media (hover: hover) and (pointer: fine) {
     #leave:hover { color: var(--bad); background: transparent; }
   }
-  #status { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-3) 0 0; }
+  /* ⚠️ `margin` 을 id 로 적으면 공용 `[role='status']:empty` 를 이겨서
+     할 말이 없을 때도 빈 줄이 자리를 차지합니다. `.status` 를 붙여
+     여백은 공용에서 받습니다. */
+  #status { font-size: var(--fs-label); color: var(--text-subtle); }
   /* ⚠️ **이 줄은 `app.css` 의 `.bad` 와 겹치는 게 아니라 꼭 있어야
      합니다.** 윗줄의 `#status`(1,0,0)가 `.bad`(0,1,0)를 이기므로, 이걸
      지우면 실패가 조용히 회색으로 돌아갑니다 — 결함 61·98 에서 이미
@@ -124,13 +127,13 @@
 
   <section class="panel">
     <h2>내 마이크</h2>
-    <p class="sub" id="mic">확인 중…</p>
+    <p class="sub" id="mic" role="status">확인 중…</p>
     <!-- ⚠️ 이게 없으면 마이크가 죽은 걸 회의가 끝난 뒤에 안다.
          그때는 그 사람의 발언이 이미 사라진 뒤다. -->
     <div class="meter"><span id="level"></span></div>
   </section>
 
-  <p id="status"></p>
+  <p id="status" class="status" role="status"></p>
 
   <!-- ⚠️ `.inner` 가 빠져 있었습니다. 화면 셋 중 이 하나만 — 검토·오프라인은
        둘 다 갖고 있습니다. `app.css` 는 폭(34rem)·가운데 정렬·버튼 사이

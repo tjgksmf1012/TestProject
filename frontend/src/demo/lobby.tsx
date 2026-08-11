@@ -34,7 +34,7 @@ import { describeUnexpected, trySend, unreachableText } from '../lib/http/send.t
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { rowItems } from '../lib/ui/skeleton.ts';
-import { Byline, RawHtml } from './parts.tsx';
+import { Byline, NoteLine, RawHtml, type Note } from './parts.tsx';
 import { renderNav } from './nav.ts';
 import { wireLogout } from './logout.ts';
 import { bootApp } from './pwa.ts';
@@ -77,20 +77,8 @@ async function getJson(path: string): Promise<unknown> {
   return response.json();
 }
 
-/** 색까지 같이 정하는 한 줄. 글자만 바꾸면 실패가 상태처럼 보입니다 (결함 98). */
-interface Note {
-  text: string;
-  tone: 'bad' | 'plain';
-}
-
-function NoteLine({ note, id }: { note: Note | null; id: string }) {
-  if (note === null || note.text === '') return null;
-  return (
-    <p id={id} className={note.tone === 'bad' ? 'status bad' : 'status plain'}>
-      {note.text}
-    </p>
-  );
-}
+// `Note`·`NoteLine` 은 `parts.tsx` 에 있습니다 — 프로젝트 화면과 **두 벌**
+// 이었고 이미 갈라져 있었습니다(이쪽만 `status` 클래스를 붙였습니다).
 
 // ══════════════════════════════════════════════════════════════
 // 화면

@@ -88,7 +88,7 @@
          "김민수 님의 트랙으로 녹음합니다" 가 사라지고 그 자리에 실패가
          부제색(회색)으로 앉았습니다 (결함 98). 로비의 `#room-note` 와
          같은 약입니다 (결함 90). -->
-    <p id="join-note" class="status" hidden></p>
+    <p id="join-note" class="status" role="status"></p>
 
     <!-- 이 환경에서 화면을 꺼도 되는가. `src/lib/shell/bridge.ts` 가
          정하고 15개 테스트가 붙습니다. -->
@@ -143,7 +143,7 @@
       <!-- 서버에 "끝났다" 고 알렸는가. 이걸 알리지 않으면 트랙이 영원히
            `recording` 으로 남고, 로비에서 검토 버튼도 강제 종료 버튼도
            뜨지 않는다 — 오류 없이 회의가 멈춘다. -->
-      <p id="finish-state" hidden></p>
+      <p id="finish-state" role="status"></p>
       <button id="finish-retry" hidden type="button">다시 시도</button>
       <a id="finish-next" hidden href="/lobby.html">회의 로비로 돌아가기</a>
 
@@ -157,7 +157,7 @@
       <ul id="gaps"></ul>
       <code id="row"></code>
       <button id="copy">표에 붙일 한 줄 복사</button>
-      <p class="status" id="copy-note" hidden></p>
+      <p class="status" id="copy-note" role="status"></p>
       <p class="note">
         커버리지 <strong>95% 미만</strong>이면(화면 켜둠 + Wake Lock 조건에서)
         모드 A를 주력에서 내려야 합니다. 배터리 소모가 시간당 30%를 넘으면

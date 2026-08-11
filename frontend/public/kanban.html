@@ -143,7 +143,12 @@
     .moves button[data-dir="back"]:hover { color: var(--text); background: transparent; }
   }
 
+  /* ⚠️ 여백을 id(1,0,0)로 적으면 공용 `[role='status']:empty { margin: 0 }`
+     을 이겨서, 실패가 없을 때도 빈 줄이 16px 자리를 차지합니다. 비었을 때만
+     걷도록 여기서도 같이 적습니다 — 공용 규칙을 강하게 만드는 것보다
+     이쪽이 낫습니다(강하게 만들면 다음 화면에서 왜 안 먹는지 또 헤맵니다). */
   #result { font-size: var(--fs-label); color: var(--bad); margin-top: var(--sp-4); }
+  #result:empty { margin-top: 0; }
         </style>
 </head>
 <body>

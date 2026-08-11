@@ -623,7 +623,9 @@ function Review() {
 
       <div className="actionbar">
         <div className="inner">
-          <div id="result" className={result?.tone ?? ''}>
+          {/* 제출 결과와 "빠진 정보" 안내가 같이 오는 자리입니다.
+              `role="status"` — 사람이 방금 누른 것의 결과라 들려야 합니다. */}
+          <div id="result" role="status" className={result?.tone ?? ''}>
             {result !== null
               ? result.text
               : summary.blocked > 0

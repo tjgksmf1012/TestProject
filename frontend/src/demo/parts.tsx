@@ -59,3 +59,47 @@ export function Byline({ name, what }: { name: string; what?: string }) {
     </p>
   );
 }
+
+/**
+ * 색까지 같이 정하는 한 줄. 글자만 바꾸면 실패가 상태처럼 보입니다 (결함 98).
+ *
+ * ⚠️ **이 타입과 아래 `NoteLine` 이 `lobby.tsx`·`project.tsx` 에 두 벌
+ * 있었습니다.** 그리고 이미 갈라져 있었습니다 — 로비 쪽은 `status` 클래스를
+ * 늘 붙이는데 프로젝트 쪽은 안 붙였습니다. 이 파일이 막으려던 그 모양이
+ * 이 파일 밖에서 일어난 것입니다.
+ */
+export interface Note {
+  text: string;
+  tone: 'bad' | 'plain';
+}
+
+/**
+ * 한 줄 안내. **낭독기에게도 들립니다.**
+ *
+ * ⚠️ **비었을 때도 상자를 그립니다.** 예전에는 `note === null` 이면
+ * `return null` 이라 요소가 DOM 에서 사라졌는데, 그러면 `role="status"` 를
+ * 붙여도 소용이 없습니다 — 낭독기는 **이미 있던** live region 이 바뀔 때
+ * 읽어 주지, 요소가 통째로 나타나는 것은 놓치기 쉽습니다. 로그인 오류
+ * 상자에서 같은 이유로 같은 결정을 했습니다.
+ * 비어 있으면 글자가 없어 화면에서는 아무것도 안 보입니다.
+ *
+ * ⚠️ `alert` 이 아니라 `status` 입니다. `alert` 은 읽던 것을 끊습니다 —
+ * "저장했습니다" 가 끼어들 일은 아닙니다. 로그인의 검증 요약만 `alert`
+ * 인데, 그건 사람이 방금 제출을 눌렀고 그것이 막힌 자리라서입니다.
+ */
+export function NoteLine({
+  note,
+  id,
+  className = 'status',
+}: {
+  note: Note | null;
+  id?: string;
+  className?: string;
+}) {
+  const tone = note === null || note.tone !== 'bad' ? 'plain' : 'bad';
+  return (
+    <p id={id} role="status" className={`${className} ${tone}`}>
+      {note === null ? '' : note.text}
+    </p>
+  );
+}

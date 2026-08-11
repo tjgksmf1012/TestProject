@@ -85,9 +85,25 @@ export interface NoteSlot {
  *
  * ⚠️ **빈 문자열은 지웁니다.** 안내를 지울 때 클래스만 남으면 다음
  * 안내가 엉뚱한 색으로 뜹니다.
+ *
+ * ## ⚠️ `hidden` 을 **더 이상 안 겁니다**
+ *
+ * 이 자리들은 `role="status"` 를 답니다. 낭독기는 **이미 있던** live region
+ * 이 바뀔 때 읽어 주는데, `hidden` 은 요소를 접근성 트리에서 **빼 버립니다** —
+ * 그러면 안내가 뜨는 순간마다 region 이 새로 생기는 셈이라 안 읽힐 수
+ * 있습니다. "실패했습니다" 를 화면에만 띄우고 끝내는 것과 같습니다.
+ *
+ * 자리를 안 차지하게 하는 일은 CSS 가 합니다 — `app.css` 의
+ * `[role='status']:empty { margin: 0 }`. 빈 `<p>` 는 여백만 걷으면
+ * 높이가 0 입니다(브라우저로 여덟 자리를 재서 확인했습니다).
+ *
+ * `hidden` 을 **읽는** 코드가 남아 있을 수 있으므로 인터페이스에서는 빼지
+ * 않습니다. 다만 이 함수가 쓰지는 않습니다.
  */
 export function showNote(slot: NoteSlot, text: string, tone: 'bad' | 'plain' = 'bad'): void {
   slot.textContent = text;
-  slot.hidden = text === '';
+  // 마크업에 `hidden` 이 적혀 있던 자리를 되살립니다. 여기서 **끄기만**
+  // 하고 다시 켜지는 않습니다 — 위 주석 참고.
+  slot.hidden = false;
   slot.classList.toggle('bad', text !== '' && tone === 'bad');
 }

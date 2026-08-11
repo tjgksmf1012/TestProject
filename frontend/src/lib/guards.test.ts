@@ -839,6 +839,54 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
     );
   });
 
+  it('⭐ 안내 자리가 **낭독기에게도 들린다**', () => {
+    // 대표 실패 ③ 의 소리 버전 — "저장하지 못했습니다" 를 화면에만 띄우고
+    // 끝내면, 화면을 못 보는 사람에게는 아무 일도 안 일어난 것입니다.
+    //
+    // 실제로 이 저장소는 **화면 아홉 중 한 곳에도** live region 이 없었습니다.
+    // 없는 것은 오류가 안 나서 안 보입니다.
+    //
+    // ⚠️ **`hidden` 과 같이 쓰면 안 됩니다.** 접근성 트리에서 요소를 빼므로
+    // 안내가 뜰 때마다 region 이 새로 생기는 셈이고, 낭독기는 **이미 있던**
+    // region 이 바뀔 때 읽어 줍니다. 그래서 `showNote` 는 `hidden` 을 끄기만
+    // 하고, 자리를 안 차지하는 일은 `[role='status']:empty` 가 합니다.
+    const offenders: string[] = [];
+
+    // ① 명령형 화면 — 마크업의 그 자리에 역할이 붙어 있는가
+    for (const [stem, ids] of [
+      ['call', ['status', 'mic']],
+      ['index', ['join-note', 'finish-state', 'copy-note']],
+    ] as [string, string[]][]) {
+      const html = readFileSync(join(PUBLIC, `${stem}.html`), 'utf8');
+      for (const id of ids) {
+        const tag = new RegExp(`<[^>]*id="${id}"[^>]*>`).exec(html)?.[0] ?? '';
+        if (!/role="(status|alert)"/.test(tag)) offenders.push(`${stem}.html #${id} 에 역할 없음`);
+        if (/\bhidden\b/.test(tag)) offenders.push(`${stem}.html #${id} 이 hidden 으로 시작함`);
+      }
+    }
+
+    // ② React 화면 — 공용 `NoteLine` 과 각 화면의 결과 줄
+    const parts = demoSource('parts') ?? '';
+    ok(/role="status"/.test(parts), '`parts.tsx` 의 `NoteLine` 에 역할이 없습니다');
+    ok(
+      !/return null/.test(parts.slice(parts.indexOf('export function NoteLine'))),
+      '`NoteLine` 이 비었을 때 `null` 을 돌려주면 live region 이 사라집니다',
+    );
+    for (const stem of ['kanban', 'review', 'login']) {
+      const code = demoSource(stem) ?? '';
+      if (!/role="(status|alert)"/.test(code)) offenders.push(`${stem} 의 결과 줄에 역할 없음`);
+    }
+
+    // ③ 빈 자리가 여백을 남기지 않는가 — 공용 규칙이 있어야 합니다
+    const appCss = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    ok(
+      /\[role='status'\]:empty[\s\S]{0,120}margin:\s*0/.test(appCss),
+      "`[role='status']:empty { margin: 0 }` 이 없으면 빈 안내가 빈 줄을 만듭니다",
+    );
+
+    strictEqual(offenders.join(', '), '', '안내가 낭독기에게 안 들립니다');
+  });
+
   it('⭐ 안내 자리는 `showNote` 를 거친다 (결함 92)', () => {
     // 요청이 실패했을 때 화면이 하는 말을 아홉 자리에서 재 봤더니
     // **색이 세 가지**였습니다.

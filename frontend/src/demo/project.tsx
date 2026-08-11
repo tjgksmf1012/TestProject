@@ -48,6 +48,7 @@ import {
 } from '../lib/privacy/deletion.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { rows as skeletonRows } from '../lib/ui/skeleton.ts';
+import { NoteLine, type Note } from './parts.tsx';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -66,11 +67,7 @@ interface Detail {
   member_count: number;
 }
 
-/** 색까지 같이 정하는 한 줄. 글자만 바꾸면 실패가 상태처럼 보입니다 (결함 98). */
-interface Note {
-  text: string;
-  tone: 'bad' | 'plain';
-}
+// `Note`·`NoteLine` 은 `parts.tsx` 에 있습니다 — 로비와 **두 벌**이었습니다.
 
 function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
@@ -125,24 +122,6 @@ function Emphasized({ text }: { text: string }) {
         .split(/\*\*([^*]+)\*\*/g)
         .map((part, i) => (i % 2 === 1 ? <strong key={i}>{part}</strong> : part))}
     </>
-  );
-}
-
-function NoteLine({
-  note,
-  className,
-  id,
-}: {
-  note: Note | null;
-  className?: string;
-  id?: string;
-}) {
-  if (note === null || note.text === '') return null;
-  const tone = note.tone === 'bad' ? 'bad' : 'plain';
-  return (
-    <p id={id} className={className === undefined ? tone : `${className} ${tone}`}>
-      {note.text}
-    </p>
   );
 }
 
