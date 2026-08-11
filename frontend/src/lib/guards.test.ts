@@ -1953,12 +1953,36 @@ describe('메신저 셸 (docs/19)', () => {
     // 보고 붙입니다 — CSS 는 그걸 모릅니다.
     const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
 
-    const bare: string[] = [];
-    for (const rule of css.matchAll(/(^|\n)\s*(body[^{]*)\{([^}]*)\}/g)) {
-      const selector = (rule[2] as string).trim();
-      if (!/var\(--shell-rail\)/.test(rule[3] as string)) continue;
-      if (!/\.has-rail\b/.test(selector)) bare.push(selector);
-    }
+    // ⚠️ **이 검사는 한 번 눈을 감을 뻔했습니다.** 처음에는 선택자가
+    // `body` 로 **시작**하는 규칙만 봤습니다. 그런데 §21 에서 자리를
+    // 비우는 일이 `html:has(body.has-rail)` 로 옮겨 갔습니다 — 선택자가
+    // `html` 로 시작하므로 검사는 아무 말 없이 0건을 냅니다.
+    //
+    // "0건" 은 규칙이 지켜져서 나오기도 하고 **찾는 방법이 틀려서**
+    // 나오기도 합니다. 그래서 선택자가 `body` 를 **어디에든** 품으면
+    // 봅니다. 아래 `plantedTest` 가 이 검사가 실제로 눈을 뜨고 있는지
+    // 확인합니다.
+    const scan = (sheet: string): string[] => {
+      const found: string[] = [];
+      for (const rule of sheet.matchAll(/(^|\n)\s*([^{}@\n][^{}]*)\{([^}]*)\}/g)) {
+        const selector = (rule[2] as string).trim();
+        if (!/\bbody\b/.test(selector)) continue;
+        if (!/var\(--shell-rail\)/.test(rule[3] as string)) continue;
+        if (!/\.has-rail\b/.test(selector)) found.push(selector);
+      }
+      return found;
+    };
+
+    // ⚠️ **없다고 적기 전에 있는 것을 하나 심어 봅니다.** 이 저장소는
+    // 눈감은 검사에 두 번 속았습니다 (그림자 검사는 심는 방법조차
+    // 틀렸습니다). 심은 것을 못 잡으면 아래 "0건" 은 아무 뜻이 없습니다.
+    deepStrictEqual(
+      scan('html:has(body.foo) {\n  padding-left: var(--shell-rail);\n}'),
+      ['html:has(body.foo)'],
+      '이 검사가 눈을 감고 있습니다 — 심어 둔 위반을 못 잡았습니다',
+    );
+
+    const bare = scan(css);
     strictEqual(
       bare.join(', '),
       '',
@@ -1985,40 +2009,131 @@ describe('메신저 셸 (docs/19)', () => {
     //
     // 실험판 v4 에서 실제로 그랬습니다 — 실측 배경 rgb(18,33,31) 에
     // 글자 rgb(22,33,31) 이었습니다. 화면에서는 그냥 빈 줄로 보입니다.
-    /**
-     * 뒤집히는데도 **일부러** 껍데기에 쓰는 것. 비워 두면 안 됩니다 —
-     * 근거 없는 면제는 다음 사람이 그냥 늘립니다.
-     */
-    const ALLOWED: Record<string, string> = {
-      '--gap': // 결측 = 흙빛. 뒤집히지만 **두 값 다** 껍데기 위에서 읽힙니다
-        '`test_a_gap_is_still_clay_not_red_even_on_the_chrome` 가 밝은·어두운 ' +
-        '양쪽을 껍데기 바탕에 대고 재서 3:1 을 넘는지 매번 확인합니다. ' +
-        '결측을 빨강이나 회색으로 바꾸지 않기로 한 결정이 이 색에 걸려 있어 ' +
-        '`--chrome-*` 로 옮길 수 없습니다',
-    };
-
     const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
-    const offenders: string[] = [];
-    // ⚠️ 셸 블록이 **둘**입니다. 회의 채널만 보면 맥락 패널은 무사통과합니다.
-    for (const marker of ['/* ── 회의 채널 ─', '   맥락 패널 — 셋째 열']) {
+    const blockAt = (marker: string): string => {
       const at = css.indexOf(marker);
       strictEqual(at > -1, true, `셸 블록을 못 찾았습니다: ${marker}`);
-      const block = css.slice(at, css.indexOf('\n}\n', at));
-      for (const m of block.matchAll(/(?:color|background)\s*:\s*var\((--[a-z0-9-]+)\)/g)) {
-        const name = m[1] as string;
-        if (name.startsWith('--chrome-') || name in ALLOWED) continue;
-        offenders.push(name);
-      }
-    }
+      return css.slice(at, css.indexOf('\n}\n', at));
+    };
+    const paints = (block: string): string[] =>
+      [...block.matchAll(/(?:color|background)\s*:\s*var\((--[a-z0-9-]+)\)/g)].map(
+        (m) => m[1] as string,
+      );
+
+    // ── 왼쪽 열들은 **껍데기**입니다 ─────────────────────────
+    // 이동하는 자리라 본문이 밝든 어둡든 늘 같은 짙은 면입니다.
+    const chan = paints(blockAt('/* ── 회의 채널 ─')).filter((n) => !n.startsWith('--chrome-'));
     strictEqual(
-      [...new Set(offenders)].join(', '),
+      [...new Set(chan)].join(', '),
       '',
       '셸 안에서 뒤집히는 본문 토큰을 씁니다 — `--chrome-*` 를 쓰세요',
     );
 
-    // 면제 목록이 낡지 않았는가 — 안 쓰는 것이 남아 있으면 빼야 합니다.
-    const stale = Object.keys(ALLOWED).filter((name) => !css.includes(`var(${name})`));
-    strictEqual(stale.join(', '), '', '이제 안 씁니다 — 면제 목록에서 빼세요');
+    // ── 오른쪽 열은 **본문**입니다 (§21) ─────────────────────
+    //
+    // ⚠️ 이 검사는 위와 **반대 방향**입니다. 맥락 패널은 좌우가 다
+    // 어두워 가운데가 종이 한 장으로 보이던 것을 고치며 본문 쪽으로
+    // 옮겼습니다. 본문은 모드에 따라 뒤집히는데 껍데기는 안 뒤집히므로,
+    // 여기에 `--chrome-*` 를 쓰면 **어두운 모드에서만** 짙은 글자가
+    // 짙은 면에 얹혀 사라집니다 — 실험판 v4 에서 당한 그 모양의 거울상.
+    const ctx = paints(blockAt('   맥락 패널 — 셋째 열')).filter((n) => n.startsWith('--chrome-'));
+    strictEqual(
+      [...new Set(ctx)].join(', '),
+      '',
+      '맥락 패널에 껍데기 색을 씁니다 — 이 열은 본문입니다, 뒤집히는 토큰을 쓰세요',
+    );
+
+    // ⚠️ **둘 다 "0건" 이라 방향이 바뀐 것을 못 볼 뻔했습니다.** 방향만
+    // 뒤집고 대상 블록을 그대로 두면 두 검사가 같은 말을 하게 되는데,
+    // 그래도 전부 통과합니다. 그래서 각 열이 **실제로 무엇으로 칠해져
+    // 있는지**를 하나씩 확인합니다 — 비어 있으면 블록을 잘못 잡은 것입니다.
+    strictEqual(
+      paints(blockAt('/* ── 회의 채널 ─')).some((n) => n.startsWith('--chrome-')),
+      true,
+      '회의 채널이 껍데기 색을 하나도 안 씁니다 — 블록을 잘못 잡았습니다',
+    );
+    strictEqual(
+      paints(blockAt('   맥락 패널 — 셋째 열')).some((n) => !n.startsWith('--chrome-')),
+      true,
+      '맥락 패널이 본문 색을 하나도 안 씁니다 — 블록을 잘못 잡았습니다',
+    );
+  });
+});
+
+describe('`:empty` 로 감추기 (docs/19 §21)', () => {
+  it('⭐ **빌 수 없는 것**을 `:empty` 로 감추지 않는다', () => {
+    // ⚠️ 이 저장소가 실제로 당한 것입니다.
+    //
+    // 결함 58 을 고치며 `.note:empty { display: none }` 을 넣었습니다.
+    // `<p class="note">` 가 비면 아무것도 없는 가로줄만 남기 때문입니다.
+    // 옳은 규칙이었습니다.
+    //
+    // 그런데 검토 화면의 메모 칸이 `<input class="note">` 였습니다.
+    // **`<input>` 은 자식을 가질 수 없는 태그라 언제나 `:empty` 입니다** —
+    // 값이 무엇이든, 사람이 무엇을 치든. 그래서 그 입력창은 Stage F
+    // 이후로 **한 번도 화면에 나온 적이 없었습니다.**
+    //
+    // 하필 그 칸이 "왜 이렇게 결정했는지" 를 적는 자리였습니다. 이
+    // 저장소는 기여도에서 "이유 없는 조정은 근거 없는 점수와 같다" 고
+    // 적어 뒀는데, 그 약속을 지킬 입력창이 조용히 사라져 있었습니다.
+    //
+    // CSS 는 오류를 안 냅니다. 브라우저로 띄워 보고 "저기 있어야 할
+    // 상자가 없네" 를 눈으로 알아챌 때까지 아무도 모릅니다.
+    const VOID = ['input', 'img', 'br', 'hr', 'source', 'track', 'embed', 'area', 'col'];
+
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // `:empty` 로 감추는 **클래스**들. 태그를 앞에 붙여 좁힌 것
+    // (`p.note:empty`)은 이미 안전하므로 세지 않습니다.
+    const bare = new Set<string>();
+    for (const m of css.matchAll(/([a-z]*)\.([a-z][a-z0-9-]*):empty/g)) {
+      if ((m[1] as string) === '') bare.add(m[2] as string);
+    }
+
+    const sources: [string, string][] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      sources.push([name, readFileSync(join(PUBLIC, name), 'utf8')]);
+    }
+    for (const { name, source } of demoFiles()) sources.push([name, source]);
+
+    const scan = (): string[] => {
+      const found: string[] = [];
+      for (const [name, source] of sources) {
+        for (const tag of VOID) {
+          for (const m of source.matchAll(new RegExp(`<${tag}\\b[^>]*`, 'g'))) {
+            const cls = /class="([^"]*)"/.exec(m[0]);
+            if (cls === null) continue;
+            for (const one of (cls[1] as string).split(/\s+/)) {
+              if (bare.has(one)) found.push(`${name} → <${tag} class="${one}">`);
+            }
+          }
+        }
+      }
+      return found;
+    };
+
+    // ⚠️ **없다고 적기 전에 있는 것을 하나 심어 봅니다.** 이 저장소는
+    // 눈감은 검사에 이미 두 번 속았습니다.
+    const planted = [...bare][0];
+    strictEqual(
+      typeof planted === 'string',
+      true,
+      '`:empty` 로 감추는 클래스가 하나도 없습니다 — 찾는 방법이 틀렸습니다',
+    );
+    sources.push(['(심은 것)', `<input class="${planted as string}" />`]);
+    strictEqual(
+      scan().length > 0,
+      true,
+      '이 검사가 눈을 감고 있습니다 — 심어 둔 위반을 못 잡았습니다',
+    );
+    sources.pop();
+
+    strictEqual(
+      scan().join(', '),
+      '',
+      '`<input>` 같은 void 태그는 **언제나** `:empty` 입니다 — ' +
+        '값이 있어도 통째로 감춰집니다. 선택자에 태그를 붙여 좁히세요',
+    );
   });
 });
 

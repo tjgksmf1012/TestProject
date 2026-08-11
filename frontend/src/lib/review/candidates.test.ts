@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   approvalBlockers,
   attentionReasons,
+  blockerLine,
   buildReviewPayload,
   canApprove,
   canSubmit,
@@ -12,6 +13,8 @@ import {
   effectiveDeadline,
   emptyDraft,
   isBeforeIsoDate,
+  laneCounts,
+  reviewLane,
   sortForReview,
   summarize,
   type Candidate,
@@ -518,5 +521,106 @@ describe('제출 결과 문구 (결함 85)', () => {
   it('⭐ 번호가 안 왔으면 지어내지 않고 건수만 말한다', () => {
     assert.equal(describeSubmitResult(2, []), '2건이 칸반에 등록됐습니다');
     assert.equal(describeSubmitResult(1, [Number.NaN]), '1건이 칸반에 등록됐습니다');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 갈래와 한 줄 검사 (디자인 브리프 §8·§13)
+// ══════════════════════════════════════════════════════════════
+
+describe('reviewLane', () => {
+  it('⭐ 이미 승인된 후보를 `검토 필요` 로 세지 않는다', () => {
+    // ⚠️ `summarize` 는 초안만 봅니다. 결정이 끝난 후보의 초안은
+    // `pending` 이라, 그 숫자로 탭을 그리면 **이미 끝난 일이 할 일로**
+    // 올라옵니다. 사람은 그걸 보고 남은 검토가 있다고 읽습니다.
+    const approved = candidate({ review_status: 'approved' });
+    assert.equal(summarize([approved], drafts(), CONTEXT).pending, 1);
+    assert.equal(reviewLane(approved, emptyDraft()), 'approve');
+  });
+
+  it('거절된 후보도 마찬가지다', () => {
+    assert.equal(reviewLane(candidate({ review_status: 'rejected' }), emptyDraft()), 'reject');
+  });
+
+  it('아직 안 정해졌으면 초안이 갈래를 정한다', () => {
+    const c = candidate();
+    assert.equal(reviewLane(c, emptyDraft()), 'pending');
+    assert.equal(reviewLane(c, { ...emptyDraft(), decision: 'approve' }), 'approve');
+    assert.equal(reviewLane(c, { ...emptyDraft(), decision: 'reject' }), 'reject');
+  });
+
+  it('⭐ 서버가 내린 결정이 초안보다 세다', () => {
+    // 이미 승인된 후보에는 결정 버튼이 없습니다. 그래도 초안이 어쩌다
+    // `reject` 로 남아 있으면 화면과 서버가 다른 말을 하게 됩니다.
+    const approved = candidate({ review_status: 'approved' });
+    assert.equal(reviewLane(approved, { ...emptyDraft(), decision: 'reject' }), 'approve');
+  });
+});
+
+describe('laneCounts', () => {
+  it('갈래마다 세고 0 도 적는다', () => {
+    const counts = laneCounts(
+      [candidate({ id: 1 }), candidate({ id: 2 }), candidate({ id: 3, review_status: 'approved' })],
+      drafts([2, { ...emptyDraft(), decision: 'reject' }]),
+    );
+    assert.deepEqual(counts, { all: 3, pending: 1, approve: 1, reject: 1 });
+  });
+
+  it('⭐ 갈래 합이 전체와 같다 — 어느 탭에도 없는 후보가 생기면 안 된다', () => {
+    const list = [
+      candidate({ id: 1 }),
+      candidate({ id: 2, review_status: 'approved' }),
+      candidate({ id: 3, review_status: 'rejected' }),
+      candidate({ id: 4 }),
+    ];
+    const counts = laneCounts(list, drafts([4, { ...emptyDraft(), decision: 'approve' }]));
+    assert.equal(counts.pending + counts.approve + counts.reject, counts.all);
+  });
+});
+
+describe('blockerLine (브리프 §13)', () => {
+  const line = (c: Candidate, d: Draft = emptyDraft()) =>
+    blockerLine(approvalBlockers(c, d, CONTEXT));
+
+  it('막는 것이 없으면 아무 말도 하지 않는다', () => {
+    assert.deepEqual(line(candidate()), { tone: 'none', text: '' });
+  });
+
+  it('⭐ 안 채운 칸은 **빨강이 아니다**', () => {
+    // 담당자가 비어 있는 것은 잘못이 아니라 아직 안 한 일입니다.
+    // 회의에 없던 내용(`no_evidence`)과 같은 색으로 칠하면, 진짜 문제가
+    // 있는 후보와 그냥 손이 안 간 후보를 구분할 수 없습니다.
+    const result = line(candidate({ assignee_id: null, deadline: null }));
+    assert.equal(result.tone, 'missing');
+  });
+
+  it('⭐ 안 채운 칸 둘이 한 줄로 합쳐진다', () => {
+    const result = line(candidate({ assignee_id: null, deadline: null }));
+    assert.equal(result.text, '담당자 · 마감일을 지정해야 등록할 수 있습니다');
+    assert.equal(result.text.split('\n').length, 1);
+  });
+
+  it('⭐ 조사가 낱말에 맞는다 — `담당자을` 이 되지 않는다', () => {
+    // `withJosa` 를 안 쓰면 받침 없는 낱말에 `을` 이 붙습니다.
+    assert.equal(line(candidate({ assignee_id: null })).text, '담당자를 지정해야 등록할 수 있습니다');
+    assert.equal(line(candidate({ deadline: null })).text, '마감일을 지정해야 등록할 수 있습니다');
+  });
+
+  it('⭐ 진짜 잘못은 빨강이고, 안 채운 칸보다 앞에 온다', () => {
+    const result = line(candidate({ evidence_utterance_ids: [], assignee_id: null }));
+    assert.equal(result.tone, 'error');
+    assert.equal(result.text.startsWith('근거 발화가 없습니다'), true, result.text);
+    assert.equal(result.text.includes('담당자를 지정해야'), true, result.text);
+  });
+
+  it('⭐ 안 채운 칸을 삼키지 않는다', () => {
+    // 빨강이 이긴다고 해서 나머지를 지우면, 사람이 근거를 고친 뒤에
+    // **또 막히는 이유**를 그때 처음 봅니다.
+    const result = line(candidate({ evidence_utterance_ids: [], assignee_id: null, deadline: null }));
+    assert.equal(result.text.includes('담당자 · 마감일을'), true, result.text);
+  });
+
+  it('과거 마감일은 안 채운 칸이 아니라 잘못이다', () => {
+    assert.equal(line(candidate({ deadline: '2020-01-01' })).tone, 'error');
   });
 });

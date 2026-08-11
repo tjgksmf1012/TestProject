@@ -13,6 +13,7 @@ import {
   LOW_CONFIDENCE,
   approvalBlockers,
   attentionReasons,
+  blockerLine,
   buildReviewPayload,
   canSubmit,
   describeBlocker,
@@ -21,13 +22,17 @@ import {
   effectiveDeadline,
   effectiveTitle,
   emptyDraft,
+  laneCounts,
+  reviewLane,
   sortForReview,
   summarize,
   type Candidate,
   type Decision,
   type Draft,
+  type Lane,
   type ReviewContext,
 } from '../lib/review/candidates.ts';
+import { iconSvg } from '../lib/nav/icons.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { attr, escapeHtml } from '../lib/html.ts';
 import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
@@ -71,6 +76,15 @@ let candidates: Candidate[] = [];
 let members: Member[] = [];
 let meeting: MeetingInfo | null = null;
 let context: ReviewContext = { memberIds: [], today: todayInTeamCalendar() };
+
+/**
+ * 지금 보고 있는 갈래 (브리프 §8).
+ *
+ * ⚠️ `'all'` 로 시작합니다. 검토 필요한 것만 먼저 보여 주고 싶었지만,
+ * 그러면 사람이 **아무것도 안 했는데 목록이 걸러진 채**로 시작합니다 —
+ * 승인·거절한 것이 어디로 갔는지 찾게 됩니다.
+ */
+let lane: Lane | 'all' = 'all';
 
 const $ = (id: string): HTMLElement => {
   const el = document.getElementById(id);
@@ -167,7 +181,7 @@ async function load(): Promise<void> {
  * 있는 것만 그리고, 없으면 그 칸을 통째로 감춥니다 — 회의 상태는 이미
  * 후보 목록 쪽이 말하고 있습니다.
  */
-function renderMinutes(): void {
+function renderMinutes(): { agenda: number; issues: number; any: boolean } {
   const agenda = agendaItems(meeting?.next_agenda ?? []);
   const issues = issueViews(meeting?.unresolved_issues ?? []);
 
@@ -189,10 +203,46 @@ function renderMinutes(): void {
     })
     .join('');
 
-  $('minutes').hidden = !hasExtraMinutes({
+  // ⚠️ 접힘 상자 자체는 **회의 요약만 있어도** 섭니다. 예전에는 안건과
+  // 미해결 사안이 있을 때만 서는 `#minutes` 였는데, 이제 요약도 같은
+  // 상자 안에 들어갑니다.
+  const extra = hasExtraMinutes({
     next_agenda: meeting?.next_agenda ?? [],
     unresolved_issues: meeting?.unresolved_issues ?? [],
   });
+  return { agenda: agenda.length, issues: issues.length, any: extra };
+}
+
+/**
+ * 접힌 회의 상자에 적을 **한 줄 요약** (브리프 §6).
+ *
+ * ⚠️ 여기서 숫자를 **지어내지 않습니다.** 브리프의 예시는
+ * `결정 3 · 미결정 1` 인데 이 화면에는 "결정" 이라는 값이 없습니다.
+ * 있는 것만 셉니다 — 요약이 있는가, 다음 안건 몇 개, 답 안 난 것 몇 개.
+ */
+function briefLine(counts: { agenda: number; issues: number }): string {
+  const parts: string[] = [];
+  if ((meeting?.summary ?? '') !== '') parts.push('회의 요약');
+  if (counts.agenda > 0) parts.push(`다음 안건 ${counts.agenda}`);
+  if (counts.issues > 0) parts.push(`답 안 난 것 ${counts.issues}`);
+  return parts.join(' · ');
+}
+
+/** 탭 하나. 개수가 0 이어도 적는다 — 없는 것도 정보다. */
+function laneTabs(counts: Record<Lane | 'all', number>): string {
+  const tabs: [Lane | 'all', string][] = [
+    ['all', '전체'],
+    ['pending', '검토 필요'],
+    ['approve', '등록'],
+    ['reject', '거절'],
+  ];
+  return tabs
+    .map(
+      ([key, label]) =>
+        `<button type="button" role="tab" data-lane="${key}"` +
+        ` aria-selected="${key === lane}">${label}<span class="n">${counts[key]}</span></button>`,
+    )
+    .join('');
 }
 
 function render(): void {
@@ -204,21 +254,17 @@ function render(): void {
   $('meeting-summary').hidden = text === '';
   $('meeting-summary').textContent = text;
 
-  renderMinutes();
+  const counts = renderMinutes();
+  // 회의록이 하나도 없으면 상자 자체가 없습니다 — 접힌 빈 상자는
+  // 눌러 볼 때까지 비었는지 알 수 없습니다.
+  $('brief').hidden = !counts.any && text === '';
+  $('brief-line').textContent = briefLine(counts);
 
-  $('counts').textContent =
-    `전체 ${summary.total} · 승인 ${summary.approving} · 거절 ${summary.rejecting} · ` +
-    `미결정 ${summary.pending}`;
-
-  $('attention').hidden = summary.needsAttention === 0;
-  $('attention').textContent =
-    `확신도가 낮은 후보 ${summary.needsAttention}건이 아직 결정되지 않았습니다. ` +
-    '근거 발화를 확인하세요.';
-
-  $('blocked').hidden = summary.blocked === 0;
-  $('blocked').textContent = `승인하려는 후보 ${summary.blocked}건에 빠진 정보가 있습니다.`;
-
+  // ⚠️ 제출을 막는 이유는 **막대 안에서 한 번만** 말합니다. 예전에는
+  // 화면 위 배너와 카드 안 빨간 줄이 같은 말을 했습니다 (브리프 §17).
   ($('submit') as HTMLButtonElement).disabled = !canSubmit(summary);
+  $('result').textContent =
+    summary.blocked > 0 ? `${summary.blocked}건에 빠진 정보가 있어 제출할 수 없습니다` : '';
 
   // ⚠️ 후보가 0건이면 목록이 통째로 빕니다. 그 화면은 고장으로
   // 읽히는데, 실제로는 셋 중 하나입니다 — 아직 처리 중이거나, 처리를
@@ -226,12 +272,36 @@ function render(): void {
   // 각각 다릅니다.** 앞은 기다리면 되고, 가운데는 기다려도 안 바뀌고,
   // 뒤는 트랙을 봐야 합니다. 하나로 덮으면 영원히 새로고침합니다.
   if (candidates.length === 0) {
+    $('lanes').innerHTML = '';
+    $('lane-empty').hidden = true;
     $('list').innerHTML = emptyHtml(emptyReviewState());
     return;
   }
 
-  $('list').innerHTML = candidates.map(cardHtml).join('');
+  $('lanes').innerHTML = laneTabs(laneCounts(candidates, drafts));
+  wireLanes();
+
+  const shown = candidates.filter(
+    (candidate) => lane === 'all' || reviewLane(candidate, draftOf(candidate.id)) === lane,
+  );
+
+  // ⚠️ **거른 결과가 0건인 것과 후보가 0건인 것은 다릅니다.** 위쪽
+  // `emptyHtml` 을 여기에 쓰면 "녹음을 처리하는 중입니다" 같은 말이
+  // 나오는데, 실제로는 사람이 방금 `거절` 탭을 누른 것뿐입니다.
+  $('lane-empty').hidden = shown.length > 0;
+  $('lane-empty').textContent = '이 상태인 후보가 없습니다';
+
+  $('list').innerHTML = shown.map(cardHtml).join('');
   wireCards();
+}
+
+function wireLanes(): void {
+  for (const tab of $('lanes').querySelectorAll<HTMLButtonElement>('button[data-lane]')) {
+    tab.addEventListener('click', () => {
+      lane = tab.dataset.lane as Lane | 'all';
+      render();
+    });
+  }
 }
 
 /** 후보가 0건일 때, **회의 상태에 따라** 다른 말을 한다. */
@@ -296,18 +366,34 @@ function cardHtml(candidate: Candidate): string {
     }),
   ].join('');
 
-  return `
-<article class="card" data-id="${candidate.id}" data-decision="${draft.decision}">
-  <header>
-    <input class="title" type="text" value=${attr(effectiveTitle(candidate, draft))}
-           ${decided ? 'disabled' : ''} />
-    <span class="conf ${low ? 'low' : ''}">${(candidate.confidence * 100).toFixed(0)}%<small>확신도</small></span>
-  </header>
+  const deadline = effectiveDeadline(candidate, draft) ?? '';
+  const check = blockerLine(blockers);
+  const evidence = candidate.evidence_utterance_ids;
 
-  <div class="row">
-    <label>담당자 <select class="assignee" ${decided ? 'disabled' : ''}>${options}</select></label>
-    <label>마감일 <input class="deadline" type="date"
-           value="${effectiveDeadline(candidate, draft) ?? ''}" ${decided ? 'disabled' : ''} /></label>
+  return `
+<article class="cand" data-id="${candidate.id}" data-decision="${draft.decision}"
+         data-done="${decided ? '1' : '0'}">
+  <div class="cand-top">
+    <input class="title" type="text" value=${attr(effectiveTitle(candidate, draft))}
+           aria-label="업무 제목" ${decided ? 'disabled' : ''} />
+    <span class="badge ${low ? 'low' : ''}"
+          title="AI 확신도">${(candidate.confidence * 100).toFixed(0)}%</span>
+  </div>
+
+  <div class="fields">
+    <label class="field sel" data-empty="${assignee === null ? '1' : '0'}">
+      <span class="ico">${iconSvg('person')}</span>
+      <span class="visually-hidden">담당자</span>
+      <select class="assignee" ${decided ? 'disabled' : ''}>${options}</select>
+    </label>
+    <label class="field" data-empty="${deadline === '' ? '1' : '0'}">
+      <span class="ico">${iconSvg('calendar')}</span>
+      <span class="visually-hidden">마감일</span>
+      <input class="deadline" type="date" value="${deadline}" ${decided ? 'disabled' : ''} />
+    </label>
+    <span class="src${evidence.length === 0 ? ' none' : ''}">${
+      evidence.length === 0 ? '근거 없음' : `근거 #${evidence.join(', #')}`
+    }</span>
   </div>
 
   ${
@@ -319,62 +405,43 @@ function cardHtml(candidate: Candidate): string {
       : ''
   }
 
-  <p class="evidence">
-    근거 발화 ${candidate.evidence_utterance_ids.length}건
-    ${
-      candidate.evidence_utterance_ids.length
-        ? `<code>#${candidate.evidence_utterance_ids.join(', #')}</code>`
-        : '<strong class="bad">— 회의에 없던 내용일 수 있습니다</strong>'
-    }
-  </p>
+  ${
+    // ⭐ 막는 이유는 **한 줄**입니다 (브리프 §13). 안 채운 칸은 흙빛,
+    // 실제로 잘못된 것만 빨강 — `blockerLine` 이 가릅니다.
+    check.tone === 'none'
+      ? ''
+      : `<p class="check" data-tone="${check.tone}">${escapeHtml(check.text)}</p>`
+  }
 
   ${
     // 서버가 무엇을 확신하지 못했는가. 사람이 화면에서 고쳐도 남는다 —
     // blockers 와 달리 이건 판정이 아니라 기록이다.
     //
-    // ⚠️ **첫 줄만 보이고 나머지는 접습니다** (docs/19 §20). 후보 셋이면
-    // 이 목록이 여섯 줄이 되고, 그러면 정작 **지금 고쳐야 하는 것**
-    // (아래 `blockers`)이 그 사이에 묻힙니다.
-    //
-    // ⚠️ `blockers` 는 **접지 않습니다.** 그건 기록이 아니라 승인을 막는
-    // 것이고, 접으면 사람이 왜 승인 버튼이 죽어 있는지 모릅니다.
+    // ⚠️ **통째로 접습니다.** 승인을 막는 것이 아니므로 위의 한 줄보다
+    // 조용해야 합니다. 접어도 **한 번의 클릭 안에** 있습니다.
     reasons.length
-      ? `<ul class="warnings"><li>${escapeHtml(reasons[0] ?? '')}</li></ul>` +
-        (reasons.length > 1
-          ? '<details class="more"><summary>확신하지 못한 이유 더 보기</summary>' +
-            `<div class="more-body"><ul class="warnings">${reasons
-              .slice(1)
-              .map((r) => `<li>${escapeHtml(r)}</li>`)
-              .join('')}</ul></div></details>`
-          : '')
-      : ''
-  }
-
-  ${
-    blockers.length
-      ? `<ul class="blockers">${blockers
-          .map((b) => `<li>${escapeHtml(b.message)}</li>`)
-          .join('')}</ul>`
+      ? `<details class="why-not"><summary>확신하지 못한 이유 ${reasons.length}건</summary>` +
+        `<ul>${reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul></details>`
       : ''
   }
 
   ${
     decided
-      ? `<p class="done">이미 ${candidate.review_status === 'approved' ? '승인' : '거절'}된 후보입니다</p>`
-      : `<div class="actions">
+      ? `<p class="done">이미 ${candidate.review_status === 'approved' ? '등록' : '거절'}된 후보입니다</p>`
+      : `<div class="acts">
            <button class="approve${draft.decision === 'approve' ? ' on' : ''}"
-                   ${blockers.length ? 'disabled' : ''}>승인</button>
+                   ${blockers.length ? 'disabled' : ''}>업무로 등록</button>
+           <button class="clear${draft.decision === 'pending' ? ' on' : ''}">나중에 검토</button>
            <button class="reject${draft.decision === 'reject' ? ' on' : ''}">거절</button>
-           <button class="clear">보류</button>
          </div>
-         <input class="note" type="text" placeholder="메모 (선택) — 왜 이렇게 결정했는지"
-                value=${attr(draft.note ?? '')} />`
+         <input class="memo" type="text" placeholder="메모 (선택) — 왜 이렇게 결정했는지"
+                aria-label="메모" value=${attr(draft.note ?? '')} />`
   }
 </article>`;
 }
 
 function wireCards(): void {
-  for (const card of document.querySelectorAll<HTMLElement>('.card')) {
+  for (const card of document.querySelectorAll<HTMLElement>('.cand')) {
     const id = Number(card.dataset.id);
     const on = <T extends HTMLElement>(sel: string, ev: string, fn: (el: T) => void): void => {
       const el = card.querySelector<T>(sel);
@@ -388,7 +455,7 @@ function wireCards(): void {
     on<HTMLInputElement>('.deadline', 'change', (el) =>
       update(id, { deadlineOverride: el.value === '' ? null : el.value }),
     );
-    on<HTMLInputElement>('.note', 'change', (el) => update(id, { note: el.value }));
+    on<HTMLInputElement>('.memo', 'change', (el) => update(id, { note: el.value }));
 
     const decide = (decision: Decision) => () => update(id, { decision });
     card.querySelector('.approve')?.addEventListener('click', decide('approve'));
@@ -467,7 +534,17 @@ async function start(): Promise<void> {
     return;
   }
   const me = (await response.json()) as Me;
-  $('who').textContent = `${me.name} 님이 검토하고 있습니다`;
+  // ⭐ 검토자는 **문장이 아니라 꼬리표**입니다 (브리프 §5). "김민수 님이
+  // 검토하고 있습니다" 는 바로 위 설명문과 같은 크기·같은 모양이라,
+  // 화면 맨 위 넉 줄이 전부 같은 무게였습니다.
+  //
+  // ⚠️ 머리글자는 `Array.from` 으로 뗍니다. `me.name[0]` 은 이모지나
+  // 일부 한자에서 반쪽 글자를 냅니다 (레일에서 한 번 당했습니다).
+  const initial = Array.from(me.name)[0] ?? '?';
+  $('who').innerHTML =
+    `<span class="avatar" aria-hidden="true">${escapeHtml(initial)}</span>` +
+    `${escapeHtml(me.name)} · 검토 중`;
+  $('who').hidden = false;
   await load();
 }
 

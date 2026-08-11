@@ -32,7 +32,14 @@
  */
 
 /** 아이콘 이름. `links.ts` 의 `TAB_ICON` 이 이 중 하나를 고릅니다. */
-export type IconName = 'home' | 'board' | 'track' | 'sliders' | 'meeting';
+export type IconName =
+  | 'home'
+  | 'board'
+  | 'track'
+  | 'sliders'
+  | 'meeting'
+  | 'person'
+  | 'calendar';
 
 /**
  * 이름 → SVG 마크업.
@@ -62,6 +69,14 @@ const PATHS: Record<IconName, string> = {
   // 슬라이더 — 손잡이가 있어 트랙 아이콘과 헷갈리지 않는다
   sliders: '<path d="M4 8h16M4 16h16"/>' +
     '<circle cx="14" cy="8" r="2.5"/><circle cx="9" cy="16" r="2.5"/>',
+
+  // 사람 — 담당자 칸. 머리 하나 + 어깨선.
+  // 비어 있을 때는 이 동그라미가 곧 "아직 아무도 없다" 입니다.
+  person: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-5.5 7-5.5s7 1.9 7 5.5"/>',
+
+  // 달력 — 마감일 칸. 고리 둘 + 머리줄.
+  calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"/>' +
+    '<path d="M3.5 10h17"/><path d="M8 3v4M16 3v4"/>',
 };
 
 /**
@@ -96,4 +111,12 @@ export function iconSvg(name: IconName): string {
 }
 
 /** 정의된 이름 전부. 테스트가 훑습니다. */
-export const ICON_NAMES: IconName[] = ['home', 'board', 'track', 'sliders', 'meeting'];
+export const ICON_NAMES: IconName[] = [
+  'home',
+  'board',
+  'track',
+  'sliders',
+  'meeting',
+  'person',
+  'calendar',
+];

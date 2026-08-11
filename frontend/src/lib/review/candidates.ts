@@ -319,6 +319,94 @@ export function sortForReview(candidates: readonly Candidate[]): Candidate[] {
 /** 이 확신도 아래면 화면에서 눈에 띄게 표시한다. */
 export const LOW_CONFIDENCE = 0.7;
 
+// ══════════════════════════════════════════════════════════════
+// 갈래와 한 줄 검사 (디자인 브리프 §8·§13)
+// ══════════════════════════════════════════════════════════════
+
+/** 화면의 필터 탭 하나. */
+export type Lane = 'pending' | 'approve' | 'reject';
+
+/**
+ * 이 후보가 지금 어느 갈래에 있는가.
+ *
+ * ⚠️ **`summarize` 로 갈래를 세면 안 됩니다.** 저쪽은 초안(`Draft`)만
+ * 봅니다. 이미 승인·거절이 끝난 후보의 초안은 `pending` 이라, 저 숫자로
+ * 탭을 그리면 **이미 승인된 것이 `검토 필요` 에 들어갑니다.** 사람은
+ * 그걸 보고 아직 할 일이 남았다고 읽습니다.
+ *
+ * 그래서 **서버가 이미 내린 결정이 먼저**입니다. 그 위에서만 초안이
+ * 갈래를 바꿉니다.
+ */
+export function reviewLane(candidate: Candidate, draft: Draft): Lane {
+  if (candidate.review_status === 'approved') return 'approve';
+  if (candidate.review_status === 'rejected') return 'reject';
+  return draft.decision;
+}
+
+/** 탭에 적을 개수. 갈래마다 하나씩, 0 도 적는다. */
+export function laneCounts(
+  candidates: readonly Candidate[],
+  drafts: ReadonlyMap<number, Draft>,
+): Record<Lane | 'all', number> {
+  const counts = { all: candidates.length, pending: 0, approve: 0, reject: 0 };
+  for (const candidate of candidates) {
+    counts[reviewLane(candidate, drafts.get(candidate.id) ?? emptyDraft())] += 1;
+  }
+  return counts;
+}
+
+/**
+ * 승인을 막는 것들을 **한 줄**로.
+ *
+ * ⚠️ 예전에는 막는 이유를 한 줄에 하나씩, 전부 빨갛게 적었습니다. 후보
+ * 하나에 두 줄이 뜨고 셋이면 여섯 줄인데, 그 여섯 줄이 전부 같은 빨강이라
+ * **무엇이 진짜 문제인지가 안 보였습니다.**
+ *
+ * 그리고 대부분은 문제가 아닙니다 — 담당자·마감일이 비어 있는 것은
+ * **아직 사람이 안 채운 것**이지 오류가 아닙니다. 회의에 없던 내용
+ * (`no_evidence`)이나 팀원이 아닌 담당자와 같은 무게로 칠하면 안 됩니다.
+ *
+ * 그래서 두 가지를 가릅니다:
+ *
+ *   `missing`  아직 안 채운 칸. 흙빛 — 할 일이지 잘못이 아닙니다
+ *   `error`    실제로 잘못된 것. 빨강
+ *
+ * 둘 다면 빨강이 이깁니다. 채우기 전에 고쳐야 할 것이 있으니까요.
+ */
+export type BlockerTone = 'none' | 'missing' | 'error';
+
+export interface BlockerLine {
+  tone: BlockerTone;
+  text: string;
+}
+
+/** 비어 있을 뿐인 칸 — 이름만 모아 한 번에 말한다. */
+const EMPTY_FIELD: Partial<Record<BlockerCode, string>> = {
+  missing_assignee: '담당자',
+  missing_deadline: '마감일',
+};
+
+export function blockerLine(blockers: readonly Blocker[]): BlockerLine {
+  const empty: string[] = [];
+  const hard: string[] = [];
+  for (const blocker of blockers) {
+    const field = EMPTY_FIELD[blocker.code];
+    if (field === undefined) hard.push(blocker.message);
+    else empty.push(field);
+  }
+
+  // ⚠️ `담당자을` 이 되지 않게 마지막 낱말에서 조사를 고릅니다.
+  const need =
+    empty.length === 0
+      ? ''
+      : `${[...empty.slice(0, -1), withJosa(empty[empty.length - 1] as string, '을를')].join(' · ')} 지정해야 등록할 수 있습니다`;
+
+  if (hard.length === 0) {
+    return empty.length === 0 ? { tone: 'none', text: '' } : { tone: 'missing', text: need };
+  }
+  return { tone: 'error', text: need === '' ? hard.join(' · ') : `${hard.join(' · ')} · ${need}` };
+}
+
 export interface ReviewSummary {
   total: number;
   pending: number;

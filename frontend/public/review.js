@@ -212,6 +212,36 @@ function sortForReview(candidates2) {
   return [...candidates2].sort((a, b) => a.confidence - b.confidence || a.id - b.id);
 }
 var LOW_CONFIDENCE = 0.7;
+function reviewLane(candidate, draft) {
+  if (candidate.review_status === "approved") return "approve";
+  if (candidate.review_status === "rejected") return "reject";
+  return draft.decision;
+}
+function laneCounts(candidates2, drafts2) {
+  const counts = { all: candidates2.length, pending: 0, approve: 0, reject: 0 };
+  for (const candidate of candidates2) {
+    counts[reviewLane(candidate, drafts2.get(candidate.id) ?? emptyDraft())] += 1;
+  }
+  return counts;
+}
+var EMPTY_FIELD = {
+  missing_assignee: "담당자",
+  missing_deadline: "마감일"
+};
+function blockerLine(blockers) {
+  const empty = [];
+  const hard = [];
+  for (const blocker of blockers) {
+    const field = EMPTY_FIELD[blocker.code];
+    if (field === void 0) hard.push(blocker.message);
+    else empty.push(field);
+  }
+  const need = empty.length === 0 ? "" : `${[...empty.slice(0, -1), withJosa(empty[empty.length - 1], "을를")].join(" · ")} 지정해야 등록할 수 있습니다`;
+  if (hard.length === 0) {
+    return empty.length === 0 ? { tone: "none", text: "" } : { tone: "missing", text: need };
+  }
+  return { tone: "error", text: need === "" ? hard.join(" · ") : `${hard.join(" · ")} · ${need}` };
+}
 function summarize(candidates2, drafts2, context2) {
   let pending = 0;
   let approving = 0;
@@ -248,6 +278,31 @@ function describeSubmitResult(approvedCount, taskIds) {
   }
   const numbers = taskIds.filter((id) => Number.isFinite(id));
   return numbers.length === 0 ? `${approvedCount}건이 칸반에 등록됐습니다` : `${approvedCount}건이 칸반에 등록됐습니다 (task ${numbers.join(", ")})`;
+}
+
+// src/lib/nav/icons.ts
+var PATHS = {
+  // 지붕(3,11)-(12,3)-(21,11) + 몸통 x 5.5~18.5, y 9.5~20
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5.5 9.5V20h13V9.5"/>',
+  // 보드 3~21 × 4~20, 세로 칸막이 x=9·15 — 열 셋이 칸반의 전부다
+  board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
+  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
+  // 가운데 줄은 **끊겨 있습니다.** 그 구멍이 이 화면의 값어치입니다.
+  track: '<path d="M4 6h13"/><path d="M4 12h5M12 12h6"/><path d="M4 18h10"/>',
+  // 말풍선 — 칸반 카드의 "회의에서 나온 업무" 표시.
+  // ⚠️ 예전에는 `🗣` 였습니다. 그 자리는 **이 제품의 대표 주장이 카드에
+  // 보이는 곳**이라, 기기마다 다른 그림이 나오면 안 됩니다.
+  meeting: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 16v4l4-4"/>',
+  // 슬라이더 — 손잡이가 있어 트랙 아이콘과 헷갈리지 않는다
+  sliders: '<path d="M4 8h16M4 16h16"/><circle cx="14" cy="8" r="2.5"/><circle cx="9" cy="16" r="2.5"/>',
+  // 사람 — 담당자 칸. 머리 하나 + 어깨선.
+  // 비어 있을 때는 이 동그라미가 곧 "아직 아무도 없다" 입니다.
+  person: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-5.5 7-5.5s7 1.9 7 5.5"/>',
+  // 달력 — 마감일 칸. 고리 둘 + 머리줄.
+  calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17"/><path d="M8 3v4M16 3v4"/>'
+};
+function iconSvg(name) {
+  return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + PATHS[name] + "</svg>";
 }
 
 // src/lib/auth/session.ts
@@ -667,26 +722,6 @@ function railAriaLabel(item) {
   return parts.join(", ");
 }
 
-// src/lib/nav/icons.ts
-var PATHS = {
-  // 지붕(3,11)-(12,3)-(21,11) + 몸통 x 5.5~18.5, y 9.5~20
-  home: '<path d="M3 11l9-8 9 8"/><path d="M5.5 9.5V20h13V9.5"/>',
-  // 보드 3~21 × 4~20, 세로 칸막이 x=9·15 — 열 셋이 칸반의 전부다
-  board: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
-  // ⭐ 이 제품의 시그니처가 아이콘이 된 것 — 시간축 위의 평행 트랙.
-  // 가운데 줄은 **끊겨 있습니다.** 그 구멍이 이 화면의 값어치입니다.
-  track: '<path d="M4 6h13"/><path d="M4 12h5M12 12h6"/><path d="M4 18h10"/>',
-  // 말풍선 — 칸반 카드의 "회의에서 나온 업무" 표시.
-  // ⚠️ 예전에는 `🗣` 였습니다. 그 자리는 **이 제품의 대표 주장이 카드에
-  // 보이는 곳**이라, 기기마다 다른 그림이 나오면 안 됩니다.
-  meeting: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 16v4l4-4"/>',
-  // 슬라이더 — 손잡이가 있어 트랙 아이콘과 헷갈리지 않는다
-  sliders: '<path d="M4 8h16M4 16h16"/><circle cx="14" cy="8" r="2.5"/><circle cx="9" cy="16" r="2.5"/>'
-};
-function iconSvg(name) {
-  return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + PATHS[name] + "</svg>";
-}
-
 // src/demo/nav.ts
 function renderNav(current) {
   const context2 = contextFromSearch(current, location.search);
@@ -936,6 +971,7 @@ var candidates = [];
 var members = [];
 var meeting = null;
 var context = { memberIds: [], today: todayInTeamCalendar() };
+var lane = "all";
 var $ = (id) => {
   const el = document.getElementById(id);
   if (!el) throw new Error(`요소 없음: ${id}`);
@@ -1009,29 +1045,63 @@ function renderMinutes() {
     const why = view.evidenceCount === 0 ? '<span class="why none">근거 발화 없음</span>' : `<span class="why">근거 발화 ${view.evidenceCount}건</span>`;
     return `<li>${at}<span class="what">${escapeHtml(view.content)}</span>${why}</li>`;
   }).join("");
-  $("minutes").hidden = !hasExtraMinutes({
+  const extra = hasExtraMinutes({
     next_agenda: meeting?.next_agenda ?? [],
     unresolved_issues: meeting?.unresolved_issues ?? []
   });
+  return { agenda: agenda.length, issues: issues.length, any: extra };
+}
+function briefLine(counts) {
+  const parts = [];
+  if ((meeting?.summary ?? "") !== "") parts.push("회의 요약");
+  if (counts.agenda > 0) parts.push(`다음 안건 ${counts.agenda}`);
+  if (counts.issues > 0) parts.push(`답 안 난 것 ${counts.issues}`);
+  return parts.join(" · ");
+}
+function laneTabs(counts) {
+  const tabs = [
+    ["all", "전체"],
+    ["pending", "검토 필요"],
+    ["approve", "등록"],
+    ["reject", "거절"]
+  ];
+  return tabs.map(
+    ([key, label]) => `<button type="button" role="tab" data-lane="${key}" aria-selected="${key === lane}">${label}<span class="n">${counts[key]}</span></button>`
+  ).join("");
 }
 function render() {
   const summary = summarize(candidates, drafts, context);
   const text = meeting?.summary ?? "";
   $("meeting-summary").hidden = text === "";
   $("meeting-summary").textContent = text;
-  renderMinutes();
-  $("counts").textContent = `전체 ${summary.total} · 승인 ${summary.approving} · 거절 ${summary.rejecting} · 미결정 ${summary.pending}`;
-  $("attention").hidden = summary.needsAttention === 0;
-  $("attention").textContent = `확신도가 낮은 후보 ${summary.needsAttention}건이 아직 결정되지 않았습니다. 근거 발화를 확인하세요.`;
-  $("blocked").hidden = summary.blocked === 0;
-  $("blocked").textContent = `승인하려는 후보 ${summary.blocked}건에 빠진 정보가 있습니다.`;
+  const counts = renderMinutes();
+  $("brief").hidden = !counts.any && text === "";
+  $("brief-line").textContent = briefLine(counts);
   $("submit").disabled = !canSubmit(summary);
+  $("result").textContent = summary.blocked > 0 ? `${summary.blocked}건에 빠진 정보가 있어 제출할 수 없습니다` : "";
   if (candidates.length === 0) {
+    $("lanes").innerHTML = "";
+    $("lane-empty").hidden = true;
     $("list").innerHTML = emptyHtml(emptyReviewState());
     return;
   }
-  $("list").innerHTML = candidates.map(cardHtml).join("");
+  $("lanes").innerHTML = laneTabs(laneCounts(candidates, drafts));
+  wireLanes();
+  const shown = candidates.filter(
+    (candidate) => lane === "all" || reviewLane(candidate, draftOf(candidate.id)) === lane
+  );
+  $("lane-empty").hidden = shown.length > 0;
+  $("lane-empty").textContent = "이 상태인 후보가 없습니다";
+  $("list").innerHTML = shown.map(cardHtml).join("");
   wireCards();
+}
+function wireLanes() {
+  for (const tab of $("lanes").querySelectorAll("button[data-lane]")) {
+    tab.addEventListener("click", () => {
+      lane = tab.dataset.lane;
+      render();
+    });
+  }
 }
 function emptyReviewState() {
   const status = meeting?.status ?? "";
@@ -1086,18 +1156,31 @@ function cardHtml(candidate) {
       return `<option value="${m.user_id}"${selected}>${escapeHtml(m.name)}</option>`;
     })
   ].join("");
+  const deadline = effectiveDeadline(candidate, draft) ?? "";
+  const check = blockerLine(blockers);
+  const evidence = candidate.evidence_utterance_ids;
   return `
-<article class="card" data-id="${candidate.id}" data-decision="${draft.decision}">
-  <header>
+<article class="cand" data-id="${candidate.id}" data-decision="${draft.decision}"
+         data-done="${decided ? "1" : "0"}">
+  <div class="cand-top">
     <input class="title" type="text" value=${attr(effectiveTitle(candidate, draft))}
-           ${decided ? "disabled" : ""} />
-    <span class="conf ${low ? "low" : ""}">${(candidate.confidence * 100).toFixed(0)}%<small>확신도</small></span>
-  </header>
+           aria-label="업무 제목" ${decided ? "disabled" : ""} />
+    <span class="badge ${low ? "low" : ""}"
+          title="AI 확신도">${(candidate.confidence * 100).toFixed(0)}%</span>
+  </div>
 
-  <div class="row">
-    <label>담당자 <select class="assignee" ${decided ? "disabled" : ""}>${options}</select></label>
-    <label>마감일 <input class="deadline" type="date"
-           value="${effectiveDeadline(candidate, draft) ?? ""}" ${decided ? "disabled" : ""} /></label>
+  <div class="fields">
+    <label class="field sel" data-empty="${assignee === null ? "1" : "0"}">
+      <span class="ico">${iconSvg("person")}</span>
+      <span class="visually-hidden">담당자</span>
+      <select class="assignee" ${decided ? "disabled" : ""}>${options}</select>
+    </label>
+    <label class="field" data-empty="${deadline === "" ? "1" : "0"}">
+      <span class="ico">${iconSvg("calendar")}</span>
+      <span class="visually-hidden">마감일</span>
+      <input class="deadline" type="date" value="${deadline}" ${decided ? "disabled" : ""} />
+    </label>
+    <span class="src${evidence.length === 0 ? " none" : ""}">${evidence.length === 0 ? "근거 없음" : `근거 #${evidence.join(", #")}`}</span>
   </div>
 
   ${// 회의에서 부른 이름을 명단에서 못 찾았을 때만 보여준다. 이미 풀린
@@ -1105,36 +1188,29 @@ function cardHtml(candidate) {
   candidate.assignee_hint && assignee === null ? `<p class="hint">회의에서는 <strong>${escapeHtml(candidate.assignee_hint)}</strong>
            라고 했습니다 — 명단에서 찾지 못했습니다</p>` : ""}
 
-  <p class="evidence">
-    근거 발화 ${candidate.evidence_utterance_ids.length}건
-    ${candidate.evidence_utterance_ids.length ? `<code>#${candidate.evidence_utterance_ids.join(", #")}</code>` : '<strong class="bad">— 회의에 없던 내용일 수 있습니다</strong>'}
-  </p>
+  ${// ⭐ 막는 이유는 **한 줄**입니다 (브리프 §13). 안 채운 칸은 흙빛,
+  // 실제로 잘못된 것만 빨강 — `blockerLine` 이 가릅니다.
+  check.tone === "none" ? "" : `<p class="check" data-tone="${check.tone}">${escapeHtml(check.text)}</p>`}
 
   ${// 서버가 무엇을 확신하지 못했는가. 사람이 화면에서 고쳐도 남는다 —
   // blockers 와 달리 이건 판정이 아니라 기록이다.
   //
-  // ⚠️ **첫 줄만 보이고 나머지는 접습니다** (docs/19 §20). 후보 셋이면
-  // 이 목록이 여섯 줄이 되고, 그러면 정작 **지금 고쳐야 하는 것**
-  // (아래 `blockers`)이 그 사이에 묻힙니다.
-  //
-  // ⚠️ `blockers` 는 **접지 않습니다.** 그건 기록이 아니라 승인을 막는
-  // 것이고, 접으면 사람이 왜 승인 버튼이 죽어 있는지 모릅니다.
-  reasons.length ? `<ul class="warnings"><li>${escapeHtml(reasons[0] ?? "")}</li></ul>` + (reasons.length > 1 ? `<details class="more"><summary>확신하지 못한 이유 더 보기</summary><div class="more-body"><ul class="warnings">${reasons.slice(1).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul></div></details>` : "") : ""}
+  // ⚠️ **통째로 접습니다.** 승인을 막는 것이 아니므로 위의 한 줄보다
+  // 조용해야 합니다. 접어도 **한 번의 클릭 안에** 있습니다.
+  reasons.length ? `<details class="why-not"><summary>확신하지 못한 이유 ${reasons.length}건</summary><ul>${reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul></details>` : ""}
 
-  ${blockers.length ? `<ul class="blockers">${blockers.map((b) => `<li>${escapeHtml(b.message)}</li>`).join("")}</ul>` : ""}
-
-  ${decided ? `<p class="done">이미 ${candidate.review_status === "approved" ? "승인" : "거절"}된 후보입니다</p>` : `<div class="actions">
+  ${decided ? `<p class="done">이미 ${candidate.review_status === "approved" ? "등록" : "거절"}된 후보입니다</p>` : `<div class="acts">
            <button class="approve${draft.decision === "approve" ? " on" : ""}"
-                   ${blockers.length ? "disabled" : ""}>승인</button>
+                   ${blockers.length ? "disabled" : ""}>업무로 등록</button>
+           <button class="clear${draft.decision === "pending" ? " on" : ""}">나중에 검토</button>
            <button class="reject${draft.decision === "reject" ? " on" : ""}">거절</button>
-           <button class="clear">보류</button>
          </div>
-         <input class="note" type="text" placeholder="메모 (선택) — 왜 이렇게 결정했는지"
-                value=${attr(draft.note ?? "")} />`}
+         <input class="memo" type="text" placeholder="메모 (선택) — 왜 이렇게 결정했는지"
+                aria-label="메모" value=${attr(draft.note ?? "")} />`}
 </article>`;
 }
 function wireCards() {
-  for (const card of document.querySelectorAll(".card")) {
+  for (const card of document.querySelectorAll(".cand")) {
     const id = Number(card.dataset.id);
     const on = (sel, ev, fn) => {
       const el = card.querySelector(sel);
@@ -1151,7 +1227,7 @@ function wireCards() {
       "change",
       (el) => update(id, { deadlineOverride: el.value === "" ? null : el.value })
     );
-    on(".note", "change", (el) => update(id, { note: el.value }));
+    on(".memo", "change", (el) => update(id, { note: el.value }));
     const decide = (decision) => () => update(id, { decision });
     card.querySelector(".approve")?.addEventListener("click", decide("approve"));
     card.querySelector(".reject")?.addEventListener("click", decide("reject"));
@@ -1208,7 +1284,9 @@ async function start() {
     return;
   }
   const me = await response.json();
-  $("who").textContent = `${me.name} 님이 검토하고 있습니다`;
+  const initial = Array.from(me.name)[0] ?? "?";
+  $("who").innerHTML = `<span class="avatar" aria-hidden="true">${escapeHtml(initial)}</span>${escapeHtml(me.name)} · 검토 중`;
+  $("who").hidden = false;
   await load();
 }
 start().catch((error) => {

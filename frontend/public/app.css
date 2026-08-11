@@ -206,8 +206,22 @@ body.no-tabs {
    `#notice` 는 서버가 준 문구를 담는데, 아직 안 왔거나 오류가 나면 빈
    채로 있습니다. 그런데 `.note` 는 위에 선을 긋기 때문에, 화면에는
    **아무것도 없는 가로줄**이 두 개 생깁니다. 사람은 그걸 "여기 뭔가
-   빠졌다" 로 읽습니다. 실제로 기여도 오류 화면이 그랬습니다. */
-.note:empty {
+   빠졌다" 로 읽습니다. 실제로 기여도 오류 화면이 그랬습니다.
+
+   ⭐ **`p` 를 붙인 이유** (docs/19 §21)
+
+   예전에는 `.note:empty` 였습니다. 그런데 `<input>` 은 **자식을 가질 수
+   없는 태그**라 값이 무엇이든 언제나 `:empty` 입니다. 검토 화면의 메모
+   칸이 `class="note"` 였고, 그래서 **Stage F 이후로 한 번도 화면에
+   나온 적이 없었습니다.**
+
+   그 칸은 "왜 이렇게 결정했는지" 를 적는 자리입니다 — 이 저장소가
+   기여도에서 "이유 없는 조정은 근거 없는 점수와 같다" 고 적어 둔 것과
+   같은 약속인데, 그 약속을 지킬 입력창이 조용히 사라져 있었습니다.
+   빈 것을 감추는 규칙이 **빌 수 없는 것까지** 감춘 것입니다.
+
+   `guards.test.ts` 가 `:empty` 규칙이 void 태그를 겨냥하지 않는지 봅니다. */
+p.note:empty {
   display: none;
 }
 
@@ -760,7 +774,7 @@ pre {
      실제로 그래서 프로젝트 화면의 "팀원 3명" 이 본문 밖으로 밀려
      있었습니다. 본문에 걸면 아무도 깰 수 없습니다. */
   body {
-    max-width: 72rem;
+    max-width: var(--main-max);
     margin-inline: auto;
     padding: calc(var(--topnav) + 1.5rem) 1.5rem 3rem;
   }
@@ -771,7 +785,7 @@ pre {
 
   .wrap,
   .wrap.wide {
-    max-width: 72rem;
+    max-width: var(--main-max);
   }
 
   /* ── 내비를 위로 ──────────────────────────────────────── */
@@ -1154,22 +1168,45 @@ pre {
    4.34:1 로 미달합니다 — 실측했습니다 (`docs/19 §10`). */
 
 @media (min-width: 90rem) {
+  /* ⭐ **열 자리는 `html` 이 비웁니다.**
+
+     예전에는 `body` 의 `padding-left` 로 비웠습니다. 그러면 본문이
+     남은 폭을 **전부** 차지합니다 — 1920px 에서 1308px 짜리 글줄이
+     됐습니다. 그렇다고 `body` 에 `max-width` 를 걸면 이번엔 왼쪽
+     여백까지 통째로 가운데 정렬되어 셸 열 위로 올라탑니다.
+
+     그래서 비우는 일(`html`)과 모으는 일(`body`)을 갈랐습니다. 열
+     자리는 바깥이 비우고, 본문은 **그 안에서** 가운데로 모입니다.
+
+     `body` 의 배경은 캔버스로 전달되므로 `html` 의 여백 자리에도
+     같은 색이 칠해집니다 — 이음매가 보이지 않습니다.
+
+     ⚠️ 레일 자리를 미리 비워 두지 않습니다. 처음에 `--shell-rail` 만큼
+     띄웠더니 **아무것도 없는 72px 이 왼쪽에 생겼습니다** (렌더해서 봤습니다).
+     레일은 프로젝트가 둘 이상일 때만 섭니다 — 없는 것을 위해 자리를
+     비워 두면 그건 빈칸이 아니라 결함입니다. 설 때 더합니다. */
+  html {
+    padding-left: var(--shell-list);
+  }
+
+  html:has(body.has-rail) {
+    padding-left: calc(var(--shell-rail) + var(--shell-list));
+  }
+
+  /* 로그인처럼 셸이 아예 없는 화면. */
+  html:has(body.no-tabs) {
+    padding-left: 0;
+  }
+
   body {
-    /* 가운데 정렬을 풀고 왼쪽 열들 옆에 붙인다. */
-    max-width: none;
-    margin-inline: 0;
+    max-width: var(--main-max);
+    margin-inline: auto;
     padding: var(--sp-6) var(--sp-8) var(--sp-10);
-    /* ⚠️ 레일 자리를 미리 비워 두지 않습니다. 처음에 `--shell-rail` 만큼
-       띄웠더니 **아무것도 없는 72px 이 왼쪽에 생겼습니다** (렌더해서 봤습니다).
-       레일은 프로젝트 전환용인데 그 화면이 아직 없습니다 — 없는 것을 위해
-       자리를 비워 두면 그건 빈칸이 아니라 결함입니다. 생길 때 더합니다. */
-    padding-left: calc(var(--shell-list) + var(--sp-8));
   }
 
   /* 셸이 서면 위쪽 가로 내비 자리가 필요 없다. */
   body.no-tabs {
     padding-top: var(--sp-6);
-    padding-left: var(--sp-8);
   }
 
   /* ── 프로젝트 레일 ──────────────────────────────────────
@@ -1182,11 +1219,8 @@ pre {
      모릅니다. 클래스가 없으면 채널 목록이 `left: 0` 에 그대로 붙어서
      레일 없는 화면에 빈칸이 생기지 않습니다.
 
-     프로젝트가 **하나뿐이면 레일이 없습니다.** 갈 곳이 없으니까요. */
-  body.has-rail {
-    padding-left: calc(var(--shell-rail) + var(--shell-list) + var(--sp-8));
-  }
-
+     프로젝트가 **하나뿐이면 레일이 없습니다.** 갈 곳이 없으니까요.
+     (자리를 비우는 규칙은 위 `html:has(body.has-rail)` 입니다.) */
   body.has-rail #tabs {
     left: var(--shell-rail);
   }
@@ -1668,15 +1702,31 @@ pre {
 
    ⚠️ 이 숫자는 `nav.ts` 의 `PANEL_WIDTH` 와 **같아야** 합니다. 갈라지면
    그 사이 폭에서 열이 보이는데 영영 빕니다 (요청이 안 나가므로).
-   `guards.test.ts` 가 두 파일의 너비 집합을 맞춰 봅니다. */
+   `guards.test.ts` 가 두 파일의 너비 집합을 맞춰 봅니다.
+
+   ## ⭐ 이 열은 **껍데기가 아니라 본문입니다** (§21)
+
+   처음에는 왼쪽 열들과 같은 `--chrome-*` 로 칠했습니다. 짙은 두 벽
+   사이에 밝은 본문이 끼는 모양인데, 1920px 로 렌더해서 보니
+   **가운데가 종이 한 장처럼** 보였습니다 — 화면의 주인이 본문인데
+   양쪽 어둠이 시선을 먼저 가져갔습니다.
+
+   왼쪽은 **이동**(프로젝트·회의를 옮겨 다니는 곳)이라 껍데기가 맞습니다.
+   오른쪽은 **지금 보고 있는 것에 딸린 정보**입니다 — 팀원이 누구고
+   무엇을 잴 수 있는가. 그건 본문의 일부라 본문과 같은 면에 있어야
+   하고, 모드에 따라 같이 뒤집혀야 합니다.
+
+   그래서 여기서는 `--chrome-*` 를 **쓰지 않습니다.** 반대로 뒤집힙니다 —
+   껍데기 색을 여기 쓰면 어두운 모드에서 짙은 글자가 짙은 면 위에 얹혀
+   사라집니다. `guards.test.ts` 가 그 방향으로 지킵니다. */
 
 @media (min-width: 100rem) {
-  body {
-    padding-right: calc(var(--shell-panel) + var(--sp-8));
+  html {
+    padding-right: var(--shell-panel);
   }
 
-  body.no-tabs {
-    padding-right: var(--sp-8);
+  html:has(body.no-tabs) {
+    padding-right: 0;
   }
 
   .ctx {
@@ -1693,8 +1743,8 @@ pre {
     padding: var(--sp-3) var(--sp-2);
     overflow-y: auto;
 
-    background: var(--chrome-side);
-    border-left: 1px solid var(--chrome-line);
+    background: var(--bg);
+    border-left: 1px solid var(--line);
   }
 
   /* 아직 못 받았거나 받을 수 없는 화면에서는 **열 자체가 없습니다.**
@@ -1715,11 +1765,11 @@ pre {
     min-height: var(--shell-head);
     margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-2)) 0;
     padding: 0 var(--sp-4);
-    border-bottom: 1px solid var(--chrome-line);
+    border-bottom: 1px solid var(--line);
 
     font-size: var(--fs-caption);
     font-weight: 600;
-    color: var(--chrome-subtle);
+    color: var(--text-subtle);
   }
 
   .ctx-row {
@@ -1733,7 +1783,7 @@ pre {
     align-items: center;
     gap: var(--sp-icon);
     margin: 0;
-    color: var(--chrome-text);
+    color: var(--text);
     font-size: var(--fs-label);
     font-weight: 600;
   }
@@ -1743,7 +1793,7 @@ pre {
   .ctx-roles {
     margin: 0;
     padding-left: calc(var(--sp-2) + var(--sp-icon));
-    color: var(--chrome-muted);
+    color: var(--text-muted);
     font-size: var(--fs-caption);
     line-height: 1.5;
   }
@@ -1765,7 +1815,7 @@ pre {
     width: var(--sp-2);
     height: var(--sp-2);
     border-radius: var(--r-round);
-    background: var(--chrome-subtle);
+    background: var(--line-strong);
   }
 
   .ctx-dot[data-state="unmeasurable"] {
@@ -1776,8 +1826,8 @@ pre {
     flex-shrink: 0;
     margin: var(--sp-2) 0 0;
     padding: var(--sp-2) var(--sp-3);
-    border-top: 1px solid var(--chrome-line);
-    color: var(--chrome-subtle);
+    border-top: 1px solid var(--line);
+    color: var(--text-subtle);
     font-size: var(--fs-caption);
     line-height: 1.5;
   }
