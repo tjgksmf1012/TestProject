@@ -80,9 +80,25 @@
      막 연 사람은 아무것도 잘못하지 않았습니다.
 
      ⚠️ **진짜 실패는 그대로 빨강입니다.** 비밀번호가 틀렸거나 서버에
-     닿지 못한 것은 결측이 아니라 실패입니다. 둘을 같은 색으로 두면
-     둘 다 뜻을 잃습니다. */
-  .error.gap { color: var(--gap); }
+     닿지 못한 것은 결측이 아니라 실패입니다.
+
+     ⚠️⚠️ **글자를 흙빛으로 칠했다가 되물렸습니다.** `--gap` 을 15px
+     글자에 쓰니 밝은 모드에서 **3.46:1** 이었습니다 — 이 저장소가 스스로
+     정한 하한(글자 4.5:1 · 점 3:1, `tokens.css` 와 `test_design_tokens.py`)
+     아래입니다. "빨강이 아니게" 하려다 **안 읽히게** 만든 것입니다.
+
+     그래서 갈랐습니다 — **글자는 읽히는 중립색, 신호는 점이 집니다.**
+     점은 글자가 아니라 UI 컴포넌트라 하한이 3:1 이고(WCAG 1.4.11),
+     흙빛은 거기서 통과합니다. 검토 화면의 `.check` 가 쓰는 모양과 같습니다.
+
+       글자 --text-muted  7.64:1(밝게) · 9.16:1(어둡게)
+       점   --gap         3.46:1(밝게) · 6.28:1(어둡게) */
+  .error.gap p { display: flex; align-items: baseline; gap: var(--sp-2);
+                 color: var(--text-muted); }
+  .error.gap p::before { content: ""; flex: 0 0 auto;
+                         width: var(--sp-1); height: var(--sp-1);
+                         border-radius: var(--r-round); background: var(--gap);
+                         transform: translateY(-3px); }
 
   /* ⚠️ 각주 위의 가로선을 걷었습니다 (브리프 §7). 화면에 요소가 셋뿐인데
      그중 하나가 폭을 가로지르는 선이면, 그 선이 제일 눈에 띕니다. */
