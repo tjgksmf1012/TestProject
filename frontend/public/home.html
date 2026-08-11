@@ -18,71 +18,111 @@
 <title>TeamFlow</title>
 <style>
 
-  header { display: flex; align-items: baseline; gap: var(--sp-3); margin-bottom: var(--sp-6); }
+  /* ══ 브리프대로 다시 짰습니다 (docs/19 §23) ═══════════════════
+     머리말은 `app.css` 의 `.head`·`.lede`·`.by` — 화면 일곱이 같은 한 벌. */
 
-  #who { font-size: var(--fs-label); color: var(--text-subtle); }
   /* --todo: 지금 사람이 해야 할 일이 있는 회의를 눈에 띄게 하는 색.
      app.css 의 --warn 과 같은 뜻이라 그걸 그대로 쓴다. */
   :root { --todo: var(--warn); }
 
-  .project h2 { font-size: var(--fs-title); margin: 0 0 var(--sp-1); }
-  .project .sub { font-size: var(--fs-label); color: var(--text-subtle); margin: 0 0 var(--sp-3); }
-  .links { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-3); flex-wrap: wrap; }
+  /* ── 프로젝트 ──────────────────────────────────────────
+     ⚠️ **`.card` 를 안 씁니다.** 공용 카드는 여백이 좁아 회의 다섯 줄을
+     담기엔 답답했고, 검토·칸반 카드와 같은 재료로 맞춥니다. */
+  .project { background: var(--surface); border: 1px solid var(--line);
+             border-radius: var(--r-card); padding: var(--sp-5);
+             margin-bottom: var(--sp-4); }
+  .project h2 { font-size: var(--fs-item); letter-spacing: var(--ls-item);
+                margin: 0 0 var(--sp-1); }
+  .project .sub { font-size: var(--fs-caption); color: var(--text-subtle);
+                  margin: 0 0 var(--sp-4); }
 
-  .meeting { border-top: 1px solid var(--line); padding: var(--sp-3) 0; }
-  .meeting:first-child { border-top: 0; }
-  .meeting .head { display: flex; align-items: baseline; gap: var(--sp-2); }
-  .meeting .name { font-weight: 600; font-size: var(--fs-body); flex: 1; }
-  .meeting .when { font-size: var(--fs-caption); color: var(--text-subtle); white-space: nowrap; }
-  .meeting .status { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-1) 0 .5rem; }
+  /* ⚠️ **여기 있던 `칸반 / 기여도 / 설정` 버튼 셋을 낮췄습니다** (브리프 §17).
+     같은 세 곳이 왼쪽 열에도 있고 폰의 아래 탭바에도 있습니다 — **내비가
+     세 벌**이었고, 그중 이 셋만 크고 네모나서 화면에서 가장 먼저
+     읽혔습니다. 정작 이 화면의 주인공은 아래 회의 목록입니다.
+
+     지우지는 않습니다. 이 링크에는 **프로젝트가 실려** 있어서, 프로젝트가
+     여럿일 때 "이 프로젝트의 칸반" 으로 갑니다 — 왼쪽 열의 것과 뜻이
+     조금 다릅니다. 글자로 낮춰 제목 옆에 붙입니다. */
+  .links { display: flex; flex-wrap: wrap; gap: var(--sp-4);
+           margin: 0 0 var(--sp-5); }
+  .links a { font-size: var(--fs-caption); color: var(--text-subtle);
+             text-decoration: none; }
+  @media (hover: hover) and (pointer: fine) {
+    .links a:hover { color: var(--text); }
+  }
+
+  /* ⚠️ 불릿을 끕니다 — `.dot` 이 그 자리를 씁니다. 안 끄면 마커가 둘입니다. */
+  ul.meetings { list-style: none; padding: 0; margin: 0; }
+
+  /* ⚠️ **줄마다 긋던 가로선을 걷었습니다** (브리프 §7). 회의 다섯이면
+     선이 넷이었고, 그 선들이 상태 점보다 진했습니다. 나누는 것은 여백입니다. */
+  .meeting { padding: var(--sp-3) 0; border-radius: var(--r-ctrl); }
+  @media (hover: hover) and (pointer: fine) {
+    .meeting:hover { background: var(--bg); }
+  }
+  .meeting .head { display: flex; align-items: center; gap: var(--sp-3); }
+  .meeting .name { font-weight: 600; font-size: var(--fs-label); flex: 1; min-width: 0; }
+  .meeting .when { font-size: var(--fs-caption); color: var(--text-subtle); white-space: nowrap;
+                   font-variant-numeric: tabular-nums; }
+  .meeting .status { font-size: var(--fs-caption); color: var(--text-subtle);
+                     margin: var(--sp-1) 0 0; padding-left: calc(var(--sp-2) + var(--sp-3)); }
   /* 지금 사람이 해야 할 일이 있는 회의만 눈에 띄게 한다. */
   .meeting.todo .status { color: var(--todo); }
 
-  .start { margin-top: var(--sp-6); }
-  .start h2 { font-size: var(--fs-body); margin: 0 0 var(--sp-3); }
+  /* ⭐ 상태 점 — **채널 목록과 같은 어휘**입니다 (docs/19 §20).
+     같은 회의가 왼쪽 열에도 있는데 거기선 점, 여기선 글자였습니다.
+     같은 것을 두 어휘로 그리면 사람은 둘을 따로 배웁니다.
+     상태 → 점 종류의 판단은 `lib/nav/channels.ts` 한 곳에만 둡니다. */
+  .meeting .dot { flex: 0 0 auto; width: var(--sp-2); height: var(--sp-2);
+                  border-radius: var(--r-round); background: var(--text-subtle); }
+  .meeting .dot[data-state="open"]   { background: var(--ok); }
+  .meeting .dot[data-state="todo"]   { background: var(--primary); }
+  .meeting .dot[data-state="failed"] { background: var(--bad); }
+  .meeting .dot[data-state="working"] { background: transparent;
+                  box-shadow: inset 0 0 0 1.5px var(--text-subtle); }
 
-  .hint { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0 0 var(--sp-4); }
+  /* 줄 끝의 작은 버튼. 예전에는 화면 폭짜리라 다섯 개가 버튼 밭이었습니다. */
+  .btn-sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-caption);
+            white-space: nowrap; }
+
+  /* ⚠️ 줄이는 것은 **마우스에서만**. 손가락에서는 `--tap`(44px)이 하한이라
+     `app.css` 가 거는 것을 여기서 되돌리면 안 됩니다 — 회의 줄마다 있는
+     버튼이라 옆 것을 누르기 딱 좋습니다. */
+  @media (hover: hover) and (pointer: fine) {
+    .btn-sm { min-height: 0; }
+  }
+
+  /* ── 시작하기 ──────────────────────────────────────────
+     ⚠️ 설명을 입력창 **아래**가 아니라 위로 올렸습니다. 아래에 두면
+     사람이 칸을 다 채운 뒤에야 무엇을 채웠는지 알게 됩니다. */
+  .start { background: var(--surface); border: 1px solid var(--line);
+           border-radius: var(--r-card); padding: var(--sp-5); margin-top: var(--sp-4); }
+  .start h2 { font-size: var(--fs-caption); font-weight: 600; color: var(--text-subtle);
+              letter-spacing: .02em; margin: 0 0 var(--sp-4); }
+  .start .field + .field { margin-top: var(--sp-5); }
+  .hint { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0 0 var(--sp-2); }
+
+  .install { background: var(--surface); border: 1px solid var(--line);
+             border-radius: var(--r-card); padding: var(--sp-5); margin-top: var(--sp-4); }
+  .install h2 { font-size: var(--fs-caption); font-weight: 600; color: var(--text-subtle);
+                margin: 0 0 var(--sp-3); }
 
 </style>
 </head>
 <body>
-  <header>
-    <h1>TeamFlow</h1>
-    <span id="who"></span>
-    <button id="logout" type="button">로그아웃</button>
-  </header>
+  <!-- ⭐ **상태가 있는 것은 React 가 그립니다** (docs/19 §24) —
+       머리말·프로젝트 목록·시작하기 폼. 여기에 같은 마크업을 남겨 두면
+       두 벌이 되고, React 가 마운트하는 순간 지워집니다.
 
-  <!-- 로그아웃이 **실제로 안 됐을 때** (결함 82). 화면만 옮기고 세션이
-       남아 있으면, 공용 PC 에서 다음 사람이 이 계정으로 들어옵니다. -->
-  <p class="status" id="logout-note" hidden></p>
-
-  <!-- 비워 둔다. "불러오는 중…" 을 여기 적어 두면 **언제나** 한 번
-       깜빡입니다 — 대부분의 요청은 200ms 안에 끝나기 때문입니다.
-       로딩 표시는 `src/lib/ui/pending.ts` 가 늦게 켭니다. -->
-  <div id="projects"></div>
-
-  <section class="card start">
-    <h2>시작하기</h2>
-    <div class="row">
-      <input id="new-title" type="text" placeholder="새 프로젝트 이름" maxlength="200"
-             autocomplete="off" />
-      <button id="create" type="button" class="primary">만들기</button>
-    </div>
-    <p class="hint">만들면 초대 코드가 나옵니다. 그 코드를 팀원에게 알려 주세요.</p>
-
-    <div class="row">
-      <input id="code" type="text" placeholder="초대 코드 (ABCD-EFGH)" maxlength="12"
-             autocomplete="off" autocapitalize="characters" spellcheck="false" />
-      <button id="join" type="button">참가</button>
-    </div>
-    <p class="hint">팀원에게 코드를 받았다면 여기에 넣으세요.</p>
-
-    <p id="start-error" class="error" hidden></p>
-  </section>
+       ⚠️ 아래의 설치 안내와 로그아웃은 **HTML 에 그대로 둡니다.**
+       `pwa.ts`·`logout.ts` 가 DOM 을 직접 만져서 채우고, 그 두 모듈은
+       화면 여덟이 함께 씁니다 — React 용으로 다시 쓰면 두 벌이 됩니다. -->
+  <div id="app"></div>
 
   <!-- 설치 안내. `src/demo/pwa.ts` 가 채우고, 설치할 방법이 없으면
        비워 둡니다 — 아이폰과 안드로이드가 완전히 다릅니다. -->
-  <section class="card install" hidden id="install-card">
+  <section class="install" hidden id="install-card">
     <h2>앱으로 쓰기</h2>
     <p id="install" class="sub" hidden></p>
     <button id="install-now" class="primary btn-block" type="button" hidden>
@@ -91,11 +131,25 @@
     <p class="hint" id="install-why"></p>
   </section>
 
+  <!-- ⚠️ 앞 두 문장은 머리말(lede)로 올라갔습니다. 화면 맨 아래에서
+       같은 말을 두 번 하지 않습니다 (브리프 §17). 남은 한 줄은 거기 없는
+       사실이라 지우지 않았습니다. -->
   <p class="note">
-    회의는 <strong>녹음 → 처리 → 사람이 검토 → 칸반</strong> 순서로 갑니다.
-    각 회의 아래 문구가 지금 어느 단계인지와 다음에 할 일을 말합니다.
     처리 중인 회의에는 버튼이 없습니다 — 눌러도 아직 아무것도 없습니다.
   </p>
+
+  <!-- ⚠️ 로그아웃은 **머리말에서 내려왔습니다** (브리프 §5·§14).
+       제목 옆에 네모 버튼으로 있으면 화면에서 두 번째로 큰 것이 되는데,
+       홈에 온 사람이 하려는 일이 로그아웃일 리는 없습니다. 로비와 같은
+       자리·같은 무게(글자만)로 맞췄습니다.
+
+       ⚠️ 지우지 않았습니다. 여기가 이 앱에서 로그아웃할 수 있는 두 곳
+       중 하나이고, 공용 PC 에서 세션이 남으면 다음 사람이 이 계정으로
+       들어옵니다 (결함 82). -->
+  <div class="act-quiet">
+    <button id="logout" class="linkish" type="button">로그아웃</button>
+  </div>
+  <p class="status" id="logout-note" hidden></p>
 
   <script type="module" src="/home.js"></script>
 

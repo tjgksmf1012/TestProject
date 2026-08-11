@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from teamflow.audio import multitrack as mt
+from teamflow.db import vocab
 from teamflow.jobs.gpu_lock import GpuBusy, GpuLease, GpuLeaseLost, LockBackend, gpu_lease
 from teamflow.meeting.resolve import TeamMemberName
 from teamflow.meeting.schema import format_transcript
@@ -87,7 +88,10 @@ class PipelineResult:
         """화자가 확정된 발화 비율. 신뢰도 계산의 입력이 된다."""
         if not self.segments:
             return 0.0
-        certain = sum(1 for s in self.segments if s.speaker_source in ("track", "manual"))
+        # ⚠️ 무엇이 확정인가는 `db/vocab.CERTAIN` 이 정합니다. 예전에는 이
+        #    튜플이 `scoring_service` 에도 똑같이 적혀 있었습니다 — 같은
+        #    판단이 두 곳에 있으면 반드시 갈라집니다.
+        certain = sum(1 for s in self.segments if s.speaker_source in vocab.CERTAIN)
         return certain / len(self.segments)
 
 

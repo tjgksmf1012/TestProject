@@ -1,0 +1,1 @@
+var o={set:(e,r)=>setTimeout(e,r),clear:e=>{clearTimeout(e)}};async function l(e,r,i,s=o,a=200){let t=!1,n=s.set(()=>{t=!0,r()},a);try{return await e}finally{s.clear(n),t&&i()}}async function m(e,r){let i=e.disabled;e.disabled=!0,e.setAttribute("aria-busy","true");try{return await r()}finally{e.disabled=i,e.removeAttribute("aria-busy")}}export{l as a,m as b};

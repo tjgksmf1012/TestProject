@@ -15,172 +15,320 @@
 <link rel="apple-touch-icon" href="/icon-180.png" />
 <link rel="stylesheet" href="/tokens.css" />
 <link rel="stylesheet" href="/app.css" />
+<!-- Tailwind. 아직 이 화면의 React 조각(근거 발화 상자)만 씁니다. -->
+<link rel="stylesheet" href="/tw.css" />
     <title>업무 후보 검토 — TeamFlow AI</title>
     <style>
 
-      .banner { padding: var(--sp-3) var(--sp-4); border-radius: .5rem; font-size: var(--fs-label); margin-bottom: var(--sp-3); }
-      #attention { background: color-mix(in srgb, var(--warn) 15%, transparent); }
-      #blocked { background: color-mix(in srgb, var(--bad) 12%, transparent); }
-      #counts { font-size: var(--fs-label); opacity: .75; margin-bottom: var(--sp-4); }
+      /* ══ 브리프대로 다시 짰습니다 (docs/19 §21) ═══════════════════
 
-      /* 회의록 — 요약 말고 나머지 (결함 110·111).
-       *
-       * 후보 목록보다 **위**에 둡니다. 이 화면에서 사람이 하는 일은
-       * "회의에서 무슨 얘기가 있었나" 를 읽고 후보를 판단하는 것이라,
-       * 맥락이 목록보다 먼저 와야 합니다. */
-      #minutes { margin-bottom: var(--sp-4); }
-      .minutes-head {
-        font-size: var(--fs-label); font-weight: 700; opacity: .75;
-        margin: var(--sp-3) 0 var(--sp-2);
+         고친 것은 장식이 아니라 **순서**입니다. 이 화면에서 사람이 하는
+         일은 하나입니다 — 후보 하나를 보고 등록할지 정하기. 그런데
+         화면은 그 일을 맨 아래에 두고, 위쪽 넉 줄을 회의록에 썼고,
+         카드 안에서는 제목보다 `34%` 가 컸습니다.
+
+         그래서 위에서부터: 무엇을 하는 화면인가(머리말) → 얼마나
+         남았나(탭) → 후보 하나(카드) → 결정(버튼). 회의 맥락은 접습니다. */
+
+      /* 머리말(`.head`·`.lede`·`.by`)은 **`app.css` 에 있습니다.**
+         칸반에도 같은 것이 필요해지자 두 벌이 될 참이었습니다. */
+
+      /* ── 회의 맥락 (접힘) ───────────────────────────────── */
+      .brief { border: 1px solid var(--line); border-radius: var(--r-card);
+               background: var(--surface); margin-bottom: var(--sp-6); }
+      .brief > summary {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: var(--sp-4); padding: var(--sp-3) var(--sp-5);
+        list-style: none; cursor: pointer; border-radius: var(--r-card);
+        font-size: var(--fs-label);
       }
-      #agenda, #issues { list-style: none; padding: 0; margin: 0; font-size: var(--fs-label); }
-      #agenda li, #issues li {
-        display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap;
-        padding: var(--sp-2) 0; border-top: 1px solid var(--line);
-      }
-      /* 발화 시각. 숫자라 폭이 흔들리지 않게 고정 폭 숫자를 쓴다. */
-      #issues .at {
-        font-variant-numeric: tabular-nums; font-size: var(--fs-caption);
-        opacity: .7; white-space: nowrap;
-      }
+      .brief > summary::-webkit-details-marker { display: none; }
+      .brief-line { color: var(--text); font-weight: 600; }
+      .brief-cta { color: var(--text-subtle); white-space: nowrap; }
+      /* 열렸다는 것을 **화살표 방향**으로 말합니다 — 글자를 바꾸면 같은
+         자리에서 문구가 튀고, 접기·펴기가 다른 버튼처럼 보입니다. */
+      .brief-cta::after { content: " \203a"; display: inline-block; transition: transform .12s ease; }
+      .brief[open] .brief-cta::after { transform: rotate(90deg); }
+      .brief[open] > summary { border-bottom: 1px solid var(--line);
+                               border-radius: var(--r-card) var(--r-card) 0 0; }
+      /* ⚠️ 카드 안쪽 여백(`--sp-5`)과 **같은 값**입니다. 16 과 20 이
+         섞이면 접힘 상자의 글과 카드의 글이 4px 어긋난 두 줄에서
+         시작합니다 — 한 줄씩 보면 안 보이는데 화면 전체로는 어수선합니다. */
+      .brief-body { padding: 0 var(--sp-5) var(--sp-5); }
+      #meeting-summary { white-space: pre-wrap; font-size: var(--fs-label);
+                         line-height: 1.7; color: var(--text-muted); margin: 0; }
+      .minutes-head { font-size: var(--fs-caption); font-weight: 600; color: var(--text-subtle);
+                      letter-spacing: .02em; margin: var(--sp-5) 0 var(--sp-2); }
+      /* ⚠️ **줄마다 가로선을 긋지 않습니다** (브리프 §7). 안건 셋에 선이
+         셋이면 화면을 가로지르는 줄이 셋 생기고, 그 선들이 카드 목록의
+         테두리와 경쟁합니다. 나누는 일은 여백이 합니다. */
+      #agenda, #issues { list-style: none; padding: 0; margin: 0;
+                         font-size: var(--fs-label); color: var(--text-muted); }
+      #agenda li, #issues li { display: flex; gap: var(--sp-2); align-items: baseline;
+                               flex-wrap: wrap; padding: var(--sp-1) 0; }
+      #agenda li::before { content: "\2013"; color: var(--text-subtle); }
+      #issues .at { font-variant-numeric: tabular-nums; font-size: var(--fs-caption);
+                    color: var(--text-subtle); white-space: nowrap; }
       /* ⚠️ `flex: 1` 을 주면 안 됩니다. 넓은 화면에서 내용 칸이 늘어나
        * "근거 발화 1건" 이 **1000px 떨어진 오른쪽 끝**으로 밀려납니다 —
-       * 무엇의 근거인지 안 보이고 표의 다른 열처럼 읽힙니다. 읽는
-       * 순서대로 붙여 두고, 좁아지면 줄만 바꿉니다. */
+       * 무엇의 근거인지 안 보이고 표의 다른 열처럼 읽힙니다. */
       #issues .what { flex: 0 1 auto; min-width: 0; }
       /* ⚠️ 근거 건수는 **작게, 그러나 지우지 않고** 둡니다. 이 저장소는
        * 근거 없는 값을 화면에 올리지 않기로 했고, 그 약속은 사람이
        * 근거의 유무를 볼 수 있을 때만 지켜집니다. */
-      #issues .why { font-size: var(--fs-caption); opacity: .7; white-space: nowrap; }
-      #issues .why.none { color: var(--warn); opacity: 1; }
+      #issues .why { font-size: var(--fs-caption); color: var(--text-subtle); white-space: nowrap; }
+      #issues .why.none { color: var(--gap); }
 
-      .card {
-        border: 1px solid var(--line); border-radius: .75rem;
-        padding: var(--sp-4); margin-bottom: var(--sp-3);
+      /* ── 상태 필터 ──────────────────────────────────────── */
+      .seg { display: flex; gap: var(--sp-1); flex-wrap: wrap;
+             margin-bottom: var(--sp-4); }
+      .seg button {
+        font-size: var(--fs-label); font-weight: 500;
+        padding: var(--sp-2) var(--sp-3);
+        border: 1px solid transparent; border-radius: var(--r-ctrl);
+        background: transparent; color: var(--text-muted);
       }
-      .card[data-decision="approve"] { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 6%, transparent); }
-      .card[data-decision="reject"] { border-color: var(--line); opacity: .6; }
-      .card header { display: flex; gap: var(--sp-3); align-items: center; margin-bottom: var(--sp-3); }
-      .card header .title {
-        flex: 1; font: inherit; font-weight: 600; padding: var(--sp-2) .5rem;
-        border: 1px solid transparent; border-radius: .35rem; background: var(--surface); color: inherit;
+      .seg button .n { font-variant-numeric: tabular-nums; color: var(--text-subtle);
+                       margin-left: var(--sp-2); }
+      .seg button[aria-selected="true"] {
+        background: var(--surface); border-color: var(--line);
+        color: var(--text); font-weight: 600;
       }
-      .card header .title:focus { border-color: var(--line); outline: none; }
-      .conf { font-size: var(--fs-caption); white-space: nowrap; opacity: .7; font-variant-numeric: tabular-nums; }
-      .conf.low { color: var(--warn); opacity: 1; font-weight: 700; }
+      .seg button[aria-selected="true"] .n { color: var(--text-muted); }
+      .lane-empty { font-size: var(--fs-label); color: var(--text-subtle);
+                    padding: var(--sp-8) 0; text-align: center; margin: 0; }
 
-      .row label { font-size: var(--fs-label); opacity: .75; display: flex; gap: var(--sp-icon); align-items: center; }
+      /* ── 후보 카드 ──────────────────────────────────────── */
+      /* 떠오른 면 + 1px. 그림자를 안 쓰는 것은 이 저장소의 규칙입니다
+         (`guards.test.ts` 가 컨트롤 경계를 봅니다). */
+      .cand {
+        background: var(--surface); border: 1px solid var(--line);
+        border-radius: var(--r-card); padding: var(--sp-5);
+        margin-bottom: var(--sp-3);
+        transition: border-color .12s ease;
+      }
+      /* 결정한 것은 **테두리로만** 말합니다. 카드 전체를 물들이면 목록에
+         색 덩어리가 생기고, 아직 안 본 것이 그 사이에 묻힙니다. */
+      .cand[data-decision="approve"] { border-color: var(--primary); }
+      .cand[data-decision="reject"] { opacity: .55; }
+      .cand[data-done="1"] { background: var(--bg); }
 
-      /* ⚠️ **겹치는 대신 줄을 바꾸게 한다** (결함 77).
-       *
-       * `app.css` 의 `.row > * { min-width: 0 }` 은 라벨이 0 까지 줄어들게
-       * 합니다(결함 53 때 넣은 것). 그런데 그 안의 `select`·`input[type=date]`
-       * 는 아래에서 `min-width: 8rem` 을 받아 **못 줄어듭니다.** 그래서 라벨
-       * 상자보다 내용이 넓어지고, 넘친 부분이 **옆 라벨 글자 위로 올라탑니다** —
-       * 360·390px 에서 "마감일" 이 담당자 칸을 덮었습니다.
-       *
-       * ⚠️ `audit360.mjs` 는 이걸 **못 잡습니다.** 그 도구는 가로 넘침을 보는데
-       * `body { overflow-x: hidden }` 이라 넘친 것이 잘려서 0px 로 나옵니다.
-       * 잘린 것은 가로 스크롤보다 나쁩니다 — 밀어서 볼 수조차 없습니다.
-       *
-       * `max-content` 로 바닥을 주면 flex 가 **줄바꿈으로** 해결합니다.
-       * 숫자를 손으로 고르지 않는 이유: 라벨 글자 폭은 글꼴·번역에 따라
-       * 달라지는데 `max-content` 는 그때그때 실제 폭을 씁니다. */
-      .row { flex-wrap: wrap; }
-      .row > label { min-width: max-content; }
-      /* ⭐ 글자를 16px 밑으로 내리지 않는다. iOS Safari 는 그보다 작은
-         입력 칸에 포커스가 가면 화면을 확대하고 **확대된 채로 돌아오지
-         않는다.** 승인 화면은 담당자 고르기·마감일 넣기가 전부 입력이라
-         그 화면에서 가장 자주 밟는다. 크기는 app.css 가 정한다. */
-      select, input[type="date"] { width: auto; min-width: 8rem; }
-      .note { font: inherit; font-size: var(--fs-body); padding: var(--sp-2) .75rem;
+      .cand-top { display: flex; gap: var(--sp-3); align-items: flex-start;
+                  margin-bottom: var(--sp-4); }
+      /* 제목은 **입력창처럼 보이지 않습니다.** 눌러야 테두리가 나옵니다 —
+         카드가 HTML 폼처럼 보이던 가장 큰 이유가 이 상자였습니다. */
+      /* ⚠️ **`.cand .title` 로는 안 먹습니다.** app.css 의
+         `input:not([type='checkbox']):not([type='radio'])` 는 특성도가 (0,2,1) 이고
+         `.cand .title` 은 (0,2,0) 이라 **app.css 가 이깁니다.** 렌더해서
+         보고 알았습니다 — 제목이 여전히 회색 입력 상자였습니다.
+         `input` 을 붙여 (0,2,1) 로 맞추면 나중에 오는 이쪽이 이깁니다. */
+      .cand input.title {
+        flex: 1; min-width: 0; font: inherit; font-size: var(--fs-input); font-weight: 600;
+        padding: var(--sp-1) var(--sp-2);
+        margin-left: calc(-1 * var(--sp-2));
+        border: 1px solid transparent; border-radius: var(--r-ctrl);
+        background: transparent; color: var(--text);
+      }
+      @media (hover: hover) and (pointer: fine) {
+        .cand input.title:hover:not(:disabled) { border-color: var(--line); }
+      }
+      .cand input.title:focus { border-color: var(--line-strong); background: var(--bg); }
+      .cand input.title:disabled { color: var(--text-muted); }
+
+      /* ⭐ **`34%` 를 걷어냈습니다** (브리프 §11).
+         48px 짜리 숫자가 제목보다 커서, 화면에서 제일 먼저 읽히는 것이
+         "이 업무가 무엇인가" 가 아니라 백분율이었습니다. 확신도는 제목을
+         **읽고 나서** 참고하는 값입니다. 그래서 제목 옆 작은 알약으로. */
+      .badge {
+        flex: 0 0 auto; font-size: var(--fs-caption); font-weight: 600;
+        font-variant-numeric: tabular-nums; line-height: 1;
+        padding: var(--sp-2) var(--sp-2); border-radius: var(--r-ctrl);
+        background: color-mix(in srgb, var(--primary) 10%, transparent);
+        color: var(--primary);
+      }
+      /* 확신도가 낮은 것은 결측과 같은 흙빛입니다 — 빨강이 아닙니다.
+         AI 가 확신을 못 한 것은 고장이 아니라 "여기는 사람이 봐야 한다". */
+      .badge.low { background: color-mix(in srgb, var(--gap) 14%, transparent); color: var(--gap); }
+
+      /* ── 담당자·마감일 ──────────────────────────────────── */
+      /* 라벨 글자를 지우고 아이콘으로 대신합니다. `담당자 [담당자 미지정]`
+         은 같은 말을 두 번 하는 것이었습니다. */
+      .fields { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+      .field { display: inline-flex; align-items: center; gap: var(--sp-icon);
+               position: relative; color: var(--text-muted); }
+      .field > .ico { position: absolute; left: var(--sp-3); display: inline-flex;
+                      pointer-events: none; color: var(--text-subtle); }
+      .field .ico svg { --ico: 15px; width: var(--ico); height: var(--ico); }
+      .field select, .field input[type="date"] {
+        width: auto; min-width: 0; font-size: var(--fs-input);
+        padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-8);
         border: 1px solid var(--line); border-radius: var(--r-ctrl);
-        background: var(--bg); color: inherit; }
-
-      .evidence { font-size: var(--fs-label); opacity: .75; margin: var(--sp-2) 0; }
-      .evidence code { font-size: inherit; }
-      .evidence .bad { color: var(--bad); opacity: 1; }
-
-      .blockers { list-style: none; padding: 0; margin: var(--sp-2) 0; font-size: var(--fs-label); color: var(--bad); }
-      .blockers li::before { content: "⚠ "; }
-
-      /* 승인을 막는 것(blockers)과 서버가 확신 못 한 것(warnings)은 다르다.
-         색을 나눠야 사람이 "지금 고쳐야 할 것" 과 "확인해 볼 것" 을 구분한다. */
-      .warnings { list-style: none; padding: 0; margin: var(--sp-2) 0; font-size: var(--fs-label); color: var(--warn); }
-      .warnings li::before { content: "· "; }
-      .hint { font-size: var(--fs-label); margin: var(--sp-2) 0; opacity: .85; }
-
-      #meeting-summary {
-        white-space: pre-wrap; font-size: var(--fs-label); line-height: 1.65;
-        border-left: 3px solid var(--line); padding: .25rem 0 .25rem var(--sp-4);
-        margin: 0 0 var(--sp-4);
+        background: var(--bg); color: var(--text);
+        /* 기본 화살표를 끄고 우리 것을 씁니다 — UA 위젯은 브라우저마다
+           달라서, 같은 화면이 크롬과 사파리에서 다르게 보입니다. */
+        appearance: none; -webkit-appearance: none;
       }
-
-      .actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); }
-      .actions button {
-        font: inherit; font-size: var(--fs-label); padding: var(--sp-2) var(--sp-4); cursor: pointer;
-        border: 1px solid var(--line); border-radius: .4rem;
-        background: transparent; color: inherit;
+      .field.sel select { padding-right: var(--sp-8); }
+      .field.sel::after {
+        content: ""; position: absolute; right: var(--sp-3); pointer-events: none;
+        width: var(--sp-2); height: var(--sp-2); border: 1px solid var(--text-subtle);
+        border-width: 0 1px 1px 0; transform: translateY(-2px) rotate(45deg);
       }
-      .actions button:disabled { opacity: .35; cursor: not-allowed; }
-      .actions .approve.on { background: var(--ok); color: var(--on-semantic); border-color: transparent; }
-      .actions .reject.on { background: var(--bad); color: var(--on-semantic); border-color: transparent; }
-      .done { font-size: var(--fs-label); opacity: .6; margin: var(--sp-2) 0 0; }
+      /* ⚠️ **달력이 둘이었습니다.** 왼쪽에 우리가 그린 아이콘, 오른쪽에
+         브라우저의 달력 버튼. 렌더해서 보고 알았습니다 — 한 칸에 같은
+         그림이 둘이면 사람은 둘이 다른 일을 한다고 읽습니다.
+
+         ⚠️ 그렇다고 브라우저 버튼을 **지우면 안 됩니다.** 지우면 달력을
+         열 방법이 없어져 `mm/dd/yyyy` 를 손으로 쳐야 합니다 (원래 주석이
+         그래서 남겨 뒀습니다). 지우는 대신 **칸 전체로 늘려 투명하게**
+         만듭니다 — 보이는 달력은 왼쪽 하나뿐이고, 칸 아무 데나 누르면
+         달력이 열립니다. 없앤 것도 아니고 둘도 아닙니다. */
+      .field input[type="date"]::-webkit-calendar-picker-indicator {
+        position: absolute;
+        inset: 0;
+        width: auto;
+        height: auto;
+        margin: 0;
+        padding: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+      .field select:focus-visible, .field input:focus-visible { border-color: var(--primary); }
+      /* 아직 안 고른 칸은 **글자를 죽여** 채워진 칸과 구분합니다. */
+      .field[data-empty="1"] select, .field[data-empty="1"] input { color: var(--text-subtle); }
+      .field select:disabled, .field input:disabled { background: transparent; border-color: transparent; }
+      .field[data-empty="1"] > .ico { color: var(--gap); }
+
+      /* 근거 — 카드에서 가장 조용한 줄. 그러나 지우지 않습니다. */
+      /* 근거는 줄 **끝**으로 보냅니다. 담당자·마감일 옆에 붙여 뒀더니
+         카드 오른쪽 절반이 통째로 비었습니다 (렌더해서 봤습니다). */
+      /* ⚠️ 근거가 **누를 수 있게 되면서** `<button>` 이 됐고, 공용 버튼
+         상자(테두리·44px·배경)를 통째로 물려받았습니다 — 카드에서 제일
+         조용해야 할 줄이 제일 눈에 띄는 상자가 됐습니다 (렌더해서 봤습니다).
+         누를 수 있다는 것은 상자가 아니라 **밑줄과 hover** 로 말합니다. */
+      .src { margin-left: auto; font-size: var(--fs-caption);
+             color: var(--text-subtle); white-space: nowrap; }
+      button.src { min-height: 0; padding: 0; border: 0; background: transparent;
+                   font-weight: 400; text-decoration: underline;
+                   text-decoration-color: var(--line-strong);
+                   text-underline-offset: 3px; }
+      @media (hover: hover) and (pointer: fine) {
+        button.src:hover { color: var(--primary); background: transparent;
+                           text-decoration-color: var(--primary); }
+      }
+      .src.none { color: var(--bad); }
+      .hint { font-size: var(--fs-caption); color: var(--text-muted); margin: var(--sp-3) 0 0; }
+
+      /* ── 한 줄 검사 (브리프 §13) ────────────────────────── */
+      /* ⚠️ 예전에는 막는 이유를 **한 줄에 하나씩 전부 빨갛게** 적었습니다.
+         후보 셋이면 빨간 줄이 여섯인데, 그중 넷은 "아직 안 골랐다" 였습니다.
+         진짜 문제(회의에 없던 내용)가 그 사이에서 안 보였습니다. */
+      .check { font-size: var(--fs-caption); margin: var(--sp-3) 0 0;
+               display: flex; gap: var(--sp-2); align-items: baseline; }
+      .check::before { content: ""; flex: 0 0 auto;
+                       width: var(--sp-1); height: var(--sp-1); border-radius: var(--r-round);
+                       background: currentColor; transform: translateY(-3px); }
+      .check[data-tone="missing"] { color: var(--gap); }
+      .check[data-tone="error"] { color: var(--bad); }
+
+      /* 서버가 확신 못 한 기록. 승인을 막지는 않으므로 **접습니다.** */
+      .why-not { margin: var(--sp-3) 0 0; }
+      .why-not > summary { font-size: var(--fs-caption); color: var(--text-subtle);
+                           cursor: pointer; list-style: none; }
+      .why-not > summary::-webkit-details-marker { display: none; }
+      /* ⚠️ `display: inline-block` 이 없으면 `transform` 이 안 먹습니다 —
+         인라인 상자는 변형되지 않습니다. 화살표가 영영 안 돕니다. */
+      .why-not > summary::after { content: " \203a"; display: inline-block;
+                                  transition: transform .12s ease; }
+      .why-not[open] > summary::after { transform: rotate(90deg); }
+      .why-not ul { list-style: none; padding: 0;
+                    margin: var(--sp-2) 0 0; font-size: var(--fs-caption); color: var(--text-muted); }
+      /* ⚠️ `content: "\2013 "` 의 꼬리 공백은 **접힙니다.** 안건 목록처럼
+         flex 로 띄웁니다 — `–회의에서…` 로 붙어 나왔습니다 (렌더해서 봤습니다). */
+      .why-not li { display: flex; gap: var(--sp-2); padding: var(--sp-1) 0; }
+      .why-not li::before { content: "\2013"; color: var(--text-subtle); }
+
+      /* ── 버튼 위계 (브리프 §14) ─────────────────────────── */
+      /* 예전에는 `승인 / 거절 / 보류` 가 **똑같이 생긴 상자 셋**이었습니다.
+         셋 다 같은 무게면 사람은 셋 다 읽어야 합니다. 이 화면의 주된
+         행동은 하나입니다 — 등록. */
+      .acts { display: flex; gap: var(--sp-2); align-items: center;
+              margin-top: var(--sp-5); flex-wrap: wrap; }
+      .acts button { font-size: var(--fs-label);
+                     padding: var(--sp-2) var(--sp-4); }
+      .acts .approve { background: var(--primary); border-color: var(--primary);
+                       color: var(--primary-fg); font-weight: 600; }
+      .acts .clear { background: transparent; border-color: var(--line-strong);
+                     color: var(--text-muted); font-weight: 500; }
+      /* 거절은 **글자만**입니다. 빨간 상자를 늘 띄워 두면 화면이 경고처럼
+         보이고, 실수로 누를 자리도 넓어집니다. */
+      /* ⚠️ 처음엔 `margin-left: auto` 로 오른쪽 끝에 보냈는데, 1024px
+         폭에서 **다른 버튼과 550px 떨어져** 같은 줄로 안 읽혔습니다.
+         위계는 거리가 아니라 무게로 만듭니다. */
+      .acts .reject { background: transparent; border-color: transparent;
+                      color: var(--text-subtle); font-weight: 500; }
+      @media (hover: hover) and (pointer: fine) {
+        .acts .reject:hover:not(:disabled) { color: var(--bad); background: transparent; }
+      }
+      .acts .reject.on { background: transparent; color: var(--bad); font-weight: 600; }
+      .acts .clear.on { border-color: var(--text-muted); color: var(--text); }
+      .done { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-4) 0 0; }
+
+      .cand input.memo {
+        font: inherit; font-size: var(--fs-input);
+        margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-3);
+        border: 1px solid var(--line); border-radius: var(--r-ctrl);
+        background: var(--bg); color: var(--text);
+      }
 
       /* 제출 막대. app.css 의 `.actionbar` 가 자리(탭바 바로 위 +
-         홈 인디케이터 여백)를 잡고, 여기서는 안에 든 것만 배치한다.
-         예전에는 `bottom: 0` 이라 탭바와 겹쳤다. */
+         홈 인디케이터 여백)를 잡고, 여기서는 안에 든 것만 배치한다. */
       .actionbar .inner { align-items: center; }
-      #result { flex: 1; font-size: var(--fs-label); }
+      #result { flex: 1; font-size: var(--fs-label); color: var(--text-muted); }
       #submit { flex: 0 0 auto; min-width: 7rem; }
       .ok { color: var(--ok); }
       .bad { color: var(--bad); }
-      .note-block { font-size: var(--fs-label); opacity: .7; margin-top: var(--sp-6); }
+    
+      /* ⚠️ **작게 만드는 것은 마우스에서만입니다.**
+         `tokens.css` 가 `--tap: 44px` 를 "손가락 끝 접촉면" 으로 정하고
+         `app.css` 가 모든 버튼에 겁니다. 화면별 `<style>` 이
+         `min-height: 0` 으로 되돌리면 그 규칙이 사라지는데, 예전에는 그걸
+         미디어 쿼리 **밖**에서 했습니다 — 실제 폰 에뮬레이션(`hasTouch`)으로
+         재니 버튼 40.1px · 제목 칸 35.5px 였습니다. 칸반의 `.moves button`
+         은 처음부터 이렇게 하고 있었고 여기만 빠져 있었습니다.
+
+         ⚠️ 폭만 390 으로 줄여서 재면 **안 잡힙니다.** Chromium 은 그때도
+         `hover: hover` 를 보고해서 이 블록이 그대로 먹습니다.
+
+         글자도 같은 이유입니다. iOS Safari 는 16px 미만 입력 칸에 포커스가
+         가면 화면을 확대하고 **안 돌아옵니다.** `--fs-input`(16px)이 그
+         함정을 피하려고 이미 있던 토큰인데, 이 화면이 안 쓰고 있었습니다. */
+      @media (hover: hover) and (pointer: fine) {
+        .seg button,
+        .acts button,
+        .cand input.title,
+        .cand input.memo,
+        .field select,
+        .field input[type="date"] { min-height: 0; }
+
+        .cand input.title { font-size: var(--fs-item); }
+        .cand input.memo,
+        .field select,
+        .field input[type="date"] { font-size: var(--fs-label); }
+      }
     </style>
   </head>
   <body class="has-actionbar">
-    <h1>업무 후보 검토</h1>
-    <p class="sub">
-      AI가 회의에서 뽑은 <strong>후보</strong>입니다. 승인해야 칸반에 등록됩니다.
-      확신도가 낮은 것부터 보입니다.
-    </p>
+    <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24).
 
-    <p class="sub" id="who"></p>
+         머리말·회의 맥락·필터 탭·후보 카드·제출 막대가 전부
+         `src/demo/review.tsx` 에 있습니다. 위 `<style>` 의 클래스 이름은
+         **그대로**입니다 — 브리프대로 맞춰 놓은 판형을 스택을 옮기면서
+         다시 흔들 이유가 없습니다.
 
-    <p id="meeting-summary" hidden></p>
-
-    <!-- ⚠️ 회의록은 요약 하나가 아닙니다 (결함 110·111). 다음 안건과
-         미해결 사안도 LLM 이 만들고 검증까지 통과한 산출물인데, 그리는
-         곳이 저장소에 0곳이라 DB 에만 남아 있었습니다. -->
-    <section id="minutes" hidden>
-      <div id="agenda-block" hidden>
-        <h2 class="minutes-head">다음 회의에서 다룰 안건</h2>
-        <ul id="agenda"></ul>
-      </div>
-      <div id="issues-block" hidden>
-        <h2 class="minutes-head">회의에서 답이 안 난 것</h2>
-        <ul id="issues"></ul>
-      </div>
-    </section>
-
-    <div id="attention" class="banner" hidden></div>
-    <div id="blocked" class="banner" hidden></div>
-    <p id="counts"></p>
-
-    <div id="list"></div>
-
-    <p class="note-block">
-      근거 발화가 없는 후보는 승인할 수 없습니다. 담당자·마감일을 채워도
-      마찬가지입니다 — 회의에 없던 내용을 사람이 "고쳐서" 통과시키는 경로를
-      만들면 안 되기 때문입니다.
-    </p>
-
-    <div class="actionbar">
-      <div class="inner">
-        <div id="result"></div>
-        <button id="submit" class="primary" disabled>제출</button>
-      </div>
-    </div>
+         ⚠️ 판단은 하나도 화면으로 오지 않았습니다. `lib/review/candidates.ts`
+         의 함수들을 그대로 부릅니다 (테스트 79개). -->
+    <div id="app"></div>
 
     <script type="module" src="./review.js"></script>
 

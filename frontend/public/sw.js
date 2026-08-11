@@ -33,29 +33,69 @@
 
 const CACHE = 'teamflow-shell-v1';
 
-/** 껍데기. 이게 있으면 오프라인에서도 화면이 뜬다. */
+/**
+ * 껍데기. 이게 있으면 오프라인에서도 화면이 뜬다.
+ *
+ * ## ⚠️ 이 목록은 **손으로 적던 것이었고, 두 번 어긋났습니다**
+ *
+ * 화면·자산을 새로 만들 때마다 빠뜨렸습니다. 빠뜨려도 **아무 데서도
+ * 티가 안 납니다** — 온라인에서는 서버가 주니까 멀쩡하고, 오프라인에서만
+ * 그 화면이 안 뜹니다. 그런데 오프라인은 개발 중에 거의 안 겪습니다.
+ *
+ * 빠져 있던 것 중에는 `/tokens.css` 도 있었습니다. **모든 색·간격·글꼴**
+ * 이라, 그것만 없어도 오프라인에서 전 화면이 스타일 없는 흰 문서가 됩니다.
+ *
+ * 처음에는 가드로 대조하는 것까지만 했는데, 그건 **어긋난 뒤에** 잡는
+ * 것입니다. 이제 `npm run build` 가 `public/` 을 세어서 아래를 직접
+ * 씁니다 — 애초에 갈라질 자리가 없습니다.
+ */
 const SHELL = [
+  /* <<< 자동 생성 — `npm run build` 가 씁니다. 손으로 고치지 마십시오. */
   '/app.css',
-  '/manifest.webmanifest',
-  '/icon.svg',
-  '/icon-192.png',
-  '/offline.html',
-  '/home.html',
-  '/home.js',
-  '/login.html',
-  '/login.js',
-  '/kanban.html',
-  '/kanban.js',
+  '/call.html',
+  '/call.js',
+  '/chunk-2NKOZAQR.js',
+  '/chunk-3PCAX5HA.js',
+  '/chunk-BOZF6HAB.js',
+  '/chunk-BVGIMUJV.js',
+  '/chunk-FLPN24SJ.js',
+  '/chunk-H2QJX6SP.js',
+  '/chunk-JWSLWDNR.js',
+  '/chunk-NRQBN5ZE.js',
+  '/chunk-PV5IDU6G.js',
+  '/chunk-QBLJAG2H.js',
+  '/chunk-SFIKOREG.js',
+  '/chunk-SW3CQMD7.js',
+  '/chunk-XX4MDJAS.js',
+  '/chunk-ZSO5VIBX.js',
   '/contributions.html',
   '/contributions.js',
-  '/project.html',
-  '/project.js',
+  '/home.html',
+  '/home.js',
+  '/icon-180.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-maskable-512.png',
+  '/icon.svg',
+  '/index.html',
+  '/kanban.html',
+  '/kanban.js',
   '/lobby.html',
   '/lobby.js',
+  '/login.html',
+  '/login.js',
+  '/main.js',
+  '/manifest.webmanifest',
+  '/offline.html',
+  '/project.html',
+  '/project.js',
+  '/reports.html',
+  '/reports.js',
   '/review.html',
   '/review.js',
-  '/index.html',
-  '/main.js',
+  '/tokens.css',
+  '/tw.css',
+  /* >>> */
 ];
 
 self.addEventListener('install', (event) => {

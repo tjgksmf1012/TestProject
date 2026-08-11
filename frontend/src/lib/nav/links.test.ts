@@ -35,9 +35,16 @@ describe('navLinks', () => {
     deepStrictEqual(screens.sort(), ['home', 'lobby', 'review']);
   });
 
-  it('프로젝트를 알면 칸반·기여도·설정으로 갈 수 있다', () => {
+  it('프로젝트를 알면 칸반·기여도·보고서·설정으로 갈 수 있다', () => {
     const screens = navLinks({ current: 'home', projectId: 3 }).map((l) => l.screen);
-    deepStrictEqual(screens.sort(), ['contributions', 'kanban', 'project']);
+    deepStrictEqual(screens.sort(), ['contributions', 'kanban', 'project', 'reports']);
+  });
+
+  it('⚠️ 보고서가 생겨도 **탭은 넷 그대로**다', () => {
+    // 사람은 자리를 기억해서 누릅니다. 다섯째가 끼면 그때까지 넷째였던
+    // 것을 누르려던 손이 엉뚱한 화면으로 갑니다.
+    const tabs = navTabs({ current: 'home', projectId: 3 }).map((t) => t.screen);
+    deepStrictEqual(tabs, ['home', 'kanban', 'contributions', 'project']);
   });
 
   it('⭐ 설정 화면으로 가는 링크가 있다 — 회의를 여는 곳이 거기뿐이다', () => {

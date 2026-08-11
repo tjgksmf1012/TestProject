@@ -1,0 +1,225 @@
+/**
+ * 보고서를 화면과 **글자**로 옮기는 판단.
+ *
+ * ## ⚠️ 왜 이게 lib 에 있는가
+ *
+ * 보고서에는 복사 버튼이 있습니다. 그리고 이 저장소는 복사에 대해 이미
+ * 한 번 배웠습니다 — **복사는 화면 글자가 아니라 데이터에서 와야 합니다**
+ * (설정 화면의 초대 코드). 화면 글자에서 긁으면 줄바꿈·말줄임·아이콘이
+ * 섞여 들어가고, 무엇보다 **화면에 안 보이는 것은 안 따라갑니다.**
+ *
+ * 여기서 안 따라가면 안 되는 것이 하나 있습니다: **팀 경고**입니다.
+ * "이 수치로 서로를 비교하지 마세요" 가 빠진 채로 숫자만 복사돼 나가면,
+ * 이 제품이 지키려던 것이 문서 밖으로 사라집니다. 그래서 글자로 옮기는
+ * 일을 화면에 두지 않고 여기 두고 테스트를 붙였습니다.
+ *
+ * ## ⚠️ 순서를 여기서 다시 정하지 않습니다
+ *
+ * 사람 순서는 **서버가 이미 이름 순으로** 세워서 줍니다
+ * (`backend/teamflow/reports/blocks.py`). 화면이 다시 정렬하면 판단이 두
+ * 곳이 되고, 언젠가 한쪽이 점수 순이 됩니다. 여기서는 받은 순서를 그대로
+ * 씁니다 — 그리고 `guards` 가 "화면이 정렬하지 않는가" 를 봅니다.
+ */
+
+/** 서버가 준 블록. 구조는 `backend/teamflow/reports/__init__.py` 머리말. */
+export type Block =
+  | { kind: 'heading'; text: string }
+  | { kind: 'paragraph'; text: string }
+  | { kind: 'facts'; items: Fact[] }
+  | { kind: 'list'; items: string[]; empty_note: string }
+  | { kind: 'people'; people: Person[] }
+  | { kind: 'gap'; text: string };
+
+export interface Fact {
+  label: string;
+  value: string;
+  gap: boolean;
+  note?: string;
+}
+
+export interface Person {
+  name: string;
+  role: string;
+  measured: boolean;
+  range_low: number | null;
+  range_high: number | null;
+  confidence: number | null;
+  confidence_label: string | null;
+  reasons: string[];
+  evidence_count: number;
+  gaps: string[];
+  final_value: number | null;
+  final_reason: string | null;
+}
+
+export interface ReportContent {
+  schema: number;
+  report_type: string;
+  title: string;
+  notices: string[];
+  blocks: Block[];
+}
+
+export interface ReportSummary {
+  id: number;
+  report_type: string;
+  title: string;
+  meeting_id: number | null;
+  period_start: string | null;
+  period_end: string | null;
+  generated_at: string;
+}
+
+/** 이 화면이 아는 내용 판. 서버가 더 큰 판을 주면 그렇다고 말해야 합니다. */
+export const KNOWN_SCHEMA = 1;
+
+const TYPE_LABEL: Record<string, string> = {
+  meeting_minutes: '회의록',
+  weekly: '주간 보고서',
+  final: '최종 보고서',
+};
+
+/**
+ * 종류 이름.
+ *
+ * ⚠️ 모르는 종류를 **빈 글자로 만들지 않습니다.** 빈 글자는 목록에서
+ * "이름 없는 보고서" 로 보이고, 사람은 그게 고장인지 원래 그런지 모릅니다.
+ */
+export function describeReportType(type: string): string {
+  return TYPE_LABEL[type] ?? type;
+}
+
+/**
+ * 화면이 이 내용을 그릴 수 있는가.
+ *
+ * ⚠️ 모르는 판을 조용히 그리면 **빈 화면**이 나오고, 그건 "보고서가
+ * 비었다" 로 읽힙니다. 못 그린다는 것과 빈 것은 다릅니다.
+ */
+export function tooNewToRender(content: { schema?: number }): boolean {
+  return typeof content.schema === 'number' && content.schema > KNOWN_SCHEMA;
+}
+
+/**
+ * 구간을 글자로.
+ *
+ * ⚠️ **못 잰 사람에게 0 을 쓰지 않습니다.** 폰이 잠겨 녹음이 끊긴 사람을
+ * "말을 안 한 사람" 으로 적으면 그건 측정이 아니라 오답입니다.
+ */
+export function describeRange(person: Person): string {
+  if (!person.measured || person.range_low === null || person.range_high === null) {
+    return '측정하지 못했습니다';
+  }
+  return `${person.range_low}% ~ ${person.range_high}%`;
+}
+
+/** 신뢰도 한 줄. 못 쟀으면 신뢰도라는 말 자체가 뜻이 없습니다. */
+export function describeConfidence(person: Person): string | null {
+  if (!person.measured || person.confidence === null) return null;
+  const percent = Math.round(person.confidence * 100);
+  const label = person.confidence_label ?? '';
+  return label === '' ? `신뢰도 ${percent}%` : `신뢰도 ${percent}% (${label})`;
+}
+
+/**
+ * 팀이 확정한 값 한 줄. 계산값과 **다르면 이유가 반드시 따라갑니다.**
+ *
+ * 서버가 이미 막고 있지만(`blocks.people`), 화면에서 이유를 떨어뜨리면
+ * 결과는 같습니다 — 근거 없는 판정이 문서에 남습니다.
+ */
+export function describeFinal(person: Person): string | null {
+  if (person.final_value === null) return null;
+  const reason = (person.final_reason ?? '').trim();
+  const head = `팀 확정 ${person.final_value}%`;
+  return reason === '' ? head : `${head} — ${reason}`;
+}
+
+/**
+ * 이 사람에 대해 **못 잰 것**들.
+ *
+ * 빈 배열이면 화면은 아무것도 안 그립니다 — "못 잰 것 없음" 이라고 굳이
+ * 적으면 그 줄이 사람마다 붙어 화면이 소음이 됩니다.
+ */
+export function gapsOf(person: Person): string[] {
+  return person.gaps.filter((g) => g.trim() !== '');
+}
+
+/**
+ * 목록 한 줄에서 **이 보고서를 다른 것과 가르는 부분**.
+ *
+ * ⚠️ 서버가 주는 `title` 은 종류를 이미 이고 있습니다 —
+ * `회의록 — DB 스키마 확정 논의`. 목록에는 종류 칩이 따로 있으므로 그대로
+ * 그리면 **"회의록 회의록 — DB 스키마 확정 논의"** 가 됩니다 (렌더해서
+ * 봤습니다). 주간은 더 나빠서 날짜까지 세 번 나옵니다 — 칩·제목·기간.
+ *
+ * 그래서 종류 머리말을 떼고, 남은 것이 옆 칸(`describeWhen`)과 같으면 아예
+ * 비웁니다. **지우는 게 아니라 한 번만 보이게** 하는 것입니다.
+ */
+export function subjectOf(row: ReportSummary): string {
+  const prefix = `${describeReportType(row.report_type)} — `;
+  const rest = row.title.startsWith(prefix) ? row.title.slice(prefix.length) : row.title;
+  return rest.trim() === describeWhen(row).trim() ? '' : rest.trim();
+}
+
+/** 목록 한 줄에 붙는 때. `2026-08-03 ~ 2026-08-09` 또는 생성 시각. */
+export function describeWhen(row: ReportSummary): string {
+  if (row.period_start !== null && row.period_end !== null) {
+    return `${row.period_start.slice(0, 10)} ~ ${row.period_end.slice(0, 10)}`;
+  }
+  return `${row.generated_at.slice(0, 10)} 만듦`;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 복사 — **데이터에서** 글자를 만듭니다
+// ══════════════════════════════════════════════════════════════
+
+function personLines(person: Person): string[] {
+  const lines = [`- ${person.name} (${person.role})`, `  ${describeRange(person)}`];
+  const confidence = describeConfidence(person);
+  if (confidence !== null) lines.push(`  ${confidence}`);
+  if (person.measured) lines.push(`  근거 ${person.evidence_count}건`);
+  for (const reason of person.reasons) lines.push(`  · ${reason}`);
+  for (const hole of gapsOf(person)) lines.push(`  · 못 잼: ${hole}`);
+  const final = describeFinal(person);
+  if (final !== null) lines.push(`  ${final}`);
+  return lines;
+}
+
+function blockLines(block: Block): string[] {
+  switch (block.kind) {
+    case 'heading':
+      return ['', `## ${block.text}`];
+    case 'paragraph':
+      return [block.text];
+    case 'facts':
+      return block.items.map((item) => {
+        const value = item.gap ? '못 쟀습니다' : item.value;
+        const note = (item.note ?? '').trim();
+        return note === ''
+          ? `${item.label}: ${value}`
+          : `${item.label}: ${value} (${note})`;
+      });
+    case 'list':
+      return block.items.length === 0
+        ? [block.empty_note]
+        : block.items.map((item) => `- ${item}`);
+    case 'people':
+      // ⚠️ 받은 순서 그대로. 여기서 정렬하면 순서를 정하는 곳이 둘이 됩니다.
+      return block.people.flatMap(personLines);
+    case 'gap':
+      return [block.text];
+  }
+}
+
+/**
+ * 보고서를 통째로 글자로. **복사 버튼이 쓰는 것.**
+ *
+ * ⚠️ `notices` 를 **맨 위에** 넣습니다. 이게 이 함수의 존재 이유에 가깝습니다 —
+ * 숫자만 복사돼 나가면 "이 수치로 서로를 비교하지 마세요" 가 문서 밖으로
+ * 사라지고, 받는 사람은 그냥 사람별 퍼센트 목록을 봅니다.
+ */
+export function toPlainText(content: ReportContent): string {
+  const lines: string[] = [`# ${content.title}`];
+  for (const notice of content.notices) lines.push(`> ${notice}`);
+  for (const block of content.blocks) lines.push(...blockLines(block));
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}

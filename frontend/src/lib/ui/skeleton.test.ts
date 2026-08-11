@@ -9,35 +9,10 @@
 import { strictEqual, ok } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  board,
-  clearSkeleton,
-  projectCards,
-  rowItems,
-  rows,
-  scoreCards,
-  showSkeleton,
-} from './skeleton.ts';
+import { board, projectCards, rowItems, rows, scoreCards } from './skeleton.ts';
 
 /** 태그를 걷어 내고 남는 글자. 스켈레톤은 여기가 비어 있어야 합니다. */
 const textOf = (html: string): string => html.replace(/<[^>]*>/g, '').trim();
-
-/** `document` 없이 `showSkeleton` 을 시험하기 위한 최소 그릇. */
-const fakeElement = (): HTMLElement => {
-  const attrs = new Map<string, string>();
-  return {
-    innerHTML: '',
-    setAttribute(name: string, value: string) {
-      attrs.set(name, value);
-    },
-    removeAttribute(name: string) {
-      attrs.delete(name);
-    },
-    getAttribute(name: string) {
-      return attrs.get(name) ?? null;
-    },
-  } as unknown as HTMLElement;
-};
 
 const WRAPPED: [string, string][] = [
   ['projectCards', projectCards()],
@@ -68,33 +43,6 @@ describe('낭독기에게 거짓말하지 않는다', () => {
     strictEqual([...items.matchAll(/aria-hidden="true"/g)].length, 3);
     ok(!items.includes('<div'), '`<ul>` 안에 `<div>` 를 넣으면 항목 수가 틀어집니다');
   });
-
-  it('⭐ 그릇에 aria-busy 를 걸고, 지울 때 **같이 뗀다**', () => {
-    // 켜기만 하고 안 끄면 낭독기는 내용이 도착한 뒤에도 계속 "바쁨"
-    // 이라고 말합니다.
-    const el = fakeElement();
-    showSkeleton(el, rows());
-    strictEqual(el.getAttribute('aria-busy'), 'true');
-    ok(el.innerHTML.length > 0);
-
-    clearSkeleton(el);
-    strictEqual(el.getAttribute('aria-busy'), null);
-    strictEqual(el.innerHTML, '');
-  });
-
-  it('⭐ 이미 진짜 내용이 들어와 있으면 지우지 않는다', () => {
-    // 화면이 순서를 어겨 스켈레톤이 떠 있는 동안 오류 문구를 써 넣는
-    // 일이 있습니다. 그걸 지우면 실패한 화면이 **아무 말도 없이 빈
-    // 채로** 남습니다 — 이 저장소가 반복해 당한 모양 그대로입니다.
-    const el = fakeElement();
-    showSkeleton(el, rows());
-    el.innerHTML = '<p>불러오지 못했습니다 (HTTP 500)</p>';
-
-    clearSkeleton(el);
-
-    strictEqual(el.innerHTML, '<p>불러오지 못했습니다 (HTTP 500)</p>');
-    strictEqual(el.getAttribute('aria-busy'), null, 'aria-busy 는 그래도 떼야 합니다');
-  });
 });
 
 describe('모양이 실제 화면에서 왔다', () => {
@@ -102,14 +50,19 @@ describe('모양이 실제 화면에서 왔다', () => {
     // 스켈레톤용 클래스를 따로 만들면, 공용 CSS 가 바뀔 때 스켈레톤만
     // 옛 모양으로 남습니다. 그러면 내용이 도착하는 순간 화면이 튑니다.
     ok(projectCards().includes('class="card"'), '홈은 카드 모양이어야 합니다');
-    ok(scoreCards().includes('class="card"'), '기여도는 카드 모양이어야 합니다');
+    // ⚠️ 기여도는 **카드가 아니라 판독 줄**입니다 (docs/19 §16). 여기가
+    // `card` 로 남아 있으면 카드가 잠깐 떴다가 줄로 튑니다 — 이 검사가
+    // 막으려던 그 모양입니다.
+    ok(scoreCards().includes('class="read"'), '기여도는 판독 줄 모양이어야 합니다');
+    ok(!scoreCards().includes('class="card"'), '기여도 스켈레톤에 옛 카드가 남아 있습니다');
     ok(board().includes('class="col"'), '칸반은 열 모양이어야 합니다');
   });
 
   it('⭐ 격자 클래스를 **다시 선언하지 않는다**', () => {
-    // `#board` 는 이미 `class="board"` 이고 `#members` 는 이미
-    // `class="score-grid"` 입니다. 스켈레톤이 그 클래스를 또 달면
-    // 격자 안에 격자가 생겨 카드 셋이 한 칸에 우겨넣어집니다.
+    // `#board` 는 이미 `class="board"` 입니다. 스켈레톤이 그 클래스를 또
+    // 달면 격자 안에 격자가 생겨 카드 셋이 한 칸에 우겨넣어집니다.
+    // (`#members` 는 이제 격자가 아닙니다 — 판독 줄이 세로로 쌓입니다.
+    //  그래도 `score-grid` 를 되살리지 못하게 계속 봅니다.)
     // 겉껍질은 `display: contents` 로 레이아웃에서 사라집니다.
     for (const [name, html] of WRAPPED) {
       ok(!html.includes('score-grid'), `${name} 이 격자를 다시 선언합니다`);
@@ -133,7 +86,7 @@ describe('모양이 실제 화면에서 왔다', () => {
 
   it('개수를 넘기면 그만큼 나온다', () => {
     strictEqual([...projectCards(5).matchAll(/class="card"/g)].length, 5);
-    strictEqual([...scoreCards(2).matchAll(/class="card"/g)].length, 2);
+    strictEqual([...scoreCards(2).matchAll(/class="read"/g)].length, 2);
     strictEqual([...rows(7).matchAll(/class="sk-line"/g)].length, 7);
     strictEqual([...rowItems(4).matchAll(/<li /g)].length, 4);
   });
@@ -142,6 +95,7 @@ describe('모양이 실제 화면에서 왔다', () => {
     // 빈 스켈레톤은 "다 불러왔는데 아무것도 없다" 로 읽힙니다.
     strictEqual([...projectCards(0).matchAll(/class="card"/g)].length, 1);
     strictEqual([...board(-1).matchAll(/class="col"/g)].length, 1);
+    strictEqual([...scoreCards(0).matchAll(/class="read"/g)].length, 1);
     strictEqual([...rows(0).matchAll(/class="sk-line"/g)].length, 1);
     strictEqual([...rowItems(0).matchAll(/<li /g)].length, 1);
   });

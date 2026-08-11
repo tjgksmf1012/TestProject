@@ -56,10 +56,23 @@ export function toPayload(shares: Record<string, number>): Record<string, number
   return out;
 }
 
-/** 지금 역할을 한 줄로. 겸직이면 둘 다 보여야 한다. */
-export function describeRoles(shares: Record<string, number> | undefined): string {
+/**
+ * 역할 목록만. **정해진 게 없으면 `null`** 입니다.
+ *
+ * ## 왜 `describeRoles` 와 갈랐는가
+ *
+ * `describeRoles` 는 문장을 돌려줍니다 — 역할이 없으면 "역할이 정해지지
+ * 않았습니다." 입니다. 설정 화면처럼 넓은 자리에는 맞지만 **맥락 패널의
+ * 좁은 줄에는 문장이 안 들어갑니다.**
+ *
+ * 그렇다고 패널이 자기 몫을 따로 계산하면 역할 이름표가 **두 벌**이
+ * 됩니다 — `ROLE_OPTIONS` 에 항목이 하나 늘었을 때 한쪽만 고쳐집니다.
+ * 그래서 목록을 만드는 일은 여기 하나로 두고, 없을 때 무슨 말을 할지는
+ * 부르는 쪽이 정합니다.
+ */
+export function roleSummary(shares: Record<string, number> | undefined): string | null {
   const entries = Object.entries(shares ?? {}).filter(([, v]) => v > 0);
-  if (entries.length === 0) return '역할이 정해지지 않았습니다.';
+  if (entries.length === 0) return null;
   const label = (key: string): string =>
     ROLE_OPTIONS.find((o) => o.key === key)?.label ?? key;
   if (entries.length === 1) return `${label(entries[0]?.[0] ?? '')} 100%`;
@@ -67,4 +80,9 @@ export function describeRoles(shares: Record<string, number> | undefined): strin
     .sort((a, b) => b[1] - a[1])
     .map(([key, value]) => `${label(key)} ${Math.round(value * 100)}%`)
     .join(' · ');
+}
+
+/** 지금 역할을 한 줄로. 겸직이면 둘 다 보여야 한다. */
+export function describeRoles(shares: Record<string, number> | undefined): string {
+  return roleSummary(shares) ?? '역할이 정해지지 않았습니다.';
 }

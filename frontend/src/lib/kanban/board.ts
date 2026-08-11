@@ -171,6 +171,35 @@ export function nextStatuses(task: Task, statuses: readonly string[]): string[] 
 }
 
 /**
+ * 이 이동이 **앞으로 가는 것인가 되돌리는 것인가** (디자인 브리프 §14).
+ *
+ * 화면에서 버튼 위계를 만드는 데 씁니다. 예전에는 옮기기 버튼 둘이
+ * 카드 폭을 반씩 채우는 **같은 무게의 상자**였습니다. 카드 셋이면 큰
+ * 상자가 여섯이라 화면에서 제일 먼저 읽히는 것이 버튼이었습니다.
+ *
+ * 위계의 근거는 **방향**입니다 — 앞으로 보내는 것이 이 화면의 주된
+ * 행동이고, 되돌리는 것은 실수를 무를 때만 씁니다.
+ *
+ * ⚠️ 순서는 `statuses` **배열이 정합니다.** 이름으로 판단하지 않습니다 —
+ * 상태 이름은 서버가 주고 프로젝트마다 다를 수 있는데, 여기서 `done` 을
+ * 글자로 찾으면 그 순간 두 벌이 됩니다.
+ *
+ * 모르는 상태(둘 중 하나가 목록에 없음)는 `'back'` 입니다. 앞으로 가는
+ * 것처럼 강조해 놓고 실제로는 어디로 가는지 모르는 것보다, 조용한 쪽이
+ * 안전합니다.
+ */
+export function moveDirection(
+  from: string,
+  to: string,
+  statuses: readonly string[],
+): 'forward' | 'back' {
+  const a = statuses.indexOf(from);
+  const b = statuses.indexOf(to);
+  if (a === -1 || b === -1) return 'back';
+  return b > a ? 'forward' : 'back';
+}
+
+/**
  * 이 카드에 붙일 경고들.
  *
  * `origin` 이 없는 것은 경고가 아닙니다 — 사람이 손으로 만든 업무는 정상

@@ -121,16 +121,48 @@ export function hasFinalConsonant(word: string): boolean | null {
   return null;
 }
 
+/** 한국어로 읽었을 때 **ㄹ 받침**으로 끝나는 숫자·글자. */
+const RIEUL_DIGITS = new Set(['1', '7', '8']); // 일 · 칠 · 팔
+const RIEUL_LETTERS = new Set(['l', 'r']); // 엘 · 알
+
+/**
+ * 끝소리가 **ㄹ** 인가. `으로/로` 하나 때문에 필요합니다.
+ *
+ * ⚠️ 이것을 안 보면 화면에 **"할 일으로"** 가 뜹니다. 실제로 떴습니다 —
+ * 칸반의 옮기기 버튼이 그랬고, 렌더해서 눈으로 볼 때까지 아무도 몰랐습니다.
+ * 받침 유무만 보는 규칙은 여기서 정확히 절반만 맞습니다.
+ */
+export function endsInRieul(word: string): boolean | null {
+  const trimmed = word.trim();
+  if (trimmed === '') return null;
+  const last = trimmed[trimmed.length - 1] as string;
+  const code = last.codePointAt(0) ?? 0;
+
+  // 한글 음절이면 종성 번호 8 이 ㄹ 입니다.
+  if (code >= 0xac00 && code <= 0xd7a3) return (code - 0xac00) % 28 === 8;
+  if (last in DIGIT_HAS_FINAL) return RIEUL_DIGITS.has(last);
+
+  const lower = last.toLowerCase();
+  if (lower in LETTER_HAS_FINAL) return RIEUL_LETTERS.has(lower);
+  return null;
+}
+
 /**
  * 값 뒤에 붙일 조사.
  *
  * ⚠️ **판단할 수 없으면 받침 없는 쪽을 씁니다.** `은(는)` 같은 짝 표기를
  * 돌려주지 않습니다 — 그게 화면에 나오는 것이 이 함수를 만든 이유입니다.
  * 대신 그런 값이 오는 자리는 **문장을 바꾸는 쪽**을 택하세요.
+ *
+ * ⚠️ **`으로/로` 만 규칙이 다릅니다.** 받침이 있어도 그 받침이 **ㄹ** 이면
+ * `로` 입니다 — `서울로`·`할 일로`·`PR로`(피알). 나머지 네 쌍은 받침
+ * 유무만 봅니다 (`서울은`·`서울을`).
  */
 export function josa(word: string, pair: JosaPair): string {
   const [withFinal, withoutFinal] = PAIRS[pair];
-  return hasFinalConsonant(word) === true ? (withFinal as string) : (withoutFinal as string);
+  if (hasFinalConsonant(word) !== true) return withoutFinal as string;
+  if (pair === '으로로' && endsInRieul(word) === true) return withoutFinal as string;
+  return withFinal as string;
 }
 
 /** 값과 조사를 **붙여서** 한 덩어리로. 띄우면 조사가 낱말처럼 보입니다. */

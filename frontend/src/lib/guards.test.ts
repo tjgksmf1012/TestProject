@@ -11,21 +11,37 @@
  * 통과하기 때문에 사람이 알아챌 방법이 없습니다.
  */
 
-import { strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
-import { bundle, entryPoints } from '../../build.mts';
+import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
+const LIB = join(ROOT, 'src', 'lib');
 const PUBLIC = join(ROOT, 'public');
+
+/**
+ * 화면 파일 전부.
+ *
+ * ⚠️ **`.tsx` 를 빠뜨리면 가드가 통째로 눈을 감습니다.**
+ *
+ * React 로 옮기기 시작하면서 첫 화면 조각(`evidence.tsx`)을 만들었더니,
+ * 그 파일이 분명히 부르는 `lib/` export 를 가드가 **"테스트만 씀"** 이라고
+ * 했습니다. 규칙이 깨진 게 아니라 **찾는 방법이 낡은** 것이었습니다 —
+ * 이 저장소가 반복해서 당한 그것이고, 이번에는 화면을 하나씩 옮기는
+ * 동안 옮긴 화면마다 조용히 감시가 사라졌을 자리입니다.
+ *
+ * `.test.ts` 는 뺍니다. 테스트가 부르는 것은 "화면이 쓴다" 가 아닙니다.
+ */
+const SCREEN_EXT = /\.tsx?$/;
 
 const demoFiles = (): { name: string; source: string }[] =>
   readdirSync(DEMO)
-    .filter((name) => name.endsWith('.ts'))
+    .filter((name) => SCREEN_EXT.test(name) && !name.endsWith('.test.ts'))
     .map((name) => ({ name, source: readFileSync(join(DEMO, name), 'utf8') }));
 
 /**
@@ -40,12 +56,136 @@ const codeOf = (source: string): string =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 /**
+ * `이름(...)` 호출의 **인자 전체**를 괄호 짝을 맞춰 떼어 온다.
+ *
+ * 창을 "뒤 400자" 로 잡으면 인자가 길 때 잘리고, 짧을 때는 남의 코드를
+ * 먹습니다. 어느 쪽이든 규칙이 엉뚱한 것을 재게 됩니다.
+ */
+function callArgs(code: string, fnName: string): string[] {
+  const out: string[] = [];
+  for (const m of code.matchAll(new RegExp(`\\b${fnName}\\(`, 'g'))) {
+    const open = (m.index as number) + m[0].length - 1;
+    let depth = 0;
+    for (let i = open; i < code.length; i++) {
+      if (code[i] === '(') depth++;
+      else if (code[i] === ')') {
+        depth--;
+        if (depth === 0) {
+          out.push(code.slice(open + 1, i));
+          break;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * **선언형으로** 잠그는가 — React 화면이 잠그는 방법.
+ *
+ * 명령형 화면은 버튼을 붙잡고 `disabled = true` 를 씁니다. React 화면은
+ * 그럴 수 없습니다 — DOM 은 React 가 갖고 있고, 화면이 직접 만지면
+ * 다음 렌더에 그대로 지워집니다. 그래서 모양이 다릅니다:
+ *
+ *     setSending(true) … setSending(false) … disabled={… || sending}
+ *
+ * ⚠️ **셋을 다 봅니다.** 켜기만 보면 안 푸는 화면이 통과하고, 켜고 끄기만
+ * 보면 버튼에 **안 이어진** 깃발이 통과합니다 — 이 저장소가 반복해 당한
+ * "만들어 놓고 아무도 안 부름" 이 규칙 안에서 재현되는 자리입니다.
+ */
+/** `const 이름 = … => { … }` 의 **몸통**. 중괄호 짝을 맞춰 떼어 옵니다. */
+function bodyOf(code: string, name: string): string {
+  const at = new RegExp(`\\bconst ${name}\\s*=`).exec(code);
+  if (at === null) return '';
+  const open = code.indexOf('{', at.index);
+  if (open === -1) return '';
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === '{') depth++;
+    else if (code[i] === '}') {
+      depth--;
+      if (depth === 0) return code.slice(open + 1, i);
+    }
+  }
+  return '';
+}
+
+/** 이 핸들러가 (한 단계 건너서라도) 서버를 바꾸러 가는가. */
+function mutates(code: string, name: string, seen = new Set<string>()): boolean {
+  if (seen.has(name)) return false;
+  seen.add(name);
+  const body = bodyOf(code, name);
+  if (body === '') return false;
+  if (/trySend\(/.test(body)) return true;
+  // `create` 가 `send(...)` 를 부르는 모양. 한 단계만 따라갑니다.
+  for (const [, called] of body.matchAll(/\b(?:void\s+)?([a-z]\w*)\(/g)) {
+    if (mutates(code, called as string, seen)) return true;
+  }
+  return false;
+}
+
+/** `<button …>` 여는 태그들. 속성 블록만 돌려줍니다. */
+function buttonTags(code: string): string[] {
+  return [...code.matchAll(/<button\b([^>]*)>/g)].map((m) => m[1] as string);
+}
+
+function locksDeclaratively(code: string): boolean {
+  for (const m of code.matchAll(/\bset([A-Z]\w*)\(true\)/g)) {
+    const suffix = m[1] as string;
+    const flag = suffix[0]?.toLowerCase() + suffix.slice(1);
+    if (!new RegExp(`\\bset${suffix}\\(false\\)`).test(code)) continue;
+    if (!new RegExp(`disabled=\\{[^}]*\\b${flag}\\b`).test(code)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 화면 모듈의 소스. `review` 처럼 `.tsx` 로 옮긴 화면도 찾습니다.
+ *
+ * ⚠️ `${stem}.ts` 로 하드코딩하면 옮긴 화면에서 **파일이 없다고 터지거나**
+ * (탭바 가드) **조용히 건너뜁니다** (진입점 목록). 둘 다 실제로 났습니다.
+ */
+function demoSource(stem: string): string | null {
+  for (const ext of ['.tsx', '.ts']) {
+    try {
+      return readFileSync(join(DEMO, `${stem}${ext}`), 'utf8');
+    } catch {
+      /* 다음 확장자 */
+    }
+  }
+  return null;
+}
+
+/**
+ * 이 화면이 그 조각을 **어디에든** 갖고 있는가 — HTML 이든 화면 모듈이든.
+ *
+ * ⚠️ 화면을 React 로 옮기면 마크업이 `.html` 에서 `.tsx` 안으로 옮겨
+ * 갑니다. 요구("누를 버튼이 있는가")는 그대로인데 **찾는 자리**가 낡아
+ * 검사만 터집니다. 이 저장소가 이번 이전에서 여섯 번 겪은 모양입니다.
+ */
+function screenHas(stem: string, needle: string): boolean {
+  const html = (() => {
+    try {
+      return readFileSync(join(PUBLIC, `${stem}.html`), 'utf8');
+    } catch {
+      return '';
+    }
+  })();
+  return html.includes(needle) || (demoSource(stem) ?? '').includes(needle);
+}
+
+/**
  * 이 모듈이 실제로 붙는 HTML. 진입점이 아니면 null.
  *
  * `main.ts` 만 이름이 다릅니다 — 녹음 화면이 `index.html` 이라서.
+ *
+ * ⚠️ 확장자를 `/\.ts$/` 로 벗기면 `review.tsx` 는 하나도 안 벗겨져
+ * `review.tsx.html` 을 찾고, 없으니 **진입점이 아니라고 답합니다.**
+ * 그러면 `bootApp` 가드가 옮긴 화면을 조용히 놓칩니다.
  */
 function htmlFor(moduleName: string): string | null {
-  const stem = moduleName.replace(/\.ts$/, '');
+  const stem = moduleName.replace(SCREEN_EXT, '');
   for (const candidate of [stem === 'main' ? 'index' : stem]) {
     try {
       return readFileSync(join(PUBLIC, `${candidate}.html`), 'utf8');
@@ -168,8 +308,12 @@ describe('모바일 규칙', () => {
         offenders.push(`${name} → 모듈 스크립트가 없다`);
         continue;
       }
-      const source = readFileSync(join(DEMO, `${script}.ts`), 'utf8');
-      if (!/renderNav\(/.test(source)) offenders.push(`${name} → ${script}.ts`);
+      const source = demoSource(script);
+      if (source === null) {
+        offenders.push(`${name} → ${script} 소스를 못 찾음`);
+        continue;
+      }
+      if (!/renderNav\(/.test(source)) offenders.push(`${name} → ${script}`);
     }
     strictEqual(offenders.join(', '), '');
   });
@@ -298,23 +442,105 @@ describe('모바일 규칙', () => {
     strictEqual(offenders.join(', '), '');
   });
 
+  /**
+   * 글자 크기 토큰 → px. `tokens.css` 에서 읽습니다.
+   *
+   * ⚠️ 이게 없을 때 아래 가드는 **`font-size: var(--fs-label)` 을 그냥
+   * 건너뛰었습니다.** 정규식이 숫자만 찾는데 `var(...)` 는 숫자가 아니라
+   * `continue` 로 빠졌고, 그래서 검토 화면의 13px 담당자·마감일 칸이
+   * "0건" 으로 통과했습니다. **토큰을 쓰면 가드가 눈을 감는** 모양입니다.
+   */
+  const fontTokens = (): Map<string, number> => {
+    const css = readFileSync(join(PUBLIC, 'tokens.css'), 'utf8');
+    const map = new Map<string, number>();
+    for (const m of css.matchAll(/(--fs-[a-z0-9-]+)\s*:\s*([\d.]+)(rem|px)\s*;/g)) {
+      map.set(m[1] as string, m[3] === 'px' ? Number(m[2]) : Number(m[2]) * 16);
+    }
+    return map;
+  };
+
+  /** 선언에서 px 를 뽑습니다. 토큰이면 풀어서. 못 풀면 `null`. */
+  const pxOf = (value: string, tokens: Map<string, number>): number | null => {
+    const token = /var\((--fs-[a-z0-9-]+)\)/.exec(value);
+    if (token !== null) return tokens.get(token[1] as string) ?? null;
+    const literal = /([\d.]+)(rem|px|em)/.exec(value);
+    if (literal === null) return null;
+    return literal[2] === 'px' ? Number(literal[1]) : Number(literal[1]) * 16;
+  };
+
   it('⭐ 입력 칸 글자를 16px 밑으로 내리지 않는다', () => {
     // iOS Safari 는 글자가 16px 보다 작은 입력 칸에 포커스가 가면 화면을
     // 확대하고, **확대된 채로 돌아오지 않는다.** 사람은 앱이 깨졌다고
     // 느낀다. 0.9375rem = 15px 이 딱 그 함정이다.
+    //
+    // ⚠️ 마우스 전용 미디어 쿼리(`hover: hover`) 안은 봐 줍니다 — iOS 는
+    // 거기 안 들어옵니다. 손가락에서만 16px 이면 됩니다.
+    const tokens = fontTokens();
+    ok(tokens.size >= 3, `tokens.css 에서 글자 토큰을 ${tokens.size}개밖에 못 읽었습니다`);
+
     const offenders: string[] = [];
     for (const { name, html } of screens()) {
       const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
-      for (const rule of style.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+      // 마우스 전용 블록은 통째로 들어냅니다.
+      const touch = style.replace(
+        /@media\s*\([^)]*hover:\s*hover[^)]*\)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,
+        '',
+      );
+      for (const rule of touch.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
         const selector = (rule[1] ?? '').trim();
         if (!/\binput\b|\btextarea\b|\bselect\b/.test(selector)) continue;
-        const size = (rule[2] ?? '').match(/font-size:\s*([\d.]+)(rem|px|em)/);
-        if (!size) continue;
-        const px = size[2] === 'px' ? Number(size[1]) : Number(size[1]) * 16;
-        if (px < 16) offenders.push(`${name} → ${selector} (${px}px)`);
+        // 체크박스·라디오는 글자를 넣는 칸이 아니라 확대가 안 일어납니다.
+        if (/checkbox|radio/.test(selector)) continue;
+        const decl = /font-size:\s*([^;]+)/.exec(rule[2] ?? '');
+        if (decl === null) continue;
+        const px = pxOf(decl[1] as string, tokens);
+        if (px !== null && px < 16) offenders.push(`${name} → ${selector} (${px}px)`);
       }
     }
-    strictEqual(offenders.join(', '), '');
+    strictEqual(offenders.join(', '), '', 'iOS 에서 포커스가 가면 화면이 확대되고 안 돌아옵니다');
+  });
+
+  it('⭐ 컨트롤을 **손가락에서** 줄이지 않는다 (`--tap` 44px)', () => {
+    // `tokens.css` 가 `--tap: 2.75rem /* 44px — 손가락 끝 접촉면 */` 이라고
+    // 정하고 `app.css` 가 `button, .btn { min-height: var(--tap) }` 으로
+    // 겁니다. 그런데 화면별 `<style>` 이 `min-height: 0` 으로 되돌리면
+    // 그 규칙이 사라집니다.
+    //
+    // 마우스에서 컨트롤을 작게 하는 것 자체는 맞습니다 — 칸반이 그걸
+    // **`@media (hover: hover) and (pointer: fine)` 안에서** 합니다.
+    // 문제는 그 밖에서 하는 것입니다. 검토·프로젝트가 그랬고, 실제 폰
+    // 에뮬레이션(`hasTouch`)으로 재니 버튼이 40.1px, 제목 칸이 35.5px
+    // 이었습니다.
+    //
+    // ⚠️ 폭만 390 으로 줄여서 재면 **안 잡힙니다.** Chromium 은 그때도
+    // `hover: hover` 를 보고해서 마우스용 규칙이 그대로 먹습니다. 그렇게
+    // 재서 칸반을 위반으로 잘못 셀 뻔했습니다.
+    const offenders: string[] = [];
+    for (const { name, html } of screens()) {
+      const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+      const bare = style.replace(/\/\*[\s\S]*?\*\//g, '');
+      const touch = bare.replace(
+        /@media\s*\([^)]*hover:\s*hover[^)]*\)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,
+        '',
+      );
+      for (const rule of touch.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+        const selector = (rule[1] ?? '').trim();
+        if (!/\bbutton\b|\bselect\b|\binput\b|\.btn\b/.test(selector)) continue;
+        if (/checkbox|radio/.test(selector)) continue;
+        if (!/min-height:\s*0/.test(rule[2] ?? '')) continue;
+        // 글자로만 된 것(`.linkish`·아이콘 버튼)은 대상이 아닙니다 — 상자가
+        // 없으므로 44px 상자를 만들 수 없습니다. 그 대신 `.linkish` 를
+        // 쓰거나 `padding` 으로 접촉면을 넓힙니다.
+        if (/\.linkish|\.src\b/.test(selector)) continue;
+        offenders.push(`${name} → ${selector}`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`min-height: 0` 은 `@media (hover: hover) and (pointer: fine)` 안에서만 쓰세요 — '
+        + '손가락에서는 44px 이어야 합니다',
+    );
   });
 });
 
@@ -368,9 +594,10 @@ describe('줄어들 수 없는 컨트롤 (결함 77)', () => {
 });
 
 describe('로그아웃이 안 될 때 (결함 82)', () => {
+  // ⚠️ 위 `SCREEN_EXT` 와 같은 이유로 `.tsx` 를 봅니다.
   const demoFiles = (): { rel: string; code: string }[] =>
     readdirSync(join(ROOT, 'src', 'demo'))
-      .filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))
+      .filter((n) => SCREEN_EXT.test(n) && !n.endsWith('.test.ts'))
       .map((n) => ({ rel: `src/demo/${n}`, code: readFileSync(join(ROOT, 'src', 'demo', n), 'utf8') }));
 
   it('⭐ 로그아웃 응답을 안 보고 화면을 옮기지 않는다', () => {
@@ -413,7 +640,7 @@ describe('로그아웃이 안 될 때 (결함 82)', () => {
 describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
   const demoSources = (): { rel: string; code: string }[] =>
     readdirSync(DEMO)
-      .filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))
+      .filter((n) => SCREEN_EXT.test(n) && !n.endsWith('.test.ts'))
       .map((n) => ({ rel: `src/demo/${n}`, code: codeOf(readFileSync(join(DEMO, n), 'utf8')) }));
 
   /** `이름(` 부터 짝 맞는 `)` 까지. 인자 안의 괄호를 세어 자릅니다. */
@@ -489,11 +716,11 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
      * 근거 없는 면제는 다음 사람이 그냥 늘립니다.
      */
     const EXEMPT: Record<string, string> = {
-      'src/demo/lobby.ts':
+      'src/demo/lobby.tsx':
         '`getJson` 이 **던지는 것이 계약**이고 호출부가 `catch` 로 받아 ' +
         '`#sub` 에 "불러오지 못했습니다" 를 빨갛게 씁니다 (결함 98 에서 실측). ' +
         '이미 사람에게 말하고 있으므로 바꾸면 오히려 두 갈래가 됩니다',
-      'src/demo/login.ts':
+      'src/demo/login.tsx':
         '`void fetch(…/me)` 는 **이미 로그인돼 있으면 넘겨 주려는** 곁길입니다. ' +
         '닿지 못하면 로그인 폼이 그대로 남고, 그게 맞는 화면입니다 — ' +
         '여기서 "서버에 닿지 못했습니다" 를 띄우면 아직 아무것도 안 한 사람을 놀래킵니다. ' +
@@ -592,14 +819,39 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
       // ⚠️ `\bsend\(` 까지 보면 통화 화면의 **WebSocket** `send()` 가
       // 걸립니다 — 이 규칙과 아무 상관이 없습니다. 첫 판에 실제로 걸렸습니다.
       if (!/trySend\(/.test(code)) continue;
-      // 그 파일이 잠그는 방법: 공용 helper 이거나, 직접 `disabled = true`.
-      const locks = /whilePressed\(/.test(code) || /\.disabled = true/.test(code);
+      // 그 파일이 잠그는 방법: 공용 helper 이거나, 직접 `disabled = true`,
+      // 또는 React 의 선언형 잠금.
+      const locks =
+        /whilePressed\(/.test(code) || /\.disabled = true/.test(code) || locksDeclaratively(code);
       if (!locks) offenders.push(rel);
     }
     strictEqual(
       offenders.join(', '),
       '',
       '`whilePressed(button, () => …)` 로 누르는 동안 잠그세요',
+    );
+
+    // ⚠️ **위 검사는 파일 단위입니다** — "이 화면이 잠그는가" 만 봅니다.
+    // 심어 보고 알았습니다: 홈에서 `만들기` 의 `disabled` 를 떼도 옆의
+    // `참가` 가 아직 갖고 있어서 **통과했습니다.**
+    //
+    // 그게 바로 결함 89 가 적어 둔 모양입니다 — "잠그는 곳과 안 잠그는
+    // 곳이 섞여 있던 것이 결함입니다." 파일 단위로 세면 그 섞임을
+    // 영영 못 봅니다. 그래서 **버튼 하나씩** 봅니다.
+    const loose: string[] = [];
+    for (const { rel, code } of demoSources()) {
+      if (!rel.endsWith('.tsx') || !/trySend\(/.test(code)) continue;
+      for (const attrs of buttonTags(code)) {
+        const handler = /onClick=\{([a-z]\w*)\}/.exec(attrs)?.[1];
+        if (handler === undefined) continue; // 인라인 화살표는 이름이 없다
+        if (!mutates(code, handler)) continue; // 서버를 안 바꾸면 잠글 것도 없다
+        if (!/disabled=\{/.test(attrs)) loose.push(`${rel} → onClick={${handler}}`);
+      }
+    }
+    strictEqual(
+      loose.join(', '),
+      '',
+      '서버를 바꾸는 버튼인데 누르는 동안 안 잠깁니다',
     );
   });
 
@@ -615,7 +867,7 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
     // 폰을 주머니에 넣었다 꺼내면 아무 일도 없었던 화면을 봅니다.
     // 실패는 **아무도 안 덮는 자리**(`…-note`)에 씁니다 — 로그아웃(82)·
     // 복사(81)가 이미 쓰던 방법입니다.
-    const source = readFileSync(join(DEMO, 'lobby.ts'), 'utf8');
+    const source = (demoSource('lobby') ?? '');
     const code = codeOf(source);
     const offenders: string[] = [];
     for (const id of ['room-message', 'consent-message']) {
@@ -631,14 +883,90 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
   });
 
   it('⭐ 그 자리가 화면에 실제로 있다 (결함 90)', () => {
-    const html = readFileSync(join(PUBLIC, 'lobby.html'), 'utf8');
+    // ⚠️ HTML 에서만 찾으면 React 로 옮긴 화면에서 헛돕니다 — 요구는
+    // "그 자리가 있는가" 이지 "어느 파일에 적혀 있는가" 가 아닙니다.
     for (const id of ['room-note', 'consent-note']) {
-      strictEqual(
-        new RegExp(`id="${id}"`).test(html),
-        true,
-        `lobby.html 에 <p class="status" id="${id}" hidden> 이 없습니다`,
-      );
+      strictEqual(screenHas('lobby', `id="${id}"`), true, `로비에 #${id} 자리가 없습니다`);
     }
+  });
+
+  it('⭐ 로그인 오류 줄이 가리키는 **칸이 실제로 있다**', () => {
+    // 대표 실패 ③ — "할 일을 알려 주고 그 일을 할 자리를 안 줌".
+    //
+    // `validateSignup` 은 어느 칸이 비었는지 `field` 로 이미 알아냅니다.
+    // 화면은 그 줄을 `<a href="#${field}">` 로 그려 누르면 그 칸으로
+    // 보냅니다. 그 약속은 **`field` 이름과 `<input>` 의 id 가 같다**는
+    // 것 하나에 걸려 있고, 어느 한쪽 이름만 바꾸면 링크가 조용히
+    // 죽습니다 — 눌러도 아무 일이 안 일어나는데 오류는 안 납니다.
+    //
+    // ⚠️ 필드 목록을 여기에 손으로 적지 않습니다. `session.ts` 의 타입에서
+    // 읽습니다 — 손으로 적으면 넷째 칸이 생기는 날 이 검사만 낡습니다.
+    const session = readFileSync(join(LIB, 'auth', 'session.ts'), 'utf8');
+    const union = /field:\s*([^;]+);/.exec(session)?.[1] ?? '';
+    const fields = [...union.matchAll(/'([a-z]+)'/g)].map((m) => m[1] as string);
+    ok(fields.length >= 3, `session.ts 에서 field 목록을 못 읽었습니다: ${union}`);
+
+    const screen = demoSource('login') ?? '';
+    const missing = fields.filter((f) => !screen.includes(`id="${f}"`));
+    strictEqual(
+      missing.join(', '),
+      '',
+      `오류 줄이 #${missing.join('/#')} 로 보내는데 그 id 를 가진 칸이 로그인 화면에 없습니다`,
+    );
+
+    // 그리고 줄이 정말 **링크**여야 합니다. 글자만 찍으면 갈 자리가 없습니다.
+    ok(
+      /href=\{`#\$\{[a-z.]+field\}`\}/.test(screen),
+      '오류 줄이 `href={`#${…field}`}` 로 칸을 가리키지 않습니다',
+    );
+  });
+
+  it('⭐ 안내 자리가 **낭독기에게도 들린다**', () => {
+    // 대표 실패 ③ 의 소리 버전 — "저장하지 못했습니다" 를 화면에만 띄우고
+    // 끝내면, 화면을 못 보는 사람에게는 아무 일도 안 일어난 것입니다.
+    //
+    // 실제로 이 저장소는 **화면 아홉 중 한 곳에도** live region 이 없었습니다.
+    // 없는 것은 오류가 안 나서 안 보입니다.
+    //
+    // ⚠️ **`hidden` 과 같이 쓰면 안 됩니다.** 접근성 트리에서 요소를 빼므로
+    // 안내가 뜰 때마다 region 이 새로 생기는 셈이고, 낭독기는 **이미 있던**
+    // region 이 바뀔 때 읽어 줍니다. 그래서 `showNote` 는 `hidden` 을 끄기만
+    // 하고, 자리를 안 차지하는 일은 `[role='status']:empty` 가 합니다.
+    const offenders: string[] = [];
+
+    // ① 명령형 화면 — 마크업의 그 자리에 역할이 붙어 있는가
+    for (const [stem, ids] of [
+      ['call', ['status', 'mic']],
+      ['index', ['join-note', 'finish-state', 'copy-note']],
+    ] as [string, string[]][]) {
+      const html = readFileSync(join(PUBLIC, `${stem}.html`), 'utf8');
+      for (const id of ids) {
+        const tag = new RegExp(`<[^>]*id="${id}"[^>]*>`).exec(html)?.[0] ?? '';
+        if (!/role="(status|alert)"/.test(tag)) offenders.push(`${stem}.html #${id} 에 역할 없음`);
+        if (/\bhidden\b/.test(tag)) offenders.push(`${stem}.html #${id} 이 hidden 으로 시작함`);
+      }
+    }
+
+    // ② React 화면 — 공용 `NoteLine` 과 각 화면의 결과 줄
+    const parts = demoSource('parts') ?? '';
+    ok(/role="status"/.test(parts), '`parts.tsx` 의 `NoteLine` 에 역할이 없습니다');
+    ok(
+      !/return null/.test(parts.slice(parts.indexOf('export function NoteLine'))),
+      '`NoteLine` 이 비었을 때 `null` 을 돌려주면 live region 이 사라집니다',
+    );
+    for (const stem of ['kanban', 'review', 'login']) {
+      const code = demoSource(stem) ?? '';
+      if (!/role="(status|alert)"/.test(code)) offenders.push(`${stem} 의 결과 줄에 역할 없음`);
+    }
+
+    // ③ 빈 자리가 여백을 남기지 않는가 — 공용 규칙이 있어야 합니다
+    const appCss = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    ok(
+      /\[role='status'\]:empty[\s\S]{0,120}margin:\s*0/.test(appCss),
+      "`[role='status']:empty { margin: 0 }` 이 없으면 빈 안내가 빈 줄을 만듭니다",
+    );
+
+    strictEqual(offenders.join(', '), '', '안내가 낭독기에게 안 들립니다');
   });
 
   it('⭐ 안내 자리는 `showNote` 를 거친다 (결함 92)', () => {
@@ -856,7 +1184,7 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.endsWith('.test.ts')) {
           const code = codeOf(readFileSync(full, 'utf8'));
           if (typeNames.some((name) => new RegExp(`\\b${name}\\b`).test(code))) {
             sources.push(code);
@@ -914,7 +1242,7 @@ describe('복사가 안 될 때 (결함 81)', () => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.endsWith('.test.ts')) {
           out.push({
             rel: full.slice(ROOT.length + 1).split('\\').join('/'),
             code: readFileSync(full, 'utf8'),
@@ -988,7 +1316,7 @@ describe('한국어 조사 (결함 76)', () => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.endsWith('.test.ts')) {
           out.push({
             rel: full.slice(join(ROOT, 'src').length + 1).split('\\').join('/'),
             // ⚠️ 주석은 뺍니다. 이 저장소의 주석은 `` `x` 를 `` 처럼
@@ -1279,7 +1607,7 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
       for (const name of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, name.name);
         if (name.isDirectory()) walk(full);
-        else if (name.name.endsWith('.ts')) {
+        else if (SCREEN_EXT.test(name.name)) {
           files.push({
             rel: full.slice(join(ROOT, 'src').length + 1).split('\\').join('/'),
             source: readFileSync(full, 'utf8'),
@@ -1348,7 +1676,8 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
     // 보려면 여기 있어야 합니다.
     const offenders: string[] = [];
     for (const name of readdirSync(join(ROOT, 'src', 'demo'))) {
-      if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue;
+      // ⚠️ `.tsx` 도 봅니다 — 위 `SCREEN_EXT` 주석 참고.
+      if (!SCREEN_EXT.test(name) || name.endsWith('.test.ts')) continue;
       const code = codeOf(readFileSync(join(ROOT, 'src', 'demo', name), 'utf8'));
       for (const m of code.matchAll(/^(?:async )?function (\w+)/gm)) {
         const fn = m[1] as string;
@@ -1637,6 +1966,31 @@ describe('빌드된 번들', () => {
     );
   });
 
+  it('⭐ 아무도 안 부르는 **공용 조각**이 남아 있지 않다', async () => {
+    // ⚠️ 위 검사는 **한 방향만** 봅니다 — 빌드가 만든 것이 디스크에
+    // 있는가. 조각을 켜기 전에는 그걸로 충분했습니다. 출력 이름이
+    // 고정이라 매 빌드가 같은 파일을 덮어썼기 때문입니다.
+    //
+    // 조각은 이름에 **해시**가 붙습니다. 내용이 바뀌면 옛 파일이 덮이는
+    // 게 아니라 **새 파일이 하나 더 생깁니다.** 지우지 않으면 아무도 안
+    // 부르는 조각이 쌓이고, 오프라인 목록은 `public/` 을 세므로 그 죽은
+    // 조각까지 폰에 내려받게 됩니다 — 오류는 어디에도 안 납니다.
+    //
+    // `build.mts` 가 빌드 전에 지웁니다. 여기서는 **정말 지워졌는지**를
+    // 봅니다.
+    const fresh = new Set([...(await bundle()).keys()]);
+    const orphans = chunkFiles().filter((name) => !fresh.has(name));
+    strictEqual(
+      orphans.join(', '),
+      '',
+      '아무도 안 부르는 조각이 남았습니다 — `npm run build:demo` 를 실행하세요',
+    );
+
+    // ⚠️ **눈을 뜨고 있는지.** 조각이 하나도 없으면 위 0건은 아무 뜻이
+    // 없습니다 — `splitting` 이 꺼졌거나 정규식이 어긋난 것입니다.
+    strictEqual(chunkFiles().length > 0, true, '공용 조각을 하나도 못 찾았습니다');
+  });
+
   it('⭐ 화면이 부르는 스크립트마다 소스가 있다', () => {
     // 없으면 그 화면은 404 를 받고 **아무 동작도 하지 않습니다.**
     const missing = entryPoints().filter((path: string) => {
@@ -1790,14 +2144,503 @@ describe('CSS 토큰', () => {
   });
 });
 
+describe('메신저 셸 (docs/19)', () => {
+  it('⭐ 셸이 서는 너비를 CSS 와 JS 가 **같은 숫자로** 안다', () => {
+    // `.chan`(회의 채널)은 셸이 설 때만 보입니다. 그래서 `nav.ts` 는
+    // 좁은 화면에서 **요청조차 보내지 않습니다** — 안 보이는 것을 위해
+    // 폰의 데이터 요금을 쓰지 않으려고요.
+    //
+    // 그런데 그 판단이 **두 벌**입니다. CSS 는 `@media (min-width: 90rem)`
+    // 로, JS 는 `matchMedia('(min-width: 90rem)')` 로 각자 압니다. CSS 에서
+    // 이 숫자를 읽어 올 방법이 마땅치 않아 어쩔 수 없이 적었는데, 두 벌이
+    // 있으면 한쪽만 고쳐집니다 — 이 저장소가 반복해서 당한 그것입니다.
+    //
+    // 갈라지면 조용합니다. CSS 만 88rem 으로 내리면 88~90rem 구간에서
+    // **채널 목록이 보이는데 영영 비어 있습니다** (요청이 안 나가므로).
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const nav = readFileSync(join(DEMO, 'nav.ts'), 'utf8');
+
+    // ⚠️ **같은 너비의 미디어 쿼리가 여럿입니다.** 처음엔 `indexOf` 로
+    // 첫 번째만 봤고, 그건 `body { padding-inline }` 하나짜리 블록이라
+    // `.chan` 을 못 찾아 "0개" 가 나왔습니다 — 규칙이 아니라 **찾는
+    // 방법이 틀린** 것이었습니다.
+    //
+    // ⚠️ 그리고 이제 셸의 너비는 **하나가 아닙니다.** 채널 목록은 90rem,
+    // 맥락 패널은 100rem 부터입니다. 그래서 "첫 번째 숫자끼리" 비교하면
+    // 안 되고, 두 파일이 아는 **너비 집합**을 통째로 맞춰 봅니다.
+    const inCss = new Set(
+      [...css.matchAll(/@media\s*\(min-width:\s*([\d.]+rem)\)/g)]
+        .filter((m) => {
+          const at = m.index ?? 0;
+          const end = css.indexOf('\n}\n', at);
+          const block = css.slice(at, end === -1 ? undefined : end);
+          return /\.chan\s*\{/.test(block) || /\.ctx\s*\{/.test(block);
+        })
+        .map((m) => m[1] as string),
+    );
+    strictEqual(inCss.size, 2, `셸 열을 품은 미디어 쿼리가 ${inCss.size}개입니다 (둘이어야 합니다)`);
+
+    const inJs = new Set(
+      [...nav.matchAll(/min-width:\s*([\d.]+rem)/g)].map((m) => m[1] as string),
+    );
+    deepStrictEqual(
+      [...inJs].sort(),
+      [...inCss].sort(),
+      `app.css 와 nav.ts 가 아는 셸 너비가 다릅니다 — ` +
+        `그 사이 폭에서 열이 보이는데 영영 빕니다 (요청이 안 나가므로)`,
+    );
+  });
+
+  it('⭐ 셸 크롬에 `<ul><li>` 를 쓰지 않는다', () => {
+    // `renderNav` 가 만드는 것은 전부 `#tabs` **안에** 들어갑니다. 그런데
+    // `lobby.html` 과 `index.html` 이 `ul` 에 자기 규칙을 걸어 뒀습니다 —
+    // 화면별 `<style>` 은 app.css 보다 뒤에 오므로 그쪽이 이깁니다.
+    // 셸에서 목록 태그를 쓰면 그 두 화면에서만 조용히 모양이 깨집니다.
+    const nav = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    strictEqual(
+      /<\s*(ul|ol|li)\b/.test(nav),
+      false,
+      'nav.ts 가 목록 태그를 만듭니다 — div·a 로 그리세요 (docs/19 §10)',
+    );
+  });
+
+  it('⭐ 데이터가 오기 **전에** 빈 문구를 그리지 않는다', () => {
+    // 빈 문구를 미리 깔아 두면 회의가 있는 사람도 잠깐 "아직 연 회의가
+    // 없습니다" 를 봅니다. 텅 빈 화면이 "0건" 으로 읽히는 것과 같은
+    // 결함인데, 여기서는 화면이 **거짓말을 먼저** 합니다.
+    //
+    // 그래서 `emptyChannelsNote()` 는 **응답을 받은 뒤에만** 불려야
+    // 합니다 — `await` 보다 앞에서 부르면 그게 미리 깔린 것입니다.
+    // ⚠️ 함수 **이름을 박아 두지 않습니다.** 처음엔 `fillChannels` 를
+    // 찾았는데, 폰에서도 탭을 되살리려고 그 함수를 둘로 가르면서 빈 문구가
+    // 다른 함수로 옮겨 갔습니다. 이름을 박아 둔 검사는 그때 아무것도 못
+    // 찾고 **조용히 통과**합니다.
+    const nav = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    const emptyAt = nav.indexOf('emptyChannelsNote(');
+    strictEqual(emptyAt > -1, true, 'nav.ts 가 빈 문구를 아예 안 씁니다');
+
+    const fnAt = nav.lastIndexOf('function ', emptyAt);
+    strictEqual(fnAt > -1, true, '빈 문구를 쓰는 함수를 못 찾았습니다');
+    strictEqual(
+      nav.slice(fnAt, emptyAt).includes('await tryGet('),
+      true,
+      '응답을 받기 전에 빈 문구를 그립니다 — 회의가 있는 사람이 "없습니다" 를 봅니다',
+    );
+  });
+
+  it('⭐ 회의 안에서 프로젝트를 알아내면 **탭도 다시 그린다**', () => {
+    // 로비·검토는 주소에 `?meeting=` 만 있어서 처음 그릴 때 칸반·기여도·
+    // 설정 셋이 흐립니다. 채널 목록을 채우려면 어차피 프로젝트를 알아내야
+    // 하는데, 알고도 탭을 그대로 두면 **같은 화면이 서로 다른 말**을
+    // 합니다 — 채널 링크에는 `project=1` 이 붙어 있는데 탭은 "프로젝트를
+    // 고르면 열립니다" 입니다. 1600px 로비를 열어 보고 알았습니다.
+    //
+    // ⚠️ 그리고 이건 **폰에서도** 해야 합니다. 채널 목록은 폰에서 안
+    // 보이지만 탭 넷은 보이고, 주소창 없는 PWA 에서 흐린 탭 셋은 갇히는
+    // 길입니다. 그래서 너비를 보는 곳(`matchMedia`)보다 **앞에서** 다시
+    // 그려야 합니다.
+    // ⚠️ 처음엔 `paint({ ...context, projectId })` 를 **글자 그대로** 찾았고,
+    // 인자를 하나 더 붙이자마자(`, title`) 못 찾아서 깨졌습니다. 규칙이
+    // 깨진 게 아니라 **찾는 방법이 부러진** 것입니다. 지금은 순서를 봅니다:
+    //
+    //     await resolveProjectId(…)  →  paint(…)  →  matchMedia(…)
+    //
+    // 가운데가 빠지거나 마지막 뒤로 밀리면 잡습니다.
+    const nav = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    const learn = nav.indexOf('await resolveProjectId(');
+    const gate = nav.indexOf('matchMedia(');
+    strictEqual(learn > -1 && gate > -1, true, 'nav.ts 의 모양이 바뀌었습니다 — 이 검사도 고치세요');
+
+    const repaint = nav.indexOf('paint(', learn);
+    strictEqual(
+      repaint > -1 && repaint < gate,
+      true,
+      '프로젝트를 알아낸 뒤 **너비를 보기 전에** 탭을 다시 그려야 합니다 — ' +
+        '안 그러면 폰의 로비에서 칸반·기여도·설정 셋이 흐린 채로 남습니다',
+    );
+  });
+
+  it('⭐ 빈 채널 구역이 **선을 긋지 않는다**', () => {
+    // 홈에는 프로젝트 맥락이 없어서 회의를 받아 올 수 없고, 그 구역이 빈
+    // 채로 남습니다. 그런데 `border-top` 은 그려져서 **아무것도 없는
+    // 아래에 가로줄 하나**가 남았습니다 — 홈을 렌더해서 보고 알았습니다.
+    //
+    // 이 저장소에서 **두 번째**입니다. 처음은 프로젝트 레일 자리를 72px
+    // 미리 비워 둔 것이었습니다. 없는 것을 위해 자리를 잡아 두면 그건
+    // 빈칸이 아니라 결함입니다.
+    // ⚠️ 처음엔 `.chan` **하나만** 봤습니다. 그래서 맥락 패널에서
+    // `.ctx:empty` 를 지워도 **조용히 통과**했습니다 — 284px 짜리 빈 열이
+    // 생기는데도요. 일부러 지워 보고 알았습니다. 셸이 세우는 열을 전부
+    // 봅니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const missing: string[] = [];
+    for (const name of ['chan', 'ctx', 'rail']) {
+      // 자리를 차지하는 장식(선·바탕)을 걸었다면 빈 경우를 반드시 빼야 합니다.
+      const rule = new RegExp(`\\.${name}\\s*\\{[^}]*(border-top|border-left|background)`);
+      if (!rule.test(css)) continue;
+      if (!new RegExp(`\\.${name}:empty\\s*\\{[^}]*display:\\s*none`).test(css)) {
+        missing.push(`.${name}`);
+      }
+    }
+    strictEqual(
+      missing.join(', '),
+      '',
+      '선이나 바탕을 그리는데 `:empty { display: none }` 이 없습니다 — ' +
+        '받아 올 것이 없는 화면에 빈 열·빈 줄이 남습니다',
+    );
+  });
+
+  it('⭐ 레일이 **설 때만** 그 자리를 잡는다', () => {
+    // 이 저장소가 같은 실수를 두 번 했습니다.
+    //
+    //   §11  `--shell-rail` 만큼 왼쪽을 비워 뒀는데 레일이 없어서
+    //        **아무것도 없는 72px** 이 생겼습니다
+    //   §13  `.chan` 이 빈 채로 `border-top` 을 그려서 **아무것도 없는
+    //        아래에 가로줄 하나**가 남았습니다
+    //
+    // 레일이 실제로 생기면서 그 자리를 다시 잡게 됐는데, 이번에는
+    // **프로젝트가 하나뿐이면 레일이 없습니다.** 그때도 자리를 잡으면
+    // 처음 그 결함으로 되돌아갑니다.
+    //
+    // 그래서 `--shell-rail` 을 쓰는 `body` 규칙은 **`.has-rail` 이
+    // 붙은 것뿐**이어야 합니다. 그 클래스는 `nav.ts` 가 프로젝트 수를
+    // 보고 붙입니다 — CSS 는 그걸 모릅니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+
+    // ⚠️ **이 검사는 한 번 눈을 감을 뻔했습니다.** 처음에는 선택자가
+    // `body` 로 **시작**하는 규칙만 봤습니다. 그런데 §21 에서 자리를
+    // 비우는 일이 `html:has(body.has-rail)` 로 옮겨 갔습니다 — 선택자가
+    // `html` 로 시작하므로 검사는 아무 말 없이 0건을 냅니다.
+    //
+    // "0건" 은 규칙이 지켜져서 나오기도 하고 **찾는 방법이 틀려서**
+    // 나오기도 합니다. 그래서 선택자가 `body` 를 **어디에든** 품으면
+    // 봅니다. 아래 `plantedTest` 가 이 검사가 실제로 눈을 뜨고 있는지
+    // 확인합니다.
+    const scan = (sheet: string): string[] => {
+      const found: string[] = [];
+      for (const rule of sheet.matchAll(/(^|\n)\s*([^{}@\n][^{}]*)\{([^}]*)\}/g)) {
+        const selector = (rule[2] as string).trim();
+        if (!/\bbody\b/.test(selector)) continue;
+        if (!/var\(--shell-rail\)/.test(rule[3] as string)) continue;
+        if (!/\.has-rail\b/.test(selector)) found.push(selector);
+      }
+      return found;
+    };
+
+    // ⚠️ **없다고 적기 전에 있는 것을 하나 심어 봅니다.** 이 저장소는
+    // 눈감은 검사에 두 번 속았습니다 (그림자 검사는 심는 방법조차
+    // 틀렸습니다). 심은 것을 못 잡으면 아래 "0건" 은 아무 뜻이 없습니다.
+    deepStrictEqual(
+      scan('html:has(body.foo) {\n  padding-left: var(--shell-rail);\n}'),
+      ['html:has(body.foo)'],
+      '이 검사가 눈을 감고 있습니다 — 심어 둔 위반을 못 잡았습니다',
+    );
+
+    const bare = scan(css);
+    strictEqual(
+      bare.join(', '),
+      '',
+      '`.has-rail` 없이 레일 자리를 잡습니다 — 프로젝트가 하나인 사람에게 ' +
+        '아무것도 없는 72px 이 생깁니다 (docs/19 §11 에서 한 번 당했습니다)',
+    );
+
+    // 그리고 그 클래스를 **실제로 붙이는 코드**가 있어야 합니다.
+    // 규칙만 있고 붙이는 곳이 없으면 레일은 영영 안 섭니다 — 이 저장소의
+    // 대표 결함인 "만들어 놓고 아무도 안 부름" 이 그 모양입니다.
+    const nav = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    strictEqual(
+      /classList\.add\('has-rail'\)/.test(nav) && /classList\.remove\('has-rail'\)/.test(nav),
+      true,
+      '`has-rail` 을 붙이거나 떼는 코드가 없습니다 — 붙이기만 하면 ' +
+        '프로젝트를 나간 뒤에도 72px 이 남습니다',
+    );
+  });
+
+  it('⭐ 껍데기 색을 본문 색과 섞어 쓰지 않는다', () => {
+    // 껍데기(`--chrome-*`)는 밝은 모드에서도 짙습니다. 본문 토큰
+    // (`--text`·`--surface`·`--line`)은 모드에 따라 뒤집힙니다. 셸 안에서
+    // 본문 토큰을 쓰면 **밝은 모드에서만** 글자가 사라집니다.
+    //
+    // 실험판 v4 에서 실제로 그랬습니다 — 실측 배경 rgb(18,33,31) 에
+    // 글자 rgb(22,33,31) 이었습니다. 화면에서는 그냥 빈 줄로 보입니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    const blockAt = (marker: string): string => {
+      const at = css.indexOf(marker);
+      strictEqual(at > -1, true, `셸 블록을 못 찾았습니다: ${marker}`);
+      return css.slice(at, css.indexOf('\n}\n', at));
+    };
+    const paints = (block: string): string[] =>
+      [...block.matchAll(/(?:color|background)\s*:\s*var\((--[a-z0-9-]+)\)/g)].map(
+        (m) => m[1] as string,
+      );
+
+    // ── 왼쪽 열들은 **껍데기**입니다 ─────────────────────────
+    // 이동하는 자리라 본문이 밝든 어둡든 늘 같은 짙은 면입니다.
+    const chan = paints(blockAt('/* ── 회의 채널 ─')).filter((n) => !n.startsWith('--chrome-'));
+    strictEqual(
+      [...new Set(chan)].join(', '),
+      '',
+      '셸 안에서 뒤집히는 본문 토큰을 씁니다 — `--chrome-*` 를 쓰세요',
+    );
+
+    // ── 오른쪽 열은 **본문**입니다 (§21) ─────────────────────
+    //
+    // ⚠️ 이 검사는 위와 **반대 방향**입니다. 맥락 패널은 좌우가 다
+    // 어두워 가운데가 종이 한 장으로 보이던 것을 고치며 본문 쪽으로
+    // 옮겼습니다. 본문은 모드에 따라 뒤집히는데 껍데기는 안 뒤집히므로,
+    // 여기에 `--chrome-*` 를 쓰면 **어두운 모드에서만** 짙은 글자가
+    // 짙은 면에 얹혀 사라집니다 — 실험판 v4 에서 당한 그 모양의 거울상.
+    const ctx = paints(blockAt('   맥락 패널 — 셋째 열')).filter((n) => n.startsWith('--chrome-'));
+    strictEqual(
+      [...new Set(ctx)].join(', '),
+      '',
+      '맥락 패널에 껍데기 색을 씁니다 — 이 열은 본문입니다, 뒤집히는 토큰을 쓰세요',
+    );
+
+    // ⚠️ **둘 다 "0건" 이라 방향이 바뀐 것을 못 볼 뻔했습니다.** 방향만
+    // 뒤집고 대상 블록을 그대로 두면 두 검사가 같은 말을 하게 되는데,
+    // 그래도 전부 통과합니다. 그래서 각 열이 **실제로 무엇으로 칠해져
+    // 있는지**를 하나씩 확인합니다 — 비어 있으면 블록을 잘못 잡은 것입니다.
+    strictEqual(
+      paints(blockAt('/* ── 회의 채널 ─')).some((n) => n.startsWith('--chrome-')),
+      true,
+      '회의 채널이 껍데기 색을 하나도 안 씁니다 — 블록을 잘못 잡았습니다',
+    );
+    strictEqual(
+      paints(blockAt('   맥락 패널 — 셋째 열')).some((n) => !n.startsWith('--chrome-')),
+      true,
+      '맥락 패널이 본문 색을 하나도 안 씁니다 — 블록을 잘못 잡았습니다',
+    );
+  });
+});
+
+describe('서비스 워커 캐시 목록 (docs/19 §24)', () => {
+  /**
+   * `sw.js` 의 **자동 생성 구간**에 적힌 것만.
+   *
+   * ⚠️ 파일 전체에서 `'/…'` 를 긁으면 `fetch` 처리기의 `'/api/'`·
+   * `'/tracks/'`·`'/offline.html'` 까지 딸려 옵니다. 실제로 딸려 왔고,
+   * 목록이 맞는데도 검사가 터졌습니다 — 규칙이 아니라 **읽는 범위**가
+   * 틀린 것이었습니다.
+   */
+  function generatedShell(): string[] {
+    const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
+    const block = /\/\* <<< 자동 생성[^*]*\*\/\n([\s\S]*?)\n\s*\/\* >>> \*\//.exec(sw);
+    strictEqual(block !== null, true, 'sw.js 에서 자동 생성 구간을 못 찾았습니다');
+    return [...(block?.[1] ?? '').matchAll(/'(\/[^']+)'/g)].map((m) => m[1] as string);
+  }
+
+  it('⭐ 오프라인 목록이 `public/` 의 **실제 파일**과 어긋나지 않는다', () => {
+    // ⚠️ 이 목록은 손으로 적던 것이었고 **두 번 어긋났습니다.** 빠뜨려도
+    // 아무 데서도 티가 안 납니다 — 온라인에서는 서버가 주니까 멀쩡하고,
+    // 오프라인에서만 안 뜹니다. 그런데 오프라인은 개발 중에 거의 안 겪습니다.
+    //
+    // 이제 `npm run build` 가 씁니다. 그래서 이 검사도 "빠진 것/유령"
+    // 두 방향을 따로 세는 대신, **빌드가 쓸 것과 지금 적힌 것이 같은가**
+    // 하나만 봅니다. 어긋나는 유일한 경우는 빌드를 안 돌린 것입니다.
+    deepStrictEqual(
+      generatedShell(),
+      shellFiles(),
+      '오프라인 캐시 목록이 지금 `public/` 과 다릅니다 — `npm run build` 를 돌리세요',
+    );
+  });
+
+  it('⭐ 이 검사가 **눈을 뜨고 있는지** 확인한다', () => {
+    // "0건" 은 규칙이 지켜져서 나오기도 하고 찾는 방법이 틀려서 나오기도
+    // 합니다. 목록을 실제로 읽고 있는지, 화면 파일을 실제로 세고 있는지를
+    // 봅니다 — 정규식이 하나만 어긋나도 위 검사는 조용히 통과합니다.
+    const listed = generatedShell();
+    strictEqual(listed.length > 10, true, `캐시 목록을 ${listed.length}개로 읽었습니다`);
+    strictEqual(listed.includes('/tokens.css'), true, '`tokens.css` 를 못 읽었습니다');
+    // 세는 쪽도 헛돌면 안 됩니다 — 빌드가 파일을 실제로 세고 있는가.
+    strictEqual(shellFiles().includes('/tokens.css'), true, '`shellFiles()` 가 헛돕니다');
+
+    const screens = readdirSync(PUBLIC).filter((n) => n.endsWith('.html'));
+    strictEqual(screens.length >= 9, true, `화면을 ${screens.length}개로 셌습니다`);
+  });
+});
+
+describe('React 번들 (docs/19 §24)', () => {
+  it('⭐ **개발 빌드가 배포로 새어 나가지 않는다**', async () => {
+    // ⚠️ React 를 넣자마자 `review.js` 가 **1206KB** 가 됐습니다
+    // (다른 화면은 37~69KB). `process.env.NODE_ENV` 를 안 정해 주면
+    // React 가 개발 빌드로 들어가기 때문입니다.
+    //
+    // **화면은 멀쩡히 돕니다.** 경고 문구·이름 추적·개발자도구 연동이
+    // 통째로 실려서 크기와 런타임이 모두 나빠지는데, 눈으로는 티가 안
+    // 납니다 — 폰에서 1.2MB 를 받는 것이 어떤 일인지도요.
+    //
+    // ⚠️ **설정을 보지 않고 결과를 봅니다.** `define` 이 있는지만 세면,
+    // 나중에 누가 빌드 경로를 하나 더 만들어 그쪽에 안 넣어도 통과합니다.
+    // 실제로 빌드해서 **개발 빌드에만 있는 문구**를 찾습니다.
+    //
+    // 이 문구가 정말 갈리는지는 재서 확인했습니다 —
+    // 개발 빌드 1202KB 에 1회, 프로덕션 빌드 260KB 에 0회.
+    const DEV_ONLY = 'unique \"key\" prop';
+
+    const built = await bundle();
+    const offenders = [...built.entries()]
+      .filter(([, text]) => text.includes(DEV_ONLY))
+      .map(([name]) => name);
+
+    deepStrictEqual(
+      offenders,
+      [],
+      'React 개발 빌드가 들어갔습니다 — `build.mts` 의 ' +
+        "`define: { 'process.env.NODE_ENV': '\"production\"' }` 를 확인하세요",
+    );
+
+    // ⚠️ **이 검사가 눈을 뜨고 있는지** 확인합니다. React 를 쓰는 번들이
+    // 하나도 없으면 위 0건은 아무 뜻이 없습니다.
+    const usesReact = [...built.values()].some((text) => text.includes('react'));
+    strictEqual(usesReact, true, 'React 가 들어간 번들이 없습니다 — 검사가 헛돕니다');
+  });
+
+  it('⭐ 커밋된 번들이 **압축된** 것이다', async () => {
+    // ⚠️ 위 검사가 막는 것은 "개발 빌드" 뿐이고, **크기는 안 봅니다.**
+    // 네 가지로 빌드해서 재 보고 알았습니다:
+    //
+    //     지금 그대로      review 258KB   개발빌드 문구 없음 → 통과
+    //     define 만 뺌     review 258KB   없음 → 통과   ← 차이가 없다
+    //     minify 만 뺌     review 719KB   없음 → 통과   ← 2.8배인데 안 잡힌다
+    //     둘 다 뺌         review 1206KB  있음 → 터짐
+    //
+    // `minify` 를 끄고 **다시 빌드해 커밋하면** 낡은 번들 검사도
+    // 통과합니다. 그래서 폰에서 719KB 를 받게 되는 변경이 아무 데서도
+    // 안 걸렸습니다.
+    //
+    // ⚠️ **크기 상한을 숫자로 적지 않습니다.** 근거 없는 상수는 이
+    // 저장소가 만들지 않기로 한 것이고, 상한은 곧 낡습니다. 대신
+    // **압축을 강제해서 다시 빌드한 것**과 커밋된 것을 견줍니다. 설정을
+    // 세는 게 아니라 결과를 보는 것이라, 빌드 경로를 새로 만들어도
+    // 빠져나갈 수 없습니다.
+    const pressed = await bundle({ minify: true });
+    const offenders: string[] = [];
+    for (const [name, text] of pressed) {
+      const onDisk = readFileSync(join(PUBLIC, name), 'utf8');
+      if (onDisk !== text) {
+        offenders.push(`${name} (커밋 ${onDisk.length}B · 압축 ${text.length}B)`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      'public 의 번들이 압축본이 아닙니다 — `build.mts` 의 `minify` 를 확인하세요',
+    );
+  });
+});
+
+describe('`:empty` 로 감추기 (docs/19 §21)', () => {
+  it('⭐ **빌 수 없는 것**을 `:empty` 로 감추지 않는다', () => {
+    // ⚠️ 이 저장소가 실제로 당한 것입니다.
+    //
+    // 결함 58 을 고치며 `.note:empty { display: none }` 을 넣었습니다.
+    // `<p class="note">` 가 비면 아무것도 없는 가로줄만 남기 때문입니다.
+    // 옳은 규칙이었습니다.
+    //
+    // 그런데 검토 화면의 메모 칸이 `<input class="note">` 였습니다.
+    // **`<input>` 은 자식을 가질 수 없는 태그라 언제나 `:empty` 입니다** —
+    // 값이 무엇이든, 사람이 무엇을 치든. 그래서 그 입력창은 Stage F
+    // 이후로 **한 번도 화면에 나온 적이 없었습니다.**
+    //
+    // 하필 그 칸이 "왜 이렇게 결정했는지" 를 적는 자리였습니다. 이
+    // 저장소는 기여도에서 "이유 없는 조정은 근거 없는 점수와 같다" 고
+    // 적어 뒀는데, 그 약속을 지킬 입력창이 조용히 사라져 있었습니다.
+    //
+    // CSS 는 오류를 안 냅니다. 브라우저로 띄워 보고 "저기 있어야 할
+    // 상자가 없네" 를 눈으로 알아챌 때까지 아무도 모릅니다.
+    const VOID = ['input', 'img', 'br', 'hr', 'source', 'track', 'embed', 'area', 'col'];
+
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // `:empty` 로 감추는 **클래스**들. 태그를 앞에 붙여 좁힌 것
+    // (`p.note:empty`)은 이미 안전하므로 세지 않습니다.
+    const bare = new Set<string>();
+    for (const m of css.matchAll(/([a-z]*)\.([a-z][a-z0-9-]*):empty/g)) {
+      if ((m[1] as string) === '') bare.add(m[2] as string);
+    }
+
+    const sources: [string, string][] = [];
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      sources.push([name, readFileSync(join(PUBLIC, name), 'utf8')]);
+    }
+    for (const { name, source } of demoFiles()) sources.push([name, source]);
+
+    const scan = (): string[] => {
+      const found: string[] = [];
+      for (const [name, source] of sources) {
+        for (const tag of VOID) {
+          for (const m of source.matchAll(new RegExp(`<${tag}\\b[^>]*`, 'g'))) {
+            const cls = /class="([^"]*)"/.exec(m[0]);
+            if (cls === null) continue;
+            for (const one of (cls[1] as string).split(/\s+/)) {
+              if (bare.has(one)) found.push(`${name} → <${tag} class="${one}">`);
+            }
+          }
+        }
+      }
+      return found;
+    };
+
+    // ⚠️ **없다고 적기 전에 있는 것을 하나 심어 봅니다.** 이 저장소는
+    // 눈감은 검사에 이미 두 번 속았습니다.
+    const planted = [...bare][0];
+    strictEqual(
+      typeof planted === 'string',
+      true,
+      '`:empty` 로 감추는 클래스가 하나도 없습니다 — 찾는 방법이 틀렸습니다',
+    );
+    sources.push(['(심은 것)', `<input class="${planted as string}" />`]);
+    strictEqual(
+      scan().length > 0,
+      true,
+      '이 검사가 눈을 감고 있습니다 — 심어 둔 위반을 못 잡았습니다',
+    );
+    sources.pop();
+
+    strictEqual(
+      scan().join(', '),
+      '',
+      '`<input>` 같은 void 태그는 **언제나** `:empty` 입니다 — ' +
+        '값이 있어도 통째로 감춰집니다. 선택자에 태그를 붙여 좁히세요',
+    );
+  });
+});
+
+describe('그림자 (docs/19 §19)', () => {
+  it('⭐ **컨트롤 경계**를 그림자로 그리지 않는다', () => {
+    // `tokens.css` 가 `--line-strong` 을 만든 이유가 이것입니다 —
+    // 입력창이 어디서 시작하는지를 **선 하나**가 말합니다. 거기에
+    // 그림자를 얹으면 두 벌이 되고, 그림자가 안 보이는 환경(고대비
+    // 모드·인쇄)에서 한쪽만 남습니다.
+    //
+    // ⚠️ 예전에 두 파일이 "이 저장소는 box-shadow 가 0건" 이라고 적어
+    // 뒀는데, 셸을 만들며 장식용 그림자가 생겨 **그 문장이 거짓이
+    // 됐습니다.** 개수를 세는 규칙은 이렇게 낡습니다. 지켜야 하는 것은
+    // 개수가 아니라 **쓰임**이라, 그것을 봅니다.
+    const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const offenders: string[] = [];
+    for (const rule of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const selector = (rule[1] as string).trim();
+      if (!/\b(input|textarea|select|button)\b/.test(selector)) continue;
+      if (/box-shadow\s*:/.test(rule[2] as string)) offenders.push(selector);
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '컨트롤에 그림자를 걸었습니다 — 경계는 `--line-strong` 선 하나가 말합니다',
+    );
+  });
+});
+
 describe('상태 화면 (지시서 §7)', () => {
   /** 목록을 **비동기로 채우는** 그릇. 화면과 그 그릇의 id. */
   const ASYNC_CONTAINERS: [string, string][] = [
-    ['home.ts', 'projects'],
-    ['contributions.ts', 'members'],
-    ['kanban.ts', 'board'],
-    ['review.ts', 'list'],
-    ['lobby.ts', 'roster'],
+    ['home.tsx', 'projects'],
+    ['contributions.tsx', 'members'],
+    ['kanban.tsx', 'board'],
+    ['review.tsx', 'list'],
+    ['lobby.tsx', 'roster'],
   ];
 
   /**
@@ -1857,6 +2700,26 @@ describe('상태 화면 (지시서 §7)', () => {
     strictEqual(dangling.join(', '), '');
   });
 
+  /**
+   * ⚠️ **요구는 하나인데 모양이 둘이었습니다.**
+   *
+   * 요구: 늦게 켜고(200ms) · 켜는 것은 뼈대이고 · 반드시 끈다.
+   *
+   * 명령형 화면은 그릇을 직접 붙잡았습니다 — `showSkeleton(el, …)` /
+   * `clearSkeleton(el)`. React 화면은 그릇을 못 만집니다(다음 렌더에
+   * 지워집니다). 그래서 같은 일을 깃발과 JSX 로 합니다.
+   *
+   * 검사를 헬퍼 **이름**으로 하고 있었더니, 화면 하나를 React 로 옮기는
+   * 순간 규칙이 그 화면에서 통째로 눈을 감았습니다 — `.tsx` 를 못 보던
+   * 것과 똑같은 부류입니다. 그래서 **요구**를 모양별로 쟀습니다.
+   *
+   * ⚠️ 그리고 이제 **명령형 갈래를 지웠습니다.** 목록을 비동기로 채우는
+   * 화면 다섯이 전부 React 로 옮겨 가면서 `showSkeleton`·`clearSkeleton`
+   * 을 부르는 곳이 0곳이 됐고, 그 둘을 지웠습니다. 갈래를 남겨 두면
+   * **없는 함수를 요구하는 규칙**이 됩니다 — 다음 사람이 그걸 살아 있는
+   * 길로 읽습니다.
+   */
+
   it('⭐ 목록을 비동기로 채우는 화면은 로딩 표시를 **켠다**', () => {
     // 이 저장소의 대표 실패 방식: 맞는 모듈을 만들어 놓고 아무도
     // 부르지 않는 것 (결함 47). 그러니 모듈이 있는지가 아니라
@@ -1864,8 +2727,15 @@ describe('상태 화면 (지시서 §7)', () => {
     const offenders: string[] = [];
     for (const [name] of ASYNC_CONTAINERS) {
       const code = codeOf(readFileSync(join(DEMO, name), 'utf8'));
+      // 늦게 켠다.
       if (!/whileLoading\(/.test(code)) offenders.push(`${name} → whileLoading 을 안 부름`);
-      if (!/showSkeleton\(/.test(code)) offenders.push(`${name} → showSkeleton 을 안 부름`);
+      // 켜는 것이 **뼈대**인가. 직접 그리는 대신 같은 모듈을 씁니다 —
+      // 두 벌이 되면 한쪽만 고쳐집니다.
+      if (!/from '\.\.\/lib\/ui\/skeleton\.ts'/.test(code)) {
+        offenders.push(`${name} → 스켈레톤 모듈을 안 씀`);
+      }
+      // 낭독기 쪽 짝. `showSkeleton` 이 대신 달아 주던 것입니다.
+      if (!/aria-busy/.test(code)) offenders.push(`${name} → aria-busy 를 안 담`);
     }
     strictEqual(offenders.join(', '), '');
   });
@@ -1875,9 +2745,20 @@ describe('상태 화면 (지시서 §7)', () => {
     const offenders: string[] = [];
     for (const [name] of ASYNC_CONTAINERS) {
       const code = codeOf(readFileSync(join(DEMO, name), 'utf8'));
-      const on = [...code.matchAll(/showSkeleton\(/g)].length;
-      const off = [...code.matchAll(/clearSkeleton\(/g)].length;
-      if (off < on) offenders.push(`${name} → 켬 ${on} · 끔 ${off}`);
+      {
+        // `whileLoading(work, show, hide)` 의 **인자 안에서** 짝을 봅니다.
+        // 파일 전체를 훑으면 아무 데나 있는 `setX(false)` 가 짝인 척합니다.
+        for (const args of callArgs(code, 'whileLoading')) {
+          const on = [...args.matchAll(/\bset([A-Z]\w*)\(true\)/g)].map((m) => m[1] as string);
+          const off = new Set(
+            [...args.matchAll(/\bset([A-Z]\w*)\(false\)/g)].map((m) => m[1] as string),
+          );
+          if (on.length === 0) offenders.push(`${name} → whileLoading 이 아무것도 안 켬`);
+          for (const flag of on) {
+            if (!off.has(flag)) offenders.push(`${name} → set${flag}(true) 의 끄는 짝이 없다`);
+          }
+        }
+      }
     }
     strictEqual(offenders.join(', '), '');
   });
@@ -1898,15 +2779,36 @@ describe('상태 화면 (지시서 §7)', () => {
     // `failureHtml({retry: true})` 는 버튼을 그리기만 합니다. 안 이으면
     // 눌러도 아무 일이 안 일어나고, 사람은 화면이 더 고장 났다고
     // 생각합니다 — 만들어 놓고 안 부르는 그 방식 그대로입니다.
+    //
+    // ⚠️ React 화면은 **직접 안 잇습니다.** 공용 `RawHtml` 에 `onRetry` 를
+    // 넘기고, 그 조각이 버튼을 찾아 붙입니다. 화면마다 다시 이으면 두
+    // 벌이 되고, 두 벌이면 한쪽만 고쳐집니다.
+    //
+    // 그래서 넘기는 것도 이었다고 봅니다 — 대신 **넘겨받는 쪽이 정말
+    // 잇는지**를 아래에서 따로 못 박습니다. 안 그러면 `onRetry` 라고
+    // 쓰기만 해도 통과하는 빈 규칙이 됩니다.
     const offenders: string[] = [];
     for (const { name, source } of demoFiles()) {
       const code = codeOf(source);
       if (!/retry:\s*true/.test(code)) continue;
-      if (!/querySelector<HTMLButtonElement>\('\.retry'\)|\.retry'\)/.test(code)) {
-        offenders.push(name);
-      }
+      if (!/\.retry'\)/.test(code) && !/onRetry=/.test(code)) offenders.push(name);
     }
     strictEqual(offenders.join(', '), '');
+
+    // ⚠️ 처음에는 `.retry')` 와 `onRetry()` 둘만 봤습니다. 그랬더니
+    // **`addEventListener` 줄을 통째로 지워도 통과했습니다** — 재료는
+    // 그대로 있고 잇는 동작만 사라진 것을 못 봤습니다. 심어서 알았습니다.
+    const parts = codeOf(readFileSync(join(DEMO, 'parts.tsx'), 'utf8'));
+    const wires =
+      /\.retry'\)/.test(parts) &&
+      /onRetry\(\)/.test(parts) &&
+      /addEventListener\('click'/.test(parts);
+    strictEqual(
+      wires,
+      true,
+      '`parts.tsx` 의 `RawHtml` 이 [다시 불러오기] 를 안 잇습니다 — ' +
+        '넘긴 화면들이 전부 헛돕니다',
+    );
   });
 
   it('⭐ 스켈레톤이 쓰는 클래스가 공용 CSS 에 **정의돼 있다**', () => {
@@ -2000,7 +2902,7 @@ describe('상태 화면 (지시서 §7)', () => {
     // 그대로 복사하면 클립보드에 문자열 `(없음)` 이 들어가고 버튼은
     // **"복사됨"** 이라고 말합니다. 받은 사람은 그걸 참가 칸에 넣고
     // "코드가 없습니다" 를 보고 **자기를 의심합니다.**
-    const src = codeOf(readFileSync(join(DEMO, 'project.ts'), 'utf8'));
+    const src = codeOf(demoSource('project') ?? '');
     strictEqual(
       /writeText\(\s*\$\('code'\)/.test(src),
       false,
@@ -2013,7 +2915,7 @@ describe('상태 화면 (지시서 §7)', () => {
     );
     // 코드가 없으면 누를 수 없어야 합니다.
     strictEqual(
-      /disabled\s*=\s*inviteCode === null/.test(src),
+      /disabled\s*=\s*\{?\s*inviteCode === null/.test(src),
       true,
       '코드가 없을 때 복사 버튼을 막지 않습니다',
     );
@@ -2028,7 +2930,7 @@ describe('상태 화면 (지시서 §7)', () => {
     // ⚠️ 이걸 되돌려 봤을 때 **번들 신선도 테스트만** 깨졌습니다.
     // 그건 "빌드를 안 했다" 는 뜻이고 의미 검사가 아닙니다. tsc 의
     // 미사용 import 경고도 카드가 무엇을 그리는지는 안 봅니다.
-    const card = codeOf(readFileSync(join(DEMO, 'contributions.ts'), 'utf8'));
+    const card = codeOf(demoSource('contributions') ?? '');
     strictEqual(
       /roleOf\(/.test(card),
       true,
@@ -2045,9 +2947,10 @@ describe('상태 화면 (지시서 §7)', () => {
     // 가입·초대가 `developer: 1.0` 을 하드코딩하고 바꿀 자리가 없었습니다.
     // 그래서 기획자·디자이너 프로파일이 도달 불가였고, 문서만 쓴 사람이
     // 개발자 가중치로 계산돼 이유 없이 낮게 나왔습니다 — 오류는 안 납니다.
-    const html = readFileSync(join(PUBLIC, 'project.html'), 'utf8');
-    strictEqual(html.includes('id="roles"'), true, '역할 칸이 없습니다');
-    strictEqual(html.includes('id="save-roles"'), true, '저장 버튼이 없습니다');
+    // ⚠️ HTML 에서만 찾으면 React 로 옮긴 화면에서 헛돕니다 — 요구는
+    // "정할 자리가 있는가" 이지 "어느 파일에 적혀 있는가" 가 아닙니다.
+    strictEqual(screenHas('project', 'id="roles"'), true, '역할 칸이 없습니다');
+    strictEqual(screenHas('project', 'id="save-roles"'), true, '저장 버튼이 없습니다');
 
     const callers = demoFiles().filter(({ source }) =>
       /members\/me`?,/.test(codeOf(source)),
@@ -2073,8 +2976,12 @@ describe('상태 화면 (지시서 §7)', () => {
     );
 
     // 확정 버튼도 있어야 누를 수 있습니다.
-    const html = readFileSync(join(PUBLIC, 'contributions.html'), 'utf8');
-    strictEqual(html.includes('id="confirm"'), true, '확정 버튼이 없습니다');
+    //
+    // ⚠️ **HTML 에서만 찾으면 안 됩니다.** 화면을 React 로 옮기면 그
+    // 버튼은 `.tsx` 안으로 들어가고, 요구는 하나도 안 바뀌었는데 이
+    // 검사만 터집니다 — 이번 이전에서 실제로 그랬습니다. 요구는 "누를
+    // 버튼이 있는가" 이지 "어느 파일에 적혀 있는가" 가 아닙니다.
+    strictEqual(screenHas('contributions', 'id="confirm"'), true, '확정 버튼이 없습니다');
   });
 
   it('⭐ 3단계 동의 ②③ 을 **묻고 보낸다** (docs/07 §2.3)', () => {
@@ -2084,16 +2991,15 @@ describe('상태 화면 (지시서 §7)', () => {
     // 결국 아무도 거부할 수 없었기 때문입니다.
     //
     // 존재가 아니라 **호출**을 셉니다 (결함 47·63·감사 #8 교훈).
-    const lobbyHtml = readFileSync(join(PUBLIC, 'lobby.html'), 'utf8');
     for (const id of ['keep-audio', 'keep-voiceprint']) {
       strictEqual(
-        lobbyHtml.includes(`id="${id}"`),
+        screenHas('lobby', `id="${id}"`),
         true,
         `로비에 ${id} 체크박스가 없습니다 — 물어보지 않으면 거부할 수 없습니다`,
       );
     }
 
-    const lobbyTs = codeOf(readFileSync(join(DEMO, 'lobby.ts'), 'utf8'));
+    const lobbyTs = codeOf((demoSource('lobby') ?? ''));
     for (const type of ['raw_audio_retention', 'voiceprint_storage']) {
       strictEqual(
         lobbyTs.includes(type),
@@ -2272,5 +3178,112 @@ describe('상태 화면 (지시서 §7)', () => {
     for (const selector of ['.empty-state', '.failure-state']) {
       strictEqual(css.includes(selector), true, `${selector} 이 app.css 에 없습니다`);
     }
+  });
+});
+
+describe('문서 참조', () => {
+  const DOCS = join(ROOT, '..', 'docs');
+
+  /** `docs/19` → 그 번호로 시작하는 실제 파일. */
+  const docFile = (n: string): string | null =>
+    readdirSync(DOCS).find((name) => name.startsWith(`${n}-`)) ?? null;
+
+  /**
+   * 그 문서가 실제로 가진 절 번호. `## 24. 제목` · `### 24.1 제목` 둘 다.
+   *
+   * ⚠️ **표제 앞의 기호를 넘겨야 합니다.** 처음에는 `^#+ (\d+)` 로 봤다가
+   * `docs/11` 의 `### ⚠️ 2. MinIO는…` 을 통째로 놓쳤고, **멀쩡한 참조
+   * 둘을 끊어졌다고 보고할 뻔했습니다.** 이 저장소에서 네 번째입니다 —
+   * 새 검사 도구는 자기가 먼저 틀립니다.
+   *
+   * 기호만 넘깁니다. `## 함정 4개` 처럼 **글자로 시작하는** 표제는 절
+   * 번호가 없는 것으로 봅니다 — 그 `4` 는 절 번호가 아니라 개수입니다.
+   */
+  function sections(file: string): Set<string> {
+    const text = readFileSync(join(DOCS, file), 'utf8');
+    const found = new Set<string>();
+    for (const [, heading] of text.matchAll(/^#{2,4}\s+(.*)$/gm)) {
+      const n = /^(?:[^\p{L}\p{N}]+\s*)*(\d+(?:\.\d+)*)(?![\p{L}\p{N}])/u.exec(heading as string);
+      if (n !== null) found.add(n[1] as string);
+    }
+    return found;
+  }
+
+  /**
+   * 참조를 적을 수 있는 곳 — **소스와 문서 전부.**
+   *
+   * ⚠️ 오랫동안 `frontend/` 만 봤습니다. 백엔드 파이썬과 문서끼리의 참조는
+   * 아무도 안 봤다는 뜻입니다. 재 보니 끊어진 것은 0건이었지만, **0건인
+   * 것과 안 보는 것은 다릅니다** — 안 보는 동안 끊어져도 티가 안 납니다.
+   */
+  function referencingFiles(): { rel: string; text: string }[] {
+    const out: { rel: string; text: string }[] = [];
+    const walk = (dir: string, prefix: string, keep: RegExp): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name === '__pycache__') continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full, `${prefix}${entry.name}/`, keep);
+        else if (keep.test(entry.name)) {
+          out.push({ rel: `${prefix}${entry.name}`, text: readFileSync(full, 'utf8') });
+        }
+      }
+    };
+    const web = /\.(tsx?|css|html|mts)$/;
+    walk(join(ROOT, 'src'), 'src/', web);
+    walk(PUBLIC, 'public/', web);
+    walk(join(ROOT, '..', 'backend'), 'backend/', /\.py$/);
+    walk(DOCS, 'docs/', /\.md$/);
+    return out;
+  }
+
+  it('⭐ 소스가 가리키는 `docs/NN §M` 이 실제로 있다', () => {
+    // ⚠️ **적어 놓고 안 만든 절**이 실제로 있었습니다 — 셸 전환 문서의
+    // 26·27 번 절을 코드 여섯 곳에서 가리키는데 그 문서는 23 에서
+    // 끝났습니다. 옮기면서 "여기 쓸 것" 이라고 미리 번호를 적어 두고,
+    // 정작 문서에는 다른 번호로 쓴 것입니다.
+    //
+    // (여기에 그 참조를 **예시로 적지 않습니다.** 적으면 이 규칙이
+    //  자기 설명에 걸립니다 — 이 파일이 `codeOf` 를 만든 이유입니다.)
+    //
+    // 이 저장소가 반복해 당한 방식 그대로입니다 — **가리키는 곳이 없는
+    // 안내.** 오류는 안 나고, 읽는 사람만 문서를 뒤지다 포기합니다.
+    const cache = new Map<string, Set<string>>();
+    const dangling: string[] = [];
+    for (const { rel, text } of referencingFiles()) {
+      // ⚠️ 세는 말이 뒤에 붙은 숫자는 **절 번호가 아닙니다.**
+      //    `docs/08 §9주차` 는 "그 문서의 9주차" 라는 뜻인데, 이걸 §9 로 읽어
+      //    "없는 절" 로 잡을 뻔했습니다 — 없는 결함을 만드는 쪽입니다.
+      const REF = /docs\/(\d{2}) §(\d+(?:\.\d+)*)(?!주차|개|건|명|번째|장)/g;
+      for (const [, doc, section] of text.matchAll(REF)) {
+        const file = docFile(doc as string);
+        if (file === null) {
+          dangling.push(`${rel} → docs/${doc as string} 이라는 문서가 없다`);
+          continue;
+        }
+        if (!cache.has(file)) cache.set(file, sections(file));
+        if (!cache.get(file)?.has(section as string)) {
+          dangling.push(`${rel} → docs/${doc as string} §${section as string}`);
+        }
+      }
+    }
+    strictEqual([...new Set(dangling)].join(', '), '');
+  });
+
+  it('⭐ IA 문서가 화면을 하나도 빠뜨리지 않는다', () => {
+    // ⚠️ `docs/13` 이 **일곱 개** 기준에서 멈춰 있었습니다. 그 뒤에 만든
+    // `project.html`(왼쪽 열 `설정` 탭이 가리키는 상시 노출 화면)과
+    // `call.html`(로비에서 여는 통화)이 그림에도 표에도 없었습니다.
+    //
+    // IA 문서가 실제 IA 를 안 담으면 다음 사람은 화면을 또 하나 늘립니다 —
+    // 그 문서가 경고하는 바로 그 일("만들 때마다 하나씩 늘어 막다른 길이
+    // 됨")이 문서 자신 때문에 반복되는 것입니다.
+    //
+    // 화면을 **세는 쪽이 문서가 아니라 디렉터리**여야 합니다.
+    const doc = readFileSync(join(DOCS, '13-화면-구조.md'), 'utf8');
+    const missing = readdirSync(PUBLIC)
+      .filter((name) => name.endsWith('.html'))
+      .map((name) => name.replace(/\.html$/, ''))
+      .filter((stem) => !doc.includes(`\`${stem}\``) && !doc.includes(`${stem}.html`));
+    strictEqual(missing.join(', '), '', 'docs/13 에 없는 화면입니다 — 그림과 §2 표에 넣으세요');
   });
 });

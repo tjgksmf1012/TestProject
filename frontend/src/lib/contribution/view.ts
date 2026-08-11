@@ -138,17 +138,100 @@ export function describeRange(member: MemberScore): string {
   return `${low}~${high}%`;
 }
 
-/**
- * 구간 막대의 위치와 폭 (0~100 백분율).
+/*
+ * ⚠️ `rangeBar()` 를 **지웠습니다.**
  *
- * 폭을 최소 1% 로 잡습니다. 0 이면 막대가 사라져서 **구간이 아예 없는 것처럼**
- * 보이는데, 구간이 좁은 것과 구간이 없는 것은 다릅니다.
+ * 구간의 절대 위치(`left`)와 폭을 주던 함수인데, 화면이 위치를 그리지
+ * 않기로 하면서 부르는 곳이 0곳이 됐습니다 (아래 `uncertaintySpans` 참고).
+ *
+ * 처음에는 "다시 그릴 일이 생기면 여기 있습니다" 라며 남겨 뒀습니다.
+ * `guards.test.ts` 의 "lib 의 export 를 화면이 실제로 부른다" 가 그걸
+ * 잡았고, 그 판단이 맞습니다 — 이 저장소의 대표 결함이 **만들어 놓고
+ * 아무도 안 부르는 것**이고, "나중에 쓸지도" 는 그 결함을 남겨 두는
+ * 가장 흔한 변명입니다. 필요해지면 그때 다시 씁니다. git 이 기억합니다.
  */
-export function rangeBar(member: MemberScore): { left: number; width: number } {
-  const low = clamp(member.range_low, 0, 100);
-  const high = clamp(member.range_high, 0, 100);
-  const left = Math.min(low, high);
-  return { left, width: Math.max(Math.abs(high - low), 1) };
+
+/** 한 사람의 "얼마나 모르는가". */
+export interface UncertaintySpan {
+  userId: number;
+  /** 구간의 폭 (%p). 클수록 덜 안다 */
+  points: number;
+  /** 팀에서 가장 넓은 구간 대비 (0~100). 막대 길이로 쓴다 */
+  ratio: number;
+}
+
+/**
+ * 구간의 **폭**만 뽑는다 — 값이 아니라 **우리 측정의 불확실성**.
+ *
+ * ## 이 막대가 비교하는 것은 사람이 아닙니다
+ *
+ * 길이가 긴 사람은 "기여가 큰 사람" 이 아니라 **"우리가 가장 모르는
+ * 사람"** 입니다. 그래서 이 그림은 팀을 줄 세우지 않고, 오히려 어디를
+ * 더 재야 하는지를 가리킵니다.
+ *
+ * ⚠️ 길이는 **팀에서 가장 넓은 구간** 기준입니다. 0~100 을 쓰면 폭 12%p 와
+ * 20%p 가 둘 다 짧은 막대가 되어 차이가 안 보입니다 — 그러면 그릴 이유가
+ * 없습니다.
+ *
+ * ⚠️ 전원이 폭 0 이면(완전히 확정된 이상적인 경우) **전부 0** 을 돌려
+ * 줍니다. 그때 100 을 주면 "다 모른다" 로 보이는데 정반대입니다.
+ */
+export function uncertaintySpans(members: readonly MemberScore[]): UncertaintySpan[] {
+  const points = members.map((m) => Math.abs(clamp(m.range_high, 0, 100) - clamp(m.range_low, 0, 100)));
+  const widest = Math.max(0, ...points);
+  return members.map((member, i) => ({
+    userId: member.user_id,
+    points: points[i] ?? 0,
+    ratio: widest === 0 ? 0 : Math.round(((points[i] ?? 0) / widest) * 100),
+  }));
+}
+
+/**
+ * 모르는 폭을 **셀 수 있는 점**으로 (docs/19 §25).
+ *
+ * ## 왜 막대가 아니라 점인가
+ *
+ * 불확실성 시각화 연구(CHI 2016·2018, 그리고 임상 5포맷 비교)가 한결같이
+ * 말하는 것은 **빈도 표현(frequency framing)이 연속 표현보다 정확하게
+ * 읽힌다**는 것입니다. 사람은 길이를 눈대중하는 것보다 개수를 세는 쪽을
+ * 훨씬 잘합니다.
+ *
+ * ## ⚠️ 그런데 quantile dotplot 을 그대로 가져오지 않았습니다
+ *
+ * 원래 형태는 **값 축 위에** 점을 뿌립니다. 이 화면에서 그러면 세 사람의
+ * 점이 같은 0~100 축에 세로로 정렬되고, 그건 이 저장소가 이미 두 번
+ * 걷어낸 **순위표**입니다 (기여도 막대의 절대 위치 · 카테고리 막대).
+ * 게다가 우리에게는 분포가 없습니다 — 구간의 양 끝뿐이라, 점을 뿌리려면
+ * **분포 모양을 지어내야** 합니다. 그건 이 저장소가 금지한 것입니다.
+ *
+ * 그래서 연구가 말하는 **기제**만 가져왔습니다: 값을 **세어지는 양**으로
+ * 바꾸되, 위치가 아니라 **개수**로만 씁니다.
+ *
+ *     점 하나 = 4%p 의 "모름"
+ *
+ * ⚠️ 예전 막대는 **팀에서 가장 넓은 구간 대비** 길이였습니다. 그러면
+ * 같은 20%p 라도 팀 구성에 따라 길이가 달라지고, 긴 막대가 "남보다 더
+ * 모른다" 로 읽힙니다. 점은 **절대량**입니다 — 다섯 개면 20%p 이고,
+ * 옆 사람이 몇 개든 상관없습니다.
+ */
+export const POINTS_PER_DOT = 4;
+
+/** 한 줄에 그릴 점 개수. 0 이면 그릴 것이 없다는 뜻입니다. */
+export function uncertaintyDots(points: number): number {
+  if (!Number.isFinite(points) || points <= 0) return 0;
+  // ⚠️ **0 으로 내림하지 않습니다.** 폭이 1%p 라도 "모르는 게 있다" 는
+  // 사실이고, 점이 0 개면 화면에서 그것이 **완전히 확정** 으로 보입니다.
+  // 반올림 대신 올림인 이유가 그것입니다.
+  const dots = Math.ceil(points / POINTS_PER_DOT);
+  // 한 줄에 스물다섯이면 100%p — 그보다 넓을 수 없습니다(구간이 0~100).
+  return Math.min(dots, Math.ceil(100 / POINTS_PER_DOT));
+}
+
+/** 점 개수를 사람 말로. 화면이 숫자를 지어내지 않게 여기서 만듭니다. */
+export function uncertaintyDotsNote(points: number): string {
+  const dots = uncertaintyDots(points);
+  if (dots === 0) return '구간이 없습니다 — 이 값은 확정적입니다';
+  return `모르는 폭 ${Math.round(points)}%p · 점 하나가 ${POINTS_PER_DOT}%p`;
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -124,7 +124,27 @@ const STATE_TEXT: Record<PeerState, { label: string; tone: PeerView['tone'] }> =
   // 다시 걸고, 그러면 진짜로 끊깁니다.
   disconnected: { label: '신호가 불안정합니다', tone: 'warn' },
   failed: { label: '연결 실패 — 네트워크가 막고 있을 수 있습니다', tone: 'bad' },
-  closed: { label: '나갔습니다', tone: 'bad' },
+  // ⚠️ **정상 종료를 오류색으로 칠하고 있었습니다.** `closed` 는 사람이
+  // 스스로 나간 것이지 실패가 아닙니다. `failed`("연결 실패")와 같은
+  // 빨강을 주면 그 둘이 화면에서 구분되지 않고, 빨강은 "네가 뭘
+  // 잘못했다" 로 읽힙니다 (불변식 ③ · 바로 위 `disconnected` 와 같은 이유).
+  //
+  // ⚠️⚠️ 그리고 **이 줄은 화면에 나올 수 없습니다.** `connectionState` 가
+  // `closed` 가 되는 길은 `pc.close()` 뿐인데, **`close()` 는
+  // `connectionstatechange` 를 쏘지 않습니다.** 브라우저로 쟀습니다 —
+  // 실제로 붙은 연결에서 `connecting`·`connected` 는 잡히는데(대조군),
+  // `close()` 뒤에는 상태가 `closed` 인 채로 이벤트가 **0건**입니다.
+  // 그래서 `call.ts` 의 `states.set(userId, pc.connectionState)` 가
+  // 이 값을 쓰는 일이 없고, `applyRoster` 는 나간 사람을 `states` 에서
+  // 지웁니다. 나가면 줄이 그냥 사라집니다.
+  //
+  // 항목을 지우지 않는 이유는 `Record<PeerState, …>` 가 키를 요구하고
+  // `PeerState` 는 `RTCPeerConnection.connectionState` 를 그대로 본뜬
+  // 것이기 때문입니다. **살릴 생각이라면** `render()` 가 `roster` 대신
+  // `roster ∪ states` 를 훑게 하고, `close()` 가 이벤트를 안 쏘므로
+  // `applyRoster` 에서 직접 `states.set(user_id, 'closed')` 를 해야
+  // 합니다 — 지금은 `states.delete` 를 합니다.
+  closed: { label: '나갔습니다', tone: 'warn' },
 };
 
 export function describePeer(

@@ -35,10 +35,12 @@ from teamflow.audio import assembly
 from teamflow.audio.chunk_store import ChunkStore
 from teamflow.config import get_settings
 from teamflow.db import models as m
+from teamflow.db import vocab
 
 logger = logging.getLogger(__name__)
 
-RECORDING_CONSENT = "recording"
+#: 없으면 녹음 자체를 시작할 수 없는 동의. 값은 `db/vocab.py` 가 정합니다.
+RECORDING_CONSENT = str(vocab.ConsentType.RECORDING)
 
 
 class ConsentError(Exception):
@@ -222,7 +224,12 @@ def require_project_member(session: Session, meeting_id: int, user_id: int) -> N
 
 
 #: 3단계 동의. ②③ 을 거부해도 서비스는 동작해야 한다 (필요 최소 수집 원칙).
-CONSENT_TYPES = ("recording", "raw_audio_retention", "voiceprint_storage")
+#:
+#: ⚠️ 목록을 여기 손으로 적지 않는다 — `db/vocab.py` 가 원본이고 CHECK
+#: 제약도 거기서 나온다. 손으로 적어 두면 서비스가 받아 준 값을 데이터베이스가
+#: 거절하는 (또는 그 반대의) 상태가 생기고, 그건 **법적 요구가 갈라지는**
+#: 것이다 — 사람은 동의했다고 알고 있는데 기록이 없다.
+CONSENT_TYPES = vocab.consent_values()
 
 
 def submit_consent(

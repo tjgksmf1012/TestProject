@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from teamflow.db import models as m
+from teamflow.db import vocab
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +200,7 @@ def purge_unconsented_audio(
 
     refused_users = select(m.RecordingConsent.user_id).where(
         m.RecordingConsent.meeting_id == meeting_id,
-        m.RecordingConsent.consent_type == "raw_audio_retention",
+        m.RecordingConsent.consent_type == vocab.ConsentType.RAW_AUDIO_RETENTION,
         m.RecordingConsent.consented.is_(False),
     )
     refused_tracks = select(m.MeetingTrack.id).where(

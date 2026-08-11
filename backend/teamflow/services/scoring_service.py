@@ -30,6 +30,7 @@ from teamflow.contribution.profiles import (
 )
 from teamflow.contribution.scoring import MeasurementGap, TeamScoreResult, score_team
 from teamflow.db import models as m
+from teamflow.db import vocab
 from teamflow.jobs import retention
 from teamflow.meeting import utterance_types as ut
 from teamflow.meeting.utterance_types import CLASSIFIER_MODEL
@@ -196,13 +197,13 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
         )
         or 0
     )
-    # 화자가 확정된 발화 — 멀티트랙(track)이거나 사람이 지정(manual)한 것.
-    # diarization 은 SPEAKER_XX 미매핑이라 불확실로 본다. docs/06 §4
+    # 화자가 확정된 발화. 무엇이 확정인가는 `db/vocab.CERTAIN` 한 곳에만
+    # 적혀 있다 — 여기와 `meeting_pipeline` 에 같은 튜플이 두 벌 있었다.
     utterances_certain = (
         session.scalar(
             select(func.count(m.Utterance.id)).where(
                 m.Utterance.meeting_id.in_(meeting_ids),
-                m.Utterance.speaker_source.in_(("track", "manual")),
+                m.Utterance.speaker_source.in_(vocab.certain_values()),
             )
         )
         or 0

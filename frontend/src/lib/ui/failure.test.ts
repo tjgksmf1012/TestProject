@@ -91,7 +91,22 @@ describe('showNote (결함 92)', () => {
     const el = slot();
     showNote(el, '복사하지 못했습니다');
     showNote(el, '');
-    strictEqual(el.hidden, true);
+    strictEqual(el.textContent, '');
     strictEqual(el.classes.has('bad'), false);
+  });
+
+  it('⭐ **`hidden` 으로 감추지 않는다** — 낭독기가 못 듣습니다', () => {
+    // 이 자리들은 `role="status"` 를 답니다. 낭독기는 **이미 있던** live
+    // region 이 바뀔 때 읽어 주는데, `hidden` 은 요소를 접근성 트리에서
+    // 빼 버립니다 — 안내가 뜰 때마다 region 이 새로 생기는 셈입니다.
+    //
+    // 자리를 안 차지하는 일은 CSS 가 합니다
+    // (`app.css` 의 `[role='status']:empty { margin: 0 }`).
+    const el = slot();
+    strictEqual(el.hidden, true, '대역은 마크업처럼 hidden 으로 시작합니다');
+    showNote(el, '복사했습니다', 'plain');
+    strictEqual(el.hidden, false, '마크업의 hidden 을 걷어야 합니다');
+    showNote(el, '');
+    strictEqual(el.hidden, false, '지운 뒤에도 자리는 접근성 트리에 남아야 합니다');
   });
 });

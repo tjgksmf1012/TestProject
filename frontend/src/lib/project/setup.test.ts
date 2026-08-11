@@ -183,8 +183,14 @@ describe('githubLoginStatus', () => {
     strictEqual(githubLoginStatus('minsu-dev'), '지금 minsu-dev로 이어져 있습니다.');
   });
 
-  it('⭐ 조사를 **계산**한다 — `v` 는 받침 없음, `7` 은 받침 있음', () => {
-    // 손으로 `로` 를 박아 두면 `hong7` 이 "hong7로" 가 됩니다.
-    strictEqual(githubLoginStatus('hong7'), '지금 hong7으로 이어져 있습니다.');
+  it('⭐ 조사를 **계산**한다 — 끝소리가 무엇이냐로 갈린다', () => {
+    // ⚠️ 여기는 `hong7` 이 "hong7으로" 라고 적혀 있었습니다. **틀린
+    // 한국어였습니다.** `7` 은 "칠" 이고 칠은 **ㄹ 받침**이라 `로` 입니다 —
+    // 받침이 없을 때만 `로` 인 줄 알고 적은 것입니다.
+    //
+    // 같은 착각이 칸반 버튼에 "할 일으로" 를 띄우고 있었습니다.
+    strictEqual(githubLoginStatus('hong7'), '지금 hong7로 이어져 있습니다.'); // 칠 → ㄹ
+    strictEqual(githubLoginStatus('hong3'), '지금 hong3으로 이어져 있습니다.'); // 삼 → ㅁ
+    strictEqual(githubLoginStatus('minsu-dev'), '지금 minsu-dev로 이어져 있습니다.'); // 브이
   });
 });

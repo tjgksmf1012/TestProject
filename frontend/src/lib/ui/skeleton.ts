@@ -32,9 +32,9 @@
  *
  * ## ⚠️ 격자를 다시 선언하지 않습니다
  *
- * `#board` 는 이미 `class="board"` 이고 `#members` 는 이미
- * `class="score-grid"` 입니다. 스켈레톤이 그 클래스를 **또** 달면
- * 격자 안에 격자가 생겨, 카드 셋이 한 칸에 우겨넣어집니다.
+ * `#board` 는 이미 `class="board"` 입니다. 스켈레톤이 그 클래스를 **또**
+ * 달면 격자 안에 격자가 생겨, 카드 셋이 한 칸에 우겨넣어집니다.
+ * (`#members` 는 격자를 뗐습니다 — 판독 줄이 세로로 쌓입니다.)
  *
  * 그래서 겉껍질 `.sk-wrap` 은 `display: contents` 입니다 — 레이아웃에서
  * 사라지고, 안의 카드들이 **그릇의 격자에 직접** 놓입니다.
@@ -63,20 +63,24 @@ export function projectCards(count = 2): string {
 }
 
 /**
- * 기여도의 사람별 카드.
+ * 기여도의 사람별 **판독 줄**.
  *
- * 실제 카드는 이름 · 구간 문구 · **구간 막대** · 신뢰도 입니다.
- * 막대 자리를 비워 두는 것이 중요합니다 — 이 화면의 주인공이라,
- * 나중에 나타나면서 아래를 밀어내면 읽던 자리를 잃습니다.
+ * ⚠️ 예전에는 `class="card"` 였습니다. 화면이 카드에서 규칙선 줄로
+ * 바뀌었는데(docs/19 §16) 여기가 그대로였다면 **카드가 잠깐 떴다가
+ * 줄로 튀었을 것**입니다 — 이 파일이 막으려던 바로 그 모양입니다.
+ *
+ * 실제 줄은 네 칸입니다: 이름 · 구간 문구 · **모르는 폭 막대** · 근거.
+ * 막대 자리를 비워 두는 것이 중요합니다 — 나중에 나타나면서 아래를
+ * 밀어내면 읽던 자리를 잃습니다.
  */
 export function scoreCards(count = 3): string {
   const one =
-    '<article class="card">' +
-    bar(40, 'title') +
-    bar(64, 'line') +
-    bar(100, 'track') +
-    bar(34, 'line') +
-    '</article>';
+    '<div class="read">' +
+    `<div class="read-who">${bar(72, 'title')}</div>` +
+    `<div class="read-val">${bar(88, 'line')}</div>` +
+    `<div class="read-unc">${bar(100, 'track')}</div>` +
+    `<div class="read-why">${bar(90, 'line')}${bar(64, 'line')}</div>` +
+    '</div>';
   return wrap(one.repeat(Math.max(1, count)));
 }
 
@@ -119,31 +123,20 @@ export function rowItems(count = 3): string {
   ).join('');
 }
 
-/**
- * 그릇에 스켈레톤을 넣고 **기다리는 중**이라고 표시한다.
+/*
+ * ⚠️ **`showSkeleton`·`clearSkeleton` 을 지웠습니다.**
  *
- * ⚠️ `aria-busy` 를 짝지어 지우는 것이 `clearBusy` 입니다. 켜기만 하고
- * 안 끄면 낭독기는 내용이 도착한 뒤에도 계속 "바쁨" 이라고 말합니다.
+ * 그릇을 직접 붙잡아 `innerHTML` 을 갈아 끼우고 `aria-busy` 를 달아 주던
+ * 함수 둘입니다. 목록을 비동기로 채우는 화면 다섯이 전부 React 로
+ * 옮겨 가면서 **부르는 곳이 0곳**이 됐습니다 — React 는 그릇을 직접
+ * 만질 수 없습니다(다음 렌더에 지워집니다).
+ *
+ * 가드가 잡았습니다. 이 저장소가 반복해 당한 실패가 "만들어 놓고 아무도
+ * 안 부름" 이라, 죽은 채로 두면 다음 사람이 그걸 살아 있는 길로 읽습니다.
+ *
+ * 그 함수들이 들고 있던 판단은 두 가지였고 둘 다 남아 있습니다:
+ *   · `aria-busy` 를 짝지어 켜고 끄기 → 이제 화면이 JSX 로 답니다.
+ *     가드가 React 화면마다 `aria-busy` 를 요구합니다.
+ *   · **이미 진짜 내용이 들어와 있으면 지우지 않기** → React 에서는
+ *     애초에 일어나지 않습니다. 그릴 것이 오면 그것을 그립니다.
  */
-export function showSkeleton(element: HTMLElement, html: string): void {
-  element.setAttribute('aria-busy', 'true');
-  element.innerHTML = html;
-}
-
-/**
- * 스켈레톤을 걷어 낸다. 내용은 그리는 쪽이 채웁니다.
- *
- * ⚠️ **이미 진짜 내용이 들어와 있으면 손대지 않습니다.**
- *
- * 부르는 순서는 이렇습니다 — 받아 오기 → 스켈레톤 걷기 → 그리기.
- * 그런데 화면 하나가 순서를 어겨 스켈레톤이 떠 있는 동안 오류 문구를
- * 써 넣으면, 여기서 그걸 지웁니다. 그러면 실패한 화면이 **아무 말도
- * 없이 빈 채로** 남습니다 — 이 저장소가 반복해 당한 바로 그 모양입니다.
- * 그래서 우리가 넣은 것일 때만 지웁니다.
- */
-export function clearSkeleton(element: HTMLElement): void {
-  element.removeAttribute('aria-busy');
-  // 스켈레톤 조각은 전부 `sk` 로 시작하는 클래스를 답니다 —
-  // `sk-wrap`(겉껍질)·`sk-line`(줄)·`sk`(막대).
-  if (element.innerHTML.includes('class="sk')) element.innerHTML = '';
-}

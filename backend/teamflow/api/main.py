@@ -38,6 +38,7 @@ from teamflow.call import signaling as call_signaling_module
 from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
 from teamflow.db import session as db_session
+from teamflow.db import vocab
 from teamflow.db.session import get_db
 from teamflow.github import backfill as gh_backfill
 from teamflow.github import connection as gh_connection
@@ -53,6 +54,7 @@ from teamflow.services import (
     github_connection_service,
     progress_service,
     recording_service,
+    report_service,
     task_link_service,
     task_service,
 )
@@ -2134,6 +2136,111 @@ def list_meeting_members(
     return _project_members(session, meeting.project_id)
 
 
+class UtteranceOut(BaseModel):
+    """근거 발화 한 줄 — **원문과 그 원문을 얼마나 믿을 수 있는가**."""
+
+    id: int
+    start_ms: int
+    end_ms: int
+    text: str
+    speaker_id: int | None
+    # 이름을 같이 보냅니다. id 만 주면 화면이 명단을 또 받아 와야 하고,
+    # 그 명단이 낡으면 같은 발화에 다른 이름이 붙습니다.
+    speaker_name: str | None
+    # ⚠️ **이 둘을 빼면 안 됩니다.** 화자가 어떻게 정해졌는지가
+    # `track`(멀티트랙 확정)인지 `diarization`(미매핑)인지에 따라
+    # "누가 말했다" 의 무게가 완전히 다릅니다. 원문만 보여 주고 출처를
+    # 감추면, 추측한 화자를 사실처럼 읽게 됩니다.
+    speaker_source: str
+    speaker_confidence: float | None
+    is_overlap: bool
+    utterance_type: str | None
+
+
+@app.get("/api/meetings/{meeting_id}/utterances", response_model=list[UtteranceOut])
+def list_utterances(
+    meeting_id: int,
+    session: DbSession,
+    user: CurrentUser,
+    ids: str = "",
+) -> list[UtteranceOut]:
+    """근거 발화의 **원문**. 업무 후보의 `근거 #5` 를 눌렀을 때 펼칠 것.
+
+    ## 왜 이 엔드포인트가 필요했나
+
+    이 제품의 대표 주장은 "기여도 숫자에서 출발해 어느 회의 몇 번째
+    발언까지 거슬러 올라갈 수 있다" 입니다. 그런데 발화 **번호**는
+    후보에 실려 있었지만 그 번호로 **원문을 가져올 방법이 없었습니다** —
+    화면은 `근거 #5` 라고 적어 놓고 눌러도 아무 데도 못 갔습니다.
+    말은 하고 그 말을 지킬 자리를 안 준 것입니다.
+
+    ## `ids` 로만 가져옵니다
+
+    회의 전체 대본을 주지 않습니다. 40분 회의면 발화가 수백 개인데,
+    지금 필요한 것은 **이 후보의 근거 두세 개**입니다. 전체 대본을 보는
+    화면은 아직 없고, 없는 것을 위해 엔드포인트를 넓혀 두지 않습니다.
+
+    ⚠️ **못 찾은 id 를 조용히 버립니다** — 대신 화면이 알 수 있게
+    합니다. 셋을 물었는데 둘이 오면 하나는 이 회의에 없는 것이고,
+    그건 후보가 남의 회의 발화를 가리키고 있다는 뜻이라 **숨기면 안 되는
+    사실**입니다. 서버가 지어내서 채우지 않고, 화면이 세어서 말합니다.
+    """
+    _load_meeting_for(session, meeting_id, user)
+
+    wanted: list[int] = []
+    for raw in ids.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            wanted.append(int(raw))
+        except ValueError:
+            # 숫자가 아닌 것은 조용히 버리지 않고 막습니다. 오타 하나로
+            # 엉뚱한 결과를 받아 들고 "근거가 없다" 고 읽으면 안 됩니다.
+            raise HTTPException(
+                status_code=400, detail="ids는 쉼표로 구분한 정수여야 합니다"
+            ) from None
+    if not wanted:
+        return []
+    # 상한. 근거는 보통 한둘이고, 목록이 길면 그건 대본 전체를 떠 가려는
+    # 것입니다 — 그 화면은 아직 없습니다.
+    if len(wanted) > 50:
+        raise HTTPException(status_code=400, detail="한 번에 50개까지만 가져올 수 있습니다")
+
+    rows = (
+        session.query(m.Utterance)
+        .filter(m.Utterance.meeting_id == meeting_id, m.Utterance.id.in_(wanted))
+        .order_by(m.Utterance.start_ms, m.Utterance.id)
+        .all()
+    )
+
+    speaker_ids = {r.speaker_id for r in rows if r.speaker_id is not None}
+    names: dict[int, str] = {}
+    if speaker_ids:
+        names = {
+            u.id: u.name
+            for u in session.query(m.User).filter(m.User.id.in_(speaker_ids)).all()
+        }
+
+    return [
+        UtteranceOut(
+            id=r.id,
+            start_ms=r.start_ms,
+            end_ms=r.end_ms,
+            text=r.text,
+            speaker_id=r.speaker_id,
+            speaker_name=names.get(r.speaker_id) if r.speaker_id is not None else None,
+            speaker_source=r.speaker_source,
+            speaker_confidence=(
+                float(r.speaker_confidence) if r.speaker_confidence is not None else None
+            ),
+            is_overlap=r.is_overlap,
+            utterance_type=r.utterance_type,
+        )
+        for r in rows
+    ]
+
+
 @app.get("/api/meetings/{meeting_id}/candidates", response_model=list[CandidateOut])
 def list_candidates(
     meeting_id: int, session: DbSession, user: CurrentUser
@@ -2786,6 +2893,172 @@ def contributions(
             for ms in result.members.values()
         ],
         skipped_categories=[c.value for c in result.skipped_categories],
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 보고서 — 회의록 · 주간 · 최종
+# ══════════════════════════════════════════════════════════════
+
+
+class ReportOut(BaseModel):
+    id: int
+    report_type: str
+    meeting_id: int | None
+    period_start: datetime | None
+    period_end: datetime | None
+    generated_at: datetime
+    #: 블록 목록. 구조는 `teamflow/reports/__init__.py` 머리말에 있습니다.
+    content: dict[str, Any]
+
+
+class ReportSummary(BaseModel):
+    """목록용 — **내용은 안 실습니다.**
+
+    보고서 하나가 꽤 큽니다. 목록에 전부 실으면 화면이 안 쓸 것을 다
+    받습니다.
+    """
+
+    id: int
+    report_type: str
+    title: str
+    meeting_id: int | None
+    period_start: datetime | None
+    period_end: datetime | None
+    generated_at: datetime
+
+
+class GenerateReportIn(BaseModel):
+    """무엇을 만들 것인가.
+
+    ⚠️ `report_type` 을 문자열로 받되 **어휘 밖이면 거절**합니다. 여기서
+    느슨하게 받으면 CHECK 제약이 500 으로 튀어나옵니다 — 사용자에게는
+    "서버가 고장 났다" 로 보이는데 실제로는 잘못된 요청입니다.
+    """
+
+    report_type: str
+    period_start: datetime | None = None
+    period_end: datetime | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+def _report_summary(row: m.Report) -> ReportSummary:
+    return ReportSummary(
+        id=row.id,
+        report_type=row.report_type,
+        title=str(row.content.get("title", "")),
+        meeting_id=row.meeting_id,
+        period_start=row.period_start,
+        period_end=row.period_end,
+        generated_at=row.generated_at,
+    )
+
+
+@app.get("/api/projects/{project_id}/reports", response_model=list[ReportSummary])
+def list_reports(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> list[ReportSummary]:
+    """이 프로젝트의 보고서 목록. 새것부터."""
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+    return [_report_summary(row) for row in report_service.list_reports(session, project_id)]
+
+
+@app.get("/api/reports/{report_id}", response_model=ReportOut)
+def get_report(report_id: int, session: DbSession, user: CurrentUser) -> ReportOut:
+    report = session.get(m.Report, report_id)
+    if report is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "보고서를 찾을 수 없습니다")
+    _require_project_member(session, report.project_id, user)
+    return ReportOut(
+        id=report.id,
+        report_type=report.report_type,
+        meeting_id=report.meeting_id,
+        period_start=report.period_start,
+        period_end=report.period_end,
+        generated_at=report.generated_at,
+        content=report.content,
+    )
+
+
+@app.post(
+    "/api/projects/{project_id}/reports",
+    response_model=ReportOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_report(
+    project_id: int, body: GenerateReportIn, session: DbSession, user: CurrentUser
+) -> ReportOut:
+    """주간·최종 보고서를 만든다.
+
+    ⚠️ **다시 부르면 갈아끼웁니다.** 그래서 201 이지만 새 행이 안 생길 수
+    있습니다 — 쌓이는 것보다 이쪽이 맞습니다. 최종 보고서가 여러 벌 있으면
+    어느 것이 진짜인지 아무도 모릅니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    try:
+        report_type = vocab.ReportType(body.report_type)
+    except ValueError:
+        allowed = ", ".join(vocab.report_values())
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"모르는 보고서 종류입니다: {body.report_type} (가능한 것: {allowed})",
+        ) from None
+
+    try:
+        report = report_service.generate_period(
+            session,
+            project_id,
+            report_type,
+            period_start=body.period_start,
+            period_end=body.period_end,
+        )
+    except (report_service.ReportError, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    session.commit()
+    session.refresh(report)
+    return ReportOut(
+        id=report.id,
+        report_type=report.report_type,
+        meeting_id=report.meeting_id,
+        period_start=report.period_start,
+        period_end=report.period_end,
+        generated_at=report.generated_at,
+        content=report.content,
+    )
+
+
+@app.post(
+    "/api/meetings/{meeting_id}/minutes",
+    response_model=ReportOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_minutes(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> ReportOut:
+    """회의록을 만든다. 회의에 매이므로 회의 쪽 주소입니다."""
+    meeting = _load_meeting_for(session, meeting_id, user)
+    try:
+        report = report_service.generate_minutes(session, meeting.id)
+    except report_service.ReportError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    session.commit()
+    session.refresh(report)
+    return ReportOut(
+        id=report.id,
+        report_type=report.report_type,
+        meeting_id=report.meeting_id,
+        period_start=report.period_start,
+        period_end=report.period_end,
+        generated_at=report.generated_at,
+        content=report.content,
     )
 
 

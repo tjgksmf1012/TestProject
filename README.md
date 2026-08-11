@@ -86,7 +86,8 @@
 
 | 문서 | 내용 |
 |---|---|
-| [00. 제안서 검토](docs/00-제안서-TeamFlowAI-검토.md) | 「TEAMFLOW AI」 제안서 강점·문제점·수정 목록 ⭐ **여기부터** |
+| [00. 이 프로그램은 무엇인가](docs/00-이-프로그램은-무엇인가.md) | **비개발자용 설명** — 무엇을 하는 도구인지, 왜 이렇게 만들었는지 ⭐ **여기부터** |
+| [00. 제안서 검토](docs/00-제안서-TeamFlowAI-검토.md) | 「TEAMFLOW AI」 제안서 강점·문제점·수정 목록 |
 | [01. 사실검증](docs/01-사실검증-2026-08.md) | 원본 자료의 기술적 주장을 2026-08 기준으로 검증. 정정 13건 |
 | [02. 모델 선정과 VRAM 예산](docs/02-모델-선정과-VRAM-예산.md) | 10~16GB VRAM에서 실제로 무엇이 돌아가는가. 티어별 구성 |
 | [03. 시스템 아키텍처](docs/03-시스템-아키텍처.md) | FastAPI 단일 백엔드, GPU 배타 락, GitHub App |
@@ -99,11 +100,13 @@
 | [10. 열린 질문](docs/10-열린-질문.md) | 결정이 필요한 10가지 |
 | [11. 비용 제로 구성](docs/11-비용-제로-구성.md) | 전 구성요소 비용 감사, 함정 4개, 학생 무료 리소스 |
 | [12. CCTV 영상 기반 화자판정](docs/12-CCTV-영상-기반-화자판정.md) | 모드 C 법적·기술 검토, 모드 비교, 융합 설계 |
-| [13. 화면 구조 (IA)](docs/13-화면-구조.md) | 화면 일곱 개가 어떻게 이어지는가, 각 화면의 책임, 아직 없는 화면 |
+| [13. 화면 구조 (IA)](docs/13-화면-구조.md) | 화면 열 개가 어떻게 이어지는가, 각 화면의 책임, 아직 없는 화면 |
 | [15. PC 우선 방향](docs/15-PC-우선-방향.md) | **지금 방향** — 브라우저 통화로 회의, GitHub 최우선, 모바일은 보류 |
-| [18. 사용설명서](docs/18-사용설명서.md) | **처음 여는 사람용** — 실제 화면 열둘로 따라가는 안내. 되는 것과 안 되는 것 ⭐ |
+| [18. 사용설명서](docs/18-사용설명서.md) | **처음 여는 사람용** — 실제 화면 열 개로 따라가는 안내. 되는 것과 안 되는 것 ⭐ |
 | [17. 결함 기록](docs/17-결함-기록.md) | 만들면서 찾은 조용한 결함 여든하나 — 재현 방법과 되돌림 확인 |
 | [14. 모바일](docs/14-모바일.md) | 왜 앱이어야 하는가, PWA + 안드로이드 셸, 폰 기준 UI/UX, 비용 근거 |
+| [16. 디자인 감사 (Stage A)](docs/16-디자인-감사-StageA.md) | 화면을 실제로 렌더해 잰 첫 감사 — 대비·간격·토큰의 근거 |
+| [19. 메신저 셸 전환](docs/19-메신저-셸-전환.md) | **디자인 결정 전부** — 셸·브리프 재적용·React 이전. 렌더해 보고 쓴 것 |
 | [원본 자료](docs/원본자료/) | ChatGPT 대화 전문, 제안서 텍스트 추출본 |
 
 ---
@@ -189,18 +192,19 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **브라우저 통화로 회의** (WebRTC 메시 5명 · 헤드폰 확인) | ✅ 같은 기기 3인 통화로 확인 / **실제 네트워크는 미검증** | `backend/teamflow/call/`, `frontend/src/lib/call/`, `public/call.html` |
 | **PC 화면** (48rem↑ 상단 탭·칸반 3열 가로) | ✅ | `frontend/public/app.css`, [docs/15](docs/15-PC-우선-방향.md) §4.7 |
 | **GitHub 백필** (연결 전 활동 + 커버리지 표시) | ✅ 배선·멱등·잘림 처리 / **실제 HTTP 미검증** | `backend/teamflow/github/backfill.py`, [docs/15](docs/15-PC-우선-방향.md) §4.8 |
-| 프로젝트 만들기·회의 열기 **화면** | ⬜ | API 는 있음. 가입 후 첫 사용자가 할 게 없습니다 |
+| 프로젝트 만들기·회의 열기·저장소 연결 **화면** | ✅ | `public/home.html`(만들기·초대코드 참가), `public/project.html`(회의 열기·저장소 연결), `frontend/src/lib/project/setup.ts` |
 | **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
+| **보고서** (회의록·주간·최종 · 글자로 내보내기) | ✅ | `backend/teamflow/reports/`, `services/report_service.py`, `public/reports.html` |
 | **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ⚠️ 실측 미검증 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests/ -q     # 1289 passed (2026-08)
+.venv/bin/python -m pytest backend/tests -q      # 개수는 명령이 직접 셉니다
 .venv/bin/ruff check backend/ scripts/
 python3 scripts/check_env.py                     # 하드웨어 진단
 
-cd frontend && npm test                          # 778 passed (2026-08), 설치 불필요
-cd frontend && npm install && npm run check       # 타입 검사까지 (개발 의존성 3개)
+npm --prefix frontend test                       # 설치 불필요 — 개수는 명령이 셉니다
+npm --prefix frontend install && npm --prefix frontend run check   # 타입 검사까지
 .venv/bin/python scripts/make_icons.py           # 앱 아이콘 (stdlib 만 씀)
 
 cd android && ./gradlew assembleDebug             # 안드로이드 셸 APK — docs/14

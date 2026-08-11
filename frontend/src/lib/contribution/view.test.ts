@@ -10,7 +10,9 @@ import {
   integrityNotes,
   nameOf,
   orderForDisplay,
-  rangeBar,
+  uncertaintyDots,
+  uncertaintyDotsNote,
+  uncertaintySpans,
   readBeforeTheNumber,
   roleOf,
   teamWarnings,
@@ -128,30 +130,55 @@ describe('describeRange', () => {
   });
 });
 
-describe('rangeBar', () => {
-  it('구간의 시작과 폭을 준다', () => {
-    deepStrictEqual(rangeBar(member({ range_low: 20, range_high: 35 })), {
-      left: 20,
-      width: 15,
-    });
+describe('uncertaintySpans', () => {
+  it('⭐ 폭은 구간의 너비다 — 값이 아니라 **모르는 양**', () => {
+    const spans = uncertaintySpans([
+      member({ user_id: 1, range_low: 32, range_high: 52 }),
+      member({ user_id: 2, range_low: 26, range_high: 41 }),
+    ]);
+    deepStrictEqual(spans.map((s) => s.points), [20, 15]);
   });
 
-  it('⭐ 폭이 0 이어도 막대가 사라지지 않는다', () => {
-    // 좁은 구간과 구간이 없는 것은 다르다. 사라지면 후자로 읽힌다.
-    strictEqual(rangeBar(member({ range_low: 40, range_high: 40 })).width, 1);
+  it('⭐ 길이는 **팀에서 가장 넓은 구간** 기준이다', () => {
+    // 0~100 을 쓰면 12%p 와 20%p 가 둘 다 짧은 막대가 되어 차이가 안 보입니다.
+    const spans = uncertaintySpans([
+      member({ user_id: 1, range_low: 32, range_high: 52 }),
+      member({ user_id: 2, range_low: 19, range_high: 31 }),
+    ]);
+    deepStrictEqual(spans.map((s) => s.ratio), [100, 60]);
   });
 
-  it('뒤집힌 구간도 그린다', () => {
-    deepStrictEqual(rangeBar(member({ range_low: 50, range_high: 30 })), {
-      left: 30,
-      width: 20,
-    });
+  it('⚠️ 전원이 폭 0 이면 전부 0 이다 — 100 을 주면 정반대로 읽힌다', () => {
+    // 폭 0 은 완전히 확정된 이상적인 경우입니다. "다 모른다" 가 아닙니다.
+    const spans = uncertaintySpans([
+      member({ user_id: 1, range_low: 40, range_high: 40 }),
+      member({ user_id: 2, range_low: 20, range_high: 20 }),
+    ]);
+    deepStrictEqual(spans.map((s) => s.ratio), [0, 0]);
   });
 
-  it('100 을 넘는 값은 잘라낸다', () => {
-    const bar = rangeBar(member({ range_low: -5, range_high: 140 }));
-    strictEqual(bar.left, 0);
-    strictEqual(bar.width, 100);
+  it('빈 팀은 빈 배열', () => {
+    deepStrictEqual(uncertaintySpans([]), []);
+  });
+
+  it('⚠️ 뒤집힌 구간도 폭을 낸다 — 지운 `rangeBar` 가 알던 것', () => {
+    const [only] = uncertaintySpans([member({ range_low: 50, range_high: 30 })]);
+    strictEqual(only?.points, 20);
+  });
+
+  it('⚠️ 0~100 밖의 값은 잘라낸다 — 지운 `rangeBar` 가 알던 것', () => {
+    const [only] = uncertaintySpans([member({ range_low: -5, range_high: 140 })]);
+    strictEqual(only?.points, 100);
+  });
+
+  it('⚠️ 이 막대는 사람을 비교하지 않는다 — 가장 긴 쪽이 가장 모르는 쪽이다', () => {
+    // 기여가 가장 적은 사람이 가장 긴 막대를 가질 수 있어야 합니다.
+    const [small, big] = uncertaintySpans([
+      member({ user_id: 1, range_low: 5, range_high: 45 }),   // 작은 값, 넓은 구간
+      member({ user_id: 2, range_low: 60, range_high: 65 }),  // 큰 값, 좁은 구간
+    ]);
+    strictEqual(small?.ratio, 100);
+    strictEqual(big?.ratio, 13);
   });
 });
 
@@ -409,5 +436,59 @@ describe('카드에 적을 역할', () => {
   it('0 인 역할은 안 보인다', () => {
     const people = [{ user_id: 1, name: '김민수', role_shares: { developer: 1, planner: 0 } }];
     strictEqual(roleOf(member(), people), '개발');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 모르는 폭을 셀 수 있는 점으로 (docs/19 §25)
+// ══════════════════════════════════════════════════════════════
+
+describe('uncertaintyDots', () => {
+  it('점 하나가 4%p 다', () => {
+    strictEqual(uncertaintyDots(20), 5);
+    strictEqual(uncertaintyDots(12), 3);
+    strictEqual(uncertaintyDots(4), 1);
+  });
+
+  it('⭐ **0 으로 내림하지 않는다**', () => {
+    // 폭이 1%p 라도 "모르는 게 있다" 는 사실입니다. 점이 0 개면 화면에서
+    // 그것이 **완전히 확정** 으로 보이는데, 그건 다른 말입니다.
+    strictEqual(uncertaintyDots(1), 1);
+    strictEqual(uncertaintyDots(0.3), 1);
+  });
+
+  it('폭이 0 이면 점도 0 — 확정된 것에 점을 찍지 않는다', () => {
+    strictEqual(uncertaintyDots(0), 0);
+  });
+
+  it('이상한 값에 점을 찍지 않는다', () => {
+    strictEqual(uncertaintyDots(Number.NaN), 0);
+    strictEqual(uncertaintyDots(-5), 0);
+  });
+
+  it('⭐ 구간은 0~100 이라 점이 스물다섯을 넘지 않는다', () => {
+    // 넘으면 한 줄이 화면 밖으로 나가고, 그건 값이 아니라 고장으로 보입니다.
+    strictEqual(uncertaintyDots(100), 25);
+    strictEqual(uncertaintyDots(9999), 25);
+  });
+
+  it('⭐ 개수가 **절대량**이다 — 팀 구성에 따라 안 변한다', () => {
+    // 예전 막대는 팀에서 가장 넓은 구간 대비 길이였습니다. 그러면 같은
+    // 20%p 라도 팀에 따라 길이가 달라지고, 긴 막대가 "남보다 더 모른다"
+    // 로 읽힙니다 — 그건 사람을 비교하는 그림입니다.
+    strictEqual(uncertaintyDots(20), uncertaintyDots(20));
+    strictEqual(uncertaintyDots(20) > uncertaintyDots(8), true);
+  });
+});
+
+describe('uncertaintyDotsNote', () => {
+  it('점 하나가 몇 %p 인지 말한다 — 안 말하면 셀 이유가 없다', () => {
+    const note = uncertaintyDotsNote(20);
+    strictEqual(note.includes('20%p'), true, note);
+    strictEqual(note.includes('4%p'), true, note);
+  });
+
+  it('확정된 값에는 다른 말을 한다', () => {
+    strictEqual(uncertaintyDotsNote(0).includes('확정적'), true);
   });
 });

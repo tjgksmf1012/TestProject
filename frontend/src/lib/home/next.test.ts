@@ -56,7 +56,7 @@ describe('nextStepFor', () => {
     // 보내면 빈 목록이 뜨고 사용자는 화면이 고장 났다고 생각한다.
     // 실제로는 "AI 가 업무로 뽑을 만한 게 없었다" 이고 그건 정상이다.
     const step = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 0 }));
-    strictEqual(step.href.includes('review.html'), false);
+    strictEqual((step.href ?? '').includes('review.html'), false);
     strictEqual(step.actionable, false);
     strictEqual(step.reason.includes('업무가 나오지 않았습니다'), true);
   });
@@ -65,7 +65,7 @@ describe('nextStepFor', () => {
     // 눌러도 아직 아무것도 없는 곳으로 갈 뿐이다.
     for (const status of ['queued', 'processing']) {
       const step = nextStepFor(meeting({ status }));
-      strictEqual(step.href, '', status);
+      strictEqual(step.href, null, status);
       strictEqual(step.actionable, false, status);
       strictEqual(step.reason.includes('처리 중'), true, status);
     }
@@ -78,7 +78,7 @@ describe('nextStepFor', () => {
   it('⭐ 실패한 회의는 트랙을 확인하게 보낸다', () => {
     // 실패의 가장 흔한 원인이 트랙이 비었거나 망가진 것이다.
     const step = nextStepFor(meeting({ status: 'failed' }));
-    strictEqual(step.href.includes('lobby.html'), true);
+    strictEqual((step.href ?? '').includes('lobby.html'), true);
     strictEqual(step.reason.includes('트랙'), true);
   });
 
@@ -87,7 +87,7 @@ describe('nextStepFor', () => {
     // 손상됐을 때 가장 확인이 필요한 회의가 바로 그것이다.
     const step = nextStepFor(meeting({ status: 'archived' }));
     strictEqual(step.reason.includes('archived'), true);
-    strictEqual(step.href.length > 0, true);
+    strictEqual((step.href ?? '').length > 0, true);
   });
 
   it('버튼이 없어도 이유는 항상 있다', () => {

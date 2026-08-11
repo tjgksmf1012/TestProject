@@ -194,6 +194,110 @@ body.no-tabs {
   margin: 0 0 var(--sp-4);
 }
 
+/* ══════════════════════════════════════════════════════════════
+   제품 머리말 (디자인 브리프 §5)
+   ══════════════════════════════════════════════════════════════
+
+   ⚠️ **여기 있는 이유가 중요합니다.** 검토 화면에서 먼저 만들었는데,
+   칸반에 같은 것이 필요해지자 두 벌이 될 참이었습니다. 이 저장소의
+   대표 실패 둘 중 하나가 **"두 벌이 있으면 한쪽만 고쳐진다"** 입니다 —
+   머리말은 모든 화면의 첫인상이라 갈라지면 제품이 둘로 보입니다.
+
+   화면 넷이 전부 이 모양이었습니다:
+
+       칸반                     ← 제목
+       김민수 님이 보고 있습니다   ← 설명문과 같은 크기
+       전체 3 · 완료 1 · 지연 0…  ← 또 같은 크기
+       [베이지 배너]             ← 또
+
+   넉 줄이 전부 같은 무게라 **무엇을 먼저 볼지가 없었습니다.** 지금은
+   제목(28) → 설명(13, muted) → 사람(12, 아바타 딸린 꼬리표) 셋뿐입니다. */
+
+.head {
+  margin-bottom: var(--sp-6);
+}
+
+.lede {
+  color: var(--text-muted);
+  font-size: var(--fs-label);
+
+  /* 브리프 §16 — 한 줄이 길면 눈이 다음 줄 첫 글자를 못 찾습니다.
+
+     ⚠️ **`ch` 를 쓰면 안 됩니다.** `ch` 는 숫자 `0` 한 글자의 폭이라
+     라틴 문자 기준이고, 한글은 글자당 그 두 배쯤을 씁니다. `64ch` 로
+     걸어 뒀더니 홈의 설명이 **한글 30자쯤에서** 끊겼습니다 — 화면에
+     자리가 한참 남았는데 두 줄이 됐습니다 (렌더해서 봤습니다).
+
+     길이는 글자 수가 아니라 **폭**으로 겁니다. */
+  max-width: 44rem;
+  margin: 0;
+}
+
+/* 사람은 **문장이 아니라 꼬리표**입니다. "김민수 님이 보고 있습니다" 는
+   바로 위 설명과 같은 크기라 설명을 두 번 읽게 만들었습니다. */
+.by {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-caption);
+  color: var(--text-subtle);
+}
+
+.by .avatar {
+  display: grid;
+  place-items: center;
+  width: var(--sp-5);
+  height: var(--sp-5);
+  border-radius: var(--r-round);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: var(--primary);
+  font-size: var(--fs-caption);
+  font-weight: 700;
+}
+
+/* ── 조용한 줄 — 이동·계정 (디자인 브리프 §14) ──────────────
+
+   ⚠️ 로비에서 만들었는데 홈에도 필요해졌습니다. 두 벌이 되기 전에
+   옮깁니다 — 이 저장소의 대표 실패가 그것입니다.
+
+   여기 들어가는 것은 **지금 이 화면에서 할 일이 아닌** 것들입니다:
+   다른 화면으로 가는 링크, 로그아웃, 강제 종료. 지우지 않되 주
+   행동과 같은 무게로 두지 않습니다 — 로비는 버튼 일곱이 한 줄에
+   같은 크기로 있었고, 녹음하러 온 사람에게 `로그아웃` 이 `녹음
+   화면으로` 와 똑같이 보였습니다. */
+.act-quiet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+.linkish {
+  min-height: 0;
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  background: transparent;
+  border: 0;
+  color: var(--text-subtle);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .linkish:hover {
+    color: var(--text);
+    background: transparent;
+  }
+
+  .linkish.danger:hover {
+    color: var(--bad);
+    background: transparent;
+  }
+}
+
 .note {
   font-size: var(--fs-label);
   color: var(--text-subtle);
@@ -206,8 +310,22 @@ body.no-tabs {
    `#notice` 는 서버가 준 문구를 담는데, 아직 안 왔거나 오류가 나면 빈
    채로 있습니다. 그런데 `.note` 는 위에 선을 긋기 때문에, 화면에는
    **아무것도 없는 가로줄**이 두 개 생깁니다. 사람은 그걸 "여기 뭔가
-   빠졌다" 로 읽습니다. 실제로 기여도 오류 화면이 그랬습니다. */
-.note:empty {
+   빠졌다" 로 읽습니다. 실제로 기여도 오류 화면이 그랬습니다.
+
+   ⭐ **`p` 를 붙인 이유** (docs/19 §21)
+
+   예전에는 `.note:empty` 였습니다. 그런데 `<input>` 은 **자식을 가질 수
+   없는 태그**라 값이 무엇이든 언제나 `:empty` 입니다. 검토 화면의 메모
+   칸이 `class="note"` 였고, 그래서 **Stage F 이후로 한 번도 화면에
+   나온 적이 없었습니다.**
+
+   그 칸은 "왜 이렇게 결정했는지" 를 적는 자리입니다 — 이 저장소가
+   기여도에서 "이유 없는 조정은 근거 없는 점수와 같다" 고 적어 둔 것과
+   같은 약속인데, 그 약속을 지킬 입력창이 조용히 사라져 있었습니다.
+   빈 것을 감추는 규칙이 **빌 수 없는 것까지** 감춘 것입니다.
+
+   `guards.test.ts` 가 `:empty` 규칙이 void 태그를 겨냥하지 않는지 봅니다. */
+p.note:empty {
   display: none;
 }
 
@@ -237,6 +355,26 @@ body.no-tabs {
   margin: var(--sp-3) 0 0;
 }
 
+/* ⚠️ **빈 안내 줄은 자리를 차지하면 안 됩니다.**
+ *
+ * 안내 자리(`NoteLine`)는 이제 **비었을 때도 DOM 에 남습니다** — 낭독기는
+ * 이미 있던 live region 이 바뀔 때 읽어 주지, 요소가 통째로 나타나는 것은
+ * 놓치기 쉬워서입니다. 그런데 그냥 두면 글자가 없어도 `margin-top` 이
+ * 남아 화면에 **아무것도 없는 빈 줄**이 생깁니다.
+ *
+ * ⚠️ `display: none` 도 `hidden` 도 쓰면 안 됩니다 — 둘 다 접근성 트리에서
+ * 요소를 빼므로 live region 이 다시 죽습니다. 여백만 걷습니다.
+ * (`:empty` 로 숨겼다가 **빌 수 없는 요소**를 영영 감춘 적이 있습니다.
+ *  여긴 글자 자식 하나뿐인 `<p>` 라 `:empty` 가 정확히 맞습니다.)
+ *
+ * 클래스가 아니라 **역할**로 겁니다. 같은 조각이 `status`·`rolestatus`·
+ * `sub` 세 가지 클래스로 나오는데, 클래스마다 적으면 넷째가 생기는 날
+ * 또 한 벌이 빠집니다. */
+[role='status']:empty,
+[role='alert']:empty {
+  margin: 0;
+}
+
 /* ══════════════════════════════════════════════════════════════
    카드
    ══════════════════════════════════════════════════════════════ */
@@ -256,6 +394,27 @@ body.no-tabs {
   border: 1px solid var(--line);
 }
 
+/* ⚠️ **넓은 화면에서는 채움 대신 선** (docs/19 §20).
+
+   위 규칙의 근거("폰에서 1px 선이 여러 개 겹치면 빽빽하다")는 **폰에서만**
+   참입니다. 넓은 화면에는 자리가 있고, 칸반 카드(`.task`)·기여도 판독
+   줄·검토 접기가 전부 헤어라인이라 **`.card` 만 회색 덩어리로 남아**
+   한 제품 안에 어휘가 두 벌이었습니다.
+
+   근거를 뒤집지 않고 **적용 범위를 좁힙니다** — 폰은 채움, 넓으면 선. */
+@media (min-width: 48rem) {
+  .card {
+    background: transparent;
+    border: 1px solid var(--line);
+  }
+
+  /* 바깥이 이미 선을 가졌으니 안쪽은 배경만 살짝 — 선이 겹치지 않게. */
+  .card .card {
+    background: var(--surface);
+    border: 0;
+  }
+}
+
 /* ── 구역 상자 ────────────────────────────────────────────────
    통화·녹음·로비·설정이 화면마다 똑같은 `section { border … }` 를
    따로 적어 두고 있었습니다 — 네 벌, 반올림값만 조금씩 달랐습니다.
@@ -271,8 +430,33 @@ body.no-tabs {
 .panel {
   border: 1px solid var(--line);
   border-radius: var(--r-card);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-5);
   margin-bottom: var(--sp-4);
+  background: var(--surface);
+}
+
+/* ⚠️ 패널 제목을 **20px 에서 16px 로** 내렸습니다 (디자인 브리프 §17).
+
+   설정 화면에 패널이 여섯인데 제목이 전부 `--fs-title`(20) 이라,
+   화면을 위에서 아래로 훑으면 **같은 크기의 제목 여섯**이 줄지어
+   있었습니다. 그러면 어느 것이 지금 볼 것인지가 없습니다 — 페이지
+   제목(28)과 패널 제목(20)이 한 대역이라 계단이 안 생겼습니다.
+
+   패널은 절(節)이지 화면이 아닙니다. 항목 제목과 같은 크기면 충분합니다. */
+.panel > h2 {
+  font-size: var(--fs-item);
+  letter-spacing: var(--ls-item);
+  margin: 0 0 var(--sp-3);
+}
+
+/* ⚠️ 패널 **안**의 각주는 위 여백을 32px 이나 띄우지 않습니다.
+   `.note` 는 원래 화면 맨 아래에 놓는 것이라 크게 띄웠는데, 패널 안에
+   들어가자 내용과 선 사이에 **아무것도 없는 50px** 이 생겼습니다 —
+   패널이 이미 테두리로 구역을 나누고 있어서 그만큼 벌릴 이유가 없습니다.
+   줄 길이도 여기서 묶습니다 (브리프 §16). */
+.panel > .note {
+  margin-top: var(--sp-5);
+  max-width: 44rem;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -287,7 +471,7 @@ button,
   min-height: var(--tap);
   padding: var(--sp-2) var(--sp-4);
   /* ⚠️ 버튼은 **컨트롤**입니다 — 경계가 3:1 이어야 합니다 (WCAG 1.4.11).
-     이 저장소는 box-shadow 가 0건이라 버튼의 존재를 알리는 것이 이 선
+     이 저장소는 **컨트롤 경계에 그림자를 안 씁니다.** 버튼의 존재를 알리는 것이 이 선
      하나뿐입니다. 예전에는 장식용 `--line`(1.25:1) 을 써서 거의
      안 보였습니다. */
   border: 1px solid var(--line-strong);
@@ -493,17 +677,28 @@ label:has(> input[type='radio']) {
  * 검정이 비쳐 탁한 올리브색이 됩니다. 실제로 그랬습니다.
  *
  * 표면색과 섞으면 두 모드 모두에서 **불투명한 한 색**이 나옵니다. */
+/* ⚠️ **채움을 걷었습니다** (디자인 브리프 §17).
+
+   브리프가 "베이지 전체폭 배너" 를 콕 집었고, 이 저장소에 남은 마지막
+   하나가 여기였습니다. 노란 띠가 화면 폭을 가로지르면 **본문보다 배너가
+   먼저** 읽힙니다 — 기여도의 팀 경고, 로비의 막는 것, 칸반의 담당자 없음
+   에서 이미 같은 이유로 걷어냈고, 여기만 공용 CSS 라 남아 있었습니다.
+
+   말은 그대로 둡니다. 무게만 낮춥니다 — 왼쪽 막대 하나가 심각도를
+   말하고, 색은 글자에만 씁니다. */
 .banner {
-  border-radius: var(--r-ctrl);
-  padding: var(--sp-3) var(--sp-4);
-  font-size: var(--fs-body);
-  margin: 0 0 var(--sp-4);
-  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
-  border-left: 3px solid var(--warn);
+  border-radius: 0;
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
+  font-size: var(--fs-label);
+  color: var(--text-muted);
+  margin: 0 0 var(--sp-5);
+  background: transparent;
+  border-left: 2px solid var(--gap);
 }
 
+/* ⚠️ 빨강은 **진짜 오류에만**입니다. 기본 배너는 흙빛입니다 — 대부분의
+   배너 문구가 "아직 안 한 것" 이지 "잘못한 것" 이 아닙니다. */
 .banner.bad {
-  background: color-mix(in srgb, var(--bad) 12%, var(--surface));
   border-left-color: var(--bad);
 }
 
@@ -622,6 +817,26 @@ body.no-tabs.has-actionbar {
   pointer-events: none;
 }
 
+/* ── 회의 채널 — 셸이 설 때만 보인다 ──────────────────────────
+
+   `renderNav` 가 `#tabs` 안에 `.chan` 을 하나 붙입니다. 폰에서 `#tabs` 는
+   **아래 탭바 넷**이고 거기에 회의 목록이 들어갈 자리는 없습니다.
+
+   ⚠️ 숨기는 것이 막다른 길을 만들지 않는지 확인했습니다 — 폰에서 회의로
+   가는 길은 **홈 화면의 회의 카드**입니다. 그 길은 그대로 있고, 여기서
+   막는 것은 "늘 떠 있는 두 번째 길" 뿐입니다.
+
+   ⚠️ 여기서 `display: none` 이면 `nav.ts` 는 **회의 목록을 받아 오지
+   않습니다.** 안 보이는 것을 위해 데이터 요금을 쓰지 않습니다. (탭 넷을
+   되살리는 데 필요한 프로젝트 조회는 폰에서도 합니다 — 그건 보이니까요.)
+   둘이 같은 너비를 봐야 하므로 `guards.test.ts` 가 그 숫자를 맞춰 봅니다. */
+.chan,
+.chan-project,
+.ctx,
+.rail {
+  display: none;
+}
+
 /* ══════════════════════════════════════════════════════════════
    목록
    ══════════════════════════════════════════════════════════════ */
@@ -719,7 +934,7 @@ pre {
      실제로 그래서 프로젝트 화면의 "팀원 3명" 이 본문 밖으로 밀려
      있었습니다. 본문에 걸면 아무도 깰 수 없습니다. */
   body {
-    max-width: 72rem;
+    max-width: var(--main-max);
     margin-inline: auto;
     padding: calc(var(--topnav) + 1.5rem) 1.5rem 3rem;
   }
@@ -730,7 +945,7 @@ pre {
 
   .wrap,
   .wrap.wide {
-    max-width: 72rem;
+    max-width: var(--main-max);
   }
 
   /* ── 내비를 위로 ──────────────────────────────────────── */
@@ -807,14 +1022,16 @@ pre {
   .peers {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-    gap: var(--sp-1) var(--sp-4);
+    gap: var(--sp-2) var(--sp-8);
   }
 
+  /* ⚠️ **칸마다 테두리를 두르지 않습니다** (디자인 브리프 §22 — 카드 안 카드).
+     패널 안에 상자가 또 생기면 화면에 액자가 이중이 되고, 통화 화면에서
+     제일 눈에 띄는 것이 사람이 아니라 네모가 됩니다.
+     칸을 가르는 것은 **여백과 아바타**입니다 — 아바타가 각 칸의 시작을
+     이미 못 박고 있어서 선이 없어도 흩어져 보이지 않습니다. */
   .peers li {
-    border-top: 0;
-    border: 1px solid var(--line);
-    border-radius: var(--r-card);
-    padding: var(--sp-3);
+    padding: var(--sp-2) 0;
   }
 
   /* ── 기여도: 카드 격자 ────────────────────────────────
@@ -1075,3 +1292,741 @@ pre {
   color: var(--text-subtle);
   margin: var(--sp-4) 0 0;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   메신저 셸 — 넓은 화면에서 `#tabs` 를 채널 목록 열로 세운다
+   ══════════════════════════════════════════════════════════════
+
+   근거는 `docs/19-메신저-셸-전환.md` 입니다. 요약하면 —
+   이 제품의 모델(프로젝트=서버 · 회의=음성 채널 · 칸반/기여도=채널)이
+   메신저 구조와 거의 그대로 겹치고, 지금은 탭으로 페이지를 갈아 끼우는
+   구조라 **회의가 장소가 아니라 페이지**입니다.
+
+   ## ⚠️ 새 DOM 을 만들지 않습니다 — `#tabs` 를 세웁니다
+
+   `#tabs` 는 이미 `position: fixed` 이고 `src/demo/nav.ts` 가 채웁니다.
+   그 안의 링크가 곧 채널 목록 항목이므로, **id·링크·개수를 하나도 안 바꾸고
+   CSS 로 방향만 세로로 돌립니다.** 그래서
+
+     · `GLOBAL_IDS`(guards.test.ts) · `links.test.ts` · 막다른 길 검사가
+       전부 그대로 통과합니다
+     · **폰에서는 지금의 아래 탭바가 그대로 남습니다.** `docs/19 §9` 가
+       걱정한 "채널 목록이 접히면 회의로 갈 방법이 없다" 는 막다른 길이
+       **아예 생기지 않습니다** — 접는 것이 아니라 원래 모양으로 돌아가는
+       것이기 때문입니다
+
+   ## 왜 90rem(1440px)부터인가
+
+   48rem~90rem 에서는 위쪽 가로 내비가 이미 잘 돕니다. 열을 셋으로 가르려면
+   본문에 최소 720px 은 남겨야 하는데, 레일 72 + 목록 256 을 빼면
+   1440px 부터입니다. 그 아래에서 세로 열을 세우면 본문이 카드 두 장 폭이
+   되어 칸반이 오히려 나빠집니다.
+
+   ## 색은 `--chrome-*` 만 씁니다
+
+   ⚠️ **껍데기 색을 새로 만들지 마십시오.** `--chrome-*` 아홉은 계산값이고
+   `test_design_tokens.py` 가 대비를 매번 다시 잽니다. 내용 쪽 토큰
+   (`--surface`·`--text-subtle` 등)을 껍데기 위에 올리면 밝은 모드에서
+   4.34:1 로 미달합니다 — 실측했습니다 (`docs/19 §10`). */
+
+@media (min-width: 90rem) {
+  /* ⭐ **열 자리는 `html` 이 비웁니다.**
+
+     예전에는 `body` 의 `padding-left` 로 비웠습니다. 그러면 본문이
+     남은 폭을 **전부** 차지합니다 — 1920px 에서 1308px 짜리 글줄이
+     됐습니다. 그렇다고 `body` 에 `max-width` 를 걸면 이번엔 왼쪽
+     여백까지 통째로 가운데 정렬되어 셸 열 위로 올라탑니다.
+
+     그래서 비우는 일(`html`)과 모으는 일(`body`)을 갈랐습니다. 열
+     자리는 바깥이 비우고, 본문은 **그 안에서** 가운데로 모입니다.
+
+     `body` 의 배경은 캔버스로 전달되므로 `html` 의 여백 자리에도
+     같은 색이 칠해집니다 — 이음매가 보이지 않습니다.
+
+     ⚠️ 레일 자리를 미리 비워 두지 않습니다. 처음에 `--shell-rail` 만큼
+     띄웠더니 **아무것도 없는 72px 이 왼쪽에 생겼습니다** (렌더해서 봤습니다).
+     레일은 프로젝트가 둘 이상일 때만 섭니다 — 없는 것을 위해 자리를
+     비워 두면 그건 빈칸이 아니라 결함입니다. 설 때 더합니다. */
+  html {
+    padding-left: var(--shell-list);
+  }
+
+  html:has(body.has-rail) {
+    padding-left: calc(var(--shell-rail) + var(--shell-list));
+  }
+
+  /* 로그인처럼 셸이 아예 없는 화면. */
+  html:has(body.no-tabs) {
+    padding-left: 0;
+  }
+
+  body {
+    max-width: var(--main-max);
+    margin-inline: auto;
+    padding: var(--sp-6) var(--sp-8) var(--sp-10);
+  }
+
+  /* 셸이 서면 위쪽 가로 내비 자리가 필요 없다. */
+  body.no-tabs {
+    padding-top: var(--sp-6);
+  }
+
+  /* ── 프로젝트 레일 ──────────────────────────────────────
+
+     ⚠️ **이 자리는 한 번 걷어냈던 자리입니다.** 셸 1단계에서 레일 몫으로
+     72px 을 비워 뒀다가 "아무것도 없는 72px" 이 되어 통째로 뺐습니다
+     (§11). 그래서 자리는 **레일이 실제로 설 때만** 잡습니다.
+
+     `body.has-rail` 은 `nav.ts` 가 붙입니다 — CSS 는 프로젝트가 몇 개인지
+     모릅니다. 클래스가 없으면 채널 목록이 `left: 0` 에 그대로 붙어서
+     레일 없는 화면에 빈칸이 생기지 않습니다.
+
+     프로젝트가 **하나뿐이면 레일이 없습니다.** 갈 곳이 없으니까요.
+     (자리를 비우는 규칙은 위 `html:has(body.has-rail)` 입니다.) */
+  body.has-rail #tabs {
+    left: var(--shell-rail);
+  }
+
+  .rail {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 31;
+    width: var(--shell-rail);
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-3) 0;
+    overflow-y: auto;
+
+    /* 가장 깊은 면. 채널 목록(9.8%)보다 3.6% 아래입니다 */
+    background: var(--chrome-rail);
+    border-right: 1px solid var(--chrome-line);
+  }
+
+  /* `paintRail` 이 안 세울 때는 요소를 통째로 걷어내므로 여기까지 올 일이
+     없습니다. 그래도 둡니다 — 다른 두 열과 **같은 규칙**이어야 다음
+     사람이 "이 열만 왜 다르지" 를 묻지 않습니다. */
+  .rail:empty {
+    display: none;
+  }
+
+  .rail-item {
+    position: relative;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--sp-10);
+    height: var(--sp-10);
+
+    border-radius: var(--r-card);
+    background: var(--chrome-hover);
+    color: var(--chrome-muted);
+    text-decoration: none;
+  }
+
+  .rail-item:hover {
+    background: var(--chrome-sel);
+    color: var(--chrome-text);
+  }
+
+  /* 현재 위치 — 탭·채널과 **같은 표시**입니다. 왼쪽 3px 청록 막대.
+     세 곳이 다른 모양을 쓰면 "여기가 지금 위치" 를 세 번 배워야 합니다. */
+  .rail-item[aria-current="page"] {
+    background: var(--chrome-sel);
+    color: var(--chrome-text);
+  }
+
+  /* ⚠️ 처음엔 탭·채널과 똑같이 `left: -12px` 에 3px 막대를 뒀습니다.
+     렌더해서 보니 **거의 안 보였습니다** — 저기는 네모가 72px 안에
+     가운데 놓인 자리라, 막대가 열 가장자리에서 4px 쯤 떠서 열 안쪽의
+     어두운 바탕에 묻힙니다. 탭·채널에서는 막대가 열 맨 왼쪽 끝에
+     붙기 때문에 같은 값이 통했던 것입니다.
+
+     그래서 여기서는 **열 끝에 붙이고 더 길게** 합니다. 색과 굵기의
+     뜻은 그대로라 "여기가 지금 위치" 를 다시 배울 필요는 없습니다. */
+  .rail-item[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    left: calc(-1 * var(--sp-4));
+    top: 10%;
+    bottom: 10%;
+    width: var(--sp-1);
+    border-radius: 0 var(--r-badge) var(--r-badge) 0;
+    background: var(--chrome-accent);
+  }
+
+  /* 이름 첫 글자. 한글 한 글자가 들어가므로 mono 를 쓰지 않습니다 —
+     한글에 mono 를 걸면 자간만 벌어집니다 (§3 의 v1 실수). */
+  .rail-face {
+    font-size: var(--fs-item);
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  /* 검토할 회의가 있다 — **개수가 아니라 있다/없다.** 72px 안에 숫자를
+     넣으면 글자가 4px 이 됩니다. 개수는 홈과 채널 목록이 말합니다.
+
+     채널 목록에서 `할 일 남음` 이 청록인 것과 같은 색입니다. */
+  .rail-dot {
+    position: absolute;
+    top: calc(-1 * var(--sp-1));
+    right: calc(-1 * var(--sp-1));
+    width: var(--sp-3);
+    height: var(--sp-3);
+    border-radius: var(--r-round);
+    background: var(--chrome-accent);
+    /* 레일 바탕색 테두리로 네모에서 떼어 놓습니다 — 안 그러면 점이
+       네모 모서리에 붙어 한 덩어리로 보입니다. */
+    box-shadow: 0 0 0 2px var(--chrome-rail);
+  }
+
+  /* ── `#tabs` → 채널 목록 열 ─────────────────────────── */
+  #tabs {
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: auto;
+    width: var(--shell-list);
+    height: auto;
+
+    flex-direction: column;
+    justify-content: flex-start;
+    /* ⚠️ 처음에 2px 을 적었다가 4px 격자 가드에 잡혔습니다. 이 저장소는
+       4의 배수만 쓰고 6px 은 아이콘↔텍스트에만 허용합니다 (지시서 §4.3). */
+    gap: var(--sp-1);
+    padding: var(--sp-3) var(--sp-2);
+
+    /* ⚠️ **납작한 단색이 촌스러움의 큰 원인이었습니다.** 세로 그라디언트로
+       깊이를 주고, 위에 아주 옅은 결을 얹습니다 — 완전 평면인 면은
+       인쇄물처럼 보이지 화면처럼 보이지 않습니다.
+
+       색은 전부 `--chrome-side` 에서 `color-mix` 로 뽑았습니다. 새 hex 를
+       눈으로 고르지 않았습니다 (`tokens.css` 의 규칙). */
+    background:
+      linear-gradient(180deg,
+        color-mix(in srgb, var(--chrome-side) 92%, white) 0%,
+        var(--chrome-side) 30%,
+        color-mix(in srgb, var(--chrome-side) 88%, black) 100%);
+    backdrop-filter: none;
+    border: 0;
+    border-right: 1px solid var(--chrome-line);
+  }
+
+  /* 결 — 이미지 없이 CSS 로만. 3px 주기라 눈에는 질감으로만 읽힙니다. */
+  #tabs::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    background: repeating-linear-gradient(0deg,
+      transparent 0 3px,
+      color-mix(in srgb, white 2%, transparent) 3px 4px);
+  }
+
+  #tabs > * { position: relative; z-index: 1; }
+
+  #tabs a {
+    flex: 0 0 auto;
+    width: 100%;
+    height: var(--shell-row);
+    min-height: var(--shell-row);
+
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: var(--sp-icon);
+    padding: 0 var(--sp-3);
+
+    border-radius: var(--r-ctrl);
+    border-bottom: 0;
+    color: var(--chrome-muted);
+    font-size: var(--fs-label);
+  }
+
+  #tabs a .ico { --ico: 16px; }
+
+  #tabs a:hover {
+    background: var(--chrome-hover);
+    color: var(--chrome-text);
+  }
+
+  /* 현재 위치 — 배경을 올리고 **왼쪽 막대**를 붙인다.
+     배경만으로는 거의 안 보입니다 (docs/19 §3 에서 실측). */
+  /* 현재 위치 — 단색 대신 **잉크가 번지는** 그라디언트. 왼쪽 막대에서
+     시작해 오른쪽으로 옅어집니다. 막대가 광원처럼 읽힙니다. */
+  #tabs a[aria-current="page"] {
+    position: relative;
+    background: linear-gradient(90deg,
+      color-mix(in srgb, var(--chrome-accent) 22%, transparent) 0%,
+      var(--chrome-sel) 55%);
+    color: var(--chrome-text);
+    border-bottom-color: transparent;
+  }
+
+  #tabs a[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 20%;
+    bottom: 20%;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--chrome-accent);
+    /* ⚠️ 장식용입니다. 컨트롤 경계가 아니므로 그림자를 써도 됩니다 —
+       그 구분을 `guards.test.ts` 가 봅니다. */
+    box-shadow: 0 0 10px color-mix(in srgb, var(--chrome-accent) 70%, transparent);
+  }
+
+  #tabs a[aria-disabled="true"] {
+    color: var(--chrome-subtle);
+  }
+
+  /* ── 회의 채널 ─────────────────────────────────────────
+
+     ⚠️ **탭 넷은 스크롤과 함께 밀려 올라가면 안 됩니다.** 한 학기 회의가
+     쌓이면 열이 화면을 넘는데, 열 전체를 스크롤시키면 제일 중요한
+     이동 수단 넷이 위로 사라집니다. 그래서 **회의 목록만** 스크롤합니다
+     (`min-height: 0` 이 있어야 flex 안에서 실제로 줄어듭니다). */
+  #tabs {
+    overflow: hidden;
+  }
+
+  #tabs a {
+    flex-shrink: 0;
+  }
+
+  /* ── 열 맨 위 — 지금 어느 프로젝트인가 ──────────────────
+
+     ⚠️ **누를 수 있는 것으로 만들지 않았습니다.** 설정으로 가는 길은
+     탭에 이미 있고, 여기를 또 링크로 두면 같은 곳으로 가는 길이 둘이
+     됩니다. 이 자리가 하는 일은 **이름을 말하는 것** 하나입니다.
+
+     프로젝트 이름을 말하는 화면이 `project.html` 하나뿐이었습니다 —
+     칸반·기여도·로비·검토는 어느 팀 화면인지 말하지 않습니다. */
+  .chan-project {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    height: var(--shell-head);
+    min-height: var(--shell-head);
+    margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-2)) 0;
+    padding: 0 var(--sp-4);
+    border-bottom: 1px solid var(--chrome-line);
+
+    color: var(--chrome-text);
+    font-size: var(--fs-item);
+    font-weight: 600;
+    letter-spacing: var(--ls-item);
+
+    /* 긴 팀 이름은 자릅니다. 두 줄이 되면 열 머리 높이가 화면마다
+       달라지고, 그러면 아래 탭들이 서로 다른 자리에서 시작합니다. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chan {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    gap: var(--sp-1);
+    margin-top: var(--sp-3);
+    border-top: 1px solid var(--chrome-line);
+    /* ⚠️ **`padding-top` 을 여기 주지 않습니다.** 줬더니 붙어 있는 머리말이
+       `top: 0`(= 안쪽 여백 **아래**)에 서고, 올라오는 줄들이 그 12px 띠를
+       **머리말 위로** 지나갔습니다. 34개를 굴려 보고 봤습니다. 여백은
+       머리말이 자기 `padding` 으로 갖습니다 — 그래야 바탕이 같이 덮습니다. */
+  }
+
+  /* ⚠️ **빈 구역은 선도 긋지 않습니다.**
+
+     홈에는 프로젝트 맥락이 없어서 회의를 받아 올 수 없고, 그래서 이
+     구역이 빈 채로 남습니다. 그런데 위 규칙의 `border-top` 은 그대로
+     그려져서 **아무것도 없는 아래에 가로줄 하나**가 남았습니다 —
+     홈을 렌더해서 보고 알았습니다.
+
+     레일 자리를 72px 미리 비워 뒀던 것과 같은 부류입니다(§11). 없는
+     것을 위해 자리를 잡아 두면 그건 빈칸이 아니라 결함입니다.
+
+     데이터가 오기 전에도 비어 있으므로, 이 규칙이 "받기 전에는 아무
+     말도 하지 않는다" 를 CSS 쪽에서도 지켜 줍니다. */
+  .chan:empty {
+    display: none;
+  }
+
+  /* ⚠️ 한글에 `text-transform: uppercase` 와 mono 를 걸지 않습니다.
+     실험판 v1 에서 그렇게 했다가 자간만 벌어지고 아무 효과가 없었습니다
+     — 한글에는 대문자가 없습니다 (docs/19 §3).
+
+     ⚠️ 목록을 끝까지 내리면 이 머리말이 **밀려 올라가 사라집니다.**
+     34개를 넣고 굴려 보고 알았습니다 — 그러면 남은 회의 줄들이 위쪽
+     탭 넷에 그대로 이어 붙어 한 덩어리로 읽힙니다. 붙여 둡니다.
+     (바탕색을 주지 않으면 밑에서 올라온 줄이 글자 위로 지나갑니다.) */
+  .chan-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    flex-shrink: 0;
+    margin: 0;
+    padding: var(--sp-3) var(--sp-3) 0;
+    background: var(--chrome-side);
+    font-size: var(--fs-caption);
+    font-weight: 600;
+    color: var(--chrome-subtle);
+    line-height: var(--sp-6);
+  }
+
+  .chan-row {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-icon);
+    height: var(--shell-row);
+    padding: 0 var(--sp-3);
+    border-radius: var(--r-ctrl);
+    color: var(--chrome-muted);
+    font-size: var(--fs-label);
+    text-decoration: none;
+  }
+
+  .chan-row:hover {
+    background: var(--chrome-hover);
+    color: var(--chrome-text);
+  }
+
+  /* 지금 보고 있는 회의 — 탭과 **같은 표시**를 씁니다. 다른 모양을 쓰면
+     "여기가 지금 위치" 라는 규칙을 두 번 배워야 합니다. */
+  .chan-row[aria-current="page"] {
+    position: relative;
+    background: var(--chrome-sel);
+    color: var(--chrome-text);
+  }
+
+  .chan-row[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 20%;
+    bottom: 20%;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--chrome-accent);
+  }
+
+  /* 회의 이름이 길면 줄이 늘어나는 게 아니라 **잘립니다.** 열 너비는
+     고정이고, 두 줄이 되면 줄 높이가 제각각이 되어 목록이 아니라
+     문단으로 읽힙니다. */
+  .chan-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── 상태 점 — 색은 셋, 넷째는 모양 ────────────────────
+
+     `--ok`·`--bad` 를 쓰지 않는 이유는 `tokens.css` 에 적어 뒀습니다:
+     그 둘은 다크에서 뒤집히는데 껍데기는 안 뒤집힙니다. */
+  .chan-dot {
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--r-round);
+    background: var(--chrome-subtle);
+  }
+
+  .chan-dot[data-state="open"]   { background: var(--chrome-live); }
+  .chan-dot[data-state="todo"]   { background: var(--chrome-accent); }
+  .chan-dot[data-state="failed"] { background: var(--chrome-bad); }
+
+  /* 속이 빈 점 = "아직 안 찼다". 색을 하나 더 만드는 대신 **모양**으로
+     가릅니다 — 색이 다섯이면 사람이 그 표를 외워야 합니다. */
+  .chan-dot[data-state="working"] {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--chrome-subtle);
+  }
+
+  /* 남은 업무 후보 수. 글자색이 `--chrome-side` 인 것은 실수가 아닙니다 —
+     대비가 대칭이라 강조색 위에서 4.51:1 이 그대로 나옵니다. */
+  .chan-count {
+    flex: 0 0 auto;
+    min-width: var(--sp-4);
+    padding: 0 var(--sp-1);
+    border-radius: var(--r-round);
+    background: var(--chrome-accent);
+    color: var(--chrome-side);
+    font-size: var(--fs-caption);
+    font-weight: 700;
+    line-height: var(--sp-4);
+    text-align: center;
+  }
+
+  /* 회의가 없을 때·잘렸을 때 하는 말. **빨강이 아닙니다** — 회의가 없는
+     것은 고장이 아니라 아직 시작하지 않은 것입니다. */
+  .chan-none {
+    margin: 0;
+    padding: var(--sp-1) var(--sp-3);
+    font-size: var(--fs-caption);
+    color: var(--chrome-subtle);
+    line-height: 1.5;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   접기 — 정직함을 **산문으로** 구현하지 않기 (docs/19 §18)
+   ══════════════════════════════════════════════════════════════
+
+   이 저장소는 "말해 줘야 한다" 를 지키다가 그것을 **영구 인라인
+   문장**으로 구현했습니다. 칸반 카드 하나에 안내문이 넉 줄, 기여도
+   한 줄에 사유가 석 줄, 화면 아래에 문단이 둘씩 깔렸습니다. 화면이
+   인터페이스가 아니라 **교재**가 됐습니다.
+
+   ⚠️ 그렇다고 지우면 안 됩니다. 측정 불가·기여도 미반영·표식 안내는
+   이 제품의 윤리이자 사람이 실제로 필요로 하는 것입니다.
+
+   > **정직함은 "항상 보이기" 가 아니라 "언제나 닿을 수 있기" 입니다.**
+
+   그래서 지우지 않고 **접습니다.** 글은 DOM 에 그대로 남아
+   낭독기도 검색도 가드도 닿고, 화면만 조용해집니다.
+
+   ⚠️ `hidden` 이 아니라 `<details>` 입니다. `hidden` 은 낭독기에서도
+   사라집니다 — 그건 지운 것과 같습니다. */
+
+.more {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-caption);
+}
+
+.more > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: fit-content;
+  padding: var(--sp-1) 0;
+  color: var(--text-subtle);
+  cursor: pointer;
+  /* 기본 삼각형을 끄고 직접 그립니다 — 브라우저마다 모양이 다릅니다. */
+  list-style: none;
+}
+
+.more > summary::-webkit-details-marker { display: none; }
+
+.more > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  transition: transform var(--dur-hover) var(--ease-out);
+}
+
+.more[open] > summary::before { transform: rotate(90deg); }
+
+.more > summary:hover { color: var(--text-muted); }
+
+/* 펼친 내용 — 본문보다 한 단 조용하게. 여기 있는 것은 "알아 두면
+   좋은 것" 이지 지금 해야 할 일이 아닙니다. */
+.more-body {
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--line);
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.more-body p,
+.more-body li { margin: var(--sp-1) 0; }
+
+.more-body ul { list-style: none; padding: 0; margin: 0; }
+
+/* ══════════════════════════════════════════════════════════════
+   맥락 패널 — 셋째 열 (docs/19 §14)
+   ══════════════════════════════════════════════════════════════
+
+   ⚠️ **채널 목록보다 넓은 데서 섭니다** (100rem = 1600px).
+
+   90rem 에서 셋째 열까지 세우면 본문에 836px 만 남고, 칸반은 거기서 열
+   셋을 나눠 씁니다 — 한 열이 270px 입니다. 카드 안에 "연결된 PR이
+   없습니다 — PR 제목이나 본문에 TASK-3을 적으면 붙습니다" 같은 문장이
+   들어가는 화면이라 그 폭에서는 글이 뭉갭니다.
+
+   그래서 90~100rem 사이는 **두 열**입니다. 접히는 게 아니라 원래
+   모양입니다 — 이 셸에는 접히는 자리가 없습니다.
+
+   ⚠️ 이 숫자는 `nav.ts` 의 `PANEL_WIDTH` 와 **같아야** 합니다. 갈라지면
+   그 사이 폭에서 열이 보이는데 영영 빕니다 (요청이 안 나가므로).
+   `guards.test.ts` 가 두 파일의 너비 집합을 맞춰 봅니다.
+
+   ## ⭐ 이 열은 **껍데기가 아니라 본문입니다** (§21)
+
+   처음에는 왼쪽 열들과 같은 `--chrome-*` 로 칠했습니다. 짙은 두 벽
+   사이에 밝은 본문이 끼는 모양인데, 1920px 로 렌더해서 보니
+   **가운데가 종이 한 장처럼** 보였습니다 — 화면의 주인이 본문인데
+   양쪽 어둠이 시선을 먼저 가져갔습니다.
+
+   왼쪽은 **이동**(프로젝트·회의를 옮겨 다니는 곳)이라 껍데기가 맞습니다.
+   오른쪽은 **지금 보고 있는 것에 딸린 정보**입니다 — 팀원이 누구고
+   무엇을 잴 수 있는가. 그건 본문의 일부라 본문과 같은 면에 있어야
+   하고, 모드에 따라 같이 뒤집혀야 합니다.
+
+   그래서 여기서는 `--chrome-*` 를 **쓰지 않습니다.** 반대로 뒤집힙니다 —
+   껍데기 색을 여기 쓰면 어두운 모드에서 짙은 글자가 짙은 면 위에 얹혀
+   사라집니다. `guards.test.ts` 가 그 방향으로 지킵니다. */
+
+@media (min-width: 100rem) {
+  html {
+    padding-right: var(--shell-panel);
+  }
+
+  html:has(body.no-tabs) {
+    padding-right: 0;
+  }
+
+  .ctx {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 30;
+    width: var(--shell-panel);
+
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    padding: var(--sp-3) var(--sp-2);
+    overflow-y: auto;
+
+    background: var(--bg);
+    border-left: 1px solid var(--line);
+  }
+
+  /* 아직 못 받았거나 받을 수 없는 화면에서는 **열 자체가 없습니다.**
+     빈 껍데기를 세워 두면 284px 짜리 빈칸이 생깁니다 — 채널 구역에서
+     한 번, 프로젝트 레일에서 한 번 당한 그것입니다. */
+  .ctx:empty {
+    display: none;
+  }
+
+  /* ⚠️ 왼쪽 열의 머리말(`.chan-project`)과 **같은 높이·같은 선**입니다.
+     처음엔 그냥 작은 라벨이었는데, 렌더해서 보니 두 열의 첫 줄이 서로
+     다른 높이에서 시작해 셸이 한 벌로 안 읽혔습니다. */
+  .ctx-head {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    height: var(--shell-head);
+    min-height: var(--shell-head);
+    margin: calc(-1 * var(--sp-3)) calc(-1 * var(--sp-2)) 0;
+    padding: 0 var(--sp-4);
+    border-bottom: 1px solid var(--line);
+
+    font-size: var(--fs-caption);
+    font-weight: 600;
+    color: var(--text-subtle);
+  }
+
+  .ctx-row {
+    flex-shrink: 0;
+    padding: var(--sp-2) var(--sp-3);
+    border-radius: var(--r-ctrl);
+  }
+
+  .ctx-name {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-icon);
+    margin: 0;
+    color: var(--text);
+    font-size: var(--fs-label);
+    font-weight: 600;
+  }
+
+  /* 이름 아래로 들여씁니다. **점 너비 + 사이 간격**에서 나온 값이라
+     눈으로 고른 숫자가 아닙니다 — 역할 줄이 이름 첫 글자에 맞습니다. */
+  .ctx-roles {
+    margin: 0;
+    padding-left: calc(var(--sp-2) + var(--sp-icon));
+    color: var(--text-muted);
+    font-size: var(--fs-caption);
+    line-height: 1.5;
+  }
+
+  /* ⚠️ 점은 **둘뿐**입니다 — 잰다 / 못 잰다. `나쁨` 은 없습니다.
+     못 재는 것은 그 사람이 일을 안 한 게 아닙니다 (docs/05 §5).
+
+     ⚠️ 잴 수 있는 쪽에 **초록을 쓰지 않았습니다.** 채널 목록에서 초록은
+     이미 "회의가 열려 있다" 입니다. 같은 색에 뜻을 둘 주면 사람은 둘 다
+     헷갈립니다. 그리고 여기서 잴 수 있는 것은 **보통 상태**이지 칭찬할
+     일이 아닙니다 — 조용한 회색으로 두면 흙빛이 그만큼 눈에 띕니다.
+
+     ⚠️ 못 재는 쪽이 **빨강이 아니라 흙빛**인 이유도 같습니다. 이
+     저장소는 결측을 흙빛으로 그리기로 정해 뒀습니다(`tokens.css`).
+
+     ⚠️⚠️ 이 주석은 오래 **껍데기 위 4.54:1** 이라고 적고 있었는데,
+     이 점은 껍데기가 아니라 **본문 면(`--bg`) 위**에 있습니다 —
+     `.ctx` 가 `background: var(--bg)` 이고, 맥락 패널은 docs/19 §18 에서
+     껍데기에서 본문으로 옮겨졌습니다. 옮길 때 색 주석만 안 따라온 것이라
+     아무 테스트도 안 터졌습니다. 실제 값은 `--bg` 위 5.85:1(밝은)·
+     8.81:1(어두운) 이고, 점 하한 3:1(WCAG 1.4.11)을 넘습니다. */
+  .ctx-dot {
+    flex: 0 0 auto;
+    width: var(--sp-2);
+    height: var(--sp-2);
+    border-radius: var(--r-round);
+    background: var(--line-strong);
+  }
+
+  .ctx-dot[data-state="unmeasurable"] {
+    background: var(--gap);
+  }
+
+  .ctx-note {
+    flex-shrink: 0;
+    margin: var(--sp-2) 0 0;
+    padding: var(--sp-2) var(--sp-3);
+    border-top: 1px solid var(--line);
+    color: var(--text-subtle);
+    font-size: var(--fs-caption);
+    line-height: 1.5;
+  }
+}
+
+
+/* ══ 팀 경고 상자 — **두 화면이 같은 한 벌을 씁니다** ═══════════
+
+   ⚠️ 기여도 화면에만 있던 것을 여기로 올렸습니다. 보고서 화면이 같은
+   상자를 필요로 하는 순간이 왔고, 이 저장소의 규칙은 "두 번째로
+   필요해지는 순간 공용으로" 입니다. 이 상자는 하필 **이 제품의 윤리가
+   사는 자리**라 — "이 수치로 서로를 비교하지 마세요" — 두 벌이 되면
+   한쪽 화면의 경고만 조용히 약해지는 일이 생깁니다.
+
+   ⚠️ 이름이 `.warnings` 가 아닌 이유: `call.html` 이 그 이름을 **다른
+   뜻**으로 이미 쓰고 있습니다(마이크 캡처 경고 `<ul>`). 같은 이름을
+   공용으로 올리면 통화 화면의 목록이 갑자기 상자가 됩니다.
+
+   ⚠️ **베이지 배너가 아닙니다.** 노란 채움은 화면 맨 위 200px 을 색
+   덩어리로 만들어서, 정작 읽어야 할 판독 줄보다 배너가 먼저 읽혔습니다.
+   조용한 면 + 왼쪽 흙빛 막대입니다 — 결측을 그리는 어휘와 같습니다. */
+.notice-box {
+  margin: 0 0 var(--sp-6);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--gap);
+  border-radius: var(--r-card);
+  font-size: var(--fs-label);
+  color: var(--text-muted);
+  max-width: 44rem;
+}
+
+.notice-box p { margin: 0; }
+.notice-box p + p { margin-top: var(--sp-2); }

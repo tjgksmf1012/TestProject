@@ -8,14 +8,20 @@
 
 ```bash
 cd frontend
-npm test          # 778개, 설치 없이 바로 돌아갑니다
+npm test          # 설치 없이 바로 돌아갑니다 (개수는 명령이 셉니다)
 ```
 
 **테스트는 의존성 0개입니다.** Node 22.18+ 가 TypeScript 를 그대로 실행하고
 (`--experimental-strip-types` 가 기본 활성), 테스트 러너도 내장이라
 `npm install` 없이 돌아갑니다 ([docs/11](../docs/11-비용-제로-구성.md)).
 
-타입 검사와 데모 페이지 빌드에만 개발 의존성 3개(약 34MB)가 필요합니다.
+타입 검사와 데모 페이지 빌드·CSS 빌드에는 개발 의존성 8개가 필요합니다
+(esbuild · typescript · tailwindcss · @tailwindcss/cli · @radix-ui/colors ·
+@types/node · @types/react · @types/react-dom).
+
+⚠️ **런타임 의존성도 이제 0개가 아닙니다** — React · React DOM ·
+@radix-ui/react-dialog 셋입니다 (docs/19 §24). 번들은 `public/` 에 커밋되므로
+데모를 여는 데는 여전히 설치가 필요 없습니다.
 
 ```bash
 npm install       # typescript, esbuild, @types/node

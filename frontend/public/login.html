@@ -18,42 +18,133 @@
 <title>로그인 — TeamFlow</title>
 <style>
 
-  /* ⚠️ 예전에는 여기서 `background: #2563eb`(파랑)를 손으로 칠했습니다
-     (결함 59). 나머지 여덟 화면은 전부 `class="primary"`(청록
-     `--primary`)를 쓰는데, **사람이 제일 먼저 보는 화면만** 다른
-     색이었습니다. 색은 이제 `button.primary` 가 정합니다. */
+  /* ══ 브리프대로 (docs/19 §26) ═══════════════════════════════
+
+     ⚠️ 이 화면과 통화 화면만 브리프를 안 거치고 남아 있었습니다.
+     **사람이 이 제품에서 제일 먼저 보는 화면**인데요.
+
+     고친 것 셋:
+       1000px 짜리 입력칸 · 화면 폭을 가로지르던 각주 선 · 제목 옆에
+       설명이 없어 무슨 서비스인지 모르던 것. */
+
+  /* ⚠️ **`body` 에 `no-tabs` 가 붙어 셸 여백 규칙이 통째로 비켜 갑니다.**
+     그래서 폭을 여기서 잡습니다. 로그인은 칸 셋짜리 화면이라 본문
+     최대폭(1088)을 다 쓸 이유가 없습니다 — 24rem 이면 입력칸이
+     "이 정도 길이를 적으면 된다" 를 스스로 말합니다.
+
+     ⚠️⚠️ **폭은 담는 쪽에 한 번만 겁니다.** 예전에는 `.head`·`.card`·
+     `.note` 가 같은 두 줄을 각자 이고 있었고, 그래서 오류 상자가
+     생길 때 **그 한 벌만 빠져** 폼에서 320px 왼쪽에 떴습니다(3d377f4).
+     증상을 고치며 네 번째 벌을 더한 셈이라 원인은 그대로였습니다 —
+     `#app` 에 요소를 하나 심어 보니 x=448 w=1024 로 똑같이 빠져나갑니다.
+     성공 문구든 약관 줄이든 다음에 얹는 것이 전부 그렇게 됩니다.
+     `app.css:910~` 이 본문 폭에서 같은 결론을 이미 적어 뒀습니다. */
+  #app { max-width: 24rem; margin-inline: auto; }
+
+  /* 머리말은 카드 **바깥**입니다. 안에 넣으면 상자가 길어지면서
+     입력칸이 아래로 밀리고, 처음 오는 사람이 채울 곳을 늦게 찾습니다. */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    padding: var(--sp-6);
+  }
+
+  form { display: flex; flex-direction: column; gap: var(--sp-4); }
+  /* ⚠️ `margin-bottom: 0` 은 공용 `label`(app.css:570~)의 6px 을 끕니다.
+     그 6px 은 라벨이 입력창 **위에 블록으로** 놓이는 패턴의 값인데,
+     여기서는 라벨이 입력창을 **감쌉니다.** `display` 만 덮고 마진을 안
+     끄면 갈 곳 없는 6px 이 상자 바깥 아래에 남아 `gap`(16px) 위에
+     얹힙니다 — 칸 사이가 22px, 마지막 칸→버튼이 30px 로 4px 격자를
+     벗어나 있었습니다. 눈으로는 "조금 뜬다" 라서 재야 나옵니다.
+     로비(`.extras label`)는 같은 모양을 이미 끄고 있었고 여기만 빠졌습니다. */
+  form label { display: flex; flex-direction: column; gap: var(--sp-icon);
+               margin-bottom: 0;
+               font-size: var(--fs-caption); color: var(--text-subtle); }
+
   #submit { margin-top: var(--sp-2); }
   #submit:disabled { cursor: progress; }
-  #toggle { border: 0; color: var(--text-subtle); margin-top: var(--sp-3); text-decoration: underline; }
 
+  /* 가입 전환은 **주 행동이 아닙니다** (브리프 §14). 예전에는 로그인
+     버튼과 같은 무게의 상자였고, 지금은 공용 `.linkish` 입니다.
+
+     ⚠️ **여기 있던 일곱 줄은 `.linkish` 를 통째로 덮고 있었습니다.**
+     React 로 옮기며 `className="linkish"` 를 붙였는데 이 `#toggle`
+     블록이 그대로 남아, id(1-0-0)가 클래스(0-1-0)를 이겨 **클래스가
+     하나도 안 먹었습니다** — 붙여 놓고 아무도 안 부르는 그 모양입니다.
+     여섯은 같은 값을 다시 적은 중복이었고, 갈라진 것은 padding
+     뿐이라(8px vs 4px → 버튼 높이 38px vs 30px) 홈·로비의 같은 버튼과
+     혼자 달랐습니다.
+
+     ⭐ 남긴 것은 **밑줄 하나**입니다. 로비에서는 이 버튼이 둘씩 나란히
+     서서(`칸반 보기` `기여도 보기`) 밑줄을 다 그으면 글줄처럼 보이는데,
+     로그인에서는 폼 아래 **혼자** 놓인 유일한 다른 길이라 밑줄이 없으면
+     누를 수 있는 것으로 안 읽힙니다. 렌더해서 둘 다 보고 정했습니다. */
+  #toggle { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* ⚠️ **이 상자가 카드와 같은 폭으로 안 묶여 있었습니다.** `body` 폭
+     (1088)을 그대로 써 **폼에서 320px 떨어진 왼쪽 끝**에 떴습니다.
+     기본값이 안 보이는 상태라 검증에 걸려야 나옵니다 — 그래서 브리프를
+     한 번 거치고도 못 봤고, 렌더해서 빈 폼을 제출해 보고 드러났습니다.
+     지금은 위 `#app` 이 한 번에 묶습니다. */
   .error p { margin: var(--sp-1) 0; }
+
+  /* ⭐ **줄이 그 칸으로 가는 링크입니다** — "이름을 입력하세요" 라고
+     알려 주고 그 일을 할 자리는 안 주던 것을 고친 자리입니다.
+     ⚠️ 색은 **상자에서 물려받습니다**(`inherit`). 여기서 색을 또 정하면
+     흙빛(아직 안 적음)과 빨강(진짜 실패)의 구분이 링크에서만 흐려집니다.
+     Tailwind 리셋이 `a { color: inherit; text-decoration: inherit }` 이라
+     밑줄은 여기서 답니다. */
+  .error a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+  @media (hover: hover) and (pointer: fine) {
+    .error a:hover { text-decoration-thickness: 2px; }
+  }
+
+  /* ⚠️ **아직 안 적은 것은 빨강이 아닙니다** (docs/19 §26).
+
+     이 저장소는 "결측은 빨강이 아니라 흙빛" 을 규칙으로 두고 로비의 끊긴
+     트랙·검토의 안 채운 칸·녹음의 아직 안 한 것을 전부 그렇게 고쳤습니다.
+     그런데 **사람이 제일 먼저 보는 화면**이 빈 칸 셋을 빨간 줄 셋으로
+     찍고 있었습니다. 빨강은 "네가 뭘 잘못했다" 로 읽힙니다 — 가입 폼을
+     막 연 사람은 아무것도 잘못하지 않았습니다.
+
+     ⚠️ **진짜 실패는 그대로 빨강입니다.** 비밀번호가 틀렸거나 서버에
+     닿지 못한 것은 결측이 아니라 실패입니다.
+
+     ⚠️⚠️ **글자를 흙빛으로 칠했다가 되물렸습니다.** `--gap` 을 15px
+     글자에 쓰니 밝은 모드에서 **3.46:1** 이었습니다 — 이 저장소가 스스로
+     정한 하한(글자 4.5:1 · 점 3:1, `tokens.css` 와 `test_design_tokens.py`)
+     아래입니다. "빨강이 아니게" 하려다 **안 읽히게** 만든 것입니다.
+
+     그래서 갈랐습니다 — **글자는 읽히는 중립색, 신호는 점이 집니다.**
+     점은 글자가 아니라 UI 컴포넌트라 하한이 3:1 이고(WCAG 1.4.11),
+     흙빛은 거기서 통과합니다. 검토 화면의 `.check` 가 쓰는 모양과 같습니다.
+
+       글자 --text-muted  7.64:1(밝게) · 9.16:1(어둡게)
+       점   --gap         3.46:1(밝게) · 6.28:1(어둡게)
+
+     ⚠️ 색은 **상자에** 겁니다. 처음에는 자식 `<p>` 에만 걸었는데, 그러면
+     상자 자신은 `.error` 의 빨강을 그대로 이고 있습니다 — 지금은 모든
+     글자가 `<p>` 안이라 안 보이지만, 나중에 `<p>` 로 안 감싼 글자가 한 줄
+     들어오는 순간 그것만 빨갛게 나옵니다. 한 겹 얕은 규칙은 그렇게 샙니다. */
+  .error.gap { color: var(--text-muted); }
+  .error.gap p { display: flex; align-items: baseline; gap: var(--sp-2); }
+  .error.gap p::before { content: ""; flex: 0 0 auto;
+                         width: var(--sp-1); height: var(--sp-1);
+                         border-radius: var(--r-round); background: var(--gap);
+                         transform: translateY(-3px); }
+
+  /* ⚠️ 각주 위의 가로선을 걷었습니다 (브리프 §7). 화면에 요소가 셋뿐인데
+     그중 하나가 폭을 가로지르는 선이면, 그 선이 제일 눈에 띕니다. */
+  .note { margin-top: var(--sp-6); padding-top: 0; border-top: 0;
+          font-size: var(--fs-caption); }
 
 </style>
 </head>
 <body class="no-tabs">
-  <h1 id="title">로그인</h1>
-  <p class="sub">회의 녹음과 기여도는 팀 내부 자료라 로그인이 필요합니다.</p>
-
-  <div id="error" class="error" hidden></div>
-
-  <form id="form">
-    <label id="name-row" hidden>이름
-      <input id="name" type="text" autocomplete="name" />
-    </label>
-    <label>이메일
-      <input id="email" type="email" autocomplete="email" inputmode="email" />
-    </label>
-    <label>비밀번호
-      <input id="password" type="password" autocomplete="current-password" />
-    </label>
-    <button id="submit" class="primary" type="submit">로그인</button>
-  </form>
-  <button id="toggle" type="button">처음이신가요? 가입하기</button>
-
-  <p class="note">
-    비밀번호는 scrypt로 해싱해 저장하고, 세션 토큰은 원문이 아니라
-    해시만 남깁니다. 로그아웃하면 서버에서 세션을 끊습니다.
-  </p>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24).
+       머리말·오류·폼이 전부 `src/demo/login.tsx` 안에 있습니다. -->
+  <div id="app"></div>
 
   <script type="module" src="/login.js"></script>
 </body>

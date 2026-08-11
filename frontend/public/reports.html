@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
+<link rel="stylesheet" href="/app.css" />
+<title>보고서 — TeamFlow</title>
+<style>
+
+  /* ══ 보고서 ═══════════════════════════════════════════════
+
+     머리말(`.head`·`.lede`·`.by`)과 팀 경고 상자(`.notice-box`)는
+     `app.css` 에 있습니다 — 다른 화면과 **같은 한 벌**입니다.
+
+     ⚠️ 이 화면에는 **값을 폭으로 그리는 규칙이 하나도 없습니다.** 일부러
+     그렇습니다. 보고서에 막대가 생기면 그건 곧 순위표이고, 이 저장소는
+     같은 결함을 두 번 냈습니다(기여도 막대의 절대 위치 · 카테고리 막대).
+     값은 전부 글자입니다. */
+
+  .actions { display: flex; flex-wrap: wrap; gap: var(--sp-3);
+             margin: 0 0 var(--sp-3); }
+
+  /* ── 두 열: 목록 + 본문 ───────────────────────────────
+
+     ⚠️ **폰이 먼저입니다.** 좁을 때는 목록이 위, 본문이 아래로 쌓입니다.
+     390px 에 두 열을 밀어 넣으면 넘칩니다 — 이 저장소가 실제로 222px
+     넘쳤던 자리입니다. */
+  .cols { display: grid; gap: var(--sp-6); align-items: start; }
+
+  @media (min-width: 60rem) {
+    .cols { grid-template-columns: 17rem 1fr; gap: var(--sp-8); }
+  }
+
+  /* ── 보고서 목록 ─────────────────────────────────────── */
+  .rlist { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp-2); }
+
+  .ritem {
+    display: grid; gap: var(--sp-1); width: 100%; text-align: left;
+    /* ⚠️ 손가락 하한. 목록 항목은 누르는 것입니다. */
+    min-height: var(--tap);
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-card); color: var(--text);
+  }
+
+  .ritem.current {
+    /* 고른 것을 색 채움이 아니라 **왼쪽 막대**로 표시합니다 — 목록에서
+       한 줄만 색이 차면 그 줄이 화면에서 가장 진한 것이 됩니다. */
+    border-left: 2px solid var(--primary);
+  }
+
+  .rtype { font-size: var(--fs-caption); color: var(--text-subtle); }
+  .rtitle { font-size: var(--fs-label); font-weight: 600; }
+  .rwhen { font-size: var(--fs-caption); color: var(--text-subtle);
+           font-variant-numeric: tabular-nums; }
+
+  /* ── 본문 ─────────────────────────────────────────────
+
+     줄 길이를 묶습니다. ⚠️ `ch` 가 아니라 `rem` 입니다 — `ch` 는 숫자 `0`
+     폭이라 한글에서 줄이 너무 일찍 끊깁니다 (`app.css` 의 `.lede` 참고). */
+  .rbody { max-width: 44rem; }
+
+  .rbar { display: flex; flex-wrap: wrap; align-items: baseline;
+          justify-content: space-between; gap: var(--sp-3);
+          margin: 0 0 var(--sp-5); }
+
+  .rhead { font-size: var(--fs-title); letter-spacing: var(--ls-title);
+           margin: 0; }
+
+  .bhead { font-size: var(--fs-item); letter-spacing: var(--ls-item);
+           margin: var(--sp-8) 0 var(--sp-3); }
+  .bpara { margin: 0 0 var(--sp-3); color: var(--text-muted);
+           font-size: var(--fs-body); }
+
+  /* 아무것도 없을 때의 한 줄. ⚠️ "없었다" 와 "아직 안 나왔다" 를 서버가
+     갈라서 문장으로 주므로, 화면은 그 문장을 그대로 그립니다. */
+  .bempty { margin: 0 0 var(--sp-3); color: var(--text-subtle);
+            font-size: var(--fs-label); }
+
+  /* ⚠️ **못 잰 것은 흙빛입니다.** 빨강은 "네가 뭘 잘못했다" 로 읽힙니다.
+     못 잰 것은 고장도 잘못도 아니라 "이 구간은 잴 수 없었다" 입니다. */
+  .bgap { margin: 0 0 var(--sp-3); padding-left: var(--sp-4);
+          border-left: 2px solid var(--gap); color: var(--text-muted);
+          font-size: var(--fs-label); }
+
+  .blist { list-style: none; padding: 0; margin: 0 0 var(--sp-3); }
+  .blist li { position: relative; padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
+              font-size: var(--fs-label); color: var(--text-muted); }
+  .blist li::before { content: ""; position: absolute; left: 0; top: 1em;
+                      width: var(--sp-1); height: var(--sp-1);
+                      border-radius: var(--r-round); background: var(--line-strong); }
+
+  /* ── 이름=값 ──────────────────────────────────────────── */
+  .facts { margin: 0 0 var(--sp-3); display: grid; gap: var(--sp-2); }
+  .fact { display: grid; gap: var(--sp-1); }
+
+  @media (min-width: 30rem) {
+    .fact { grid-template-columns: 9rem 1fr; gap: var(--sp-4); align-items: baseline; }
+  }
+
+  .fact dt { font-size: var(--fs-caption); color: var(--text-subtle); }
+  .fact dd { margin: 0; font-size: var(--fs-label); color: var(--text);
+             font-variant-numeric: tabular-nums; }
+  .fact dd.gap { color: var(--gap); }
+  .fnote { display: block; font-size: var(--fs-caption); color: var(--text-subtle);
+           font-variant-numeric: normal; margin-top: var(--sp-1); }
+
+  /* ── 사람별 ───────────────────────────────────────────
+
+     ⚠️ 줄마다 가로선을 긋지 않습니다. 사람 셋이면 화면을 가로지르는 선이
+     넷이 되고, 그 선들이 화면에서 가장 진한 것이 됩니다. 나누는 일은
+     여백이 합니다 (브리프 §7). */
+  .people { display: grid; gap: var(--sp-6); margin: 0 0 var(--sp-3); }
+  .prow { display: grid; gap: var(--sp-2); }
+
+  @media (min-width: 48rem) {
+    .prow { grid-template-columns: 8rem 11rem 1fr; gap: var(--sp-5);
+            align-items: start; }
+  }
+
+  .pwho { margin: 0; }
+  .pwho .who { display: block; font-size: var(--fs-label); font-weight: 600; }
+  .pwho .role { display: block; font-size: var(--fs-caption);
+                color: var(--text-subtle); margin-top: var(--sp-1); }
+
+  /* 구간이 주인공입니다. ⚠️ **단일 점수를 크게 띄우지 않습니다** — 애초에
+     서버가 단일 계산값을 안 보냅니다 (`blocks.person` 에 통로가 없습니다). */
+  .pval .range { margin: 0; font-size: var(--fs-number); font-weight: 700;
+                 letter-spacing: -.02em; line-height: 1.15; white-space: nowrap;
+                 font-variant-numeric: tabular-nums; }
+
+  /* 못 잰 사람. 숫자 자리에 0 이 아니라 문장이 오므로 줄바꿈을 허용합니다. */
+  .pval .range-gap { color: var(--gap); font-size: var(--fs-label);
+                     font-weight: 600; white-space: normal; }
+
+  .pval .conf { margin: var(--sp-1) 0 0; font-size: var(--fs-caption);
+                color: var(--text-subtle); }
+
+  /* ⚠️ `display: flex` 를 쓰면 안 됩니다 — 줄 안의 강조가 별개 항목이 되어
+     문장이 흩어집니다 (기여도 화면에서 실제로 그렇게 깨졌습니다).
+     인라인 흐름은 인라인으로 두고 마커만 절대 위치로 뺍니다. */
+  .notes { list-style: none; padding: 0; margin: 0; }
+  .notes li { position: relative; padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
+              font-size: var(--fs-caption); color: var(--text-muted); }
+  .notes li::before { content: ""; position: absolute; left: 0; top: 1em;
+                      width: var(--sp-1); height: var(--sp-1);
+                      border-radius: var(--r-round); background: var(--line-strong); }
+  .notes-gap li { color: var(--gap); }
+  .notes-gap li::before { background: var(--gap); }
+
+  /* 팀이 확정한 값. 계산 구간과 나란히 있어야 둘이 다르다는 것이 보입니다. */
+  .final { margin: var(--sp-2) 0 0; font-size: var(--fs-caption);
+           color: var(--text); }
+
+  /* ⚠️ 손가락에서는 16px 아래로 내려가지 않습니다. 그 아래면 iOS 가
+     입력할 때 화면을 확대하고, 작은 글자는 애초에 누르기 어렵습니다.
+     ⚠️ 폭만 줄여서 재면 안 잡힙니다 — Chromium 은 그때도 `hover: hover`
+     를 보고합니다. `hasTouch` 로 재십시오. */
+  @media (hover: none) and (pointer: coarse) {
+    .rtitle, .fact dd, .blist li, .bempty, .bgap { font-size: 1rem; }
+    .notes li, .rtype, .rwhen, .fnote, .pval .conf, .final { font-size: .875rem; }
+    .ritem { min-height: var(--tap); padding: var(--sp-4); }
+  }
+        </style>
+</head>
+<body>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24). 마크업을 여기
+       남겨 두면 두 벌이 되고, React 가 마운트하는 순간 지워지므로 고쳐도
+       아무 일이 안 일어납니다. -->
+  <div id="app"></div>
+
+  <script type="module" src="/reports.js"></script>
+
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
+</html>

@@ -1376,3 +1376,146 @@ def test_confirming_does_not_run_over_a_failed_meeting(client: TestClient, seede
     )
     with db_session.session_scope() as s:
         assert s.get(m.Meeting, meeting_id).status == m.MeetingStatus.FAILED.value
+
+
+# ══════════════════════════════════════════════════════════════
+# 근거 발화 역추적 (docs/19 §24)
+# ══════════════════════════════════════════════════════════════
+
+
+def _seed_utterances(engine, meeting_id: int, speaker_id: int) -> list[int]:
+    """근거로 쓸 발화 셋. 화자 출처를 일부러 다르게 둔다."""
+    with Session(engine) as s:
+        rows = [
+            m.Utterance(
+                meeting_id=meeting_id,
+                speaker_id=speaker_id,
+                start_ms=32_000,
+                end_ms=38_000,
+                text="배포 방식은 다음 회의로 미룹시다",
+                speaker_source="track",
+                speaker_confidence=1.0,
+            ),
+            m.Utterance(
+                meeting_id=meeting_id,
+                speaker_id=None,
+                start_ms=10_000,
+                end_ms=14_000,
+                text="로그인 API 는 제가 맡을게요",
+                speaker_source="diarization",
+                speaker_confidence=0.41,
+            ),
+        ]
+        s.add_all(rows)
+        s.commit()
+        return [r.id for r in rows]
+
+
+def test_utterances_returns_text_for_the_ids_asked(client: TestClient, engine, seeded):
+    """⭐ 이 엔드포인트가 없는 동안 화면은 `근거 #5` 를 적어 놓고
+    눌러도 아무 데도 못 갔다 — 말은 하고 그 말을 지킬 자리를 안 준 것."""
+    ids = _seed_utterances(engine, seeded["meeting_id"], seeded["user_ids"][0])
+    response = client.get(
+        f"/api/meetings/{seeded['meeting_id']}/utterances?ids={ids[0]},{ids[1]}"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert {r["id"] for r in body} == set(ids)
+    texts = " ".join(r["text"] for r in body)
+    assert "배포 방식은 다음 회의로" in texts
+    assert "로그인 API 는 제가" in texts
+
+
+def test_utterances_come_back_in_meeting_order(client: TestClient, engine, seeded):
+    """근거 둘을 나란히 읽을 때 회의에서 말한 순서여야 한다 —
+    id 순으로 주면 나중에 한 말이 위로 온다."""
+    ids = _seed_utterances(engine, seeded["meeting_id"], seeded["user_ids"][0])
+    body = client.get(
+        f"/api/meetings/{seeded['meeting_id']}/utterances?ids={ids[0]},{ids[1]}"
+    ).json()
+    assert [r["start_ms"] for r in body] == sorted(r["start_ms"] for r in body)
+
+
+def test_utterances_say_how_the_speaker_was_decided(client: TestClient, engine, seeded):
+    """⭐ **화자 출처를 감추면 안 된다.**
+
+    `track`(멀티트랙 확정)과 `diarization`(미매핑)은 "누가 말했다" 의
+    무게가 완전히 다르다. 원문만 주고 출처를 빼면, 추측한 화자를
+    사실처럼 읽게 된다."""
+    ids = _seed_utterances(engine, seeded["meeting_id"], seeded["user_ids"][0])
+    body = client.get(
+        f"/api/meetings/{seeded['meeting_id']}/utterances?ids={ids[0]},{ids[1]}"
+    ).json()
+    by_id = {r["id"]: r for r in body}
+    assert by_id[ids[0]]["speaker_source"] == "track"
+    assert by_id[ids[0]]["speaker_name"] is not None
+    assert by_id[ids[1]]["speaker_source"] == "diarization"
+    assert by_id[ids[1]]["speaker_confidence"] == pytest.approx(0.41, abs=0.001)
+    # 화자를 못 정한 발화에 이름을 지어내지 않는다
+    assert by_id[ids[1]]["speaker_name"] is None
+
+
+def test_utterances_do_not_leak_across_meetings(client: TestClient, engine, seeded):
+    """⭐ 다른 회의의 발화를 이 회의 id 로 물으면 안 나와야 한다.
+
+    나오면 후보가 남의 회의 발화를 근거로 달고 있어도 화면에서
+    구분되지 않는다 — 게다가 그 회의의 내용이 새는 것이다."""
+    with Session(engine) as s:
+        other = m.Meeting(
+            project_id=seeded["project_id"],
+            title="다른 회의",
+            started_at=NOW,
+            duration_sec=600,
+            status="needs_review",
+            started_by=seeded["user_ids"][0],
+        )
+        s.add(other)
+        s.flush()
+        leak = m.Utterance(
+            meeting_id=other.id,
+            speaker_id=seeded["user_ids"][0],
+            start_ms=0,
+            end_ms=1000,
+            text="이 문장은 새면 안 됩니다",
+            speaker_source="track",
+        )
+        s.add(leak)
+        s.commit()
+        leak_id = leak.id
+
+    body = client.get(
+        f"/api/meetings/{seeded['meeting_id']}/utterances?ids={leak_id}"
+    ).json()
+    assert body == []
+
+
+def test_utterances_need_membership(client: TestClient, engine, seeded):
+    """회의 내용이다. 팀원이 아니면 원문을 볼 수 없어야 한다."""
+    ids = _seed_utterances(engine, seeded["meeting_id"], seeded["user_ids"][0])
+    with Session(engine) as s:
+        outsider = m.User(name="남", email="outsider@example.com", password_hash="x")
+        s.add(outsider)
+        s.commit()
+        outsider_id = outsider.id
+    login_as(client, outsider_id)
+    response = client.get(f"/api/meetings/{seeded['meeting_id']}/utterances?ids={ids[0]}")
+    assert response.status_code in (403, 404)
+
+
+def test_utterances_reject_garbage_ids(client: TestClient, seeded):
+    """⚠️ 숫자가 아닌 것을 조용히 버리지 않는다. 오타 하나로 빈 목록을
+    받아 들고 "근거가 없다" 로 읽으면 안 된다."""
+    response = client.get(f"/api/meetings/{seeded['meeting_id']}/utterances?ids=5,abc")
+    assert response.status_code == 400
+
+
+def test_utterances_are_capped(client: TestClient, seeded):
+    """대본 전체를 떠 가는 통로가 되면 안 된다. 그 화면은 아직 없다."""
+    many = ",".join(str(i) for i in range(1, 60))
+    response = client.get(f"/api/meetings/{seeded['meeting_id']}/utterances?ids={many}")
+    assert response.status_code == 400
+
+
+def test_utterances_with_no_ids_returns_empty(client: TestClient, seeded):
+    """`ids` 없이 부르면 회의 전체 대본이 나오지 않는다."""
+    assert client.get(f"/api/meetings/{seeded['meeting_id']}/utterances").json() == []

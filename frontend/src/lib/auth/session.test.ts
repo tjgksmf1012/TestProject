@@ -57,6 +57,26 @@ describe('validateSignup', () => {
     const messages = validateSignup('가', 'a@x.com', '').map((p) => p.message);
     deepStrictEqual(messages, ['비밀번호를 입력하세요']);
   });
+
+  it('⭐ 문구 순서가 **화면의 칸 순서**와 같다 — 이름 → 이메일 → 비밀번호', () => {
+    // 가입 폼의 칸은 이름·이메일·비밀번호 순인데 예전에는 문구가
+    // 이메일·비밀번호·이름 순으로 나왔습니다(`validateLogin` 결과 뒤에
+    // 이름을 붙였기 때문). 세 줄이 위에 모여 있고 그 아래 칸 셋이 다른
+    // 순서면 사람이 눈으로 짝을 지어야 합니다.
+    deepStrictEqual(
+      validateSignup('', '', '').map((p) => p.field),
+      ['name', 'email', 'password'],
+    );
+    // 이름만 비어도, 이름만 채워도 각각 제자리에 옵니다.
+    deepStrictEqual(
+      validateSignup('', 'a@x.com', '').map((p) => p.field),
+      ['name', 'password'],
+    );
+    deepStrictEqual(
+      validateSignup('가', '', 'x').map((p) => p.field),
+      ['email', 'password'],
+    );
+  });
 });
 
 describe('safeRedirect', () => {

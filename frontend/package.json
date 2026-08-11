@@ -10,14 +10,26 @@
     "typecheck": "tsc --noEmit",
     "build:demo": "node build.mts",
     "check": "npm run typecheck && npm test",
-    "serve": "python3 -m http.server 3000 --directory public"
+    "serve": "python3 -m http.server 3000 --directory public",
+    "build:css": "tailwindcss -i src/styles/tailwind.css -o public/tw.css --minify",
+    "build": "npm run build:demo && npm run build:css"
   },
   "engines": {
     "node": ">=22.18"
   },
   "devDependencies": {
+    "@radix-ui/colors": "^3.0.0",
+    "@tailwindcss/cli": "^4.3.3",
     "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "esbuild": "^0.28.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.23",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }

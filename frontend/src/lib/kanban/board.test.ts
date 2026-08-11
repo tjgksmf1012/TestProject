@@ -10,6 +10,7 @@ import {
   describeStatus,
   isDueSoon,
   isOverdue,
+  moveDirection,
   nextStatuses,
   sortForBoard,
   sortLinks,
@@ -340,6 +341,38 @@ describe('nextStatuses', () => {
 
   it('모르는 상태여도 옮길 곳은 전부 준다', () => {
     deepStrictEqual(nextStatuses(task({ status: 'archived' }), STATUSES), STATUSES);
+  });
+});
+
+describe('moveDirection (브리프 §14)', () => {
+  it('뒤 칸으로 가면 앞으로다', () => {
+    strictEqual(moveDirection('todo', 'in_progress', STATUSES), 'forward');
+    strictEqual(moveDirection('todo', 'done', STATUSES), 'forward');
+    strictEqual(moveDirection('in_progress', 'done', STATUSES), 'forward');
+  });
+
+  it('앞 칸으로 가면 되돌리는 것이다', () => {
+    strictEqual(moveDirection('done', 'todo', STATUSES), 'back');
+    strictEqual(moveDirection('in_progress', 'todo', STATUSES), 'back');
+  });
+
+  it('⭐ 이름이 아니라 **배열 순서**로 판단한다', () => {
+    // 상태 이름은 서버가 줍니다. 여기서 `done` 을 글자로 찾으면 그
+    // 순간 두 벌이 되고, 프로젝트마다 다른 이름을 쓰면 조용히 틀립니다.
+    const 우리말 = ['접수', '작업중', '끝'];
+    strictEqual(moveDirection('접수', '끝', 우리말), 'forward');
+    strictEqual(moveDirection('끝', '접수', 우리말), 'back');
+  });
+
+  it('⭐ 모르는 상태는 **조용한 쪽**으로 둔다', () => {
+    // 앞으로 가는 것처럼 강조해 놓고 실제로는 어디로 가는지 모르는 것보다,
+    // 되돌리기로 그리는 편이 안전합니다.
+    strictEqual(moveDirection('archived', 'done', STATUSES), 'back');
+    strictEqual(moveDirection('todo', 'archived', STATUSES), 'back');
+  });
+
+  it('같은 자리로는 앞으로가 아니다', () => {
+    strictEqual(moveDirection('done', 'done', STATUSES), 'back');
   });
 });
 
