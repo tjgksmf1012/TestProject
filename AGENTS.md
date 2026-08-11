@@ -137,7 +137,8 @@ bash <스크래치패드>/serve.sh          # uvicorn 8811, demo.db
 
 ### React 로 옮긴 화면 · 안 옮기는 화면
 
-`review`·`kanban`·`home`·`contributions`·`login` 이 React 입니다.
+`review`·`kanban`·`home`·`contributions`·`login`·`project`·`lobby` 가
+React 입니다 (일곱).
 **`index`(녹음)와 `call`(통화)은 안 옮깁니다** — 그 둘은 화면이 아니라
 장치를 붙잡고 있는 것이고(`MediaRecorder`·`RTCPeerConnection`), 수명
 관리를 `useEffect` 로 옮겨 적으면 같은 판단이 두 벌이 됩니다. 녹음이 한
