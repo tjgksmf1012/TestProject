@@ -92,9 +92,14 @@
      흙빛은 거기서 통과합니다. 검토 화면의 `.check` 가 쓰는 모양과 같습니다.
 
        글자 --text-muted  7.64:1(밝게) · 9.16:1(어둡게)
-       점   --gap         3.46:1(밝게) · 6.28:1(어둡게) */
-  .error.gap p { display: flex; align-items: baseline; gap: var(--sp-2);
-                 color: var(--text-muted); }
+       점   --gap         3.46:1(밝게) · 6.28:1(어둡게)
+
+     ⚠️ 색은 **상자에** 겁니다. 처음에는 자식 `<p>` 에만 걸었는데, 그러면
+     상자 자신은 `.error` 의 빨강을 그대로 이고 있습니다 — 지금은 모든
+     글자가 `<p>` 안이라 안 보이지만, 나중에 `<p>` 로 안 감싼 글자가 한 줄
+     들어오는 순간 그것만 빨갛게 나옵니다. 한 겹 얕은 규칙은 그렇게 샙니다. */
+  .error.gap { color: var(--text-muted); }
+  .error.gap p { display: flex; align-items: baseline; gap: var(--sp-2); }
   .error.gap p::before { content: ""; flex: 0 0 auto;
                          width: var(--sp-1); height: var(--sp-1);
                          border-radius: var(--r-round); background: var(--gap);
