@@ -3209,21 +3209,30 @@ describe('문서 참조', () => {
     return found;
   }
 
-  /** 참조를 적을 수 있는 곳 — 소스와 화면 마크업 전부. */
+  /**
+   * 참조를 적을 수 있는 곳 — **소스와 문서 전부.**
+   *
+   * ⚠️ 오랫동안 `frontend/` 만 봤습니다. 백엔드 파이썬과 문서끼리의 참조는
+   * 아무도 안 봤다는 뜻입니다. 재 보니 끊어진 것은 0건이었지만, **0건인
+   * 것과 안 보는 것은 다릅니다** — 안 보는 동안 끊어져도 티가 안 납니다.
+   */
   function referencingFiles(): { rel: string; text: string }[] {
     const out: { rel: string; text: string }[] = [];
-    const walk = (dir: string, prefix: string): void => {
+    const walk = (dir: string, prefix: string, keep: RegExp): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        if (entry.name === 'node_modules') continue;
+        if (entry.name === 'node_modules' || entry.name === '__pycache__') continue;
         const full = join(dir, entry.name);
-        if (entry.isDirectory()) walk(full, `${prefix}${entry.name}/`);
-        else if (/\.(tsx?|css|html|mts)$/.test(entry.name) && !entry.name.endsWith('.js')) {
+        if (entry.isDirectory()) walk(full, `${prefix}${entry.name}/`, keep);
+        else if (keep.test(entry.name)) {
           out.push({ rel: `${prefix}${entry.name}`, text: readFileSync(full, 'utf8') });
         }
       }
     };
-    walk(join(ROOT, 'src'), 'src/');
-    walk(PUBLIC, 'public/');
+    const web = /\.(tsx?|css|html|mts)$/;
+    walk(join(ROOT, 'src'), 'src/', web);
+    walk(PUBLIC, 'public/', web);
+    walk(join(ROOT, '..', 'backend'), 'backend/', /\.py$/);
+    walk(DOCS, 'docs/', /\.md$/);
     return out;
   }
 
@@ -3241,7 +3250,11 @@ describe('문서 참조', () => {
     const cache = new Map<string, Set<string>>();
     const dangling: string[] = [];
     for (const { rel, text } of referencingFiles()) {
-      for (const [, doc, section] of text.matchAll(/docs\/(\d{2}) §(\d+(?:\.\d+)*)/g)) {
+      // ⚠️ 세는 말이 뒤에 붙은 숫자는 **절 번호가 아닙니다.**
+      //    `docs/08 §9주차` 는 "그 문서의 9주차" 라는 뜻인데, 이걸 §9 로 읽어
+      //    "없는 절" 로 잡을 뻔했습니다 — 없는 결함을 만드는 쪽입니다.
+      const REF = /docs\/(\d{2}) §(\d+(?:\.\d+)*)(?!주차|개|건|명|번째|장)/g;
+      for (const [, doc, section] of text.matchAll(REF)) {
         const file = docFile(doc as string);
         if (file === null) {
           dangling.push(`${rel} → docs/${doc as string} 이라는 문서가 없다`);
