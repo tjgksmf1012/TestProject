@@ -22,7 +22,7 @@
  */
 
 import { build } from 'esbuild';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -80,6 +80,26 @@ export const OPTIONS = {
      넣었습니다. 상수를 만들지 않고 결과로 잽니다. */
   minify: true,
   define: { 'process.env.NODE_ENV': '"production"' },
+
+  /* ⭐ **공용 조각을 따로 뺍니다** (docs/19 §24.7).
+
+     화면마다 번들 하나씩 통으로 만들면 `lib/` 도 React 도 화면 수만큼
+     복사됩니다. React 화면이 하나뿐일 때는 복사할 것이 없어서 켜면
+     오히려 손해였고, 그래서 안 켰습니다. 두 번째 화면(칸반)이 오면서
+     실제로 복사가 생겼고, 재 보니 이렇습니다:
+
+       끄면  합계 622KB   review 259KB · kanban 212KB · home 20KB
+       켜면  합계 336KB   review  55KB · kanban   8KB · home  4KB
+
+     절반 이하입니다. 화면 하나를 여는 데 받는 양도 줄어듭니다 — 조각은
+     화면끼리 공유되므로 두 번째 화면부터는 이미 캐시에 있습니다.
+
+     ⚠️ 조각 이름에는 **해시**가 붙어 빌드마다 바뀝니다. 예전에는 그것이
+     못 켜는 이유였습니다 — `sw.js` 의 오프라인 목록이 손으로 적는
+     것이라 빌드마다 어긋났기 때문입니다. 그 목록을 빌드가 쓰게 바꾼
+     뒤에야 이걸 켤 수 있었습니다. 순서가 있었습니다. */
+  splitting: true,
+  chunkNames: 'chunk-[hash]',
 } as const;
 
 // `src="/main.js"` 와 `src="./main.js"` 둘 다 씁니다. 한쪽만 보면 화면
@@ -193,7 +213,17 @@ export function writeShellList(): number {
   return files.length;
 }
 
+/** 지금 `public/` 에 놓인 공용 조각. 이름에 해시가 붙습니다. */
+export const chunkFiles = (): string[] =>
+  readdirSync(PUBLIC).filter((name) => /^chunk-[A-Z0-9]+\.js$/.test(name));
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // ⚠️ **먼저 옛 조각을 지웁니다.** 해시가 붙은 이름이라 내용이 바뀌면
+  // 새 파일이 생길 뿐 옛 파일은 덮이지 않습니다. 안 지우면 아무도 안
+  // 부르는 조각이 쌓이고, 오프라인 목록은 `public/` 을 세므로 그 죽은
+  // 조각까지 폰에 내려받게 됩니다.
+  for (const name of chunkFiles()) rmSync(join(PUBLIC, name));
+
   const entries = entryPoints();
   await build({ ...OPTIONS, entryPoints: entries, outdir: PUBLIC });
   // ⚠️ **번들을 만든 뒤에** 셉니다. 먼저 세면 이번에 새로 생긴 화면의

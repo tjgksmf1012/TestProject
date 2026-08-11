@@ -16,7 +16,7 @@
  * 스택을 옮기면서 다시 흔들 이유가 없습니다.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -45,7 +45,7 @@ import { iconSvg } from '../lib/nav/icons.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
-import { avatarInitial } from '../lib/ui/byline.ts';
+import { Byline, RawHtml } from './parts.tsx';
 import { failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { rows as skeletonRows } from '../lib/ui/skeleton.ts';
@@ -103,25 +103,6 @@ type Screen =
 // ══════════════════════════════════════════════════════════════
 // 조각들
 // ══════════════════════════════════════════════════════════════
-
-/**
- * 서버가 준 HTML 을 그대로 꽂는 자리.
- *
- * `emptyHtml`·`failureHtml` 은 "무엇을·왜·다음에 뭘" 을 타입으로
- * 강제하는 lib 함수라 문자열을 돌려줍니다. 그걸 React 로 다시 쓰면
- * **두 벌**이 되고, 다른 화면 넷이 아직 그 함수를 씁니다.
- */
-function RawHtml({ html, onRetry }: { html: string; onRetry?: (() => void) | undefined }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const button = ref.current?.querySelector<HTMLButtonElement>('.retry');
-    if (button === null || button === undefined || onRetry === undefined) return;
-    const handler = (): void => onRetry();
-    button.addEventListener('click', handler);
-    return () => button.removeEventListener('click', handler);
-  }, [html, onRetry]);
-  return <div ref={ref} dangerouslySetInnerHTML={{ __html: html }} />;
-}
 
 /** 아이콘. `iconSvg` 는 상수 문자열만 돌려줍니다 (주입 통로 아님). */
 function Icon({ name }: { name: 'person' | 'calendar' }) {
@@ -548,14 +529,7 @@ function Review() {
     <header className="head">
       <h1>업무 후보 검토</h1>
       <p className="lede">AI가 회의에서 뽑은 후보입니다. 등록해야 칸반에 올라갑니다.</p>
-      {me !== null && (
-        <p className="by">
-          <span className="avatar" aria-hidden="true">
-            {avatarInitial(me.name)}
-          </span>
-          {me.name} · 검토 중
-        </p>
-      )}
+      {me !== null && <Byline name={me.name} what="검토 중" />}
     </header>
   );
 

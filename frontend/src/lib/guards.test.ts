@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
-import { bundle, entryPoints, shellFiles } from '../../build.mts';
+import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
@@ -1730,6 +1730,31 @@ describe('빌드된 번들', () => {
     );
   });
 
+  it('⭐ 아무도 안 부르는 **공용 조각**이 남아 있지 않다', async () => {
+    // ⚠️ 위 검사는 **한 방향만** 봅니다 — 빌드가 만든 것이 디스크에
+    // 있는가. 조각을 켜기 전에는 그걸로 충분했습니다. 출력 이름이
+    // 고정이라 매 빌드가 같은 파일을 덮어썼기 때문입니다.
+    //
+    // 조각은 이름에 **해시**가 붙습니다. 내용이 바뀌면 옛 파일이 덮이는
+    // 게 아니라 **새 파일이 하나 더 생깁니다.** 지우지 않으면 아무도 안
+    // 부르는 조각이 쌓이고, 오프라인 목록은 `public/` 을 세므로 그 죽은
+    // 조각까지 폰에 내려받게 됩니다 — 오류는 어디에도 안 납니다.
+    //
+    // `build.mts` 가 빌드 전에 지웁니다. 여기서는 **정말 지워졌는지**를
+    // 봅니다.
+    const fresh = new Set([...(await bundle()).keys()]);
+    const orphans = chunkFiles().filter((name) => !fresh.has(name));
+    strictEqual(
+      orphans.join(', '),
+      '',
+      '아무도 안 부르는 조각이 남았습니다 — `npm run build:demo` 를 실행하세요',
+    );
+
+    // ⚠️ **눈을 뜨고 있는지.** 조각이 하나도 없으면 위 0건은 아무 뜻이
+    // 없습니다 — `splitting` 이 꺼졌거나 정규식이 어긋난 것입니다.
+    strictEqual(chunkFiles().length > 0, true, '공용 조각을 하나도 못 찾았습니다');
+  });
+
   it('⭐ 화면이 부르는 스크립트마다 소스가 있다', () => {
     // 없으면 그 화면은 404 를 받고 **아무 동작도 하지 않습니다.**
     const missing = entryPoints().filter((path: string) => {
@@ -2377,7 +2402,7 @@ describe('상태 화면 (지시서 §7)', () => {
   const ASYNC_CONTAINERS: [string, string][] = [
     ['home.ts', 'projects'],
     ['contributions.ts', 'members'],
-    ['kanban.ts', 'board'],
+    ['kanban.tsx', 'board'],
     ['review.tsx', 'list'],
     ['lobby.ts', 'roster'],
   ];
@@ -2521,15 +2546,36 @@ describe('상태 화면 (지시서 §7)', () => {
     // `failureHtml({retry: true})` 는 버튼을 그리기만 합니다. 안 이으면
     // 눌러도 아무 일이 안 일어나고, 사람은 화면이 더 고장 났다고
     // 생각합니다 — 만들어 놓고 안 부르는 그 방식 그대로입니다.
+    //
+    // ⚠️ React 화면은 **직접 안 잇습니다.** 공용 `RawHtml` 에 `onRetry` 를
+    // 넘기고, 그 조각이 버튼을 찾아 붙입니다. 화면마다 다시 이으면 두
+    // 벌이 되고, 두 벌이면 한쪽만 고쳐집니다.
+    //
+    // 그래서 넘기는 것도 이었다고 봅니다 — 대신 **넘겨받는 쪽이 정말
+    // 잇는지**를 아래에서 따로 못 박습니다. 안 그러면 `onRetry` 라고
+    // 쓰기만 해도 통과하는 빈 규칙이 됩니다.
     const offenders: string[] = [];
     for (const { name, source } of demoFiles()) {
       const code = codeOf(source);
       if (!/retry:\s*true/.test(code)) continue;
-      if (!/querySelector<HTMLButtonElement>\('\.retry'\)|\.retry'\)/.test(code)) {
-        offenders.push(name);
-      }
+      if (!/\.retry'\)/.test(code) && !/onRetry=/.test(code)) offenders.push(name);
     }
     strictEqual(offenders.join(', '), '');
+
+    // ⚠️ 처음에는 `.retry')` 와 `onRetry()` 둘만 봤습니다. 그랬더니
+    // **`addEventListener` 줄을 통째로 지워도 통과했습니다** — 재료는
+    // 그대로 있고 잇는 동작만 사라진 것을 못 봤습니다. 심어서 알았습니다.
+    const parts = codeOf(readFileSync(join(DEMO, 'parts.tsx'), 'utf8'));
+    const wires =
+      /\.retry'\)/.test(parts) &&
+      /onRetry\(\)/.test(parts) &&
+      /addEventListener\('click'/.test(parts);
+    strictEqual(
+      wires,
+      true,
+      '`parts.tsx` 의 `RawHtml` 이 [다시 불러오기] 를 안 잇습니다 — ' +
+        '넘긴 화면들이 전부 헛돕니다',
+    );
   });
 
   it('⭐ 스켈레톤이 쓰는 클래스가 공용 CSS 에 **정의돼 있다**', () => {

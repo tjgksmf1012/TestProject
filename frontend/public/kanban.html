@@ -147,37 +147,11 @@
         </style>
 </head>
 <body>
-  <header class="head">
-    <h1>칸반</h1>
-    <p class="lede">
-      회의에서 승인된 업무와 직접 만든 업무가 단계별로 놓입니다.
-    </p>
-    <p class="by" id="who" hidden></p>
-  </header>
-
-  <!-- 대표 주장 한 줄. `src/demo/kanban.ts` 가 채운다.
-       ⚠️ 담당자 없는 업무를 알리던 배너를 걷었습니다 — 그 말은
-       해당 카드에 이미 흙빛 표시로 있습니다 (브리프 §17). -->
-  <p class="flow" id="counts"></p>
-
-  <div id="board" class="board"></div>
-  <p id="result"></p>
-
-  <details class="more">
-    <summary>이 화면을 읽는 법</summary>
-    <div class="more-body">
-      <p>
-        말풍선 표시가 붙은 업무는 <strong>회의에서 나온 결정</strong>이 사람의
-        승인을 거쳐 여기까지 온 것입니다. 근거 발화까지 거슬러 올라갈 수
-        있습니다 — 그게 이 프로젝트가 하려는 일입니다.
-      </p>
-      <p>
-        업무를 <strong>완료</strong>로 옮기면 그 시점에 기여 이벤트가 만들어지고
-        기여도 화면에 반영됩니다. 마감일이 있으면 지켰는지도 같이 기록됩니다.
-        담당자가 없는 업무는 누구의 기여인지 알 수 없어 반영되지 않습니다.
-      </p>
-    </div>
-  </details>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24).
+       머리말·대표 주장 한 줄·보드·읽는 법이 전부 `src/demo/kanban.tsx`
+       안에 있습니다. 여기에 같은 마크업을 남겨 두면 **두 벌**이 되고,
+       React 가 마운트하는 순간 지워지므로 고쳐도 아무 일이 안 일어납니다. -->
+  <div id="app"></div>
 
   <script type="module" src="/kanban.js"></script>
 
