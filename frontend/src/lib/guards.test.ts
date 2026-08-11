@@ -2746,7 +2746,7 @@ describe('상태 화면 (지시서 §7)', () => {
     // 그대로 복사하면 클립보드에 문자열 `(없음)` 이 들어가고 버튼은
     // **"복사됨"** 이라고 말합니다. 받은 사람은 그걸 참가 칸에 넣고
     // "코드가 없습니다" 를 보고 **자기를 의심합니다.**
-    const src = codeOf(readFileSync(join(DEMO, 'project.ts'), 'utf8'));
+    const src = codeOf(demoSource('project') ?? '');
     strictEqual(
       /writeText\(\s*\$\('code'\)/.test(src),
       false,
@@ -2759,7 +2759,7 @@ describe('상태 화면 (지시서 §7)', () => {
     );
     // 코드가 없으면 누를 수 없어야 합니다.
     strictEqual(
-      /disabled\s*=\s*inviteCode === null/.test(src),
+      /disabled\s*=\s*\{?\s*inviteCode === null/.test(src),
       true,
       '코드가 없을 때 복사 버튼을 막지 않습니다',
     );
@@ -2791,9 +2791,10 @@ describe('상태 화면 (지시서 §7)', () => {
     // 가입·초대가 `developer: 1.0` 을 하드코딩하고 바꿀 자리가 없었습니다.
     // 그래서 기획자·디자이너 프로파일이 도달 불가였고, 문서만 쓴 사람이
     // 개발자 가중치로 계산돼 이유 없이 낮게 나왔습니다 — 오류는 안 납니다.
-    const html = readFileSync(join(PUBLIC, 'project.html'), 'utf8');
-    strictEqual(html.includes('id="roles"'), true, '역할 칸이 없습니다');
-    strictEqual(html.includes('id="save-roles"'), true, '저장 버튼이 없습니다');
+    // ⚠️ HTML 에서만 찾으면 React 로 옮긴 화면에서 헛돕니다 — 요구는
+    // "정할 자리가 있는가" 이지 "어느 파일에 적혀 있는가" 가 아닙니다.
+    strictEqual(screenHas('project', 'id="roles"'), true, '역할 칸이 없습니다');
+    strictEqual(screenHas('project', 'id="save-roles"'), true, '저장 버튼이 없습니다');
 
     const callers = demoFiles().filter(({ source }) =>
       /members\/me`?,/.test(codeOf(source)),
