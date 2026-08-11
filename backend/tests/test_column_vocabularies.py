@@ -1,4 +1,17 @@
-"""`speaker_source` 어휘가 **다섯 곳에서 갈라지지 않는가.**
+"""열의 허용값이 **여러 곳에서 갈라지지 않는가.**
+
+두 열을 봅니다.
+
+* `utterances.speaker_source` — 실제로 갈라져 있었습니다 (아래).
+* `recording_consents.consent_type` — 아직 안 갈라졌습니다. 같은 모양으로
+  세 곳(서비스 상수 · CHECK 제약 · 마이그레이션)에 적혀 있었고, **갈라진
+  뒤에 옮기면 그 사이에 무슨 일이 있었는지 아무도 모릅니다.** 이쪽이
+  갈라지면 법적 요구가 갈라집니다 — 서비스가 받아 준 동의를 데이터베이스가
+  거절하면 사람은 "동의했다" 고 알고 있는데 기록이 없습니다.
+
+---
+
+`speaker_source` 어휘가 **다섯 곳에서 갈라지지 않는가.**
 
 이 열은 "누가 말했는지를 얼마나 믿을 수 있는가" 를 담습니다. 신뢰도의
 입력이고, 신뢰도는 사람의 기여를 말하는 숫자에 곱해집니다. 여기가 어긋나면
@@ -35,15 +48,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = REPO_ROOT / "backend" / "migrations" / "versions"
 EVIDENCE_TS = REPO_ROOT / "frontend" / "src" / "lib" / "review" / "evidence.ts"
 
-# `IN ('a','b')` 안의 값들.
-_IN_LIST = re.compile(r"speaker_source\s+IN\s*\(([^)]*)\)")
 _QUOTED = re.compile(r"'([a-z_]+)'")
 
 
-def _values_in(sql: str) -> set[str]:
-    match = _IN_LIST.search(sql)
-    assert match is not None, f"`speaker_source IN (...)` 를 못 찾았습니다:\n{sql}"
+def _values_in(sql: str, column: str) -> set[str]:
+    """`<column> IN ('a','b')` 안의 값들."""
+    match = re.search(rf"{column}\s+IN\s*\(([^)]*)\)", sql)
+    assert match is not None, f"`{column} IN (...)` 를 못 찾았습니다:\n{sql}"
     return set(_QUOTED.findall(match.group(1)))
+
+
+def _model_constraint(table, name: str, column: str) -> set[str]:
+    checks = [
+        c
+        for c in table.constraints
+        if isinstance(c, CheckConstraint) and c.name == name
+    ]
+    assert len(checks) == 1, f"`{name}` 가 하나가 아닙니다"
+    return _values_in(str(checks[0].sqltext), column)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -110,14 +132,9 @@ def test_a_guess_is_never_counted_as_certain():
 
 def test_the_model_constraint_is_built_from_the_vocabulary():
     """모델의 CHECK 제약 == `STORED`."""
-    checks = [
-        c
-        for c in m.Utterance.__table__.constraints
-        if isinstance(c, CheckConstraint) and c.name == "ck_speaker_source"
-    ]
-    assert len(checks) == 1, "`ck_speaker_source` 가 하나가 아닙니다"
-
-    declared = _values_in(str(checks[0].sqltext))
+    declared = _model_constraint(
+        m.Utterance.__table__, "ck_speaker_source", "speaker_source"
+    )
     expected = {str(v) for v in vocab.STORED}
     assert declared == expected, (
         f"모델 제약 {sorted(declared)} 가 vocab.STORED {sorted(expected)} 와 다릅니다"
@@ -152,6 +169,16 @@ def _migration_chain() -> list[Path]:
     return order
 
 
+def _newest_migration_values(constraint: str, column: str) -> tuple[Path, set[str]]:
+    """제약을 **마지막으로** 선언한 마이그레이션과 그 값들."""
+    newest: Path | None = None
+    for path in _migration_chain():
+        if constraint in path.read_text(encoding="utf-8"):
+            newest = path
+    assert newest is not None, f"`{constraint}` 를 만드는 마이그레이션이 없습니다"
+    return newest, _values_in(newest.read_text(encoding="utf-8"), column)
+
+
 def test_the_migration_that_actually_runs_matches_the_vocabulary():
     """⚠️ **실제 데이터베이스를 만드는 것은 마이그레이션입니다.**
 
@@ -159,14 +186,7 @@ def test_the_migration_that_actually_runs_matches_the_vocabulary():
     옛 제약을 그대로 들고 있습니다. 값을 늘리면 **새 마이그레이션이 필요**
     하다는 것을 여기서 알려 줍니다.
     """
-    newest: Path | None = None
-    for path in _migration_chain():
-        if "ck_speaker_source" in path.read_text(encoding="utf-8"):
-            newest = path
-
-    assert newest is not None, "`ck_speaker_source` 를 만드는 마이그레이션이 없습니다"
-
-    declared = _values_in(newest.read_text(encoding="utf-8"))
+    newest, declared = _newest_migration_values("ck_speaker_source", "speaker_source")
     expected = {str(v) for v in vocab.STORED}
     assert declared == expected, (
         f"`{newest.name}` 의 제약은 {sorted(declared)} 인데 vocab.STORED 는 "
@@ -218,3 +238,60 @@ def test_values_we_cannot_store_are_not_pretended_to_be_handled():
         f"{premature}. `db/vocab.py` 의 STORED 로 옮기고 마이그레이션을 "
         "더한 뒤에 화면을 고치십시오."
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 4. recording_consents.consent_type — 아직 안 갈라진 쪽
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 위 `speaker_source` 와 **같은 모양**이라 여기 같이 둡니다. 갈라진 것을
+#    고치는 것보다 안 갈라지게 두는 쪽이 싸고, 이 열은 갈라지면 법적 요구가
+#    갈라집니다 (docs/07 P3).
+
+
+def test_the_consent_service_and_the_database_accept_the_same_things():
+    """서비스가 받아 주는 값 == 데이터베이스가 받아 주는 값.
+
+    ⚠️ 한쪽만 넓으면 둘 중 하나입니다 — 서비스가 통과시킨 동의를 DB 가
+    거절하거나(사람은 동의했다고 아는데 기록이 없음), 검증 없이 아무 값이나
+    들어가거나. 둘 다 "동의를 받았다" 는 말을 못 믿게 만듭니다.
+    """
+    from teamflow.services import recording_service
+
+    service_side = set(recording_service.CONSENT_TYPES)
+    db_side = _model_constraint(
+        m.RecordingConsent.__table__, "ck_consent_type", "consent_type"
+    )
+    vocab_side = {str(c) for c in vocab.CONSENT_STORED}
+
+    assert service_side == vocab_side, (
+        f"서비스 {sorted(service_side)} 가 vocab {sorted(vocab_side)} 와 다릅니다"
+    )
+    assert db_side == vocab_side, (
+        f"CHECK 제약 {sorted(db_side)} 가 vocab {sorted(vocab_side)} 와 다릅니다"
+    )
+
+
+def test_the_consent_migration_matches_too():
+    """배포된 데이터베이스도 같은 셋을 받는가."""
+    newest, declared = _newest_migration_values("ck_consent_type", "consent_type")
+    expected = {str(c) for c in vocab.CONSENT_STORED}
+    assert declared == expected, (
+        f"`{newest.name}` 의 제약은 {sorted(declared)} 인데 vocab 은 "
+        f"{sorted(expected)} 입니다 — 새 마이그레이션이 필요합니다."
+    )
+
+
+def test_only_the_recording_consent_is_required():
+    """⚠️ **②③ 은 거부해도 서비스가 돌아야 합니다** (docs/07 P3).
+
+    필요 최소 수집 원칙입니다. 거부를 못 하게 만들면 그건 동의가 아니라
+    통보입니다. 필수 목록이 늘어나면 여기서 터집니다 — 그건 제품이 아니라
+    **법적 성격이 바뀌는** 변경이라 조용히 지나가면 안 됩니다.
+    """
+    assert set(vocab.CONSENT_REQUIRED) == {vocab.ConsentType.RECORDING}
+    optional = vocab.CONSENT_STORED - vocab.CONSENT_REQUIRED
+    assert optional == {
+        vocab.ConsentType.RAW_AUDIO_RETENTION,
+        vocab.ConsentType.VOICEPRINT_STORAGE,
+    }

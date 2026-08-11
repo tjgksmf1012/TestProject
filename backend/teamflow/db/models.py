@@ -765,7 +765,10 @@ class RecordingConsent(Base):
             "meeting_id", "user_id", "consent_type", name="uq_consent"
         ),
         CheckConstraint(
-            "consent_type IN ('recording','raw_audio_retention','voiceprint_storage')",
+            # ⚠️ 목록을 손으로 적지 않습니다 — `vocab.CONSENT_STORED` 가 원본.
+            "consent_type IN ("
+            + ",".join(f"'{v}'" for v in vocab.consent_values())
+            + ")",
             name="ck_consent_type",
         ),
     )

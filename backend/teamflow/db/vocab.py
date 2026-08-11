@@ -107,3 +107,44 @@ def stored_values() -> tuple[str, ...]:
 def certain_values() -> tuple[str, ...]:
     """`IN (...)` 에 넣을 확정 값들."""
     return tuple(sorted(str(s) for s in CERTAIN))
+
+
+# ══════════════════════════════════════════════════════════════
+# recording_consents.consent_type — 3단계 동의 (docs/07)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 여기 있는 이유는 **아직 안 갈라졌기 때문**입니다. `speaker_source` 와
+#    똑같은 모양으로 세 곳에 따로 적혀 있었고(서비스 상수 · CHECK 제약 ·
+#    마이그레이션), 지금은 셋이 일치합니다. 갈라진 뒤에 옮기면 그 사이에
+#    무슨 일이 있었는지를 아무도 모릅니다.
+#
+# ⚠️ 이 열이 갈라지면 **법적 요구가 갈라집니다.** 서비스가 받아 준 동의를
+#    데이터베이스가 거절하면 사람은 "동의했다" 고 알고 있는데 기록이 없고,
+#    반대로 제약만 넓으면 검증 없이 아무 값이나 들어갑니다.
+
+
+class ConsentType(StrEnum):
+    """무엇에 대한 동의인가 (docs/07 P3).
+
+    ⚠️ ②③ 을 **거부해도 서비스는 돌아야 합니다** — 필요 최소 수집 원칙입니다.
+    거부를 못 하게 만들면 그건 동의가 아니라 통보입니다.
+    """
+
+    RECORDING = "recording"  # ① 녹음 자체. 이것만 필수
+    RAW_AUDIO_RETENTION = "raw_audio_retention"  # ② 원본 오디오 보관
+    VOICEPRINT_STORAGE = "voiceprint_storage"  # ③ 목소리 특징 저장
+
+
+#: `recording_consents.consent_type` 이 받는 값 전부.
+#:
+#: `speaker_source` 와 달리 **전부 저장 가능합니다** — 세 단계가 다 화면에
+#: 있고 로비가 실제로 셋 다 보냅니다. "아직 아닌 것" 이 없으니 나누지
+#: 않습니다. 나눌 것이 없는데 빈 집합을 만들어 두면 그것도 거짓말입니다.
+CONSENT_STORED: frozenset[ConsentType] = frozenset(ConsentType)
+
+#: 없으면 **녹음을 시작할 수 없는** 동의. 나머지 둘은 거부해도 됩니다.
+CONSENT_REQUIRED: frozenset[ConsentType] = frozenset({ConsentType.RECORDING})
+
+
+def consent_values() -> tuple[str, ...]:
+    return tuple(sorted(str(c) for c in CONSENT_STORED))
