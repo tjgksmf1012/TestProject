@@ -276,67 +276,16 @@
         </style>
   </head>
   <body class="has-actionbar">
-    <!-- ⭐ 제품 머리말 (브리프 §5). 제목·설명·검토자가 **한 덩어리**로
-         읽혀야 합니다. 예전에는 셋이 각각 문단이라 화면 위쪽 넉 줄이
-         전부 비슷한 무게였습니다. -->
-    <header class="head">
-      <h1>업무 후보 검토</h1>
-      <p class="lede">
-        AI가 회의에서 뽑은 후보입니다. 등록해야 칸반에 올라갑니다.
-      </p>
-      <p class="by" id="who" hidden></p>
-    </header>
+    <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24).
 
-    <!-- ⭐ 회의 맥락은 **접어 둡니다** (브리프 §6).
-         요약·다음 안건·답 안 난 것이 전부 펼쳐져 있으면, 정작 이 화면에서
-         할 일(후보 판단)보다 읽을거리가 먼저 옵니다. 접되 **지우지
-         않습니다** — 한 번의 클릭 안에 둡니다.
+         머리말·회의 맥락·필터 탭·후보 카드·제출 막대가 전부
+         `src/demo/review.tsx` 에 있습니다. 위 `<style>` 의 클래스 이름은
+         **그대로**입니다 — 브리프대로 맞춰 놓은 판형을 스택을 옮기면서
+         다시 흔들 이유가 없습니다.
 
-         ⚠️ 회의록은 요약 하나가 아닙니다 (결함 110·111). 다음 안건과
-         미해결 사안도 LLM 이 만들고 검증까지 통과한 산출물인데, 그리는
-         곳이 저장소에 0곳이라 DB 에만 남아 있었습니다. -->
-    <details class="brief" id="brief" hidden>
-      <summary>
-        <span class="brief-line" id="brief-line"></span>
-        <span class="brief-cta">회의 내용 보기</span>
-      </summary>
-      <div class="brief-body">
-        <p id="meeting-summary" hidden></p>
-        <div id="agenda-block" hidden>
-          <h2 class="minutes-head">다음 회의에서 다룰 안건</h2>
-          <ul id="agenda"></ul>
-        </div>
-        <div id="issues-block" hidden>
-          <h2 class="minutes-head">회의에서 답이 안 난 것</h2>
-          <ul id="issues"></ul>
-        </div>
-      </div>
-    </details>
-
-    <!-- 상태 필터 (브리프 §8). `src/demo/review.ts` 가 채운다.
-         ⚠️ **세기만 하고 거르지 않는 탭은 거짓말입니다.** 예전 `#counts`
-         는 개수만 적은 한 줄이었는데, 그걸 탭 모양으로 그려 놓고 눌러도
-         아무 일이 안 일어나면 사람은 앱이 고장 났다고 읽습니다. -->
-    <div class="seg" id="lanes" role="tablist" aria-label="검토 상태"></div>
-
-    <div id="list"></div>
-    <p class="lane-empty" id="lane-empty" hidden></p>
-
-    <details class="more">
-      <summary>등록되지 않는 후보가 있는 이유</summary>
-      <div class="more-body">
-        근거 발화가 없는 후보는 등록할 수 없습니다. 담당자·마감일을 채워도
-        마찬가지입니다 — 회의에 없던 내용을 사람이 "고쳐서" 통과시키는 경로를
-        만들면 안 되기 때문입니다.
-      </div>
-    </details>
-
-    <div class="actionbar">
-      <div class="inner">
-        <div id="result"></div>
-        <button id="submit" class="primary" disabled>제출</button>
-      </div>
-    </div>
+         ⚠️ 판단은 하나도 화면으로 오지 않았습니다. `lib/review/candidates.ts`
+         의 함수들을 그대로 부릅니다 (테스트 79개). -->
+    <div id="app"></div>
 
     <script type="module" src="./review.js"></script>
 

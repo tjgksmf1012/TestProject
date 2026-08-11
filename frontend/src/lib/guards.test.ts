@@ -55,12 +55,82 @@ const codeOf = (source: string): string =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 /**
+ * `이름(...)` 호출의 **인자 전체**를 괄호 짝을 맞춰 떼어 온다.
+ *
+ * 창을 "뒤 400자" 로 잡으면 인자가 길 때 잘리고, 짧을 때는 남의 코드를
+ * 먹습니다. 어느 쪽이든 규칙이 엉뚱한 것을 재게 됩니다.
+ */
+function callArgs(code: string, fnName: string): string[] {
+  const out: string[] = [];
+  for (const m of code.matchAll(new RegExp(`\\b${fnName}\\(`, 'g'))) {
+    const open = (m.index as number) + m[0].length - 1;
+    let depth = 0;
+    for (let i = open; i < code.length; i++) {
+      if (code[i] === '(') depth++;
+      else if (code[i] === ')') {
+        depth--;
+        if (depth === 0) {
+          out.push(code.slice(open + 1, i));
+          break;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * **선언형으로** 잠그는가 — React 화면이 잠그는 방법.
+ *
+ * 명령형 화면은 버튼을 붙잡고 `disabled = true` 를 씁니다. React 화면은
+ * 그럴 수 없습니다 — DOM 은 React 가 갖고 있고, 화면이 직접 만지면
+ * 다음 렌더에 그대로 지워집니다. 그래서 모양이 다릅니다:
+ *
+ *     setSending(true) … setSending(false) … disabled={… || sending}
+ *
+ * ⚠️ **셋을 다 봅니다.** 켜기만 보면 안 푸는 화면이 통과하고, 켜고 끄기만
+ * 보면 버튼에 **안 이어진** 깃발이 통과합니다 — 이 저장소가 반복해 당한
+ * "만들어 놓고 아무도 안 부름" 이 규칙 안에서 재현되는 자리입니다.
+ */
+function locksDeclaratively(code: string): boolean {
+  for (const m of code.matchAll(/\bset([A-Z]\w*)\(true\)/g)) {
+    const suffix = m[1] as string;
+    const flag = suffix[0]?.toLowerCase() + suffix.slice(1);
+    if (!new RegExp(`\\bset${suffix}\\(false\\)`).test(code)) continue;
+    if (!new RegExp(`disabled=\\{[^}]*\\b${flag}\\b`).test(code)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 화면 모듈의 소스. `review` 처럼 `.tsx` 로 옮긴 화면도 찾습니다.
+ *
+ * ⚠️ `${stem}.ts` 로 하드코딩하면 옮긴 화면에서 **파일이 없다고 터지거나**
+ * (탭바 가드) **조용히 건너뜁니다** (진입점 목록). 둘 다 실제로 났습니다.
+ */
+function demoSource(stem: string): string | null {
+  for (const ext of ['.tsx', '.ts']) {
+    try {
+      return readFileSync(join(DEMO, `${stem}${ext}`), 'utf8');
+    } catch {
+      /* 다음 확장자 */
+    }
+  }
+  return null;
+}
+
+/**
  * 이 모듈이 실제로 붙는 HTML. 진입점이 아니면 null.
  *
  * `main.ts` 만 이름이 다릅니다 — 녹음 화면이 `index.html` 이라서.
+ *
+ * ⚠️ 확장자를 `/\.ts$/` 로 벗기면 `review.tsx` 는 하나도 안 벗겨져
+ * `review.tsx.html` 을 찾고, 없으니 **진입점이 아니라고 답합니다.**
+ * 그러면 `bootApp` 가드가 옮긴 화면을 조용히 놓칩니다.
  */
 function htmlFor(moduleName: string): string | null {
-  const stem = moduleName.replace(/\.ts$/, '');
+  const stem = moduleName.replace(SCREEN_EXT, '');
   for (const candidate of [stem === 'main' ? 'index' : stem]) {
     try {
       return readFileSync(join(PUBLIC, `${candidate}.html`), 'utf8');
@@ -183,8 +253,12 @@ describe('모바일 규칙', () => {
         offenders.push(`${name} → 모듈 스크립트가 없다`);
         continue;
       }
-      const source = readFileSync(join(DEMO, `${script}.ts`), 'utf8');
-      if (!/renderNav\(/.test(source)) offenders.push(`${name} → ${script}.ts`);
+      const source = demoSource(script);
+      if (source === null) {
+        offenders.push(`${name} → ${script} 소스를 못 찾음`);
+        continue;
+      }
+      if (!/renderNav\(/.test(source)) offenders.push(`${name} → ${script}`);
     }
     strictEqual(offenders.join(', '), '');
   });
@@ -608,8 +682,10 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
       // ⚠️ `\bsend\(` 까지 보면 통화 화면의 **WebSocket** `send()` 가
       // 걸립니다 — 이 규칙과 아무 상관이 없습니다. 첫 판에 실제로 걸렸습니다.
       if (!/trySend\(/.test(code)) continue;
-      // 그 파일이 잠그는 방법: 공용 helper 이거나, 직접 `disabled = true`.
-      const locks = /whilePressed\(/.test(code) || /\.disabled = true/.test(code);
+      // 그 파일이 잠그는 방법: 공용 helper 이거나, 직접 `disabled = true`,
+      // 또는 React 의 선언형 잠금.
+      const locks =
+        /whilePressed\(/.test(code) || /\.disabled = true/.test(code) || locksDeclaratively(code);
       if (!locks) offenders.push(rel);
     }
     strictEqual(
@@ -2291,7 +2367,7 @@ describe('상태 화면 (지시서 §7)', () => {
     ['home.ts', 'projects'],
     ['contributions.ts', 'members'],
     ['kanban.ts', 'board'],
-    ['review.ts', 'list'],
+    ['review.tsx', 'list'],
     ['lobby.ts', 'roster'],
   ];
 
@@ -2352,6 +2428,21 @@ describe('상태 화면 (지시서 §7)', () => {
     strictEqual(dangling.join(', '), '');
   });
 
+  /**
+   * ⚠️ **요구는 하나인데 모양이 둘입니다.**
+   *
+   * 요구: 늦게 켜고(200ms) · 켜는 것은 뼈대이고 · 반드시 끈다.
+   *
+   * 명령형 화면은 그릇을 직접 붙잡습니다 — `showSkeleton(el, …)` /
+   * `clearSkeleton(el)`. React 화면은 그릇을 못 만집니다. 다음 렌더에
+   * 지워지기 때문입니다. 그래서 같은 일을 깃발과 JSX 로 합니다.
+   *
+   * 검사를 헬퍼 **이름**으로 하고 있었더니, 화면 하나를 React 로 옮기는
+   * 순간 규칙이 그 화면에서 통째로 눈을 감았습니다 — `.tsx` 를 못 보던
+   * 것과 똑같은 부류입니다. 그래서 **요구**를 모양별로 잽니다.
+   */
+  const isReact = (name: string): boolean => name.endsWith('.tsx');
+
   it('⭐ 목록을 비동기로 채우는 화면은 로딩 표시를 **켠다**', () => {
     // 이 저장소의 대표 실패 방식: 맞는 모듈을 만들어 놓고 아무도
     // 부르지 않는 것 (결함 47). 그러니 모듈이 있는지가 아니라
@@ -2359,8 +2450,19 @@ describe('상태 화면 (지시서 §7)', () => {
     const offenders: string[] = [];
     for (const [name] of ASYNC_CONTAINERS) {
       const code = codeOf(readFileSync(join(DEMO, name), 'utf8'));
+      // 늦게 켠다 — 이건 모양과 무관하게 같습니다.
       if (!/whileLoading\(/.test(code)) offenders.push(`${name} → whileLoading 을 안 부름`);
-      if (!/showSkeleton\(/.test(code)) offenders.push(`${name} → showSkeleton 을 안 부름`);
+      if (isReact(name)) {
+        // 켜는 것이 **뼈대**인가. 직접 그리는 대신 같은 모듈을 씁니다 —
+        // 두 벌이 되면 한쪽만 고쳐집니다.
+        if (!/from '\.\.\/lib\/ui\/skeleton\.ts'/.test(code)) {
+          offenders.push(`${name} → 스켈레톤 모듈을 안 씀`);
+        }
+        // 낭독기 쪽 짝. `showSkeleton` 이 대신 달아 주던 것입니다.
+        if (!/aria-busy/.test(code)) offenders.push(`${name} → aria-busy 를 안 담`);
+      } else if (!/showSkeleton\(/.test(code)) {
+        offenders.push(`${name} → showSkeleton 을 안 부름`);
+      }
     }
     strictEqual(offenders.join(', '), '');
   });
@@ -2370,6 +2472,21 @@ describe('상태 화면 (지시서 §7)', () => {
     const offenders: string[] = [];
     for (const [name] of ASYNC_CONTAINERS) {
       const code = codeOf(readFileSync(join(DEMO, name), 'utf8'));
+      if (isReact(name)) {
+        // `whileLoading(work, show, hide)` 의 **인자 안에서** 짝을 봅니다.
+        // 파일 전체를 훑으면 아무 데나 있는 `setX(false)` 가 짝인 척합니다.
+        for (const args of callArgs(code, 'whileLoading')) {
+          const on = [...args.matchAll(/\bset([A-Z]\w*)\(true\)/g)].map((m) => m[1] as string);
+          const off = new Set(
+            [...args.matchAll(/\bset([A-Z]\w*)\(false\)/g)].map((m) => m[1] as string),
+          );
+          if (on.length === 0) offenders.push(`${name} → whileLoading 이 아무것도 안 켬`);
+          for (const flag of on) {
+            if (!off.has(flag)) offenders.push(`${name} → set${flag}(true) 의 끄는 짝이 없다`);
+          }
+        }
+        continue;
+      }
       const on = [...code.matchAll(/showSkeleton\(/g)].length;
       const off = [...code.matchAll(/clearSkeleton\(/g)].length;
       if (off < on) offenders.push(`${name} → 켬 ${on} · 끔 ${off}`);
@@ -2767,5 +2884,81 @@ describe('상태 화면 (지시서 §7)', () => {
     for (const selector of ['.empty-state', '.failure-state']) {
       strictEqual(css.includes(selector), true, `${selector} 이 app.css 에 없습니다`);
     }
+  });
+});
+
+describe('문서 참조', () => {
+  const DOCS = join(ROOT, '..', 'docs');
+
+  /** `docs/19` → 그 번호로 시작하는 실제 파일. */
+  const docFile = (n: string): string | null =>
+    readdirSync(DOCS).find((name) => name.startsWith(`${n}-`)) ?? null;
+
+  /**
+   * 그 문서가 실제로 가진 절 번호. `## 24. 제목` · `### 24.1 제목` 둘 다.
+   *
+   * ⚠️ **표제 앞의 기호를 넘겨야 합니다.** 처음에는 `^#+ (\d+)` 로 봤다가
+   * `docs/11` 의 `### ⚠️ 2. MinIO는…` 을 통째로 놓쳤고, **멀쩡한 참조
+   * 둘을 끊어졌다고 보고할 뻔했습니다.** 이 저장소에서 네 번째입니다 —
+   * 새 검사 도구는 자기가 먼저 틀립니다.
+   *
+   * 기호만 넘깁니다. `## 함정 4개` 처럼 **글자로 시작하는** 표제는 절
+   * 번호가 없는 것으로 봅니다 — 그 `4` 는 절 번호가 아니라 개수입니다.
+   */
+  function sections(file: string): Set<string> {
+    const text = readFileSync(join(DOCS, file), 'utf8');
+    const found = new Set<string>();
+    for (const [, heading] of text.matchAll(/^#{2,4}\s+(.*)$/gm)) {
+      const n = /^(?:[^\p{L}\p{N}]+\s*)*(\d+(?:\.\d+)*)(?![\p{L}\p{N}])/u.exec(heading as string);
+      if (n !== null) found.add(n[1] as string);
+    }
+    return found;
+  }
+
+  /** 참조를 적을 수 있는 곳 — 소스와 화면 마크업 전부. */
+  function referencingFiles(): { rel: string; text: string }[] {
+    const out: { rel: string; text: string }[] = [];
+    const walk = (dir: string, prefix: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules') continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full, `${prefix}${entry.name}/`);
+        else if (/\.(tsx?|css|html|mts)$/.test(entry.name) && !entry.name.endsWith('.js')) {
+          out.push({ rel: `${prefix}${entry.name}`, text: readFileSync(full, 'utf8') });
+        }
+      }
+    };
+    walk(join(ROOT, 'src'), 'src/');
+    walk(PUBLIC, 'public/');
+    return out;
+  }
+
+  it('⭐ 소스가 가리키는 `docs/NN §M` 이 실제로 있다', () => {
+    // ⚠️ **적어 놓고 안 만든 절**이 실제로 있었습니다 — 셸 전환 문서의
+    // 26·27 번 절을 코드 여섯 곳에서 가리키는데 그 문서는 23 에서
+    // 끝났습니다. 옮기면서 "여기 쓸 것" 이라고 미리 번호를 적어 두고,
+    // 정작 문서에는 다른 번호로 쓴 것입니다.
+    //
+    // (여기에 그 참조를 **예시로 적지 않습니다.** 적으면 이 규칙이
+    //  자기 설명에 걸립니다 — 이 파일이 `codeOf` 를 만든 이유입니다.)
+    //
+    // 이 저장소가 반복해 당한 방식 그대로입니다 — **가리키는 곳이 없는
+    // 안내.** 오류는 안 나고, 읽는 사람만 문서를 뒤지다 포기합니다.
+    const cache = new Map<string, Set<string>>();
+    const dangling: string[] = [];
+    for (const { rel, text } of referencingFiles()) {
+      for (const [, doc, section] of text.matchAll(/docs\/(\d{2}) §(\d+(?:\.\d+)*)/g)) {
+        const file = docFile(doc as string);
+        if (file === null) {
+          dangling.push(`${rel} → docs/${doc as string} 이라는 문서가 없다`);
+          continue;
+        }
+        if (!cache.has(file)) cache.set(file, sections(file));
+        if (!cache.get(file)?.has(section as string)) {
+          dangling.push(`${rel} → docs/${doc as string} §${section as string}`);
+        }
+      }
+    }
+    strictEqual([...new Set(dangling)].join(', '), '');
   });
 });

@@ -187,7 +187,7 @@ export function uncertaintySpans(members: readonly MemberScore[]): UncertaintySp
 }
 
 /**
- * 모르는 폭을 **셀 수 있는 점**으로 (docs/19 §26).
+ * 모르는 폭을 **셀 수 있는 점**으로 (docs/19 §25).
  *
  * ## 왜 막대가 아니라 점인가
  *
