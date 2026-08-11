@@ -19,13 +19,28 @@
     <style>
 
 
-      li { padding: var(--sp-1) 0; }
-      li::before { content: "· "; opacity: .5; }
+      /* ══ 브리프대로 다시 짰습니다 (docs/19 §23) ═══════════════
+
+         ⚠️ **마커가 둘이었습니다.** `<ul>` 의 기본 불릿(•)이 살아 있는데
+         `::before` 로 `· ` 를 또 찍어서 화면에 `• · 마이크 권한을…` 이
+         나왔습니다 (렌더해서 봤습니다). 목록 마커를 손으로 그릴 때는
+         기본 마커를 반드시 꺼야 합니다 — 홈의 상태 점에서 이미 한 번
+         겪은 자리입니다. */
+      ul#blockers, ul#capture { list-style: none; padding-left: 0; margin: 0; }
+      #blockers li, #capture li { position: relative; padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
+                                  font-size: var(--fs-label); color: var(--text-muted); }
+      #blockers li::before, #capture li::before {
+        content: ""; position: absolute; left: 0; top: 1em;
+        width: var(--sp-1); height: var(--sp-1); border-radius: var(--r-round);
+        background: currentColor;
+      }
       li.ok { color: var(--ok); }
-      li.ok::before { content: "✓ "; }
       li.critical { color: var(--bad); }
-      li.warning { color: var(--warn); }
-      li.info { opacity: .7; }
+      /* ⚠️ 아직 안 한 것은 **경고가 아닙니다.** `마이크 권한을 아직
+         허용하지 않았습니다` 는 순서상 당연한 상태이지 잘못이 아니라,
+         결측과 같은 흙빛으로 둡니다 (브리프 §13 · docs/05 §5). */
+      li.warning { color: var(--gap); }
+      li.info { color: var(--text-subtle); }
 
       #phase {
         display: inline-block; padding: var(--sp-1) var(--sp-3); border-radius: 999px;
@@ -47,20 +62,33 @@
       /* 배치는 `app.css` 의 `label:has(> input[type=checkbox])` 가 합니다 —
          여기서 다시 적으면 두 곳이 어긋납니다. 크기만 이 화면 것으로. */
       label.check { font-size: var(--fs-label); }
+
+      /* ── 수치 (브리프 §20) ─────────────────────────────
+         ⚠️ `<dl>` 의 기본 조판은 `dt` 아래에 `dd` 를 **한 줄씩** 놓습니다.
+         네 값이면 여덟 줄이고, 화면 절반이 숫자 넷을 세로로 늘어놓는 데
+         쓰였습니다. 이름과 값을 한 줄에 묶고 가로로 폅니다. */
+      dl { display: grid; gap: var(--sp-2) var(--sp-6); margin: var(--sp-4) 0 0;
+           grid-template-columns: repeat(auto-fit, minmax(8rem, max-content)); }
+      dl > div { display: flex; align-items: baseline; gap: var(--sp-2); }
+      dt { font-size: var(--fs-caption); color: var(--text-subtle); }
+      dd { margin: 0; font-size: var(--fs-label); font-weight: 600;
+           font-variant-numeric: tabular-nums; }
     </style>
   </head>
   <body>
-    <h1>녹음 생존율 테스트</h1>
-    <p id="who" class="sub"></p>
+    <header class="head">
+      <h1>녹음 생존율 테스트</h1>
+      <p class="lede">
+        docs/09 실험 5 — 폰이 회의 끝까지 녹음을 유지하는지 확인합니다.
+        <strong>모드 A(멀티트랙)의 성립 여부</strong>가 여기서 결정됩니다.
+      </p>
+      <p class="by" id="who" hidden></p>
+    </header>
     <!-- ⚠️ 참가 실패는 **여기** 씁니다. 예전에는 `#who` 를 덮어써서
          "김민수 님의 트랙으로 녹음합니다" 가 사라지고 그 자리에 실패가
          부제색(회색)으로 앉았습니다 (결함 98). 로비의 `#room-note` 와
          같은 약입니다 (결함 90). -->
     <p id="join-note" class="status" hidden></p>
-    <p class="sub">
-      docs/09 실험 5 — 폰이 회의 끝까지 녹음을 유지하는지 확인합니다.
-      <strong>모드 A(멀티트랙)의 성립 여부</strong>가 여기서 결정됩니다.
-    </p>
 
     <!-- 이 환경에서 화면을 꺼도 되는가. `src/lib/shell/bridge.ts` 가
          정하고 15개 테스트가 붙습니다. -->
@@ -99,9 +127,9 @@
       <button id="start" class="primary" disabled>녹음 시작</button>
       <button id="stop" disabled>정지</button>
       <dl>
-        <dt>청크</dt><dd><span id="chunks">0</span></dd>
-        <dt>화면 가려짐</dt><dd><span id="interruptions">0</span>회</dd>
-        <dt>업로드</dt><dd id="uploaded">-</dd>
+        <div><dt>청크</dt><dd><span id="chunks">0</span></dd></div>
+        <div><dt>화면 가려짐</dt><dd><span id="interruptions">0</span>회</dd></div>
+        <div><dt>업로드</dt><dd id="uploaded">-</dd></div>
       </dl>
       <p class="note">
         실험 조건: ① 화면 켜둠 ② 화면 잠금 ③ 다른 앱 전환 ④ 통화 수신.
@@ -121,10 +149,10 @@
 
       <p id="verdict"></p>
       <dl>
-        <dt>커버리지</dt><dd id="coverage">-</dd>
-        <dt>총 공백</dt><dd id="totalgap">-</dd>
-        <dt>최장 공백</dt><dd id="longestgap">-</dd>
-        <dt>판정</dt><dd id="usable">-</dd>
+        <div><dt>커버리지</dt><dd id="coverage">-</dd></div>
+        <div><dt>총 공백</dt><dd id="totalgap">-</dd></div>
+        <div><dt>최장 공백</dt><dd id="longestgap">-</dd></div>
+        <div><dt>판정</dt><dd id="usable">-</dd></div>
       </dl>
       <ul id="gaps"></ul>
       <code id="row"></code>

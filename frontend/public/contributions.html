@@ -42,7 +42,7 @@
   .warnings { margin: 0 0 var(--sp-6); padding: var(--sp-4) var(--sp-5);
               background: var(--surface); border: 1px solid var(--line);
               border-left: 2px solid var(--gap); border-radius: var(--r-card);
-              font-size: var(--fs-label); color: var(--text-muted); max-width: 72ch; }
+              font-size: var(--fs-label); color: var(--text-muted); max-width: 44rem; }
   .warnings p { margin: 0; }
   .warnings p + p { margin-top: var(--sp-2); }
 
@@ -102,8 +102,10 @@
   .unc-note { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-2) 0 0; }
   .unc-none { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-4) 0 0; }
 
-  /* 사유 칸. ⚠️ 줄 길이를 묶습니다 — 1920px 에서 한 줄이 110자였습니다. */
-  .read-why { max-width: 56ch; }
+  /* 사유 칸. ⚠️ 줄 길이를 묶습니다 — 1920px 에서 한 줄이 110자였습니다.
+     `ch` 가 아니라 `rem` 인 이유는 `app.css` 의 `.lede` 주석에 있습니다 —
+     `ch` 는 라틴 문자 기준이라 한글에서 줄이 너무 일찍 끊깁니다. */
+  .read-why { max-width: 34rem; }
 
   /* ⚠️ `::before` 로 마커를 찍으므로 목록 기본 불릿을 꺼야 한다.
      안 끄면 "• · 동료평가…" 처럼 마커가 두 개 찍힌다. */

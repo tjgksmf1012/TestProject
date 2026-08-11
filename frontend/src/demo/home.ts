@@ -27,6 +27,7 @@ import { escapeHtml } from '../lib/html.ts';
 import { channelState } from '../lib/nav/channels.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
+import { bylineHtml } from '../lib/ui/byline.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, projectCards, showSkeleton } from '../lib/ui/skeleton.ts';
@@ -80,15 +81,23 @@ function meetingHtml(meeting: Meeting): string {
 }
 
 function projectHtml(project: Project, meetings: Meeting[]): string {
+  // ⚠️ **`btn` 을 뗐습니다** (브리프 §17). 같은 세 곳이 왼쪽 열에도,
+  // 폰의 아래 탭바에도 있습니다 — 내비가 **세 벌**이었고 그중 이 셋만
+  // 크고 네모나서 화면에서 가장 먼저 읽혔습니다. 정작 이 화면의
+  // 주인공은 아래 회의 목록입니다.
+  //
+  // ⚠️ 지우지는 않습니다. 이 링크에는 **프로젝트가 실려** 있어서
+  // 프로젝트가 여럿일 때 "이 프로젝트의 칸반" 으로 갑니다 — 왼쪽 열의
+  // 것과 뜻이 조금 다릅니다. 그리고 회의를 여는 곳·초대 코드를 보는
+  // 곳이 `설정` 뿐이라, 없어지면 프로젝트를 만들고도 다음 단계로 갈
+  // 방법이 없습니다.
   const links =
-    `<a class="btn" href="/kanban.html?project=${project.project_id}">칸반</a>` +
-    `<a class="btn" href="/contributions.html?project=${project.project_id}">기여도</a>` +
-    // 회의를 여는 곳·초대 코드를 보는 곳이 여기뿐이다. 이 링크가 없으면
-    // 프로젝트를 만들어 놓고도 다음 단계로 갈 방법이 없다.
-    `<a class="btn" href="/project.html?project=${project.project_id}">설정</a>`;
+    `<a href="/kanban.html?project=${project.project_id}">칸반</a>` +
+    `<a href="/contributions.html?project=${project.project_id}">기여도</a>` +
+    `<a href="/project.html?project=${project.project_id}">설정</a>`;
 
   return `
-<section class="card project">
+<section class="project">
   <h2>${escapeHtml(project.title)}</h2>
   <p class="sub">${escapeHtml(describeProject(project))}</p>
   <div class="links">${links}</div>
@@ -288,7 +297,8 @@ async function start(): Promise<void> {
     goToLogin();
     return;
   }
-  $('who').textContent = `${((await me.json()) as Me).name} 님`;
+  $('who').innerHTML = bylineHtml(((await me.json()) as Me).name);
+  $('who').hidden = false;
   await load();
 }
 

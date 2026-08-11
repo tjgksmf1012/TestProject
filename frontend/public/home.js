@@ -263,6 +263,17 @@ function tryGet(url) {
   return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
 }
 
+// src/lib/ui/byline.ts
+function avatarInitial(name) {
+  return Array.from(name.trim())[0] ?? "?";
+}
+function bylineHtml(name, role = "") {
+  const initial = escapeHtml(avatarInitial(name));
+  const who = escapeHtml(name.trim());
+  const tail = role === "" ? "" : ` · ${escapeHtml(role)}`;
+  return `<span class="avatar" aria-hidden="true">${initial}</span>${who}${tail}`;
+}
+
 // src/lib/ui/failure.ts
 function describeHttpStatus(status) {
   if (status === 401) return "로그인이 풀렸습니다.";
@@ -834,9 +845,9 @@ function meetingHtml(meeting) {
 </li>`;
 }
 function projectHtml(project, meetings) {
-  const links = `<a class="btn" href="/kanban.html?project=${project.project_id}">칸반</a><a class="btn" href="/contributions.html?project=${project.project_id}">기여도</a><a class="btn" href="/project.html?project=${project.project_id}">설정</a>`;
+  const links = `<a href="/kanban.html?project=${project.project_id}">칸반</a><a href="/contributions.html?project=${project.project_id}">기여도</a><a href="/project.html?project=${project.project_id}">설정</a>`;
   return `
-<section class="card project">
+<section class="project">
   <h2>${escapeHtml(project.title)}</h2>
   <p class="sub">${escapeHtml(describeProject(project))}</p>
   <div class="links">${links}</div>
@@ -972,7 +983,8 @@ async function start() {
     goToLogin();
     return;
   }
-  $("who").textContent = `${(await me.json()).name} 님`;
+  $("who").innerHTML = bylineHtml((await me.json()).name);
+  $("who").hidden = false;
   await load();
 }
 void start();

@@ -33,13 +33,16 @@
      읽힌다 (결함 71 의 뒷면). */
   #code.none { font: inherit; letter-spacing: normal; color: var(--text-subtle); }
   #next { font-size: var(--fs-label); margin: var(--sp-2) 0 0; }
-  #members { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-1) 0 0; }
+  .meta-line { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0 0 var(--sp-5); }
 
   /* 연결 진단. 심각도에 따라 왼쪽 띠 색만 바뀐다 — 상자 전체를 붉게
      칠하면 경고와 오류가 같은 무게로 보이고, 둘 다 무시하게 된다. */
-  .health { margin-top: var(--sp-4); padding: .75rem var(--sp-4); border-radius: .5rem;
-            border: 1px solid var(--line); border-left-width: 3px;
-            background: color-mix(in srgb, var(--line) 12%, transparent); }
+  /* ⚠️ **테두리 상자를 걷었습니다** (브리프 §22 — 카드 안 카드).
+     패널 안에 또 액자가 있으니 화면에 상자가 이중이었습니다. 심각도는
+     왼쪽 띠 하나가 말합니다 — 상자 전체를 붉게 칠하면 경고와 오류가
+     같은 무게로 보이고, 둘 다 무시하게 됩니다. */
+  .health { margin-top: var(--sp-5); padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
+            border-left: 2px solid var(--line); }
   .health.ok   { border-left-color: var(--ok); }
   .health.warn { border-left-color: var(--warn); }
   .health.bad  { border-left-color: var(--bad); }
@@ -54,11 +57,35 @@
   .health code { font: inherit; font-weight: 700; }
   #error { color: var(--bad); font-size: var(--fs-label); margin-top: var(--sp-4); }
 
-  /* 역할 — 한 줄 = 한 역할. 합이 눈에 보여야 1 을 맞출 수 있다. */
-  .roles label { display: grid; grid-template-columns: 6rem 5.5rem 1fr; gap: var(--sp-2);
-                 align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
-  .roles label:first-child { border-top: 0; }
-  .roles input { font-size: var(--fs-input); }
+  /* 역할 — 한 줄 = 한 역할. 합이 눈에 보여야 1 을 맞출 수 있다.
+     ⚠️ **줄마다 긋던 가로선을 걷었습니다** (브리프 §7). 역할 셋에 선이
+     둘인데, 그 선이 값보다 진했습니다. */
+  .roles label { display: grid; grid-template-columns: 5rem 4.5rem 1fr; gap: var(--sp-3);
+                 align-items: center; padding: var(--sp-1) 0;
+                 font-size: var(--fs-label); }
+  /* ⚠️ 입력창 **글자**는 16px 밑으로 안 내립니다 — iOS Safari 가 확대하고
+     돌아오지 않습니다. 줄이는 것은 높이와 폭뿐입니다.
+
+     ⚠️ `.roles input` 은 (0,1,1) 이라 `app.css` 의
+     `input:not([type='checkbox']):not([type='radio'])`(0,2,1) 에 집니다.
+     `[type="number"]` 를 붙여 (0,2,1) 로 맞췄습니다.
+
+     ⚠️ **그런데 그것만으로는 안 줄었습니다.** `min-height: 0` 이 먹었는데도
+     45px 그대로여서 재 봤더니, 높이가 `min-height` 가 아니라 **내용**에서
+     나오고 있었습니다 — 글자 16px 에 `body` 에서 물려받은
+     `line-height: 1.7` 이면 27px, 거기에 여백 16 + 테두리 2 = 45px 입니다.
+     특성도를 의심했는데 원인은 행간이었습니다. 재 보지 않았으면
+     선택자만 계속 고쳤을 것입니다.
+
+     ⚠️ 높이를 줄이는 것은 **포인터가 있을 때만**입니다. 손가락 끝
+     접촉면은 44px 이고, 여기서 그보다 작아지면 옆 칸을 누릅니다. */
+  .roles input[type="number"] { font-size: var(--fs-input); text-align: right; }
+  #gh-login { max-width: 20rem; }
+  @media (hover: hover) and (pointer: fine) {
+    .roles input[type="number"], #gh-login, #meeting-title, #title, #repo {
+      min-height: 0; padding: var(--sp-2) var(--sp-3); line-height: 1.4;
+    }
+  }
   .roles .hint { font-size: var(--fs-caption); color: var(--text-subtle); }
   .rolesum { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-2) 0; }
   .rolesum.bad { color: var(--bad); }
@@ -69,11 +96,35 @@
      `.rolesum.bad` 와 `#del-result.bad` 는 이미 이렇게 적혀 있었고,
      이 자리만 빠져 있었습니다. */
   .rolestatus.bad { color: var(--bad); }
+
+  /* ⚠️ 설명문 줄 길이를 묶습니다 (브리프 §16). 1920px 에서 한 줄이
+     화면 폭을 다 썼습니다 — `내 역할만 바꿉니다. 역할은 가중치를 바꾸고
+     …` 가 한 줄에 60자였고, 그 줄 끝에서 다음 줄 첫 글자를 못 찾습니다.
+     `ch` 가 아니라 `rem` 인 이유는 `app.css` 의 `.lede` 주석에 있습니다. */
+  /* `.panel > .note` 의 여백·줄 길이는 **`app.css` 에 있습니다** —
+     녹음 화면에도 같은 것이 필요해서 옮겼습니다. */
+  .panel > .sub { max-width: 44rem; }
+
+  /* 저장 버튼은 **보조**입니다 (브리프 §14). 이 화면의 주 행동은
+     `회의를 열고 로비로` 하나뿐이고, 나머지는 값을 고친 뒤 눌러
+     확정하는 것입니다. 여섯 개가 다 청록이면 주 행동이 사라집니다. */
+  .panel > button:not(.primary) { min-height: 0; font-size: var(--fs-label);
+                                  padding: var(--sp-2) var(--sp-4); margin-top: var(--sp-4); }
 </style>
 </head>
 <body>
-  <h1 id="title-heading">프로젝트</h1>
-  <p class="sub" id="members"></p>
+  <header class="head">
+    <h1 id="title-heading">프로젝트</h1>
+    <p class="lede">
+      역할과 GitHub 계정은 기여도 계산에 그대로 들어갑니다. 회의를 여는 곳도 여기입니다.
+    </p>
+    <!-- ⚠️ 여기에 `.by` 꼬리표를 두지 않습니다. `project.ts` 는 로그인
+         사용자를 받아오지 않아서 **채울 코드가 없습니다** — 빈 요소를
+         두면 이 저장소의 대표 결함(만들어 놓고 아무도 안 부름)이 하나
+         더 생깁니다. 이 화면은 "내 역할" 이 이미 누구인지 말합니다. -->
+  </header>
+
+  <p class="meta-line" id="members"></p>
 
   <!-- ⭐ 역할. 이 값이 기여도 **가중치**를 정한다 — 기획자는 코드 0% · 문서 30%,
        개발자는 코드 35% · 문서 5%. 바꿀 자리가 없던 동안 전원이 개발자로

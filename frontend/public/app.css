@@ -220,8 +220,16 @@ body.no-tabs {
 .lede {
   color: var(--text-muted);
   font-size: var(--fs-label);
-  /* 브리프 §16 — 한 줄이 90자를 넘으면 눈이 다음 줄 첫 글자를 못 찾습니다. */
-  max-width: 64ch;
+
+  /* 브리프 §16 — 한 줄이 길면 눈이 다음 줄 첫 글자를 못 찾습니다.
+
+     ⚠️ **`ch` 를 쓰면 안 됩니다.** `ch` 는 숫자 `0` 한 글자의 폭이라
+     라틴 문자 기준이고, 한글은 글자당 그 두 배쯤을 씁니다. `64ch` 로
+     걸어 뒀더니 홈의 설명이 **한글 30자쯤에서** 끊겼습니다 — 화면에
+     자리가 한참 남았는데 두 줄이 됐습니다 (렌더해서 봤습니다).
+
+     길이는 글자 수가 아니라 **폭**으로 겁니다. */
+  max-width: 44rem;
   margin: 0;
 }
 
@@ -246,6 +254,48 @@ body.no-tabs {
   color: var(--primary);
   font-size: var(--fs-caption);
   font-weight: 700;
+}
+
+/* ── 조용한 줄 — 이동·계정 (디자인 브리프 §14) ──────────────
+
+   ⚠️ 로비에서 만들었는데 홈에도 필요해졌습니다. 두 벌이 되기 전에
+   옮깁니다 — 이 저장소의 대표 실패가 그것입니다.
+
+   여기 들어가는 것은 **지금 이 화면에서 할 일이 아닌** 것들입니다:
+   다른 화면으로 가는 링크, 로그아웃, 강제 종료. 지우지 않되 주
+   행동과 같은 무게로 두지 않습니다 — 로비는 버튼 일곱이 한 줄에
+   같은 크기로 있었고, 녹음하러 온 사람에게 `로그아웃` 이 `녹음
+   화면으로` 와 똑같이 보였습니다. */
+.act-quiet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+.linkish {
+  min-height: 0;
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  background: transparent;
+  border: 0;
+  color: var(--text-subtle);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .linkish:hover {
+    color: var(--text);
+    background: transparent;
+  }
+
+  .linkish.danger:hover {
+    color: var(--bad);
+    background: transparent;
+  }
 }
 
 .note {
@@ -360,8 +410,33 @@ p.note:empty {
 .panel {
   border: 1px solid var(--line);
   border-radius: var(--r-card);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-5);
   margin-bottom: var(--sp-4);
+  background: var(--surface);
+}
+
+/* ⚠️ 패널 제목을 **20px 에서 16px 로** 내렸습니다 (디자인 브리프 §17).
+
+   설정 화면에 패널이 여섯인데 제목이 전부 `--fs-title`(20) 이라,
+   화면을 위에서 아래로 훑으면 **같은 크기의 제목 여섯**이 줄지어
+   있었습니다. 그러면 어느 것이 지금 볼 것인지가 없습니다 — 페이지
+   제목(28)과 패널 제목(20)이 한 대역이라 계단이 안 생겼습니다.
+
+   패널은 절(節)이지 화면이 아닙니다. 항목 제목과 같은 크기면 충분합니다. */
+.panel > h2 {
+  font-size: var(--fs-item);
+  letter-spacing: var(--ls-item);
+  margin: 0 0 var(--sp-3);
+}
+
+/* ⚠️ 패널 **안**의 각주는 위 여백을 32px 이나 띄우지 않습니다.
+   `.note` 는 원래 화면 맨 아래에 놓는 것이라 크게 띄웠는데, 패널 안에
+   들어가자 내용과 선 사이에 **아무것도 없는 50px** 이 생겼습니다 —
+   패널이 이미 테두리로 구역을 나누고 있어서 그만큼 벌릴 이유가 없습니다.
+   줄 길이도 여기서 묶습니다 (브리프 §16). */
+.panel > .note {
+  margin-top: var(--sp-5);
+  max-width: 44rem;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -582,17 +657,28 @@ label:has(> input[type='radio']) {
  * 검정이 비쳐 탁한 올리브색이 됩니다. 실제로 그랬습니다.
  *
  * 표면색과 섞으면 두 모드 모두에서 **불투명한 한 색**이 나옵니다. */
+/* ⚠️ **채움을 걷었습니다** (디자인 브리프 §17).
+
+   브리프가 "베이지 전체폭 배너" 를 콕 집었고, 이 저장소에 남은 마지막
+   하나가 여기였습니다. 노란 띠가 화면 폭을 가로지르면 **본문보다 배너가
+   먼저** 읽힙니다 — 기여도의 팀 경고, 로비의 막는 것, 칸반의 담당자 없음
+   에서 이미 같은 이유로 걷어냈고, 여기만 공용 CSS 라 남아 있었습니다.
+
+   말은 그대로 둡니다. 무게만 낮춥니다 — 왼쪽 막대 하나가 심각도를
+   말하고, 색은 글자에만 씁니다. */
 .banner {
-  border-radius: var(--r-ctrl);
-  padding: var(--sp-3) var(--sp-4);
-  font-size: var(--fs-body);
-  margin: 0 0 var(--sp-4);
-  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
-  border-left: 3px solid var(--warn);
+  border-radius: 0;
+  padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
+  font-size: var(--fs-label);
+  color: var(--text-muted);
+  margin: 0 0 var(--sp-5);
+  background: transparent;
+  border-left: 2px solid var(--gap);
 }
 
+/* ⚠️ 빨강은 **진짜 오류에만**입니다. 기본 배너는 흙빛입니다 — 대부분의
+   배너 문구가 "아직 안 한 것" 이지 "잘못한 것" 이 아닙니다. */
 .banner.bad {
-  background: color-mix(in srgb, var(--bad) 12%, var(--surface));
   border-left-color: var(--bad);
 }
 

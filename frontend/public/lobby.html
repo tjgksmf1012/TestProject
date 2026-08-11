@@ -100,17 +100,9 @@
        이동       칸반·기여도 — **왼쪽 열과 아래 탭에 이미 있습니다.**
                   지우지는 않되(맥락이 실린 링크라) 글자로 낮춥니다
        위험·계정  강제 종료·로그아웃. 글자만, 빨강은 진짜 위험에만 */
+  /* `.act-quiet`·`.linkish` 는 **`app.css` 에 있습니다** — 홈에도
+     같은 것이 필요해져서 옮겼습니다. */
   .act-main { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-  .act-quiet { display: flex; flex-wrap: wrap; align-items: center;
-               gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-5);
-               padding-top: var(--sp-4); border-top: 1px solid var(--line); }
-  .linkish { min-height: 0; padding: var(--sp-1) 0; font-size: var(--fs-label);
-             font-weight: 500; background: transparent; border: 0;
-             color: var(--text-subtle); }
-  @media (hover: hover) and (pointer: fine) {
-    .linkish:hover { color: var(--text); background: transparent; }
-    .linkish.danger:hover { color: var(--bad); background: transparent; }
-  }
         </style>
 </head>
 <body>
