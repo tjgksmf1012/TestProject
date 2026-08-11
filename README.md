@@ -194,6 +194,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **GitHub 백필** (연결 전 활동 + 커버리지 표시) | ✅ 배선·멱등·잘림 처리 / **실제 HTTP 미검증** | `backend/teamflow/github/backfill.py`, [docs/15](docs/15-PC-우선-방향.md) §4.8 |
 | 프로젝트 만들기·회의 열기·저장소 연결 **화면** | ✅ | `public/home.html`(만들기·초대코드 참가), `public/project.html`(회의 열기·저장소 연결), `frontend/src/lib/project/setup.ts` |
 | **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
+| **보고서** (회의록·주간·최종 · 글자로 내보내기) | ✅ | `backend/teamflow/reports/`, `services/report_service.py`, `public/reports.html` |
 | **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ⚠️ 실측 미검증 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
 
 ```bash

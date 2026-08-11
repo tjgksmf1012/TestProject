@@ -38,6 +38,7 @@ from teamflow.call import signaling as call_signaling_module
 from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
 from teamflow.db import session as db_session
+from teamflow.db import vocab
 from teamflow.db.session import get_db
 from teamflow.github import backfill as gh_backfill
 from teamflow.github import connection as gh_connection
@@ -53,6 +54,7 @@ from teamflow.services import (
     github_connection_service,
     progress_service,
     recording_service,
+    report_service,
     task_link_service,
     task_service,
 )
@@ -2891,6 +2893,172 @@ def contributions(
             for ms in result.members.values()
         ],
         skipped_categories=[c.value for c in result.skipped_categories],
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 보고서 — 회의록 · 주간 · 최종
+# ══════════════════════════════════════════════════════════════
+
+
+class ReportOut(BaseModel):
+    id: int
+    report_type: str
+    meeting_id: int | None
+    period_start: datetime | None
+    period_end: datetime | None
+    generated_at: datetime
+    #: 블록 목록. 구조는 `teamflow/reports/__init__.py` 머리말에 있습니다.
+    content: dict[str, Any]
+
+
+class ReportSummary(BaseModel):
+    """목록용 — **내용은 안 실습니다.**
+
+    보고서 하나가 꽤 큽니다. 목록에 전부 실으면 화면이 안 쓸 것을 다
+    받습니다.
+    """
+
+    id: int
+    report_type: str
+    title: str
+    meeting_id: int | None
+    period_start: datetime | None
+    period_end: datetime | None
+    generated_at: datetime
+
+
+class GenerateReportIn(BaseModel):
+    """무엇을 만들 것인가.
+
+    ⚠️ `report_type` 을 문자열로 받되 **어휘 밖이면 거절**합니다. 여기서
+    느슨하게 받으면 CHECK 제약이 500 으로 튀어나옵니다 — 사용자에게는
+    "서버가 고장 났다" 로 보이는데 실제로는 잘못된 요청입니다.
+    """
+
+    report_type: str
+    period_start: datetime | None = None
+    period_end: datetime | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+def _report_summary(row: m.Report) -> ReportSummary:
+    return ReportSummary(
+        id=row.id,
+        report_type=row.report_type,
+        title=str(row.content.get("title", "")),
+        meeting_id=row.meeting_id,
+        period_start=row.period_start,
+        period_end=row.period_end,
+        generated_at=row.generated_at,
+    )
+
+
+@app.get("/api/projects/{project_id}/reports", response_model=list[ReportSummary])
+def list_reports(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> list[ReportSummary]:
+    """이 프로젝트의 보고서 목록. 새것부터."""
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+    return [_report_summary(row) for row in report_service.list_reports(session, project_id)]
+
+
+@app.get("/api/reports/{report_id}", response_model=ReportOut)
+def get_report(report_id: int, session: DbSession, user: CurrentUser) -> ReportOut:
+    report = session.get(m.Report, report_id)
+    if report is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "보고서를 찾을 수 없습니다")
+    _require_project_member(session, report.project_id, user)
+    return ReportOut(
+        id=report.id,
+        report_type=report.report_type,
+        meeting_id=report.meeting_id,
+        period_start=report.period_start,
+        period_end=report.period_end,
+        generated_at=report.generated_at,
+        content=report.content,
+    )
+
+
+@app.post(
+    "/api/projects/{project_id}/reports",
+    response_model=ReportOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_report(
+    project_id: int, body: GenerateReportIn, session: DbSession, user: CurrentUser
+) -> ReportOut:
+    """주간·최종 보고서를 만든다.
+
+    ⚠️ **다시 부르면 갈아끼웁니다.** 그래서 201 이지만 새 행이 안 생길 수
+    있습니다 — 쌓이는 것보다 이쪽이 맞습니다. 최종 보고서가 여러 벌 있으면
+    어느 것이 진짜인지 아무도 모릅니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    try:
+        report_type = vocab.ReportType(body.report_type)
+    except ValueError:
+        allowed = ", ".join(vocab.report_values())
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"모르는 보고서 종류입니다: {body.report_type} (가능한 것: {allowed})",
+        ) from None
+
+    try:
+        report = report_service.generate_period(
+            session,
+            project_id,
+            report_type,
+            period_start=body.period_start,
+            period_end=body.period_end,
+        )
+    except (report_service.ReportError, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    session.commit()
+    session.refresh(report)
+    return ReportOut(
+        id=report.id,
+        report_type=report.report_type,
+        meeting_id=report.meeting_id,
+        period_start=report.period_start,
+        period_end=report.period_end,
+        generated_at=report.generated_at,
+        content=report.content,
+    )
+
+
+@app.post(
+    "/api/meetings/{meeting_id}/minutes",
+    response_model=ReportOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_minutes(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> ReportOut:
+    """회의록을 만든다. 회의에 매이므로 회의 쪽 주소입니다."""
+    meeting = _load_meeting_for(session, meeting_id, user)
+    try:
+        report = report_service.generate_minutes(session, meeting.id)
+    except report_service.ReportError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    session.commit()
+    session.refresh(report)
+    return ReportOut(
+        id=report.id,
+        report_type=report.report_type,
+        meeting_id=report.meeting_id,
+        period_start=report.period_start,
+        period_end=report.period_end,
+        generated_at=report.generated_at,
+        content=report.content,
     )
 
 

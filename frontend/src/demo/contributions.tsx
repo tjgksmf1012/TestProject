@@ -508,7 +508,7 @@ function Contributions() {
       {/* ⚠️ 이 경고는 **안 줄였습니다.** 여기가 이 제품의 윤리가 사는
           자리입니다 — "이 수치로 서로를 비교하지 마세요". */}
       {warnings.length > 0 && (
-        <div id="warnings" className="warnings">
+        <div id="warnings" className="notice-box">
           {warnings.map((w, i) => (
             <p key={i}>{w}</p>
           ))}

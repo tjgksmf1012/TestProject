@@ -498,7 +498,6 @@ class Utterance(Base):
         CheckConstraint("end_ms >= start_ms", name="ck_utterance_span"),
         CheckConstraint(
             # ⚠️ 목록을 손으로 적지 않습니다. `vocab.STORED` 가 원본입니다.
-            # ⚠️ 목록을 손으로 적지 않습니다. `vocab.STORED` 가 원본입니다.
             "speaker_source IN ("
             + ",".join(f"'{v}'" for v in vocab.stored_values())
             + ")",
@@ -863,13 +862,51 @@ class AuditLog(Base):
 
 
 class Report(Base):
+    """회의록 · 주간 · 최종 (docs/08 §2).
+
+    ⚠️ **다시 만들면 갈아끼워야지 쌓이면 안 됩니다.** 이 저장소는 그 결함을
+    이미 한 번 당했습니다 — 미해결 사안이 재처리마다 한 벌씩 쌓였습니다.
+    보고서에서 그러면 "최종 보고서" 가 여러 벌 생기고 어느 것이 진짜인지
+    아무도 모릅니다. 그래서 서비스에만 맡기지 않고 **유일 제약으로 데이터
+    베이스가 지킵니다** — `scope_key` 가 그것을 위한 열입니다.
+    """
+
     __tablename__ = "reports"
 
     id: Mapped[int] = _pk()
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
-    # weekly | final | meeting_minutes
+    # 값과 뜻은 `db/vocab.py` 한 곳에만 있습니다 — 아래 CHECK 제약이 거기서
+    # 끌어다 씁니다. 예전에는 여기 주석 한 줄(`# weekly | final | ...`)이
+    # 전부였고, 주석은 아무것도 막지 않습니다.
     report_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: 회의록일 때만 채워집니다. 회의가 지워지면 그 회의록도 같이 지워져야
+    #: 하므로 내용(JSON)에 id 를 적어 두는 것으로는 부족합니다.
+    meeting_id: Mapped[int | None] = mapped_column(ForeignKey("meetings.id"))
     period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: **무엇 하나에 매여 있는지**를 한 문자열로 적은 것. 유일 제약이 이걸
+    #: 씁니다.
+    #:
+    #: ⚠️ 널을 섞은 유일 제약은 못 씁니다 — 널은 서로 다른 값으로 쳐서
+    #: `(project, 'final', NULL, NULL)` 이 몇 번이고 들어갑니다. 그래서
+    #: 널이 될 수 있는 열들 대신 **널이 아닌 열 하나**로 모읍니다.
+    #:
+    #: ⚠️ 값을 손으로 만들지 마십시오. `reports.scope_key()` 하나가
+    #: 만듭니다 — 두 곳에서 만들면 한쪽만 고쳐지고, 그 순간 같은 보고서가
+    #: 서로 다른 열쇠를 갖게 되어 유일 제약이 **아무것도 안 막습니다.**
+    scope_key: Mapped[str] = mapped_column(String(64), nullable=False)
     content: Mapped[dict] = mapped_column(JSONType, nullable=False)
     generated_at: Mapped[datetime] = _now()
+
+    __table_args__ = (
+        CheckConstraint(
+            # ⚠️ 목록을 손으로 적지 않습니다 — `vocab.ReportType` 이 원본.
+            "report_type IN ("
+            + ",".join(f"'{v}'" for v in vocab.report_values())
+            + ")",
+            name="ck_report_type",
+        ),
+        UniqueConstraint(
+            "project_id", "report_type", "scope_key", name="uq_report_scope"
+        ),
+    )

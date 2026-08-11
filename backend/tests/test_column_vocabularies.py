@@ -295,3 +295,102 @@ def test_only_the_recording_consent_is_required():
         vocab.ConsentType.RAW_AUDIO_RETENTION,
         vocab.ConsentType.VOICEPRINT_STORAGE,
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# 5. reports.report_type — 주석 한 줄이 전부였던 쪽
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 이 열은 위 둘보다 **한 발 더 간 상태**였습니다. `speaker_source` 는
+#    적어도 CHECK 제약이 있었고(값이 갈라졌을 뿐), 이쪽은 허용값이 주석
+#    한 줄로만 있었습니다:
+#
+#        # weekly | final | meeting_minutes
+#
+#    주석은 아무것도 막지 않습니다. 그리고 그 표에는 **쓰는 코드가 0곳**
+#    이었으므로 아무도 알아차릴 일이 없었습니다 — 대표 실패 ①("만들어 놓고
+#    아무도 안 부름")이 스키마에 남아 있던 자리입니다.
+
+
+def test_every_report_type_says_what_it_is_tied_to():
+    """**새 종류를 넣으면 "무엇 하나에 매이는가" 를 반드시 정하게** 합니다.
+
+    ⚠️ 이게 곧 다시 만들 때 무엇을 갈아끼우는지입니다. 안 정하면 재생성이
+    갈아끼우기가 아니라 **쌓기**가 됩니다 — 이 저장소는 그 결함을 이미 한 번
+    당했습니다(미해결 사안이 재처리마다 한 벌씩 쌓였습니다).
+    """
+    missing = set(vocab.ReportType) - set(vocab.REPORT_SCOPE)
+    assert not missing, (
+        "무엇에 매이는지 안 적힌 보고서 종류입니다 — `db/vocab.py` 의 "
+        f"REPORT_SCOPE 에 넣으십시오: {sorted(missing)}"
+    )
+    extra = set(vocab.REPORT_SCOPE) - set(vocab.ReportType)
+    assert not extra, f"없는 종류에 자리를 준 것: {sorted(extra)}"
+
+
+def test_a_report_that_carries_contribution_numbers_is_declared_as_such():
+    """사람별 기여도 수치가 들어가는 보고서는 **그렇다고 적혀 있어야** 합니다.
+
+    ⚠️ 보고서는 **앱 밖으로 나가는 문서**입니다. 복사돼서 제출물·메일·발표
+    자료가 됩니다. 화면이라면 CSS 가드와 렌더 검사가 막아 주지만 **글자가
+    되어 나간 뒤에는 아무 가드도 안 닿습니다.** 그래서 어느 종류가 그 수치를
+    이고 다니는지를 여기 한 번 적고, 생성기 쪽 테스트가 그 종류에 대해
+    순위 금지·구간·측정 불가 표시를 다시 잽니다.
+    """
+    unknown = vocab.CARRIES_CONTRIBUTION - set(vocab.ReportType)
+    assert not unknown, f"없는 종류입니다: {sorted(unknown)}"
+
+    # 회의록은 **일부러** 빠져 있습니다. 사람별 발언 수를 넣으면 그 순간
+    # 순위표가 됩니다 — "많이 말한 사람" 은 기여가 아니라 발언량입니다.
+    assert vocab.ReportType.MEETING_MINUTES not in vocab.CARRIES_CONTRIBUTION
+    assert vocab.ReportType.WEEKLY in vocab.CARRIES_CONTRIBUTION
+    assert vocab.ReportType.FINAL in vocab.CARRIES_CONTRIBUTION
+
+
+def test_the_report_model_constraint_is_built_from_the_vocabulary():
+    """모델의 CHECK 제약 == `ReportType` 전부."""
+    declared = _model_constraint(m.Report.__table__, "ck_report_type", "report_type")
+    expected = {str(r) for r in vocab.ReportType}
+    assert declared == expected, (
+        f"모델 제약 {sorted(declared)} 가 vocab {sorted(expected)} 와 다릅니다"
+    )
+
+
+def test_the_report_migration_matches_too():
+    """배포된 데이터베이스도 같은 셋을 받는가.
+
+    ⚠️ 마이그레이션 파일은 값을 **박아** 둡니다. 거기서 `vocab` 을 import 해
+    문자열을 만들면 vocab 을 고칠 때 파일 글자도 같이 움직여 이 검사가 항상
+    통과합니다 — 정작 이미 적용된 데이터베이스는 옛 제약을 그대로 들고 있는데.
+    """
+    newest, declared = _newest_migration_values("ck_report_type", "report_type")
+    expected = {str(r) for r in vocab.ReportType}
+    assert declared == expected, (
+        f"`{newest.name}` 의 제약은 {sorted(declared)} 인데 vocab 은 "
+        f"{sorted(expected)} 입니다 — 새 마이그레이션이 필요합니다."
+    )
+
+
+def test_regenerating_a_report_cannot_stack():
+    """유일 제약이 **데이터베이스 쪽에** 있는가.
+
+    서비스가 "있으면 갈아끼운다" 를 지키는 것만으로는 부족합니다. 다른 경로가
+    하나 생기는 순간(배치 작업·재처리·수동 스크립트) 갈라지고, 쌓이기 시작해도
+    **오류가 안 납니다** — 그냥 최종 보고서가 두 벌이 됩니다.
+    """
+    from sqlalchemy import UniqueConstraint
+
+    uniques = [
+        c
+        for c in m.Report.__table__.constraints
+        if isinstance(c, UniqueConstraint) and c.name == "uq_report_scope"
+    ]
+    assert uniques, "`uq_report_scope` 가 없습니다 — 재생성이 쌓입니다"
+    columns = [c.name for c in uniques[0].columns]
+    assert columns == ["project_id", "report_type", "scope_key"], columns
+
+    # ⚠️ 널이 섞이면 유일 제약은 아무것도 안 막습니다 — 널은 서로 다른 값으로
+    #    쳐서 같은 행이 몇 번이고 들어갑니다. 그래서 `scope_key` 는 NOT NULL.
+    assert m.Report.__table__.c.scope_key.nullable is False, (
+        "`scope_key` 가 널을 받으면 유일 제약이 최종 보고서를 못 막습니다"
+    )

@@ -148,3 +148,80 @@ CONSENT_REQUIRED: frozenset[ConsentType] = frozenset({ConsentType.RECORDING})
 
 def consent_values() -> tuple[str, ...]:
     return tuple(sorted(str(c) for c in CONSENT_STORED))
+
+
+# ══════════════════════════════════════════════════════════════
+# reports.report_type — 보고서 종류
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 이 열은 `speaker_source` 보다 **한 발 더 간 상태**였습니다. 저쪽은
+#    적어도 CHECK 제약이 있었고(값이 갈라졌을 뿐), 이쪽은 허용값이
+#    **주석 한 줄로만** 있었습니다:
+#
+#        # weekly | final | meeting_minutes
+#        report_type: Mapped[str] = mapped_column(String(20), nullable=False)
+#
+#    주석은 아무것도 막지 않습니다. `String(20)` 이라 `"weekly "`(뒤 공백)도
+#    `"Weekly"` 도 `"주간"` 도 들어갑니다. 그리고 그 표에는 쓰는 코드가
+#    **0곳**이었으므로, 아무도 그 사실을 알아차릴 일이 없었습니다.
+
+
+class ReportType(StrEnum):
+    """무엇을 담은 보고서인가 (docs/08 §2 "반드시 구현").
+
+    ⚠️ 새 종류를 넣으면 아래 `REPORT_SCOPE` 와 `CARRIES_CONTRIBUTION`
+    양쪽에서 자리를 정하기 전까지 테스트가 터집니다. 둘 다 **조용히
+    기본값으로 떨어지면 안 되는** 판단이기 때문입니다 — 아래를 보십시오.
+    """
+
+    MEETING_MINUTES = "meeting_minutes"  # 회의 하나의 기록
+    WEEKLY = "weekly"  # 한 주 동안 일어난 일
+    FINAL = "final"  # 프로젝트 전체 — 제출물이 되는 것
+
+
+class ReportScope(StrEnum):
+    """이 보고서가 **무엇 하나에** 매이는가.
+
+    ⚠️ 이게 곧 **다시 만들 때 무엇을 갈아끼우는지**입니다. 안 정하면 재생성이
+    갈아끼우기가 아니라 **쌓기**가 됩니다 — 이 저장소는 그 결함을 이미 한 번
+    당했습니다(미해결 사안이 재처리마다 한 벌씩 쌓였습니다). 보고서에서
+    그러면 "최종 보고서" 가 여러 벌 생기고, 어느 것이 진짜인지 아무도
+    모릅니다.
+    """
+
+    MEETING = "meeting"  # 회의 하나당 하나
+    PERIOD = "period"  # 프로젝트 × 기간당 하나
+    PROJECT = "project"  # 프로젝트당 하나
+
+
+#: 종류 → 무엇에 매이는가. **빠짐없이** 적혀 있어야 합니다.
+REPORT_SCOPE: dict[ReportType, ReportScope] = {
+    ReportType.MEETING_MINUTES: ReportScope.MEETING,
+    ReportType.WEEKLY: ReportScope.PERIOD,
+    ReportType.FINAL: ReportScope.PROJECT,
+}
+
+#: 사람별 **기여도 수치**가 들어가는 보고서.
+#:
+#: ⚠️ 여기가 이 제품에서 불변식이 가장 위험한 자리입니다. 보고서는 **앱
+#: 밖으로 나가는 문서**입니다 — 복사돼서 제출물·메일·발표 자료가 됩니다.
+#: 화면이라면 CSS 가드와 렌더 검사가 막아 주지만, **글자가 되어 나간 뒤에는
+#: 아무 가드도 안 닿습니다.** 그래서 순위 금지·구간·측정 불가 표시를
+#: 화면이 아니라 **생성기 자체**에 박고, 여기 적힌 종류에 대해서만이 아니라
+#: 여기 적혔다는 사실 자체를 테스트가 검사합니다.
+#:
+#: ⚠️ `meeting_minutes` 는 **일부러 빠져 있습니다.** 회의록에 사람별 발언
+#: 수를 넣으면 그 순간 순위표가 됩니다 — "많이 말한 사람" 은 기여가 아니라
+#: 발언량이고, 그걸 회의마다 나란히 적으면 팀이 그걸로 서로를 봅니다.
+#: 회의록은 **무슨 일이 있었나**를 적지 **누가 얼마나** 를 적지 않습니다.
+CARRIES_CONTRIBUTION: frozenset[ReportType] = frozenset(
+    {
+        ReportType.WEEKLY,
+        ReportType.FINAL,
+    }
+)
+
+
+def report_values() -> tuple[str, ...]:
+    """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
+    return tuple(sorted(str(r) for r in ReportType))
