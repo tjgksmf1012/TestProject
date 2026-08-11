@@ -48,7 +48,6 @@
      읽힙니다 — 로비의 끊긴 트랙에서 이미 같은 이유로 바꿨습니다. */
   .who .state.warn { color: var(--gap); }
   .who .state.bad { color: var(--bad); }
-  /* 헤드폰을 안 쓴 사람 — 이게 그 사람 트랙에 남의 목소리를 섞는다. */
   /* 헤드폰을 안 쓴 사람 — 이게 그 사람 트랙에 남의 목소리를 섞습니다.
      ⚠️ 이것도 **잘못이 아니라 조건**이라 흙빛입니다. */
   .badge { font-size: var(--fs-caption); padding: var(--sp-1) var(--sp-2);
@@ -62,23 +61,47 @@
                          width: var(--sp-1); height: var(--sp-1);
                          border-radius: var(--r-round); background: currentColor; }
 
-  /* 마이크 레벨. "내 소리가 들어가고 있나" 를 눈으로 확인하는 유일한 곳. */
+  /* 마이크 레벨. "내 소리가 들어가고 있나" 를 눈으로 확인하는 유일한 곳.
+
+     ⚠️ **빈 홈통이 안 보였습니다.** `--sunken` 은 판(`--surface`) 위에서
+     1.17:1(밝은)·1.15:1(어두운) 이라 사실상 아무것도 없는 것과 같습니다.
+     하필 **레벨이 0 일 때** — 즉 마이크가 죽어서 이 위젯이 존재하는
+     이유가 되는 그 순간 — 위젯 자체가 사라집니다. 렌더해서 보고
+     알았습니다: 판 위에 흰 줄 하나만 보입니다.
+
+     테두리를 둡니다. `--line-strong` 은 이 저장소의 컨트롤 경계색이고
+     판 위에서 3.36:1(밝은)·3.41:1(어두운) 이라 UI 컴포넌트 하한
+     3:1(WCAG 1.4.11)을 넘습니다. 채움(`--ok`)은 홈통 위에서 5.50 · 9.60
+     이라 원래 잘 보였습니다 — 안 보이던 것은 **빈 상태**뿐입니다. */
   .meter { height: var(--sp-2); border-radius: var(--r-badge); margin-top: var(--sp-3);
-           background: var(--sunken); overflow: hidden; }
+           background: var(--sunken); border: 1px solid var(--line-strong);
+           overflow: hidden; }
   .meter span { display: block; height: 100%; width: 0;
                 background: var(--ok); transition: width .1s linear; }
 
   /* ⚠️ **둘이 화면 폭을 반씩 채우고 있었습니다** (`flex: 1`). 통화에
      들어온 사람의 주 행동은 `녹음 화면으로` 하나이고, `나가기` 는
      끝낼 때만 씁니다 — 같은 크기의 빨간 상자로 늘 띄워 두면 화면이
-     경고처럼 보이고 실수로 누를 자리도 넓어집니다 (브리프 §14). */
-  .actionbar button { flex: 0 0 auto; }
+     경고처럼 보이고 실수로 누를 자리도 넓어집니다 (브리프 §14).
+
+     ⚠️⚠️ **선택자를 `.actionbar .inner > button` 으로 씁니다.**
+     `.actionbar button` 은 (0,1,1) 이라 `app.css` 의
+     `.actionbar .inner > *`(0,2,0)에 **집니다** — 화면별 `<style>` 이
+     뒤에 와도 특성도가 먼저입니다(결함 61·98 과 같은 부류). 그 규칙이
+     여태 먹은 것처럼 보인 이유는 이 화면에 `.inner` 자체가 없어서
+     `flex: 1` 이 아무 데도 안 걸렸기 때문입니다 — 고장 둘이 서로를
+     가리고 있었습니다. */
+  .actionbar .inner > button { flex: 0 0 auto; }
   #leave { min-height: 0; padding: var(--sp-2) var(--sp-4); border-color: transparent;
            background: transparent; color: var(--text-subtle); font-weight: 500; }
   @media (hover: hover) and (pointer: fine) {
     #leave:hover { color: var(--bad); background: transparent; }
   }
   #status { font-size: var(--fs-label); color: var(--text-subtle); margin: var(--sp-3) 0 0; }
+  /* ⚠️ **이 줄은 `app.css` 의 `.bad` 와 겹치는 게 아니라 꼭 있어야
+     합니다.** 윗줄의 `#status`(1,0,0)가 `.bad`(0,1,0)를 이기므로, 이걸
+     지우면 실패가 조용히 회색으로 돌아갑니다 — 결함 61·98 에서 이미
+     `.rolestatus.bad` 로 겪은 그 자리입니다. */
   #status.bad { color: var(--bad); }
 </style>
 </head>
@@ -109,9 +132,16 @@
 
   <p id="status"></p>
 
+  <!-- ⚠️ `.inner` 가 빠져 있었습니다. 화면 셋 중 이 하나만 — 검토·오프라인은
+       둘 다 갖고 있습니다. `app.css` 는 폭(34rem)·가운데 정렬·버튼 사이
+       간격(`--sp-2`)을 전부 `.actionbar .inner` 에 겁니다. 없으면 막대가
+       그냥 블록이라 버튼 사이가 **마크업 공백 4px** 로 벌어지고(토큰이
+       아니라 우연입니다) 두 버튼 높이도 44 / 43.5 로 어긋납니다. -->
   <div class="actionbar">
-    <button id="record" class="primary">녹음 화면으로</button>
-    <button id="leave" type="button">통화 나가기</button>
+    <div class="inner">
+      <button id="record" class="primary">녹음 화면으로</button>
+      <button id="leave" type="button">통화 나가기</button>
+    </div>
   </div>
 
   <nav id="tabs" aria-label="주요 화면"></nav>

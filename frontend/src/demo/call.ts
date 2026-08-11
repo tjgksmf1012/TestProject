@@ -64,9 +64,20 @@ function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
 }
 
+/**
+ * 통화 상태 한 줄.
+ *
+ * ⚠️ 예전에는 여기서 `textContent` 와 `className` 을 손으로 같이 썼습니다 —
+ * `showNote` 를 **다시 만든 것**이었습니다. 색과 글자를 한 자리에서 정하는
+ * 것까지는 같았지만 `hidden` 을 안 걸어서, 할 말이 없을 때도 빈 `<p>` 가
+ * 남아 위쪽 여백 12px 을 계속 차지했습니다.
+ *
+ * ⚠️⚠️ **가드 셋(결함 92·98·104)이 이걸 못 봤습니다.** 셋 다 실패 문구가
+ * **쓰는 그 줄에** 있는 모양을 찾는데, 여기서는 문구가 부르는 쪽에
+ * 있습니다(`say('…못했습니다', true)`). 감싸는 함수는 넷째 모양입니다.
+ */
 function say(text: string, bad = false): void {
-  $('status').textContent = text;
-  $('status').className = bad ? 'bad' : '';
+  showNote($('status'), text, bad ? 'bad' : 'plain');
 }
 
 // ══════════════════════════════════════════════════════════════
