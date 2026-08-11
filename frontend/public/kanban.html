@@ -18,40 +18,67 @@
 <title>칸반 — TeamFlow</title>
 <style>
 
-  /* ⚠️ 노란 배너를 뺐습니다 (docs/19 §18). 카드에 이미 흙빛 표시가
-     있는데 화면 위에 또 노란 띠를 깔면 같은 말이 두 번이고, 색이 강해서
-     **보드보다 배너가 먼저** 읽힙니다. 같은 흙빛 어휘로 낮춥니다. */
-  #unassigned { margin: var(--sp-3) 0; padding: var(--sp-1) 0 var(--sp-1) var(--sp-3);
-                border-left: 2px solid var(--gap);
-                font-size: var(--fs-caption); color: var(--text-muted); }
+  /* ══ 브리프대로 다시 짰습니다 (docs/19 §22) ═══════════════════
+
+     머리말(`.head`·`.lede`·`.by`)은 `app.css` 에 있습니다 — 검토
+     화면과 **같은 한 벌**입니다.
+
+     여기서 고친 것은 셋입니다:
+       열 머리를 가로지르던 **굵은 규칙선 셋**을 걷었고,
+       카드 폭을 반씩 채우던 **버튼 밭**을 방향에 따라 갈랐고,
+       카드에 이미 있는 말을 화면 위에서 또 하던 **배너**를 뺐습니다. */
+
+  /* ── 대표 주장 한 줄 ───────────────────────────────────
+     예전에는 `전체 3 · 완료 1 · 지연 0 · 회의에서 나온 업무 1 ·
+     PR이 붙은 업무 1` 이었습니다. 다섯 값이 같은 무게로 나열됐는데,
+     앞의 둘은 **바로 아래 열 머리가 이미 세고 있습니다.**
+
+     남긴 셋이 이 화면의 존재 이유입니다 — 회의에서 나와서 PR 로
+     끝났는가, 그리고 늦은 것이 있는가. */
+  .flow { display: flex; flex-wrap: wrap; gap: var(--sp-4);
+          margin: 0 0 var(--sp-6); font-size: var(--fs-caption); color: var(--text-subtle); }
+  .flow b { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums;
+            margin-left: var(--sp-2); }
+  .flow .late b { color: var(--gap); }
 
   /* 좁은 화면에서는 세로로 쌓인다. 폰에서 열어보는 게 기본이다. */
-  #board { display: grid; gap: var(--sp-4); margin-top: var(--sp-4); }
+  #board { display: grid; gap: var(--sp-5); }
   @media (min-width: 46rem) { #board { grid-template-columns: repeat(3, 1fr); align-items: start; } }
 
-  /* ══ 제도 도면 어휘로 (docs/19 §17) ═══════════════════════
+  /* ── 열 ────────────────────────────────────────────────
 
-     ⚠️ **열 상자를 걷어냈습니다.** 회색 둥근 상자 셋은 어느 보드
-     화면과도 구분되지 않았고, 기여도를 규칙선으로 바꾸면서 한 제품
-     안에 판형이 두 벌이 됐습니다. 열은 이제 **머리 규칙선 하나**입니다.
+     ⚠️ **열 머리의 굵은 규칙선을 걷었습니다** (브리프 §7). 2px 짜리
+     선 셋이 화면을 가로지르며 카드 테두리와 경쟁했습니다. 열을 가르는
+     것은 이제 **여백과 카드 면**입니다 — 선이 하나도 없어도 세 덩어리로
+     읽힙니다 (렌더해서 확인했습니다).
 
      ⚠️ 카드는 **남깁니다.** 기여도에서 카드를 걷어낸 이유는 "완결된
      결과처럼 보이는 그릇에 불확실한 값을 담았다" 였습니다. 여기 있는
      것은 진짜로 옮기는 물건이라 카드가 맞는 은유입니다 — 판형을
      맞춘다고 은유까지 갈아 끼우지 않습니다. */
-  .col { padding: 0; }
-  .col h2 { display: flex; align-items: baseline; justify-content: space-between;
-            font-size: var(--fs-label); letter-spacing: .04em; color: var(--text-muted);
-            margin: 0 0 var(--sp-3); padding-bottom: var(--sp-2);
-            border-bottom: 2px solid var(--text); }
+  .col h2 { display: flex; align-items: center; gap: var(--sp-2);
+            font-size: var(--fs-caption); font-weight: 600; letter-spacing: .02em;
+            color: var(--text-subtle); margin: 0 0 var(--sp-3); }
   /* ⚠️ 한글에 `text-transform: uppercase` 를 걸지 않습니다 — 대문자가
      없어 자간만 벌어집니다 (docs/19 §3 의 v1 실수). */
-  .col h2 .n { font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+  .col h2 .n { font-variant-numeric: tabular-nums; color: var(--text-muted);
+               background: var(--sunken); border-radius: var(--r-badge);
+               padding: 0 var(--sp-2); line-height: 1.6; }
+  .col .empty { font-size: var(--fs-caption); color: var(--text-subtle);
+                padding: var(--sp-5) 0; margin: 0; text-align: center; }
 
-  .task { border: 1px solid var(--line); border-radius: var(--r-ctrl);
-          padding: var(--sp-3); margin-bottom: var(--sp-3); }
-  .task .title { font-weight: 600; margin: 0 0 var(--sp-1); font-size: var(--fs-body); }
-  .task .meta { font-size: var(--fs-label); color: var(--text-subtle); margin: 0; }
+  /* ── 카드 ──────────────────────────────────────────────
+     검토 화면의 후보 카드와 **같은 재료**입니다 — 떠오른 면 + 1px +
+     같은 radius. 예전에는 배경이 없어 페이지가 그대로 비쳤습니다. */
+  .task { background: var(--surface); border: 1px solid var(--line);
+          border-radius: var(--r-card); padding: var(--sp-4);
+          margin-bottom: var(--sp-3); transition: border-color .12s ease; }
+  @media (hover: hover) and (pointer: fine) {
+    .task:hover { border-color: var(--line-strong); }
+  }
+  .task .title { font-weight: 600; margin: 0 0 var(--sp-1);
+                 font-size: var(--fs-item); letter-spacing: var(--ls-item); }
+  .task .meta { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0; }
 
   /* 회의 → 업무 연결이 이 화면의 존재 이유다. 눈에 띄어야 한다. */
   /* ⚠️ `--ico` 만 정하면 안 됩니다 (결함 74). 그 변수를 **읽는** 규칙은
@@ -62,50 +89,77 @@
                               display: inline-block; vertical-align: -2px; }
   /* 회의에서 나온 업무 — 이 화면의 존재 이유라 **칩**으로 세웁니다.
      손으로 만든 업무는 아무 표시도 없습니다(기본값이니까) — 그래야
-     이 칩이 눈에 띕니다. */
+     이 칩이 눈에 띕니다.
+
+     ⚠️ 색을 `--ok`(초록)에서 **브랜드 청록**으로 옮겼습니다. 초록은
+     채널 목록에서 이미 "회의가 열려 있다" 이고, 여기서 말하려는 것은
+     성공이 아니라 **출처**입니다. 브리프 §15 — 색은 90% 중립, 강조는
+     브랜드 하나. */
   .origin { display: flex; align-items: center; gap: var(--sp-icon);
-            font-size: var(--fs-caption); margin: var(--sp-2) 0 0; color: var(--ok); }
+            font-size: var(--fs-caption); margin: var(--sp-3) 0 0; color: var(--primary); }
   .origin .ev { margin-left: auto; color: var(--text-subtle);
                 font-variant-numeric: tabular-nums; }
 
   /* 못 재는 자리 — 문장이 아니라 **표시**. 전문은 접힌 서랍에 있습니다.
      맥락 패널의 측정 불가 점, 기여도의 모르는 폭 막대와 같은 흙빛입니다. */
-  .gapmark { margin: var(--sp-2) 0 0; padding-left: var(--sp-2);
-             border-left: 2px solid var(--gap);
-             font-size: var(--fs-caption); color: var(--text-muted); }
-
   /* ⚠️ **못 잰다는 말은 경고가 아닙니다.** 담당자가 없는 업무는 잘못된
      것이 아니라 **누구 기여인지 알 수 없는** 것이고, 이 저장소는 그런
-     자리를 결측(흙빛)으로 그리기로 정해 뒀습니다. 노랑 삼각형은 "네가
-     뭘 잘못했다" 로 읽힙니다. 왼쪽 흙빛 막대로 바꿉니다. */
-
+     자리를 결측(흙빛)으로 그리기로 정해 뒀습니다. */
+  .gapmark { display: flex; align-items: baseline; gap: var(--sp-2);
+             margin: var(--sp-2) 0 0; font-size: var(--fs-caption); color: var(--gap); }
+  .gapmark::before { content: ""; flex: 0 0 auto;
+                     width: var(--sp-1); height: var(--sp-1); border-radius: var(--r-round);
+                     background: currentColor; transform: translateY(-3px); }
 
   /* 이 업무가 어느 PR 로 끝났는가. 대표 주장(회의→업무→GitHub)의 마지막 칸. */
-  .gh { font-size: var(--fs-caption); margin: var(--sp-2) 0 0; color: var(--text-subtle); }
-  .gh-list { list-style: none; padding: 0; margin: var(--sp-1) 0 0; font-size: var(--fs-caption); }
-  .gh-list li { padding: var(--sp-1) 0; }
-  .gh-list li::before { content: "⎇ "; }
+  .gh-list { list-style: none; padding: 0; margin: var(--sp-2) 0 0; font-size: var(--fs-caption); }
+  .gh-list li { display: flex; gap: var(--sp-2); padding: var(--sp-1) 0; }
+  .gh-list li::before { content: "\2197"; flex: 0 0 auto; }
   /* 확정과 추정을 색으로 나눈다 — 추정을 사실처럼 보이게 하면 안 된다. */
-  .gh-list li.sure { color: var(--ok); }
-  .gh-list li.guess { color: var(--warn); }
+  .gh-list li.sure { color: var(--text-muted); }
+  .gh-list li.guess { color: var(--gap); }
 
-  .moves { display: flex; gap: .375rem; margin-top: var(--sp-2); flex-wrap: wrap; }
-  /* ⭐ 예전에는 높이 26px 이었다. 손가락 끝 접촉면이 대략 44px 이라
-     그보다 작으면 **옆 카드의 버튼을 누른다** — 칸반에서 그건 엉뚱한
-     업무를 완료 처리하는 것이고, 완료는 기여 이벤트를 만든다.
-     크기는 app.css 의 button 규칙(min-height: var(--tap))이 정하고,
-     여기서는 한 줄에 몇 개가 들어가는지만 정한다. */
-  .moves button { flex: 1 1 auto; font-size: var(--fs-label); padding-inline: var(--sp-3); }
+  /* ── 옮기기 (브리프 §14) ───────────────────────────────
+
+     ⚠️ 예전에는 `flex: 1 1 auto` 라 버튼 둘이 **카드 폭을 반씩** 채웠습니다.
+     44px 짜리 상자 둘이 카드에서 제일 큰 것이었고, 카드 셋이면 큰 상자가
+     여섯이라 화면이 버튼 밭이었습니다.
+
+     위계는 **방향**에서 나옵니다 — 앞으로 보내는 것이 이 화면의 주된
+     행동이고, 되돌리는 것은 실수를 무를 때만 씁니다. `kanban.ts` 가
+     `data-dir` 로 갈라 줍니다.
+
+     ⚠️ 높이는 44px 밑으로 내리되 **포인터가 있을 때만** 입니다. 폰에서
+     26px 이었다가 옆 카드의 버튼을 누르던 결함으로 되돌아가면 안 됩니다 —
+     칸반에서 그건 엉뚱한 업무를 완료 처리하는 것이고, 완료는 기여
+     이벤트를 만듭니다. */
+  .moves { display: flex; gap: var(--sp-2); margin-top: var(--sp-4); flex-wrap: wrap; }
+  .moves button { flex: 0 0 auto; font-size: var(--fs-label);
+                  padding: var(--sp-2) var(--sp-4); }
+  .moves button[data-dir="back"] { background: transparent; border-color: transparent;
+                                   color: var(--text-subtle); font-weight: 500; }
+  @media (hover: hover) and (pointer: fine) {
+    .moves button { min-height: 0; }
+    .moves button[data-dir="back"]:hover { color: var(--text); background: transparent; }
+  }
 
   #result { font-size: var(--fs-label); color: var(--bad); margin-top: var(--sp-4); }
-    </style>
+        </style>
 </head>
 <body>
-  <h1>칸반</h1>
-  <p class="sub" id="who"></p>
-  <p class="sub" id="counts"></p>
+  <header class="head">
+    <h1>칸반</h1>
+    <p class="lede">
+      회의에서 승인된 업무와 직접 만든 업무가 단계별로 놓입니다.
+    </p>
+    <p class="by" id="who" hidden></p>
+  </header>
 
-  <div id="unassigned" hidden></div>
+  <!-- 대표 주장 한 줄. `src/demo/kanban.ts` 가 채운다.
+       ⚠️ 담당자 없는 업무를 알리던 배너를 걷었습니다 — 그 말은
+       해당 카드에 이미 흙빛 표시로 있습니다 (브리프 §17). -->
+  <p class="flow" id="counts"></p>
+
   <div id="board" class="board"></div>
   <p id="result"></p>
 

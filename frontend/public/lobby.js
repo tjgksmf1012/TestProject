@@ -324,6 +324,17 @@ function tryGet(url) {
   return trySend(() => fetch(url, { credentials: "same-origin", cache: "no-store" }));
 }
 
+// src/lib/ui/byline.ts
+function avatarInitial(name) {
+  return Array.from(name.trim())[0] ?? "?";
+}
+function bylineHtml(name, role = "") {
+  const initial = escapeHtml(avatarInitial(name));
+  const who = escapeHtml(name.trim());
+  const tail = role === "" ? "" : ` · ${escapeHtml(role)}`;
+  return `<span class="avatar" aria-hidden="true">${initial}</span>${who}${tail}`;
+}
+
 // src/lib/ui/failure.ts
 function describeHttpStatus(status) {
   if (status === 401) return "로그인이 풀렸습니다.";
@@ -1211,6 +1222,9 @@ function render() {
   $("finish").hidden = !room.needsForceFinish;
   $("reprocess").hidden = !canReprocess;
   $("review").hidden = room.recording > 0 || room.notJoined > 0 || tracks.length === 0;
+  const reviewReady = !$("review").hidden;
+  $("review").classList.toggle("primary", reviewReady);
+  $("record").classList.toggle("primary", !reviewReady);
 }
 $("agree").addEventListener("click", () => {
   void whilePressed($("agree"), () => submitConsent(true));
@@ -1248,7 +1262,8 @@ async function start() {
   }
   const me = await response.json();
   meId = me.user_id;
-  $("who").textContent = `${me.name} 님으로 로그인했습니다`;
+  $("who").innerHTML = bylineHtml(me.name);
+  $("who").hidden = false;
   const meeting = await getJson(`/api/meetings/${meetingId}`);
   projectId = meeting.project_id;
   await refresh();

@@ -188,6 +188,12 @@ function daysBetween(from, to) {
 function nextStatuses(task, statuses2) {
   return statuses2.filter((s) => s !== task.status);
 }
+function moveDirection(from, to, statuses2) {
+  const a = statuses2.indexOf(from);
+  const b = statuses2.indexOf(to);
+  if (a === -1 || b === -1) return "back";
+  return b > a ? "forward" : "back";
+}
 function taskWarnings(task, today) {
   const warnings = [];
   if (task.assignee_id === null) {
@@ -316,6 +322,17 @@ var PATHS = {
 };
 function iconSvg(name) {
   return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + PATHS[name] + "</svg>";
+}
+
+// src/lib/ui/byline.ts
+function avatarInitial(name) {
+  return Array.from(name.trim())[0] ?? "?";
+}
+function bylineHtml(name, role = "") {
+  const initial = escapeHtml(avatarInitial(name));
+  const who = escapeHtml(name.trim());
+  const tail = role === "" ? "" : ` · ${escapeHtml(role)}`;
+  return `<span class="avatar" aria-hidden="true">${initial}</span>${who}${tail}`;
 }
 
 // src/lib/ui/empty.ts
@@ -891,13 +908,10 @@ function memberName(userId) {
 }
 function cardHtml(task, today) {
   const warnings = taskWarnings(task, today);
-  const moves = nextStatuses(task, statuses).map(
-    (s) => (
-      // ⚠️ `…로` 를 글자로 붙이면 안 된다. `진행 중` 은 받침이 있어
-      // `진행 중으로` 다 — 붙여 놓은 동안 버튼에 **"진행 중로"** 가 떴다.
-      `<button class="move" data-id="${task.id}" data-to="${escapeHtml(s)}">${escapeHtml(withJosa(describeStatus(s), "으로로"))}</button>`
-    )
-  ).join("");
+  const moves = nextStatuses(task, statuses).map((s) => {
+    const dir = moveDirection(task.status, s, statuses);
+    return `<button class="move" data-id="${task.id}" data-to="${escapeHtml(s)}" data-dir="${dir}">${escapeHtml(withJosa(describeStatus(s), "으로로"))}</button>`;
+  }).join("");
   return `
 <article class="task" data-id="${task.id}">
   <p class="title">${escapeHtml(task.title)}</p>
@@ -958,9 +972,7 @@ function githubHtml(task) {
 function render() {
   const today = todayInTeamCalendar();
   const summary = summarize(tasks, today);
-  $("counts").textContent = `전체 ${summary.total} · 완료 ${summary.done} · 지연 ${summary.overdue} · 회의에서 나온 업무 ${summary.fromMeetings} · PR이 붙은 업무 ${summary.withPulls}`;
-  $("unassigned").hidden = summary.unassigned === 0;
-  $("unassigned").textContent = `담당자가 없는 업무 ${summary.unassigned}건은 완료해도 기여도에 반영되지 않습니다.`;
+  $("counts").innerHTML = `<span>회의에서 나온 업무<b>${summary.fromMeetings}</b></span><span>PR로 이어진 업무<b>${summary.withPulls}</b></span><span class="late">지연<b>${summary.overdue}</b></span>`;
   if (summary.total === 0) {
     $("board").innerHTML = emptyHtml({
       what: "여기에는 팀의 업무 카드가 단계별로 놓입니다.",
@@ -1070,7 +1082,8 @@ async function start() {
     goToLogin();
     return;
   }
-  $("who").textContent = `${(await me.json()).name} 님이 보고 있습니다`;
+  $("who").innerHTML = bylineHtml((await me.json()).name, "보는 중");
+  $("who").hidden = false;
   await load();
 }
 void start();

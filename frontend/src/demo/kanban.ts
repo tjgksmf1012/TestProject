@@ -9,6 +9,7 @@ import {
   describeLinkState,
   describePull,
   describeStatus,
+  moveDirection,
   nextStatuses,
   sortLinks,
   statusPatch,
@@ -22,6 +23,7 @@ import { escapeHtml } from '../lib/html.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { withJosa } from '../lib/text/josa.ts';
+import { bylineHtml } from '../lib/ui/byline.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
@@ -68,13 +70,19 @@ function memberName(userId: number | null): string {
 function cardHtml(task: Task, today: string): string {
   const warnings = taskWarnings(task, today);
   const moves = nextStatuses(task, statuses)
-    .map(
-      (s) =>
-        // ⚠️ `…로` 를 글자로 붙이면 안 된다. `진행 중` 은 받침이 있어
-        // `진행 중으로` 다 — 붙여 놓은 동안 버튼에 **"진행 중로"** 가 떴다.
-        `<button class="move" data-id="${task.id}" data-to="${escapeHtml(s)}">` +
-        `${escapeHtml(withJosa(describeStatus(s), '으로로'))}</button>`,
-    )
+    .map((s) => {
+      // ⚠️ `…로` 를 글자로 붙이면 안 된다. `진행 중` 은 받침이 있어
+      // `진행 중으로` 다 — 붙여 놓은 동안 버튼에 **"진행 중로"** 가 떴다.
+      //
+      // ⭐ `data-dir` 이 버튼 위계를 만듭니다 (브리프 §14). 앞으로 보내는
+      // 것이 주된 행동이고 되돌리기는 실수를 무를 때만 씁니다 — 예전에는
+      // 둘이 카드 폭을 반씩 채우는 같은 무게의 상자였습니다.
+      const dir = moveDirection(task.status, s, statuses);
+      return (
+        `<button class="move" data-id="${task.id}" data-to="${escapeHtml(s)}" data-dir="${dir}">` +
+        `${escapeHtml(withJosa(describeStatus(s), '으로로'))}</button>`
+      );
+    })
     .join('');
 
   return `
@@ -189,15 +197,20 @@ function render(): void {
   const today = todayInTeamCalendar();
   const summary = summarize(tasks, today);
 
-  // 마지막 숫자가 이 프로젝트의 대표 주장이 **끝까지** 도는지를 봅니다 —
-  // 회의에서 나온 업무가 실제 PR 로 이어진 건수.
-  $('counts').textContent =
-    `전체 ${summary.total} · 완료 ${summary.done} · 지연 ${summary.overdue} · ` +
-    `회의에서 나온 업무 ${summary.fromMeetings} · PR이 붙은 업무 ${summary.withPulls}`;
-
-  $('unassigned').hidden = summary.unassigned === 0;
-  $('unassigned').textContent =
-    `담당자가 없는 업무 ${summary.unassigned}건은 완료해도 기여도에 반영되지 않습니다.`;
+  // ⭐ 이 프로젝트의 대표 주장이 **끝까지** 도는지를 봅니다 —
+  // 회의에서 나온 업무가 실제 PR 로 이어졌는가.
+  //
+  // ⚠️ `전체`·`완료` 를 뺐습니다 (브리프 §17). 바로 아래 **열 머리가
+  // 이미 세고 있습니다** — 같은 수를 두 번 적으면 사람은 둘이 다른
+  // 것인 줄 알고 대조합니다.
+  //
+  // ⚠️ 담당자 없는 업무를 알리던 배너도 걷었습니다. 그 말은 해당
+  // 카드에 흙빛 표시로 이미 있고, 배너는 색이 강해 **보드보다 먼저**
+  // 읽혔습니다.
+  $('counts').innerHTML =
+    `<span>회의에서 나온 업무<b>${summary.fromMeetings}</b></span>` +
+    `<span>PR로 이어진 업무<b>${summary.withPulls}</b></span>` +
+    `<span class="late">지연<b>${summary.overdue}</b></span>`;
 
   // ⚠️ 업무가 하나도 없으면 **열만 세 개** 서고 전부 "비어 있음" 입니다.
   // 그 화면은 아무것도 안 알려 주면서 고장처럼 보입니다 — 이 저장소가
@@ -347,7 +360,8 @@ async function start(): Promise<void> {
     goToLogin();
     return;
   }
-  $('who').textContent = `${((await me.json()) as Me).name} 님이 보고 있습니다`;
+  $('who').innerHTML = bylineHtml(((await me.json()) as Me).name, '보는 중');
+  $('who').hidden = false;
   await load();
 }
 

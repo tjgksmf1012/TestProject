@@ -38,6 +38,7 @@ import {
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { bylineHtml } from '../lib/ui/byline.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml, showNote } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
@@ -115,15 +116,25 @@ function memberRow(member: MemberScore, uncertainty: UncertaintySpan | undefined
   const flags = integrityNotes(member);
   const noEvidence = hasNoEvidence(member);
 
+  // ⭐ **막대를 걷어냈습니다** (docs/19 §22).
+  //
+  // 이 저장소가 기여도 막대에서 절대 위치를 뺄 때 세운 규칙이 있습니다 —
+  // **"값은 글자로만 적고, 막대는 구간의 넓이만 그린다."** 세 사람을
+  // 같은 0~100 축에 세로로 세우면 그건 순위표니까요.
+  //
+  // 그런데 카테고리 막대는 그대로 남아 있었습니다. `width: team_share%`
+  // 짜리 막대가 세 줄에서 **같은 자리·같은 축**에 정렬돼 있었고, 그건
+  // 방금 걷어낸 그 막대그래프와 똑같은 그림입니다.
+  //
+  // ⚠️ 숫자는 **지우지 않습니다.** 글자로 적으면 같은 정보가 더 정확하고
+  // (막대는 40% 와 45% 를 구분해 주지 못합니다), 훑을 때 눈이 옆 사람
+  // 줄로 미끄러지지 않습니다.
   const categories = categoriesForDisplay(member)
-    .map((c) => {
-      const share = Math.round(c.team_share * 100);
-      return (
+    .map(
+      (c) =>
         `<li><span class="cat">${escapeHtml(describeCategory(c.category))}</span>` +
-        `<span class="catbar"><i style="width:${share}%"></i></span>` +
-        `<span class="catnum">${c.event_count}건</span></li>`
-      );
-    })
+        `<span class="catnum">${c.event_count}건 · 팀의 ${Math.round(c.team_share * 100)}%</span></li>`,
+    )
     .join('');
 
   // 폭 0 은 "완전히 확정" 이라 그릴 것이 없습니다. 0px 막대를 그리면
@@ -145,9 +156,13 @@ function memberRow(member: MemberScore, uncertainty: UncertaintySpan | undefined
   <div class="read-val">
     <p class="range">${escapeHtml(describeRange(member))}</p>
     <p class="conf">신뢰도 ${escapeHtml(member.confidence_label)}</p>
+    ${
+      // ⚠️ 모르는 폭은 **숫자와 같은 칸**입니다. 제 열을 주면 8rem 을
+      // 차지하면서 사유 칸을 좁히는데, 이건 바로 왼쪽 숫자에 딸린
+      // 것이라 떨어뜨려 놓으면 무엇의 폭인지 안 보입니다.
+      spread
+    }
   </div>
-
-  <div class="read-unc">${spread}</div>
 
   <div class="read-why">
     ${
@@ -452,7 +467,8 @@ async function start(): Promise<void> {
     goToLogin();
     return;
   }
-  $('who').textContent = `${((await me.json()) as Me).name} 님이 보고 있습니다`;
+  $('who').innerHTML = bylineHtml(((await me.json()) as Me).name, '보는 중');
+  $('who').hidden = false;
   await load();
 }
 

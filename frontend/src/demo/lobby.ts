@@ -31,6 +31,7 @@ import { escapeHtml } from '../lib/html.ts';
 import { axisTicks, buildDiagram, describeGap } from '../lib/track/diagram.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { describeUnexpected, trySend, unreachableText } from '../lib/http/send.ts';
+import { bylineHtml } from '../lib/ui/byline.ts';
 import { describeHttpStatus, failureHtml, showNote } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import { clearSkeleton, rowItems, showSkeleton } from '../lib/ui/skeleton.ts';
@@ -510,6 +511,18 @@ function render(): void {
   $('reprocess').hidden = !canReprocess;
   // 처리가 끝나야 후보가 생긴다. 그 전에 눌러도 빈 화면이라 감춘다.
   $('review').hidden = room.recording > 0 || room.notJoined > 0 || tracks.length === 0;
+
+  // ⭐ **주 행동은 회의 상태를 따라 움직입니다** (브리프 §14).
+  //
+  // 녹음이 이미 끝난 회의에서 `녹음 화면으로` 가 청록으로 남아 있으면,
+  // 화면이 가장 크게 가리키는 곳이 **이제 할 일이 아닌 곳**입니다.
+  // 그때 사람이 해야 할 일은 뽑힌 후보를 검토하는 것입니다.
+  //
+  // 바로 위 `agree` 가 같은 방식으로 움직입니다 — 이 화면은 단계마다
+  // 주 행동이 바뀌는 곳이라, 청록은 **한 번에 하나만** 켭니다.
+  const reviewReady = !$('review').hidden;
+  $('review').classList.toggle('primary', reviewReady);
+  $('record').classList.toggle('primary', !reviewReady);
 }
 
 // ⚠️ 누르는 동안 잠근다 (결함 89). 동의는 멱등이지만, 두 번 누르면
@@ -553,7 +566,8 @@ async function start(): Promise<void> {
   }
   const me = (await response.json()) as Me;
   meId = me.user_id;
-  $('who').textContent = `${me.name} 님으로 로그인했습니다`;
+  $('who').innerHTML = bylineHtml(me.name);
+  $('who').hidden = false;
 
   const meeting = (await getJson(`/api/meetings/${meetingId}`)) as { project_id: number };
   projectId = meeting.project_id;

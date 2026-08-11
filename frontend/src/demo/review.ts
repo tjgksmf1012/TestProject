@@ -37,6 +37,7 @@ import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth
 import { attr, escapeHtml } from '../lib/html.ts';
 import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
+import { bylineHtml } from '../lib/ui/byline.ts';
 import { failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import {
@@ -550,12 +551,10 @@ async function start(): Promise<void> {
   // 검토하고 있습니다" 는 바로 위 설명문과 같은 크기·같은 모양이라,
   // 화면 맨 위 넉 줄이 전부 같은 무게였습니다.
   //
-  // ⚠️ 머리글자는 `Array.from` 으로 뗍니다. `me.name[0]` 은 이모지나
-  // 일부 한자에서 반쪽 글자를 냅니다 (레일에서 한 번 당했습니다).
-  const initial = Array.from(me.name)[0] ?? '?';
-  $('who').innerHTML =
-    `<span class="avatar" aria-hidden="true">${escapeHtml(initial)}</span>` +
-    `${escapeHtml(me.name)} · 검토 중`;
+  // ⚠️ 손으로 만들지 않습니다 — `bylineHtml` 이 머리글자를 `Array.from`
+  // 으로 떼고(대리쌍) 이스케이프까지 합니다. 화면 넷이 같은 것을 그려서
+  // lib 으로 옮겼습니다.
+  $('who').innerHTML = bylineHtml(me.name, '검토 중');
   $('who').hidden = false;
   await load();
 }

@@ -334,6 +334,17 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/ui/byline.ts
+function avatarInitial(name) {
+  return Array.from(name.trim())[0] ?? "?";
+}
+function bylineHtml(name, role = "") {
+  const initial = escapeHtml(avatarInitial(name));
+  const who = escapeHtml(name.trim());
+  const tail = role === "" ? "" : ` · ${escapeHtml(role)}`;
+  return `<span class="avatar" aria-hidden="true">${initial}</span>${who}${tail}`;
+}
+
 // src/lib/ui/empty.ts
 function emptyHtml(state) {
   const action = state.action ? `<a class="btn btn-primary" href="${escapeHtml(state.action.href)}">${escapeHtml(state.action.label)}</a>` : "";
@@ -937,10 +948,9 @@ function memberRow(member, uncertainty) {
   const notes = readBeforeTheNumber(member);
   const flags = integrityNotes(member);
   const noEvidence = hasNoEvidence(member);
-  const categories = categoriesForDisplay(member).map((c) => {
-    const share = Math.round(c.team_share * 100);
-    return `<li><span class="cat">${escapeHtml(describeCategory(c.category))}</span><span class="catbar"><i style="width:${share}%"></i></span><span class="catnum">${c.event_count}건</span></li>`;
-  }).join("");
+  const categories = categoriesForDisplay(member).map(
+    (c) => `<li><span class="cat">${escapeHtml(describeCategory(c.category))}</span><span class="catnum">${c.event_count}건 · 팀의 ${Math.round(c.team_share * 100)}%</span></li>`
+  ).join("");
   const width = uncertainty?.ratio ?? 0;
   const spread = uncertainty === void 0 || uncertainty.points === 0 ? '<p class="unc-none">구간이 없습니다 — 이 값은 확정적입니다</p>' : `<div class="unc-bar"><i style="width:${width}%"></i></div><p class="unc-note">모르는 폭 ${Math.round(uncertainty.points)}%p</p>`;
   return `
@@ -953,9 +963,11 @@ function memberRow(member, uncertainty) {
   <div class="read-val">
     <p class="range">${escapeHtml(describeRange(member))}</p>
     <p class="conf">신뢰도 ${escapeHtml(member.confidence_label)}</p>
+    ${// ⚠️ 모르는 폭은 **숫자와 같은 칸**입니다. 제 열을 주면 8rem 을
+  // 차지하면서 사유 칸을 좁히는데, 이건 바로 왼쪽 숫자에 딸린
+  // 것이라 떨어뜨려 놓으면 무엇의 폭인지 안 보입니다.
+  spread}
   </div>
-
-  <div class="read-unc">${spread}</div>
 
   <div class="read-why">
     ${noEvidence ? '<p class="empty">이 사람의 활동이 아직 하나도 연결되지 않았습니다 — 0 이라는 뜻이 아니라 <strong>연결이 없다</strong>는 뜻입니다.</p>' : ""}
@@ -1147,7 +1159,8 @@ async function start() {
     goToLogin();
     return;
   }
-  $("who").textContent = `${(await me.json()).name} 님이 보고 있습니다`;
+  $("who").innerHTML = bylineHtml((await me.json()).name, "보는 중");
+  $("who").hidden = false;
   await load();
 }
 $("confirm").addEventListener("click", () => {

@@ -373,6 +373,17 @@ function emptyHtml(state) {
   return `<div class="empty-state"><p class="what">${escapeHtml(state.what)}</p><p class="why">${escapeHtml(state.why)}</p><p class="how">${escapeHtml(state.how)}</p>` + action + "</div>";
 }
 
+// src/lib/ui/byline.ts
+function avatarInitial(name) {
+  return Array.from(name.trim())[0] ?? "?";
+}
+function bylineHtml(name, role = "") {
+  const initial = escapeHtml(avatarInitial(name));
+  const who = escapeHtml(name.trim());
+  const tail = role === "" ? "" : ` · ${escapeHtml(role)}`;
+  return `<span class="avatar" aria-hidden="true">${initial}</span>${who}${tail}`;
+}
+
 // src/lib/ui/failure.ts
 function failureHtml(failure) {
   const code = failure.code === void 0 || failure.code === "" ? "" : `<p class="code">오류 코드 ${escapeHtml(String(failure.code))}</p>`;
@@ -1292,8 +1303,7 @@ async function start() {
     return;
   }
   const me = await response.json();
-  const initial = Array.from(me.name)[0] ?? "?";
-  $("who").innerHTML = `<span class="avatar" aria-hidden="true">${escapeHtml(initial)}</span>${escapeHtml(me.name)} · 검토 중`;
+  $("who").innerHTML = bylineHtml(me.name, "검토 중");
   $("who").hidden = false;
   await load();
 }

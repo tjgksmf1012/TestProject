@@ -18,61 +18,113 @@
 <title>회의 로비 — TeamFlow</title>
 <style>
 
+  /* ══ 브리프대로 다시 짰습니다 (docs/19 §22) ═══════════════════
+     머리말은 `app.css` 의 `.head`·`.lede`·`.by` — 네 화면이 같은 한 벌. */
 
-  /* 참가자 한 명 = 한 줄. 이름·상태가 위, 커버리지 막대가 아래.
-     막대는 **한 줄을 통째로** 써야 42% 와 98% 의 차이가 보입니다. */
-  li { display: grid; grid-template-columns: 6rem 1fr; gap: var(--sp-1) var(--sp-2);
-       padding: var(--sp-2) 0; border-top: 1px solid var(--line); align-items: baseline; }
-  li:first-child { border-top: 0; }
-  .name { font-weight: 600; }
+  .meta-line { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0 0 var(--sp-5); }
+
+  /* ── 동의 명단 ─────────────────────────────────────────
+     ⚠️ **줄마다 긋던 가로선을 걷었습니다** (브리프 §7). 세 사람이면
+     선이 셋인데 그 선이 이름보다 진했습니다. 나누는 것은 여백입니다. */
+  li { display: grid; grid-template-columns: 7rem 1fr; gap: var(--sp-1) var(--sp-3);
+       padding: var(--sp-2) 0; align-items: baseline; }
+  .name { font-weight: 600; font-size: var(--fs-label); }
   .state { font-size: var(--fs-label); color: var(--text-subtle); }
   /* 트랙은 이름 칸 아래가 아니라 **상태 칸 아래**로. */
   li .tl { grid-column: 2; }
 
   /* 기기가 남긴 경고도 같은 칸으로 (결함 93).
-     ⚠️ 이걸 안 걸면 첫 칸(6rem)에 떨어져 **한 줄에 한두 낱말**씩
-     쪼개집니다. 넘침은 0px 이라 수치 검사는 통과하고, 캡처를 눈으로
-     봐야만 보입니다 — 이 PR 에서 반복해 겪은 그대로입니다.
-     상태 칸(2열)만 써도 180px 이라 여전히 좁아, **줄 전체**를 씁니다. */
+     ⚠️ 이걸 안 걸면 첫 칸에 떨어져 **한 줄에 한두 낱말**씩 쪼개집니다.
+     넘침은 0px 이라 수치 검사는 통과하고, 캡처를 눈으로 봐야만 보입니다. */
   li .warn { grid-column: 1 / -1; margin: 0; padding-left: 1.1em; }
-  li .warn li { display: list-item; grid-template-columns: none; padding: 0; border-top: 0; }
+  li .warn li { display: list-item; grid-template-columns: none; padding: 0; }
 
   /* 시간축 — 트랙과 같은 격자에 맞춘다. 안 맞으면 눈금이 가리키는
      시각이 트랙의 그 자리와 어긋난다. */
-  .axis { display: grid; grid-template-columns: 6rem 1fr; gap: 0 var(--sp-2);
-          margin: 0 0 var(--sp-1); font-size: var(--fs-caption); color: var(--text-subtle); }
+  .axis { display: grid; grid-template-columns: 7rem 1fr; gap: 0 var(--sp-3);
+          margin: 0 0 var(--sp-2); font-size: var(--fs-caption); color: var(--text-subtle); }
   .axis .marks { display: flex; justify-content: space-between; }
-  .granted { color: var(--ok); } .refused { color: var(--bad); } .pending { color: var(--warn); }
-  .broken .state, .at_risk .state { color: var(--warn); }
-  .broken .state { color: var(--bad); }
 
-  button.primary:disabled { background: transparent; color: var(--text-subtle); border-color: var(--line); font-weight: 400; cursor: not-allowed; }
-  button + button { margin-top: var(--sp-2); }
- .row button { margin-top: 0; }
-  .blockers { margin: 0 0 var(--sp-3); padding: var(--sp-3) var(--sp-4); border-radius: .5rem; background: color-mix(in srgb, var(--warn) 12%, transparent); font-size: var(--fs-label); }
-  .blockers p { margin: var(--sp-1) 0; }
+  .granted { color: var(--ok); } .refused { color: var(--bad); } .pending { color: var(--gap); }
+  /* ⭐ **끊긴 트랙은 빨강이 아닙니다** (docs/05 §5 · 브리프 §15).
+     `커버리지 42% — 이 사람의 발언량은 측정할 수 없습니다` 가 빨간 글씨로
+     떠 있었습니다. 빨강은 "네가 뭘 잘못했다" 로 읽힙니다. 녹음이 끊긴
+     것은 고장도 잘못도 아니라 **"이 구간은 잴 수 없었다"** 이고, 이
+     저장소는 그 자리를 흙빛으로 그리기로 정해 뒀습니다 — 기여도의 모르는
+     폭 막대, 칸반의 반영 안 됨 표시, 맥락 패널의 점과 같은 색입니다. */
+  .broken .state, .at_risk .state { color: var(--gap); }
 
-  /* ②③ 은 녹음 동의와 **다른 무게**다. 테두리로 묶어 한 덩어리로 보이게 하되
-     시각적 비중은 낮춘다 — 주 동작은 아래 "동의합니다" 하나다. */
-  .extras { margin: var(--sp-3) 0 0; padding: var(--sp-2) var(--sp-3) var(--sp-3);
-            border: 1px solid var(--line); border-radius: var(--r-card); }
-  .extras legend { padding: 0 var(--sp-1); font-size: var(--fs-label); color: var(--text-subtle); }
+  /* ── 막는 것 ───────────────────────────────────────────
+     ⚠️ 노란 채움을 걷었습니다 (브리프 §17). 기여도의 팀 경고와 **같은
+     재료**입니다 — 조용한 면 + 왼쪽 흙빛 막대. */
+  .blockers { margin: 0 0 var(--sp-4); padding: var(--sp-3) var(--sp-4);
+              background: var(--bg); border-left: 2px solid var(--gap);
+              border-radius: var(--r-ctrl);
+              font-size: var(--fs-label); color: var(--text-muted); }
+  .blockers p { margin: 0; }
+  .blockers p + p { margin-top: var(--sp-2); }
+
+  /* ── 따로 받는 동의 ────────────────────────────────────
+     ⚠️ **`fieldset` 의 테두리를 걷었습니다** (브리프 §22 — 카드 안 카드).
+     패널 안에 legend 달린 상자가 또 있으니 화면에 액자가 이중이었고,
+     그 상자가 옛 HTML 폼처럼 보이는 가장 큰 이유였습니다.
+
+     ⚠️ 태그는 **`fieldset` 그대로 둡니다.** 체크박스 둘을 묶는 것은
+     낭독기에게 의미가 있습니다 — 보이는 테두리만 없앴지 묶음을
+     없앤 것이 아닙니다. */
+  .extras { margin: var(--sp-5) 0 0; padding: 0; border: 0;
+            border-top: 1px solid var(--line); }
+  .extras legend { display: contents; }
+  .extras .cap { display: block; margin: var(--sp-4) 0 var(--sp-1);
+                 font-size: var(--fs-caption); font-weight: 600; color: var(--text-subtle); }
   /* ⚠️ 예전에는 여기에 `display: grid; grid-template-columns: auto 1fr` 이
      있었습니다. 그리드 항목이 **셋**(체크박스 · 글자 · `.hint`)이라
-     `.hint` 가 1열로 떨어지고, 그 열이 설명 글 너비만큼 벌어졌습니다.
-     설명이 라벨 글자보다 **223px 왼쪽**에 찍혔습니다 (결함 72).
-     지금은 글자와 설명을 한 `<span>` 에 넣고 `app.css` 의
-     `label:has(> input[type=checkbox])` 규칙(flex)을 그대로 씁니다. */
-  .extras label { margin: var(--sp-2) 0 0; font-size: var(--fs-label); }
+     `.hint` 가 1열로 떨어지고, 설명이 라벨 글자보다 **223px 왼쪽**에
+     찍혔습니다 (결함 72). 지금은 글자와 설명을 한 `<span>` 에 넣고
+     `app.css` 의 `label:has(> input[type=checkbox])` 규칙을 그대로 씁니다. */
+  .extras label { margin: var(--sp-1) 0 0; font-size: var(--fs-label); }
   .extras .hint { display: block; color: var(--text-subtle); font-size: var(--fs-caption); }
-    </style>
+
+  button.primary:disabled { background: transparent; color: var(--text-subtle);
+                            border-color: var(--line); font-weight: 400; cursor: not-allowed; }
+
+  /* ── 이 회의로 할 수 있는 일 (브리프 §14) ───────────────
+
+     ⚠️ 예전에는 **버튼 일곱이 한 줄에** 나란히 있었습니다. 전부 같은
+     크기·같은 테두리라, 지금 눌러야 할 것이 무엇인지 화면이 말하지
+     않았습니다 — 녹음을 시작하러 온 사람에게 `로그아웃` 이 `녹음
+     화면으로` 와 같은 무게로 보였습니다.
+
+     셋으로 갈랐습니다:
+       주 행동    지금 이 회의에서 할 일 (녹음·통화·검토)
+       이동       칸반·기여도 — **왼쪽 열과 아래 탭에 이미 있습니다.**
+                  지우지는 않되(맥락이 실린 링크라) 글자로 낮춥니다
+       위험·계정  강제 종료·로그아웃. 글자만, 빨강은 진짜 위험에만 */
+  .act-main { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  .act-quiet { display: flex; flex-wrap: wrap; align-items: center;
+               gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-5);
+               padding-top: var(--sp-4); border-top: 1px solid var(--line); }
+  .linkish { min-height: 0; padding: var(--sp-1) 0; font-size: var(--fs-label);
+             font-weight: 500; background: transparent; border: 0;
+             color: var(--text-subtle); }
+  @media (hover: hover) and (pointer: fine) {
+    .linkish:hover { color: var(--text); background: transparent; }
+    .linkish.danger:hover { color: var(--bad); background: transparent; }
+  }
+        </style>
 </head>
 <body>
-  <h1 id="title">회의 로비</h1>
+  <header class="head">
+    <h1 id="title">회의 로비</h1>
+    <p class="lede">
+      전원이 동의하면 녹음을 시작할 수 있습니다. 트랙은 사람마다 따로 남습니다.
+    </p>
+    <p class="by" id="who" hidden></p>
+  </header>
+
   <!-- 비워 둔다. 정적 "불러오는 중…" 은 **언제나** 한 번 깜빡입니다.
        로딩 표시는 `src/lib/ui/pending.ts` 가 200ms 뒤에 켭니다. -->
-  <p class="sub" id="sub"></p>
-  <p class="sub" id="who"></p>
+  <p class="meta-line" id="sub"></p>
 
   <section class="panel">
     <h2>동의</h2>
@@ -83,7 +135,7 @@
          "녹음은 되지만 원본은 남기기 싫다" 를 말할 방법이 없다.
          거부해도 회의는 그대로 진행된다 — 그게 분리해서 받는 이유다. -->
     <fieldset class="extras">
-      <legend>따로 받는 동의</legend>
+      <legend><span class="cap">따로 받는 동의</span></legend>
       <!-- ⚠️ 글자와 설명을 **한 상자에** 넣습니다. 형제로 두면 체크박스
            옆 열이 아니라 그 아래 열로 떨어집니다 (결함 72). -->
       <label><input type="checkbox" id="keep-audio" checked />
@@ -117,23 +169,30 @@
   </section>
 
   <section class="panel">
-    <button id="record" class="primary" disabled>녹음 화면으로</button>
-    <!-- 브라우저 통화 (docs/15). 각자 자기 PC 에서 회의할 때 여기로 들어간다. -->
-    <button id="call" disabled>통화로 회의하기</button>
-    <button id="finish" hidden>강제 종료</button>
+    <div class="act-main">
+      <button id="record" class="primary" disabled>녹음 화면으로</button>
+      <!-- 브라우저 통화 (docs/15). 각자 자기 PC 에서 회의할 때 여기로 들어간다. -->
+      <button id="call" disabled>통화로 회의하기</button>
+      <!-- ⚠️ 실패한 회의는 **막다른 길이었습니다** (결함 114). 홈 화면은
+           "트랙이 온전한지 확인하세요" 라고 보내면서, 확인하고 나면 할 수
+           있는 일을 안 줬습니다. -->
+      <button id="reprocess" hidden>다시 처리하기</button>
+      <button id="review" hidden>업무 후보 검토</button>
+    </div>
     <!-- ⚠️ 실패 문구는 **여기** 씁니다. `#room-message` 는 3초마다 도는
          폴링이 방 상태로 덮으므로, 거기 쓴 실패 문구는 3초 뒤에 조용히
          사라집니다 (결함 90). 이 자리는 아무도 안 덮습니다. -->
     <p class="status" id="room-note" hidden></p>
-    <!-- ⚠️ 실패한 회의는 **막다른 길이었습니다** (결함 114). 홈 화면은
-         "트랙이 온전한지 확인하세요" 라고 보내면서, 확인하고 나면 할 수
-         있는 일을 안 줬습니다. -->
-    <button id="reprocess" hidden>다시 처리하기</button>
     <p class="status" id="reprocess-note" hidden></p>
-    <button id="review" hidden>업무 후보 검토</button>
-    <button id="kanban">칸반 보기</button>
-    <button id="contrib">기여도 보기</button>
-    <button id="logout">로그아웃</button>
+
+    <!-- 이동과 계정. 칸반·기여도는 왼쪽 열과 아래 탭에 이미 있습니다 —
+         여기 것은 **이 회의가 실린** 링크라 지우지 않고 낮춥니다. -->
+    <div class="act-quiet">
+      <button id="kanban" class="linkish">칸반 보기</button>
+      <button id="contrib" class="linkish">기여도 보기</button>
+      <button id="finish" class="linkish danger" hidden>강제 종료</button>
+      <button id="logout" class="linkish">로그아웃</button>
+    </div>
     <p class="status" id="logout-note" hidden></p>
   </section>
 

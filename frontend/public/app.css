@@ -194,6 +194,60 @@ body.no-tabs {
   margin: 0 0 var(--sp-4);
 }
 
+/* ══════════════════════════════════════════════════════════════
+   제품 머리말 (디자인 브리프 §5)
+   ══════════════════════════════════════════════════════════════
+
+   ⚠️ **여기 있는 이유가 중요합니다.** 검토 화면에서 먼저 만들었는데,
+   칸반에 같은 것이 필요해지자 두 벌이 될 참이었습니다. 이 저장소의
+   대표 실패 둘 중 하나가 **"두 벌이 있으면 한쪽만 고쳐진다"** 입니다 —
+   머리말은 모든 화면의 첫인상이라 갈라지면 제품이 둘로 보입니다.
+
+   화면 넷이 전부 이 모양이었습니다:
+
+       칸반                     ← 제목
+       김민수 님이 보고 있습니다   ← 설명문과 같은 크기
+       전체 3 · 완료 1 · 지연 0…  ← 또 같은 크기
+       [베이지 배너]             ← 또
+
+   넉 줄이 전부 같은 무게라 **무엇을 먼저 볼지가 없었습니다.** 지금은
+   제목(28) → 설명(13, muted) → 사람(12, 아바타 딸린 꼬리표) 셋뿐입니다. */
+
+.head {
+  margin-bottom: var(--sp-6);
+}
+
+.lede {
+  color: var(--text-muted);
+  font-size: var(--fs-label);
+  /* 브리프 §16 — 한 줄이 90자를 넘으면 눈이 다음 줄 첫 글자를 못 찾습니다. */
+  max-width: 64ch;
+  margin: 0;
+}
+
+/* 사람은 **문장이 아니라 꼬리표**입니다. "김민수 님이 보고 있습니다" 는
+   바로 위 설명과 같은 크기라 설명을 두 번 읽게 만들었습니다. */
+.by {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-caption);
+  color: var(--text-subtle);
+}
+
+.by .avatar {
+  display: grid;
+  place-items: center;
+  width: var(--sp-5);
+  height: var(--sp-5);
+  border-radius: var(--r-round);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: var(--primary);
+  font-size: var(--fs-caption);
+  font-weight: 700;
+}
+
 .note {
   font-size: var(--fs-label);
   color: var(--text-subtle);
