@@ -112,8 +112,16 @@
   /* 저장 버튼은 **보조**입니다 (브리프 §14). 이 화면의 주 행동은
      `회의를 열고 로비로` 하나뿐이고, 나머지는 값을 고친 뒤 눌러
      확정하는 것입니다. 여섯 개가 다 청록이면 주 행동이 사라집니다. */
-  .panel > button:not(.primary) { min-height: 0; font-size: var(--fs-label);
+  .panel > button:not(.primary) { font-size: var(--fs-label);
                                   padding: var(--sp-2) var(--sp-4); margin-top: var(--sp-4); }
+
+  /* ⚠️ **작게 만드는 것은 마우스에서만입니다.** `--tap`(44px)은 손가락 끝
+     접촉면이고 `app.css` 가 모든 버튼에 겁니다. 여기서 미디어 쿼리 밖에
+     `min-height: 0` 을 적었더니 실제 폰 에뮬레이션에서 저장 버튼 다섯이
+     40.1px 이었습니다. 칸반의 `.moves button` 이 쓰는 모양으로 맞춥니다. */
+  @media (hover: hover) and (pointer: fine) {
+    .panel > button:not(.primary) { min-height: 0; }
+  }
 </style>
 </head>
 <body>

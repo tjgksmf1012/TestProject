@@ -442,23 +442,105 @@ describe('모바일 규칙', () => {
     strictEqual(offenders.join(', '), '');
   });
 
+  /**
+   * 글자 크기 토큰 → px. `tokens.css` 에서 읽습니다.
+   *
+   * ⚠️ 이게 없을 때 아래 가드는 **`font-size: var(--fs-label)` 을 그냥
+   * 건너뛰었습니다.** 정규식이 숫자만 찾는데 `var(...)` 는 숫자가 아니라
+   * `continue` 로 빠졌고, 그래서 검토 화면의 13px 담당자·마감일 칸이
+   * "0건" 으로 통과했습니다. **토큰을 쓰면 가드가 눈을 감는** 모양입니다.
+   */
+  const fontTokens = (): Map<string, number> => {
+    const css = readFileSync(join(PUBLIC, 'tokens.css'), 'utf8');
+    const map = new Map<string, number>();
+    for (const m of css.matchAll(/(--fs-[a-z0-9-]+)\s*:\s*([\d.]+)(rem|px)\s*;/g)) {
+      map.set(m[1] as string, m[3] === 'px' ? Number(m[2]) : Number(m[2]) * 16);
+    }
+    return map;
+  };
+
+  /** 선언에서 px 를 뽑습니다. 토큰이면 풀어서. 못 풀면 `null`. */
+  const pxOf = (value: string, tokens: Map<string, number>): number | null => {
+    const token = /var\((--fs-[a-z0-9-]+)\)/.exec(value);
+    if (token !== null) return tokens.get(token[1] as string) ?? null;
+    const literal = /([\d.]+)(rem|px|em)/.exec(value);
+    if (literal === null) return null;
+    return literal[2] === 'px' ? Number(literal[1]) : Number(literal[1]) * 16;
+  };
+
   it('⭐ 입력 칸 글자를 16px 밑으로 내리지 않는다', () => {
     // iOS Safari 는 글자가 16px 보다 작은 입력 칸에 포커스가 가면 화면을
     // 확대하고, **확대된 채로 돌아오지 않는다.** 사람은 앱이 깨졌다고
     // 느낀다. 0.9375rem = 15px 이 딱 그 함정이다.
+    //
+    // ⚠️ 마우스 전용 미디어 쿼리(`hover: hover`) 안은 봐 줍니다 — iOS 는
+    // 거기 안 들어옵니다. 손가락에서만 16px 이면 됩니다.
+    const tokens = fontTokens();
+    ok(tokens.size >= 3, `tokens.css 에서 글자 토큰을 ${tokens.size}개밖에 못 읽었습니다`);
+
     const offenders: string[] = [];
     for (const { name, html } of screens()) {
       const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
-      for (const rule of style.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+      // 마우스 전용 블록은 통째로 들어냅니다.
+      const touch = style.replace(
+        /@media\s*\([^)]*hover:\s*hover[^)]*\)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,
+        '',
+      );
+      for (const rule of touch.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
         const selector = (rule[1] ?? '').trim();
         if (!/\binput\b|\btextarea\b|\bselect\b/.test(selector)) continue;
-        const size = (rule[2] ?? '').match(/font-size:\s*([\d.]+)(rem|px|em)/);
-        if (!size) continue;
-        const px = size[2] === 'px' ? Number(size[1]) : Number(size[1]) * 16;
-        if (px < 16) offenders.push(`${name} → ${selector} (${px}px)`);
+        // 체크박스·라디오는 글자를 넣는 칸이 아니라 확대가 안 일어납니다.
+        if (/checkbox|radio/.test(selector)) continue;
+        const decl = /font-size:\s*([^;]+)/.exec(rule[2] ?? '');
+        if (decl === null) continue;
+        const px = pxOf(decl[1] as string, tokens);
+        if (px !== null && px < 16) offenders.push(`${name} → ${selector} (${px}px)`);
       }
     }
-    strictEqual(offenders.join(', '), '');
+    strictEqual(offenders.join(', '), '', 'iOS 에서 포커스가 가면 화면이 확대되고 안 돌아옵니다');
+  });
+
+  it('⭐ 컨트롤을 **손가락에서** 줄이지 않는다 (`--tap` 44px)', () => {
+    // `tokens.css` 가 `--tap: 2.75rem /* 44px — 손가락 끝 접촉면 */` 이라고
+    // 정하고 `app.css` 가 `button, .btn { min-height: var(--tap) }` 으로
+    // 겁니다. 그런데 화면별 `<style>` 이 `min-height: 0` 으로 되돌리면
+    // 그 규칙이 사라집니다.
+    //
+    // 마우스에서 컨트롤을 작게 하는 것 자체는 맞습니다 — 칸반이 그걸
+    // **`@media (hover: hover) and (pointer: fine)` 안에서** 합니다.
+    // 문제는 그 밖에서 하는 것입니다. 검토·프로젝트가 그랬고, 실제 폰
+    // 에뮬레이션(`hasTouch`)으로 재니 버튼이 40.1px, 제목 칸이 35.5px
+    // 이었습니다.
+    //
+    // ⚠️ 폭만 390 으로 줄여서 재면 **안 잡힙니다.** Chromium 은 그때도
+    // `hover: hover` 를 보고해서 마우스용 규칙이 그대로 먹습니다. 그렇게
+    // 재서 칸반을 위반으로 잘못 셀 뻔했습니다.
+    const offenders: string[] = [];
+    for (const { name, html } of screens()) {
+      const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+      const bare = style.replace(/\/\*[\s\S]*?\*\//g, '');
+      const touch = bare.replace(
+        /@media\s*\([^)]*hover:\s*hover[^)]*\)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,
+        '',
+      );
+      for (const rule of touch.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+        const selector = (rule[1] ?? '').trim();
+        if (!/\bbutton\b|\bselect\b|\binput\b|\.btn\b/.test(selector)) continue;
+        if (/checkbox|radio/.test(selector)) continue;
+        if (!/min-height:\s*0/.test(rule[2] ?? '')) continue;
+        // 글자로만 된 것(`.linkish`·아이콘 버튼)은 대상이 아닙니다 — 상자가
+        // 없으므로 44px 상자를 만들 수 없습니다. 그 대신 `.linkish` 를
+        // 쓰거나 `padding` 으로 접촉면을 넓힙니다.
+        if (/\.linkish|\.src\b/.test(selector)) continue;
+        offenders.push(`${name} → ${selector}`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`min-height: 0` 은 `@media (hover: hover) and (pointer: fine)` 안에서만 쓰세요 — '
+        + '손가락에서는 44px 이어야 합니다',
+    );
   });
 });
 

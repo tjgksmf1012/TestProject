@@ -83,7 +83,7 @@
       .seg { display: flex; gap: var(--sp-1); flex-wrap: wrap;
              margin-bottom: var(--sp-4); }
       .seg button {
-        min-height: 0; font-size: var(--fs-label); font-weight: 500;
+        font-size: var(--fs-label); font-weight: 500;
         padding: var(--sp-2) var(--sp-3);
         border: 1px solid transparent; border-radius: var(--r-ctrl);
         background: transparent; color: var(--text-muted);
@@ -123,8 +123,8 @@
          보고 알았습니다 — 제목이 여전히 회색 입력 상자였습니다.
          `input` 을 붙여 (0,2,1) 로 맞추면 나중에 오는 이쪽이 이깁니다. */
       .cand input.title {
-        flex: 1; min-width: 0; font: inherit; font-size: var(--fs-item); font-weight: 600;
-        min-height: 0; padding: var(--sp-1) var(--sp-2);
+        flex: 1; min-width: 0; font: inherit; font-size: var(--fs-input); font-weight: 600;
+        padding: var(--sp-1) var(--sp-2);
         margin-left: calc(-1 * var(--sp-2));
         border: 1px solid transparent; border-radius: var(--r-ctrl);
         background: transparent; color: var(--text);
@@ -160,8 +160,8 @@
                       pointer-events: none; color: var(--text-subtle); }
       .field .ico svg { --ico: 15px; width: var(--ico); height: var(--ico); }
       .field select, .field input[type="date"] {
-        width: auto; min-width: 0; font-size: var(--fs-label);
-        min-height: 0; padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-8);
+        width: auto; min-width: 0; font-size: var(--fs-input);
+        padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-8);
         border: 1px solid var(--line); border-radius: var(--r-ctrl);
         background: var(--bg); color: var(--text);
         /* 기본 화살표를 끄고 우리 것을 씁니다 — UA 위젯은 브라우저마다
@@ -174,10 +174,25 @@
         width: var(--sp-2); height: var(--sp-2); border: 1px solid var(--text-subtle);
         border-width: 0 1px 1px 0; transform: translateY(-2px) rotate(45deg);
       }
-      /* ⚠️ 날짜 칸의 달력 버튼은 **지우지 않습니다.** 지우면 키보드로만
-         입력해야 하고, `mm/dd/yyyy` 를 손으로 치는 것은 이 화면에서 가장
-         자주 하는 일입니다. 색만 우리 것으로 맞춥니다. */
-      .field input[type="date"]::-webkit-calendar-picker-indicator { opacity: .55; }
+      /* ⚠️ **달력이 둘이었습니다.** 왼쪽에 우리가 그린 아이콘, 오른쪽에
+         브라우저의 달력 버튼. 렌더해서 보고 알았습니다 — 한 칸에 같은
+         그림이 둘이면 사람은 둘이 다른 일을 한다고 읽습니다.
+
+         ⚠️ 그렇다고 브라우저 버튼을 **지우면 안 됩니다.** 지우면 달력을
+         열 방법이 없어져 `mm/dd/yyyy` 를 손으로 쳐야 합니다 (원래 주석이
+         그래서 남겨 뒀습니다). 지우는 대신 **칸 전체로 늘려 투명하게**
+         만듭니다 — 보이는 달력은 왼쪽 하나뿐이고, 칸 아무 데나 누르면
+         달력이 열립니다. 없앤 것도 아니고 둘도 아닙니다. */
+      .field input[type="date"]::-webkit-calendar-picker-indicator {
+        position: absolute;
+        inset: 0;
+        width: auto;
+        height: auto;
+        margin: 0;
+        padding: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
       .field select:focus-visible, .field input:focus-visible { border-color: var(--primary); }
       /* 아직 안 고른 칸은 **글자를 죽여** 채워진 칸과 구분합니다. */
       .field[data-empty="1"] select, .field[data-empty="1"] input { color: var(--text-subtle); }
@@ -239,7 +254,7 @@
          행동은 하나입니다 — 등록. */
       .acts { display: flex; gap: var(--sp-2); align-items: center;
               margin-top: var(--sp-5); flex-wrap: wrap; }
-      .acts button { min-height: 0; font-size: var(--fs-label);
+      .acts button { font-size: var(--fs-label);
                      padding: var(--sp-2) var(--sp-4); }
       .acts .approve { background: var(--primary); border-color: var(--primary);
                        color: var(--primary-fg); font-weight: 600; }
@@ -260,7 +275,7 @@
       .done { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-4) 0 0; }
 
       .cand input.memo {
-        font: inherit; font-size: var(--fs-label); min-height: 0;
+        font: inherit; font-size: var(--fs-input);
         margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-3);
         border: 1px solid var(--line); border-radius: var(--r-ctrl);
         background: var(--bg); color: var(--text);
@@ -273,7 +288,35 @@
       #submit { flex: 0 0 auto; min-width: 7rem; }
       .ok { color: var(--ok); }
       .bad { color: var(--bad); }
-        </style>
+    
+      /* ⚠️ **작게 만드는 것은 마우스에서만입니다.**
+         `tokens.css` 가 `--tap: 44px` 를 "손가락 끝 접촉면" 으로 정하고
+         `app.css` 가 모든 버튼에 겁니다. 화면별 `<style>` 이
+         `min-height: 0` 으로 되돌리면 그 규칙이 사라지는데, 예전에는 그걸
+         미디어 쿼리 **밖**에서 했습니다 — 실제 폰 에뮬레이션(`hasTouch`)으로
+         재니 버튼 40.1px · 제목 칸 35.5px 였습니다. 칸반의 `.moves button`
+         은 처음부터 이렇게 하고 있었고 여기만 빠져 있었습니다.
+
+         ⚠️ 폭만 390 으로 줄여서 재면 **안 잡힙니다.** Chromium 은 그때도
+         `hover: hover` 를 보고해서 이 블록이 그대로 먹습니다.
+
+         글자도 같은 이유입니다. iOS Safari 는 16px 미만 입력 칸에 포커스가
+         가면 화면을 확대하고 **안 돌아옵니다.** `--fs-input`(16px)이 그
+         함정을 피하려고 이미 있던 토큰인데, 이 화면이 안 쓰고 있었습니다. */
+      @media (hover: hover) and (pointer: fine) {
+        .seg button,
+        .acts button,
+        .cand input.title,
+        .cand input.memo,
+        .field select,
+        .field input[type="date"] { min-height: 0; }
+
+        .cand input.title { font-size: var(--fs-item); }
+        .cand input.memo,
+        .field select,
+        .field input[type="date"] { font-size: var(--fs-label); }
+      }
+    </style>
   </head>
   <body class="has-actionbar">
     <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24).

@@ -84,7 +84,14 @@
 
   /* 줄 끝의 작은 버튼. 예전에는 화면 폭짜리라 다섯 개가 버튼 밭이었습니다. */
   .btn-sm { padding: var(--sp-1) var(--sp-3); font-size: var(--fs-caption);
-            white-space: nowrap; min-height: 0; }
+            white-space: nowrap; }
+
+  /* ⚠️ 줄이는 것은 **마우스에서만**. 손가락에서는 `--tap`(44px)이 하한이라
+     `app.css` 가 거는 것을 여기서 되돌리면 안 됩니다 — 회의 줄마다 있는
+     버튼이라 옆 것을 누르기 딱 좋습니다. */
+  @media (hover: hover) and (pointer: fine) {
+    .btn-sm { min-height: 0; }
+  }
 
   /* ── 시작하기 ──────────────────────────────────────────
      ⚠️ 설명을 입력창 **아래**가 아니라 위로 올렸습니다. 아래에 두면
