@@ -1002,14 +1002,16 @@ pre {
   .peers {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-    gap: var(--sp-1) var(--sp-4);
+    gap: var(--sp-2) var(--sp-8);
   }
 
+  /* ⚠️ **칸마다 테두리를 두르지 않습니다** (디자인 브리프 §22 — 카드 안 카드).
+     패널 안에 상자가 또 생기면 화면에 액자가 이중이 되고, 통화 화면에서
+     제일 눈에 띄는 것이 사람이 아니라 네모가 됩니다.
+     칸을 가르는 것은 **여백과 아바타**입니다 — 아바타가 각 칸의 시작을
+     이미 못 박고 있어서 선이 없어도 흩어져 보이지 않습니다. */
   .peers li {
-    border-top: 0;
-    border: 1px solid var(--line);
-    border-radius: var(--r-card);
-    padding: var(--sp-3);
+    padding: var(--sp-2) 0;
   }
 
   /* ── 기여도: 카드 격자 ────────────────────────────────

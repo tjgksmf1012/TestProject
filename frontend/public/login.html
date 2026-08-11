@@ -18,24 +18,72 @@
 <title>로그인 — TeamFlow</title>
 <style>
 
-  /* ⚠️ 예전에는 여기서 `background: #2563eb`(파랑)를 손으로 칠했습니다
-     (결함 59). 나머지 여덟 화면은 전부 `class="primary"`(청록
-     `--primary`)를 쓰는데, **사람이 제일 먼저 보는 화면만** 다른
-     색이었습니다. 색은 이제 `button.primary` 가 정합니다. */
+  /* ══ 브리프대로 (docs/19 §25) ═══════════════════════════════
+
+     ⚠️ 이 화면과 통화 화면만 브리프를 안 거치고 남아 있었습니다.
+     **사람이 이 제품에서 제일 먼저 보는 화면**인데요.
+
+     고친 것 셋:
+       1000px 짜리 입력칸 · 화면 폭을 가로지르던 각주 선 · 제목 옆에
+       설명이 없어 무슨 서비스인지 모르던 것. */
+
+  /* ⚠️ **`body` 에 `no-tabs` 가 붙어 셸 여백 규칙이 통째로 비켜 갑니다.**
+     그래서 폭을 여기서 잡습니다. 로그인은 칸 셋짜리 화면이라 본문
+     최대폭(1088)을 다 쓸 이유가 없습니다 — 24rem 이면 입력칸이
+     "이 정도 길이를 적으면 된다" 를 스스로 말합니다. */
+  .card {
+    max-width: 24rem;
+    margin-inline: auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    padding: var(--sp-6);
+  }
+
+  /* 머리말은 카드 **바깥**입니다. 안에 넣으면 상자가 길어지면서
+     입력칸이 아래로 밀리고, 처음 오는 사람이 채울 곳을 늦게 찾습니다. */
+  .head { max-width: 24rem; margin-inline: auto; }
+
+  form { display: flex; flex-direction: column; gap: var(--sp-4); }
+  form label { display: flex; flex-direction: column; gap: var(--sp-icon);
+               font-size: var(--fs-caption); color: var(--text-subtle); }
+
   #submit { margin-top: var(--sp-2); }
   #submit:disabled { cursor: progress; }
-  #toggle { border: 0; color: var(--text-subtle); margin-top: var(--sp-3); text-decoration: underline; }
+
+  /* 가입 전환은 **주 행동이 아닙니다** (브리프 §14). 예전에는 로그인
+     버튼과 같은 무게의 상자였습니다. */
+  #toggle { min-height: 0; padding: var(--sp-2) 0; border: 0; background: transparent;
+            font-size: var(--fs-label); font-weight: 500;
+            color: var(--text-subtle); text-decoration: underline;
+            text-underline-offset: 3px; }
+  @media (hover: hover) and (pointer: fine) {
+    #toggle:hover { color: var(--text); background: transparent; }
+  }
 
   .error p { margin: var(--sp-1) 0; }
+
+  /* ⚠️ 각주 위의 가로선을 걷었습니다 (브리프 §7). 화면에 요소가 셋뿐인데
+     그중 하나가 폭을 가로지르는 선이면, 그 선이 제일 눈에 띕니다. */
+  .note { max-width: 24rem; margin-inline: auto; margin-top: var(--sp-6);
+          padding-top: 0; border-top: 0;
+          font-size: var(--fs-caption); }
 
 </style>
 </head>
 <body class="no-tabs">
-  <h1 id="title">로그인</h1>
-  <p class="sub">회의 녹음과 기여도는 팀 내부 자료라 로그인이 필요합니다.</p>
+  <header class="head">
+    <h1 id="title">로그인</h1>
+    <p class="lede">
+      TeamFlow는 회의에서 정한 일이 칸반과 GitHub을 거쳐 기여 기록까지
+      이어지게 하는 도구입니다. 회의 녹음과 기여도는 팀 내부 자료라
+      로그인이 필요합니다.
+    </p>
+  </header>
 
   <div id="error" class="error" hidden></div>
 
+  <div class="card">
   <form id="form">
     <label id="name-row" hidden>이름
       <input id="name" type="text" autocomplete="name" />
@@ -49,6 +97,7 @@
     <button id="submit" class="primary" type="submit">로그인</button>
   </form>
   <button id="toggle" type="button">처음이신가요? 가입하기</button>
+  </div>
 
   <p class="note">
     비밀번호는 scrypt로 해싱해 저장하고, 세션 토큰은 원문이 아니라

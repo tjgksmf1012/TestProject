@@ -10,6 +10,7 @@
  * `docs/09` 실험 6(사람 넷이 각자 PC 에서 30분)에서만 알 수 있습니다.
  */
 
+import { bylineHtml } from '../lib/ui/byline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import {
   CALL_AUDIO_CONSTRAINTS,
@@ -283,7 +284,8 @@ async function start(): Promise<void> {
   }
   const who = (await response.json()) as Me;
   me = who.user_id;
-  $('sub').textContent = `${who.name} 님으로 참여 중`;
+  $('sub').innerHTML = bylineHtml(who.name, '참여 중');
+  $('sub').hidden = false;
 
   await openMic();
   openSocket();
