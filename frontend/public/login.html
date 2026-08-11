@@ -30,45 +30,63 @@
   /* ⚠️ **`body` 에 `no-tabs` 가 붙어 셸 여백 규칙이 통째로 비켜 갑니다.**
      그래서 폭을 여기서 잡습니다. 로그인은 칸 셋짜리 화면이라 본문
      최대폭(1088)을 다 쓸 이유가 없습니다 — 24rem 이면 입력칸이
-     "이 정도 길이를 적으면 된다" 를 스스로 말합니다. */
+     "이 정도 길이를 적으면 된다" 를 스스로 말합니다.
+
+     ⚠️⚠️ **폭은 담는 쪽에 한 번만 겁니다.** 예전에는 `.head`·`.card`·
+     `.note` 가 같은 두 줄을 각자 이고 있었고, 그래서 오류 상자가
+     생길 때 **그 한 벌만 빠져** 폼에서 320px 왼쪽에 떴습니다(3d377f4).
+     증상을 고치며 네 번째 벌을 더한 셈이라 원인은 그대로였습니다 —
+     `#app` 에 요소를 하나 심어 보니 x=448 w=1024 로 똑같이 빠져나갑니다.
+     성공 문구든 약관 줄이든 다음에 얹는 것이 전부 그렇게 됩니다.
+     `app.css:910~` 이 본문 폭에서 같은 결론을 이미 적어 뒀습니다. */
+  #app { max-width: 24rem; margin-inline: auto; }
+
+  /* 머리말은 카드 **바깥**입니다. 안에 넣으면 상자가 길어지면서
+     입력칸이 아래로 밀리고, 처음 오는 사람이 채울 곳을 늦게 찾습니다. */
   .card {
-    max-width: 24rem;
-    margin-inline: auto;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r-card);
     padding: var(--sp-6);
   }
 
-  /* 머리말은 카드 **바깥**입니다. 안에 넣으면 상자가 길어지면서
-     입력칸이 아래로 밀리고, 처음 오는 사람이 채울 곳을 늦게 찾습니다. */
-  .head { max-width: 24rem; margin-inline: auto; }
-
   form { display: flex; flex-direction: column; gap: var(--sp-4); }
+  /* ⚠️ `margin-bottom: 0` 은 공용 `label`(app.css:570~)의 6px 을 끕니다.
+     그 6px 은 라벨이 입력창 **위에 블록으로** 놓이는 패턴의 값인데,
+     여기서는 라벨이 입력창을 **감쌉니다.** `display` 만 덮고 마진을 안
+     끄면 갈 곳 없는 6px 이 상자 바깥 아래에 남아 `gap`(16px) 위에
+     얹힙니다 — 칸 사이가 22px, 마지막 칸→버튼이 30px 로 4px 격자를
+     벗어나 있었습니다. 눈으로는 "조금 뜬다" 라서 재야 나옵니다.
+     로비(`.extras label`)는 같은 모양을 이미 끄고 있었고 여기만 빠졌습니다. */
   form label { display: flex; flex-direction: column; gap: var(--sp-icon);
+               margin-bottom: 0;
                font-size: var(--fs-caption); color: var(--text-subtle); }
 
   #submit { margin-top: var(--sp-2); }
   #submit:disabled { cursor: progress; }
 
   /* 가입 전환은 **주 행동이 아닙니다** (브리프 §14). 예전에는 로그인
-     버튼과 같은 무게의 상자였습니다. */
-  #toggle { min-height: 0; padding: var(--sp-2) 0; border: 0; background: transparent;
-            font-size: var(--fs-label); font-weight: 500;
-            color: var(--text-subtle); text-decoration: underline;
-            text-underline-offset: 3px; }
-  @media (hover: hover) and (pointer: fine) {
-    #toggle:hover { color: var(--text); background: transparent; }
-  }
+     버튼과 같은 무게의 상자였고, 지금은 공용 `.linkish` 입니다.
 
-  /* ⚠️ **여기가 카드와 같은 폭으로 안 묶여 있었습니다.** `.head`·`.card`·
-     `.note` 는 셋 다 24rem 으로 가운데 모이는데 이 자리만 규칙이 없어서,
-     `body` 폭(1088)을 그대로 써 **폼에서 320px 떨어진 왼쪽 끝**에 떴습니다.
+     ⚠️ **여기 있던 일곱 줄은 `.linkish` 를 통째로 덮고 있었습니다.**
+     React 로 옮기며 `className="linkish"` 를 붙였는데 이 `#toggle`
+     블록이 그대로 남아, id(1-0-0)가 클래스(0-1-0)를 이겨 **클래스가
+     하나도 안 먹었습니다** — 붙여 놓고 아무도 안 부르는 그 모양입니다.
+     여섯은 같은 값을 다시 적은 중복이었고, 갈라진 것은 padding
+     뿐이라(8px vs 4px → 버튼 높이 38px vs 30px) 홈·로비의 같은 버튼과
+     혼자 달랐습니다.
 
-     기본값이 `hidden` 이라 아무 문제 없을 때는 안 보이고, 검증에 걸려야
-     나옵니다 — 그래서 브리프를 한 번 거치고도 못 봤습니다. 렌더해서
-     빈 폼을 제출해 보고 나서야 드러났습니다. */
-  .error { max-width: 24rem; margin-inline: auto; }
+     ⭐ 남긴 것은 **밑줄 하나**입니다. 로비에서는 이 버튼이 둘씩 나란히
+     서서(`칸반 보기` `기여도 보기`) 밑줄을 다 그으면 글줄처럼 보이는데,
+     로그인에서는 폼 아래 **혼자** 놓인 유일한 다른 길이라 밑줄이 없으면
+     누를 수 있는 것으로 안 읽힙니다. 렌더해서 둘 다 보고 정했습니다. */
+  #toggle { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* ⚠️ **이 상자가 카드와 같은 폭으로 안 묶여 있었습니다.** `body` 폭
+     (1088)을 그대로 써 **폼에서 320px 떨어진 왼쪽 끝**에 떴습니다.
+     기본값이 안 보이는 상태라 검증에 걸려야 나옵니다 — 그래서 브리프를
+     한 번 거치고도 못 봤고, 렌더해서 빈 폼을 제출해 보고 드러났습니다.
+     지금은 위 `#app` 이 한 번에 묶습니다. */
   .error p { margin: var(--sp-1) 0; }
 
   /* ⚠️ **아직 안 적은 것은 빨강이 아닙니다** (docs/19 §26).
@@ -107,8 +125,7 @@
 
   /* ⚠️ 각주 위의 가로선을 걷었습니다 (브리프 §7). 화면에 요소가 셋뿐인데
      그중 하나가 폭을 가로지르는 선이면, 그 선이 제일 눈에 띕니다. */
-  .note { max-width: 24rem; margin-inline: auto; margin-top: var(--sp-6);
-          padding-top: 0; border-top: 0;
+  .note { margin-top: var(--sp-6); padding-top: 0; border-top: 0;
           font-size: var(--fs-caption); }
 
 </style>

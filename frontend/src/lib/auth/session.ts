@@ -46,15 +46,25 @@ export function validateLogin(email: string, password: string): FormProblem[] {
   return problems;
 }
 
+/**
+ * ⚠️ **화면의 칸 순서대로 쌓는다** — 이름 → 이메일 → 비밀번호.
+ *
+ * 예전에는 `validateLogin` 결과 뒤에 이름을 붙여서 문구가
+ * `이메일 · 비밀번호 · 이름` 으로 나왔는데, 가입 폼의 칸은
+ * `이름 · 이메일 · 비밀번호` 순입니다. 세 줄이 위에 모여 있고 그 아래
+ * 칸 셋이 다른 순서로 있으면 사람이 눈으로 짝을 지어야 합니다 —
+ * 순서만 맞추면 공짜로 되는 일입니다.
+ */
 export function validateSignup(
   name: string,
   email: string,
   password: string,
 ): FormProblem[] {
-  const problems = validateLogin(email, password);
+  const problems: FormProblem[] = [];
   if (!name.trim()) {
     problems.push({ field: 'name', message: '이름을 입력하세요' });
   }
+  problems.push(...validateLogin(email, password));
   // 로그인과 달리 가입에서는 길이를 미리 본다. 여기서 막지 않으면 사람이
   // 짧은 비밀번호를 만들고 서버에서 거절당한 뒤 다시 입력해야 한다.
   if (password && password.length < MIN_PASSWORD_LENGTH) {

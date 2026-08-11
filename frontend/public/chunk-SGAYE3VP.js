@@ -1,1 +1,0 @@
-import{a}from"./chunk-ZL2NUEMK.js";function i(t){let n=t.action?`<a class="btn btn-primary" href="${a(t.action.href)}">${a(t.action.label)}</a>`:"";return`<div class="empty-state"><p class="what">${a(t.what)}</p><p class="why">${a(t.why)}</p><p class="how">${a(t.how)}</p>`+n+"</div>"}export{i as a};
