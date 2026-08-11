@@ -100,9 +100,18 @@ describe('describePeer', () => {
     for (const state of ['new', 'connecting', 'disconnected'] as PeerState[]) {
       strictEqual(view(2, state).tone, 'warn');
     }
-    for (const state of ['failed', 'closed'] as PeerState[]) {
-      strictEqual(view(2, state).tone, 'bad');
-    }
+    strictEqual(view(2, 'failed').tone, 'bad');
+  });
+
+  it('⭐ 정상 종료(`closed`)는 **빨강이 아니다**', () => {
+    // 예전에는 이 테스트가 `['failed', 'closed']` 를 한 배열로 묶어
+    // **둘 다 `bad`** 라고 못 박고 있었습니다. 사람이 스스로 나간 것과
+    // 연결이 실패한 것은 같은 색일 수 없습니다 — 빨강은 "네가 뭘
+    // 잘못했다" 로 읽히고, 회의가 끝나 나간 사람은 아무것도 잘못하지
+    // 않았습니다 (불변식 ③).
+    strictEqual(view(2, 'closed').tone, 'warn');
+    // 그리고 실패와 **글자도** 달라야 합니다.
+    strictEqual(view(2, 'closed').label === view(2, 'failed').label, false);
   });
 
   it('헤드폰 여부를 잃지 않는다', () => {
