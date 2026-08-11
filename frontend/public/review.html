@@ -48,7 +48,7 @@
                background: var(--surface); margin-bottom: var(--sp-6); }
       .brief > summary {
         display: flex; align-items: center; justify-content: space-between;
-        gap: var(--sp-4); padding: var(--sp-3) var(--sp-4);
+        gap: var(--sp-4); padding: var(--sp-3) var(--sp-5);
         list-style: none; cursor: pointer; border-radius: var(--r-card);
         font-size: var(--fs-label);
       }
@@ -61,7 +61,10 @@
       .brief[open] .brief-cta::after { transform: rotate(90deg); }
       .brief[open] > summary { border-bottom: 1px solid var(--line);
                                border-radius: var(--r-card) var(--r-card) 0 0; }
-      .brief-body { padding: var(--sp-4); }
+      /* ⚠️ 카드 안쪽 여백(`--sp-5`)과 **같은 값**입니다. 16 과 20 이
+         섞이면 접힘 상자의 글과 카드의 글이 4px 어긋난 두 줄에서
+         시작합니다 — 한 줄씩 보면 안 보이는데 화면 전체로는 어수선합니다. */
+      .brief-body { padding: 0 var(--sp-5) var(--sp-5); }
       #meeting-summary { white-space: pre-wrap; font-size: var(--fs-label);
                          line-height: 1.7; color: var(--text-muted); margin: 0; }
       .minutes-head { font-size: var(--fs-caption); font-weight: 600; color: var(--text-subtle);
@@ -216,12 +219,17 @@
       .why-not > summary { font-size: var(--fs-caption); color: var(--text-subtle);
                            cursor: pointer; list-style: none; }
       .why-not > summary::-webkit-details-marker { display: none; }
-      .why-not > summary::after { content: " \203a"; display: inline-block; }
+      /* ⚠️ `display: inline-block` 이 없으면 `transform` 이 안 먹습니다 —
+         인라인 상자는 변형되지 않습니다. 화살표가 영영 안 돕니다. */
+      .why-not > summary::after { content: " \203a"; display: inline-block;
+                                  transition: transform .12s ease; }
       .why-not[open] > summary::after { transform: rotate(90deg); }
       .why-not ul { list-style: none; padding: 0;
                     margin: var(--sp-2) 0 0; font-size: var(--fs-caption); color: var(--text-muted); }
-      .why-not li { padding: var(--sp-1) 0; }
-      .why-not li::before { content: "\2013 "; color: var(--text-subtle); }
+      /* ⚠️ `content: "\2013 "` 의 꼬리 공백은 **접힙니다.** 안건 목록처럼
+         flex 로 띄웁니다 — `–회의에서…` 로 붙어 나왔습니다 (렌더해서 봤습니다). */
+      .why-not li { display: flex; gap: var(--sp-2); padding: var(--sp-1) 0; }
+      .why-not li::before { content: "\2013"; color: var(--text-subtle); }
 
       /* ── 버튼 위계 (브리프 §14) ─────────────────────────── */
       /* 예전에는 `승인 / 거절 / 보류` 가 **똑같이 생긴 상자 셋**이었습니다.

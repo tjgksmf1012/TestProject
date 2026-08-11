@@ -1205,8 +1205,16 @@ function cardHtml(candidate) {
            <button class="clear${draft.decision === "pending" ? " on" : ""}">나중에 검토</button>
            <button class="reject${draft.decision === "reject" ? " on" : ""}">거절</button>
          </div>
-         <input class="memo" type="text" placeholder="메모 (선택) — 왜 이렇게 결정했는지"
-                aria-label="메모" value=${attr(draft.note ?? "")} />`}
+         ${// ⭐ 메모는 **결정한 뒤에만** 나옵니다.
+  //
+  // 카드마다 빈 입력 상자가 하나씩 있으면 목록이 폼처럼 보이고
+  // (브리프 §9), 후보 셋이면 아무도 안 쓴 상자가 셋입니다.
+  // 게다가 이 칸의 placeholder 는 "왜 **이렇게 결정했는지**"
+  // 입니다 — 결정하기 전에는 설명할 것이 없습니다.
+  //
+  // ⚠️ 없애는 게 아닙니다. 결정하는 순간 같은 자리에 나옵니다.
+  draft.decision === "pending" ? "" : `<input class="memo" type="text" placeholder="메모 (선택) — 왜 이렇게 결정했는지"
+                aria-label="메모" value=${attr(draft.note ?? "")} />`}`}
 </article>`;
 }
 function wireCards() {
