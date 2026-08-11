@@ -2077,6 +2077,111 @@ describe('메신저 셸 (docs/19)', () => {
   });
 });
 
+describe('서비스 워커 캐시 목록 (docs/19 §24)', () => {
+  /**
+   * 오프라인에 **없어도 되는** 것. 근거를 적어야 합니다.
+   *
+   * 근거 없는 면제는 다음 사람이 그냥 늘립니다 — 그러면 이 검사는
+   * 있으나 마나가 됩니다.
+   */
+  const NOT_NEEDED: Record<string, string> = {
+    'icon-180.png':
+      'iOS 홈 화면 아이콘. **설치할 때** 브라우저가 가져가는 것이라 ' +
+      '앱이 도는 동안에는 안 씁니다',
+    'icon-512.png': 'manifest 가 가리키는 큰 아이콘. 설치 시점에만 씁니다',
+    'sw.js': '서비스 워커 자신. 자기를 캐시하면 새 버전으로 못 갑니다',
+  };
+
+  it('⭐ 오프라인 목록이 `public/` 의 **실제 파일**과 어긋나지 않는다', () => {
+    // ⚠️ 이 목록은 **두 번 어긋났습니다.** 손으로 유지하는 목록이라
+    // 화면·자산을 새로 만들 때마다 빠뜨렸고, 빠뜨려도 **아무 데서도
+    // 티가 안 납니다** — 온라인에서는 서버가 주니까 멀쩡하고, 오프라인
+    // 에서만 안 뜹니다. 그런데 오프라인은 개발 중에 거의 안 겪습니다.
+    //
+    // 이번에 빠져 있던 것: `/tokens.css`(모든 색·간격!) · `/tw.css` ·
+    // `/call.html` · `/call.js`.
+    const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
+    const listed = new Set(
+      [...sw.matchAll(/'\/([^']+)'/g)].map((m) => m[1] as string),
+    );
+
+    // 화면이 실제로 받아 가는 것: HTML · CSS · 화면 번들 · manifest.
+    const onDisk = readdirSync(PUBLIC).filter((name) =>
+      /\.(html|css|webmanifest)$/.test(name) || (name.endsWith('.js') && name !== 'sw.js'),
+    );
+
+    const missing = onDisk.filter((name) => !listed.has(name) && !(name in NOT_NEEDED));
+    deepStrictEqual(
+      missing,
+      [],
+      '오프라인 캐시 목록에 없습니다 — 온라인에서는 멀쩡하고 ' +
+        '**오프라인에서만** 이 화면이 안 뜹니다 (`public/sw.js` 의 `SHELL`)',
+    );
+
+    // ⚠️ **반대 방향도 봅니다.** 목록에 있는데 파일이 없으면 설치할 때
+    // 그 항목만 조용히 실패합니다 — `sw.js` 가 `catch` 로 넘기므로
+    // 콘솔 경고 한 줄이 전부이고, 아무도 안 봅니다.
+    const ghosts = [...listed].filter(
+      (name) => name.includes('.') && !existsSync(join(PUBLIC, name)),
+    );
+    deepStrictEqual(ghosts, [], '캐시 목록이 없는 파일을 가리킵니다');
+
+    // 면제 목록이 낡지 않았는가.
+    const stale = Object.keys(NOT_NEEDED).filter((name) => !existsSync(join(PUBLIC, name)));
+    deepStrictEqual(stale, [], '이제 없는 파일입니다 — 면제 목록에서 빼세요');
+  });
+
+  it('⭐ 이 검사가 **눈을 뜨고 있는지** 확인한다', () => {
+    // "0건" 은 규칙이 지켜져서 나오기도 하고 찾는 방법이 틀려서 나오기도
+    // 합니다. 목록을 실제로 읽고 있는지, 화면 파일을 실제로 세고 있는지를
+    // 봅니다 — 정규식이 하나만 어긋나도 위 검사는 조용히 통과합니다.
+    const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
+    const listed = [...sw.matchAll(/'\/([^']+)'/g)].map((m) => m[1] as string);
+    strictEqual(listed.length > 10, true, `캐시 목록을 ${listed.length}개로 읽었습니다`);
+    strictEqual(listed.includes('tokens.css'), true, '`tokens.css` 를 못 읽었습니다');
+
+    const screens = readdirSync(PUBLIC).filter((n) => n.endsWith('.html'));
+    strictEqual(screens.length >= 9, true, `화면을 ${screens.length}개로 셌습니다`);
+  });
+});
+
+describe('React 번들 (docs/19 §24)', () => {
+  it('⭐ **개발 빌드가 배포로 새어 나가지 않는다**', async () => {
+    // ⚠️ React 를 넣자마자 `review.js` 가 **1206KB** 가 됐습니다
+    // (다른 화면은 37~69KB). `process.env.NODE_ENV` 를 안 정해 주면
+    // React 가 개발 빌드로 들어가기 때문입니다.
+    //
+    // **화면은 멀쩡히 돕니다.** 경고 문구·이름 추적·개발자도구 연동이
+    // 통째로 실려서 크기와 런타임이 모두 나빠지는데, 눈으로는 티가 안
+    // 납니다 — 폰에서 1.2MB 를 받는 것이 어떤 일인지도요.
+    //
+    // ⚠️ **설정을 보지 않고 결과를 봅니다.** `define` 이 있는지만 세면,
+    // 나중에 누가 빌드 경로를 하나 더 만들어 그쪽에 안 넣어도 통과합니다.
+    // 실제로 빌드해서 **개발 빌드에만 있는 문구**를 찾습니다.
+    //
+    // 이 문구가 정말 갈리는지는 재서 확인했습니다 —
+    // 개발 빌드 1202KB 에 1회, 프로덕션 빌드 260KB 에 0회.
+    const DEV_ONLY = 'unique \"key\" prop';
+
+    const built = await bundle();
+    const offenders = [...built.entries()]
+      .filter(([, text]) => text.includes(DEV_ONLY))
+      .map(([name]) => name);
+
+    deepStrictEqual(
+      offenders,
+      [],
+      'React 개발 빌드가 들어갔습니다 — `build.mts` 의 ' +
+        "`define: { 'process.env.NODE_ENV': '\"production\"' }` 를 확인하세요",
+    );
+
+    // ⚠️ **이 검사가 눈을 뜨고 있는지** 확인합니다. React 를 쓰는 번들이
+    // 하나도 없으면 위 0건은 아무 뜻이 없습니다.
+    const usesReact = [...built.values()].some((text) => text.includes('react'));
+    strictEqual(usesReact, true, 'React 가 들어간 번들이 없습니다 — 검사가 헛돕니다');
+  });
+});
+
 describe('`:empty` 로 감추기 (docs/19 §21)', () => {
   it('⭐ **빌 수 없는 것**을 `:empty` 로 감추지 않는다', () => {
     // ⚠️ 이 저장소가 실제로 당한 것입니다.

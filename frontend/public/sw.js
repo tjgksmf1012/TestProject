@@ -33,9 +33,34 @@
 
 const CACHE = 'teamflow-shell-v1';
 
-/** 껍데기. 이게 있으면 오프라인에서도 화면이 뜬다. */
+/**
+ * 껍데기. 이게 있으면 오프라인에서도 화면이 뜬다.
+ *
+ * ## ⚠️ 이 목록은 **두 번 어긋났습니다**
+ *
+ * 손으로 유지하는 목록이라 화면·자산을 새로 만들 때마다 빠뜨렸습니다.
+ * 빠뜨려도 **아무 데서도 티가 안 납니다** — 온라인에서는 서버가 주니까
+ * 멀쩡하고, 오프라인에서만 그 화면이 안 뜹니다. 그런데 오프라인은
+ * 개발 중에 거의 안 겪는 상태입니다.
+ *
+ * 이번에 빠져 있던 것:
+ *
+ *     /tokens.css   ← **모든 색·간격**. 이게 없으면 오프라인에서 전
+ *                      화면이 스타일 없는 흰 문서로 뜹니다
+ *     /tw.css       ← Tailwind (React 조각용). 방금 생겼습니다
+ *     /call.html    ← 통화 화면 통째로
+ *     /call.js
+ *
+ * 그래서 목록을 고치는 것으로 끝내지 않았습니다. `guards.test.ts` 가
+ * **`public/` 의 실제 파일과 이 목록을 대조**합니다 — 세 번째로 어긋나기
+ * 전에 잡히게.
+ */
 const SHELL = [
+  // 스타일. ⚠️ `tokens.css` 가 먼저입니다 — 색·간격·글꼴이 전부 거기
+  // 있어서, 이것만 빠져도 오프라인에서 전 화면이 무너집니다.
+  '/tokens.css',
   '/app.css',
+  '/tw.css',
   '/manifest.webmanifest',
   '/icon.svg',
   '/icon-192.png',
@@ -56,6 +81,8 @@ const SHELL = [
   '/review.js',
   '/index.html',
   '/main.js',
+  '/call.html',
+  '/call.js',
 ];
 
 self.addEventListener('install', (event) => {
