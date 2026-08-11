@@ -20,6 +20,7 @@ import {
   safeRedirect,
   validateLogin,
   validateSignup,
+  type FormProblem,
 } from '../lib/auth/session.ts';
 import { bootApp } from './pwa.ts';
 
@@ -41,8 +42,19 @@ function Login() {
    * ⚠️ 예전에는 둘을 한 배열에 담아 전부 빨갛게 찍었습니다. 가입 폼을 막
    * 연 사람에게 빨간 줄 셋이 뜨는데, 그 사람은 아무것도 잘못하지
    * 않았습니다 — 이 저장소가 로비·검토·녹음에서 이미 고친 그 모양입니다.
+   *
+   * ⚠️⚠️ **`gap` 쪽은 문자열이 아니라 `FormProblem` 을 그대로 듭니다.**
+   * 예전에는 여기서 `.map((p) => p.message)` 로 **`field` 를 버렸습니다** —
+   * `validateSignup` 이 어느 칸인지 이미 알아냈는데 화면이 그걸 흘린
+   * 것입니다. 그러면 "이름을 입력하세요" 라고 알려 주고 **그 일을 할 자리는
+   * 안 주는** 모양이 됩니다(대표 실패 ③). 지금은 그 줄이 칸으로 가는
+   * 링크입니다.
+   *
+   * 서버 실패(`bad`)에는 가리킬 칸이 없습니다 — 그래서 타입이 갈립니다.
    */
-  const [note, setNote] = useState<{ lines: string[]; tone: 'gap' | 'bad' } | null>(null);
+  const [note, setNote] = useState<
+    { tone: 'gap'; problems: FormProblem[] } | { tone: 'bad'; lines: string[] } | null
+  >(null);
   // 누르는 동안 잠근다 (결함 89).
   const [sending, setSending] = useState(false);
 
@@ -65,7 +77,7 @@ function Login() {
     const found = signup ? validateSignup(name, email, password) : validateLogin(email, password);
     if (found.length > 0) {
       // 보내기도 전에 잡은 것 — **아직 안 적은 것**이라 흙빛입니다.
-      setNote({ lines: found.map((p) => p.message), tone: 'gap' });
+      setNote({ tone: 'gap', problems: found });
       return;
     }
     setNote(null);
@@ -117,13 +129,39 @@ function Login() {
         </p>
       </header>
 
-      {note !== null && (
-        <div id="error" className={note.tone === 'gap' ? 'error gap' : 'error'}>
-          {note.lines.map((line, i) => (
-            <p key={i}>{line}</p>
+      {/* ⚠️ **상자는 언제나 있습니다.** 오류가 생길 때 통째로 새로 그리면
+          `role="alert"` 이 붙은 채로 나타나는데, 낭독기는 **이미 있던**
+          live region 이 바뀔 때 읽어 주는 쪽이 확실합니다. 비어 있으면
+          높이가 0 이라 화면에는 아무것도 없습니다. */}
+      <div
+        id="error"
+        role="alert"
+        className={note !== null && note.tone === 'gap' ? 'error gap' : 'error'}
+      >
+        {note?.tone === 'gap' &&
+          note.problems.map((p) => (
+            <p key={`${p.field}:${p.message}`}>
+              {/* ⭐ **줄을 누르면 그 칸으로 갑니다.** `field` 를 버리면
+                  "이름을 입력하세요" 라고 알려 주고 그 일을 할 자리는 안
+                  주는 것이 됩니다. 칸 id 가 `field` 와 같다는 약속은
+                  `guards.test.ts` 가 지킵니다 — 이름이 갈라지면 이 링크가
+                  조용히 죽습니다. */}
+              <a
+                href={`#${p.field}`}
+                onClick={(e) => {
+                  // 조각 이동만으로도 브라우저가 대개 초점을 옮기지만,
+                  // 주소창에 `#password` 가 남는 것이 로그인 화면에서는
+                  // 반갑지 않습니다. 직접 옮깁니다.
+                  e.preventDefault();
+                  document.getElementById(p.field)?.focus();
+                }}
+              >
+                {p.message}
+              </a>
+            </p>
           ))}
-        </div>
-      )}
+        {note?.tone === 'bad' && note.lines.map((line, i) => <p key={i}>{line}</p>)}
+      </div>
 
       <div className="card">
         <form

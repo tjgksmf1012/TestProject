@@ -89,6 +89,17 @@
      지금은 위 `#app` 이 한 번에 묶습니다. */
   .error p { margin: var(--sp-1) 0; }
 
+  /* ⭐ **줄이 그 칸으로 가는 링크입니다** — "이름을 입력하세요" 라고
+     알려 주고 그 일을 할 자리는 안 주던 것을 고친 자리입니다.
+     ⚠️ 색은 **상자에서 물려받습니다**(`inherit`). 여기서 색을 또 정하면
+     흙빛(아직 안 적음)과 빨강(진짜 실패)의 구분이 링크에서만 흐려집니다.
+     Tailwind 리셋이 `a { color: inherit; text-decoration: inherit }` 이라
+     밑줄은 여기서 답니다. */
+  .error a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+  @media (hover: hover) and (pointer: fine) {
+    .error a:hover { text-decoration-thickness: 2px; }
+  }
+
   /* ⚠️ **아직 안 적은 것은 빨강이 아닙니다** (docs/19 §26).
 
      이 저장소는 "결측은 빨강이 아니라 흙빛" 을 규칙으로 두고 로비의 끊긴

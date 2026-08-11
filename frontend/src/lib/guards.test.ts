@@ -11,7 +11,7 @@
  * 통과하기 때문에 사람이 알아챌 방법이 없습니다.
  */
 
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,7 @@ import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
+const LIB = join(ROOT, 'src', 'lib');
 const PUBLIC = join(ROOT, 'public');
 
 /**
@@ -805,6 +806,37 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
     for (const id of ['room-note', 'consent-note']) {
       strictEqual(screenHas('lobby', `id="${id}"`), true, `로비에 #${id} 자리가 없습니다`);
     }
+  });
+
+  it('⭐ 로그인 오류 줄이 가리키는 **칸이 실제로 있다**', () => {
+    // 대표 실패 ③ — "할 일을 알려 주고 그 일을 할 자리를 안 줌".
+    //
+    // `validateSignup` 은 어느 칸이 비었는지 `field` 로 이미 알아냅니다.
+    // 화면은 그 줄을 `<a href="#${field}">` 로 그려 누르면 그 칸으로
+    // 보냅니다. 그 약속은 **`field` 이름과 `<input>` 의 id 가 같다**는
+    // 것 하나에 걸려 있고, 어느 한쪽 이름만 바꾸면 링크가 조용히
+    // 죽습니다 — 눌러도 아무 일이 안 일어나는데 오류는 안 납니다.
+    //
+    // ⚠️ 필드 목록을 여기에 손으로 적지 않습니다. `session.ts` 의 타입에서
+    // 읽습니다 — 손으로 적으면 넷째 칸이 생기는 날 이 검사만 낡습니다.
+    const session = readFileSync(join(LIB, 'auth', 'session.ts'), 'utf8');
+    const union = /field:\s*([^;]+);/.exec(session)?.[1] ?? '';
+    const fields = [...union.matchAll(/'([a-z]+)'/g)].map((m) => m[1] as string);
+    ok(fields.length >= 3, `session.ts 에서 field 목록을 못 읽었습니다: ${union}`);
+
+    const screen = demoSource('login') ?? '';
+    const missing = fields.filter((f) => !screen.includes(`id="${f}"`));
+    strictEqual(
+      missing.join(', '),
+      '',
+      `오류 줄이 #${missing.join('/#')} 로 보내는데 그 id 를 가진 칸이 로그인 화면에 없습니다`,
+    );
+
+    // 그리고 줄이 정말 **링크**여야 합니다. 글자만 찍으면 갈 자리가 없습니다.
+    ok(
+      /href=\{`#\$\{[a-z.]+field\}`\}/.test(screen),
+      '오류 줄이 `href={`#${…field}`}` 로 칸을 가리키지 않습니다',
+    );
   });
 
   it('⭐ 안내 자리는 `showNote` 를 거친다 (결함 92)', () => {
