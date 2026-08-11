@@ -61,9 +61,23 @@ export const OPTIONS = {
      소스로 빌드한 것과 같은가" 를 계속 비교하므로 낡은 번들은 그대로
      잡힙니다.
 
-     ⚠️ 이 `define` 을 지우면 `guards.test.ts` 의 **개발 빌드 검사**가
-     터집니다. 설정을 세는 게 아니라 실제로 빌드해서 개발 빌드에만 있는
-     문구를 찾는 검사라, 빌드 경로를 새로 만들어도 빠져나갈 수 없습니다. */
+     ⚠️ **여기 "이 `define` 을 지우면 가드가 터진다" 고 적어 뒀는데
+     거짓이었습니다.** 네 가지로 실제 빌드해서 쟀습니다:
+
+       지금 그대로        review 258KB   개발빌드 문구 없음 → 가드 통과
+       define 만 뺌       review 258KB   없음 → 통과   ← 아무 차이가 없다
+       minify 만 뺌       review 719KB   없음 → 통과   ← 2.8배인데 안 잡힌다
+       둘 다 뺌           review 1206KB  있음 → 터짐
+
+     `minify` 가 켜져 있으면 esbuild 가 `process.env.NODE_ENV` 를
+     `"production"` 으로 **알아서** 넣습니다. 그래서 `define` 은 지금
+     아무 일도 안 합니다 — 남겨 두는 것은 나중에 `minify` 를 끄더라도
+     개발 빌드가 새지 않게 하려는 것이고, 그게 이 줄의 **유일한** 값입니다.
+
+     그리고 진짜 구멍은 `minify` 였습니다. 꺼도 개발 빌드 검사는 통과하고,
+     낡은 번들 검사도 (다시 빌드해 커밋하면) 통과합니다. 그래서
+     `guards.test.ts` 에 **압축된 것과 커밋된 것이 같은가**를 따로
+     넣었습니다. 상수를 만들지 않고 결과로 잽니다. */
   minify: true,
   define: { 'process.env.NODE_ENV': '"production"' },
 } as const;
@@ -96,10 +110,18 @@ export function entryPoints(): string[] {
   });
 }
 
-/** 소스에서 곧바로 뽑은 번들. `{파일이름 → 내용}`. 디스크에 쓰지 않습니다. */
-export async function bundle(): Promise<Map<string, string>> {
+/**
+ * 소스에서 곧바로 뽑은 번들. `{파일이름 → 내용}`. 디스크에 쓰지 않습니다.
+ *
+ * `overrides` 는 가드가 **설정을 일부러 달리 잡아** 빌드해 볼 때 씁니다 —
+ * "압축을 강제해도 커밋된 것과 같은가" 처럼요.
+ */
+export async function bundle(
+  overrides: Record<string, unknown> = {},
+): Promise<Map<string, string>> {
   const result = await build({
     ...OPTIONS,
+    ...overrides,
     entryPoints: entryPoints(),
     outdir: PUBLIC,
     write: false,

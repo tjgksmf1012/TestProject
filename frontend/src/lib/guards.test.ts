@@ -2256,6 +2256,39 @@ describe('React 번들 (docs/19 §24)', () => {
     const usesReact = [...built.values()].some((text) => text.includes('react'));
     strictEqual(usesReact, true, 'React 가 들어간 번들이 없습니다 — 검사가 헛돕니다');
   });
+
+  it('⭐ 커밋된 번들이 **압축된** 것이다', async () => {
+    // ⚠️ 위 검사가 막는 것은 "개발 빌드" 뿐이고, **크기는 안 봅니다.**
+    // 네 가지로 빌드해서 재 보고 알았습니다:
+    //
+    //     지금 그대로      review 258KB   개발빌드 문구 없음 → 통과
+    //     define 만 뺌     review 258KB   없음 → 통과   ← 차이가 없다
+    //     minify 만 뺌     review 719KB   없음 → 통과   ← 2.8배인데 안 잡힌다
+    //     둘 다 뺌         review 1206KB  있음 → 터짐
+    //
+    // `minify` 를 끄고 **다시 빌드해 커밋하면** 낡은 번들 검사도
+    // 통과합니다. 그래서 폰에서 719KB 를 받게 되는 변경이 아무 데서도
+    // 안 걸렸습니다.
+    //
+    // ⚠️ **크기 상한을 숫자로 적지 않습니다.** 근거 없는 상수는 이
+    // 저장소가 만들지 않기로 한 것이고, 상한은 곧 낡습니다. 대신
+    // **압축을 강제해서 다시 빌드한 것**과 커밋된 것을 견줍니다. 설정을
+    // 세는 게 아니라 결과를 보는 것이라, 빌드 경로를 새로 만들어도
+    // 빠져나갈 수 없습니다.
+    const pressed = await bundle({ minify: true });
+    const offenders: string[] = [];
+    for (const [name, text] of pressed) {
+      const onDisk = readFileSync(join(PUBLIC, name), 'utf8');
+      if (onDisk !== text) {
+        offenders.push(`${name} (커밋 ${onDisk.length}B · 압축 ${text.length}B)`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      'public 의 번들이 압축본이 아닙니다 — `build.mts` 의 `minify` 를 확인하세요',
+    );
+  });
 });
 
 describe('`:empty` 로 감추기 (docs/19 §21)', () => {
@@ -2960,5 +2993,23 @@ describe('문서 참조', () => {
       }
     }
     strictEqual([...new Set(dangling)].join(', '), '');
+  });
+
+  it('⭐ IA 문서가 화면을 하나도 빠뜨리지 않는다', () => {
+    // ⚠️ `docs/13` 이 **일곱 개** 기준에서 멈춰 있었습니다. 그 뒤에 만든
+    // `project.html`(왼쪽 열 `설정` 탭이 가리키는 상시 노출 화면)과
+    // `call.html`(로비에서 여는 통화)이 그림에도 표에도 없었습니다.
+    //
+    // IA 문서가 실제 IA 를 안 담으면 다음 사람은 화면을 또 하나 늘립니다 —
+    // 그 문서가 경고하는 바로 그 일("만들 때마다 하나씩 늘어 막다른 길이
+    // 됨")이 문서 자신 때문에 반복되는 것입니다.
+    //
+    // 화면을 **세는 쪽이 문서가 아니라 디렉터리**여야 합니다.
+    const doc = readFileSync(join(DOCS, '13-화면-구조.md'), 'utf8');
+    const missing = readdirSync(PUBLIC)
+      .filter((name) => name.endsWith('.html'))
+      .map((name) => name.replace(/\.html$/, ''))
+      .filter((stem) => !doc.includes(`\`${stem}\``) && !doc.includes(`${stem}.html`));
+    strictEqual(missing.join(', '), '', 'docs/13 에 없는 화면입니다 — 그림과 §2 표에 넣으세요');
   });
 });
