@@ -106,93 +106,18 @@
         </style>
 </head>
 <body>
-  <header class="head">
-    <h1 id="title">회의 로비</h1>
-    <p class="lede">
-      전원이 동의하면 녹음을 시작할 수 있습니다. 트랙은 사람마다 따로 남습니다.
-    </p>
-    <p class="by" id="who" hidden></p>
-  </header>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24).
+       동의·참가자 상태·운행도표·행동 줄이 전부 `src/demo/lobby.tsx`
+       안에 있습니다.
 
-  <!-- 비워 둔다. 정적 "불러오는 중…" 은 **언제나** 한 번 깜빡입니다.
-       로딩 표시는 `src/lib/ui/pending.ts` 가 200ms 뒤에 켭니다. -->
-  <p class="meta-line" id="sub"></p>
+       ⚠️ 로그아웃만 HTML 에 남습니다 — `logout.ts` 가 DOM 을 직접
+       만지고, 그 모듈은 화면 여럿이 함께 씁니다. -->
+  <div id="app"></div>
 
-  <section class="panel">
-    <h2>동의</h2>
-    <div id="blockers" class="blockers" hidden></div>
-    <ul id="roster"></ul>
-
-    <!-- ②③ 은 **따로** 묻는다 (docs/07 §2.3). 녹음 동의에 묶어 버리면
-         "녹음은 되지만 원본은 남기기 싫다" 를 말할 방법이 없다.
-         거부해도 회의는 그대로 진행된다 — 그게 분리해서 받는 이유다. -->
-    <fieldset class="extras">
-      <legend><span class="cap">따로 받는 동의</span></legend>
-      <!-- ⚠️ 글자와 설명을 **한 상자에** 넣습니다. 형제로 두면 체크박스
-           옆 열이 아니라 그 아래 열로 떨어집니다 (결함 72). -->
-      <label><input type="checkbox" id="keep-audio" checked />
-        <span>원본 음성 파일 보관
-          <span class="hint">거부하면 회의록을 만든 뒤 바로 지웁니다</span></span></label>
-      <label><input type="checkbox" id="keep-voiceprint" checked />
-        <span>목소리 특징 저장
-          <span class="hint">거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다</span></span></label>
-    </fieldset>
-
-    <div class="row" style="margin-top:.75rem">
-      <button id="agree" class="primary">동의합니다</button>
-      <button id="refuse">거부</button>
-    </div>
-    <p class="status" id="consent-message"></p>
-    <!-- ⚠️ 실패 문구는 **여기** 씁니다 — `#consent-message` 는 3초마다
-         도는 폴링이 서버 문장으로 덮습니다 (결함 90). 실제로 재 보니
-         1.5초에는 실패 문구가 있고 3.5초에는 "전원 동의했습니다" 로
-         바뀌어 있었습니다. -->
-    <p class="status" id="consent-note" hidden></p>
-  </section>
-
-  <section class="panel">
-    <h2>참가자 상태</h2>
-    <p id="axis" class="axis" hidden></p>
-    <ul id="members"></ul>
-    <p class="status" id="room-message"></p>
-    <!-- 처리가 어디까지 갔는지. 파이프라인이 Redis 에 쓰던 것을 처음으로
-         읽어 옵니다 — 그전까지 이 자리에 쓸 말이 없었습니다 (감사 #8). -->
-    <p class="status" id="progress"></p>
-  </section>
-
-  <section class="panel">
-    <div class="act-main">
-      <button id="record" class="primary" disabled>녹음 화면으로</button>
-      <!-- 브라우저 통화 (docs/15). 각자 자기 PC 에서 회의할 때 여기로 들어간다. -->
-      <button id="call" disabled>통화로 회의하기</button>
-      <!-- ⚠️ 실패한 회의는 **막다른 길이었습니다** (결함 114). 홈 화면은
-           "트랙이 온전한지 확인하세요" 라고 보내면서, 확인하고 나면 할 수
-           있는 일을 안 줬습니다. -->
-      <button id="reprocess" hidden>다시 처리하기</button>
-      <button id="review" hidden>업무 후보 검토</button>
-    </div>
-    <!-- ⚠️ 실패 문구는 **여기** 씁니다. `#room-message` 는 3초마다 도는
-         폴링이 방 상태로 덮으므로, 거기 쓴 실패 문구는 3초 뒤에 조용히
-         사라집니다 (결함 90). 이 자리는 아무도 안 덮습니다. -->
-    <p class="status" id="room-note" hidden></p>
-    <p class="status" id="reprocess-note" hidden></p>
-
-    <!-- 이동과 계정. 칸반·기여도는 왼쪽 열과 아래 탭에 이미 있습니다 —
-         여기 것은 **이 회의가 실린** 링크라 지우지 않고 낮춥니다. -->
-    <div class="act-quiet">
-      <button id="kanban" class="linkish">칸반 보기</button>
-      <button id="contrib" class="linkish">기여도 보기</button>
-      <button id="finish" class="linkish danger" hidden>강제 종료</button>
-      <button id="logout" class="linkish">로그아웃</button>
-    </div>
-    <p class="status" id="logout-note" hidden></p>
-  </section>
-
-  <p class="note">
-    주소에는 <code>?meeting=1</code>만 붙습니다. <strong>내가 누구인지는
-    서버가 세션에서 읽습니다</strong> — 예전에는 <code>?me=1</code>로
-    스스로 선언했고, 그래서 누구나 남을 사칭할 수 있었습니다.
-  </p>
+  <div class="act-quiet">
+    <button id="logout" class="linkish" type="button">로그아웃</button>
+  </div>
+  <p class="status" id="logout-note" hidden></p>
 
   <script type="module" src="/lobby.js"></script>
 

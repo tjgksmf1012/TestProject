@@ -9,35 +9,10 @@
 import { strictEqual, ok } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  board,
-  clearSkeleton,
-  projectCards,
-  rowItems,
-  rows,
-  scoreCards,
-  showSkeleton,
-} from './skeleton.ts';
+import { board, projectCards, rowItems, rows, scoreCards } from './skeleton.ts';
 
 /** 태그를 걷어 내고 남는 글자. 스켈레톤은 여기가 비어 있어야 합니다. */
 const textOf = (html: string): string => html.replace(/<[^>]*>/g, '').trim();
-
-/** `document` 없이 `showSkeleton` 을 시험하기 위한 최소 그릇. */
-const fakeElement = (): HTMLElement => {
-  const attrs = new Map<string, string>();
-  return {
-    innerHTML: '',
-    setAttribute(name: string, value: string) {
-      attrs.set(name, value);
-    },
-    removeAttribute(name: string) {
-      attrs.delete(name);
-    },
-    getAttribute(name: string) {
-      return attrs.get(name) ?? null;
-    },
-  } as unknown as HTMLElement;
-};
 
 const WRAPPED: [string, string][] = [
   ['projectCards', projectCards()],
@@ -67,33 +42,6 @@ describe('낭독기에게 거짓말하지 않는다', () => {
     const items = rowItems(3);
     strictEqual([...items.matchAll(/aria-hidden="true"/g)].length, 3);
     ok(!items.includes('<div'), '`<ul>` 안에 `<div>` 를 넣으면 항목 수가 틀어집니다');
-  });
-
-  it('⭐ 그릇에 aria-busy 를 걸고, 지울 때 **같이 뗀다**', () => {
-    // 켜기만 하고 안 끄면 낭독기는 내용이 도착한 뒤에도 계속 "바쁨"
-    // 이라고 말합니다.
-    const el = fakeElement();
-    showSkeleton(el, rows());
-    strictEqual(el.getAttribute('aria-busy'), 'true');
-    ok(el.innerHTML.length > 0);
-
-    clearSkeleton(el);
-    strictEqual(el.getAttribute('aria-busy'), null);
-    strictEqual(el.innerHTML, '');
-  });
-
-  it('⭐ 이미 진짜 내용이 들어와 있으면 지우지 않는다', () => {
-    // 화면이 순서를 어겨 스켈레톤이 떠 있는 동안 오류 문구를 써 넣는
-    // 일이 있습니다. 그걸 지우면 실패한 화면이 **아무 말도 없이 빈
-    // 채로** 남습니다 — 이 저장소가 반복해 당한 모양 그대로입니다.
-    const el = fakeElement();
-    showSkeleton(el, rows());
-    el.innerHTML = '<p>불러오지 못했습니다 (HTTP 500)</p>';
-
-    clearSkeleton(el);
-
-    strictEqual(el.innerHTML, '<p>불러오지 못했습니다 (HTTP 500)</p>');
-    strictEqual(el.getAttribute('aria-busy'), null, 'aria-busy 는 그래도 떼야 합니다');
   });
 });
 

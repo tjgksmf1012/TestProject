@@ -633,7 +633,7 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
      * 근거 없는 면제는 다음 사람이 그냥 늘립니다.
      */
     const EXEMPT: Record<string, string> = {
-      'src/demo/lobby.ts':
+      'src/demo/lobby.tsx':
         '`getJson` 이 **던지는 것이 계약**이고 호출부가 `catch` 로 받아 ' +
         '`#sub` 에 "불러오지 못했습니다" 를 빨갛게 씁니다 (결함 98 에서 실측). ' +
         '이미 사람에게 말하고 있으므로 바꾸면 오히려 두 갈래가 됩니다',
@@ -784,7 +784,7 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
     // 폰을 주머니에 넣었다 꺼내면 아무 일도 없었던 화면을 봅니다.
     // 실패는 **아무도 안 덮는 자리**(`…-note`)에 씁니다 — 로그아웃(82)·
     // 복사(81)가 이미 쓰던 방법입니다.
-    const source = readFileSync(join(DEMO, 'lobby.ts'), 'utf8');
+    const source = (demoSource('lobby') ?? '');
     const code = codeOf(source);
     const offenders: string[] = [];
     for (const id of ['room-message', 'consent-message']) {
@@ -800,13 +800,10 @@ describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
   });
 
   it('⭐ 그 자리가 화면에 실제로 있다 (결함 90)', () => {
-    const html = readFileSync(join(PUBLIC, 'lobby.html'), 'utf8');
+    // ⚠️ HTML 에서만 찾으면 React 로 옮긴 화면에서 헛돕니다 — 요구는
+    // "그 자리가 있는가" 이지 "어느 파일에 적혀 있는가" 가 아닙니다.
     for (const id of ['room-note', 'consent-note']) {
-      strictEqual(
-        new RegExp(`id="${id}"`).test(html),
-        true,
-        `lobby.html 에 <p class="status" id="${id}" hidden> 이 없습니다`,
-      );
+      strictEqual(screenHas('lobby', `id="${id}"`), true, `로비에 #${id} 자리가 없습니다`);
     }
   });
 
@@ -2481,7 +2478,7 @@ describe('상태 화면 (지시서 §7)', () => {
     ['contributions.tsx', 'members'],
     ['kanban.tsx', 'board'],
     ['review.tsx', 'list'],
-    ['lobby.ts', 'roster'],
+    ['lobby.tsx', 'roster'],
   ];
 
   /**
@@ -2542,19 +2539,24 @@ describe('상태 화면 (지시서 §7)', () => {
   });
 
   /**
-   * ⚠️ **요구는 하나인데 모양이 둘입니다.**
+   * ⚠️ **요구는 하나인데 모양이 둘이었습니다.**
    *
    * 요구: 늦게 켜고(200ms) · 켜는 것은 뼈대이고 · 반드시 끈다.
    *
-   * 명령형 화면은 그릇을 직접 붙잡습니다 — `showSkeleton(el, …)` /
-   * `clearSkeleton(el)`. React 화면은 그릇을 못 만집니다. 다음 렌더에
-   * 지워지기 때문입니다. 그래서 같은 일을 깃발과 JSX 로 합니다.
+   * 명령형 화면은 그릇을 직접 붙잡았습니다 — `showSkeleton(el, …)` /
+   * `clearSkeleton(el)`. React 화면은 그릇을 못 만집니다(다음 렌더에
+   * 지워집니다). 그래서 같은 일을 깃발과 JSX 로 합니다.
    *
    * 검사를 헬퍼 **이름**으로 하고 있었더니, 화면 하나를 React 로 옮기는
    * 순간 규칙이 그 화면에서 통째로 눈을 감았습니다 — `.tsx` 를 못 보던
-   * 것과 똑같은 부류입니다. 그래서 **요구**를 모양별로 잽니다.
+   * 것과 똑같은 부류입니다. 그래서 **요구**를 모양별로 쟀습니다.
+   *
+   * ⚠️ 그리고 이제 **명령형 갈래를 지웠습니다.** 목록을 비동기로 채우는
+   * 화면 다섯이 전부 React 로 옮겨 가면서 `showSkeleton`·`clearSkeleton`
+   * 을 부르는 곳이 0곳이 됐고, 그 둘을 지웠습니다. 갈래를 남겨 두면
+   * **없는 함수를 요구하는 규칙**이 됩니다 — 다음 사람이 그걸 살아 있는
+   * 길로 읽습니다.
    */
-  const isReact = (name: string): boolean => name.endsWith('.tsx');
 
   it('⭐ 목록을 비동기로 채우는 화면은 로딩 표시를 **켠다**', () => {
     // 이 저장소의 대표 실패 방식: 맞는 모듈을 만들어 놓고 아무도
@@ -2563,19 +2565,15 @@ describe('상태 화면 (지시서 §7)', () => {
     const offenders: string[] = [];
     for (const [name] of ASYNC_CONTAINERS) {
       const code = codeOf(readFileSync(join(DEMO, name), 'utf8'));
-      // 늦게 켠다 — 이건 모양과 무관하게 같습니다.
+      // 늦게 켠다.
       if (!/whileLoading\(/.test(code)) offenders.push(`${name} → whileLoading 을 안 부름`);
-      if (isReact(name)) {
-        // 켜는 것이 **뼈대**인가. 직접 그리는 대신 같은 모듈을 씁니다 —
-        // 두 벌이 되면 한쪽만 고쳐집니다.
-        if (!/from '\.\.\/lib\/ui\/skeleton\.ts'/.test(code)) {
-          offenders.push(`${name} → 스켈레톤 모듈을 안 씀`);
-        }
-        // 낭독기 쪽 짝. `showSkeleton` 이 대신 달아 주던 것입니다.
-        if (!/aria-busy/.test(code)) offenders.push(`${name} → aria-busy 를 안 담`);
-      } else if (!/showSkeleton\(/.test(code)) {
-        offenders.push(`${name} → showSkeleton 을 안 부름`);
+      // 켜는 것이 **뼈대**인가. 직접 그리는 대신 같은 모듈을 씁니다 —
+      // 두 벌이 되면 한쪽만 고쳐집니다.
+      if (!/from '\.\.\/lib\/ui\/skeleton\.ts'/.test(code)) {
+        offenders.push(`${name} → 스켈레톤 모듈을 안 씀`);
       }
+      // 낭독기 쪽 짝. `showSkeleton` 이 대신 달아 주던 것입니다.
+      if (!/aria-busy/.test(code)) offenders.push(`${name} → aria-busy 를 안 담`);
     }
     strictEqual(offenders.join(', '), '');
   });
@@ -2585,7 +2583,7 @@ describe('상태 화면 (지시서 §7)', () => {
     const offenders: string[] = [];
     for (const [name] of ASYNC_CONTAINERS) {
       const code = codeOf(readFileSync(join(DEMO, name), 'utf8'));
-      if (isReact(name)) {
+      {
         // `whileLoading(work, show, hide)` 의 **인자 안에서** 짝을 봅니다.
         // 파일 전체를 훑으면 아무 데나 있는 `setX(false)` 가 짝인 척합니다.
         for (const args of callArgs(code, 'whileLoading')) {
@@ -2598,11 +2596,7 @@ describe('상태 화면 (지시서 §7)', () => {
             if (!off.has(flag)) offenders.push(`${name} → set${flag}(true) 의 끄는 짝이 없다`);
           }
         }
-        continue;
       }
-      const on = [...code.matchAll(/showSkeleton\(/g)].length;
-      const off = [...code.matchAll(/clearSkeleton\(/g)].length;
-      if (off < on) offenders.push(`${name} → 켬 ${on} · 끔 ${off}`);
     }
     strictEqual(offenders.join(', '), '');
   });
@@ -2835,16 +2829,15 @@ describe('상태 화면 (지시서 §7)', () => {
     // 결국 아무도 거부할 수 없었기 때문입니다.
     //
     // 존재가 아니라 **호출**을 셉니다 (결함 47·63·감사 #8 교훈).
-    const lobbyHtml = readFileSync(join(PUBLIC, 'lobby.html'), 'utf8');
     for (const id of ['keep-audio', 'keep-voiceprint']) {
       strictEqual(
-        lobbyHtml.includes(`id="${id}"`),
+        screenHas('lobby', `id="${id}"`),
         true,
         `로비에 ${id} 체크박스가 없습니다 — 물어보지 않으면 거부할 수 없습니다`,
       );
     }
 
-    const lobbyTs = codeOf(readFileSync(join(DEMO, 'lobby.ts'), 'utf8'));
+    const lobbyTs = codeOf((demoSource('lobby') ?? ''));
     for (const type of ['raw_audio_retention', 'voiceprint_storage']) {
       strictEqual(
         lobbyTs.includes(type),

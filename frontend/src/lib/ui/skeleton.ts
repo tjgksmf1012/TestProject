@@ -123,31 +123,20 @@ export function rowItems(count = 3): string {
   ).join('');
 }
 
-/**
- * 그릇에 스켈레톤을 넣고 **기다리는 중**이라고 표시한다.
+/*
+ * ⚠️ **`showSkeleton`·`clearSkeleton` 을 지웠습니다.**
  *
- * ⚠️ `aria-busy` 를 짝지어 지우는 것이 `clearBusy` 입니다. 켜기만 하고
- * 안 끄면 낭독기는 내용이 도착한 뒤에도 계속 "바쁨" 이라고 말합니다.
+ * 그릇을 직접 붙잡아 `innerHTML` 을 갈아 끼우고 `aria-busy` 를 달아 주던
+ * 함수 둘입니다. 목록을 비동기로 채우는 화면 다섯이 전부 React 로
+ * 옮겨 가면서 **부르는 곳이 0곳**이 됐습니다 — React 는 그릇을 직접
+ * 만질 수 없습니다(다음 렌더에 지워집니다).
+ *
+ * 가드가 잡았습니다. 이 저장소가 반복해 당한 실패가 "만들어 놓고 아무도
+ * 안 부름" 이라, 죽은 채로 두면 다음 사람이 그걸 살아 있는 길로 읽습니다.
+ *
+ * 그 함수들이 들고 있던 판단은 두 가지였고 둘 다 남아 있습니다:
+ *   · `aria-busy` 를 짝지어 켜고 끄기 → 이제 화면이 JSX 로 답니다.
+ *     가드가 React 화면마다 `aria-busy` 를 요구합니다.
+ *   · **이미 진짜 내용이 들어와 있으면 지우지 않기** → React 에서는
+ *     애초에 일어나지 않습니다. 그릴 것이 오면 그것을 그립니다.
  */
-export function showSkeleton(element: HTMLElement, html: string): void {
-  element.setAttribute('aria-busy', 'true');
-  element.innerHTML = html;
-}
-
-/**
- * 스켈레톤을 걷어 낸다. 내용은 그리는 쪽이 채웁니다.
- *
- * ⚠️ **이미 진짜 내용이 들어와 있으면 손대지 않습니다.**
- *
- * 부르는 순서는 이렇습니다 — 받아 오기 → 스켈레톤 걷기 → 그리기.
- * 그런데 화면 하나가 순서를 어겨 스켈레톤이 떠 있는 동안 오류 문구를
- * 써 넣으면, 여기서 그걸 지웁니다. 그러면 실패한 화면이 **아무 말도
- * 없이 빈 채로** 남습니다 — 이 저장소가 반복해 당한 바로 그 모양입니다.
- * 그래서 우리가 넣은 것일 때만 지웁니다.
- */
-export function clearSkeleton(element: HTMLElement): void {
-  element.removeAttribute('aria-busy');
-  // 스켈레톤 조각은 전부 `sk` 로 시작하는 클래스를 답니다 —
-  // `sk-wrap`(겉껍질)·`sk-line`(줄)·`sk`(막대).
-  if (element.innerHTML.includes('class="sk')) element.innerHTML = '';
-}
