@@ -72,37 +72,9 @@
 </style>
 </head>
 <body class="no-tabs">
-  <header class="head">
-    <h1 id="title">로그인</h1>
-    <p class="lede">
-      TeamFlow는 회의에서 정한 일이 칸반과 GitHub을 거쳐 기여 기록까지
-      이어지게 하는 도구입니다. 회의 녹음과 기여도는 팀 내부 자료라
-      로그인이 필요합니다.
-    </p>
-  </header>
-
-  <div id="error" class="error" hidden></div>
-
-  <div class="card">
-  <form id="form">
-    <label id="name-row" hidden>이름
-      <input id="name" type="text" autocomplete="name" />
-    </label>
-    <label>이메일
-      <input id="email" type="email" autocomplete="email" inputmode="email" />
-    </label>
-    <label>비밀번호
-      <input id="password" type="password" autocomplete="current-password" />
-    </label>
-    <button id="submit" class="primary" type="submit">로그인</button>
-  </form>
-  <button id="toggle" type="button">처음이신가요? 가입하기</button>
-  </div>
-
-  <p class="note">
-    비밀번호는 scrypt로 해싱해 저장하고, 세션 토큰은 원문이 아니라
-    해시만 남깁니다. 로그아웃하면 서버에서 세션을 끊습니다.
-  </p>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24).
+       머리말·오류·폼이 전부 `src/demo/login.tsx` 안에 있습니다. -->
+  <div id="app"></div>
 
   <script type="module" src="/login.js"></script>
 </body>
