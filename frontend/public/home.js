@@ -177,6 +177,51 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+// src/lib/nav/channels.ts
+var STATE = {
+  pending: "open",
+  queued: "working",
+  processing: "working",
+  needs_review: "todo",
+  confirmed: "done",
+  failed: "failed"
+};
+function channelState(status) {
+  return STATE[status] ?? "working";
+}
+function channelLabel(meeting) {
+  const title = (meeting.title ?? "").trim();
+  return title === "" ? `회의 ${meeting.meeting_id}` : title;
+}
+function channelHref(meetingId, projectId) {
+  const base = `/lobby.html?meeting=${meetingId}`;
+  return projectId != null && projectId > 0 ? `${base}&project=${projectId}` : base;
+}
+function meetingChannels(meetings, context = {}) {
+  const { projectId, currentMeetingId } = context;
+  return meetings.map((meeting) => ({
+    meetingId: meeting.meeting_id,
+    label: channelLabel(meeting),
+    href: channelHref(meeting.meeting_id, projectId),
+    state: channelState(meeting.status),
+    stateLabel: describeMeetingStatus(meeting.status),
+    current: currentMeetingId != null && currentMeetingId === meeting.meeting_id,
+    pending: meeting.pending_candidates > 0 ? meeting.pending_candidates : null
+  }));
+}
+function emptyChannelsNote() {
+  return "아직 연 회의가 없습니다 — 설정에서 엽니다";
+}
+function shellHeading(projectTitle) {
+  const title = (projectTitle ?? "").trim();
+  return title === "" ? "TeamFlow" : title;
+}
+function channelAriaLabel(channel) {
+  const parts = [channel.label, channel.stateLabel];
+  if (channel.pending !== null) parts.push(`업무 후보 ${channel.pending}건 검토 대기`);
+  return parts.join(", ");
+}
+
 // src/lib/http/detail.ts
 function isValidationList(value) {
   return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "object" && item !== null);
@@ -388,51 +433,6 @@ function contextFromSearch(current, search) {
     return positive(Number(raw));
   };
   return { current, projectId: read("project"), meetingId: read("meeting") };
-}
-
-// src/lib/nav/channels.ts
-var STATE = {
-  pending: "open",
-  queued: "working",
-  processing: "working",
-  needs_review: "todo",
-  confirmed: "done",
-  failed: "failed"
-};
-function channelState(status) {
-  return STATE[status] ?? "working";
-}
-function channelLabel(meeting) {
-  const title = (meeting.title ?? "").trim();
-  return title === "" ? `회의 ${meeting.meeting_id}` : title;
-}
-function channelHref(meetingId, projectId) {
-  const base = `/lobby.html?meeting=${meetingId}`;
-  return projectId != null && projectId > 0 ? `${base}&project=${projectId}` : base;
-}
-function meetingChannels(meetings, context = {}) {
-  const { projectId, currentMeetingId } = context;
-  return meetings.map((meeting) => ({
-    meetingId: meeting.meeting_id,
-    label: channelLabel(meeting),
-    href: channelHref(meeting.meeting_id, projectId),
-    state: channelState(meeting.status),
-    stateLabel: describeMeetingStatus(meeting.status),
-    current: currentMeetingId != null && currentMeetingId === meeting.meeting_id,
-    pending: meeting.pending_candidates > 0 ? meeting.pending_candidates : null
-  }));
-}
-function emptyChannelsNote() {
-  return "아직 연 회의가 없습니다 — 설정에서 엽니다";
-}
-function shellHeading(projectTitle) {
-  const title = (projectTitle ?? "").trim();
-  return title === "" ? "TeamFlow" : title;
-}
-function channelAriaLabel(channel) {
-  const parts = [channel.label, channel.stateLabel];
-  if (channel.pending !== null) parts.push(`업무 후보 ${channel.pending}건 검토 대기`);
-  return parts.join(", ");
 }
 
 // src/lib/contribution/roles.ts
@@ -814,13 +814,18 @@ function meetingHtml(meeting) {
   return `
 <li class="meeting${step.actionable ? " todo" : ""}">
   <div class="head">
+    <span class="dot" data-state="${escapeHtml(channelState(meeting.status))}"></span>
     <span class="name">${escapeHtml(meeting.title ?? "제목 없는 회의")}</span>
     <span class="when">${escapeHtml(formatMeetingTime(meeting.started_at))}</span>
+    ${// ⚠️ **화면 폭짜리 버튼을 다섯 개 쌓지 않습니다** (docs/19 §20).
+  // 예전에는 회의마다 `btn-block` 이라 900px 짜리 초록 덩어리가
+  // 다섯 개 깔렸고, 화면이 "무엇을 할 차례인가" 가 아니라 **버튼 밭**
+  // 이었습니다. 줄 오른쪽 끝의 작은 버튼이면 충분합니다 — 줄 자체가
+  // 이미 어느 회의인지 말하고 있습니다.
+  step.href ? `<a class="btn btn-sm${step.actionable ? " btn-primary" : ""}" href="${escapeHtml(step.href)}">${escapeHtml(step.label)}</a>` : ""}
   </div>
   <p class="status">${escapeHtml(describeMeetingStatus(meeting.status))}
      — ${escapeHtml(step.reason)}</p>
-  ${step.href ? `<a class="btn btn-block${step.actionable ? " btn-primary" : ""}"
-             href="${escapeHtml(step.href)}">${escapeHtml(step.label)}</a>` : ""}
 </li>`;
 }
 function projectHtml(project, meetings) {

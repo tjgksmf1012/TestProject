@@ -24,6 +24,7 @@ import {
   titleProblem,
 } from '../lib/project/setup.ts';
 import { escapeHtml } from '../lib/html.ts';
+import { channelState } from '../lib/nav/channels.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
@@ -58,17 +59,23 @@ function meetingHtml(meeting: Meeting): string {
   return `
 <li class="meeting${step.actionable ? ' todo' : ''}">
   <div class="head">
+    <span class="dot" data-state="${escapeHtml(channelState(meeting.status))}"></span>
     <span class="name">${escapeHtml(meeting.title ?? '제목 없는 회의')}</span>
     <span class="when">${escapeHtml(formatMeetingTime(meeting.started_at))}</span>
+    ${
+      // ⚠️ **화면 폭짜리 버튼을 다섯 개 쌓지 않습니다** (docs/19 §20).
+      // 예전에는 회의마다 `btn-block` 이라 900px 짜리 초록 덩어리가
+      // 다섯 개 깔렸고, 화면이 "무엇을 할 차례인가" 가 아니라 **버튼 밭**
+      // 이었습니다. 줄 오른쪽 끝의 작은 버튼이면 충분합니다 — 줄 자체가
+      // 이미 어느 회의인지 말하고 있습니다.
+      step.href
+        ? `<a class="btn btn-sm${step.actionable ? ' btn-primary' : ''}"` +
+          ` href="${escapeHtml(step.href)}">${escapeHtml(step.label)}</a>`
+        : ''
+    }
   </div>
   <p class="status">${escapeHtml(describeMeetingStatus(meeting.status))}
      — ${escapeHtml(step.reason)}</p>
-  ${
-    step.href
-      ? `<a class="btn btn-block${step.actionable ? ' btn-primary' : ''}"
-             href="${escapeHtml(step.href)}">${escapeHtml(step.label)}</a>`
-      : ''
-  }
 </li>`;
 }
 

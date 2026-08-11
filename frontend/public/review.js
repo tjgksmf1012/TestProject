@@ -1091,7 +1091,7 @@ function cardHtml(candidate) {
   <header>
     <input class="title" type="text" value=${attr(effectiveTitle(candidate, draft))}
            ${decided ? "disabled" : ""} />
-    <span class="conf ${low ? "low" : ""}">확신도 ${(candidate.confidence * 100).toFixed(0)}%</span>
+    <span class="conf ${low ? "low" : ""}">${(candidate.confidence * 100).toFixed(0)}%<small>확신도</small></span>
   </header>
 
   <div class="row">
@@ -1112,7 +1112,14 @@ function cardHtml(candidate) {
 
   ${// 서버가 무엇을 확신하지 못했는가. 사람이 화면에서 고쳐도 남는다 —
   // blockers 와 달리 이건 판정이 아니라 기록이다.
-  reasons.length ? `<ul class="warnings">${reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>` : ""}
+  //
+  // ⚠️ **첫 줄만 보이고 나머지는 접습니다** (docs/19 §20). 후보 셋이면
+  // 이 목록이 여섯 줄이 되고, 그러면 정작 **지금 고쳐야 하는 것**
+  // (아래 `blockers`)이 그 사이에 묻힙니다.
+  //
+  // ⚠️ `blockers` 는 **접지 않습니다.** 그건 기록이 아니라 승인을 막는
+  // 것이고, 접으면 사람이 왜 승인 버튼이 죽어 있는지 모릅니다.
+  reasons.length ? `<ul class="warnings"><li>${escapeHtml(reasons[0] ?? "")}</li></ul>` + (reasons.length > 1 ? `<details class="more"><summary>확신하지 못한 이유 더 보기</summary><div class="more-body"><ul class="warnings">${reasons.slice(1).map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul></div></details>` : "") : ""}
 
   ${blockers.length ? `<ul class="blockers">${blockers.map((b) => `<li>${escapeHtml(b.message)}</li>`).join("")}</ul>` : ""}
 

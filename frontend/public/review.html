@@ -18,9 +18,13 @@
     <title>업무 후보 검토 — TeamFlow AI</title>
     <style>
 
-      .banner { padding: var(--sp-3) var(--sp-4); border-radius: .5rem; font-size: var(--fs-label); margin-bottom: var(--sp-3); }
-      #attention { background: color-mix(in srgb, var(--warn) 15%, transparent); }
-      #blocked { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+      /* ⚠️ 색 띠를 걷어냈습니다 (docs/19 §20). 카드마다 이미 표시가 있는데
+         화면 위에 또 노란·빨간 띠를 깔면 같은 말이 두 번이고, 색이 강해서
+         **목록보다 배너가 먼저** 읽힙니다. 칸반에서 한 것과 같습니다. */
+      .banner { padding: var(--sp-1) 0 var(--sp-1) var(--sp-3); font-size: var(--fs-caption);
+                color: var(--text-muted); margin-bottom: var(--sp-3); }
+      #attention { border-left: 2px solid var(--gap); }
+      #blocked { border-left: 2px solid var(--bad); }
       #counts { font-size: var(--fs-label); opacity: .75; margin-bottom: var(--sp-4); }
 
       /* 회의록 — 요약 말고 나머지 (결함 110·111).
@@ -66,8 +70,23 @@
         border: 1px solid transparent; border-radius: .35rem; background: var(--surface); color: inherit;
       }
       .card header .title:focus { border-color: var(--line); outline: none; }
-      .conf { font-size: var(--fs-caption); white-space: nowrap; opacity: .7; font-variant-numeric: tabular-nums; }
-      .conf.low { color: var(--warn); opacity: 1; font-weight: 700; }
+      /* ⭐ **확신도가 이 화면의 판단 근거인데 12px 에 opacity .7 이었습니다**
+         (docs/19 §20). 사람이 여기서 하는 일은 "AI 가 얼마나 확신하는가" 를
+         보고 승인 여부를 정하는 것입니다. 제목보다 작으면 안 됩니다.
+
+         잉크 농도 그라디언트는 기여도 숫자와 같은 어휘입니다. */
+      .conf { white-space: nowrap; font-variant-numeric: tabular-nums;
+              font-size: 1.75rem; font-weight: 800; letter-spacing: -.03em; line-height: 1;
+              background: linear-gradient(180deg, var(--text-subtle) 30%,
+                color-mix(in srgb, var(--text-subtle) 60%, var(--primary)) 100%);
+              -webkit-background-clip: text; background-clip: text; color: transparent; }
+      .conf small { display: block; font-size: var(--fs-caption); font-weight: 400;
+                    letter-spacing: 0; color: var(--text-subtle);
+                    -webkit-text-fill-color: var(--text-subtle); margin-top: var(--sp-1); }
+      /* 확신도가 낮은 것 — 이 화면이 먼저 보여 주기로 한 것이라 흙빛으로. */
+      .conf.low { background: linear-gradient(180deg, var(--gap) 25%,
+                    color-mix(in srgb, var(--gap) 70%, black) 100%);
+                  -webkit-background-clip: text; background-clip: text; }
 
       .row label { font-size: var(--fs-label); opacity: .75; display: flex; gap: var(--sp-icon); align-items: center; }
 
