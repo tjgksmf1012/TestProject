@@ -23,9 +23,24 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
 const PUBLIC = join(ROOT, 'public');
 
+/**
+ * 화면 파일 전부.
+ *
+ * ⚠️ **`.tsx` 를 빠뜨리면 가드가 통째로 눈을 감습니다.**
+ *
+ * React 로 옮기기 시작하면서 첫 화면 조각(`evidence.tsx`)을 만들었더니,
+ * 그 파일이 분명히 부르는 `lib/` export 를 가드가 **"테스트만 씀"** 이라고
+ * 했습니다. 규칙이 깨진 게 아니라 **찾는 방법이 낡은** 것이었습니다 —
+ * 이 저장소가 반복해서 당한 그것이고, 이번에는 화면을 하나씩 옮기는
+ * 동안 옮긴 화면마다 조용히 감시가 사라졌을 자리입니다.
+ *
+ * `.test.ts` 는 뺍니다. 테스트가 부르는 것은 "화면이 쓴다" 가 아닙니다.
+ */
+const SCREEN_EXT = /\.tsx?$/;
+
 const demoFiles = (): { name: string; source: string }[] =>
   readdirSync(DEMO)
-    .filter((name) => name.endsWith('.ts'))
+    .filter((name) => SCREEN_EXT.test(name) && !name.endsWith('.test.ts'))
     .map((name) => ({ name, source: readFileSync(join(DEMO, name), 'utf8') }));
 
 /**
@@ -368,9 +383,10 @@ describe('줄어들 수 없는 컨트롤 (결함 77)', () => {
 });
 
 describe('로그아웃이 안 될 때 (결함 82)', () => {
+  // ⚠️ 위 `SCREEN_EXT` 와 같은 이유로 `.tsx` 를 봅니다.
   const demoFiles = (): { rel: string; code: string }[] =>
     readdirSync(join(ROOT, 'src', 'demo'))
-      .filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))
+      .filter((n) => SCREEN_EXT.test(n) && !n.endsWith('.test.ts'))
       .map((n) => ({ rel: `src/demo/${n}`, code: readFileSync(join(ROOT, 'src', 'demo', n), 'utf8') }));
 
   it('⭐ 로그아웃 응답을 안 보고 화면을 옮기지 않는다', () => {
@@ -413,7 +429,7 @@ describe('로그아웃이 안 될 때 (결함 82)', () => {
 describe('요청이 서버에 닿지 못할 때 (결함 87)', () => {
   const demoSources = (): { rel: string; code: string }[] =>
     readdirSync(DEMO)
-      .filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))
+      .filter((n) => SCREEN_EXT.test(n) && !n.endsWith('.test.ts'))
       .map((n) => ({ rel: `src/demo/${n}`, code: codeOf(readFileSync(join(DEMO, n), 'utf8')) }));
 
   /** `이름(` 부터 짝 맞는 `)` 까지. 인자 안의 괄호를 세어 자릅니다. */
@@ -856,7 +872,7 @@ describe('서버가 보내는데 아무도 안 읽는 칸 (결함 93)', () => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.endsWith('.test.ts')) {
           const code = codeOf(readFileSync(full, 'utf8'));
           if (typeNames.some((name) => new RegExp(`\\b${name}\\b`).test(code))) {
             sources.push(code);
@@ -914,7 +930,7 @@ describe('복사가 안 될 때 (결함 81)', () => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.endsWith('.test.ts')) {
           out.push({
             rel: full.slice(ROOT.length + 1).split('\\').join('/'),
             code: readFileSync(full, 'utf8'),
@@ -988,7 +1004,7 @@ describe('한국어 조사 (결함 76)', () => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')) {
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.endsWith('.test.ts')) {
           out.push({
             rel: full.slice(join(ROOT, 'src').length + 1).split('\\').join('/'),
             // ⚠️ 주석은 뺍니다. 이 저장소의 주석은 `` `x` 를 `` 처럼
@@ -1279,7 +1295,7 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
       for (const name of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, name.name);
         if (name.isDirectory()) walk(full);
-        else if (name.name.endsWith('.ts')) {
+        else if (SCREEN_EXT.test(name.name)) {
           files.push({
             rel: full.slice(join(ROOT, 'src').length + 1).split('\\').join('/'),
             source: readFileSync(full, 'utf8'),
@@ -1348,7 +1364,8 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
     // 보려면 여기 있어야 합니다.
     const offenders: string[] = [];
     for (const name of readdirSync(join(ROOT, 'src', 'demo'))) {
-      if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue;
+      // ⚠️ `.tsx` 도 봅니다 — 위 `SCREEN_EXT` 주석 참고.
+      if (!SCREEN_EXT.test(name) || name.endsWith('.test.ts')) continue;
       const code = codeOf(readFileSync(join(ROOT, 'src', 'demo', name), 'utf8'));
       for (const m of code.matchAll(/^(?:async )?function (\w+)/gm)) {
         const fn = m[1] as string;

@@ -1,0 +1,80 @@
+/*
+ * Tailwind v4 진입 파일 — **토큰을 다시 만들지 않습니다.**
+ *
+ * ## ⚠️ 왜 색을 여기 안 적는가
+ *
+ * `public/tokens.css` 의 값은 **눈으로 고른 것이 하나도 없습니다.** 전부
+ * 계산값이고, 대비 주장 스무 개 남짓을 `test_design_tokens.py` 가 매번
+ * 다시 잽니다. 껍데기 램프는 `scripts/derive_chrome_ramp.py` 가 만들었고요.
+ *
+ * 여기에 Tailwind 기본 팔레트나 Radix 스케일을 그대로 들여오면 **색이
+ * 두 벌**이 됩니다. 그러면 반드시 한쪽만 고쳐지고, 어느 쪽이 화면에
+ * 나오는지는 특성도가 정합니다 — 이 저장소가 반복해서 당한 그것입니다.
+ *
+ * 그래서 Tailwind 는 **이름만** 가져가고 값은 `tokens.css` 를 가리킵니다.
+ * `@theme inline` 이 그 뜻입니다 — 값을 복사하지 않고 `var()` 를 그대로
+ * 내보냅니다. 다크 모드도 `tokens.css` 가 이미 뒤집으므로 여기서 다시
+ * 처리할 것이 없습니다.
+ *
+ * ## 빌드
+ *
+ *   npm run build:css   → public/tw.css
+ *
+ * `tokens.css` 와 `app.css` 는 그대로 둡니다. 화면을 하나씩 옮기는 동안
+ * 두 체계가 공존해야 하고, 옮기지 않은 화면이 깨지면 안 됩니다.
+ */
+
+@import "tailwindcss";
+
+/* 어두운 모드는 `tokens.css` 가 `prefers-color-scheme` 으로 이미 뒤집습니다.
+   Tailwind 의 `dark:` 변형도 같은 신호를 보게 맞춥니다 — 둘이 다른 신호를
+   보면 한 화면 안에서 절반만 어두워집니다. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+@theme inline {
+  /* ── 표면 사다리 ─────────────────────────────────────── */
+  --color-sunken: var(--sunken);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+
+  /* ── 경계 ────────────────────────────────────────────
+     Radix 의 6(비인터랙티브)/7(인터랙티브)/8(포커스) 셋과 대응합니다.
+     우리는 지금 둘뿐이라 포커스는 `--primary` 를 빌려 씁니다 — 셋째
+     단계를 만들 때 여기부터 바뀝니다. */
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  /* ── 글자 ────────────────────────────────────────────
+     Radix 11(저대비)/12(고대비) 에 해당합니다. */
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+
+  /* ── 브랜드·의미 ──────────────────────────────────── */
+  --color-primary: var(--primary);
+  --color-primary-fg: var(--primary-fg);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-on-semantic: var(--on-semantic);
+
+  /* ⚠️ 결측은 **흙빛**입니다. 빨강으로 바꾸지 마세요 — 녹음이 끊긴 것은
+     고장이 아니라 "이 구간은 잴 수 없었다" 입니다 (docs/05 §5). */
+  --color-gap: var(--gap);
+  --color-gap-tint: var(--gap-tint);
+
+  /* ── 글꼴 ────────────────────────────────────────────
+     ⚠️ 웹폰트를 **받지 않습니다.** 비용 0원이고 오프라인에서도 열려야
+     합니다(PWA). Pretendard 는 있으면 쓰고 없으면 시스템 글꼴로 갑니다. */
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-data);
+
+  /* ── 치수 ────────────────────────────────────────────
+     간격은 4px 격자입니다. Tailwind 기본 간격도 0.25rem 단위라 그대로
+     맞습니다 — 새로 정의하지 않습니다. */
+  --radius-badge: var(--r-badge);
+  --radius-ctrl: var(--r-ctrl);
+  --radius-card: var(--r-card);
+  --radius-modal: var(--r-modal);
+}

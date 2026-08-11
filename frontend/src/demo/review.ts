@@ -38,6 +38,7 @@ import { attr, escapeHtml } from '../lib/html.ts';
 import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
 import { bylineHtml } from '../lib/ui/byline.ts';
+import { mountEvidence, openEvidence } from './evidence.tsx';
 import { failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading, whilePressed } from '../lib/ui/pending.ts';
 import {
@@ -392,9 +393,17 @@ function cardHtml(candidate: Candidate): string {
       <span class="visually-hidden">마감일</span>
       <input class="deadline" type="date" value="${deadline}" ${decided ? 'disabled' : ''} />
     </label>
-    <span class="src${evidence.length === 0 ? ' none' : ''}">${
-      evidence.length === 0 ? '근거 없음' : `근거 #${evidence.join(', #')}`
-    }</span>
+    ${
+      // ⭐ **누를 수 있게 됐습니다** (docs/19 §24). 오랫동안 이 자리는
+      // `근거 #5` 라고 **적기만** 했습니다 — 그 번호로 원문을 가져올
+      // 엔드포인트가 없어서, 이 제품의 대표 주장(역추적)이 화면에서
+      // 끊겨 있었습니다.
+      evidence.length === 0
+        ? '<span class="src none">근거 없음</span>'
+        : `<button type="button" class="src" data-evidence="${evidence.join(',')}"` +
+          ` data-title=${attr(effectiveTitle(candidate, draft))}>` +
+          `근거 #${evidence.join(', #')}</button>`
+    }
   </div>
 
   ${
@@ -469,6 +478,14 @@ function wireCards(): void {
       update(id, { deadlineOverride: el.value === '' ? null : el.value }),
     );
     on<HTMLInputElement>('.memo', 'change', (el) => update(id, { note: el.value }));
+
+    on<HTMLButtonElement>('button.src', 'click', (el) => {
+      const ids = (el.dataset.evidence ?? '')
+        .split(',')
+        .map(Number)
+        .filter((n) => Number.isFinite(n));
+      openEvidence(ids, el.dataset.title ?? '');
+    });
 
     const decide = (decision: Decision) => () => update(id, { decision });
     card.querySelector('.approve')?.addEventListener('click', decide('approve'));
@@ -579,6 +596,10 @@ start().catch((error: unknown) => {
       void load();
     });
 });
+
+// 근거 발화 상자를 한 번 붙인다. 카드마다 붙이지 않습니다 — 목록이
+// 다시 그려질 때마다 React 루트가 늘어납니다.
+mountEvidence(apiBase, meetingId);
 
 renderNav('review');
 

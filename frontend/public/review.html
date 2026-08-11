@@ -15,6 +15,8 @@
 <link rel="apple-touch-icon" href="/icon-180.png" />
 <link rel="stylesheet" href="/tokens.css" />
 <link rel="stylesheet" href="/app.css" />
+<!-- Tailwind. 아직 이 화면의 React 조각(근거 발화 상자)만 씁니다. -->
+<link rel="stylesheet" href="/tw.css" />
     <title>업무 후보 검토 — TeamFlow AI</title>
     <style>
 
@@ -185,8 +187,20 @@
       /* 근거 — 카드에서 가장 조용한 줄. 그러나 지우지 않습니다. */
       /* 근거는 줄 **끝**으로 보냅니다. 담당자·마감일 옆에 붙여 뒀더니
          카드 오른쪽 절반이 통째로 비었습니다 (렌더해서 봤습니다). */
+      /* ⚠️ 근거가 **누를 수 있게 되면서** `<button>` 이 됐고, 공용 버튼
+         상자(테두리·44px·배경)를 통째로 물려받았습니다 — 카드에서 제일
+         조용해야 할 줄이 제일 눈에 띄는 상자가 됐습니다 (렌더해서 봤습니다).
+         누를 수 있다는 것은 상자가 아니라 **밑줄과 hover** 로 말합니다. */
       .src { margin-left: auto; font-size: var(--fs-caption);
              color: var(--text-subtle); white-space: nowrap; }
+      button.src { min-height: 0; padding: 0; border: 0; background: transparent;
+                   font-weight: 400; text-decoration: underline;
+                   text-decoration-color: var(--line-strong);
+                   text-underline-offset: 3px; }
+      @media (hover: hover) and (pointer: fine) {
+        button.src:hover { color: var(--primary); background: transparent;
+                           text-decoration-color: var(--primary); }
+      }
       .src.none { color: var(--bad); }
       .hint { font-size: var(--fs-caption); color: var(--text-muted); margin: var(--sp-3) 0 0; }
 

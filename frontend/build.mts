@@ -22,7 +22,7 @@
  */
 
 import { build } from 'esbuild';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,6 +36,10 @@ export const OPTIONS = {
   format: 'esm',
   target: 'es2022',
   charset: 'utf8',
+  /* ⚠️ `automatic` 이라 화면 파일이 `import React` 를 적지 않아도 됩니다.
+     `classic` 으로 두면 JSX 마다 React 를 손으로 가져와야 하고, 빠뜨린
+     파일만 **런타임에** 터집니다 — 빌드는 통과하고요. */
+  jsx: 'automatic',
 } as const;
 
 // `src="/main.js"` 와 `src="./main.js"` 둘 다 씁니다. 한쪽만 보면 화면
@@ -56,7 +60,14 @@ export function entryPoints(): string[] {
     const html = readFileSync(join(PUBLIC, file), 'utf8');
     for (const [, name] of html.matchAll(MODULE_SCRIPT)) if (name) wanted.add(name);
   }
-  return [...wanted].sort().map((name) => join(DEMO, `${name}.ts`));
+  /* ⚠️ **`.tsx` 를 먼저 봅니다.** 화면을 React 로 옮기는 동안 두 종류가
+     섞이는데, 확장자를 `.ts` 로 못박아 두면 옮긴 화면이 조용히
+     `Could not resolve` 로 죽습니다 — 그런데 그건 빌드 로그 안쪽이라
+     테스트에는 안 보입니다. */
+  return [...wanted].sort().map((name) => {
+    const tsx = join(DEMO, `${name}.tsx`);
+    return existsSync(tsx) ? tsx : join(DEMO, `${name}.ts`);
+  });
 }
 
 /** 소스에서 곧바로 뽑은 번들. `{파일이름 → 내용}`. 디스크에 쓰지 않습니다. */
