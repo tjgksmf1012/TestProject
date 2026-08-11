@@ -57,6 +57,8 @@ export function evidenceQuery(ids: readonly number[]): string {
  * ⚠️ `track` 은 **아무 말도 하지 않습니다.** 멀티트랙은 이 제품의 기본
  * 전제라 그게 정상이고, 정상에 꼬리표를 달면 나머지 셋이 안 보입니다.
  */
+const UNRESOLVED = '화자를 확정하지 못했습니다 — 목소리로 나눈 것까지입니다';
+
 export function speakerNote(source: string, confidence: number | null): string | null {
   if (source === 'track') return null;
   if (source === 'manual') return '사람이 지정한 화자입니다';
@@ -65,9 +67,15 @@ export function speakerNote(source: string, confidence: number | null): string |
       ? '목소리로 추정한 화자입니다'
       : `목소리로 추정한 화자입니다 (유사도 ${Math.round(confidence * 100)}%)`;
   }
-  // diarization 이거나 모르는 값. 모르는 값을 조용히 "확정" 으로 그리지
-  // 않습니다 — 그쪽이 훨씬 위험합니다.
-  return '화자를 확정하지 못했습니다 — 목소리로 나눈 것까지입니다';
+  if (source === 'diarization') return UNRESOLVED;
+  // ⚠️ 모르는 값. 조용히 "확정" 으로 그리지 않습니다 — 그쪽이 훨씬 위험합니다.
+  //
+  // ⚠️ **여기로 떨어지는 것은 임시 안전망이지 답이 아닙니다.** 서버가
+  //    저장할 수 있는 값(`backend/teamflow/db/vocab.py` 의 `STORED`)은
+  //    **전부 위에 제 가지를 가져야 합니다** — 백엔드 검사가 그걸 봅니다.
+  //    예컨대 영상 융합이 열리면 `fused` 는 오디오·영상이 **일치한** 것이라
+  //    여기 문구("확정하지 못했습니다")가 정반대가 됩니다.
+  return UNRESOLVED;
 }
 
 export function evidenceView(utterance: Utterance): EvidenceView {

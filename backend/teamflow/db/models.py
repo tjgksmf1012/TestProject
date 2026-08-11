@@ -31,6 +31,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, validates
 
+from teamflow.db import vocab
+from teamflow.db.vocab import SpeakerSource
 from teamflow.github.connection import repo_key
 
 # ── dialect 변형 ──────────────────────────────────────────────
@@ -475,12 +477,11 @@ class Utterance(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
 
     # 화자 라벨이 어떻게 정해졌는가. 신뢰도 계산의 핵심 입력.
-    #   track       : 멀티트랙 → 확정 (신뢰도 1.0)
-    #   voiceprint  : 성문 임베딩 매칭 → 유사도 있음
-    #   manual      : 사람이 지정
-    #   diarization : SPEAKER_XX 미매핑 → 불확실
+    # 값과 뜻은 `db/vocab.py` 한 곳에만 있습니다 — 여기 손으로 적어 두었을
+    # 때 `video/speaker.py` 의 enum 과 이미 갈라져 있었습니다(셋이 더 많았고,
+    # 그 셋은 이 제약이 거절했습니다).
     speaker_source: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="diarization"
+        String(20), nullable=False, default=str(SpeakerSource.DIARIZATION)
     )
     speaker_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
     is_overlap: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -496,7 +497,11 @@ class Utterance(Base):
     __table_args__ = (
         CheckConstraint("end_ms >= start_ms", name="ck_utterance_span"),
         CheckConstraint(
-            "speaker_source IN ('track','voiceprint','manual','diarization')",
+            # ⚠️ 목록을 손으로 적지 않습니다. `vocab.STORED` 가 원본입니다.
+            # ⚠️ 목록을 손으로 적지 않습니다. `vocab.STORED` 가 원본입니다.
+            "speaker_source IN ("
+            + ",".join(f"'{v}'" for v in vocab.stored_values())
+            + ")",
             name="ck_speaker_source",
         ),
         Index("ix_utterances_meeting_time", "meeting_id", "start_ms"),

@@ -13,27 +13,30 @@ Active Speaker Detection 이 "이 순간 입을 움직이는 얼굴이 누구인
 
 ⚠️ 실제 ASD 모델(Light-ASD) 연동은 GPU와 모델이 없어 아직 없습니다.
 인터페이스와 융합 로직만 확정했습니다 — 융합은 순수 계산이라 전부 검증됩니다.
+
+⚠️⚠️ **그래서 이 파일의 결과는 아직 저장되지 않습니다.** `fuse()` 가 내는
+`fused`·`conflict`·`video_asd` 는 `utterances.speaker_source` 의 CHECK 제약이
+거절합니다 — 값을 만들어 낼 앞단(얼굴 검출·ASD)이 없으니 저장 통로를 미리
+열어 두지 않는 것입니다. 열려면 `db/vocab.py` 의 `NOT_STORED_YET` 를 먼저
+읽으십시오. 거기에 **같이 정해야 하는 것**이 적혀 있습니다 — `conflict`
+("사람이 봐야 한다")를 사람이 볼 화면이 어디인가.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
 from typing import Protocol
 
 import numpy as np
 
+# ⚠️ **여기서 정의하지 않습니다.** `SpeakerSource` 는 `utterances` 열의
+#    어휘라서 DB 쪽(`db/vocab.py`)이 원본입니다. 이 파일이 갖고 있던 동안
+#    설명이 "utterances.speaker_source 에 저장된다" 였는데, 그중 셋
+#    (`video_asd`·`fused`·`conflict`)은 **CHECK 제약이 거절했습니다.**
+#    같은 목록이 두 곳에 있으면 반드시 갈라집니다.
+from teamflow.db.vocab import SpeakerSource
 
-class SpeakerSource(StrEnum):
-    """화자 라벨이 어떻게 정해졌는가. utterances.speaker_source 에 저장된다."""
-
-    TRACK = "track"  # 멀티트랙 → 확정
-    VOICEPRINT = "voiceprint"  # 성문 매칭
-    MANUAL = "manual"  # 사람이 지정
-    DIARIZATION = "diarization"  # SPEAKER_XX 미매핑
-    VIDEO_ASD = "video_asd"  # 영상 단독
-    FUSED = "fused"  # 오디오 + 영상 일치
-    CONFLICT = "conflict"  # 오디오 ≠ 영상 → 사람 검토 필요
+__all__ = ["SpeakerSource"]  # 이 모듈을 통해 쓰던 코드가 계속 돌게 둡니다
 
 
 # ══════════════════════════════════════════════════════════════
