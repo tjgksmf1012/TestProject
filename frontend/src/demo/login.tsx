@@ -35,7 +35,14 @@ function Login() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [problems, setProblems] = useState<string[]>([]);
+  /**
+   * 화면이 할 말. **아직 안 적은 것과 실패를 가릅니다** (docs/19 §26).
+   *
+   * ⚠️ 예전에는 둘을 한 배열에 담아 전부 빨갛게 찍었습니다. 가입 폼을 막
+   * 연 사람에게 빨간 줄 셋이 뜨는데, 그 사람은 아무것도 잘못하지
+   * 않았습니다 — 이 저장소가 로비·검토·녹음에서 이미 고친 그 모양입니다.
+   */
+  const [note, setNote] = useState<{ lines: string[]; tone: 'gap' | 'bad' } | null>(null);
   // 누르는 동안 잠근다 (결함 89).
   const [sending, setSending] = useState(false);
 
@@ -57,10 +64,11 @@ function Login() {
   const submit = async (): Promise<void> => {
     const found = signup ? validateSignup(name, email, password) : validateLogin(email, password);
     if (found.length > 0) {
-      setProblems(found.map((p) => p.message));
+      // 보내기도 전에 잡은 것 — **아직 안 적은 것**이라 흙빛입니다.
+      setNote({ lines: found.map((p) => p.message), tone: 'gap' });
       return;
     }
-    setProblems([]);
+    setNote(null);
     setSending(true);
     try {
       const response = await trySend(() =>
@@ -75,7 +83,10 @@ function Login() {
         }),
       );
       if (response === null) {
-        setProblems([unreachableText(signup ? '가입하지 못했습니다' : '로그인하지 못했습니다')]);
+        setNote({
+          lines: [unreachableText(signup ? '가입하지 못했습니다' : '로그인하지 못했습니다')],
+          tone: 'bad',
+        });
         return;
       }
       if (!response.ok) {
@@ -83,14 +94,14 @@ function Login() {
         // 자리에 `[object Object]` 가 나옵니다.
         const body = (await response.json().catch(() => null)) as unknown;
         const detail = detailText(body, '') || undefined;
-        setProblems([describeAuthFailure(response.status, detail)]);
+        setNote({ lines: [describeAuthFailure(response.status, detail)], tone: 'bad' });
         return;
       }
       location.href = next;
     } catch (error) {
       // 보내는 실패는 위에서 `null` 로 끝납니다. 여기는 응답을 읽다 깨진 경우입니다.
       console.error(error);
-      setProblems([describeUnexpected()]);
+      setNote({ lines: [describeUnexpected()], tone: 'bad' });
     } finally {
       setSending(false);
     }
@@ -106,10 +117,10 @@ function Login() {
         </p>
       </header>
 
-      {problems.length > 0 && (
-        <div id="error" className="error">
-          {problems.map((p, i) => (
-            <p key={i}>{p}</p>
+      {note !== null && (
+        <div id="error" className={note.tone === 'gap' ? 'error gap' : 'error'}>
+          {note.lines.map((line, i) => (
+            <p key={i}>{line}</p>
           ))}
         </div>
       )}
@@ -167,7 +178,7 @@ function Login() {
           className="linkish"
           onClick={() => {
             setSignup((was) => !was);
-            setProblems([]);
+            setNote(null);
           }}
         >
           {signup ? '이미 계정이 있습니다 — 로그인' : '처음이신가요? 가입하기'}
