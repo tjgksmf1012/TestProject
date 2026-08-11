@@ -169,60 +169,11 @@
         </style>
 </head>
 <body>
-  <header class="head">
-    <h1>기여도</h1>
-    <p class="lede">
-      활동 기록에서 <strong>추정한 구간</strong>입니다. 순위가 아니고, 최종값도 아닙니다.
-    </p>
-    <p class="by" id="who" hidden></p>
-  </header>
-
-  <p class="meta-line" id="meta"></p>
-
-  <div id="warnings" class="warnings" hidden></div>
-
-  <div id="members"></div>
-
-  <p class="note" id="notice"></p>
-
-  <!-- ⭐ 확정. `docs/05` §5 는 "최종 점수를 시스템이 확정" 을 ❌ 로 금지한다.
-       그런데 확정을 남길 자리가 화면에도 API 에도 없어서, 배포 상태에서
-       존재하는 값은 시스템이 계산한 숫자뿐이었다 — 금지한 쪽으로 실제
-       동작한 것이다. `src/demo/contributions.ts` 가 채운다. -->
-  <section class="panel" id="final-panel">
-    <h2>확정</h2>
-    <p class="sub" id="final-state"></p>
-    <div id="finals"></div>
-    <div class="row" style="margin-top:.75rem">
-      <button id="confirm" class="primary">이 값으로 확정</button>
-    </div>
-    <p class="status" id="final-message"></p>
-    <p class="note">
-      시스템 값은 <strong>참고값</strong>입니다. 다르게 확정하려면 각 칸에 값을
-      적고 <strong>이유</strong>를 함께 적으세요 — 이유 없는 조정은 근거 없는
-      점수와 같습니다. 시스템 값은 지워지지 않고 나란히 남습니다.
-    </p>
-  </section>
-
-  <details class="more">
-    <summary>이 화면을 읽는 법</summary>
-  <div class="more-body">
-    <strong>순위는 제공하지 않습니다.</strong> 목록은 이름 순이고, 점수 순으로
-    정렬하지 않습니다 — 리더보드를 안 그려도 목록이 점수 순이면 사람들은 1등과
-    꼴찌를 읽습니다.
-    <br /><br />
-    숫자는 구간입니다. 신뢰도가 낮을수록 구간이 넓어지고, 그 넓이가 "이 값을
-    얼마나 믿을 수 있는가"를 말합니다. <strong>측정하지 못한 영역은 0이
-    아닙니다</strong> — 나머지 활동으로 추정한 값이고, 그 사실을 각 줄에
-    적어 둡니다.
-    <br /><br />
-    <strong>막대는 값이 아니라 "얼마나 모르는가"입니다.</strong> 값의 자리를
-    그림으로 그리면 세 사람이 같은 자에 서게 되고, 그건 순위표입니다. 그래서
-    값은 글자로만 적고, 막대는 구간의 <strong>넓이</strong>만 그립니다 —
-    막대가 긴 사람은 기여가 큰 사람이 아니라 <strong>우리가 가장 모르는
-    사람</strong>이고, 그 자리가 다음에 더 재야 할 곳입니다.
-  </div>
-  </details>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24).
+       머리말·경고·판독 줄·확정 표·읽는 법이 전부 `src/demo/contributions.tsx`
+       안에 있습니다. 여기에 같은 마크업을 남겨 두면 두 벌이 되고, React 가
+       마운트하는 순간 지워지므로 고쳐도 아무 일이 안 일어납니다. -->
+  <div id="app"></div>
 
   <script type="module" src="/contributions.js"></script>
 

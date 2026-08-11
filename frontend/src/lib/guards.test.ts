@@ -157,6 +157,24 @@ function demoSource(stem: string): string | null {
 }
 
 /**
+ * 이 화면이 그 조각을 **어디에든** 갖고 있는가 — HTML 이든 화면 모듈이든.
+ *
+ * ⚠️ 화면을 React 로 옮기면 마크업이 `.html` 에서 `.tsx` 안으로 옮겨
+ * 갑니다. 요구("누를 버튼이 있는가")는 그대로인데 **찾는 자리**가 낡아
+ * 검사만 터집니다. 이 저장소가 이번 이전에서 여섯 번 겪은 모양입니다.
+ */
+function screenHas(stem: string, needle: string): boolean {
+  const html = (() => {
+    try {
+      return readFileSync(join(PUBLIC, `${stem}.html`), 'utf8');
+    } catch {
+      return '';
+    }
+  })();
+  return html.includes(needle) || (demoSource(stem) ?? '').includes(needle);
+}
+
+/**
  * 이 모듈이 실제로 붙는 HTML. 진입점이 아니면 null.
  *
  * `main.ts` 만 이름이 다릅니다 — 녹음 화면이 `index.html` 이라서.
@@ -2460,7 +2478,7 @@ describe('상태 화면 (지시서 §7)', () => {
   /** 목록을 **비동기로 채우는** 그릇. 화면과 그 그릇의 id. */
   const ASYNC_CONTAINERS: [string, string][] = [
     ['home.tsx', 'projects'],
-    ['contributions.ts', 'members'],
+    ['contributions.tsx', 'members'],
     ['kanban.tsx', 'board'],
     ['review.tsx', 'list'],
     ['lobby.ts', 'roster'],
@@ -2756,7 +2774,7 @@ describe('상태 화면 (지시서 §7)', () => {
     // ⚠️ 이걸 되돌려 봤을 때 **번들 신선도 테스트만** 깨졌습니다.
     // 그건 "빌드를 안 했다" 는 뜻이고 의미 검사가 아닙니다. tsc 의
     // 미사용 import 경고도 카드가 무엇을 그리는지는 안 봅니다.
-    const card = codeOf(readFileSync(join(DEMO, 'contributions.ts'), 'utf8'));
+    const card = codeOf(demoSource('contributions') ?? '');
     strictEqual(
       /roleOf\(/.test(card),
       true,
@@ -2801,8 +2819,12 @@ describe('상태 화면 (지시서 §7)', () => {
     );
 
     // 확정 버튼도 있어야 누를 수 있습니다.
-    const html = readFileSync(join(PUBLIC, 'contributions.html'), 'utf8');
-    strictEqual(html.includes('id="confirm"'), true, '확정 버튼이 없습니다');
+    //
+    // ⚠️ **HTML 에서만 찾으면 안 됩니다.** 화면을 React 로 옮기면 그
+    // 버튼은 `.tsx` 안으로 들어가고, 요구는 하나도 안 바뀌었는데 이
+    // 검사만 터집니다 — 이번 이전에서 실제로 그랬습니다. 요구는 "누를
+    // 버튼이 있는가" 이지 "어느 파일에 적혀 있는가" 가 아닙니다.
+    strictEqual(screenHas('contributions', 'id="confirm"'), true, '확정 버튼이 없습니다');
   });
 
   it('⭐ 3단계 동의 ②③ 을 **묻고 보낸다** (docs/07 §2.3)', () => {
