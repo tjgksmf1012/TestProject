@@ -22,7 +22,7 @@
  */
 
 import { build } from 'esbuild';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -129,8 +129,75 @@ export async function bundle(
   return new Map(result.outputFiles.map((f) => [basename(f.path), f.text]));
 }
 
+/**
+ * 오프라인에 **없어도 되는** 것. 근거를 적어야 합니다.
+ *
+ * 근거 없는 면제는 다음 사람이 그냥 늘립니다 — 그러면 목록 검사가
+ * 있으나 마나가 됩니다.
+ */
+export const NOT_CACHED: Record<string, string> = {
+  'sw.js': '서비스 워커 자신. 자기를 캐시하면 새 버전으로 못 갑니다',
+};
+
+/**
+ * 서비스 워커가 미리 받아 둘 것 — **디렉터리에서 셉니다.**
+ *
+ * ## ⚠️ 왜 손으로 안 적는가
+ *
+ * 이 목록은 **두 번 어긋났습니다.** 화면·자산을 새로 만들 때마다
+ * 빠뜨렸고, 빠뜨려도 아무 데서도 티가 안 납니다 — 온라인에서는 서버가
+ * 주니까 멀쩡하고, 오프라인에서만 그 화면이 안 뜹니다. 그런데 오프라인은
+ * 개발 중에 거의 안 겪는 상태입니다.
+ *
+ * 빠져 있던 것 중에는 `/tokens.css` 도 있었습니다 — **모든 색·간격·글꼴**
+ * 이라, 그것만 없어도 오프라인에서 전 화면이 스타일 없는 흰 문서가 됩니다.
+ *
+ * 가드로 대조하는 것까지 했었는데, 그건 **어긋난 뒤에** 잡는 것입니다.
+ * 애초에 갈라지지 않게 빌드가 씁니다. 순서는 정렬해서 고정합니다 —
+ * 설치는 `Promise.all` 이라 순서가 동작을 바꾸지 않고, 정렬해 두면
+ * 빌드마다 애먼 diff 가 안 납니다.
+ *
+ * ## 확장자로 안 고릅니다
+ *
+ * 예전 목록은 "HTML·CSS·번들·manifest" 만 담고 아이콘은 **면제 목록**에
+ * 근거를 적어 빼 뒀습니다. 그런데 면제 판단이 실제로 어긋나 있었습니다 —
+ * `icon-180.png` 은 화면 열 개가 전부 가리키는데 면제였고,
+ * `icon-192.png` 만 목록에 들어 있었습니다. 아무도 못 봤습니다.
+ *
+ * 아이콘 넷을 합쳐 **24KB** 입니다. 이만한 것을 놓고 판단을 하니까
+ * 판단이 틀렸습니다. 그래서 규칙을 없앴습니다 — `public/` 에 있으면
+ * 캐시합니다. 예외는 서비스 워커 자신 하나뿐이고, 그건 자기를 캐시하면
+ * 새 버전으로 못 가기 때문입니다.
+ */
+export function shellFiles(): string[] {
+  return readdirSync(PUBLIC, { withFileTypes: true })
+    .filter((e) => e.isFile() && !e.name.startsWith('.') && !(e.name in NOT_CACHED))
+    .map((e) => `/${e.name}`)
+    .sort();
+}
+
+/** sw.js 안의 `SHELL` 배열을 지금 `public/` 에 맞게 다시 씁니다. */
+export function writeShellList(): number {
+  const path = join(PUBLIC, 'sw.js');
+  const source = readFileSync(path, 'utf8');
+  const files = shellFiles();
+  const body = files.map((url) => `  '${url}',`).join('\n');
+  const next = source.replace(
+    /(\/\* <<< 자동 생성[^*]*\*\/\n)[\s\S]*?(\n\s*\/\* >>> \*\/)/,
+    `$1${body}$2`,
+  );
+  if (next === source && !source.includes(body)) {
+    throw new Error('sw.js 에서 자동 생성 표시를 찾지 못했습니다');
+  }
+  writeFileSync(path, next);
+  return files.length;
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const entries = entryPoints();
   await build({ ...OPTIONS, entryPoints: entries, outdir: PUBLIC });
-  console.log(`${entries.length}개 화면을 빌드했습니다.`);
+  // ⚠️ **번들을 만든 뒤에** 셉니다. 먼저 세면 이번에 새로 생긴 화면의
+  // 번들이 아직 디스크에 없어서 목록에서 빠집니다.
+  const cached = writeShellList();
+  console.log(`${entries.length}개 화면을 빌드했고, 오프라인 목록 ${cached}개를 적었습니다.`);
 }

@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
-import { bundle, entryPoints } from '../../build.mts';
+import { bundle, entryPoints, shellFiles } from '../../build.mts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
@@ -2155,66 +2155,44 @@ describe('메신저 셸 (docs/19)', () => {
 
 describe('서비스 워커 캐시 목록 (docs/19 §24)', () => {
   /**
-   * 오프라인에 **없어도 되는** 것. 근거를 적어야 합니다.
+   * `sw.js` 의 **자동 생성 구간**에 적힌 것만.
    *
-   * 근거 없는 면제는 다음 사람이 그냥 늘립니다 — 그러면 이 검사는
-   * 있으나 마나가 됩니다.
+   * ⚠️ 파일 전체에서 `'/…'` 를 긁으면 `fetch` 처리기의 `'/api/'`·
+   * `'/tracks/'`·`'/offline.html'` 까지 딸려 옵니다. 실제로 딸려 왔고,
+   * 목록이 맞는데도 검사가 터졌습니다 — 규칙이 아니라 **읽는 범위**가
+   * 틀린 것이었습니다.
    */
-  const NOT_NEEDED: Record<string, string> = {
-    'icon-180.png':
-      'iOS 홈 화면 아이콘. **설치할 때** 브라우저가 가져가는 것이라 ' +
-      '앱이 도는 동안에는 안 씁니다',
-    'icon-512.png': 'manifest 가 가리키는 큰 아이콘. 설치 시점에만 씁니다',
-    'sw.js': '서비스 워커 자신. 자기를 캐시하면 새 버전으로 못 갑니다',
-  };
+  function generatedShell(): string[] {
+    const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
+    const block = /\/\* <<< 자동 생성[^*]*\*\/\n([\s\S]*?)\n\s*\/\* >>> \*\//.exec(sw);
+    strictEqual(block !== null, true, 'sw.js 에서 자동 생성 구간을 못 찾았습니다');
+    return [...(block?.[1] ?? '').matchAll(/'(\/[^']+)'/g)].map((m) => m[1] as string);
+  }
 
   it('⭐ 오프라인 목록이 `public/` 의 **실제 파일**과 어긋나지 않는다', () => {
-    // ⚠️ 이 목록은 **두 번 어긋났습니다.** 손으로 유지하는 목록이라
-    // 화면·자산을 새로 만들 때마다 빠뜨렸고, 빠뜨려도 **아무 데서도
-    // 티가 안 납니다** — 온라인에서는 서버가 주니까 멀쩡하고, 오프라인
-    // 에서만 안 뜹니다. 그런데 오프라인은 개발 중에 거의 안 겪습니다.
+    // ⚠️ 이 목록은 손으로 적던 것이었고 **두 번 어긋났습니다.** 빠뜨려도
+    // 아무 데서도 티가 안 납니다 — 온라인에서는 서버가 주니까 멀쩡하고,
+    // 오프라인에서만 안 뜹니다. 그런데 오프라인은 개발 중에 거의 안 겪습니다.
     //
-    // 이번에 빠져 있던 것: `/tokens.css`(모든 색·간격!) · `/tw.css` ·
-    // `/call.html` · `/call.js`.
-    const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
-    const listed = new Set(
-      [...sw.matchAll(/'\/([^']+)'/g)].map((m) => m[1] as string),
-    );
-
-    // 화면이 실제로 받아 가는 것: HTML · CSS · 화면 번들 · manifest.
-    const onDisk = readdirSync(PUBLIC).filter((name) =>
-      /\.(html|css|webmanifest)$/.test(name) || (name.endsWith('.js') && name !== 'sw.js'),
-    );
-
-    const missing = onDisk.filter((name) => !listed.has(name) && !(name in NOT_NEEDED));
+    // 이제 `npm run build` 가 씁니다. 그래서 이 검사도 "빠진 것/유령"
+    // 두 방향을 따로 세는 대신, **빌드가 쓸 것과 지금 적힌 것이 같은가**
+    // 하나만 봅니다. 어긋나는 유일한 경우는 빌드를 안 돌린 것입니다.
     deepStrictEqual(
-      missing,
-      [],
-      '오프라인 캐시 목록에 없습니다 — 온라인에서는 멀쩡하고 ' +
-        '**오프라인에서만** 이 화면이 안 뜹니다 (`public/sw.js` 의 `SHELL`)',
+      generatedShell(),
+      shellFiles(),
+      '오프라인 캐시 목록이 지금 `public/` 과 다릅니다 — `npm run build` 를 돌리세요',
     );
-
-    // ⚠️ **반대 방향도 봅니다.** 목록에 있는데 파일이 없으면 설치할 때
-    // 그 항목만 조용히 실패합니다 — `sw.js` 가 `catch` 로 넘기므로
-    // 콘솔 경고 한 줄이 전부이고, 아무도 안 봅니다.
-    const ghosts = [...listed].filter(
-      (name) => name.includes('.') && !existsSync(join(PUBLIC, name)),
-    );
-    deepStrictEqual(ghosts, [], '캐시 목록이 없는 파일을 가리킵니다');
-
-    // 면제 목록이 낡지 않았는가.
-    const stale = Object.keys(NOT_NEEDED).filter((name) => !existsSync(join(PUBLIC, name)));
-    deepStrictEqual(stale, [], '이제 없는 파일입니다 — 면제 목록에서 빼세요');
   });
 
   it('⭐ 이 검사가 **눈을 뜨고 있는지** 확인한다', () => {
     // "0건" 은 규칙이 지켜져서 나오기도 하고 찾는 방법이 틀려서 나오기도
     // 합니다. 목록을 실제로 읽고 있는지, 화면 파일을 실제로 세고 있는지를
     // 봅니다 — 정규식이 하나만 어긋나도 위 검사는 조용히 통과합니다.
-    const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
-    const listed = [...sw.matchAll(/'\/([^']+)'/g)].map((m) => m[1] as string);
+    const listed = generatedShell();
     strictEqual(listed.length > 10, true, `캐시 목록을 ${listed.length}개로 읽었습니다`);
-    strictEqual(listed.includes('tokens.css'), true, '`tokens.css` 를 못 읽었습니다');
+    strictEqual(listed.includes('/tokens.css'), true, '`tokens.css` 를 못 읽었습니다');
+    // 세는 쪽도 헛돌면 안 됩니다 — 빌드가 파일을 실제로 세고 있는가.
+    strictEqual(shellFiles().includes('/tokens.css'), true, '`shellFiles()` 가 헛돕니다');
 
     const screens = readdirSync(PUBLIC).filter((n) => n.endsWith('.html'));
     strictEqual(screens.length >= 9, true, `화면을 ${screens.length}개로 셌습니다`);
