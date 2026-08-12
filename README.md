@@ -103,10 +103,11 @@
 | [13. 화면 구조 (IA)](docs/13-화면-구조.md) | 화면 열 개가 어떻게 이어지는가, 각 화면의 책임, 아직 없는 화면 |
 | [15. PC 우선 방향](docs/15-PC-우선-방향.md) | **지금 방향** — 브라우저 통화로 회의, GitHub 최우선, 모바일은 보류 |
 | [18. 사용설명서](docs/18-사용설명서.md) | **처음 여는 사람용** — 실제 화면 열 개로 따라가는 안내. 되는 것과 안 되는 것 ⭐ |
-| [17. 결함 기록](docs/17-결함-기록.md) | 만들면서 찾은 조용한 결함 여든하나 — 재현 방법과 되돌림 확인 |
+| [17. 결함 기록](docs/17-결함-기록.md) | 만들면서 찾은 조용한 결함 **127건** — 재현 방법과 되돌림 확인 |
 | [14. 모바일](docs/14-모바일.md) | 왜 앱이어야 하는가, PWA + 안드로이드 셸, 폰 기준 UI/UX, 비용 근거 |
 | [16. 디자인 감사 (Stage A)](docs/16-디자인-감사-StageA.md) | 화면을 실제로 렌더해 잰 첫 감사 — 대비·간격·토큰의 근거 |
 | [19. 메신저 셸 전환](docs/19-메신저-셸-전환.md) | **디자인 결정 전부** — 셸·브리프 재적용·React 이전. 렌더해 보고 쓴 것 |
+| [20. 요구사항 대조](docs/20-요구사항-대조.md) | **「요구사항 정의서」의 요구 ID 를 지금 코드와 하나씩 대조** — 얼마나 만들어졌나에 답하는 곳 ⭐ |
 | [원본 자료](docs/원본자료/) | ChatGPT 대화 전문, 제안서 텍스트 추출본 |
 
 ---
@@ -136,7 +137,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **GitHub 웹훅 (HMAC 서명 검증)** | ✅ | `backend/teamflow/github/webhook.py` |
 | **GitHub 연결 진단** (배달이 오는지·이름 오타·팀원 계정) | ✅ | `backend/teamflow/github/connection.py` |
 | **업무 ↔ PR 연결** (확정/추정 구분·근거 표시) | ✅ | `backend/teamflow/github/linking.py` |
-| **발언 유형 분류** (8라벨·규칙 기준선·확신 하한) | ✅ | `backend/teamflow/meeting/utterance_types.py` |
+| **발언 유형 분류** (13라벨·규칙 기준선·확신 하한) | ✅ | `backend/teamflow/meeting/utterance_types.py` |
 | **회의 발화 → 기여 이벤트** | ✅ | `backend/teamflow/services/meeting_contribution_service.py` |
 | **통화 시그널링** (인증·중계 규칙·메시 상한) | 🟡 서버만, 실측 불가 | `backend/teamflow/call/` |
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |

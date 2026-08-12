@@ -2122,3 +2122,48 @@ def test_every_place_that_reads_tasks_goes_through_live():
         "`live_tasks()`·`live_task_ids()`·`not_deleted()` 중 하나를 쓰십시오. "
         "직접 조건을 적으면 다음 사람이 빠뜨립니다"
     )
+
+
+def test_the_readme_numbers_are_not_stale():
+    """⭐ README 가 손으로 적은 개수를 **다시 셉니다.**
+
+    이 저장소는 문서가 사실과 다른 곳을 열세 군데 발견했고, 그중 여럿이
+    "처음 적을 때는 맞았는데 코드가 움직인 뒤로 아무도 안 고친" 것입니다.
+    README 는 **제일 먼저 읽는 문서**라 틀리면 제일 오래 갑니다.
+
+    ⚠️ 실제로 낡아 있었습니다 — 발언 라벨을 여덟이라고 적어 뒀는데
+    열셋이었고, 결함 기록을 `여든하나` 라고 부르는데 백스물다섯이었습니다.
+
+    ⚠️ **여기서 세는 것은 기계로 확인 가능한 것뿐입니다.** "화면이
+    예쁜가" 같은 것까지 재는 척하면 이 검사가 거짓말을 하게 됩니다.
+    """
+    import re
+
+    from teamflow.db import models as models_mod
+    from teamflow.db import vocab
+
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    labels = len(vocab.UTTERANCE_LABEL)
+    assert f"{labels}라벨" in readme, (
+        f"발언 유형이 {labels}개인데 README 가 그렇게 안 적혀 있습니다"
+    )
+
+    tables = len(models_mod.Base.metadata.tables)
+    assert f"{tables}개 테이블" in readme, (
+        f"표가 {tables}개인데 README 가 그렇게 안 적혀 있습니다"
+    )
+
+    # `docs/17` 이 스스로 밝힌 건수와 README 가 부르는 이름이 맞는가.
+    defects = (REPO_ROOT / "docs" / "17-결함-기록.md").read_text(encoding="utf-8")
+    claimed = re.search(r"번호가 붙은 항목 \*\*(\d+)건\*\*", defects)
+    assert claimed is not None, "`docs/17` 머리말에서 건수를 못 찾았습니다"
+    assert f"결함 **{claimed.group(1)}건**" in readme, (
+        f"`docs/17` 은 {claimed.group(1)}건이라는데 README 가 다르게 부릅니다"
+    )
+
+    # 얼마나 만들어졌나에 답하는 문서를 README 가 가리키는가.
+    assert "docs/20-요구사항-대조.md" in readme, (
+        "`docs/20` 이 README 문서 표에 없습니다 — 얼마나 만들어졌나에 "
+        "답하는 문서인데 찾을 방법이 없습니다"
+    )
