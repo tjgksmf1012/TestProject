@@ -643,7 +643,10 @@ class Utterance(Base):
     speaker_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
     is_overlap: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # docs/10 Q9 확정 8개 라벨
+    # 발언 유형 (요구사항 정의서 §10). 값과 뜻은 `db/vocab.py` 한 곳에만
+    # 있습니다 — 여기 제약이 **아예 없던** 동안 허용값은 분류기 모듈의 튜플
+    # 하나뿐이었고, 그 목록은 요구 열 개와 1:1 이 아니었습니다.
+    # ⚠️ `None` 은 "아직 분류 안 함" 입니다. `other`(모르겠음)와 다릅니다.
     utterance_type: Mapped[str | None] = mapped_column(String(20))
     type_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
 
@@ -659,6 +662,13 @@ class Utterance(Base):
             + ",".join(f"'{v}'" for v in vocab.stored_values())
             + ")",
             name="ck_speaker_source",
+        ),
+        CheckConstraint(
+            # ⚠️ 목록을 손으로 적지 않습니다. `vocab.UTTERANCE_STORED` 가 원본입니다.
+            "utterance_type IS NULL OR utterance_type IN ("
+            + ",".join(f"'{v}'" for v in vocab.utterance_type_values())
+            + ")",
+            name="ck_utterance_type",
         ),
         Index("ix_utterances_meeting_time", "meeting_id", "start_ms"),
     )

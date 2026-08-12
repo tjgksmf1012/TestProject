@@ -266,3 +266,44 @@ def record_meeting(
         "labels": counts,
         "classifier": classifier_name,
     }
+
+
+def count_by_type(session: Session, meeting_id: int) -> dict[str, int | dict[str, int]]:
+    """이 회의의 발언을 **유형별로** 센다 (요구사항 정의서 §10 · `REVIEW-005`).
+
+    ## ⚠️ 사람별로 세지 않습니다
+
+    회의 단위 집계입니다. 사람별로 세면 그 순간 **"누가 제일 많이
+    제안했나" 표**가 만들어지고, 그건 이 저장소가 금지한 리더보드입니다
+    (`AGENTS.md` 불변식 1). 발언을 많이 한 것이 기여가 아니라는 것은
+    `docs/05` §2.2 가 원본 대화에서 가져온 경고이기도 합니다.
+
+    ## ⚠️ 대본을 주지 않습니다
+
+    `GET /api/meetings/{id}/utterances` 가 `ids` 로만 원문을 주는 이유와
+    같습니다. 여기서 세어서 **숫자만** 돌려주면 회의록 전체를 뜨지 않고도
+    "이 회의에 반대가 몇 번 있었나" 를 말할 수 있습니다.
+
+    ## ⚠️ 분류 전과 `other` 를 **섞지 않습니다**
+
+    `utterance_type` 이 `NULL` 인 것은 아직 안 잰 것이고, `other` 는 재고
+    나서 모르는 것입니다. 섞으면 "분석이 아직 안 끝났다" 가 "분석했는데
+    분류가 안 됐다" 로 보입니다 — 불변식 3(측정 불가 ≠ 0점)이 여기서
+    나타납니다.
+    """
+    labels: dict[str, int] = {}
+    unclassified = 0
+
+    for value in session.scalars(
+        select(m.Utterance.utterance_type).where(m.Utterance.meeting_id == meeting_id)
+    ).all():
+        if value is None:
+            unclassified += 1
+        else:
+            labels[value] = labels.get(value, 0) + 1
+
+    return {
+        "labels": labels,
+        "unclassified": unclassified,
+        "total": sum(labels.values()) + unclassified,
+    }

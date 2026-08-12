@@ -210,6 +210,7 @@ def _screen_vocabularies():
     from teamflow.audio.assembly import GapReason
     from teamflow.contribution.events import Category
     from teamflow.contribution.profiles import Role
+    from teamflow.db import vocab
     from teamflow.db.models import MeetingStatus
     from teamflow.meeting.approval import ApprovalError
     from teamflow.services import task_service
@@ -244,6 +245,16 @@ def _screen_vocabularies():
             {r.value for r in GapReason},
             "frontend/src/lib/track/diagram.ts",
             "REASON_TEXT",
+        ),
+        # 발언 유형 (정의서 §10). 서버가 `utterance_type` 을 코드로 보내고
+        # 화면이 옮깁니다. ⚠️ 동의·반대·보완을 가르면서 다섯이 한꺼번에
+        # 늘었는데, 한쪽만 늘리면 검토 화면에 `objection` 이라는 **영어
+        # 식별자**가 그대로 찍힙니다.
+        (
+            "발언 유형",
+            {str(t) for t in vocab.UtteranceType},
+            "frontend/src/lib/review/labels.ts",
+            "TYPE_LABEL",
         ),
         # 승인이 막힌 이유. 서버가 `failures` 로 코드만 내보내고 화면이
         # 옮긴다. 화면이 스스로도 판정하는 코드가 일곱이라 **다 있는 줄

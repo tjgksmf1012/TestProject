@@ -513,3 +513,90 @@ TASK_STATUS_LABEL: dict[TaskStatus, str] = {
 def task_status_values() -> tuple[str, ...]:
     """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
     return tuple(sorted(str(s) for s in TaskStatus))
+
+
+# ══════════════════════════════════════════════════════════════
+# utterances.utterance_type — 발언 유형 (요구사항 정의서 §10)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **같은 결함의 다섯 번째 사례입니다.** 이 열도 CHECK 제약이 **아예
+#    없었고**, 허용값은 `meeting/utterance_types.py` 의 `LABELS` 튜플
+#    하나뿐이었습니다. `speaker_source`(118) · `report_type`(119) ·
+#    `meeting_events`(122) · `tasks.status`(132) 에 이어 다섯 번째입니다.
+#
+# ⚠️ **요구 열 개와 라벨 여덟 개가 1:1 이 아니었습니다.** 동의·반대·보완이
+#    전부 `opinion` 하나로 뭉개져 있어서 `REVIEW-005`("동의 수 · 반대 의견
+#    수")를 **셀 수가 없었습니다.** 화면부터 만들었으면 0 이 뜨거나 빈 칸이
+#    생겼을 것입니다.
+
+
+class UtteranceType(StrEnum):
+    """이 발언이 무엇을 하고 있는가.
+
+    ⚠️ **라벨은 "무엇을 말했나" 이지 "얼마나 기여했나" 가 아닙니다.**
+    점수는 `contribution/scoring.py` 가 따로 정하고, 화면은 라벨로 세고
+    점수는 점수대로 씁니다. 둘을 한 축에 묶으면 "동의는 몇 점짜리인가"
+    같은 질문에 **시스템이 답하게** 됩니다.
+    """
+
+    QUESTION = "question"  # AI-SPEECH-001 질문
+    PROPOSAL = "proposal"  # AI-SPEECH-002 제안
+    ANSWER = "answer"  # AI-SPEECH-003 정보 제공·응답
+    AGREEMENT = "agreement"  # AI-SPEECH-004 동의
+    OBJECTION = "objection"  # AI-SPEECH-005 반대 의견
+    REFINEMENT = "refinement"  # AI-SPEECH-006 보완 의견
+    DECISION = "decision"  # AI-SPEECH-007 결정
+    REQUEST = "request"  # AI-SPEECH-008 업무 요청
+    COMMITMENT = "commitment"  # AI-SPEECH-009 일정 약속
+    CONFIRMATION = "confirmation"  # AI-SPEECH-010 확인 요청
+    OPINION = "opinion"  # 어느 쪽도 아닌 의견 — 아래 설명
+    SOCIAL = "social"  # 맞장구·잡담 → 0점
+    OTHER = "other"  # 모르는 것 → 0점
+
+
+#: `utterances.utterance_type` 이 받는 값 전부.
+UTTERANCE_STORED: frozenset[UtteranceType] = frozenset(UtteranceType)
+
+#: 기여도에 **값을 더하지 않는** 라벨.
+#:
+#: ⚠️ 여기 떨어져도 발언은 회의록에 그대로 남습니다. 0점은 "말을 안 했다"
+#: 가 아니라 "이 발언은 점수 계산에 넣지 않는다" 입니다 — 불변식 3
+#: (측정 불가 ≠ 0점)과 헷갈리면 안 되는 자리입니다.
+UTTERANCE_ZERO_SCORE: frozenset[UtteranceType] = frozenset(
+    {UtteranceType.SOCIAL, UtteranceType.OTHER}
+)
+
+#: 찬반·보완 — `REVIEW-005` 가 세는 것.
+#:
+#: ⚠️ `OPINION` 은 여기 **없습니다.** 어느 쪽도 아닌 의견이라 "동의 수" 에도
+#: "반대 수" 에도 넣을 수 없습니다. 넣으면 둘 다 부풀고, 어느 쪽에 넣을지
+#: 고르는 순간 **시스템이 사람의 입장을 정하는** 것이 됩니다.
+UTTERANCE_STANCE: frozenset[UtteranceType] = frozenset(
+    {UtteranceType.AGREEMENT, UtteranceType.OBJECTION, UtteranceType.REFINEMENT}
+)
+
+#: 사람이 읽을 이름.
+#:
+#: ⚠️ **화면의 `lib/review/labels.ts` 와 짝입니다.** 두 벌이지만 런타임이
+#: 달라 어쩔 수 없고, `test_repo_integrity.py` 의 교차 검사가 갈라지면
+#: 터집니다 (`TASK_STATUS_LABEL` 과 같은 방식).
+UTTERANCE_LABEL: dict[UtteranceType, str] = {
+    UtteranceType.QUESTION: "질문",
+    UtteranceType.PROPOSAL: "제안",
+    UtteranceType.ANSWER: "정보 제공",
+    UtteranceType.AGREEMENT: "동의",
+    UtteranceType.OBJECTION: "반대 의견",
+    UtteranceType.REFINEMENT: "보완 의견",
+    UtteranceType.DECISION: "결정",
+    UtteranceType.REQUEST: "업무 요청",
+    UtteranceType.COMMITMENT: "일정 약속",
+    UtteranceType.CONFIRMATION: "확인 요청",
+    UtteranceType.OPINION: "의견",
+    UtteranceType.SOCIAL: "맞장구",
+    UtteranceType.OTHER: "기타",
+}
+
+
+def utterance_type_values() -> tuple[str, ...]:
+    """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
+    return tuple(sorted(str(t) for t in UTTERANCE_STORED))

@@ -83,23 +83,26 @@ def test_the_tables_we_call_present_are_actually_present():
 # ══════════════════════════════════════════════════════════════
 
 
-def test_the_speech_label_count_the_doc_claims_matches_the_code():
-    """§10 — "라벨 8개 ↔ 요구 10개" 라고 적었습니다.
+def test_the_doc_no_longer_says_the_labels_are_short_of_the_spec():
+    """§10 — 문서가 **낡은 불평을 계속 하고 있지 않은가.**
 
-    ⚠️ 라벨을 갈라 놓고 문서를 안 고치면, `REVIEW-005`(동의 수·반대 의견
-    수)가 **여전히 못 만든다고** 적혀 있게 됩니다.
+    ⚠️ 이 검사는 방향이 뒤집힌 것입니다. 예전에는 "라벨 8개 ↔ 요구 10개"
+    라는 문구가 문서에 **있는지**를 지켰습니다(어긋남을 잊지 않으려고).
+    이제 갈랐으니, 그 문구가 **남아 있으면** 안 됩니다 — 남아 있으면
+    문서가 이미 고친 것을 아직 못 했다고 말합니다.
+
+    ⚠️ 갈랐다고 `REVIEW-005` 가 저절로 되는 건 아닙니다. 셀 수 있게 됐을
+    뿐이고 **세는 화면**은 따로 만들어야 합니다.
     """
     from teamflow.meeting import utterance_types
 
-    actual = len(utterance_types.LABELS)
-    assert actual == 8, (
-        f"발언 유형 라벨이 {actual}개가 됐습니다 — `docs/20` §10 표와 §1 요약을 "
-        "고치고, `REVIEW-005` 상태도 다시 보십시오 (동의/반대를 셀 수 있게 "
-        "됐을 수 있습니다)"
-    )
-    assert "라벨 8개 ↔ 요구 10개" in _doc(), (
-        "문서에서 라벨 개수를 적은 자리를 못 찾았습니다 — 문구가 바뀌었으면 "
-        "이 검사도 같이 고치십시오"
+    covered = {"agreement", "objection", "refinement", "request", "confirmation"}
+    missing = covered - set(utterance_types.LABELS)
+    assert missing == set(), f"§10 이 요구하는 라벨이 아직 없습니다: {sorted(missing)}"
+
+    assert "라벨 8개 ↔ 요구 10개" not in _doc(), (
+        "`docs/20` 이 아직 '라벨 8개 ↔ 요구 10개' 라고 말합니다 — 갈랐으니 "
+        "§10 표와 §1 요약을 고치십시오"
     )
 
 

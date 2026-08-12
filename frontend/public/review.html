@@ -62,6 +62,21 @@
       /* ⚠️ **줄마다 가로선을 긋지 않습니다** (브리프 §7). 안건 셋에 선이
          셋이면 화면을 가로지르는 줄이 셋 생기고, 그 선들이 카드 목록의
          테두리와 경쟁합니다. 나누는 일은 여백이 합니다. */
+      /* 발언 유형 (정의서 §10 · REVIEW-005).
+         ⚠️ **막대를 그리지 않습니다.** 값을 같은 축 위에 세로로 늘어놓으면
+         그게 곧 순위표입니다(AGENTS.md 불변식 1 — 두 번 어긴 규칙).
+         값은 글자로 적고, 가로로 흘려서 크기 비교가 안 되게 둡니다. */
+      .types { margin: var(--sp-5) 0; }
+      .stance { font-size: var(--fs-label); color: var(--text); margin: 0 0 var(--sp-2); }
+      .tlist { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap;
+               gap: var(--sp-2) var(--sp-5); font-size: var(--fs-label); }
+      .tlist li { display: flex; gap: var(--sp-1); align-items: baseline; }
+      .tname { color: var(--text-muted); }
+      .tnum { color: var(--text); font-weight: 600; }
+      /* 0점짜리는 흐리게. ⚠️ 빨강이 아닙니다 — 빨강은 "네가 뭘 잘못했다"
+         로 읽히는데, 맞장구는 잘못이 아니라 그냥 안 세는 것입니다. */
+      .tzero .tname, .tzero .tnum { color: var(--text-subtle); font-weight: 400; }
+
       #agenda, #issues { list-style: none; padding: 0; margin: 0;
                          font-size: var(--fs-label); color: var(--text-muted); }
       #agenda li, #issues li { display: flex; gap: var(--sp-2); align-items: baseline;

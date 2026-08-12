@@ -16,7 +16,7 @@ from teamflow.contribution.profiles import (
     blended_profile,
     clean_role_shares,
 )
-from teamflow.contribution.scoring import score_team
+from teamflow.contribution.scoring import event_points, score_team
 
 from .conftest import Ids, deadline, task_done, utterance
 
@@ -429,3 +429,78 @@ def test_an_empty_choice_is_refused():
     for bad in (None, {}, {"developer": 0.0}):
         with pytest.raises(ValueError):
             clean_role_shares(bad)
+
+
+# ══════════════════════════════════════════════════════════════
+# ⭐ 찬반은 값이 같다 (요구사항 정의서 §10)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_taking_a_side_costs_nothing():
+    """⭐ **동의·반대·보완·의견은 점수가 똑같습니다.**
+
+    요구사항 §10 이 동의(`004`)·반대(`005`)·보완(`006`)을 따로 세라고 해서
+    라벨을 갈랐습니다. 가른 것은 **세기 위해서**지 값을 매기기 위해서가
+    아닙니다.
+
+    ⚠️ 반대에 더 주면 어깃장이 이득이 되고, 동의에 더 주면 반대가 손해가
+    됩니다. 둘 다 회의를 망가뜨리고, 어느 쪽이 더 값진가는 **시스템이
+    정할 일이 아닙니다** (`AGENTS.md` 불변식 4 — 시스템은 판정하지 않음).
+
+    ⚠️ 팀이 다르게 보면 가중치를 조정하고 **그 이유를 함께 남깁니다.**
+    코드에 몰래 박아 두는 것과는 다릅니다.
+
+    ⚠️ `share` 가 아니라 `event_points` 를 봅니다 — 한 사람만 있으면
+    비중은 언제나 100%%라 **무슨 값을 넣어도 통과합니다.**
+    """
+    ids = Ids()
+    scores = {
+        kind.value: event_points(utterance(1, kind, ids.next()))
+        for kind in (
+            EventType.UTT_AGREEMENT,
+            EventType.UTT_OBJECTION,
+            EventType.UTT_REFINEMENT,
+            EventType.UTT_OPINION,
+        )
+    }
+
+    assert len(set(scores.values())) == 1, (
+        f"찬반·보완의 점수가 갈렸습니다: {scores}. 어느 쪽 편을 들지는 "
+        "시스템이 정할 일이 아닙니다 — `scoring.py` 의 그 문단을 읽으십시오"
+    )
+    assert set(scores.values()) != {0.0}, "넷 다 0점이면 의견이 통째로 안 세어집니다"
+
+
+def test_asking_someone_else_to_work_is_not_worth_more_than_asking_a_question():
+    """업무 요청(`008`)·확인 요청(`010`)은 질문과 같은 값입니다.
+
+    ⚠️ 더 주면 **일을 시키는 것이 하는 것보다 남는 장사**가 됩니다.
+    """
+    ids = Ids()
+    baseline = event_points(utterance(1, EventType.UTT_QUESTION, ids.next()))
+
+    for kind in (EventType.UTT_REQUEST, EventType.UTT_CONFIRMATION):
+        got = event_points(utterance(1, kind, ids.next()))
+        assert got == baseline, f"{kind.value} 이 질문({baseline})과 다릅니다: {got}"
+
+
+def test_every_utterance_label_has_a_weight():
+    """⭐ 라벨을 늘려 놓고 `scoring.py` 에 자리를 안 만들면 **조용히 0점**이 된다.
+
+    `event_points` 는 아는 `EventType` 이 없으면 마지막에 0.0 을 돌려줍니다.
+    그래서 새 라벨은 오류 없이 **없는 것처럼** 굴고, 그게 이 저장소의 대표
+    실패 ①(만들어 놓고 아무도 안 부름)입니다.
+
+    ⚠️ 0점이어야 하는 둘(`social`·`other`)은 빼고 봅니다.
+    """
+    from teamflow.db import vocab
+
+    for label in vocab.UtteranceType:
+        if label in vocab.UTTERANCE_ZERO_SCORE:
+            continue
+        kind = EventType(f"utt_{label}")
+        points = event_points(utterance(1, kind, Ids().next()))
+        assert points > 0.0, (
+            f"`{kind.value}` 의 점수가 0 입니다 — `scoring.py` 의 "
+            "`event_points` 에 자리를 만드십시오"
+        )

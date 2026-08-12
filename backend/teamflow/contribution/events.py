@@ -44,14 +44,21 @@ class EventType(StrEnum):
     BLOCKER_RESOLVED = "blocker_resolved"
 
     # ── meeting ───────────────────────────────────────────
-    # 발언 유형은 docs/10-열린-질문.md Q9의 확정 8개 라벨을 따른다
+    # 발언 유형은 `db/vocab.py` 의 `UtteranceType` 과 **이름이 짝**입니다
+    # (`_event_type_for` 가 `utt_ + 라벨` 로 만듭니다). 한쪽만 늘리면
+    # `EventType(...)` 이 `ValueError` 로 터지고, 그것을 테스트가 잽니다.
     MEETING_ATTENDED = "meeting_attended"
     UTT_QUESTION = "utt_question"
     UTT_ANSWER = "utt_answer"
     UTT_PROPOSAL = "utt_proposal"
-    UTT_OPINION = "utt_opinion"
+    UTT_AGREEMENT = "utt_agreement"  # 동의 (AI-SPEECH-004)
+    UTT_OBJECTION = "utt_objection"  # 반대 의견 (AI-SPEECH-005)
+    UTT_REFINEMENT = "utt_refinement"  # 보완 의견 (AI-SPEECH-006)
+    UTT_OPINION = "utt_opinion"  # 어느 쪽도 아닌 의견
     UTT_DECISION = "utt_decision"
+    UTT_REQUEST = "utt_request"  # 업무 요청 (AI-SPEECH-008)
     UTT_COMMITMENT = "utt_commitment"
+    UTT_CONFIRMATION = "utt_confirmation"  # 확인 요청 (AI-SPEECH-010)
     UTT_SOCIAL = "utt_social"  # 맞장구·농담·잡담 → 0점
     UTT_OTHER = "utt_other"  # 기타·미완성 발언 → 0점
 
@@ -77,9 +84,14 @@ CATEGORY_OF: dict[EventType, Category] = {
     EventType.UTT_QUESTION: Category.MEETING,
     EventType.UTT_ANSWER: Category.MEETING,
     EventType.UTT_PROPOSAL: Category.MEETING,
+    EventType.UTT_AGREEMENT: Category.MEETING,
+    EventType.UTT_OBJECTION: Category.MEETING,
+    EventType.UTT_REFINEMENT: Category.MEETING,
     EventType.UTT_OPINION: Category.MEETING,
     EventType.UTT_DECISION: Category.MEETING,
+    EventType.UTT_REQUEST: Category.MEETING,
     EventType.UTT_COMMITMENT: Category.MEETING,
+    EventType.UTT_CONFIRMATION: Category.MEETING,
     EventType.UTT_SOCIAL: Category.MEETING,
     EventType.UTT_OTHER: Category.MEETING,
     EventType.DOCUMENT_REVISED: Category.DOCUMENT,

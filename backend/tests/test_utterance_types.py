@@ -40,22 +40,54 @@ def label_of(text: str) -> str:
 # ══════════════════════════════════════════════════════════════
 
 
-def test_the_labels_are_the_eight_that_docs_10_settled_on():
-    """제안서의 15개를 8개로 병합한 것입니다 (docs/10 Q9).
+#: 요구사항 정의서 §10 이 요구하는 열 가지 ↔ 라벨.
+#:
+#: ⚠️ **예전에는 이게 1:1 이 아니었습니다.** 동의·반대·보완이 전부
+#: `opinion` 하나였고 업무 요청·확인 요청은 아예 없었습니다. 그래서
+#: `REVIEW-005`("동의 수 · 반대 의견 수")를 셀 수가 없었습니다.
+SPEC_TO_LABEL = {
+    "AI-SPEECH-001 질문": "question",
+    "AI-SPEECH-002 제안": "proposal",
+    "AI-SPEECH-003 정보 제공": "answer",
+    "AI-SPEECH-004 동의": "agreement",
+    "AI-SPEECH-005 반대 의견": "objection",
+    "AI-SPEECH-006 보완 의견": "refinement",
+    "AI-SPEECH-007 결정": "decision",
+    "AI-SPEECH-008 업무 요청": "request",
+    "AI-SPEECH-009 일정 약속": "commitment",
+    "AI-SPEECH-010 확인 요청": "confirmation",
+}
 
-    여기가 늘어나면 `scoring.py` 의 `EventType` 과 어긋나고, 어긋난 라벨은
-    **점수 계산에서 조용히 빠집니다.**
+
+def test_every_speech_type_the_spec_asks_for_has_its_own_label():
+    """⭐ 요구 열 가지가 **각각 제 라벨**을 가지는가.
+
+    ⚠️ 이 검사는 방향이 뒤집힌 것입니다. 예전에는 "라벨은 여덟" 을 지켰고,
+    그 여덟이 요구 열 개와 1:1 이 아니라는 사실은 아무것도 안 잡고
+    있었습니다 — 문서에만 적혀 있었습니다.
+
+    ⚠️ **둘이 같은 라벨을 쓰면 안 됩니다.** 동의와 반대가 같은 라벨이면
+    회의 리뷰가 "동의 5 · 반대 5" 대신 "의견 10" 만 말할 수 있습니다.
     """
-    assert set(LABELS) == {
-        "question",
-        "answer",
-        "proposal",
-        "opinion",
-        "decision",
-        "commitment",
-        "social",
-        "other",
-    }
+    for requirement, label in SPEC_TO_LABEL.items():
+        assert label in LABELS, f"{requirement} 에 해당하는 라벨 `{label}` 이 없습니다"
+
+    distinct = set(SPEC_TO_LABEL.values())
+    assert len(distinct) == len(SPEC_TO_LABEL), (
+        "요구 둘 이상이 같은 라벨을 씁니다 — 그러면 따로 셀 수 없습니다: "
+        f"{sorted(distinct)}"
+    )
+
+
+def test_the_leftover_labels_are_only_the_three_the_spec_does_not_name():
+    """요구에 없는 라벨은 셋뿐입니다 — 그리고 **지우면 안 됩니다.**
+
+    · `opinion` — 어느 쪽도 아닌 의견. 요구가 열 개라고 이걸 지우면
+      지금 1.0 으로 세어지던 의견이 `other`(0점)로 떨어집니다
+    · `social`·`other` — 0점. `social` 은 `mostly_social_utterances`
+      탐지의 **분모**라 없애면 "네" 만 백 번 한 사람이 탐지를 피해 갑니다
+    """
+    assert set(LABELS) - set(SPEC_TO_LABEL.values()) == {"opinion", "social", "other"}
 
 
 def test_every_label_maps_to_a_contribution_event_type():

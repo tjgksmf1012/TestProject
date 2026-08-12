@@ -57,6 +57,7 @@ from teamflow.services import (
     calendar_service,
     channel_service,
     github_connection_service,
+    meeting_contribution_service,
     message_service,
     notification_service,
     progress_service,
@@ -2247,6 +2248,42 @@ def list_utterances(
         )
         for r in rows
     ]
+
+
+class UtteranceTypeCounts(BaseModel):
+    """유형별 건수. **원문은 안 나갑니다.**"""
+
+    labels: dict[str, int]
+    #: 아직 분류하지 않은 발화 수. ⚠️ `labels["other"]` 와 **다릅니다** —
+    #: 앞은 아직 안 잰 것이고 뒤는 재고 나서 모르는 것입니다.
+    unclassified: int
+    total: int
+
+
+@app.get(
+    "/api/meetings/{meeting_id}/utterance-types", response_model=UtteranceTypeCounts
+)
+def count_utterance_types(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> UtteranceTypeCounts:
+    """이 회의의 발언을 유형별로 센다 (요구사항 정의서 §10 · `REVIEW-005`).
+
+    ## ⚠️ 사람별 건수를 주지 않습니다
+
+    회의 단위 집계만 나갑니다. 사람별로 나가면 화면이 그것으로
+    **"누가 제일 많이 제안했나" 표**를 만들 수 있고, 그건 이 저장소가
+    금지한 리더보드입니다 (`AGENTS.md` 불변식 1). 서버가 안 주면 화면이
+    못 만듭니다 — 화면 코드에는 자동 테스트가 없으므로 **막는 자리는
+    여기**입니다.
+
+    ## ⚠️ 대본을 대신하지 않습니다
+
+    숫자만 나갑니다. 위 `list_utterances` 가 `ids` 로만 원문을 주는 것과
+    같은 이유이고, 이 엔드포인트로 회의록을 재구성할 수 없습니다.
+    """
+    _load_meeting_for(session, meeting_id, user)
+    counted = meeting_contribution_service.count_by_type(session, meeting_id)
+    return UtteranceTypeCounts(**counted)
 
 
 @app.get("/api/meetings/{meeting_id}/candidates", response_model=list[CandidateOut])

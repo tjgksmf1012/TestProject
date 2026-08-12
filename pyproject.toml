@@ -82,5 +82,6 @@ ignore = [
 "backend/tests/test_notifications.py" = ["F811"]
 "backend/tests/test_activity_api.py" = ["F811"]
 "backend/tests/test_search_api.py" = ["F811"]
+"backend/tests/test_utterance_type_counts.py" = ["F811"]
 "backend/tests/test_task_pr_link.py" = ["F811"]
 "backend/tests/test_call_api.py" = ["F811"]

@@ -55,6 +55,7 @@ import {
   issueViews,
   type UnresolvedIssue,
 } from '../lib/review/minutes.ts';
+import { pendingNote, typeCounts, type TypeCount } from '../lib/review/labels.ts';
 import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { mountEvidence, openEvidence } from './evidence.tsx';
 import { renderNav } from './nav.ts';
@@ -392,8 +393,65 @@ function emptyReviewState(status: string): EmptyState {
 // 화면
 // ══════════════════════════════════════════════════════════════
 
+interface TypeTally {
+  labels: Record<string, number>;
+  unclassified: number;
+  total: number;
+}
+
+/**
+ * 이 회의에서 무슨 말이 오갔나 (요구사항 정의서 §10 · `REVIEW-005`).
+ *
+ * ## ⚠️ 사람 이름이 여기 없습니다
+ *
+ * 회의 단위로만 셉니다. 사람별로 세면 그 순간 "누가 제일 많이 제안했나"
+ * 표가 되고, 그건 이 저장소가 금지한 리더보드입니다. 서버도 사람별
+ * 건수를 **안 줍니다** — 막는 자리를 화면이 아니라 API 에 뒀습니다.
+ *
+ * ## ⚠️ 막대를 안 그립니다
+ *
+ * 값을 같은 축 위에 세로로 늘어놓으면 그게 곧 순위표입니다
+ * (`AGENTS.md` 불변식 1 — 이 저장소가 두 번 어긴 규칙). **값은 글자로**
+ * 적습니다.
+ */
+function SpeechTypes({ counts }: { counts: TypeTally | null }) {
+  if (counts === null) return null;
+
+  const rows: TypeCount[] = typeCounts(counts.labels);
+  const pending = pendingNote(counts.unclassified, counts.total);
+
+  // 아무 말도 안 오간 회의는 표를 그리지 않습니다 — 0 열세 줄은 소음입니다.
+  if (counts.total === 0) return null;
+
+  const spoken = rows.filter((row) => row.count > 0);
+
+  return (
+    <section className="types">
+      <h2 className="minutes-head">무슨 말이 오갔나</h2>
+      {/* ⚠️ 안 잰 것을 0 옆에 두지 않습니다 — 위에 따로 적습니다. */}
+      {pending !== null && <p className="text-gap text-[12px]">{pending}</p>}
+      <ul className="tlist">
+        {spoken.map((row) => (
+          <li key={row.type} className={row.zero ? 'tzero' : undefined}>
+            <span className="tname">{row.label}</span>
+            <span className="tnum tabular-nums">{row.count}</span>
+          </li>
+        ))}
+      </ul>
+      {/* ⚠️ 0건인 유형을 통째로 숨기면 "반대가 없었다" 가 안 보입니다.
+          줄로 세우면 시끄러우니 한 줄로 적습니다. */}
+      {spoken.length < rows.length && (
+        <p className="text-text-subtle text-[12px]">
+          없던 것 — {rows.filter((r) => r.count === 0).map((r) => r.label).join(' · ')}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Review() {
   const [screen, setScreen] = useState<Screen>({ k: 'loading' });
+  const [types, setTypes] = useState<TypeTally | null>(null);
   const [drafts, setDrafts] = useState<Map<number, Draft>>(new Map());
   const [lane, setLane] = useState<Lane | 'all'>('all');
   const [me, setMe] = useState<Me | null>(null);
@@ -411,11 +469,15 @@ function Review() {
     //
     // 끄는 것은 `whileLoading` 의 `finally` 가 책임집니다. 성공이든
     // 실패든 켠 것은 반드시 꺼집니다.
-    const [c, m, g] = await whileLoading(
+    const [c, m, g, t] = await whileLoading(
       Promise.all([
         get(`/api/meetings/${meetingId}/candidates`),
         get(`/api/meetings/${meetingId}/members`),
         get(`/api/meetings/${meetingId}`),
+        // ⚠️ 이것 하나가 실패해도 화면 전체를 못 쓰게 만들지 않습니다 —
+        //    후보 검토는 유형 집계 없이도 할 수 있습니다. 아래에서 `ok`
+        //    일 때만 씁니다.
+        get(`/api/meetings/${meetingId}/utterance-types`),
       ]),
       () => setSlow(true),
       () => setSlow(false),
@@ -433,6 +495,8 @@ function Review() {
       setScreen({ k: 'error' });
       return;
     }
+    setTypes(t !== null && t.ok ? ((await t.json()) as TypeTally) : null);
+
     const members = (await m.json()) as Member[];
     setScreen({
       k: 'ok',
@@ -574,6 +638,7 @@ function Review() {
     <>
       {header}
       <Brief meeting={meeting} />
+      <SpeechTypes counts={types} />
 
       {candidates.length === 0 ? (
         <RawHtml html={emptyHtml(emptyReviewState(meeting.status))} />
