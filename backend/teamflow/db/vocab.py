@@ -225,3 +225,70 @@ CARRIES_CONTRIBUTION: frozenset[ReportType] = frozenset(
 def report_values() -> tuple[str, ...]:
     """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
     return tuple(sorted(str(r) for r in ReportType))
+
+
+# ══════════════════════════════════════════════════════════════
+# meeting_events.event_type — 회의 분석이 찾아낸 것
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **같은 결함의 세 번째 사례입니다.** `speaker_source` 는 값이 갈라져
+#    있었고, `report_type` 은 주석 한 줄뿐이었으며, 이 열은 **둘 다**
+#    입니다 — 주석이 다섯 값을 선언하는데 CHECK 제약은 없고, 그중
+#    **실제로 만들어지는 것은 하나**뿐입니다.
+#
+#        # repeated_discussion | unanswered_question | incomplete_task |
+#        # topic_drift | decision_conflict
+#
+#    나머지 넷을 만드는 프로덕션 코드가 0곳입니다. 그런데 주석은 다섯을
+#    다 말하고 있으니, 읽는 사람은 "탐지기가 다섯 개 있다" 고 믿습니다.
+#    요구사항 정의서 §12(AI-REVIEW-001·003·004·006)가 그 넷이고, 그래서
+#    이 표의 주석이 **요구가 이미 구현된 것처럼** 보이게 만들고 있었습니다.
+
+
+class MeetingEventType(StrEnum):
+    """회의에서 찾아낸 문제 구간 (요구사항 정의서 §12).
+
+    ⚠️ 새 값을 넣으면 아래 `EVENT_PRODUCED` / `EVENT_NOT_PRODUCED_YET`
+    양쪽에서 자리를 정하기 전까지 테스트가 터집니다.
+    """
+
+    REPEATED_DISCUSSION = "repeated_discussion"  # AI-REVIEW-001 반복 논의
+    UNANSWERED_QUESTION = "unanswered_question"  # AI-REVIEW-005 미응답 질문
+    INCOMPLETE_TASK = "incomplete_task"  # AI-REVIEW-004 미완성 업무
+    TOPIC_DRIFT = "topic_drift"  # AI-REVIEW-003 주제 이탈
+    DECISION_CONFLICT = "decision_conflict"  # AI-REVIEW-006 결정 번복
+
+
+#: 지금 **실제로 만들어지는** 값. 만드는 곳은 `tasks/meeting_tasks.py`.
+EVENT_PRODUCED: frozenset[MeetingEventType] = frozenset(
+    {MeetingEventType.UNANSWERED_QUESTION}
+)
+
+#: 아직 **탐지기가 없는** 값과 그 사실.
+#:
+#: ⚠️ 이 집합이 비어 있지 않다는 것 자체가 "요구사항 §12 가 아직 다 안
+#: 됐다" 는 뜻입니다. `docs/20` 의 대조표가 이 집합을 그대로 읽습니다 —
+#: 문서에 숫자를 손으로 적어 두면 구현이 늘어도 문서는 그대로 낡습니다.
+#:
+#: ⚠️ 여기 있는 값을 화면이 **미리 다루는 척하면 안 됩니다.** 안 나오는
+#: 값에 라벨을 붙여 두면 "이미 되는 기능" 으로 읽힙니다.
+EVENT_NOT_PRODUCED_YET: frozenset[MeetingEventType] = frozenset(
+    {
+        MeetingEventType.REPEATED_DISCUSSION,
+        MeetingEventType.INCOMPLETE_TASK,
+        MeetingEventType.TOPIC_DRIFT,
+        MeetingEventType.DECISION_CONFLICT,
+    }
+)
+
+
+def event_values() -> tuple[str, ...]:
+    """CHECK 제약에 쓸 문자열들.
+
+    ⚠️ **`EVENT_PRODUCED` 가 아니라 전부**입니다. `speaker_source` 와 다른
+    점인데, 저쪽은 못 만드는 값을 DB 가 거절해야 앞단이 없다는 사실이
+    드러나지만 이쪽은 탐지기가 붙는 즉시 값이 들어옵니다 — 그때 마이그
+    레이션을 또 하게 만들 이유가 없습니다. 대신 "아직 안 나온다" 는 사실은
+    위 두 집합과 테스트가 지킵니다.
+    """
+    return tuple(sorted(str(e) for e in MeetingEventType))

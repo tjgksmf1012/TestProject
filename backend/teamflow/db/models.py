@@ -576,8 +576,12 @@ class MeetingEvent(Base):
 
     id: Mapped[int] = _pk()
     meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id"), nullable=False)
-    # repeated_discussion | unanswered_question | incomplete_task |
-    # topic_drift | decision_conflict
+    # 값과 뜻은 `db/vocab.py` 한 곳에만 있습니다 — 아래 CHECK 제약이 거기서
+    # 끌어다 씁니다.
+    #
+    # ⚠️ 예전에는 여기 주석이 다섯 값을 늘어놓는 것이 전부였고, 그중
+    # **넷은 만드는 코드가 0곳**이었습니다. 읽는 사람은 탐지기가 다섯 개
+    # 있다고 믿게 됩니다 — `vocab.EVENT_NOT_PRODUCED_YET` 을 보십시오.
     event_type: Mapped[str] = mapped_column(String(40), nullable=False)
     severity: Mapped[str] = mapped_column(String(10), nullable=False, default="info")
     start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -586,6 +590,17 @@ class MeetingEvent(Base):
         BigIntArray, nullable=False
     )
     detail: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+
+    __table_args__ = (
+        CheckConstraint(
+            # ⚠️ 목록을 손으로 적지 않습니다 — `vocab.MeetingEventType` 이 원본.
+            "event_type IN ("
+            + ",".join(f"'{v}'" for v in vocab.event_values())
+            + ")",
+            name="ck_meeting_event_type",
+        ),
+        CheckConstraint("end_ms >= start_ms", name="ck_meeting_event_span"),
+    )
 
 
 # ══════════════════════════════════════════════════════════════

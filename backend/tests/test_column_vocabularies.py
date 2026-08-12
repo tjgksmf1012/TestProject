@@ -394,3 +394,84 @@ def test_regenerating_a_report_cannot_stack():
     assert m.Report.__table__.c.scope_key.nullable is False, (
         "`scope_key` 가 널을 받으면 유일 제약이 최종 보고서를 못 막습니다"
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 6. meeting_events.event_type — 주석뿐이었고, **넷은 만들지도 않던** 쪽
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 같은 결함의 **세 번째 사례**입니다. `speaker_source` 는 값이 갈라져
+#    있었고, `report_type` 은 주석 한 줄이 전부였으며, 이 열은 **둘 다**
+#    였습니다 — 제약이 없고, 주석이 선언한 다섯 중 넷은 만드는 코드가
+#    0곳입니다.
+#
+#    그 넷이 요구사항 정의서 §12 의 AI-REVIEW-001·003·004·006 이라,
+#    이 주석이 **요구가 이미 구현된 것처럼** 보이게 만들고 있었습니다.
+
+
+def test_every_event_type_says_whether_anything_produces_it():
+    """새 값을 넣으면 **탐지기가 있는지 없는지 반드시 적게** 합니다.
+
+    안 적으면 그 값은 어느 쪽도 아닌 채로 떠 있게 되고, 그게 바로
+    `repeated_discussion` 을 비롯한 넷이 오래 있던 상태입니다.
+    """
+    everything = set(vocab.MeetingEventType)
+    classified = vocab.EVENT_PRODUCED | vocab.EVENT_NOT_PRODUCED_YET
+
+    missing = everything - classified
+    assert not missing, (
+        "탐지기가 있는지 안 적힌 이벤트 종류입니다 — `db/vocab.py` 의 "
+        f"EVENT_PRODUCED 나 EVENT_NOT_PRODUCED_YET 에 넣으십시오: {sorted(missing)}"
+    )
+    both = vocab.EVENT_PRODUCED & vocab.EVENT_NOT_PRODUCED_YET
+    assert not both, f"양쪽에 다 들어 있습니다: {sorted(both)}"
+
+
+def test_what_we_claim_to_produce_is_actually_produced():
+    """⭐ **"만들어진다" 고 적은 값은 진짜 만드는 코드가 있어야 합니다.**
+
+    이게 이 파일에서 제일 중요한 검사입니다. 반대 방향(만든다고 적었는데
+    코드가 없음)이 바로 이 저장소의 대표 실패 ① 이고, 그 상태가 오래
+    들키지 않았던 이유는 **아무도 대조해 보지 않았기** 때문입니다.
+    """
+    produced_in_code: set[str] = set()
+    for path in (REPO_ROOT / "backend" / "teamflow").rglob("*.py"):
+        if path.name == "vocab.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for value in vocab.MeetingEventType:
+            if f'"{value}"' in text or f"'{value}'" in text:
+                produced_in_code.add(str(value))
+
+    claimed = {str(v) for v in vocab.EVENT_PRODUCED}
+    missing = claimed - produced_in_code
+    assert not missing, (
+        f"만들어진다고 적혀 있는데 코드에 없습니다: {sorted(missing)} — "
+        "탐지기를 지웠다면 EVENT_NOT_PRODUCED_YET 으로 옮기십시오"
+    )
+
+    surprise = produced_in_code - claimed
+    assert not surprise, (
+        f"탐지기가 생겼는데 아직 EVENT_NOT_PRODUCED_YET 에 있습니다: {sorted(surprise)} — "
+        "`db/vocab.py` 에서 EVENT_PRODUCED 로 옮기십시오. 옮기지 않으면 "
+        "`docs/20` 대조표가 계속 '미구현' 이라고 말합니다"
+    )
+
+
+def test_the_meeting_event_model_constraint_is_built_from_the_vocabulary():
+    declared = _model_constraint(
+        m.MeetingEvent.__table__, "ck_meeting_event_type", "event_type"
+    )
+    expected = {str(e) for e in vocab.MeetingEventType}
+    assert declared == expected, (
+        f"모델 제약 {sorted(declared)} 가 vocab {sorted(expected)} 와 다릅니다"
+    )
+
+
+def test_the_meeting_event_migration_matches_too():
+    newest, declared = _newest_migration_values("ck_meeting_event_type", "event_type")
+    expected = {str(e) for e in vocab.MeetingEventType}
+    assert declared == expected, (
+        f"`{newest.name}` 의 제약은 {sorted(declared)} 인데 vocab 은 "
+        f"{sorted(expected)} 입니다 — 새 마이그레이션이 필요합니다."
+    )

@@ -18,6 +18,7 @@ from teamflow.audio.multitrack import (
     estimate_offsets,
     frame_rms,
     gcc_phat,
+    speaking_ratios,
     suppress_crosstalk,
     to_db,
     track_stats,
@@ -671,3 +672,75 @@ def test_noise_floor_of_all_silence_is_the_floor():
 
     assert estimate_noise_floor_db(np.full(50, DB_FLOOR)) == DB_FLOOR
     assert estimate_noise_floor_db(np.zeros(0)) == DB_FLOOR
+
+
+# ══════════════════════════════════════════════════════════════
+# 7. 발언 비중 (AI-AUDIO-005) — ⚠️ 0.0 을 돌려주던 자리
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 여기 `TrackStats.speaking_ratio` 라는 property 가 있었고 **언제나
+#    `0.0`** 을 돌려줬습니다(결함 121). 부르는 곳은 0곳이었습니다.
+#    비중에는 분모(팀 전체 발언 시간)가 필요한데 그 dataclass 는 자기
+#    트랙만 아니까, 구조적으로 계산이 불가능한 자리에 스텁이 박혀 있던
+#    것입니다.
+
+
+def test_speaking_ratios_sum_to_one():
+    track_a, track_b = build_two_speaker_meeting(seed=201)
+    analysis = analyze_tracks([track_a, track_b], sample_rate=SR)
+    ratios = speaking_ratios(track_stats(analysis, 2))
+
+    assert all(r is not None for r in ratios)
+    assert abs(sum(r for r in ratios if r is not None) - 1.0) < 1e-9
+    assert all(0.0 <= r <= 1.0 for r in ratios if r is not None)
+
+
+def test_a_member_who_said_nothing_gets_zero_not_none():
+    """말을 **안 한** 것은 잰 것입니다 — 그건 진짜 0 입니다.
+
+    아래 "아무도 말 안 함" 과 헷갈리면 안 됩니다. 여기서는 남이 말했으므로
+    분모가 있고, 이 사람 몫이 0 이라는 것을 **쟀습니다.**
+    """
+    track_a, _ = build_two_speaker_meeting(seed=211)
+    analysis = analyze_tracks([track_a, silence(6.0)], sample_rate=SR)
+    ratios = speaking_ratios(track_stats(analysis, 2))
+
+    assert ratios[0] is not None and ratios[0] > 0
+    assert ratios[1] == 0.0
+
+
+def test_nobody_spoke_is_none_not_zero():
+    """⭐ **아무도 말하지 않으면 비중이 존재하지 않습니다.**
+
+    분모가 0인데 0.0 을 돌려주면 "다들 0% 말했다" 는 **잰 값**처럼 보입니다.
+    실제로는 잴 것이 없었던 것이고, 그 둘을 같게 만드는 것이 이 저장소가
+    제일 하면 안 된다고 정한 것입니다 (측정 불가 ≠ 0점).
+    """
+    analysis = analyze_tracks([silence(4.0), silence(4.0)], sample_rate=SR)
+    ratios = speaking_ratios(track_stats(analysis, 2))
+
+    assert ratios == [None, None]
+    assert 0.0 not in ratios
+
+
+def test_ratios_come_back_in_track_order_never_sorted():
+    """⚠️ **정렬해서 주지 않습니다.**
+
+    요구사항 정의서 AI-AUDIO-005 의 예시가 내림차순 목록이라 그대로 따라
+    하면 리더보드가 됩니다. 그런데 같은 문서의 AI-REVIEW-007·NFR-005 는
+    반대로 말합니다 — 요구는 **값을 만들라**는 것이지 **줄을 세우라**는
+    것이 아닙니다.
+
+    정렬해서 주면 부르는 쪽은 그게 뜻있는 순서라고 믿습니다.
+    """
+    _, loud = build_two_speaker_meeting(seed=221)
+    # 트랙 0 을 일부러 조용하게 만들어 "값 순서 ≠ 트랙 순서" 를 만듭니다.
+    analysis = analyze_tracks([silence(6.0), loud], sample_rate=SR)
+    stats = track_stats(analysis, 2)
+    ratios = speaking_ratios(stats)
+
+    assert [s.track_index for s in stats] == [0, 1]
+    assert ratios[0] is not None and ratios[1] is not None
+    assert ratios[0] < ratios[1], "표본이 잘못됐습니다 — 값 순서가 안 뒤집힙니다"
+    # 값으로 정렬했다면 큰 것이 먼저 왔을 것입니다.
+    assert ratios != sorted(ratios, reverse=True)
