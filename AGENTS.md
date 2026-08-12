@@ -15,7 +15,11 @@ TeamFlow AI. 회의에서 정한 일이 칸반과 GitHub 을 거쳐 기여 기�
 # 프런트 — 설치 없이 돕니다
 npm --prefix frontend test
 npm --prefix frontend run typecheck
-npm --prefix frontend run build      # build:demo + build:css
+npm --prefix frontend run build      # build:demo + build:css + 데스크톱 셸
+
+# 데스크톱 셸 (Electron) — 서버를 먼저 띄워야 합니다
+TEAMFLOW_SERVER_URL=http://127.0.0.1:8811/home.html \
+  npm --prefix frontend run desktop
 
 # 화면을 눈으로 보려면 (아래 §"디자인은 눈으로" 참고)
 bash <스크래치패드>/serve.sh          # uvicorn 8811, demo.db
@@ -184,6 +188,33 @@ React 입니다 (열셋). ⚠️ 이 숫자는 **화면을 더할 때마다 낡�
 
 ---
 
+## 데스크톱 셸 (Electron)
+
+**이유는 하나뿐입니다** — 창을 내리거나 화면이 잠기면 브라우저가 녹음을
+끊습니다. 녹음이 한 번 끊기면 그 구간은 **영영 못 잽니다.** 그것 말고
+다른 이유(트레이·자동 실행)로 이 셸을 늘리지 마십시오.
+
+이 창은 **서버가 준 화면**을 띄웁니다(`/api/...` 를 same-origin 으로
+부르기 때문에 `file://` 로는 로그인부터 안 됩니다). 즉 **원격 코드를
+실행합니다.** 그래서:
+
+- ⛔ `contextIsolation`·`sandbox`·`nodeIntegration:false`·`webSecurity`
+  **넷 중 하나도 끄지 마십시오.** 끄면 서버의 XSS 가 곧 사용자 PC 의 코드
+  실행입니다. 가드가 여섯 항목으로 잡습니다
+- ⛔ **`--no-sandbox` 를 앱 코드에 넣지 마십시오.** 이 컨테이너가 root 라
+  검사 하네스에서는 붙이는데, 그건 하네스 사정입니다
+- ⛔ **`require.main === module` 로 진입을 감싸지 마십시오** — Electron 에서는
+  언제나 거짓이라 **앱이 창을 하나도 안 엽니다**(결함 166)
+- ⛔ 판단(허용 주소·바깥 링크)을 main 프로세스에 두지 마십시오. main 에는
+  자동 검사가 안 붙습니다 → `src/lib/desktop/`
+- ⛔ **electron-vite 를 들이지 마십시오.** 그 권고의 전제(Vite 사용)가 이
+  저장소에 없습니다. main·preload 도 `build.mts` 의 esbuild 로 만듭니다
+
+⚠️ **아직 Phase 0 입니다** — 창만 뜹니다. `powerSaveBlocker` 도 시스템
+오디오도 아직 없습니다. 자세한 것과 남은 단계는 `docs/21`.
+
+---
+
 ## 자세한 것
 
 | 무엇 | 어디 |
@@ -193,6 +224,7 @@ React 입니다 (열셋). ⚠️ 이 숫자는 **화면을 더할 때마다 낡�
 | 법적·윤리 요구 | `docs/07-법적-윤리-요구사항.md` |
 | 결함 기록 | `docs/17-결함-기록.md` |
 | 셸·디자인 결정 전부 | `docs/19-메신저-셸-전환.md` |
+| 데스크톱 셸(Electron) 결정 | `docs/21-데스크톱-셸-Electron.md` |
 
 ⚠️ 문서가 사실과 다른 곳이 여럿 있었습니다. **문서에 적힌 숫자를 그대로
 믿지 말고 세어 보세요.**

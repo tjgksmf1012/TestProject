@@ -22,5 +22,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "build.mts"]
+  /* ⚠️ `electron/` 을 빠뜨리면 `npm run typecheck` 가 데스크톱 셸을
+     **한 줄도 안 보고** "깨끗함" 이라고 말합니다. 실제로 그렇게 만들어
+     놓고 통과를 보고할 뻔했습니다 — 이 저장소가 반복해서 당한
+     "검사가 눈을 감고 있다" 그대로입니다. */
+  "include": ["src/**/*.ts", "src/**/*.tsx", "build.mts", "electron/**/*.ts"]
 }

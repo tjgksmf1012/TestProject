@@ -1616,6 +1616,80 @@ describe('처리되지 않은 거부 (결함 115)', () => {
   });
 });
 
+describe('데스크톱 셸 (Electron)', () => {
+  // 이 창은 **원격 코드**를 돌립니다 — 화면을 전부 서버가 주기 때문입니다.
+  // 그래서 아래 넷은 "권장 사항" 이 아니라 서버가 뚫렸을 때 사용자 기계를
+  // 지키는 **유일한 벽**입니다. 하나만 꺼도 서버의 XSS 가 곧 사용자 PC 의
+  // 코드 실행이 됩니다.
+  /* ⚠️ **`codeOf` 를 거칩니다.** 이 저장소의 주석은 "이렇게 하면 안
+     됩니다" 를 나쁜 예와 함께 적어 둡니다 — 그대로 읽으면 규칙이 제
+     설명문에 걸립니다. 실제로 그렇게 만들었다가 preload 가 `ipcRenderer`
+     를 내놓는다고 잡혔습니다(결함 167). 결함 156 과 같은 실수입니다. */
+  const shellCode = (file: string): string =>
+    codeOf(readFileSync(join(ROOT, 'electron', file), 'utf8'));
+  const mainSource = (): string => shellCode('main/index.ts');
+
+  it('⭐ 창의 보안 기본값 넷이 켜져 있다', () => {
+    const source = mainSource();
+    for (const [key, want] of [
+      ['contextIsolation', 'true'],
+      ['nodeIntegration', 'false'],
+      ['sandbox', 'true'],
+      ['webSecurity', 'true'],
+    ] as const) {
+      const found = new RegExp(`${key}:\\s*(\\w+)`).exec(source)?.[1];
+      strictEqual(found, want, `webPreferences.${key} 가 ${found} 입니다`);
+    }
+  });
+
+  it('⭐ 바깥으로 나가는 문을 전부 잠근다', () => {
+    const source = mainSource();
+    // 새 창은 preload 를 물려받습니다 — 남의 사이트가 이 앱의 다리 위에서
+    // 돌게 두면 안 됩니다.
+    ok(/setWindowOpenHandler/.test(source), '새 창 처리를 안 겁니다');
+    ok(/action: 'deny'/.test(source), '새 창을 열어 주고 있습니다');
+    // 서버가 뚫려 `location =` 을 실행해도 창은 안 따라가야 합니다.
+    ok(/will-navigate/.test(source), '이동 잠금이 없습니다');
+    // 권한은 기본이 거절이어야 합니다 — 안 걸면 Electron 이 대부분 내줍니다.
+    ok(/setPermissionRequestHandler/.test(source), '권한 요청을 안 막습니다');
+    ok(/setPermissionCheckHandler/.test(source), '권한 **확인** 경로가 열려 있습니다');
+  });
+
+  it('⭐ 진입을 `require.main` 으로 감싸지 않는다 (결함 166)', () => {
+    // Electron 은 진입 파일을 제 모듈 시스템으로 읽어서 `require.main` 이
+    // 그 모듈이 아닙니다. 감싸 두면 조건이 **언제나 거짓**이고, 앱은
+    // 창을 하나도 안 연 채 살아 있습니다 — 오류는 한 줄도 안 납니다.
+    ok(
+      !/if\s*\(require\.main === module\)/.test(mainSource()),
+      '`require.main === module` 로 감쌌습니다 — Electron 에서는 언제나 거짓입니다',
+    );
+  });
+
+  it('⭐ 판단이 main 프로세스에 살지 않는다', () => {
+    // main 에는 자동 검사가 안 붙습니다. 여기 판단을 두면 검증 밖입니다.
+    const source = mainSource();
+    ok(
+      /from '\.\.\/\.\.\/src\/lib\/desktop\/server\.ts'/.test(source),
+      '`lib/desktop/server.ts` 를 안 씁니다 — 판단이 main 으로 샜습니다',
+    );
+    ok(!/hostname ===/.test(source), '허용 주소 판단이 main 에 있습니다');
+  });
+
+  it('⭐ `--no-sandbox` 를 앱 코드에 박지 않는다', () => {
+    // 검사 하네스에서는 붙입니다(컨테이너가 root 라서). 앱이 스스로 붙이면
+    // 그건 위 보안 기본값을 통째로 무르는 것입니다.
+    for (const file of ['main/index.ts', 'preload/index.ts']) {
+      ok(!shellCode(file).includes('no-sandbox'), `${file} 이 sandbox 를 끄고 있습니다`);
+    }
+  });
+
+  it('⭐ preload 가 `ipcRenderer` 를 통째로 내놓지 않는다', () => {
+    const source = shellCode('preload/index.ts');
+    ok(!/ipcRenderer/.test(source), 'ipcRenderer 가 새 나갑니다');
+    ok(/contextBridge/.test(source), 'contextBridge 를 안 씁니다');
+  });
+});
+
 describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
   // 이 저장소의 **대표 실패 방식**입니다 — 결함 47(`renderNav`),
   // 감사 #8(진행률), #12(`extract_task_refs`), #13(확정 테이블),
@@ -1650,19 +1724,29 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
 
   it('⭐ `lib/` 의 export 를 화면이 실제로 부른다', () => {
     const files: { rel: string; source: string }[] = [];
-    const walk = (dir: string): void => {
+    const walk = (dir: string, prefix: string): void => {
       for (const name of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, name.name);
-        if (name.isDirectory()) walk(full);
+        if (name.isDirectory()) walk(full, prefix);
         else if (SCREEN_EXT.test(name.name)) {
           files.push({
-            rel: full.slice(join(ROOT, 'src').length + 1).split('\\').join('/'),
+            rel: full.slice(prefix.length + 1).split('\\').join('/'),
             source: readFileSync(full, 'utf8'),
           });
         }
       }
     };
-    walk(join(ROOT, 'src'));
+    walk(join(ROOT, 'src'), join(ROOT, 'src'));
+    /* ⭐ **데스크톱 셸도 부르는 쪽입니다** (`electron/`).
+
+       여기를 안 보면 `lib/desktop/**` 이 통째로 "테스트만 씀" 으로
+       잡힙니다 — 실제로는 Electron main 이 부르고 있는데요. 그리고
+       반대 방향이 더 위험합니다: 셸이 부르던 것을 지웠을 때 이 가드가
+       **아무 말도 안 하게** 됩니다.
+
+       ⚠️ 화면을 옮길 때마다 이 저장소의 가드가 눈을 감았습니다(여덟 번).
+       셸이 하나 늘었으면 **찾는 자리**부터 늘려야 합니다. */
+    walk(join(ROOT, 'electron'), join(ROOT));
 
     const offenders: string[] = [];
     for (const { rel, source } of files) {
