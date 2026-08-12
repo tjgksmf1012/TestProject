@@ -32,8 +32,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
+from teamflow.db import live, vocab
 from teamflow.db import models as m
-from teamflow.db import vocab
 
 #: 한 종류당 최대 건수.
 #:
@@ -114,7 +114,7 @@ def search_tasks(
     rows = session.execute(
         select(m.Task, m.User.name)
         .outerjoin(m.User, m.User.id == m.Task.assignee_id)
-        .where(m.Task.project_id == project_id, *conditions)
+        .where(m.Task.project_id == project_id, live.not_deleted(), *conditions)
         .order_by(m.Task.id.desc())
         .limit(MAX_PER_KIND)
     ).all()

@@ -603,3 +603,61 @@ UTTERANCE_LABEL: dict[UtteranceType, str] = {
 def utterance_type_values() -> tuple[str, ...]:
     """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
     return tuple(sorted(str(t) for t in UTTERANCE_STORED))
+
+
+# ══════════════════════════════════════════════════════════════
+# members.project_role — 프로젝트 안에서의 권한 (요구사항 정의서 §5)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **`role_shares` 와 헷갈리지 마십시오.** 그 칸은 `{"developer": 0.7,
+#    "planner": 0.3}` 처럼 **기여도 가중치**를 담습니다. 권한이 아닙니다.
+#    `docs/20` 이 그 혼동을 이미 한 번 적어 뒀습니다 — "`Member.role_shares`
+#    는 기여도 가중치지 권한이 아닙니다".
+#
+#    둘을 한 칸에 담으면 **기획자 비중을 0.3 으로 바꾼 것이 권한 변경이
+#    됩니다.** 완전히 다른 것이라 칸을 따로 둡니다.
+#
+# ⚠️ **제약 없는 열 여섯 번째가 되지 않게** 처음부터 CHECK 를 답니다
+#    (`speaker_source` 118 · `report_type` 119 · `meeting_events` 122 ·
+#    `tasks.status` 132 · `utterance_type` 이 앞의 다섯입니다).
+
+
+class ProjectRole(StrEnum):
+    """프로젝트 안에서 무엇을 할 수 있는가.
+
+    ⚠️ **선언 순서 = 권한 크기 순**입니다. `ROLE_RANK` 가 이 순서를
+    씁니다 — 값을 사이에 끼워 넣으면 조용히 위계가 바뀝니다.
+    """
+
+    OWNER = "owner"  # 프로젝트를 만든 사람. 넘겨줄 수는 있어도 스스로 사라질 수 없음
+    ADMIN = "admin"  # 팀원·설정을 다룰 수 있음. 프로젝트를 지우지는 못함
+    MEMBER = "member"  # 자기 일을 함
+
+
+#: `members.project_role` 이 받는 값 전부.
+PROJECT_ROLES: tuple[ProjectRole, ...] = tuple(ProjectRole)
+
+#: 새로 합류하는 사람의 기본값. **`member` 입니다** — 초대 코드만 알면
+#: 들어올 수 있으므로, 기본이 그보다 크면 코드가 새는 순간 팀이 열립니다.
+DEFAULT_PROJECT_ROLE: ProjectRole = ProjectRole.MEMBER
+
+#: 클수록 권한이 큽니다. **비교는 이 표로만** 하십시오 — 문자열 비교
+#: (`"admin" < "member"`)는 알파벳 순이라 뜻이 정반대가 됩니다.
+ROLE_RANK: dict[ProjectRole, int] = {
+    role: len(PROJECT_ROLES) - at for at, role in enumerate(PROJECT_ROLES)
+}
+
+#: 사람이 읽을 이름.
+#:
+#: ⚠️ **화면의 `lib/project/roles.ts` 와 짝입니다** (`TASK_STATUS_LABEL`
+#: 과 같은 방식). 갈라지면 `test_repo_integrity.py` 가 터집니다.
+PROJECT_ROLE_LABEL: dict[ProjectRole, str] = {
+    ProjectRole.OWNER: "소유자",
+    ProjectRole.ADMIN: "관리자",
+    ProjectRole.MEMBER: "팀원",
+}
+
+
+def project_role_values() -> tuple[str, ...]:
+    """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
+    return tuple(sorted(str(r) for r in PROJECT_ROLES))

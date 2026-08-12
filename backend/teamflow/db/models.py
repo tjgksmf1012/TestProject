@@ -337,11 +337,28 @@ class Member(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     # 겸직 지원: {"developer": 0.7, "planner": 0.3}
+    #
+    # ⚠️ **권한이 아닙니다.** 이건 기여도를 나눌 때 쓰는 가중치입니다.
+    #    권한은 아래 `project_role` 입니다 — 한 칸에 담으면 기획자 비중을
+    #    0.3 으로 바꾼 것이 권한 변경이 됩니다.
     role_shares: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    #: 프로젝트 안에서의 권한 (`PROJECT-004`). 판단은 전부
+    #: `projects/permissions.py` 에 있습니다 — 여기서 비교하지 마십시오.
+    project_role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=str(vocab.DEFAULT_PROJECT_ROLE)
+    )
     skills: Mapped[list | None] = mapped_column(JSONType)
     github_login: Mapped[str | None] = mapped_column(String(100))
 
-    __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_member"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "user_id", name="uq_member"),
+        CheckConstraint(
+            "project_role IN ("
+            + ",".join(f"'{v}'" for v in vocab.project_role_values())
+            + ")",
+            name="ck_member_project_role",
+        ),
+    )
 
 
 class Task(Base):
@@ -365,6 +382,16 @@ class Task(Base):
     # 회의에서 만들어진 업무라면 그 후보를 가리킨다
     origin_candidate_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = _now()
+    #: 지운 때 (`TASK-003`). NULL 이면 살아 있는 업무입니다.
+    #:
+    #: ⚠️ **행을 안 지웁니다.** 기여 이벤트·PR 연결·회의 후보가 이 업무를
+    #: 가리키고 있습니다. 진짜로 지우면 "근거 업무 #7" 이 아무것도 안
+    #: 가리키게 되고, 그건 이 저장소의 대표 실패 ③ 입니다. 채널을
+    #: `archive_channel` 로 다루는 것과 같은 판단입니다.
+    #:
+    #: ⚠️ 읽을 때는 **반드시** `db/live.py` 의 `live_tasks()` 를 쓰십시오.
+    #: 조건을 손으로 적으면 일곱 곳 중 하나를 빠뜨립니다.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         CheckConstraint("difficulty BETWEEN 1 AND 3", name="ck_task_difficulty"),

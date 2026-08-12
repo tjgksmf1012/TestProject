@@ -2069,3 +2069,41 @@ def test_the_kanban_css_column_count_matches_the_statuses():
         "`#board` 규칙을 고치십시오. 안 고치면 마지막 열이 아랫줄로 떨어져 "
         "`완료` 가 `할 일` 밑에 붙습니다"
     )
+
+
+def test_every_place_that_reads_tasks_goes_through_live():
+    """⭐ 지운 업무를 **한 곳에서만** 걸러 냅니다 (`TASK-003`).
+
+    업무를 읽는 곳이 일곱입니다 — 칸반·달력·검색·알림·위험 신호·회의
+    업무 후보·PR 연결. 각자 `deleted_at IS NULL` 을 적게 두면 그중 하나는
+    반드시 빠지고, **빠진 곳에서 지운 업무가 되살아납니다.**
+
+    되살아난 자리가 조용한 것이 문제입니다. 오류가 안 나고 달력에만,
+    진행률에만 남습니다 — 이 저장소의 대표 실패 ② 가 정확히 이 모양이고,
+    그래서 세는 자리를 여기 둡니다.
+
+    ⚠️ **이름이 아니라 쓰임을 셉니다.** `m.Task` 를 질의에 넣는 파일이
+    `db/live.py` 를 안 가져오면 잡습니다.
+    """
+    import re
+
+    root = REPO_ROOT / "backend" / "teamflow"
+    offenders: list[str] = []
+    for path in root.rglob("*.py"):
+        if path.name == "live.py":
+            continue
+        body = path.read_text(encoding="utf-8")
+        # `select(m.Task)` · `select(m.Task, ...)` · `select(m.Task.id)` 처럼
+        # **업무 표를 고르는** 질의만 봅니다. `m.TaskGithubLink` 같은 다른
+        # 표는 대상이 아닙니다 — `\b` 로 끊습니다.
+        if not re.search(r"select\(\s*m\.Task\b(?!\w)", body):
+            continue
+        if "from teamflow.db import live" in body or "db import live" in body:
+            continue
+        offenders.append(str(path.relative_to(REPO_ROOT)))
+
+    assert not offenders, (
+        f"업무를 읽으면서 `db/live.py` 를 안 거치는 곳: {offenders} — "
+        "`live_tasks()`·`live_task_ids()`·`not_deleted()` 중 하나를 쓰십시오. "
+        "직접 조건을 적으면 다음 사람이 빠뜨립니다"
+    )

@@ -47,6 +47,7 @@ ACTION_LABEL: dict[str, str] = {
     "meeting_reprocess_requested": "회의 재처리 요청",
     "score_adjusted": "기여도 확정값 조정",
     "task_completed": "업무 완료",
+    "task_deleted": "업무 삭제",
     "task_reopened": "업무 다시 열기",
     "user_data_revoked": "개인 정보 파기",
     "voiceprint_revoked": "성문 폐기",

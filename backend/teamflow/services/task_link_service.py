@@ -40,6 +40,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from teamflow.db import live
 from teamflow.db import models as m
 from teamflow.github.linking import TaskRef, find_task_refs
 
@@ -77,7 +78,7 @@ def link_pull_request(session: Session, event: m.GithubEvent) -> list[TaskRef]:
     wanted = {ref.task_id for ref in refs}
     real = set(
         session.scalars(
-            select(m.Task.id).where(
+            live.live_task_ids().where(
                 m.Task.id.in_(wanted), m.Task.project_id == event.project_id
             )
         )

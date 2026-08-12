@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import today as team_today
+from teamflow.db import live
 from teamflow.db import models as m
 from teamflow.projects import risk
 
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 def _tasks(session: Session, project_id: int) -> list[risk.TaskFacts]:
     rows = session.scalars(
-        select(m.Task).where(m.Task.project_id == project_id).order_by(m.Task.id)
+        live.live_tasks().where(m.Task.project_id == project_id).order_by(m.Task.id)
     ).all()
     return [
         risk.TaskFacts(
@@ -64,7 +65,7 @@ def _edges(session: Session, project_id: int) -> list[tuple[int, int]]:
     "우리가 막혀 있다" 의 근거로 쓰면 그 업무를 열어 볼 수도 없습니다.
     """
     mine = set(
-        session.scalars(select(m.Task.id).where(m.Task.project_id == project_id))
+        session.scalars(live.live_task_ids().where(m.Task.project_id == project_id))
     )
     rows = session.execute(
         select(m.TaskDependency.predecessor_id, m.TaskDependency.successor_id)

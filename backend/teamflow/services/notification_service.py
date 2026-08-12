@@ -31,6 +31,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
+from teamflow.db import live
 from teamflow.db import models as m
 from teamflow.db.vocab import NotificationKind
 
@@ -319,7 +320,7 @@ def deadline_notices(
     ⚠️ 끝난 업무는 안 나옵니다. 마감일이 지났어도 끝냈으면 지연이 아닙니다.
     """
     tasks = session.scalars(
-        select(m.Task).where(
+        live.live_tasks().where(
             m.Task.project_id == project_id,
             m.Task.assignee_id == user_id,
             m.Task.deadline.is_not(None),

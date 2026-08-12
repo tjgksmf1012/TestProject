@@ -39,8 +39,8 @@ from sqlalchemy.orm import Session
 
 from teamflow.clock import local_date
 from teamflow.contribution.events import CATEGORY_OF, EventType, SourceKind
+from teamflow.db import live, vocab
 from teamflow.db import models as m
-from teamflow.db import vocab
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ def list_tasks(session: Session, project_id: int) -> list[dict]:
     할 일 목록이고, "회의 결정이 업무가 됐다" 는 주장을 확인할 방법이 없습니다.
     """
     rows = session.scalars(
-        select(m.Task).where(m.Task.project_id == project_id).order_by(m.Task.id)
+        live.live_tasks().where(m.Task.project_id == project_id).order_by(m.Task.id)
     ).all()
 
     # 후보 → 회의를 한 번에 끌어온다. 업무마다 조회하면 N+1 이다.
@@ -264,6 +264,51 @@ def change_task(
 
     session.flush()
     return task
+
+
+def delete_task(
+    session: Session, *, project_id: int, task_id: int, actor_id: int
+) -> m.Task:
+    """업무를 지운다 (`TASK-003`).
+
+    ⚠️ **행을 안 지웁니다.** `deleted_at` 만 적습니다. 기여 이벤트·PR
+    연결·회의 후보가 이 업무를 가리키고 있어서, 진짜로 지우면 화면의
+    `근거 업무 #7` 이 아무것도 안 가리키게 됩니다 (대표 실패 ③).
+
+    ⚠️ **기여 이벤트를 안 지웁니다.** 지운 업무로 쌓인 기여까지 사라지면
+    업무 하나를 지우는 것으로 남의 기여도를 깎을 수 있습니다 — 그건
+    조작 통로입니다.
+
+    ⚠️ 두 번 지워도 오류가 아닙니다. 이미 지워진 게 원하던 결과입니다.
+    """
+    task = session.get(m.Task, task_id)
+    if task is None or task.project_id != project_id:
+        raise TaskError("업무를 찾을 수 없습니다")
+
+    if task.deleted_at is None:
+        task.deleted_at = datetime.now(UTC)
+        _log_deletion(session, task, actor_id)
+        session.flush()
+    return task
+
+
+def _log_deletion(session: Session, task: m.Task, actor_id: int) -> None:
+    """지웠다는 사실을 남깁니다.
+
+    ⚠️ 안 남기면 카드가 조용히 사라지고, 남은 사람은 **누가 지웠는지도
+    지워진 건지도** 모릅니다. 완료·되돌리기와 같은 표에 적습니다.
+    """
+    session.add(
+        m.AuditLog(
+            project_id=task.project_id,
+            actor_id=actor_id,
+            action="task_deleted",
+            target=f"task:{task.id}",
+            before={"status": task.status},
+            after={"deleted": True},
+            at=task.deleted_at,
+        )
+    )
 
 
 def _change_deadline(

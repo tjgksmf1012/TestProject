@@ -30,6 +30,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
+from teamflow.db import live
 from teamflow.db import models as m
 
 #: 달력에 놓이는 것의 종류.
@@ -93,6 +94,7 @@ def collect(
         .outerjoin(m.User, m.User.id == m.Task.assignee_id)
         .where(
             m.Task.project_id == project_id,
+            live.not_deleted(),
             or_(
                 m.Task.start_date.between(since, until),
                 m.Task.deadline.between(since, until),

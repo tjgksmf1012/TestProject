@@ -38,9 +38,9 @@ from teamflow.call import rooms as call_rooms
 from teamflow.call import signaling as call_signaling_module
 from teamflow.chat import hub as chat_hub
 from teamflow.config import Settings, get_settings, safe_dump
+from teamflow.db import live, vocab
 from teamflow.db import models as m
 from teamflow.db import session as db_session
-from teamflow.db import vocab
 from teamflow.db.session import get_db
 from teamflow.github import backfill as gh_backfill
 from teamflow.github import connection as gh_connection
@@ -49,7 +49,7 @@ from teamflow.github import webhook as gh
 from teamflow.jobs import retention
 from teamflow.logging_config import configure_logging
 from teamflow.meeting.approval import ApprovalRequest
-from teamflow.projects import invites
+from teamflow.projects import invites, permissions
 from teamflow.services import (
     activity_service,
     approval_service,
@@ -340,11 +340,15 @@ def read_me(user: CurrentUser) -> MeOut:
     return MeOut(user_id=user.id, name=user.name, email=user.email)
 
 
-def _require_project_member(session: Session, project_id: int, user: m.User) -> None:
-    """이 프로젝트 사람인가.
+def _require_project_member(session: Session, project_id: int, user: m.User) -> m.Member:
+    """이 프로젝트 사람인가. **그 사람의 구성원 행을 돌려줍니다.**
 
     회의 내용·기여도는 팀 내부 자료입니다. 로그인만 확인하고 통과시키면,
     가입만 하면 남의 팀 회의록을 읽을 수 있습니다.
+
+    ⚠️ 예전에는 `None` 을 돌려줬습니다. 권한을 물으려면 부르는 쪽이
+    `members` 를 **한 번 더** 읽어야 했고, 그렇게 두면 조회 조건이 두
+    벌이 됩니다. 여기서 찾은 행을 그대로 넘깁니다.
     """
     member = session.scalars(
         select(m.Member).where(
@@ -355,6 +359,25 @@ def _require_project_member(session: Session, project_id: int, user: m.User) -> 
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "이 프로젝트의 구성원이 아닙니다"
         )
+    return member
+
+
+def _require_can(
+    session: Session, project_id: int, user: m.User, action: permissions.Action
+) -> m.Member:
+    """구성원인가 + **그 행동을 해도 되는가** (`PROJECT-004`).
+
+    ⚠️ 판단은 `projects/permissions.py` 의 표 하나에만 있습니다. 여기서
+    등급을 직접 비교하지 마십시오 — 권한이 두 벌이 되면 한쪽에서만
+    막히고, **막히지 않는 쪽이 곧 구멍**입니다.
+    """
+    member = _require_project_member(session, project_id, user)
+    if not permissions.can(member.project_role, action):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "이 작업을 할 권한이 없습니다",
+        )
+    return member
 
 
 def _load_meeting_for(session: Session, meeting_id: int, user: m.User) -> m.Meeting:
@@ -646,8 +669,17 @@ def create_project(payload: ProjectIn, session: DbSession, user: CurrentUser) ->
     #
     # 만든 사람을 빠뜨리면 자기가 만든 프로젝트를 자기가 못 봅니다 —
     # 모든 조회가 구성원 확인을 지나기 때문입니다.
+    #
+    # ⚠️ **소유자로 넣습니다.** 기본값(`member`)으로 두면 만든 사람이
+    #    자기 프로젝트 설정을 못 고치고, 소유자가 0명이라 아무도 못
+    #    고치는 프로젝트가 됩니다.
     session.add(
-        m.Member(project_id=project.id, user_id=user.id, role_shares={"developer": 1.0})
+        m.Member(
+            project_id=project.id,
+            user_id=user.id,
+            role_shares={"developer": 1.0},
+            project_role=str(vocab.ProjectRole.OWNER),
+        )
     )
     session.flush()
 
@@ -769,7 +801,8 @@ def patch_project(
     project = session.get(m.Project, project_id)
     if project is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
-    _require_project_member(session, project_id, user)
+    # ⚠️ 예전에는 **구성원이면 누구나** 이름과 저장소를 바꿀 수 있었습니다.
+    _require_can(session, project_id, user, permissions.Action.EDIT_PROJECT)
 
     if payload.title is not None:
         project.title = payload.title
@@ -852,7 +885,9 @@ def rotate_invite_code(
     project = session.get(m.Project, project_id)
     if project is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
-    _require_project_member(session, project_id, user)
+    # ⚠️ 코드를 새로 뽑으면 **옛 코드로 들어오려던 사람이 전부 막힙니다.**
+    #    구성원이면 누구나 할 수 있게 두면 한 사람이 팀 합류를 끊을 수 있습니다.
+    _require_can(session, project_id, user, permissions.Action.ROTATE_INVITE)
 
     project.invite_code = _fresh_invite_code(session)
     session.flush()
@@ -1957,6 +1992,10 @@ class MemberOut(BaseModel):
     # 이 사람의 GitHub 아이디 (결함 112). 안 이었으면 None —
     # 화면이 "아직 연결 안 됨" 으로 그립니다.
     github_login: str | None = None
+    #: 프로젝트 안에서의 권한 (`PROJECT-004`).
+    #:
+    #: ⚠️ `role_shares` 와 **다른 것**입니다. 그건 기여도 가중치입니다.
+    project_role: str = str(vocab.DEFAULT_PROJECT_ROLE)
 
 
 def _project_members(session: Session, project_id: int) -> list[MemberOut]:
@@ -1972,6 +2011,7 @@ def _project_members(session: Session, project_id: int) -> list[MemberOut]:
             name=user.name,
             role_shares={k: float(v) for k, v in (member.role_shares or {}).items()},
             github_login=member.github_login,
+            project_role=member.project_role,
         )
         for member, user in rows
     ]
@@ -1996,6 +2036,156 @@ def list_project_members(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
     return _project_members(session, project_id)
+
+
+class RolePatch(BaseModel):
+    project_role: str
+
+
+def _member_roles(session: Session, project_id: int) -> list[str]:
+    """지금 구성원 전부의 등급. `last_owner_problem` 에 넘길 재료입니다."""
+    return list(
+        session.scalars(
+            select(m.Member.project_role).where(m.Member.project_id == project_id)
+        )
+    )
+
+
+def _load_member(session: Session, project_id: int, user_id: int) -> m.Member:
+    member = session.scalars(
+        select(m.Member).where(
+            m.Member.project_id == project_id, m.Member.user_id == user_id
+        )
+    ).first()
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "그런 팀원이 없습니다")
+    return member
+
+
+@app.patch(
+    "/api/projects/{project_id}/members/{user_id}/role", response_model=MemberOut
+)
+def change_member_role(
+    project_id: int,
+    user_id: int,
+    payload: RolePatch,
+    session: DbSession,
+    user: CurrentUser,
+) -> MemberOut:
+    """남의 권한을 바꾼다 (`PROJECT-003`·`PROJECT-004`).
+
+    ⚠️ **자기 등급을 스스로 올릴 수 없습니다.** 막지 않으면 팀원이
+    관리자가 되는 데 아무 절차가 없고, 권한 3단계가 장식이 됩니다.
+
+    ⚠️ **같은 등급끼리도 못 바꿉니다.** 관리자 둘이 서로를 강등할 수
+    있으면 먼저 누른 쪽이 이기는 경주가 됩니다.
+    """
+    actor = _require_can(session, project_id, user, permissions.Action.CHANGE_ROLE)
+
+    try:
+        wanted = vocab.ProjectRole(payload.project_role)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "그런 권한이 없습니다"
+        ) from None
+
+    target = _load_member(session, project_id, user_id)
+
+    if target.user_id == actor.user_id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "자기 권한은 스스로 바꿀 수 없습니다"
+        )
+    if not permissions.outranks(actor.project_role, target.project_role):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "나보다 높거나 같은 사람은 바꿀 수 없습니다"
+        )
+    # ⚠️ **올려 주는 것도 자기 위로는 못 합니다.** 안 막으면 관리자가
+    #    팀원을 소유자로 만들어 놓고 그 사람을 통해 자기를 올릴 수 있습니다.
+    if permissions.ROLE_RANK[wanted] >= permissions.ROLE_RANK[
+        vocab.ProjectRole(actor.project_role)
+    ]:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "자기보다 높거나 같은 권한은 줄 수 없습니다"
+        )
+
+    problem = permissions.last_owner_problem(
+        _member_roles(session, project_id), leaving=target.project_role
+    )
+    if problem is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, problem)
+
+    target.project_role = str(wanted)
+    session.flush()
+    return next(
+        row
+        for row in _project_members(session, project_id)
+        if row.user_id == user_id
+    )
+
+
+@app.delete(
+    "/api/projects/{project_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def remove_member(
+    project_id: int, user_id: int, session: DbSession, user: CurrentUser
+) -> Response:
+    """팀원을 내보낸다 (`PROJECT-003`).
+
+    ⚠️ **그 사람이 한 일은 안 지웁니다.** 업무·발화·기여 이벤트는 그대로
+    남습니다. 나갔다고 해서 그 사람이 한 일이 없던 일이 되면, 남은 팀의
+    기여도 비율이 조용히 부풀고 회의록에 구멍이 납니다. 지우는 것은
+    본인이 요청할 때 `POST /me/data` 가 따로 합니다 — 그건 **동의 철회**
+    라는 다른 일입니다.
+    """
+    actor = _require_can(session, project_id, user, permissions.Action.REMOVE_MEMBER)
+    target = _load_member(session, project_id, user_id)
+
+    if target.user_id == actor.user_id:
+        # 스스로 나가는 것은 권한이 아니라 **본인의 결정**입니다. 다른 문을
+        # 씁니다 — 관리자가 아니어도 나갈 수 있어야 하니까요.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "스스로 나가려면 나가기를 쓰십시오",
+        )
+    if not permissions.outranks(actor.project_role, target.project_role):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "나보다 높거나 같은 사람은 내보낼 수 없습니다"
+        )
+
+    session.delete(target)
+    session.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post(
+    "/api/projects/{project_id}/members/me/leave",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def leave_project(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> Response:
+    """스스로 나간다 (`PROJECT-006`).
+
+    ⚠️ **권한을 안 봅니다.** 나가는 것은 남에게 하는 일이 아니라 자기
+    일입니다. 관리자 허락을 받아야 나갈 수 있으면 그건 팀이 아닙니다.
+
+    ⚠️ 다만 **마지막 소유자는 못 나갑니다** — 나가면 아무도 팀원을 못
+    다루는 프로젝트가 남고, 되돌릴 화면이 없습니다.
+
+    ⚠️ **한 일은 그대로 둡니다** (`remove_member` 와 같은 이유).
+    """
+    member = _require_project_member(session, project_id, user)
+
+    problem = permissions.last_owner_problem(
+        _member_roles(session, project_id), leaving=member.project_role
+    )
+    if problem is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, problem)
+
+    session.delete(member)
+    session.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 class ProgressOut(BaseModel):
@@ -2468,7 +2658,7 @@ def review(
     )
 
     task_ids = session.scalars(
-        select(m.Task.id).where(
+        live.live_task_ids().where(
             m.Task.origin_candidate_id.in_([t.origin_candidate_id for t in outcome.approved])
         )
     ).all() if outcome.approved else []
@@ -2729,6 +2919,36 @@ class TaskPatch(BaseModel):
     # `deadline` 은 None 이 두 뜻이라 따로 받는다 — 아래 엔드포인트 주석 참조.
     deadline: date | None = None
     reason: str | None = Field(default=None, max_length=300)
+
+
+@app.delete(
+    "/api/projects/{project_id}/tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_task(
+    project_id: int, task_id: int, session: DbSession, user: CurrentUser
+) -> Response:
+    """업무를 지운다 (`TASK-003`).
+
+    ⚠️ **팀원도 지울 수 있습니다.** 칸반은 매일 쓰는 화면이고, 잘못 만든
+    카드 하나를 지우려고 관리자를 부르게 하면 사람들은 지우는 대신
+    **완료로 옮겨 버립니다** — 그러면 진행률이 거짓이 되고 그 숫자가
+    기여도와 보고서로 흘러갑니다.
+
+    ⚠️ 행은 남습니다. 사유는 `task_service.delete_task` 에 있습니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_can(session, project_id, user, permissions.Action.DELETE_TASK)
+
+    try:
+        task_service.delete_task(
+            session, project_id=project_id, task_id=task_id, actor_id=user.id
+        )
+    except task_service.TaskError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.patch("/api/projects/{project_id}/tasks/{task_id}", response_model=TaskOut)
