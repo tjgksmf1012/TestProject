@@ -23,6 +23,7 @@ from teamflow.meeting.approval import (
     StoredCandidate,
     apply_batch,
 )
+from teamflow.services import notification_service
 
 
 def _to_domain(row: m.MeetingTaskCandidate) -> StoredCandidate:
@@ -128,6 +129,18 @@ def review_candidates(
         row = session.get(m.MeetingTaskCandidate, candidate_id)
         if row is not None:
             row.created_task_id = task.id
+        # NOTIFICATION-002 — 맡은 사람에게 알립니다.
+        #
+        # ⚠️ **여기가 업무가 만들어지는 유일한 자리입니다** (위 주석의
+        #    불변식). 알림을 API 쪽에 붙이면 다른 경로가 생겼을 때 조용히
+        #    빠집니다 — 이 저장소가 반복해 당한 "만들어 놓고 아무도 안 부름"
+        #    의 반대 모양입니다.
+        #
+        # ⚠️ 승인한 사람은 방금 자기가 한 일이라 안 받습니다. 누가 승인했는지는
+        #    후보 행에 이미 적혀 있으므로 거기서 가져옵니다 — 인자를 하나 더
+        #    받으면 부르는 자리마다 넘겨야 하고, 그러면 한 곳이 빠집니다.
+        reviewer_id = row.reviewed_by if row is not None else None
+        notification_service.record_assignment(session, task, actor_id=reviewer_id)
 
     # 3) 감사 로그. 이게 없으면 승인도 없다.
     for entry in outcome.audit:

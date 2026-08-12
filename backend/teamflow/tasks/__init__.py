@@ -112,6 +112,15 @@ app.conf.update(
             "task": "teamflow.tasks.maintenance.revoke_finished_project_voiceprints_task",
             "schedule": crontab(hour=4, minute=30),
         },
+        # 곧 시작할 회의를 알린다 (NOTIFICATION-005).
+        #
+        # ⚠️ 하루 한 번이 아니라 **5분마다**입니다. 회의 30분 전에 알리려면
+        #    그보다 촘촘히 돌아야 합니다 — 하루 한 번이면 대부분의 회의를
+        #    놓치고, 그러면 "만들었는데 안 오는 알림" 이 됩니다.
+        "announce-upcoming-meetings": {
+            "task": "teamflow.tasks.maintenance.announce_upcoming_meetings_task",
+            "schedule": crontab(minute="*/5"),
+        },
     },
 )
 

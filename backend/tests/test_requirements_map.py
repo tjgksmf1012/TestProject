@@ -41,14 +41,20 @@ def _doc() -> str:
 
 
 def test_the_tables_we_call_missing_are_actually_missing():
-    """§16·§19 를 ❌ 로 적었습니다. 진짜 없는지 확인합니다.
+    """❌ 로 적은 것이 진짜 없는지 확인합니다.
 
-    ⚠️ `channels`·`messages` 가 여기 있었습니다. 만들었으므로 뺐고,
-    문서의 ❌ 도 같이 고쳤습니다 — **이 검사가 잡아 줘서** 고친 것입니다.
-    이 목록에서 무언가를 뺄 때는 `docs/20` 을 반드시 같이 고치십시오.
+    ⚠️ 여기 있다가 빠진 것들: `channels`·`messages`(§6·§7 을 만들면서),
+    `notifications`(§19 를 만들면서). **이 검사가 그때마다 잡아 줘서**
+    문서를 같이 고쳤습니다. 이 목록에서 무언가를 뺄 때는 `docs/20` 을
+    반드시 같이 고치십시오.
+
+    ⚠️ `calendar_events` 는 다릅니다 — 만들 수 있었는데 **일부러 안
+    만들었습니다.** 달력은 이미 있는 행에서 읽어서 만듭니다. 그래서 이
+    표가 생기는 것은 §16 이 구현된 신호가 아니라 **베끼기가 시작된**
+    신호이고, 그때는 `docs/20` §5 를 다시 읽어야 합니다.
     """
     tables = set(m.Base.metadata.tables)
-    for absent in ("calendar_events", "notifications"):
+    for absent in ("calendar_events",):
         assert absent not in tables, (
             f"`{absent}` 표가 생겼습니다 — `docs/20` 에서 ❌ 를 고치십시오. "
             "문서가 계속 '없음' 이라고 말하면 다음 사람이 또 만듭니다"

@@ -35,9 +35,17 @@ describe('navLinks', () => {
     deepStrictEqual(screens.sort(), ['home', 'lobby', 'review']);
   });
 
-  it('프로젝트를 알면 채팅·칸반·기여도·보고서·설정으로 갈 수 있다', () => {
+  it('프로젝트를 알면 채팅·일정·알림·칸반·기여도·보고서·설정으로 갈 수 있다', () => {
     const screens = navLinks({ current: 'home', projectId: 3 }).map((l) => l.screen);
-    deepStrictEqual(screens.sort(), ['chat', 'contributions', 'kanban', 'project', 'reports']);
+    deepStrictEqual(screens.sort(), [
+      'calendar',
+      'chat',
+      'contributions',
+      'kanban',
+      'notifications',
+      'project',
+      'reports',
+    ]);
   });
 
   it('⭐ 채팅으로 가는 링크가 있다 — 채널이 없는 사람도 만들러 갈 수 있어야 한다', () => {

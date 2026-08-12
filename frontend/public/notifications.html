@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
+<link rel="stylesheet" href="/app.css" />
+<title>알림 — TeamFlow</title>
+<style>
+
+  /* ══ 알림 ═════════════════════════════════════════════════
+
+     ⚠️ 여기에는 **값이 하나도 없습니다.** 알림은 개수를 세는 곳이 아니라
+     "무엇을 해야 하는가" 를 말하는 곳입니다. 사람별 건수를 나란히 적으면
+     그 순간 순위표가 됩니다. */
+
+  .nbar { display: flex; flex-wrap: wrap; align-items: center;
+          justify-content: space-between; gap: var(--sp-3);
+          max-width: 44rem; margin: 0 0 var(--sp-4); }
+  .ncount { margin: 0; font-size: var(--fs-label); color: var(--text-muted); }
+  .nbar button { min-height: var(--tap); padding: var(--sp-2) var(--sp-4);
+                 background: var(--surface); border: 1px solid var(--line);
+                 border-radius: var(--r-ctrl); color: var(--text); }
+
+  /* 안 읽은 수. ⚠️ **글자**입니다 — 개수만큼 점을 찍으면 그게 곧 막대입니다. */
+  .badge { display: inline-block; min-width: 1.5rem; text-align: center;
+           padding: 0 var(--sp-2); border-radius: var(--r-round);
+           background: var(--primary); color: var(--primary-fg);
+           font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+
+  /* 0 일 때 배지 대신 쓰는 말. ⚠️ 빨강도 흙빛도 아닙니다 — 알림이 없는
+     것은 좋은 일도 나쁜 일도 아닙니다. */
+  .none { color: var(--text-subtle); }
+
+  /* ⚠️ 줄마다 가로선을 긋지 않습니다 — 열 줄이면 선이 열하나가 되고, 그
+     선들이 화면에서 가장 진한 것이 됩니다. 나누는 일은 여백이 합니다. */
+  .nlist { list-style: none; padding: 0; margin: 0; max-width: 44rem;
+           display: grid; gap: var(--sp-3); }
+
+  .nitem { display: flex; flex-wrap: wrap; align-items: baseline;
+           gap: var(--sp-3); padding-left: var(--sp-3);
+           /* 안 읽은 것을 표시할 자리. ⚠️ **늘 잡아 둡니다** — 읽으면
+              줄이 옆으로 밀리는 것을 막습니다. */
+           border-left: 2px solid transparent; }
+
+  /* 안 읽음. 색을 채우지 않고 **왼쪽 막대**로 — 줄 하나가 통째로 색이
+     차면 그 줄이 화면에서 가장 진한 것이 됩니다. */
+  .nitem.fresh { border-left-color: var(--primary); }
+
+  /* ⚠️ 지난 것만 경고색입니다. `due_soon` 은 아직 안 늦었습니다 —
+     둘을 같은 모양으로 그리면 진짜 지난 것을 못 알아봅니다. */
+  .nitem.urgent { border-left-color: var(--bad); }
+  .nitem.urgent .nkind { color: var(--bad); font-weight: 600; }
+
+  .nkind { flex: none; min-width: 4rem; font-size: var(--fs-caption);
+           color: var(--text-subtle); }
+  .ntext { font-size: var(--fs-label); color: var(--text); }
+
+  /* ⚠️ 손가락에서는 16px 밑으로 내려가지 않습니다. */
+  @media (hover: none) and (pointer: coarse) {
+    .ntext, .ncount { font-size: 1rem; }
+    .nkind, .badge { font-size: .875rem; }
+  }
+        </style>
+</head>
+<body>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24). 마크업을 여기
+       남겨 두면 두 벌이 되고, React 가 마운트하는 순간 지워지므로 고쳐도
+       아무 일이 안 일어납니다. -->
+  <div id="app"></div>
+
+  <script type="module" src="/notifications.js"></script>
+
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
+</html>

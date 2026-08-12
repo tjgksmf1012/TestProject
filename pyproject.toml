@@ -78,5 +78,7 @@ ignore = [
 # 이 저장소가 잡아야 하는 부류라 그물을 남겨 둡니다.
 "backend/tests/test_github_health_api.py" = ["F811"]
 "backend/tests/test_chat_api.py" = ["F811"]
+"backend/tests/test_calendar_api.py" = ["F811"]
+"backend/tests/test_notifications.py" = ["F811"]
 "backend/tests/test_task_pr_link.py" = ["F811"]
 "backend/tests/test_call_api.py" = ["F811"]

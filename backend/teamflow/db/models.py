@@ -351,6 +351,9 @@ class Task(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    #: 언제부터 할 일인가 (CALENDAR-002). ⚠️ `created_at` 이 아닙니다 —
+    #: 그건 행이 생긴 때이고, 이건 사람이 정한 날입니다.
+    start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
@@ -508,7 +511,13 @@ class Meeting(Base):
     id: Mapped[int] = _pk()
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     title: Mapped[str | None] = mapped_column(String(200))
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: ⚠️ **널일 수 있습니다** — 예정만 잡고 아직 안 연 회의입니다
+    #: (CALENDAR-003). 예전에는 회의가 곧 녹음이라 늘 값이 있었습니다.
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: 예정 시각 (CALENDAR-003·004). ⚠️ 예정을 별도 표에 두지 않습니다 —
+    #: 그러면 "그 예정이 이 회의가 됐다" 를 잇는 칸이 또 필요하고, 안
+    #: 이어진 것들이 쌓입니다.
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_sec: Mapped[int | None] = mapped_column(Integer)
     # multitrack | single  — docs/04 의 모드 A / 모드 B
     capture_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="multitrack")
@@ -549,6 +558,10 @@ class MeetingTrack(Base):
     meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     device_label: Mapped[str | None] = mapped_column(String(100))
+    #: ⚠️ **트랙은 언제나 시작 시각이 있습니다.** 녹음이 시작돼야 트랙이
+    #: 생기기 때문입니다 — 회의(`Meeting.started_at`)와 달리 여기는 널이
+    #: 될 수 없습니다. 널을 허용하면 시간 정렬(`offset_ms`)의 기준이
+    #: 사라지고, 그 트랙 구간은 영영 못 잽니다.
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 트랙 간 시간 정렬 보정값
@@ -702,6 +715,48 @@ class MeetingTaskCandidate(Base):
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"))
     created_at: Mapped[datetime] = _now()
+
+
+class Notification(Base):
+    """알림 하나 (요구사항 정의서 §19).
+
+    ## ⚠️ **문장을 저장하지 않습니다**
+
+    여기에는 무엇을 가리키는지(업무 번호·메시지 번호)만 있고 "…님이 나를
+    불렀습니다" 같은 글자는 없습니다. 문장을 저장하면 업무 이름을 고쳤을 때
+    **알림만 옛 이름을 말합니다.** 문장은 읽을 때 만듭니다
+    (`notification_service._text_for`).
+
+    ## ⚠️ 마감 알림은 **이 표에 없습니다**
+
+    `due_soon`·`overdue` 는 지금 상태에서 나옵니다. 행으로 쌓으면 마감일을
+    미뤘을 때 "곧 마감" 이 남고, 업무를 끝냈을 때 "지연" 이 남습니다 —
+    알림이 **베낀 순간의 사실**을 가리키게 됩니다. 그래서 CHECK 제약이
+    그 둘을 아예 거절합니다 (`vocab.NOTIFICATION_STORED`).
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = _pk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: 무엇을 가리키는가. 종류마다 하나만 채워집니다.
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"))
+    meeting_id: Mapped[int | None] = mapped_column(ForeignKey("meetings.id"))
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"))
+    created_at: Mapped[datetime] = _now()
+    #: 읽은 시각. ⚠️ **행을 지우지 않습니다** — 지우면 "언제 알렸는가" 가
+    #: 사라지고, 기여도 분쟁에서 그게 확인할 거리가 됩니다.
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN (" + ",".join(f"'{v}'" for v in vocab.notification_values()) + ")",
+            name="ck_notification_kind",
+        ),
+        Index("ix_notifications_inbox", "user_id", "project_id", "id"),
+    )
 
 
 class MeetingEvent(Base):

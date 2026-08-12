@@ -125,7 +125,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 신뢰도·조정범위 계산 | ✅ | `backend/teamflow/contribution/confidence.py` |
 | **측정 불가 처리 (0점과 구분)** | ✅ | `backend/teamflow/contribution/scoring.py` |
 | 기여도 산정 엔진 | ✅ | `backend/teamflow/contribution/scoring.py` |
-| DB 스키마 (32개 테이블) | ✅ | `backend/teamflow/db/models.py` |
+| DB 스키마 (33개 테이블) | ✅ | `backend/teamflow/db/models.py` |
 | **조작 저항성 테스트** | ✅ **11 시나리오 · 24 케이스** | `backend/tests/test_anti_gaming.py` |
 | 환경 진단 스크립트 | ✅ | `scripts/check_env.py` |
 | LLM 출력 스키마 (guided decoding) | ✅ | `backend/teamflow/meeting/schema.py` |
@@ -142,7 +142,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
 | docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
 | **Dockerfile (api·gpu, ffmpeg 포함)** | ⚠️ 빌드 미검증 | `docker/` |
-| **Alembic 마이그레이션** | ✅ 32개 테이블 | `backend/migrations/` |
+| **Alembic 마이그레이션** | ✅ 33개 테이블 | `backend/migrations/` |
 | GPU 배타 락 (TTL·소유권 검증) | ✅ | `backend/teamflow/jobs/gpu_lock.py` |
 | **보존기간 삭제 잡** (법적 요구사항) | ✅ | `backend/teamflow/jobs/retention.py` |
 | **멀티트랙 정렬 (GCC-PHAT)** | ✅ | `backend/teamflow/audio/multitrack.py` |

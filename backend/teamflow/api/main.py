@@ -52,9 +52,11 @@ from teamflow.projects import invites
 from teamflow.services import (
     approval_service,
     auth_service,
+    calendar_service,
     channel_service,
     github_connection_service,
     message_service,
+    notification_service,
     progress_service,
     recording_service,
     report_service,
@@ -3356,6 +3358,11 @@ async def send_message(
     except (channel_service.ChannelError, message_service.MessageError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
+    # NOTIFICATION-001 — 부른 사람들에게. ⚠️ 누구를 불렀는지는 서버가
+    # 본문에서 뽑아 이미 저장했습니다. 여기서 다시 뽑지 않습니다.
+    notification_service.record_mentions(
+        session, message, project_id=channel.project_id, author_id=user.id
+    )
     out = _messages_out(session, [message], user.id)[0]
     session.commit()
     # ⚠️ 커밋 **뒤에** 흘립니다. 앞에서 흘리면 롤백된 메시지가 남의 화면에
@@ -3523,6 +3530,223 @@ async def channel_stream(websocket: WebSocket, channel_id: int) -> None:
         pass
     finally:
         await chat_hub.hub.part(channel_id, connection_id)
+
+
+# ══════════════════════════════════════════════════════════════
+# 일정 (요구사항 정의서 §16)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **달력 표를 만들지 않았습니다.** 요구하는 다섯 중 넷은 이미 있는
+# 행에서 나옵니다 — 베껴 담으면 업무 마감일을 고쳤을 때 달력만 옛 날짜를
+# 말합니다. 자세한 것은 `services/calendar_service.py` 머리말에.
+
+
+class CalendarItemOut(BaseModel):
+    kind: str
+    #: ⚠️ **자르지 않은 순간**입니다. 어느 날인지는 화면이 팀 달력으로
+    #: 정합니다 — 여기서 또 자르면 시간대 계산이 두 벌이 됩니다.
+    at: datetime
+    title: str
+    task_id: int | None
+    meeting_id: int | None
+    who: str | None
+    done: bool
+
+
+class ScheduleIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    at: datetime
+    channel_id: int | None = None
+
+
+class RescheduleIn(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    at: datetime | None = None
+
+
+class ScheduledOut(BaseModel):
+    meeting_id: int
+    title: str | None
+    scheduled_at: datetime | None
+    started_at: datetime | None
+    channel_id: int | None
+
+
+def _scheduled_out(meeting: m.Meeting) -> ScheduledOut:
+    return ScheduledOut(
+        meeting_id=meeting.id,
+        title=meeting.title,
+        scheduled_at=meeting.scheduled_at,
+        started_at=meeting.started_at,
+        channel_id=meeting.channel_id,
+    )
+
+
+@app.get("/api/projects/{project_id}/calendar", response_model=list[CalendarItemOut])
+def read_calendar(
+    project_id: int,
+    since: datetime,
+    until: datetime,
+    session: DbSession,
+    user: CurrentUser,
+) -> list[CalendarItemOut]:
+    """CALENDAR-001·002·005 — 이 기간에 놓이는 것 전부.
+
+    ⚠️ 범위를 **반드시 받습니다.** 전부 주면 3년치가 한 번에 오고 화면은
+    그중 한 달만 씁니다.
+    """
+    _require_project_member(session, project_id, user)
+    try:
+        items = calendar_service.collect(session, project_id, since=since, until=until)
+    except calendar_service.CalendarError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return [
+        CalendarItemOut(
+            kind=item.kind,
+            at=item.at,
+            title=item.title,
+            task_id=item.task_id,
+            meeting_id=item.meeting_id,
+            who=item.who,
+            done=item.done,
+        )
+        for item in items
+    ]
+
+
+@app.post(
+    "/api/projects/{project_id}/scheduled-meetings",
+    response_model=ScheduledOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def schedule_meeting(
+    project_id: int, payload: ScheduleIn, session: DbSession, user: CurrentUser
+) -> ScheduledOut:
+    """CALENDAR-003 — 일정을 잡는다. **아직 회의를 여는 것이 아닙니다.**"""
+    _require_project_member(session, project_id, user)
+    try:
+        meeting = calendar_service.schedule_meeting(
+            session,
+            project_id,
+            title=payload.title,
+            at=payload.at,
+            created_by=user.id,
+            channel_id=payload.channel_id,
+        )
+    except calendar_service.CalendarError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return _scheduled_out(meeting)
+
+
+@app.patch("/api/scheduled-meetings/{meeting_id}", response_model=ScheduledOut)
+def reschedule_meeting(
+    meeting_id: int, payload: RescheduleIn, session: DbSession, user: CurrentUser
+) -> ScheduledOut:
+    """CALENDAR-004."""
+    meeting = _load_meeting_for(session, meeting_id, user)
+    try:
+        calendar_service.reschedule_meeting(
+            session, meeting, at=payload.at, title=payload.title
+        )
+    except calendar_service.CalendarError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return _scheduled_out(meeting)
+
+
+@app.delete("/api/scheduled-meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_scheduled_meeting(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> Response:
+    """잡아 둔 일정을 무른다. **아직 안 연 회의만.**"""
+    meeting = _load_meeting_for(session, meeting_id, user)
+    try:
+        calendar_service.cancel_meeting(session, meeting)
+    except calendar_service.CalendarError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ══════════════════════════════════════════════════════════════
+# 알림 (요구사항 정의서 §19)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **여섯 중 넷만 저장돼 있습니다.** 마감 임박·지연은 지금 상태에서
+# 만들어 붙입니다 — 행으로 쌓으면 마감일을 미뤘을 때 "곧 마감" 이 남고,
+# 끝냈을 때 "지연" 이 남습니다. 자세한 것은 `notification_service` 머리말에.
+
+
+class NoticeOut(BaseModel):
+    kind: str
+    at: datetime
+    #: ⚠️ 저장된 글자가 아니라 **지금 만든** 문장입니다. 업무 이름을 고치면
+    #: 이 문장도 따라옵니다.
+    text: str
+    task_id: int | None
+    meeting_id: int | None
+    message_id: int | None
+    #: 저장된 알림만 번호가 있습니다. 파생(마감)은 `null` —
+    #: ⚠️ 읽었다고 마감이 사라지지 않습니다.
+    notification_id: int | None
+    read: bool
+
+
+class ReadIn(BaseModel):
+    notification_ids: list[int]
+
+
+@app.get("/api/projects/{project_id}/notifications", response_model=list[NoticeOut])
+def read_notifications(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> list[NoticeOut]:
+    """NOTIFICATION-001~005 — 저장된 사건 + 지금 상태에서 나오는 마감."""
+    _require_project_member(session, project_id, user)
+    notices = notification_service.collect(
+        session, user.id, project_id, now=datetime.now(UTC)
+    )
+    return [
+        NoticeOut(
+            kind=n.kind,
+            at=n.at,
+            text=n.text,
+            task_id=n.task_id,
+            meeting_id=n.meeting_id,
+            message_id=n.message_id,
+            notification_id=n.notification_id,
+            read=n.read,
+        )
+        for n in notices
+    ]
+
+
+@app.get("/api/projects/{project_id}/notifications/unread")
+def read_unread_count(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> dict[str, int]:
+    """배지에 쓸 수.
+
+    ⚠️ **마감은 안 셉니다.** 읽어도 안 없어지므로 영영 안 줄어드는 숫자가
+    되고, 그러면 사람은 배지를 아예 안 봅니다.
+    """
+    _require_project_member(session, project_id, user)
+    return {
+        "unread": notification_service.unread_count(
+            session, user.id, project_id, now=datetime.now(UTC)
+        )
+    }
+
+
+@app.post("/api/projects/{project_id}/notifications/read")
+def mark_notifications_read(
+    project_id: int, payload: ReadIn, session: DbSession, user: CurrentUser
+) -> dict[str, int]:
+    """읽음 표시. ⚠️ **남의 알림은 못 읽습니다** — 서비스가 한 번 더 거릅니다."""
+    _require_project_member(session, project_id, user)
+    marked = notification_service.mark_read(session, user.id, payload.notification_ids)
+    session.commit()
+    return {"marked": marked}
 
 
 # ══════════════════════════════════════════════════════════════

@@ -93,14 +93,33 @@ def test_models_and_migrations_are_in_sync(alembic_config: Config):
         engine.dispose()
 
     # SQLite는 일부 제약(CHECK, 서버 기본값 표현)을 그대로 반영하지 못해
-    # 오탐이 난다. 테이블·컬럼 수준의 차이만 본다 — 진짜 잊어버린 마이그레이션은
-    # 반드시 이 범주로 나타난다.
-    significant = [
-        d
-        for d in diff
-        if isinstance(d, tuple)
-        and d[0] in ("add_table", "remove_table", "add_column", "remove_column")
-    ]
+    # 오탐이 난다. 그래서 **볼 것을 골라서** 본다.
+    #
+    # ⚠️ 예전에는 여기 "테이블·컬럼 수준의 차이만 본다 — 진짜 잊어버린
+    #    마이그레이션은 **반드시** 이 범주로 나타난다" 고 적혀 있었습니다.
+    #    **그 말이 틀렸습니다.**
+    #
+    #    `nullable` 변경은 add/remove 어디에도 안 나타납니다. 게다가
+    #    alembic 은 그것을 **리스트 안에 담아** 돌려주므로 아래
+    #    `isinstance(d, tuple)` 이 통째로 걸러 냈습니다. 실제로 찾기·바꾸기가
+    #    두 곳을 쳐서 `meeting_tracks.started_at` 이 조용히 널 허용으로
+    #    바뀐 적이 있고(결함 128), 이 검사는 **그때 통과했습니다.**
+    #
+    #    널 허용은 잊어버린 마이그레이션 중에서도 나쁜 쪽입니다 — 배포된
+    #    DB 는 여전히 NOT NULL 이라 널을 넣는 코드가 **배포에서만** 터집니다.
+    KINDS = ("add_table", "remove_table", "add_column", "remove_column", "modify_nullable")
+
+    def flatten(entries: object) -> list[tuple]:
+        """alembic 은 컬럼 변경을 **리스트로 감싸서** 돌려준다."""
+        out: list[tuple] = []
+        if isinstance(entries, tuple):
+            out.append(entries)
+        elif isinstance(entries, list):
+            for entry in entries:
+                out.extend(flatten(entry))
+        return out
+
+    significant = [d for entry in diff for d in flatten(entry) if d and d[0] in KINDS]
     assert not significant, (
         "모델과 마이그레이션이 어긋났습니다. "
         "`alembic revision --autogenerate` 로 새 마이그레이션을 만드세요:\n"

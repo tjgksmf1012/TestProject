@@ -380,3 +380,72 @@ REACTION_LABEL: dict[ReactionMark, str] = {
 
 def reaction_values() -> tuple[str, ...]:
     return tuple(sorted(str(r) for r in ReactionMark))
+
+
+# ══════════════════════════════════════════════════════════════
+# notifications.kind — 알림의 종류 (요구사항 정의서 §19)
+# ══════════════════════════════════════════════════════════════
+#
+# ## ⚠️ 여섯 중 넷만 **저장**됩니다
+#
+# 정의서의 여섯을 두 종류로 갈랐습니다.
+#
+#     저장한다  MENTION · ASSIGNED · MEETING_SOON · GITHUB
+#               → **일어난 사건**입니다. 그 순간이 아니면 다시 알 수 없습니다
+#
+#     안 한다   DUE_SOON · OVERDUE
+#               → **지금 상태에서 나옵니다.** 행으로 쌓으면 마감일을 미뤘을 때
+#                 "곧 마감" 이 남고, 끝냈을 때 "지연" 이 남습니다
+#
+# 아래 두 집합이 그 경계이고, `test_column_vocabularies.py` 가 "저장한다고
+# 적은 값에 진짜 저장하는 코드가 있는지" 를 소스에서 셉니다.
+#
+# ⚠️ **`GITHUB` 은 아직 만드는 코드가 0곳입니다.** 웹훅에서 부를 자리를
+#    아직 안 잡았습니다 — `speaker_source` 처럼 "곧 온다" 를 미리 열어 두는
+#    것이고, 그 사실을 아래 집합과 테스트가 지킵니다.
+
+
+class NotificationKind(StrEnum):
+    """알림 하나의 종류."""
+
+    MENTION = "mention"  # NOTIFICATION-001 채팅에서 불렸다
+    ASSIGNED = "assigned"  # NOTIFICATION-002 업무를 맡았다
+    DUE_SOON = "due_soon"  # NOTIFICATION-003 곧 마감 — **파생**
+    OVERDUE = "overdue"  # NOTIFICATION-004 지났다 — **파생**
+    MEETING_SOON = "meeting_soon"  # NOTIFICATION-005 곧 회의
+    GITHUB = "github"  # NOTIFICATION-006 PR 상태가 바뀌었다
+
+
+#: `notifications.kind` 가 받는 값. **파생 둘은 빠집니다** — 저장 안 합니다.
+NOTIFICATION_STORED: frozenset[NotificationKind] = frozenset(
+    {
+        NotificationKind.MENTION,
+        NotificationKind.ASSIGNED,
+        NotificationKind.MEETING_SOON,
+        NotificationKind.GITHUB,
+    }
+)
+
+#: 저장하지 않고 **읽을 때 만드는** 것. 표에 들어가면 안 됩니다.
+NOTIFICATION_DERIVED: frozenset[NotificationKind] = frozenset(
+    {NotificationKind.DUE_SOON, NotificationKind.OVERDUE}
+)
+
+#: 저장은 하는데 **아직 만드는 코드가 없는** 것.
+#:
+#: ⚠️ `MEETING_SOON` 이 여기 있을 뻔했습니다 — 읽는 코드(`_text_for`)만
+#: 만들어 놓고 만드는 코드를 안 붙였습니다. 이 저장소의 대표 실패 ①
+#: 이고, 검사가 아니라 눈으로 grep 해서 알았습니다. 지금은
+#: `announce_upcoming_meetings` 가 만듭니다.
+#:
+#: ⚠️ `GITHUB` 은 진짜로 아직 없습니다. 웹훅에서 부를 자리를 안 잡았고,
+#: 잡으려면 "PR 상태가 바뀌었다" 를 업무와 이어야 하는데
+#: (`task_github_links`) 그건 별개 작업입니다.
+NOTIFICATION_NOT_PRODUCED_YET: frozenset[NotificationKind] = frozenset(
+    {NotificationKind.GITHUB}
+)
+
+
+def notification_values() -> tuple[str, ...]:
+    """CHECK 제약에 들어갈 값. **저장하는 것만.**"""
+    return tuple(sorted(str(k) for k in NOTIFICATION_STORED))

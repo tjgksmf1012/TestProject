@@ -48,6 +48,26 @@ def team_zone() -> ZoneInfo:
     return ZoneInfo(get_settings().project_timezone)
 
 
+def as_utc(at: datetime) -> datetime:
+    """tzinfo 가 없는 값을 UTC 로 본다.
+
+    ## ⚠️ 왜 필요한가 — SQLite 와 PostgreSQL 이 다릅니다
+
+    `DateTime(timezone=True)` 로 저장해도 **SQLite 는 tzinfo 를 잃고**
+    돌려줍니다. PostgreSQL 은 붙여서 돌려줍니다. 그래서 DB 에서 읽은 값과
+    요청으로 들어온 값을 파이썬에서 비교하면
+
+        TypeError: can't compare offset-naive and offset-aware datetimes
+
+    가 **테스트(SQLite)에서만** 납니다. 반대 방향이었으면 더 나빴을
+    것입니다 — 배포에서만 터졌을 테니까요.
+
+    이 저장소는 naive datetime 을 **UTC 로만** 저장하므로 이 가정은
+    안전합니다. `local_date` 가 같은 이유로 같은 가정을 씁니다.
+    """
+    return at if at.tzinfo is not None else at.replace(tzinfo=UTC)
+
+
 def local_date(at: datetime) -> date:
     """이 순간이 팀 달력에서 며칠인가.
 
@@ -57,6 +77,4 @@ def local_date(at: datetime) -> date:
     돌려주기 때문입니다. 이 저장소는 naive datetime 을 UTC 로만
     저장하므로 그 가정은 안전합니다.
     """
-    if at.tzinfo is None:
-        at = at.replace(tzinfo=UTC)
-    return at.astimezone(team_zone()).date()
+    return as_utc(at).astimezone(team_zone()).date()
