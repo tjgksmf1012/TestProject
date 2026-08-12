@@ -61,6 +61,14 @@ import {
   taskHref,
   type Analytics,
 } from '../lib/analytics/view.ts';
+import {
+  assignableRoles,
+  canChangeRoleOf,
+  canRemove,
+  LEAVE_CONFIRM,
+  leaveBlockedBecause,
+  roleLabel,
+} from '../lib/project/roles.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -224,6 +232,14 @@ function ProjectHealth({ data }: { data: Analytics | null }) {
   );
 }
 
+interface TeamMember {
+  user_id: number;
+  name?: string;
+  role_shares?: Record<string, number>;
+  github_login?: string | null;
+  project_role?: string;
+}
+
 function ProjectSettings() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
@@ -234,6 +250,9 @@ function ProjectSettings() {
   const [copyNote, setCopyNote] = useState<Note | null>(null);
   const [copyLabel, setCopyLabel] = useState('코드 복사');
   const [health, setHealth] = useState<HealthView | null>(null);
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  const [myId, setMyId] = useState<number | null>(null);
+  const [teamNote, setTeamNote] = useState<Note | null>(null);
   const [slow, setSlow] = useState(false);
   const [backfill, setBackfill] = useState<Note | null>(null);
   const [roles, setRoles] = useState<Record<string, number>>({});
@@ -271,15 +290,15 @@ function ProjectSettings() {
   const loadRoles = useCallback(async (): Promise<void> => {
     const response = await call(`/api/projects/${projectId}/members`);
     if (response === null || !response.ok) return;
-    const members = (await response.json()) as {
-      user_id: number;
-      role_shares?: Record<string, number>;
-      github_login?: string | null;
-    }[];
+    const members = (await response.json()) as TeamMember[];
     const meRes = await call('/api/auth/me');
     if (meRes === null || !meRes.ok) return;
     const me = (await meRes.json()) as { user_id: number };
     const mine = members.find((entry) => entry.user_id === me.user_id);
+    // ⚠️ 명단과 "나" 를 같이 들고 있어야 합니다. 누구를 바꿀 수 있는지는
+    //    **내 등급과 상대 등급을 같이 봐야** 정해집니다.
+    setTeam(members);
+    setMyId(me.user_id);
     setRoles(mine?.role_shares ?? {});
     setRoleMessage({ text: `지금 ${describeRoles(mine?.role_shares)}`, tone: 'plain' });
     // ⚠️ **저장한 것이 화면으로 돌아와야 합니다.** 안 돌아오면 사람은 매번
@@ -287,6 +306,61 @@ function ProjectSettings() {
     setGhLogin(mine?.github_login ?? '');
     setGhLoginMessage({ text: githubLoginStatus(mine?.github_login ?? null), tone: 'plain' });
   }, []);
+
+  /** 남의 권한을 바꾼다. ⚠️ 서버가 거절하면 **이유를 그대로 보여 줍니다.** */
+  const changeRole = async (userId: number, role: string): Promise<void> => {
+    const response = await send(
+      `/api/projects/${projectId}/members/${userId}/role`,
+      { method: 'PATCH', body: JSON.stringify({ project_role: role }) },
+    );
+    if (response === null) {
+      setTeamNote({ text: unreachableText('권한을 바꾸지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    if (!response.ok) {
+      setTeamNote({ text: await detailText(response, '권한을 바꾸지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    setTeamNote({ text: '권한을 바꿨습니다.', tone: 'plain' });
+    await loadRoles();
+  };
+
+  const removeMember = async (userId: number, name: string): Promise<void> => {
+    // ⚠️ 되돌릴 수 없으므로 먼저 묻습니다.
+    if (!confirm(`${name} 님을 팀에서 내보냅니다. 맡은 업무와 회의 기록은 남습니다.`)) {
+      return;
+    }
+    const response = await send(`/api/projects/${projectId}/members/${userId}`, {
+      method: 'DELETE',
+    });
+    if (response === null) {
+      setTeamNote({ text: unreachableText('내보내지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    if (!response.ok) {
+      setTeamNote({ text: await detailText(response, '내보내지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    setTeamNote({ text: `${name} 님이 팀에서 빠졌습니다.`, tone: 'plain' });
+    await loadRoles();
+  };
+
+  const leave = async (): Promise<void> => {
+    if (!confirm(LEAVE_CONFIRM)) return;
+    const response = await send(`/api/projects/${projectId}/members/me/leave`, {
+      method: 'POST',
+    });
+    if (response === null) {
+      setTeamNote({ text: unreachableText('나가지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    if (!response.ok) {
+      setTeamNote({ text: await detailText(response, '나가지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    // 나간 프로젝트는 더 볼 수 없습니다. 빈 화면에 남겨 두면 오류로 읽힙니다.
+    location.href = '/home.html';
+  };
 
   const load = useCallback(async (): Promise<void> => {
     const response = await call(`/api/projects/${projectId}`);
@@ -543,6 +617,12 @@ function ProjectSettings() {
   const inviteCode = detail?.invite_code || null;
   const roleTotal = sumOf(roles);
 
+  const myRole = team.find((entry) => entry.user_id === myId)?.project_role ?? null;
+  const leaveWhy = leaveBlockedBecause(
+    myRole,
+    team.map((entry) => entry.project_role ?? 'member'),
+  );
+
   return (
     <>
       <header className="head">
@@ -557,6 +637,90 @@ function ProjectSettings() {
       </p>
 
       <ProjectHealth data={analytics} />
+
+      {/* ⭐ 팀원과 권한 (`PROJECT-003`·`PROJECT-004`).
+
+          ⚠️ 여기 버튼을 숨기는 것은 **보안이 아닙니다.** 진짜 문은
+          서버입니다. 여기서 하는 일은 못 하는 버튼을 안 보여 주는
+          것뿐입니다 — 눌렀더니 403 이 뜨는 화면은 "고장" 으로 읽힙니다.
+
+          ⚠️ **줄을 세우지 않습니다.** 서버가 주는 순서 그대로 씁니다.
+          권한 순으로 정렬하면 맨 위가 "제일 높은 사람" 이 되고, 그건
+          이 화면이 만들면 안 되는 그림입니다. */}
+      {team.length > 0 && (
+        <section className="panel team">
+          <h2>팀원</h2>
+          <p className="sub">
+            권한은 무엇을 바꿀 수 있는가입니다. 기여도 가중치(위의 내 역할)와는 다릅니다.
+          </p>
+          <ul className="mlist">
+            {team.map((person) => {
+              const isMe = person.user_id === myId;
+              const canEdit = canChangeRoleOf(myRole, person.project_role, { isMe });
+              const options = assignableRoles(myRole);
+              return (
+                <li key={person.user_id}>
+                  <span className="mname">
+                    {person.name ?? `사용자 #${person.user_id}`}
+                    {isMe && <span className="mme">나</span>}
+                  </span>
+                  {canEdit ? (
+                    <select
+                      className="mrole"
+                      value={person.project_role ?? 'member'}
+                      onChange={(e) => void changeRole(person.user_id, e.target.value)}
+                      aria-label={`${person.name ?? ''} 권한`}
+                    >
+                      {/* ⚠️ 지금 값이 목록에 없을 수 있습니다(내가 줄 수 없는
+                          등급). 빼면 select 가 엉뚱한 값을 보여 줍니다. */}
+                      {!options.includes((person.project_role ?? 'member') as never) && (
+                        <option value={person.project_role ?? 'member'}>
+                          {roleLabel(person.project_role)}
+                        </option>
+                      )}
+                      {options.map((r) => (
+                        <option key={r} value={r}>
+                          {roleLabel(r)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="mrole-flat">{roleLabel(person.project_role)}</span>
+                  )}
+                  {canRemove(myRole, person.project_role, { isMe }) && (
+                    <button
+                      className="mout"
+                      onClick={() =>
+                        void removeMember(
+                          person.user_id,
+                          person.name ?? `사용자 #${person.user_id}`,
+                        )
+                      }
+                    >
+                      내보내기
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+
+          <NoteLine note={teamNote} />
+
+          {/* ⭐ 나가기 (`PROJECT-006`).
+              ⚠️ 막힐 때 **버튼을 지우지 않고 이유를 말합니다.** 없어진
+              버튼은 "이 화면은 나갈 수 없다" 가 아니라 "고장" 으로
+              읽힙니다. */}
+          <h3 className="sub-head">이 프로젝트에서 나가기</h3>
+          {leaveWhy === null ? (
+            <button className="leave" onClick={() => void leave()}>
+              나가기
+            </button>
+          ) : (
+            <p className="sub">{leaveWhy}</p>
+          )}
+        </section>
+      )}
 
       {/* ⭐ 역할. 이 값이 기여도 **가중치**를 정합니다 — 바꿀 자리가 없던
           동안 전원이 개발자로 계산돼, 문서만 쓴 사람이 이유 없이 낮게

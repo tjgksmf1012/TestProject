@@ -136,6 +136,33 @@
   .rname { font-size: var(--fs-label); font-weight: 600; color: var(--text); margin: 0; }
   .rwhy { font-size: var(--fs-caption); color: var(--text-muted); margin: var(--sp-1) 0 0;
           font-variant-numeric: tabular-nums; }
+  /* ── 팀원과 권한 (`PROJECT-003`·`PROJECT-004`) ─────────── */
+  /* ⚠️ **줄을 세우지 않습니다.** 서버가 주는 순서 그대로입니다 — 권한 순
+     으로 정렬하면 맨 위가 "제일 높은 사람" 이 되고, 이 화면이 만들면 안
+     되는 그림입니다. */
+  .mlist { list-style: none; padding: 0; margin: var(--sp-3) 0 0;
+           display: flex; flex-direction: column; gap: var(--sp-2); }
+  .mlist li { display: flex; align-items: center; gap: var(--sp-3);
+              flex-wrap: wrap; min-height: var(--tap); }
+  .mname { font-size: var(--fs-item); color: var(--text); }
+  /* 내 줄을 알아보게. ⚠️ 색이 아니라 **글자**로 말합니다 — 색만으로
+     구분하면 색을 못 보는 사람에게는 아무 표시도 없는 것입니다. */
+  .mme { margin-left: var(--sp-2); font-size: var(--fs-caption);
+         color: var(--text-subtle); }
+  /* ⚠️ **공용 CSS 가 `select` 에 `width: 100%` 를 줍니다.** 그대로 두면
+     칸이 줄 전체를 먹고, 이름·권한·버튼이 한 줄에서 **세 줄로 흩어집니다.**
+     렌더해서 보기 전에는 안 보였습니다 — 값은 다 맞았고 배치만 틀렸습니다.
+     `AGENTS.md` 가 경고하는 그 자리(공용 규칙이 화면 칸을 부풀리는 것)입니다. */
+  .mrole { margin-left: auto; width: auto; min-width: 7rem; }
+  /* 못 바꾸는 사람의 등급 — 잠긴 select 대신 **글자**입니다.
+     ⚠️ `disabled` 된 select 를 두면 "눌리는데 안 눌린다" 로 읽힙니다. */
+  .mrole-flat { margin-left: auto; font-size: var(--fs-caption);
+                color: var(--text-subtle); }
+  /* ⚠️ 되돌릴 수 없는 행동이라 **주된 버튼처럼 보이면 안 됩니다.**
+     빨강도 아닙니다 — 이 저장소에서 빨강은 "네가 뭘 잘못했다" 입니다. */
+  .mout { font-size: var(--fs-caption); }
+  .leave { margin-top: var(--sp-2); }
+
   /* 근거로 든 업무 — **누르면 그 카드로 갑니다.**
      ⚠️ 처음엔 글자 그대로 두었더니 폰에서 접촉면이 13×14px 이었고 이웃과
      6.4px 떨어져 있었습니다. 옆 것을 누릅니다. 누르는 것은 `--tap`(44px)

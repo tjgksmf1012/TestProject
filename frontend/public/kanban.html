@@ -167,9 +167,18 @@
                   padding: var(--sp-2) var(--sp-4); }
   .moves button[data-dir="back"] { background: transparent; border-color: transparent;
                                    color: var(--text-subtle); font-weight: 500; }
+  /* 지우기 (`TASK-003`) — **되돌리기와 같은 무게**입니다.
+     ⚠️ 빨강이 아닙니다. 이 저장소에서 빨강은 "네가 뭘 잘못했다" 이고,
+     잘못 만든 카드를 치우는 것은 잘못이 아닙니다.
+     ⚠️ 맨 앞에 그리지 않습니다 — 주된 행동은 앞으로 보내는 것입니다.
+     `order` 로 눈에 보이는 자리만 뒤로 미룹니다(마크업 순서는 그대로 둬야
+     탭 이동이 카드 안에서 자연스럽습니다). */
+  .moves .drop { order: 9; background: transparent; border-color: transparent;
+                 color: var(--text-subtle); font-weight: 500; margin-left: auto; }
   @media (hover: hover) and (pointer: fine) {
     .moves button { min-height: 0; }
     .moves button[data-dir="back"]:hover { color: var(--text); background: transparent; }
+    .moves .drop:hover { color: var(--text); background: transparent; }
   }
 
   /* ⚠️ 여백을 id(1,0,0)로 적으면 공용 `[role='status']:empty { margin: 0 }`

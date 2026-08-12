@@ -41,6 +41,7 @@ import {
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
+import { deleteTaskConfirm } from '../lib/project/roles.ts';
 import { withJosa } from '../lib/text/josa.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
@@ -154,6 +155,7 @@ function Card({
   members,
   moving,
   onMove,
+  onDelete,
 }: {
   task: Task;
   today: string;
@@ -161,6 +163,7 @@ function Card({
   members: Member[];
   moving: boolean;
   onMove: (to: string) => void;
+  onDelete: () => void;
 }) {
   const warnings = taskWarnings(task, today);
   const who =
@@ -199,6 +202,17 @@ function Card({
       {warnings.length > 0 && <p className="gapmark">기여도에 반영 안 됨</p>}
 
       <div className="moves">
+        {/* ⭐ 지우기 (`TASK-003`).
+
+            ⚠️ **팀원도 지웁니다.** 관리자만 지울 수 있으면 사람들은
+            지우는 대신 완료 칸으로 밀어 넣고, 그러면 진행률이 거짓이
+            되어 기여도와 보고서로 흘러갑니다.
+
+            ⚠️ 빨강이 아닙니다. 이 저장소에서 빨강은 "네가 뭘 잘못했다"
+            이고, 카드를 지우는 것은 잘못이 아닙니다. */}
+        <button className="drop" disabled={moving} onClick={() => onDelete()}>
+          지우기
+        </button>
         {nextStatuses(task, statuses).map((s) => (
           <button
             key={s}
@@ -309,6 +323,42 @@ function Kanban() {
     card.classList.add('found');
     card.scrollIntoView({ block: 'center' });
   }, [screen]);
+
+  /**
+   * 업무를 지운다 (`TASK-003`).
+   *
+   * ⚠️ **먼저 묻습니다.** 되돌릴 방법을 화면이 안 줍니다.
+   * ⚠️ 문구는 `lib/project/roles.ts` 가 만듭니다 — 조사(`을/를`)를
+   *    받침 보고 골라야 하고, 그건 판단이라 화면에 두면 안 됩니다.
+   */
+  const drop = async (task: Task): Promise<void> => {
+    if (!confirm(deleteTaskConfirm(task.title))) return;
+    setMoving(true);
+    try {
+      const response = await trySend(() =>
+        fetch(`${apiBase}/api/projects/${projectId}/tasks/${task.id}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        }),
+      );
+      if (response === null) {
+        setError(unreachableText('지우지 못했습니다'));
+        return;
+      }
+      if (isSessionExpired(response.status)) {
+        goToLogin();
+        return;
+      }
+      if (!response.ok) {
+        setError(`지우지 못했습니다 (${describeHttpStatus(response.status)})`);
+        return;
+      }
+      setError('');
+      await load();
+    } finally {
+      setMoving(false);
+    }
+  };
 
   const move = async (taskId: number, to: string): Promise<void> => {
     setMoving(true);
@@ -483,6 +533,7 @@ function Kanban() {
                     members={members}
                     moving={moving}
                     onMove={(to) => void move(task.id, to)}
+                    onDelete={() => void drop(task)}
                   />
                 ))
               )}

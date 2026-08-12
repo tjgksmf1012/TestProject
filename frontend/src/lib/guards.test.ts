@@ -481,8 +481,16 @@ describe('모바일 규칙', () => {
     const offenders: string[] = [];
     for (const { name, html } of screens()) {
       const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+      // ⚠️ **주석을 먼저 걷어냅니다.** 이 검사는 `{` 앞의 글자를 통째로
+      //    선택자로 보는데, 바로 위에 붙은 주석도 거기 딸려 들어옵니다.
+      //    그래서 주석에 `select` 라는 낱말이 있으면 `<span>` 규칙이
+      //    입력 칸으로 잡혔습니다 — 실제로 `.mrole-flat` 이 그렇게
+      //    걸렸습니다(그 주석은 "잠긴 select 대신 글자" 라고 적혀
+      //    있었습니다). 바로 아래 44px 검사는 이미 이렇게 하고 있었고,
+      //    여기만 빠져 있었습니다.
+      const bare = style.replace(/\/\*[\s\S]*?\*\//g, '');
       // 마우스 전용 블록은 통째로 들어냅니다.
-      const touch = style.replace(
+      const touch = bare.replace(
         /@media\s*\([^)]*hover:\s*hover[^)]*\)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,
         '',
       );
