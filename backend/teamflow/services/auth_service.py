@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from teamflow.auth import passwords
 from teamflow.db import models as m
+from teamflow.users import presence
 
 # 세션 수명. 회의 하나가 몇 시간이고 팀플은 며칠 단위로 이어지므로,
 # 짧게 잡으면 녹음 도중에 로그아웃되는 사고가 납니다.
@@ -140,6 +141,17 @@ def resolve_session(session: Session, token: str | None) -> m.User | None:
     expires_at = _aware(row.expires_at)
     if expires_at is not None and expires_at <= _now():
         return None
+
+    # ⚠️ **상태를 저장하는 것이 아닙니다** (`USER-005`). "이 세션이 마지막으로
+    #    쓰인 때" 라는 사실 하나만 적고, `접속 중`·`자리 비움` 은 읽을 때
+    #    계산합니다 (`users/presence.py`). 상태를 행으로 쌓으면 그 표는 곧
+    #    출퇴근부가 됩니다.
+    #
+    # ⚠️ 요청마다 쓰지 않습니다 — 화면 하나가 API 를 여럿 부르므로 그대로
+    #    두면 쓰기가 읽기만큼 생깁니다.
+    now = _now()
+    if presence.should_touch(_aware(row.last_seen_at), now):
+        row.last_seen_at = now
 
     return session.get(m.User, row.user_id)
 

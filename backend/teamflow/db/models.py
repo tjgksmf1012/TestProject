@@ -118,6 +118,15 @@ class UserSession(Base):
     # 로그인해 있었는가" 는 기여도 분쟁에서 확인할 거리가 됩니다.
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     user_agent: Mapped[str | None] = mapped_column(String(300))
+    #: 이 세션으로 마지막 요청이 온 때 (`USER-005`).
+    #:
+    #: ⚠️ **상태를 저장하는 칸이 아닙니다.** `접속 중`·`자리 비움` 은
+    #: 여기서 읽을 때 계산합니다(`users/presence.py`). 상태를 행으로
+    #: 쌓으면 그 표는 곧 **출퇴근부**가 되고, 그건 이 제품이 절대
+    #: 만들면 안 되는 물건입니다.
+    #:
+    #: ⚠️ 요청마다 쓰지 않습니다 — `presence.should_touch` 를 지납니다.
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (Index("ix_user_sessions_user", "user_id"),)
 

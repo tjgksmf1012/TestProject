@@ -37,6 +37,7 @@ from teamflow.auth import passwords
 from teamflow.call import rooms as call_rooms
 from teamflow.call import signaling as call_signaling_module
 from teamflow.chat import hub as chat_hub
+from teamflow.clock import as_utc
 from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import live, vocab
 from teamflow.db import models as m
@@ -70,6 +71,7 @@ from teamflow.services import (
     task_service,
 )
 from teamflow.tasks import dispatch
+from teamflow.users import presence
 
 logger = logging.getLogger(__name__)
 
@@ -1996,6 +1998,58 @@ class MemberOut(BaseModel):
     #:
     #: ⚠️ `role_shares` 와 **다른 것**입니다. 그건 기여도 가중치입니다.
     project_role: str = str(vocab.DEFAULT_PROJECT_ROLE)
+    #: 지금 붙어 있는가 (`USER-005`). **읽을 때 계산합니다.**
+    #:
+    #: ⚠️ 과거를 안 보냅니다 — `마지막 접속 3일 전` 은 상태가 아니라
+    #: 근태 기록입니다.
+    presence: str = str(vocab.PresenceStatus.OFFLINE)
+
+
+def _presence_of(session: Session, user_ids: list[int]) -> dict[int, str]:
+    """지금 붙어 있는가 (`USER-005`).
+
+    ⚠️ **아무것도 저장하지 않습니다.** 세션의 마지막 요청 시각과 열려
+    있는 회의 트랙을 읽어 그때그때 계산합니다. 상태를 행으로 쌓으면 그
+    표는 곧 출퇴근부가 되고, 이 제품은 기여를 "무엇을 했는가" 로 재기로
+    했습니다 — 옆에 "언제 앉아 있었는가" 가 쌓이면 사람은 둘을 같이
+    봅니다.
+    """
+    if not user_ids:
+        return {}
+
+    now = datetime.now(UTC)
+    # 사람마다 **제일 최근** 세션. 여러 기기로 들어와 있을 수 있습니다.
+    seen: dict[int, datetime] = {}
+    for uid, at in session.execute(
+        select(m.UserSession.user_id, m.UserSession.last_seen_at).where(
+            m.UserSession.user_id.in_(user_ids),
+            m.UserSession.revoked_at.is_(None),
+            m.UserSession.last_seen_at.is_not(None),
+        )
+    ).all():
+        when = as_utc(at)
+        if when is not None and (uid not in seen or when > seen[uid]):
+            seen[uid] = when
+
+    # ⚠️ 끝나지 않은 트랙 = 지금 녹음 중. 회의 화면은 요청을 자주 안
+    #    보내서, 시간만 보면 회의하는 사람이 자리 비움으로 뜹니다.
+    meeting = set(
+        session.scalars(
+            select(m.MeetingTrack.user_id).where(
+                m.MeetingTrack.user_id.in_(user_ids),
+                m.MeetingTrack.ended_at.is_(None),
+            )
+        )
+    )
+
+    return {
+        uid: str(
+            presence.status_of(
+                last_seen=seen.get(uid), in_meeting=uid in meeting, now=now
+            )
+        )
+        for uid in user_ids
+    }
 
 
 def _project_members(session: Session, project_id: int) -> list[MemberOut]:
@@ -2005,6 +2059,7 @@ def _project_members(session: Session, project_id: int) -> list[MemberOut]:
         .where(m.Member.project_id == project_id)
         .order_by(m.Member.id)
     ).all()
+    here = _presence_of(session, [member.user_id for member, _ in rows])
     return [
         MemberOut(
             user_id=member.user_id,
@@ -2012,6 +2067,7 @@ def _project_members(session: Session, project_id: int) -> list[MemberOut]:
             role_shares={k: float(v) for k, v in (member.role_shares or {}).items()},
             github_login=member.github_login,
             project_role=member.project_role,
+            presence=here.get(member.user_id, str(vocab.PresenceStatus.OFFLINE)),
         )
         for member, user in rows
     ]

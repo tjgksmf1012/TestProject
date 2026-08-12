@@ -256,6 +256,21 @@ def _screen_vocabularies():
             "frontend/src/lib/review/labels.ts",
             "TYPE_LABEL",
         ),
+        # 프로젝트 권한 (정의서 §5 `PROJECT-004`). 한쪽만 늘리면 팀원
+        # 목록에 `admin` 이라는 영어 식별자가 그대로 찍힙니다.
+        (
+            "프로젝트 권한",
+            {str(r) for r in vocab.ProjectRole},
+            "frontend/src/lib/project/roles.ts",
+            "ROLE_LABEL",
+        ),
+        # 사용자 상태 (정의서 §4 `USER-005`).
+        (
+            "사용자 상태",
+            {str(s) for s in vocab.PresenceStatus},
+            "frontend/src/lib/project/presence.ts",
+            "PRESENCE_LABEL",
+        ),
         # 승인이 막힌 이유. 서버가 `failures` 로 코드만 내보내고 화면이
         # 옮긴다. 화면이 스스로도 판정하는 코드가 일곱이라 **다 있는 줄
         # 알기 쉬운데**, 서버만 내는 둘(`unknown_candidate`·`no_reviewer`)

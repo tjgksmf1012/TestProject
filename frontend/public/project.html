@@ -145,6 +145,21 @@
   .mlist li { display: flex; align-items: center; gap: var(--sp-3);
               flex-wrap: wrap; min-height: var(--tap); }
   .mname { font-size: var(--fs-item); color: var(--text); }
+  /* 지금 붙어 있는가 (`USER-005`).
+     ⚠️ **오프라인에는 아무 표시도 안 붙습니다** — 클래스가 없으면 이
+     규칙이 아예 안 걸립니다. 회색 점을 찍어 "없음" 을 세게 만들지
+     않습니다.
+     ⚠️ 빨강·초록 신호등을 안 씁니다. 색으로 좋고 나쁨을 말하는 순간
+     자리에 없는 것이 잘못이 됩니다. `--primary` 하나만 씁니다. */
+  .pdot { display: inline-block; width: 8px; height: 8px;
+          border-radius: var(--r-round); margin-right: var(--sp-2);
+          vertical-align: middle; }
+  .pdot.here { background: var(--primary); }
+  /* 자리 비움은 **속이 빈 점** — 형태로 말합니다. */
+  .pdot.away { border: 1.5px solid var(--primary); }
+  /* ⚠️ 점만 찍으면 색을 못 보는 사람에게는 아무 표시도 없는 것입니다. */
+  .pstat { margin-left: var(--sp-2); font-size: var(--fs-caption);
+           color: var(--text-subtle); }
   /* 내 줄을 알아보게. ⚠️ 색이 아니라 **글자**로 말합니다 — 색만으로
      구분하면 색을 못 보는 사람에게는 아무 표시도 없는 것입니다. */
   .mme { margin-left: var(--sp-2); font-size: var(--fs-caption);

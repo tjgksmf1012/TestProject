@@ -61,6 +61,7 @@ import {
   taskHref,
   type Analytics,
 } from '../lib/analytics/view.ts';
+import { presenceDot, presenceLabel, worthShowing } from '../lib/project/presence.ts';
 import {
   assignableRoles,
   canChangeRoleOf,
@@ -238,6 +239,7 @@ interface TeamMember {
   role_shares?: Record<string, number>;
   github_login?: string | null;
   project_role?: string;
+  presence?: string;
 }
 
 function ProjectSettings() {
@@ -661,7 +663,19 @@ function ProjectSettings() {
               return (
                 <li key={person.user_id}>
                   <span className="mname">
+                    {/* ⭐ 지금 붙어 있는가 (`USER-005`).
+                        ⚠️ **오프라인은 안 그립니다** — 팀 대부분이 그
+                        상태라 다 그리면 목록이 회색 점으로 덮이고,
+                        "누가 없는지" 를 한눈에 세게 만듭니다.
+                        ⚠️ 색으로만 말하지 않습니다. 점만 찍으면 색을 못
+                        보는 사람에게는 아무 표시도 없는 것입니다. */}
+                    {worthShowing(person.presence) && (
+                      <span className={`pdot ${presenceDot(person.presence)}`} aria-hidden="true" />
+                    )}
                     {person.name ?? `사용자 #${person.user_id}`}
+                    {worthShowing(person.presence) && (
+                      <span className="pstat">{presenceLabel(person.presence)}</span>
+                    )}
                     {isMe && <span className="mme">나</span>}
                   </span>
                   {canEdit ? (

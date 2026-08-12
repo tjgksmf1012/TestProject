@@ -661,3 +661,45 @@ PROJECT_ROLE_LABEL: dict[ProjectRole, str] = {
 def project_role_values() -> tuple[str, ...]:
     """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
     return tuple(sorted(str(r) for r in PROJECT_ROLES))
+
+
+# ══════════════════════════════════════════════════════════════
+# 사용자 상태 표시 (요구사항 정의서 §4 `USER-005`)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **이 값은 표에 없습니다.** 어디에도 저장하지 않고 읽을 때마다
+#    계산합니다. 상태를 행으로 쌓으면 그건 곧 **출퇴근 기록**이 되고,
+#    이 제품에서 제일 만들면 안 되는 물건입니다 — 기여도는 "무엇을
+#    했는가" 로 재기로 했는데 옆에 "언제 앉아 있었는가" 표가 생기면
+#    사람은 그걸 같이 봅니다.
+#
+#    `calendar_events`·알림·위험 신호를 안 만든 것과 같은 판단이고,
+#    여기서는 이유가 하나 더 있습니다. **감시입니다.**
+
+
+class PresenceStatus(StrEnum):
+    """지금 이 사람이 붙어 있는가.
+
+    ⚠️ **과거를 말하지 않습니다.** `마지막 접속 3일 전` 같은 값은 두지
+    않습니다 — 그건 상태가 아니라 **근태 기록**입니다. 지금 안 붙어
+    있으면 그냥 `offline` 입니다.
+    """
+
+    ONLINE = "online"  # 방금까지 쓰고 있었음
+    AWAY = "away"  # 로그인은 살아 있는데 한동안 조용함
+    OFFLINE = "offline"  # 세션이 없거나 오래됨
+    IN_MEETING = "in_meeting"  # 녹음 중인 회의에 트랙이 열려 있음
+
+
+PRESENCE_STATUSES: tuple[PresenceStatus, ...] = tuple(PresenceStatus)
+
+#: 사람이 읽을 이름.
+#:
+#: ⚠️ **화면의 `lib/project/presence.ts` 와 짝입니다.**
+#: `test_repo_integrity.py` 의 교차 검사가 갈라지면 터집니다.
+PRESENCE_LABEL: dict[PresenceStatus, str] = {
+    PresenceStatus.ONLINE: "접속 중",
+    PresenceStatus.AWAY: "자리 비움",
+    PresenceStatus.OFFLINE: "오프라인",
+    PresenceStatus.IN_MEETING: "회의 중",
+}
