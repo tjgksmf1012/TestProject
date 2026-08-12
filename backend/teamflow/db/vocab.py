@@ -292,3 +292,91 @@ def event_values() -> tuple[str, ...]:
     위 두 집합과 테스트가 지킵니다.
     """
     return tuple(sorted(str(e) for e in MeetingEventType))
+
+
+# ══════════════════════════════════════════════════════════════
+# channels.kind — 채널의 종류 (요구사항 정의서 §6)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **둘 다 실제로 만들어집니다.** `speaker_source` 처럼 "아직 못 만드는
+#    값" 을 미리 열어 두지 않았고, `meeting_events` 처럼 주석으로만 선언
+#    하지도 않았습니다 — 두 종류 다 화면에서 만들 수 있고 목록에 뜹니다.
+
+
+class ChannelKind(StrEnum):
+    """텍스트 채널인가 음성 채널인가 (요구사항 정의서 CHANNEL-001·002).
+
+    ⚠️ **음성 채널은 회의를 대신하지 않습니다.** 음성 채널은 *방 이름*
+    이고(`주간회의`·`개발회의`), 회의는 그 방에서 **열리는 사건**입니다.
+    `meetings.channel_id` 가 그 둘을 잇습니다. 방과 사건을 한 표에 뭉치면
+    "지난 주간회의" 를 가리킬 방법이 없어집니다.
+    """
+
+    TEXT = "text"  # #일반 · #공지 — 메시지가 쌓이는 곳
+    VOICE = "voice"  # 주간회의 · 개발회의 — 회의가 열리는 방
+
+
+#: `channels.kind` 가 받는 값 전부. 둘 다 만들 수 있습니다.
+CHANNEL_STORED: frozenset[ChannelKind] = frozenset(ChannelKind)
+
+#: 메시지를 담을 수 있는 종류.
+#:
+#: ⚠️ 음성 채널에 메시지를 쓰게 두면 "회의 중 채팅" 이 생기는데, 그건
+#: 정의서에 없는 기능입니다. 없는 것을 조용히 만들지 않습니다 — 필요해지면
+#: 그때 여기에 넣고 화면도 같이 만듭니다.
+CHANNEL_CARRIES_MESSAGES: frozenset[ChannelKind] = frozenset({ChannelKind.TEXT})
+
+
+def channel_values() -> tuple[str, ...]:
+    return tuple(sorted(str(c) for c in ChannelKind))
+
+
+# ══════════════════════════════════════════════════════════════
+# message_reactions.mark — 메시지에 다는 반응 (요구사항 정의서 CHAT-004)
+# ══════════════════════════════════════════════════════════════
+#
+# ## ⚠️ 정의서는 "이모지 반응" 이라고 적었는데 왜 이름인가
+#
+# 두 가지 이유가 있고, 둘 다 이 저장소가 **이미 겪은 것**입니다.
+#
+# ① **색 이모지는 화면에 못 나갑니다.** `guards.test.ts` 가 막습니다 —
+#    기기마다 다른 그림이 나오고, 색이 박혀 있어 어두운 모드를 안 따라
+#    가고, 베이스라인이 서체에 딸려 있어 세로 정렬이 틀어집니다. 칸반
+#    카드의 `🗣` 를 SVG 로 바꾼 것이 그 규칙이 생긴 자리입니다.
+#
+# ② **아무 이모지나 받으면 그건 조롱 통로입니다.** 이 제품은 성적에 쓰일
+#    수 있는 기여도를 다루고(`docs/07`), 반응은 **남이 쓴 글 위에** 붙습니다.
+#    자유 입력이면 `💩` 을 막을 방법이 없고, 지금 이 저장소에는 신고도
+#    차단도 없습니다. 없는 것을 전제로 통로부터 열지 않습니다.
+#
+# 그래서 **정해진 넷**만 있고, 넷 다 중립이거나 긍정입니다.
+# ⚠️ **부정 반응을 넣지 마십시오.** 하나 생기는 순간 그것이 몰매의 도구가
+#    됩니다 — 반대는 말로 적게 두는 편이 낫습니다.
+
+
+class ReactionMark(StrEnum):
+    """반응 하나. 값은 **이름**이고, 그림은 화면이 SVG 로 그립니다."""
+
+    OK = "ok"  # 확인했어요
+    AGREE = "agree"  # 동의해요
+    QUESTION = "question"  # 궁금해요
+    THANKS = "thanks"  # 고마워요
+
+
+#: `message_reactions.mark` 가 받는 값 전부.
+REACTION_STORED: frozenset[ReactionMark] = frozenset(ReactionMark)
+
+#: 이름 → 사람 말. 화면과 낭독기가 같이 씁니다.
+#:
+#: ⚠️ 화면에 두 번째 표를 만들지 마십시오. 하나만 고쳐지면 낭독기가 읽는
+#: 말과 눈에 보이는 말이 갈라집니다.
+REACTION_LABEL: dict[ReactionMark, str] = {
+    ReactionMark.OK: "확인했어요",
+    ReactionMark.AGREE: "동의해요",
+    ReactionMark.QUESTION: "궁금해요",
+    ReactionMark.THANKS: "고마워요",
+}
+
+
+def reaction_values() -> tuple[str, ...]:
+    return tuple(sorted(str(r) for r in ReactionMark))

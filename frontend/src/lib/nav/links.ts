@@ -24,6 +24,7 @@ import type { IconName } from './icons.ts';
 export type ScreenId =
   | 'home'
   | 'lobby'
+  | 'chat'
   | 'record'
   | 'review'
   | 'kanban'
@@ -47,6 +48,7 @@ export interface NavLink {
 const LABEL: Record<ScreenId, string> = {
   home: '홈',
   lobby: '회의 로비',
+  chat: '채팅',
   record: '녹음',
   review: '업무 후보 검토',
   kanban: '칸반',
@@ -116,6 +118,14 @@ export function navLinks(context: NavContext): NavLink[] {
     // 자리를 기억해서 누르므로, 다섯째가 끼면 그때까지 넷째였던 것을
     // 누르려던 손이 엉뚱한 화면으로 갑니다. 보고서는 자주 가는 곳이
     // 아니라 **다 끝나고 한 번 가는 곳**이라 이 줄이 맞는 자리입니다.
+    // ⚠️ **탭이 아니라 여기입니다.** 탭 넷은 그대로 둡니다 — 이유는
+    // 바로 아래 보고서 링크에 적어 뒀습니다. 채팅은 셸의 채널 목록에서도
+    // 갈 수 있으므로, 이 줄은 채널이 아직 하나도 없는 사람을 위한 문입니다.
+    links.push({
+      screen: 'chat',
+      label: LABEL.chat,
+      href: `/chat.html?project=${project}`,
+    });
     links.push({
       screen: 'reports',
       label: LABEL.reports,

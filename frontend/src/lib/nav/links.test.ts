@@ -35,9 +35,16 @@ describe('navLinks', () => {
     deepStrictEqual(screens.sort(), ['home', 'lobby', 'review']);
   });
 
-  it('프로젝트를 알면 칸반·기여도·보고서·설정으로 갈 수 있다', () => {
+  it('프로젝트를 알면 채팅·칸반·기여도·보고서·설정으로 갈 수 있다', () => {
     const screens = navLinks({ current: 'home', projectId: 3 }).map((l) => l.screen);
-    deepStrictEqual(screens.sort(), ['contributions', 'kanban', 'project', 'reports']);
+    deepStrictEqual(screens.sort(), ['chat', 'contributions', 'kanban', 'project', 'reports']);
+  });
+
+  it('⭐ 채팅으로 가는 링크가 있다 — 채널이 없는 사람도 만들러 갈 수 있어야 한다', () => {
+    // 채널은 셸의 왼쪽 열에서도 갈 수 있지만, 그 목록은 **회의**를 세웁니다.
+    // 텍스트 채널이 아직 하나도 없는 팀에게는 이 링크가 유일한 문입니다.
+    const link = navLinks({ current: 'kanban', projectId: 3 }).find((l) => l.screen === 'chat');
+    strictEqual(link?.href, '/chat.html?project=3');
   });
 
   it('⚠️ 보고서가 생겨도 **탭은 넷 그대로**다', () => {

@@ -35,6 +35,7 @@ from teamflow.audio.chunk_store import ChunkStore
 from teamflow.auth import passwords
 from teamflow.call import rooms as call_rooms
 from teamflow.call import signaling as call_signaling_module
+from teamflow.chat import hub as chat_hub
 from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import models as m
 from teamflow.db import session as db_session
@@ -51,7 +52,9 @@ from teamflow.projects import invites
 from teamflow.services import (
     approval_service,
     auth_service,
+    channel_service,
     github_connection_service,
+    message_service,
     progress_service,
     recording_service,
     report_service,
@@ -3060,6 +3063,466 @@ def generate_minutes(
         generated_at=report.generated_at,
         content=report.content,
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 채널과 채팅 (요구사항 정의서 §6 · §7)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **글은 HTTP 로 쓰고, 소켓은 읽기 전용입니다.**
+#
+# 소켓으로 받은 것을 그대로 남에게 뿌리면 저장은 안 됐는데 화면에만 뜬
+# 메시지가 생깁니다 — 새로고침하면 사라지고, 쓴 사람은 자기 말이 갔다고
+# 믿습니다. 그래서 POST 가 저장하고, 저장된 뒤에 `chat_hub` 로 흘립니다.
+#
+# ⚠️ **기여도와 닿지 않습니다.** 정의서 §7 머리말이 채팅에 대한 AI 분석·
+# 업무 자동 생성·프로젝트 분석을 금지합니다. 메시지가 기여로 세어지면
+# 도배가 기여도를 올리는 방법이 됩니다 — `test_chat_is_not_measured.py`.
+
+
+class ChannelIn(BaseModel):
+    kind: str = Field(default="text")
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ChannelPatch(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ChannelOrderIn(BaseModel):
+    #: ⚠️ **전체 순서**입니다. 한 칸씩 위/아래가 아닙니다 — 이유는
+    #: `channel_service.reorder_channels` 머리말에.
+    channel_ids: list[int]
+
+
+class ChannelOut(BaseModel):
+    id: int
+    kind: str
+    name: str
+    position: int
+
+
+class ReactionOut(BaseModel):
+    mark: str
+    #: 사람 말. ⚠️ 화면이 두 번째 표를 만들지 않게 서버가 같이 보냅니다.
+    label: str
+    count: int
+
+
+class MessageOut(BaseModel):
+    id: int
+    channel_id: int
+    author_id: int
+    author_name: str
+    #: ⚠️ 지워진 메시지는 **본문이 비어 옵니다.** 자리는 남습니다(답글이
+    #: 가리키는 곳이라서) — `deleted` 를 보고 화면이 "지워진 메시지" 라고 씁니다.
+    body: str
+    reply_to_id: int | None
+    created_at: datetime
+    edited_at: datetime | None
+    deleted: bool
+    mentions: list[str]
+    reactions: list[ReactionOut]
+    #: 내가 단 반응. 없으면 `null`. 이게 없으면 누른 사람이 뗄 길을 못 찾습니다.
+    my_reaction: str | None
+
+
+class MessageIn(BaseModel):
+    body: str = Field(min_length=1, max_length=message_service.MAX_BODY)
+    reply_to_id: int | None = None
+
+
+class MessageEditIn(BaseModel):
+    """고칠 때는 **본문만** 받습니다.
+
+    ⚠️ 처음에는 `MessageIn` 을 그대로 썼습니다. 그러면 화면이
+    `reply_to_id` 를 같이 보낼 수 있는데 `edit_message` 는 그 칸을 안
+    읽습니다 — 200 을 돌려주면서 아무 일도 안 하는 칸입니다.
+    무엇에 단 답글인지는 애초에 고칠 수 있는 것이 아닙니다.
+    """
+
+    body: str = Field(min_length=1, max_length=message_service.MAX_BODY)
+
+
+class ReactionIn(BaseModel):
+    #: `null` 이면 뗍니다.
+    mark: str | None = None
+
+
+def _channel_out(channel: m.Channel) -> ChannelOut:
+    return ChannelOut(
+        id=channel.id,
+        kind=channel.kind,
+        name=channel.name,
+        position=channel.position,
+    )
+
+
+def _messages_out(
+    session: Session, rows: list[m.Message], viewer_id: int
+) -> list[MessageOut]:
+    """행 → 화면이 읽을 것. **한 번에 모아 옵니다.**
+
+    ⚠️ 메시지마다 작성자·반응·멘션을 따로 물으면 50건에 150번을 묻습니다.
+    """
+    ids = [row.id for row in rows]
+    authors = {
+        int(user_id): str(name)
+        for user_id, name in session.execute(
+            select(m.User.id, m.User.name).where(
+                m.User.id.in_({row.author_id for row in rows} or {0})
+            )
+        ).all()
+    }
+    reactions = message_service.reactions_for(session, ids)
+    mine = message_service.mine_for(session, ids, viewer_id)
+    mentions = message_service.mentioned_names(session, ids)
+
+    return [
+        MessageOut(
+            id=row.id,
+            channel_id=row.channel_id,
+            author_id=row.author_id,
+            author_name=authors.get(row.author_id, "알 수 없음"),
+            # ⚠️ 지운 글의 본문은 **서버에서** 뺍니다. 화면에 보내 놓고
+            #    화면이 가리게 하면, 개발자 도구를 열면 그대로 보입니다.
+            body="" if row.deleted_at is not None else row.body,
+            reply_to_id=row.reply_to_id,
+            created_at=row.created_at,
+            edited_at=row.edited_at,
+            deleted=row.deleted_at is not None,
+            mentions=mentions.get(row.id, []),
+            reactions=[ReactionOut(**r) for r in reactions.get(row.id, [])],
+            my_reaction=mine.get(row.id),
+        )
+        for row in rows
+    ]
+
+
+def _load_channel_for(session: Session, channel_id: int, user: m.User) -> m.Channel:
+    """채널을 가져오고 **구성원인지 확인한다.**
+
+    ⚠️ 없는 채널과 남의 채널에 **같은 404** 를 줍니다. 403 으로 나누면
+    번호를 훑어 "저 팀에 이런 채널이 있다" 를 알아낼 수 있습니다.
+    """
+    channel = session.get(m.Channel, channel_id)
+    if channel is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "채널을 찾을 수 없습니다")
+    member = session.scalar(
+        select(m.Member.id).where(
+            m.Member.project_id == channel.project_id,
+            m.Member.user_id == user.id,
+        )
+    )
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "채널을 찾을 수 없습니다")
+    return channel
+
+
+class ReactionChoice(BaseModel):
+    mark: str
+    label: str
+
+
+@app.get("/api/chat/reactions", response_model=list[ReactionChoice])
+def list_reaction_choices(user: CurrentUser) -> list[ReactionChoice]:
+    """고를 수 있는 반응 전부 (CHAT-008).
+
+    ⚠️ **화면이 이 표를 자기 안에 두면 안 됩니다.** 메시지에 딸려 오는
+    `label` 은 **이미 달린** 반응에만 있어서, 아직 아무도 안 단 것은 화면이
+    이름을 알 방법이 없습니다. 거기서 화면이 자기 표를 만들면 서버의
+    `REACTION_LABEL` 과 두 벌이 되고, 반드시 한쪽만 고쳐집니다.
+
+    ⚠️ 순서는 **어휘 순서**입니다. 개수 순으로 세우면 그 순간 순위표입니다.
+    """
+    return [
+        ReactionChoice(mark=str(mark), label=vocab.REACTION_LABEL[mark])
+        for mark in vocab.ReactionMark
+    ]
+
+
+@app.get("/api/projects/{project_id}/channels", response_model=list[ChannelOut])
+def list_channels(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> list[ChannelOut]:
+    """CHANNEL-005 — 자리 순으로."""
+    _require_project_member(session, project_id, user)
+    return [_channel_out(c) for c in channel_service.list_channels(session, project_id)]
+
+
+@app.post(
+    "/api/projects/{project_id}/channels",
+    response_model=ChannelOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_channel(
+    project_id: int, payload: ChannelIn, session: DbSession, user: CurrentUser
+) -> ChannelOut:
+    """CHANNEL-001·002."""
+    _require_project_member(session, project_id, user)
+    try:
+        kind = vocab.ChannelKind(payload.kind)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "채널 종류는 텍스트 아니면 음성입니다",
+        ) from None
+    try:
+        channel = channel_service.create_channel(
+            session, project_id, kind=kind, name=payload.name, created_by=user.id
+        )
+    except channel_service.ChannelError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return _channel_out(channel)
+
+
+@app.patch("/api/channels/{channel_id}", response_model=ChannelOut)
+def rename_channel(
+    channel_id: int, payload: ChannelPatch, session: DbSession, user: CurrentUser
+) -> ChannelOut:
+    """CHANNEL-003."""
+    channel = _load_channel_for(session, channel_id, user)
+    try:
+        channel_service.rename_channel(session, channel, payload.name)
+    except channel_service.ChannelError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return _channel_out(channel)
+
+
+@app.delete("/api/channels/{channel_id}", response_model=ChannelOut)
+def archive_channel(
+    channel_id: int, session: DbSession, user: CurrentUser
+) -> ChannelOut:
+    """CHANNEL-004 — **행을 지우지 않습니다.** 메시지가 딸려 있습니다."""
+    channel = _load_channel_for(session, channel_id, user)
+    channel_service.archive_channel(session, channel)
+    session.commit()
+    return _channel_out(channel)
+
+
+@app.put("/api/projects/{project_id}/channels/order", response_model=list[ChannelOut])
+def reorder_channels(
+    project_id: int, payload: ChannelOrderIn, session: DbSession, user: CurrentUser
+) -> list[ChannelOut]:
+    """CHANNEL-005."""
+    _require_project_member(session, project_id, user)
+    try:
+        ordered = channel_service.reorder_channels(
+            session, project_id, payload.channel_ids
+        )
+    except channel_service.ChannelError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return [_channel_out(c) for c in ordered]
+
+
+@app.get("/api/channels/{channel_id}/messages", response_model=list[MessageOut])
+def list_messages(
+    channel_id: int,
+    session: DbSession,
+    user: CurrentUser,
+    before_id: int | None = None,
+    limit: int = message_service.MAX_PAGE,
+) -> list[MessageOut]:
+    """CHAT-009 — 오래된 것 → 새것 순. `before_id` 로 거슬러 올라갑니다."""
+    _load_channel_for(session, channel_id, user)
+    rows = message_service.history(
+        session, channel_id, before_id=before_id, limit=limit
+    )
+    return _messages_out(session, rows, user.id)
+
+
+@app.post(
+    "/api/channels/{channel_id}/messages",
+    response_model=MessageOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_message(
+    channel_id: int, payload: MessageIn, session: DbSession, user: CurrentUser
+) -> MessageOut:
+    """CHAT-001·004·005 — 쓰고, **저장된 뒤에** 보고 있는 사람들에게 흘린다."""
+    _load_channel_for(session, channel_id, user)
+    try:
+        channel = channel_service.load_for_message(session, channel_id)
+        message = message_service.send_message(
+            session,
+            channel,
+            author_id=user.id,
+            body=payload.body,
+            reply_to_id=payload.reply_to_id,
+        )
+    except (channel_service.ChannelError, message_service.MessageError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    out = _messages_out(session, [message], user.id)[0]
+    session.commit()
+    # ⚠️ 커밋 **뒤에** 흘립니다. 앞에서 흘리면 롤백된 메시지가 남의 화면에
+    #    남고, 그 사람이 새로고침하기 전까지는 있는 말로 보입니다.
+    await chat_hub.hub.publish(
+        channel_id, {"kind": "message", "message": out.model_dump(mode="json")}
+    )
+    return out
+
+
+@app.patch("/api/messages/{message_id}", response_model=MessageOut)
+async def edit_message(
+    message_id: int, payload: MessageEditIn, session: DbSession, user: CurrentUser
+) -> MessageOut:
+    """CHAT-002 — 쓴 사람만. `edited_at` 이 반드시 남습니다."""
+    message = message_service.load_message(session, message_id)
+    _load_channel_for(session, message.channel_id, user)
+    try:
+        message_service.edit_message(
+            session, message, editor_id=user.id, body=payload.body
+        )
+    except message_service.MessageError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    out = _messages_out(session, [message], user.id)[0]
+    session.commit()
+    await chat_hub.hub.publish(
+        message.channel_id, {"kind": "edit", "message": out.model_dump(mode="json")}
+    )
+    return out
+
+
+@app.delete("/api/messages/{message_id}", response_model=MessageOut)
+async def delete_message(
+    message_id: int, session: DbSession, user: CurrentUser
+) -> MessageOut:
+    """CHAT-003 — **행을 지우지 않습니다.** 답글이 가리킬 자리는 남습니다."""
+    message = message_service.load_message(session, message_id)
+    _load_channel_for(session, message.channel_id, user)
+    try:
+        message_service.delete_message(session, message, actor_id=user.id)
+    except message_service.MessageError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    out = _messages_out(session, [message], user.id)[0]
+    session.commit()
+    await chat_hub.hub.publish(
+        message.channel_id, {"kind": "delete", "message": out.model_dump(mode="json")}
+    )
+    return out
+
+
+@app.put("/api/messages/{message_id}/reaction", response_model=MessageOut)
+async def set_reaction(
+    message_id: int, payload: ReactionIn, session: DbSession, user: CurrentUser
+) -> MessageOut:
+    """CHAT-008 — **한 사람당 하나.** `mark: null` 이면 뗍니다."""
+    message = message_service.load_message(session, message_id)
+    _load_channel_for(session, message.channel_id, user)
+    try:
+        message_service.set_reaction(
+            session, message, user_id=user.id, mark=payload.mark
+        )
+    except message_service.MessageError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    out = _messages_out(session, [message], user.id)[0]
+    session.commit()
+    # ⚠️ 남에게 보낼 때 `my_reaction` 은 **내 것**입니다. 그대로 뿌리면
+    #    남의 화면에 내가 누른 것이 자기가 누른 것으로 그려집니다.
+    body = out.model_dump(mode="json")
+    body["my_reaction"] = None
+    await chat_hub.hub.publish(message.channel_id, {"kind": "reaction", "message": body})
+    return out
+
+
+class MessageSearchOut(BaseModel):
+    channel_id: int
+    channel_name: str
+    message: MessageOut
+
+
+@app.get("/api/projects/{project_id}/messages/search")
+def search_messages(
+    project_id: int, q: str, session: DbSession, user: CurrentUser
+) -> list[MessageSearchOut]:
+    """CHAT-010 — 이 프로젝트 안에서만. 지워진 것은 안 나옵니다."""
+    _require_project_member(session, project_id, user)
+    rows = message_service.search(session, project_id, q)
+    names = {
+        c.id: c.name
+        for c in channel_service.list_channels(session, project_id, include_archived=True)
+    }
+    return [
+        MessageSearchOut(
+            channel_id=row.channel_id,
+            channel_name=names.get(row.channel_id, "지워진 채널"),
+            message=out,
+        )
+        for row, out in zip(rows, _messages_out(session, rows, user.id), strict=True)
+    ]
+
+
+@app.get("/api/projects/{project_id}/mentions")
+def my_mentions(project_id: int, session: DbSession, user: CurrentUser) -> dict[str, int]:
+    """나를 부른 메시지 건수 (CHAT-005).
+
+    ⚠️ 이름이 `mention_total` 입니다 — **안 읽은 것이 아니라 전부**입니다.
+    읽음 표시는 표가 하나 더 필요하고 아직 없습니다. `unread` 라고 부르면
+    화면이 "읽으면 준다" 고 믿고 안 줄어드는 배지를 그립니다.
+    """
+    _require_project_member(session, project_id, user)
+    return {
+        "mention_total": message_service.unread_mentions(session, user.id, project_id)
+    }
+
+
+@app.websocket("/api/channels/{channel_id}/stream")
+async def channel_stream(websocket: WebSocket, channel_id: int) -> None:
+    """새 메시지를 실시간으로 받는 통로 (CHAT-001).
+
+    ⚠️ **인증과 구성원 확인을 `accept()` 앞에서** 합니다. 받아 놓고 나중에
+    끊으면 그 사이에 남의 팀 대화가 이미 샙니다.
+
+    ⚠️ **읽기 전용입니다.** 소켓으로 오는 것은 전부 버립니다 — 글을 여기로
+    받으면 저장 안 된 메시지가 남의 화면에만 뜹니다.
+    """
+    with db_session.session_scope() as session:
+        user = auth_service.resolve_session(
+            session, websocket.cookies.get(auth_service.COOKIE_NAME)
+        )
+        if user is None:
+            # 1008 = policy violation. WS 에는 401 이 없습니다.
+            await websocket.close(code=1008, reason="로그인이 필요합니다")
+            return
+
+        channel = session.get(m.Channel, channel_id)
+        if channel is None:
+            await websocket.close(code=1008, reason="채널을 찾을 수 없습니다")
+            return
+
+        member = session.scalar(
+            select(m.Member.id).where(
+                m.Member.project_id == channel.project_id,
+                m.Member.user_id == user.id,
+            )
+        )
+        if member is None:
+            # 없는 채널과 같은 말입니다 — 여기서 존재 여부를 흘리지 않습니다.
+            await websocket.close(code=1008, reason="채널을 찾을 수 없습니다")
+            return
+
+    await websocket.accept()
+    connection_id = uuid4().hex
+
+    async def send(body: dict[str, Any]) -> None:
+        await websocket.send_json(body)
+
+    await chat_hub.hub.join(channel_id, connection_id, send)
+    try:
+        while True:
+            # ⚠️ 받은 것을 **쓰지 않습니다.** 소켓을 살려 두기 위해 읽을 뿐입니다.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await chat_hub.hub.part(channel_id, connection_id)
 
 
 # ══════════════════════════════════════════════════════════════

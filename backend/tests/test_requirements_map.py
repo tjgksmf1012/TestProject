@@ -41,9 +41,14 @@ def _doc() -> str:
 
 
 def test_the_tables_we_call_missing_are_actually_missing():
-    """§6·§7·§16·§19 를 ❌ 로 적었습니다. 진짜 없는지 확인합니다."""
+    """§16·§19 를 ❌ 로 적었습니다. 진짜 없는지 확인합니다.
+
+    ⚠️ `channels`·`messages` 가 여기 있었습니다. 만들었으므로 뺐고,
+    문서의 ❌ 도 같이 고쳤습니다 — **이 검사가 잡아 줘서** 고친 것입니다.
+    이 목록에서 무언가를 뺄 때는 `docs/20` 을 반드시 같이 고치십시오.
+    """
     tables = set(m.Base.metadata.tables)
-    for absent in ("channels", "messages", "calendar_events", "notifications"):
+    for absent in ("calendar_events", "notifications"):
         assert absent not in tables, (
             f"`{absent}` 표가 생겼습니다 — `docs/20` 에서 ❌ 를 고치십시오. "
             "문서가 계속 '없음' 이라고 말하면 다음 사람이 또 만듭니다"

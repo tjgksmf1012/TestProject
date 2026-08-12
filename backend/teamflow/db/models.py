@@ -201,6 +201,135 @@ class Project(Base):
         return cleaned or None
 
 
+# ══════════════════════════════════════════════════════════════
+# 1-b. 채널과 채팅 (요구사항 정의서 §6·§7)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **채팅은 이 제품에서 유일하게 "재지 않는" 자리입니다.**
+#
+# 정의서 §7 머리말이 못 박습니다 — "채팅 내용에 대한 AI 분석, 업무 자동
+# 생성, 프로젝트 분석 등의 기능은 제공하지 않는다."
+#
+# 그냥 안 만든 게 아니라 **만들면 안 되는** 것입니다. 이 제품은 사람의
+# 기여를 숫자로 말하는데, 메시지가 기여로 세어지는 순간 **도배가 기여도를
+# 올리는 방법**이 됩니다. 회의 발언은 트랙·근거·신뢰도가 붙어 조작이
+# 어렵지만(`docs/05` §5, `test_anti_gaming.py`), 채팅은 아무 때나 아무나
+# 무한히 칠 수 있습니다.
+#
+# 그래서 `messages` 는 `contribution_events` 와 **닿지 않습니다.**
+# `test_chat_is_not_measured.py` 가 그 경계를 지킵니다.
+
+
+class Channel(Base):
+    """텍스트 채널과 음성 채널 (CHANNEL-001·002).
+
+    ⚠️ **음성 채널은 회의가 아닙니다.** 음성 채널은 *방 이름*이고
+    (`주간회의`), 회의는 그 방에서 **열리는 사건**입니다. 둘을 한 표에
+    뭉치면 "지난 주간회의" 를 가리킬 방법이 없어집니다.
+    """
+
+    __tablename__ = "channels"
+
+    id: Mapped[int] = _pk()
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    # 값과 뜻은 `db/vocab.py` 한 곳에만 있습니다.
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    #: 목록에서의 자리 (CHANNEL-005). 작을수록 위.
+    #:
+    #: ⚠️ 정수 하나로 둡니다. "위/아래로 한 칸" 을 링크드리스트로 만들면
+    #: 중간이 끊겼을 때 목록이 통째로 사라집니다 — 순서가 깨지는 것보다
+    #: 나쁩니다.
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = _now()
+    #: 지운 채널. ⚠️ **행을 지우지 않습니다** — 메시지가 딸려 있고, 그
+    #: 메시지는 사람이 쓴 것입니다. 채널을 지웠다고 남의 말이 사라지면
+    #: 안 됩니다 (CHANNEL-004).
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            # ⚠️ 목록을 손으로 적지 않습니다 — `vocab.ChannelKind` 가 원본.
+            "kind IN (" + ",".join(f"'{v}'" for v in vocab.channel_values()) + ")",
+            name="ck_channel_kind",
+        ),
+        UniqueConstraint("project_id", "kind", "name", name="uq_channel_name"),
+        Index("ix_channels_project_order", "project_id", "position", "id"),
+    )
+
+
+class Message(Base):
+    """채팅 메시지 (CHAT-001~009).
+
+    ⚠️ **기여도와 닿지 않습니다.** 위 머리말을 보십시오.
+    """
+
+    __tablename__ = "messages"
+
+    id: Mapped[int] = _pk()
+    channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id"), nullable=False)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    #: 답글이면 부모 (CHAT-004).
+    reply_to_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"))
+    created_at: Mapped[datetime] = _now()
+    #: 고친 시각. ⚠️ 화면이 "(수정됨)" 을 붙일 근거입니다 (CHAT-002) —
+    #: 고친 사실을 감추면 나중에 말이 달라진 것을 아무도 모릅니다.
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: 지운 시각. ⚠️ **행을 지우지 않습니다** (CHAT-003). 답글이 달린 말을
+    #: 통째로 지우면 남의 답글이 허공에 뜹니다. 본문만 가리고 자리는 남깁니다.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        # 최근 것부터 거슬러 올라가는 조회 (CHAT-009).
+        Index("ix_messages_channel_time", "channel_id", "id"),
+    )
+
+
+class MessageMention(Base):
+    """이 메시지가 부른 사람 (CHAT-005).
+
+    ⚠️ **서버가 본문에서 뽑아 저장합니다.** 화면이 보낸 목록을 믿으면
+    아무나 "누가 멘션됐는지" 를 지어내 알림을 쏠 수 있습니다.
+    """
+
+    __tablename__ = "message_mentions"
+
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+
+
+class MessageReaction(Base):
+    """메시지에 다는 반응 (CHAT-008).
+
+    ⚠️ **자유 이모지가 아니라 정해진 이름입니다.** 왜 그렇게 했는지는
+    `db/vocab.py` 의 `ReactionMark` 머리말에 있습니다 — 요약하면 색
+    이모지는 화면 규칙이 막고, 자유 입력은 조롱 통로가 됩니다.
+    """
+
+    __tablename__ = "message_reactions"
+
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    #: ⚠️ 한 사람이 같은 메시지에 반응을 **하나만** 답니다 — 위 복합
+    #: 기본키가 (메시지, 사람) 이기 때문입니다. `mark` 를 키에 넣으면 한
+    #: 사람이 넷을 전부 달아 반응 수를 부풀릴 수 있습니다.
+    mark: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = _now()
+
+    __table_args__ = (
+        CheckConstraint(
+            "mark IN (" + ",".join(f"'{v}'" for v in vocab.reaction_values()) + ")",
+            name="ck_reaction_mark",
+        ),
+    )
+
+
 class Member(Base):
     __tablename__ = "members"
 
@@ -383,6 +512,12 @@ class Meeting(Base):
     duration_sec: Mapped[int | None] = mapped_column(Integer)
     # multitrack | single  — docs/04 의 모드 A / 모드 B
     capture_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="multitrack")
+    #: 이 회의가 열린 **음성 채널** (CHANNEL-002). 없으면 채널 밖에서 연 회의.
+    #:
+    #: ⚠️ 채널은 방 이름이고 회의는 그 방에서 열린 사건입니다. 널을 허용하는
+    #: 이유는 채널이 생기기 전에 열린 회의가 있고, 그것들을 아무 채널에나
+    #: 밀어 넣으면 **없던 사실을 만드는** 것이기 때문입니다.
+    channel_id: Mapped[int | None] = mapped_column(ForeignKey("channels.id"))
     #: 값의 뜻은 `MeetingStatus` 참조. 그쪽이 유일한 출처다.
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=MeetingStatus.PENDING.value

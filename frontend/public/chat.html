@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
+<link rel="stylesheet" href="/app.css" />
+<title>채팅 — TeamFlow</title>
+<style>
+
+  /* ══ 채팅 ═════════════════════════════════════════════════
+
+     머리말(`.head`·`.lede`)과 빈/오류 상태는 `app.css` 에 있습니다 —
+     다른 화면과 **같은 한 벌**입니다.
+
+     ⚠️ 이 화면에는 **값을 폭으로 그리는 규칙이 하나도 없습니다.** 반응
+     개수는 글자입니다. 개수를 막대로 그리면 그 순간 순위표가 되고, 이
+     저장소는 같은 결함을 두 번 냈습니다. */
+
+  /* ── 두 열: 채널 + 대화 ───────────────────────────────
+
+     ⚠️ **폰이 먼저입니다.** 좁을 때는 채널이 위, 대화가 아래로 쌓입니다.
+     390px 에 두 열을 밀어 넣으면 넘칩니다 — 이 저장소가 실제로 222px
+     넘쳤던 자리입니다. */
+  .cols { display: grid; gap: var(--sp-6); align-items: start; }
+
+  @media (min-width: 60rem) {
+    .cols { grid-template-columns: 15rem 1fr; gap: var(--sp-8); }
+  }
+
+  .shead { font-size: var(--fs-item); letter-spacing: var(--ls-item);
+           margin: 0 0 var(--sp-3); }
+
+  /* ── 채널 목록 ─────────────────────────────────────── */
+  .clist { list-style: none; padding: 0; margin: 0 0 var(--sp-6);
+           display: grid; gap: var(--sp-1); }
+
+  .citem {
+    display: block; width: 100%; text-align: left;
+    /* ⚠️ 손가락 하한. 목록 항목은 누르는 것입니다. */
+    min-height: var(--tap);
+    padding: var(--sp-3) var(--sp-4);
+    background: transparent; border: 1px solid transparent;
+    border-radius: var(--r-card); color: var(--text);
+    font-size: var(--fs-label);
+  }
+
+  .citem.current {
+    /* 고른 것을 색 채움이 아니라 **왼쪽 막대**로 — 목록에서 한 줄만 색이
+       차면 그 줄이 화면에서 가장 진한 것이 됩니다. */
+    border-left: 2px solid var(--primary);
+    background: var(--surface);
+  }
+
+  /* ── 만들기·찾기 ───────────────────────────────────── */
+  .cnew { display: grid; gap: var(--sp-2); margin: 0 0 var(--sp-5); }
+  .clabel { font-size: var(--fs-caption); color: var(--text-subtle); }
+
+  /* ── 대화 ─────────────────────────────────────────────
+
+     줄 길이를 묶습니다. ⚠️ `ch` 가 아니라 `rem` 입니다 — `ch` 는 숫자 `0`
+     폭이라 한글에서 줄이 너무 일찍 끊깁니다. */
+  .main { max-width: 48rem; }
+  .stream { display: grid; gap: var(--sp-6); margin: 0 0 var(--sp-6); }
+  .day { display: grid; gap: var(--sp-2); }
+
+  /* 날짜 머리. ⚠️ 가로선을 긋지 않습니다 — 하루가 셋이면 화면을 가로지르는
+     선이 셋이 되고, 그 선들이 가장 진한 것이 됩니다. 나누는 일은 여백이
+     합니다 (브리프 §7). */
+  .dhead { font-size: var(--fs-caption); color: var(--text-subtle);
+           font-weight: 600; margin: var(--sp-4) 0 var(--sp-1); }
+
+  .mlist { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp-4); }
+
+  /* 같은 사람이 이어 쓴 줄은 더 붙입니다 — 한 덩어리로 읽히게. */
+  .msg.run { margin-top: calc(var(--sp-4) * -1 + var(--sp-1)); }
+
+  .mhead { display: flex; flex-wrap: wrap; align-items: baseline;
+           gap: var(--sp-2); margin: 0 0 var(--sp-1); }
+  .mwho { font-size: var(--fs-label); font-weight: 600; }
+  .mwhen { font-size: var(--fs-caption); color: var(--text-subtle);
+           font-variant-numeric: tabular-nums; }
+
+  /* ⚠️ `display: flex` 를 쓰면 안 됩니다 — 줄 안의 강조(`.mat`)가 별개
+     항목이 되어 문장이 흩어집니다 (기여도 화면에서 실제로 깨졌습니다). */
+  .mbody { margin: 0; font-size: var(--fs-body); color: var(--text);
+           white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  /* 부른 이름. 배경을 옅게 깔아 문장 흐름을 안 끊습니다. */
+  .mat { font-weight: 600; color: var(--primary);
+         background: color-mix(in oklab, var(--primary) 12%, transparent);
+         border-radius: var(--r-badge); padding: 0 var(--sp-1); }
+
+  /* 지워진 자리. ⚠️ **빨강이 아닙니다** — 지운 것은 잘못이 아닙니다. */
+  .mgone { color: var(--text-subtle); font-style: italic; }
+
+  .medit { margin-left: var(--sp-2); font-size: var(--fs-caption);
+           color: var(--text-subtle); }
+
+  /* 답글이 가리키는 원문. ⚠️ 이게 없으면 "무엇에 단 답글" 인지 볼 방법이
+     없습니다 — 이 저장소가 반복해 낸 실패 ③ 입니다. */
+  .mquote { display: grid; gap: var(--sp-1); margin: 0 0 var(--sp-2);
+            padding-left: var(--sp-3); border-left: 2px solid var(--line-strong);
+            font-size: var(--fs-caption); color: var(--text-subtle); }
+  .qwho { font-weight: 600; }
+  .qbody { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── 반응 ─────────────────────────────────────────────
+
+     ⚠️ 개수는 **글자**입니다. 값을 폭이나 세로 위치로 그리면 순위표가
+     됩니다 (`AGENTS.md` 불변식 1). */
+  /* 반응 + 딸린 버튼을 **한 줄**로. 둘을 따로 두면 44px 짜리 줄이 둘이라
+     메시지 하나가 세 줄짜리 덩어리가 됩니다 (폰 캡처에서 봤습니다). */
+  .mbar { display: flex; flex-wrap: wrap; align-items: center;
+          gap: var(--sp-2); margin: var(--sp-1) 0 0; }
+
+  .rrow { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
+  .rchip {
+    display: inline-flex; align-items: center;
+    /* 아이콘↔글자만 6px 예외. 나머지는 4px 격자입니다. */
+    gap: 6px;
+    min-height: var(--tap); min-width: var(--tap);
+    justify-content: center;
+    padding: var(--sp-1) var(--sp-3);
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-ctrl); color: var(--text-muted);
+  }
+
+  .rchip.on { border-color: var(--primary); color: var(--primary); }
+
+  /* 아직 안 단 것은 옅게. ⚠️ 흐리게만 두면 눌러도 되는지 모르므로
+     테두리는 남깁니다. */
+  .rchip.add { color: var(--text-subtle); }
+
+  /* 고를 것을 펴는 버튼. ⚠️ 테두리를 안 그립니다 — 넷을 늘 펴 뒀을 때
+     네모가 줄마다 쌓여 **사람이 쓴 말보다 눈에 띄던** 것을 고친 자리라,
+     그 자리에 또 네모를 놓으면 반만 고친 것이 됩니다. */
+  .rmore { min-height: var(--tap); padding: var(--sp-1) var(--sp-3);
+           background: transparent; border: 1px solid transparent;
+           color: var(--text-subtle); font-size: var(--fs-caption);
+           border-radius: var(--r-ctrl); }
+
+  .rnum { font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+
+  /* ── 한 줄에 딸린 버튼 ─────────────────────────────── */
+  .mtools { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+  .mtools button { min-height: var(--tap); padding: var(--sp-1) var(--sp-3);
+                   background: transparent; border: 1px solid transparent;
+                   color: var(--text-subtle); font-size: var(--fs-caption);
+                   border-radius: var(--r-ctrl); }
+
+  /* ── 쓰는 자리 ───────────────────────────────────────
+
+     ⚠️ `position: fixed` 를 안 씁니다. 아래 탭바가 이미 고정이라 겹칩니다 —
+     이 저장소에 그 결함이 있었고 가드가 지킵니다. */
+  .compose { display: grid; gap: var(--sp-2); padding: var(--sp-4) 0 0;
+             border-top: 1px solid var(--line); }
+
+  .creply { display: flex; flex-wrap: wrap; align-items: center;
+            justify-content: space-between; gap: var(--sp-3); margin: 0;
+            font-size: var(--fs-caption); color: var(--text-subtle); }
+  .creply button { min-height: var(--tap); background: transparent;
+                   border: 1px solid var(--line); border-radius: var(--r-ctrl);
+                   color: var(--text-muted); padding: var(--sp-1) var(--sp-3); }
+
+  /* 왜 못 보내는지. ⚠️ 버튼만 흐려 두면 사람은 계속 누릅니다. */
+  .cwhy { margin: 0; font-size: var(--fs-caption); color: var(--text-muted); }
+
+  .bempty { margin: 0; color: var(--text-subtle); font-size: var(--fs-label); }
+
+  /* ── 찾은 결과 ───────────────────────────────────── */
+  .hbar { display: flex; flex-wrap: wrap; align-items: baseline;
+          justify-content: space-between; gap: var(--sp-3); margin: 0 0 var(--sp-4); }
+  .hlist { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp-5); }
+  .hwhere { margin: 0 0 var(--sp-1); font-size: var(--fs-caption);
+            color: var(--text-subtle); }
+
+  /* ⚠️ 손가락에서는 16px 아래로 내려가지 않습니다 — 그 아래면 iOS 가
+     입력할 때 화면을 확대합니다. 이건 **입력 칸에만** 걸립니다. */
+  @media (hover: none) and (pointer: coarse) {
+    .citem, .mbody, .bempty { font-size: 1rem; }
+    .mwhen, .medit, .rnum, .cwhy, .hwhere, .dhead { font-size: .875rem; }
+    .citem { min-height: var(--tap); padding: var(--sp-4); }
+  }
+        </style>
+</head>
+<body>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24). 마크업을 여기
+       남겨 두면 두 벌이 되고, React 가 마운트하는 순간 지워지므로 고쳐도
+       아무 일이 안 일어납니다. -->
+  <div id="app"></div>
+
+  <script type="module" src="/chat.js"></script>
+
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
+</html>
