@@ -35,9 +35,10 @@ describe('navLinks', () => {
     deepStrictEqual(screens.sort(), ['home', 'lobby', 'review']);
   });
 
-  it('프로젝트를 알면 채팅·일정·알림·칸반·기여도·보고서·설정으로 갈 수 있다', () => {
+  it('프로젝트를 알면 채팅·일정·알림·활동·칸반·기여도·보고서·설정으로 갈 수 있다', () => {
     const screens = navLinks({ current: 'home', projectId: 3 }).map((l) => l.screen);
     deepStrictEqual(screens.sort(), [
+      'activity',
       'calendar',
       'chat',
       'contributions',

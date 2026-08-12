@@ -50,6 +50,7 @@ from teamflow.logging_config import configure_logging
 from teamflow.meeting.approval import ApprovalRequest
 from teamflow.projects import invites
 from teamflow.services import (
+    activity_service,
     approval_service,
     auth_service,
     calendar_service,
@@ -3747,6 +3748,51 @@ def mark_notifications_read(
     marked = notification_service.mark_read(session, user.id, payload.notification_ids)
     session.commit()
     return {"marked": marked}
+
+
+# ══════════════════════════════════════════════════════════════
+# 활동 기록 (요구사항 정의서 §21 ACTIVITY-001)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **이 엔드포인트가 생기기 전까지 `audit_logs` 는 쓰기만 하고 읽는 곳이
+# 0곳이었습니다.** 열한 곳에서 성실하게 쌓고 있었는데 볼 방법이 없었습니다 —
+# 이 저장소가 대표 실패 ① 로 적어 둔 그것입니다.
+
+
+class ActivityOut(BaseModel):
+    id: int
+    at: datetime
+    action: str
+    #: 사람 말. ⚠️ 서버가 줍니다 — 화면이 두 번째 표를 만들지 않습니다.
+    label: str
+    who: str | None
+    target: str
+    #: 사람의 기여 숫자를 건드린 기록인가. 분쟁에서 제일 먼저 볼 것입니다.
+    touches_contribution: bool
+
+
+@app.get("/api/projects/{project_id}/activity", response_model=list[ActivityOut])
+def read_activity(
+    project_id: int, session: DbSession, user: CurrentUser, limit: int = 100
+) -> list[ActivityOut]:
+    """ACTIVITY-001 — 이 프로젝트에서 일어난 일. 최근 것부터.
+
+    ⚠️ **구성원만** 볼 수 있습니다. 감사 기록에는 누가 무엇을 고쳤는지가
+    그대로 있어서, 남에게 보이면 팀 내부 사정이 통째로 새어 나갑니다.
+    """
+    _require_project_member(session, project_id, user)
+    return [
+        ActivityOut(
+            id=entry.id,
+            at=entry.at,
+            action=entry.action,
+            label=entry.label,
+            who=entry.who,
+            target=entry.target,
+            touches_contribution=entry.touches_contribution,
+        )
+        for entry in activity_service.recent(session, project_id, limit=limit)
+    ]
 
 
 # ══════════════════════════════════════════════════════════════

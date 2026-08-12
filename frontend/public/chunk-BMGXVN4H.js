@@ -1,0 +1,1 @@
+import{a as r}from"./chunk-ZM6OPZ25.js";function o(t){return Array.from(t.trim())[0]??"?"}function e(t,i=""){let n=r(o(t)),a=r(t.trim()),s=i===""?"":` · ${r(i)}`;return`<span class="avatar" aria-hidden="true">${n}</span>${a}${s}`}export{o as a,e as b};

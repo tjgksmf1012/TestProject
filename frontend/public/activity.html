@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
+<link rel="stylesheet" href="/app.css" />
+<title>활동 기록 — TeamFlow</title>
+<style>
+
+  /* ══ 활동 기록 ═════════════════════════════════════════════
+
+     ⚠️ 여기에는 **누를 것이 하나도 없습니다.** 감사 기록은 고치거나
+     지울 수 없어야 하고, 버튼이 하나라도 있으면 그게 열립니다. */
+
+  /* ⚠️ 줄마다 가로선을 긋지 않습니다 — 백 줄이면 선이 백하나가 되고,
+     그 선들이 화면에서 가장 진한 것이 됩니다. */
+  .alist { list-style: none; padding: 0; margin: 0; max-width: 52rem;
+           display: grid; gap: var(--sp-3); }
+
+  .aitem { display: flex; flex-wrap: wrap; align-items: baseline;
+           gap: var(--sp-3); padding-left: var(--sp-3);
+           /* 표시할 자리를 **늘 잡아 둡니다** — 안 그러면 줄이 옆으로 밀립니다. */
+           border-left: 2px solid transparent; }
+
+  /* 사람의 기여 숫자를 건드린 기록. ⚠️ 빨강이 아닙니다 — 잘못한 일이
+     아니라 **되짚어 볼 일**입니다. 팀이 합의해 정한 것일 수 있습니다. */
+  .aitem.weighty { border-left-color: var(--primary); }
+  .aitem.weighty .awhat { font-weight: 600; }
+
+  .awhen { flex: none; min-width: 8.5rem; font-size: var(--fs-caption);
+           color: var(--text-subtle); font-variant-numeric: tabular-nums; }
+  .awhat { font-size: var(--fs-label); color: var(--text); }
+  .awho { font-size: var(--fs-caption); color: var(--text-muted); }
+
+  /* 무엇을 바꿨는가. ⚠️ `meetings/3` 같은 식별자라 **가로로 넘칠 수**
+     있습니다 — 줄바꿈을 허용합니다. */
+  .atarget { font-size: var(--fs-caption); color: var(--text-subtle);
+             overflow-wrap: anywhere; }
+
+  @media (hover: none) and (pointer: coarse) {
+    .awhat { font-size: 1rem; }
+    .awhen, .awho, .atarget { font-size: .875rem; }
+  }
+        </style>
+</head>
+<body>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24). -->
+  <div id="app"></div>
+
+  <script type="module" src="/activity.js"></script>
+
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
+</html>

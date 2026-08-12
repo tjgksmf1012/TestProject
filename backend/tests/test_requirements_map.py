@@ -169,17 +169,21 @@ def test_the_functions_the_doc_names_exist():
 # ══════════════════════════════════════════════════════════════
 
 
-def test_the_audit_log_is_still_write_only_as_the_doc_says():
-    """§21 — "쓰기만 하고 읽는 곳이 0곳" 이라고 적었습니다.
+def test_the_audit_log_is_now_read_somewhere():
+    """§21 — 예전에는 "쓰기만 하고 읽는 곳이 0곳" 이었습니다.
+
+    ⚠️ **이 검사는 방향이 뒤집혔습니다.** 예전에는 "읽는 곳이 없다" 를
+    지켰고, 주석에 "읽는 곳이 생기면 터집니다. 그게 맞습니다 — 그때
+    `docs/20` 의 🟡 를 ✅ 로 바꾸라는 뜻입니다" 라고 적어 뒀습니다.
+    실제로 그렇게 됐고, 그래서 지금은 **읽는 곳이 있는지**를 지킵니다.
+
+    다시 0곳이 되면 열한 곳에서 쌓기만 하고 볼 방법이 없던 그 상태로
+    돌아간 것입니다.
 
     ⚠️ **쓰기와 읽기를 갈라서 재야 합니다.** 처음에 `"AuditLog" in main.py`
     로 쟀다가 틀렸습니다 — 그 파일은 감사 로그를 **쓰는** 곳이라 문자열이
     당연히 있고, 검사는 "읽는 곳이 생겼다" 고 잘못 말했습니다. 이 저장소가
     여덟 번째로 당한 "자를 잘못 든" 경우입니다.
-
-    ⚠️ 이 검사는 **읽는 곳이 생기면 터집니다.** 그게 맞습니다 — 그때
-    `docs/20` 의 🟡 를 ✅ 로 바꾸라는 뜻입니다. 문서가 "아직 안 읽는다" 로
-    남아 있으면 다음 사람이 화면을 또 만듭니다.
     """
     reads: list[str] = []
     writes = 0
@@ -189,9 +193,9 @@ def test_the_audit_log_is_still_write_only_as_the_doc_says():
             reads.append(str(path.relative_to(REPO_ROOT)))
         writes += len(re.findall(r"\bm\.AuditLog\(", text))
 
-    assert not reads, (
-        f"감사 로그를 읽는 곳이 생겼습니다: {sorted(reads)} — "
-        "`docs/20` ACTIVITY-001 을 ✅ 로 고치십시오"
+    assert reads, (
+        "감사 로그를 읽는 곳이 0곳이 됐습니다 — 열한 곳에서 쌓기만 하고 "
+        "볼 방법이 없던 상태로 돌아갔습니다 (`docs/20` ACTIVITY-001)"
     )
     # 쓰는 곳이 0이 되면 그건 반대쪽 결함입니다 — 기록이 끊긴 것입니다.
     assert writes > 0, "감사 로그를 쓰는 곳이 0곳이 됐습니다 — 기록이 끊겼습니다"
@@ -204,4 +208,26 @@ def test_the_audit_log_is_still_write_only_as_the_doc_says():
     assert "쓰기는 열한 곳" in _doc(), (
         "문서에서 쓰기 개수를 적은 자리를 못 찾았습니다 — 문구가 바뀌었으면 "
         "이 검사도 같이 고치십시오"
+    )
+
+
+def test_the_action_labels_cover_every_action_the_code_writes():
+    """⭐ 화면이 **원문 그대로** 보여 주는 행동이 없어야 합니다.
+
+    ⚠️ 새 감사 행동을 추가하고 표에 안 넣으면, 화면에 `score_adjusted`
+    같은 영어 식별자가 그대로 뜹니다. 이 저장소는 보고서에서 같은 부류를
+    이미 한 번 냈습니다 (`상태: processing`).
+    """
+    from teamflow.services import activity_service
+
+    written: set[str] = set()
+    for path in (REPO_ROOT / "backend" / "teamflow").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        written |= set(re.findall(r'action="([a-z_]+)"', text))
+
+    assert written, "감사 행동을 하나도 못 찾았습니다 — 정규식이 낡았습니다"
+    missing = sorted(written - set(activity_service.ACTION_LABEL))
+    assert not missing, (
+        f"사람 말이 없는 감사 행동입니다: {missing} — "
+        "`activity_service.ACTION_LABEL` 에 넣으십시오"
     )
