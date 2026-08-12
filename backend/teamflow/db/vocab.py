@@ -441,12 +441,14 @@ NOTIFICATION_DERIVED: frozenset[NotificationKind] = frozenset(
 #: 이고, 검사가 아니라 눈으로 grep 해서 알았습니다. 지금은
 #: `announce_upcoming_meetings` 가 만듭니다.
 #:
-#: ⚠️ `GITHUB` 은 진짜로 아직 없습니다. 웹훅에서 부를 자리를 안 잡았고,
-#: 잡으려면 "PR 상태가 바뀌었다" 를 업무와 이어야 하는데
-#: (`task_github_links`) 그건 별개 작업입니다.
-NOTIFICATION_NOT_PRODUCED_YET: frozenset[NotificationKind] = frozenset(
-    {NotificationKind.GITHUB}
-)
+#: ⚠️ **지금은 비어 있습니다.** `GITHUB` 이 마지막이었고,
+#: `task_link_service._tell_the_assignee` 가 만듭니다 — PR 과 업무가
+#: 실제로 이어지는 순간이 붙일 자리였습니다.
+#:
+#: ⚠️ 비었다고 이 집합을 **지우지 마십시오.** 다음에 어휘를 늘릴 때
+#: "만드는 코드를 아직 안 붙였다" 를 적을 자리가 여기입니다. 적을 자리가
+#: 없으면 사람은 그냥 안 적고, 그게 결함 122 가 생긴 방식입니다.
+NOTIFICATION_NOT_PRODUCED_YET: frozenset[NotificationKind] = frozenset()
 
 
 def notification_values() -> tuple[str, ...]:

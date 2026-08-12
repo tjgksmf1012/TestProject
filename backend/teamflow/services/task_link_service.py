@@ -37,12 +37,13 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from teamflow.db import live
+from teamflow.db import live, vocab
 from teamflow.db import models as m
 from teamflow.github.linking import TaskRef, find_task_refs
+from teamflow.services import notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -119,12 +120,67 @@ def link_pull_request(session: Session, event: m.GithubEvent) -> list[TaskRef]:
 
     if linked:
         session.flush()
+        _tell_the_assignee(session, event, linked)
         logger.info(
             "github_event=%s → 업무 %s 연결",
             event.id,
             [ref.task_id for ref in linked],
         )
     return linked
+
+
+def _tell_the_assignee(
+    session: Session, event: m.GithubEvent, linked: list[TaskRef]
+) -> None:
+    """`NOTIFICATION-006` — 내 업무에 PR 이 붙었다.
+
+    이 알림 종류(`github`)는 **어휘에만 있고 만드는 코드가 0곳**이었습니다
+    (`vocab.NOTIFICATION_NOT_PRODUCED_YET` 이 그렇게 적어 뒀습니다).
+    붙일 자리가 여기입니다 — PR 과 업무가 실제로 이어지는 순간.
+
+    ⚠️ **담당자에게만 갑니다.** 프로젝트 전원에게 쏘면 PR 하나에 알림이
+    사람 수만큼 생기고, 그러면 사람들은 알림을 통째로 무시합니다.
+
+    ⚠️ **자기가 올린 PR 은 자기에게 안 알립니다.** `record()` 가 그걸
+    막는데, 막으려면 **누가 한 일인지**를 넘겨야 합니다.
+
+    ⚠️ 담당자가 없는 업무는 조용합니다. 아무에게도 안 보내는 것이
+    맞습니다 — 여기서 프로젝트 전원으로 넓히면 위 규칙이 무너집니다.
+    """
+    actor_id = _github_actor(session, event)
+    for ref in linked:
+        task = session.get(m.Task, ref.task_id)
+        if task is None or task.assignee_id is None:
+            continue
+        # ⚠️ 자기가 올린 PR 은 자기에게 안 알립니다. `record_assignment` 가
+        #    같은 방식으로 거릅니다 — `record()` 자체는 누가 했는지 모릅니다.
+        if task.assignee_id == actor_id:
+            continue
+        notification_service.record(
+            session,
+            user_id=task.assignee_id,
+            project_id=task.project_id,
+            kind=vocab.NotificationKind.GITHUB,
+            task_id=task.id,
+        )
+
+
+def _github_actor(session: Session, event: m.GithubEvent) -> int | None:
+    """이 PR 을 움직인 사람이 우리 팀의 누구인가. 모르면 `None`.
+
+    ⚠️ GitHub 로그인과 우리 사용자를 잇는 것은 `members.github_login`
+    뿐입니다. 안 이어 놓았으면 모르는 것이고, **모르면 안 거릅니다** —
+    자기 알림이 하나 오는 것이 남의 알림이 안 오는 것보다 낫습니다.
+    """
+    login = (event.actor_login or "").strip().lower()
+    if not login:
+        return None
+    return session.scalars(
+        select(m.Member.user_id).where(
+            func.lower(m.Member.github_login) == login,
+            m.Member.project_id == event.project_id,
+        )
+    ).first()
 
 
 def links_for_tasks(
