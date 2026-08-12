@@ -28,6 +28,7 @@ export type ScreenId =
   | 'calendar'
   | 'notifications'
   | 'activity'
+  | 'search'
   | 'record'
   | 'review'
   | 'kanban'
@@ -55,6 +56,7 @@ const LABEL: Record<ScreenId, string> = {
   calendar: '일정',
   notifications: '알림',
   activity: '활동 기록',
+  search: '찾기',
   record: '녹음',
   review: '업무 후보 검토',
   kanban: '칸반',
@@ -146,6 +148,11 @@ export function navLinks(context: NavContext): NavLink[] {
       screen: 'activity',
       label: LABEL.activity,
       href: `/activity.html?project=${project}`,
+    });
+    links.push({
+      screen: 'search',
+      label: LABEL.search,
+      href: `/search.html?project=${project}`,
     });
     links.push({
       screen: 'reports',

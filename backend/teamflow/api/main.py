@@ -20,6 +20,7 @@ from fastapi import (
     FastAPI,
     Header,
     HTTPException,
+    Query,
     Request,
     Response,
     WebSocket,
@@ -61,6 +62,7 @@ from teamflow.services import (
     progress_service,
     recording_service,
     report_service,
+    search_service,
     task_link_service,
     task_service,
 )
@@ -3793,6 +3795,100 @@ def read_activity(
         )
         for entry in activity_service.recent(session, project_id, limit=limit)
     ]
+
+
+# ══════════════════════════════════════════════════════════════
+# 검색 (요구사항 정의서 §20)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **프로젝트 밖으로 새지 않습니다.** 검색은 회의 전사·팀 대화·기여
+# 근거를 한 상자에서 꺼내는 문이라, 범위가 한 번 새면 남의 팀 회의록이
+# 결과로 나옵니다. 종류마다 `project_id` 로 먼저 좁힙니다.
+#
+# ⚠️ 채팅 검색(SEARCH-001)은 이미 위에 있습니다 — 채널 권한을 같이 봐야
+# 해서 자리가 다릅니다.
+
+
+class HitOut(BaseModel):
+    kind: str
+    task_id: int | None
+    meeting_id: int | None
+    title: str
+    #: ⚠️ **자르지 않은 대목**입니다. 어디를 잘라야 뜻이 사는지는 화면이
+    #: 폭을 알아야 정합니다 — 여기서 자르면 그 판단이 두 벌이 됩니다.
+    body: str
+    at: datetime | None
+    who: str | None
+    status: str | None
+
+
+def _hits_out(hits: list[search_service.Hit]) -> list[HitOut]:
+    return [
+        HitOut(
+            kind=hit.kind,
+            task_id=hit.task_id,
+            meeting_id=hit.meeting_id,
+            title=hit.title,
+            body=hit.body,
+            at=hit.at,
+            who=hit.who,
+            status=hit.status,
+        )
+        for hit in hits
+    ]
+
+
+@app.get("/api/projects/{project_id}/search", response_model=list[HitOut])
+def search_everything(
+    project_id: int,
+    session: DbSession,
+    user: CurrentUser,
+    q: str = "",
+    kind: str | None = None,
+    assignee_id: int | None = None,
+    # ⚠️ **매개변수 이름을 `status` 로 두면 안 됩니다.** 이 파일은
+    #    `from fastapi import status` 를 쓰고 있어서, 그 이름을 가리는
+    #    순간 함수 안의 `status.HTTP_400_BAD_REQUEST` 가
+    #    `AttributeError: 'str' object has no attribute ...` 로 터집니다.
+    #    **오류 경로에서만** 나므로 정상 요청으로는 영영 안 보입니다 —
+    #    잘못된 상태를 넣어 본 테스트가 잡았습니다 (결함 135).
+    task_status: str | None = Query(default=None, alias="status"),
+    priority: int | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> list[HitOut]:
+    """SEARCH-002~005 — 업무·회의·회의 내용·GitHub.
+
+    `kind` 를 주면 그 종류만, 안 주면 전부 찾습니다.
+
+    ⚠️ **구성원만** 찾을 수 있습니다. 회의 전사는 팀 내부 자료입니다.
+    """
+    _require_project_member(session, project_id, user)
+
+    wants = {kind} if kind is not None else {"task", "meeting", "utterance", "github"}
+    hits: list[search_service.Hit] = []
+    try:
+        if "task" in wants:
+            hits += search_service.search_tasks(
+                session,
+                project_id,
+                query=q,
+                assignee_id=assignee_id,
+                status=task_status,
+                priority=priority,
+            )
+        if "meeting" in wants:
+            hits += search_service.search_meetings(
+                session, project_id, query=q, since=since, until=until
+            )
+        if "utterance" in wants:
+            hits += search_service.search_utterances(session, project_id, q)
+        if "github" in wants:
+            hits += search_service.search_github(session, project_id, q)
+    except search_service.SearchError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return _hits_out(hits)
 
 
 # ══════════════════════════════════════════════════════════════
