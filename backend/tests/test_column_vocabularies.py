@@ -475,3 +475,66 @@ def test_the_meeting_event_migration_matches_too():
         f"`{newest.name}` 의 제약은 {sorted(declared)} 인데 vocab 은 "
         f"{sorted(expected)} 입니다 — 새 마이그레이션이 필요합니다."
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# tasks.status — 제약이 **아예 없던** 열 (TASK-004)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_the_task_status_column_now_has_a_constraint():
+    """⭐ 이 열에는 CHECK 가 **없었습니다.**
+
+    허용값이 `task_service.STATUSES` 튜플 하나뿐이었고 `String(20)` 이라
+    무엇이든 들어갔습니다. 서비스를 안 거치는 경로가 하나라도 생기면
+    칸반에 **어느 열에도 안 속하는 카드**가 생깁니다.
+    """
+    from teamflow.db import models as m
+
+    table = m.Base.metadata.tables["tasks"]
+    checks = [str(c.sqltext) for c in table.constraints if hasattr(c, "sqltext")]
+    status_check = [c for c in checks if "status" in c]
+    assert status_check, "`tasks.status` 에 CHECK 제약이 없습니다"
+    for value in ("todo", "in_progress", "review", "done"):
+        assert f"'{value}'" in status_check[0], value
+
+
+def test_the_database_refuses_an_unknown_task_status(tmp_path):
+    """⭐ 어휘가 말만 하는 것이 아니라 **DB 가 막습니다.**"""
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session
+
+    from teamflow.db import models as m
+
+    engine = create_engine(f"sqlite:///{tmp_path}/t.db")
+    m.Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        project = m.Project(title="시험")
+        session.add(project)
+        session.flush()
+        session.add(m.Task(project_id=project.id, title="일", status="Done"))
+        with pytest.raises(IntegrityError):
+            session.flush()
+    engine.dispose()
+
+
+def test_review_is_not_counted_as_finished():
+    """⭐ 검토 중인 일을 완료로 세면 진행률이 실제보다 높게 나옵니다."""
+    from teamflow.db import vocab
+
+    assert vocab.TaskStatus.REVIEW not in vocab.TASK_FINISHED
+    assert {str(s) for s in vocab.TASK_FINISHED} == {"done"}
+
+
+def test_the_column_order_is_the_kanban_order():
+    """⚠️ `review` 가 `done` 뒤로 가면 검토가 완료 다음에 오는 판이 됩니다."""
+    from teamflow.db import vocab
+
+    assert [str(s) for s in vocab.TASK_STATUSES] == [
+        "todo",
+        "in_progress",
+        "review",
+        "done",
+    ]

@@ -1913,3 +1913,36 @@ def test_no_document_makes_the_bundle_a_required_setup_step():
         + " | ".join(offenders)
         + ". 소스를 고쳤을 때만 다시 만들면 됩니다."
     )
+
+
+def test_the_kanban_css_column_count_matches_the_statuses():
+    """⭐ 칸반 CSS 의 열 수가 서버의 상태 수와 같은가.
+
+    ## ⚠️ 왜 CSS 에 숫자를 박았는가
+
+    처음에는 `repeat(3, 1fr)` 이었고, `TASK-004` 로 넷째 열이 생기자
+    **`완료` 가 아랫줄로 내려가 `할 일` 밑에 붙었습니다.** 칸반은 왼쪽에서
+    오른쪽으로 가는 판이라 그 순간 뜻이 통째로 깨집니다.
+
+    `repeat(auto-fit, minmax(...))` 로 바꿔 봤지만 폭에 따라 **셋이 서고
+    완료 하나만 떨어지는** 모양이 남았습니다(1024px·900px 에서 실측).
+    고아가 생기는 것은 같은 결함입니다.
+
+    그래서 넷/둘/하나로 못 박았고, **그 대신 이 검사를 답니다** — 상태가
+    다섯이 되면 여기서 터져서 CSS 를 같이 고치라고 알려 줍니다.
+    """
+    import re
+
+    from teamflow.services import task_service
+
+    css = (REPO_ROOT / "frontend" / "public" / "kanban.html").read_text(encoding="utf-8")
+    widest = re.findall(r"grid-template-columns:\s*repeat\((\d+),", css)
+    assert widest, "칸반 CSS 에서 열 수를 못 찾았습니다 — 정규식이 낡았습니다"
+
+    biggest = max(int(n) for n in widest)
+    assert biggest == len(task_service.STATUSES), (
+        f"CSS 는 열을 최대 {biggest}개로 세우는데 상태는 "
+        f"{len(task_service.STATUSES)}개입니다 — `frontend/public/kanban.html` 의 "
+        "`#board` 규칙을 고치십시오. 안 고치면 마지막 열이 아랫줄로 떨어져 "
+        "`완료` 가 `할 일` 밑에 붙습니다"
+    )

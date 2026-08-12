@@ -103,15 +103,23 @@ def test_the_speech_label_count_the_doc_claims_matches_the_code():
     )
 
 
-def test_the_task_status_count_matches():
-    """§15 TASK-004 — "지금 셋, 요구는 넷" 이라고 적었습니다."""
+def test_the_task_statuses_are_the_four_the_spec_asks_for():
+    """§15 TASK-004 — 요구는 넷입니다.
+
+    ⚠️ **이 검사도 방향이 뒤집혔습니다.** 예전에는 "지금 셋" 을 지켰고
+    `review` 가 없는 것을 고정했습니다. 넷이 됐으니 이제 넷을 지킵니다.
+
+    ⚠️ **순서가 곧 칸반 열 순서입니다.** `review` 가 `done` 뒤로 가면
+    화면에서 검토가 완료 다음에 오는 이상한 판이 됩니다.
+    """
     from teamflow.services import task_service
 
-    assert len(task_service.STATUSES) == 3, (
-        f"업무 상태가 {len(task_service.STATUSES)}개가 됐습니다 — "
-        "`docs/20` TASK-004 줄을 고치십시오"
+    assert task_service.STATUSES == ("todo", "in_progress", "review", "done"), (
+        f"업무 상태가 {task_service.STATUSES} 가 됐습니다 — "
+        "`docs/20` TASK-004 줄과 칸반 열 순서를 같이 보십시오"
     )
-    assert "review" not in task_service.STATUSES
+    # ⚠️ 검토 중인 일을 완료로 세면 진행률이 실제보다 높게 나옵니다.
+    assert {str(s) for s in vocab.TASK_FINISHED} == {"done"}
 
 
 def test_the_meeting_event_gap_the_doc_describes_is_the_real_gap():

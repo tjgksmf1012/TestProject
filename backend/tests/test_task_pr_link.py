@@ -52,7 +52,12 @@ def pr_payload(
 
 def make_task(project_id: int, title: str = "로그인 API 구현") -> int:
     with db_session.session_scope() as s:
-        task = m.Task(project_id=project_id, title=title, status="doing")
+        # ⚠️ 예전에는 `status="doing"` 이었습니다 — **어느 상태 목록에도 없는
+        #    값**입니다(`todo`·`in_progress`·`review`·`done`). 그 열에는
+        #    CHECK 제약이 없어서 몇 달 동안 아무도 몰랐고, 칸반은 이런
+        #    카드를 "알 수 없는 상태" 열로 밀어냅니다. 제약을 걸자
+        #    이 열네 개가 한꺼번에 터졌습니다 (결함 134).
+        task = m.Task(project_id=project_id, title=title, status="in_progress")
         s.add(task)
         s.flush()
         return task.id

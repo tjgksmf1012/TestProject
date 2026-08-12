@@ -40,12 +40,17 @@ from sqlalchemy.orm import Session
 from teamflow.clock import local_date
 from teamflow.contribution.events import CATEGORY_OF, EventType, SourceKind
 from teamflow.db import models as m
+from teamflow.db import vocab
 
 logger = logging.getLogger(__name__)
 
 # 칸반 열. 순서가 곧 화면의 열 순서다.
-STATUSES = ("todo", "in_progress", "done")
-DONE = "done"
+#
+# ⚠️ **여기서 정하지 않습니다.** 예전에는 이 튜플이 허용값의 유일한
+#    출처였고 데이터베이스에는 제약이 없었습니다 — `db/vocab.py` 의
+#    `TaskStatus` 머리말을 보십시오. 지금은 어휘에서 끌어옵니다.
+STATUSES = tuple(str(s) for s in vocab.TASK_STATUSES)
+DONE = str(vocab.TaskStatus.DONE)
 
 
 class TaskError(Exception):

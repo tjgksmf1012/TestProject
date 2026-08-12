@@ -172,7 +172,7 @@ def events(user_id: int | None = None) -> list[m.ContributionEventRow]:
 def test_board_lists_every_task(client: TestClient, board: dict):
     body = client.get(f"/api/projects/{board['project_id']}/tasks").json()
     assert len(body["tasks"]) == 3
-    assert body["statuses"] == ["todo", "in_progress", "done"]
+    assert body["statuses"] == ["todo", "in_progress", "review", "done"]
 
 
 def test_task_from_a_meeting_carries_its_origin(client: TestClient, board: dict):

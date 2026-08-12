@@ -41,9 +41,30 @@
             margin-left: var(--sp-2); }
   .flow .late b { color: var(--gap); }
 
-  /* 좁은 화면에서는 세로로 쌓인다. 폰에서 열어보는 게 기본이다. */
+  /* 좁은 화면에서는 세로로 쌓인다. 폰에서 열어보는 게 기본이다.
+
+     ⚠️ **열 수를 숫자로 박지 마십시오.** `repeat(3, 1fr)` 이었는데
+     `TASK-004` 로 넷째 열(`검토 중`)이 생기자 **`완료` 가 아랫줄로
+     내려가** `할 일` 밑에 붙었습니다 — 칸반은 왼쪽에서 오른쪽으로 가는
+     판인데 완료가 할 일 아래에 있으면 그 뜻이 통째로 깨집니다.
+     렌더해서 보고 알았습니다.
+
+     ⚠️ `auto-fit` 도 안 됩니다 — 폭에 따라 **셋이 서고 완료 하나만
+     아랫줄**로 떨어집니다(1024px·900px 에서 실측). 고아가 생기는 순간
+     같은 결함입니다.
+
+     그래서 나는 자리를 **넷 아니면 둘 아니면 하나**로 못 박습니다.
+     둘이면 `할 일·진행 중 / 검토 중·완료` 라 읽는 순서가 유지됩니다.
+
+     ⚠️ 여기 숫자 `4` 는 서버의 `task_service.STATUSES` 와 짝입니다.
+     상태가 다섯이 되면 `test_repo_integrity.py` 의 교차 검사가 터집니다. */
   #board { display: grid; gap: var(--sp-5); }
-  @media (min-width: 46rem) { #board { grid-template-columns: repeat(3, 1fr); align-items: start; } }
+  @media (min-width: 40rem) {
+    #board { grid-template-columns: repeat(2, 1fr); align-items: start; }
+  }
+  @media (min-width: 64rem) {
+    #board { grid-template-columns: repeat(4, 1fr); }
+  }
 
   /* ── 열 ────────────────────────────────────────────────
 

@@ -55,9 +55,20 @@ export interface Column {
   tasks: Task[];
 }
 
+/**
+ * 상태 → 사람 말.
+ *
+ * ⚠️ **서버의 `vocab.TASK_STATUS_LABEL` 과 짝입니다.** 값이 갈라지면
+ * `test_repo_integrity.py` 의 교차 검사가 터집니다 — 실제로 서버가
+ * `하는 중`, 화면이 `진행 중` 으로 갈려 있었고 화면 쪽 말을 남겼습니다.
+ *
+ * ⚠️ `review` 는 **완료가 아닙니다.** 검토 중인 일을 완료로 세면 진행률이
+ * 실제보다 높게 나옵니다 (`vocab.TASK_FINISHED` 에 `done` 만 있습니다).
+ */
 export const STATUS_LABEL: Record<string, string> = {
   todo: '할 일',
   in_progress: '진행 중',
+  review: '검토 중',
   done: '완료',
 };
 

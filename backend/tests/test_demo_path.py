@@ -676,7 +676,7 @@ def test_kanban_response_has_the_fields_the_screen_reads(client: TestClient, see
     """`board.ts` 의 `Task` 와 서버 응답이 어긋나면 카드가 조용히 빕니다."""
     body = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()
 
-    assert body["statuses"] == ["todo", "in_progress", "done"]
+    assert body["statuses"] == ["todo", "in_progress", "review", "done"]
     assert body["tasks"]
     for task in body["tasks"]:
         assert {

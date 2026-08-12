@@ -449,3 +449,67 @@ NOTIFICATION_NOT_PRODUCED_YET: frozenset[NotificationKind] = frozenset(
 def notification_values() -> tuple[str, ...]:
     """CHECK 제약에 들어갈 값. **저장하는 것만.**"""
     return tuple(sorted(str(k) for k in NOTIFICATION_STORED))
+
+
+# ══════════════════════════════════════════════════════════════
+# tasks.status — 칸반 열 (요구사항 정의서 TASK-004)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **같은 결함의 네 번째 사례입니다.** 이 열에는 CHECK 제약이 **아예
+#    없었고**, 허용값은 `services/task_service.py` 의 튜플 하나뿐이었습니다.
+#
+#        STATUSES = ("todo", "in_progress", "done")   # ← 여기가 전부
+#        status: Mapped[str] = mapped_column(String(20), ...)  # 제약 없음
+#
+#    `String(20)` 이라 `"Done"` 도 `"완료"` 도 `"todo "`(뒤 공백)도
+#    들어갑니다. 서비스를 안 거치는 경로가 하나라도 생기면 그 순간
+#    칸반에 **어느 열에도 안 속하는 카드**가 생기고, 화면에서는 그냥
+#    사라진 것처럼 보입니다.
+#
+# ⚠️ **순서가 곧 칸반 열 순서입니다.** 선언 순서를 바꾸면 화면이 바뀝니다.
+
+
+class TaskStatus(StrEnum):
+    """업무가 지금 어느 열에 있는가.
+
+    ⚠️ `REVIEW` 는 정의서 `TASK-004` 가 요구하는 넷째 열입니다. 이것이
+    없던 동안 "다 만들었는데 아직 아무도 안 본" 일이 `in_progress` 와
+    `done` 어느 쪽에도 정확히 안 맞았습니다 — `done` 에 두면 검토를
+    건너뛴 것이 완료로 보이고, `in_progress` 에 두면 만든 사람이 아직
+    붙잡고 있는 것처럼 보입니다.
+    """
+
+    TODO = "todo"  # 할 일
+    IN_PROGRESS = "in_progress"  # 하는 중
+    REVIEW = "review"  # 검토 중 — 만든 사람 손을 떠났고 아직 확인 전
+    DONE = "done"  # 완료
+
+
+#: `tasks.status` 가 받는 값 전부. **선언 순서 = 칸반 열 순서.**
+TASK_STATUSES: tuple[TaskStatus, ...] = tuple(TaskStatus)
+
+#: 끝난 것으로 세는 상태.
+#:
+#: ⚠️ `REVIEW` 는 여기 없습니다. 검토 중인 일을 완료로 세면 진행률이
+#: 실제보다 높게 나오고, 그 숫자로 "우리 팀은 80% 했다" 를 말하게 됩니다.
+#: 아직 아무도 안 본 것은 안 끝난 것입니다.
+TASK_FINISHED: frozenset[TaskStatus] = frozenset({TaskStatus.DONE})
+
+#: 사람이 읽을 이름.
+#:
+#: ⚠️ **화면의 `lib/kanban/board.ts` 의 `STATUS_LABEL` 과 짝입니다.**
+#: 두 벌이지만 런타임이 달라 어쩔 수 없고, 대신
+#: `test_repo_integrity.py` 의 교차 검사가 값이 갈라지면 터집니다.
+#: 처음 적을 때 여기는 `하는 중`, 화면은 `진행 중` 으로 이미 갈려
+#: 있었습니다 — 화면 쪽 말로 맞췄습니다.
+TASK_STATUS_LABEL: dict[TaskStatus, str] = {
+    TaskStatus.TODO: "할 일",
+    TaskStatus.IN_PROGRESS: "진행 중",
+    TaskStatus.REVIEW: "검토 중",
+    TaskStatus.DONE: "완료",
+}
+
+
+def task_status_values() -> tuple[str, ...]:
+    """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
+    return tuple(sorted(str(s) for s in TaskStatus))

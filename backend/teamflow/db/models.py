@@ -355,6 +355,9 @@ class Task(Base):
     #: 그건 행이 생긴 때이고, 이건 사람이 정한 날입니다.
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: ⚠️ 제약이 **없던** 열입니다 — 허용값이 서비스 튜플 하나뿐이었습니다
+    #: (`db/vocab.py` 의 `TaskStatus` 머리말). 서비스를 안 거치는 경로가
+    #: 하나라도 생기면 칸반에 어느 열에도 안 속하는 카드가 생깁니다.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     difficulty: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -365,6 +368,12 @@ class Task(Base):
 
     __table_args__ = (
         CheckConstraint("difficulty BETWEEN 1 AND 3", name="ck_task_difficulty"),
+        CheckConstraint(
+            "status IN ("
+            + ",".join(f"'{v}'" for v in vocab.task_status_values())
+            + ")",
+            name="ck_task_status",
+        ),
     )
 
 
