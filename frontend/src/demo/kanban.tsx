@@ -291,6 +291,25 @@ function Kanban() {
     })();
   }, [load]);
 
+  // ⭐ `?task=N` 으로 들어오면 **그 카드까지 데려다 줍니다.**
+  //
+  // 프로젝트 상태 화면의 근거 링크(`analytics/view.ts::taskHref`)가 여기로
+  // 옵니다. 이게 없으면 근거를 눌러도 판만 열리고, 열두 장 중 어느 것인지
+  // 사람이 다시 찾아야 합니다 — 링크가 있는데 도착을 안 시키는 것은 링크가
+  // 없는 것과 거의 같습니다.
+  //
+  // ⚠️ 숫자인지 먼저 봅니다. 주소창에서 온 글자를 그대로 선택자에 넣으면
+  //    남이 판을 열어 놓고 아무 선택자나 던질 수 있습니다.
+  useEffect(() => {
+    if (screen.k !== 'ok') return;
+    const wanted = params.get('task');
+    if (wanted === null || !/^\d+$/.test(wanted)) return;
+    const card = document.querySelector(`.task[data-id="${wanted}"]`);
+    if (card === null) return;
+    card.classList.add('found');
+    card.scrollIntoView({ block: 'center' });
+  }, [screen]);
+
   const move = async (taskId: number, to: string): Promise<void> => {
     setMoving(true);
     try {

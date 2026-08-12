@@ -109,6 +109,52 @@
      녹음 화면에도 같은 것이 필요해서 옮겼습니다. */
   .panel > .sub { max-width: 44rem; }
 
+  /* 프로젝트 상태 (정의서 §18).
+     ⚠️⚠️ **막대를 그리지 마십시오.** 사람별 미완료 건수를 같은 축 위에
+     늘어놓으면 그게 곧 순위표입니다 — 이 저장소가 두 번 어긴 규칙이고,
+     여기는 그중에서도 제일 위험한 자리입니다(부하는 성적으로 읽힙니다).
+     값은 **글자로**, 목록은 **이름 순** 그대로. */
+  .sub-head { font-size: var(--fs-caption); font-weight: 600; color: var(--text-subtle);
+              letter-spacing: .02em; margin: var(--sp-5) 0 var(--sp-2); }
+  .prog { font-size: var(--fs-body); color: var(--text); margin: var(--sp-2) 0 0;
+          font-variant-numeric: tabular-nums; }
+  /* ⚠️ 마감이 지난 건수도 **빨강이 아닙니다.** 이 저장소에서 빨강은
+     "네가 뭘 잘못했다" 로 읽히는데, 이건 팀이 같이 보는 사실입니다. */
+  .prog-late { font-size: var(--fs-label); color: var(--text-muted); margin: var(--sp-1) 0 0; }
+
+  .loads { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap;
+           gap: var(--sp-2) var(--sp-5); font-size: var(--fs-label); }
+  .loads li { display: flex; gap: var(--sp-1); align-items: baseline; }
+  .lname { color: var(--text-muted); }
+  .lnum { color: var(--text); font-weight: 600; }
+  /* 담당자 없는 것. ⚠️ 흙빛(`--gap`)입니다 — 빨강이 아닙니다.
+     "아직 아무도 안 맡았다" 는 잘못이 아니라 **빈 자리**입니다. */
+  .lnone .lname, .lnone .lnum { color: var(--gap); }
+
+  .rlist { list-style: none; padding: 0; margin: 0;
+           display: flex; flex-direction: column; gap: var(--sp-4); }
+  .rname { font-size: var(--fs-label); font-weight: 600; color: var(--text); margin: 0; }
+  .rwhy { font-size: var(--fs-caption); color: var(--text-muted); margin: var(--sp-1) 0 0;
+          font-variant-numeric: tabular-nums; }
+  /* 근거로 든 업무 — **누르면 그 카드로 갑니다.**
+     ⚠️ 처음엔 글자 그대로 두었더니 폰에서 접촉면이 13×14px 이었고 이웃과
+     6.4px 떨어져 있었습니다. 옆 것을 누릅니다. 누르는 것은 `--tap`(44px)
+     이 하한이라는 것이 이 저장소의 규칙입니다 (`docs/14` §5.3).
+     ⚠️ 쉼표를 글자로 넣지 않습니다 — flex 가 쉼표를 낱개 칸으로 만들어
+     줄 사이에 떠다닙니다(문장을 흩어 놓는 실패). 칸 자체로 나눕니다. */
+  .rsrc { display: flex; flex-wrap: wrap; align-items: center;
+          gap: var(--sp-1); margin: var(--sp-1) 0 0; }
+  .rsrc-label { font-size: var(--fs-caption); color: var(--text-subtle); }
+  .rsrc a { display: inline-flex; align-items: center; justify-content: center;
+            min-height: var(--tap); min-width: var(--tap);
+            padding: 0 var(--sp-2); font-size: var(--fs-caption);
+            font-variant-numeric: tabular-nums;
+            color: var(--text-subtle); text-decoration: none;
+            border: 1px solid var(--line); border-radius: var(--r-ctrl); }
+  @media (hover: hover) and (pointer: fine) {
+    .rsrc a:hover { color: var(--primary); border-color: var(--primary); }
+  }
+
   /* 저장 버튼은 **보조**입니다 (브리프 §14). 이 화면의 주 행동은
      `회의를 열고 로비로` 하나뿐이고, 나머지는 값을 고친 뒤 눌러
      확정하는 것입니다. 여섯 개가 다 청록이면 주 행동이 사라집니다. */

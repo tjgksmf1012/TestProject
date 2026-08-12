@@ -542,6 +542,45 @@ describe('모바일 규칙', () => {
         + '손가락에서는 44px 이어야 합니다',
     );
   });
+
+  it('⭐ **상자로 만든 링크**도 손가락을 받아야 한다 (`--tap` 44px)', () => {
+    // ⚠️ 위 가드는 `button`·`input`·`select`·`.btn` 이 `min-height: 0` 으로
+    //    **되돌리는 것**만 봅니다. 그래서 링크에는 눈을 감습니다 — `<a>` 는
+    //    애초에 공용 44px 규칙을 안 받으므로 되돌릴 것도 없습니다.
+    //
+    // 실제로 프로젝트 상태 화면의 근거 링크가 그 틈으로 들어갔습니다.
+    // 폰에서 재니 **13×14px** 이고 이웃과 **6.4px** 떨어져 있었습니다.
+    // 위 가드는 통과했습니다. 요구가 아니라 **찾는 자리**가 좁았던 것입니다.
+    //
+    // 여기서는 "링크를 상자로 만든 것" 만 봅니다 — `display` 를 준 순간
+    // 그건 글줄 속 낱말이 아니라 **누르는 칸**이고, 누르는 칸은 44px 이
+    // 하한입니다. 문장 속 보통 링크는 대상이 아닙니다(상자가 없습니다).
+    const offenders: string[] = [];
+    for (const { name, html } of screens()) {
+      const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+      const bare = style.replace(/\/\*[\s\S]*?\*\//g, '');
+      const touch = bare.replace(
+        /@media\s*\([^)]*hover:\s*hover[^)]*\)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,
+        '',
+      );
+      for (const rule of touch.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+        const selector = (rule[1] ?? '').trim();
+        const body = rule[2] ?? '';
+        // 선택자가 `a` 를 겨냥하는가 (`.rsrc a`·`a.chip`·`li > a` …)
+        if (!/(^|[\s,>+~])a([.:#[\s,]|$)/.test(selector)) continue;
+        // 상자가 됐는가
+        if (!/display:\s*(inline-)?(flex|grid|block)/.test(body)) continue;
+        if (/min-height:\s*var\(--tap\)/.test(body)) continue;
+        offenders.push(`${name} → ${selector.replace(/\s+/g, ' ')}`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '링크를 상자로 만들었으면 `min-height: var(--tap)` 도 주세요 — '
+        + '누르는 칸은 손가락에서 44px 이 하한입니다',
+    );
+  });
 });
 
 describe('줄어들 수 없는 컨트롤 (결함 77)', () => {

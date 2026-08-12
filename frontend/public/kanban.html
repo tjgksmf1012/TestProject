@@ -97,6 +97,14 @@
   @media (hover: hover) and (pointer: fine) {
     .task:hover { border-color: var(--line-strong); }
   }
+  /* 근거 링크를 타고 온 카드 (`?task=N`).
+     ⚠️ **빨강이 아닙니다.** 이 표시는 "여기입니다" 이지 "잘못됐습니다" 가
+     아닙니다. 테두리만 굵게 하고 새 hex 는 만들지 않습니다 —
+     `--primary` 는 이미 두 테마에서 대비를 재어 둔 값이고, 이 저장소의
+     초점 표시(`app.css` 의 `:focus-visible`)가 쓰는 것과 같습니다.
+     ⚠️ `--focus` 라는 토큰을 지어낼 뻔했습니다 — 없는 이름입니다. */
+  .task.found { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
+
   .task .title { font-weight: 600; margin: 0 0 var(--sp-1);
                  font-size: var(--fs-item); letter-spacing: var(--ls-item); }
   .task .meta { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0; }

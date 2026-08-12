@@ -78,3 +78,18 @@ def local_date(at: datetime) -> date:
     저장하므로 그 가정은 안전합니다.
     """
     return as_utc(at).astimezone(team_zone()).date()
+
+
+def today() -> date:
+    """팀 달력에서 오늘.
+
+    ⚠️ `date.today()` 를 쓰지 마세요. 그건 **서버가 놓인 기계의** 달력이고,
+    이 저장소는 그것 때문에 이미 한 번 당했습니다 — 마감 준수 판정이
+    보는 사람의 시간대를 따라가 서울에서는 지연, 뉴욕에서는 제때가 되던
+    자리입니다(결함 109). 달력은 `settings.project_timezone` 하나뿐입니다.
+
+    ⚠️ 이 함수가 없던 동안 `local_date()` 를 인자 없이 부르는 코드를
+    썼다가 바로 터졌습니다. 그쪽은 "이 순간이 며칠인가" 이고 이쪽은
+    "지금이 며칠인가" 라, 같은 이름으로 겹쳐 두면 안 됩니다.
+    """
+    return local_date(datetime.now(UTC))

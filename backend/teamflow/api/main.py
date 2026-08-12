@@ -64,6 +64,7 @@ from teamflow.services import (
     progress_service,
     recording_service,
     report_service,
+    risk_service,
     search_service,
     task_link_service,
     task_service,
@@ -1995,6 +1996,85 @@ def list_project_members(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
     return _project_members(session, project_id)
+
+
+class ProgressOut(BaseModel):
+    total: int
+    finished: int
+    #: 끝나지 않았는데 마감이 지난 것.
+    overdue: int
+    #: 0.0~1.0. ⚠️ 업무가 없으면 **`null`** 입니다 — 0.0 이 아닙니다.
+    #: 0을 보내면 화면이 "시작도 안 했다" 로 그리고, 그건 이 저장소가
+    #: 제일 하면 안 된다고 정한 것입니다 (측정 불가 ≠ 0점).
+    ratio: float | None
+
+
+class LoadOut(BaseModel):
+    """사람별 **미완료** 업무 수.
+
+    ⚠️ **기여도가 아닙니다.** 업무를 많이 맡은 것이 기여가 많은 것이
+    아니고, 적게 맡은 것이 게으른 것도 아닙니다. 순서는 **이름 순**이고
+    서버가 그렇게 내보냅니다 — 화면이 다시 정렬하면 그게 순위표입니다.
+    """
+
+    #: 담당자 없는 업무는 `null` 로 맨 뒤에 옵니다.
+    user_id: int | None
+    name: str
+    open_tasks: int
+
+
+class RiskSignalOut(BaseModel):
+    """위험 신호 하나 (제안서 §4.5).
+
+    ⚠️ **등급이 없습니다.** 규칙으로 센 값에 빨강·노랑을 붙이면 그건
+    팀에 대한 판정이 됩니다 — `meeting_events` 와 같은 규칙입니다.
+
+    ⚠️ **문장이 없습니다.** 숫자만 나가고 말은 화면이 만듭니다
+    (`lib/analytics/view.ts`). 서버가 문장을 만들면 같은 판단이 두 벌이
+    되고, 한글 문구 하나를 고치려고 서버를 배포해야 합니다.
+    """
+
+    kind: str
+    detail: dict
+    #: 눌러서 볼 업무들. ⚠️ 활동 감소만 비어 있습니다 — 그건 **없는 것**에
+    #: 대한 신호라 가리킬 업무가 없습니다.
+    task_ids: list[int]
+
+
+class ProjectAnalyticsOut(BaseModel):
+    progress: ProgressOut
+    load: list[LoadOut]
+    signals: list[RiskSignalOut]
+
+
+@app.get(
+    "/api/projects/{project_id}/analytics", response_model=ProjectAnalyticsOut
+)
+def read_project_analytics(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> ProjectAnalyticsOut:
+    """프로젝트가 지금 어떤 상태인가 (정의서 §18 · 제안서 §4.5).
+
+    > **제출 직전이 아니라 진행 중에 문제를 발견한다.**
+
+    ## ⚠️ 표를 안 만듭니다
+
+    위험 신호를 행으로 쌓지 않습니다. 쌓으면 업무를 끝냈는데 "완료율이
+    낮습니다" 가 남고, 담당자를 바꿨는데 "한 사람에게 몰려 있습니다" 가
+    남습니다. **읽을 때마다 셉니다.**
+
+    ## ⚠️ 재배정을 제안하지 않습니다
+
+    제안서 §4.5 의 다섯째가 "근거 기반 재배정 및 일정 조정 제안" 인데
+    **안 만들었습니다.** "김민수의 업무를 이지연에게 넘기세요" 는 사람에
+    대한 판정이고, 그중에서도 제일 무거운 것입니다 — 누가 못 하고 있다는
+    말이 되니까요. 사실만 내고 어떻게 할지는 팀이 정합니다
+    (`AGENTS.md` 불변식 4).
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+    return ProjectAnalyticsOut(**risk_service.read(session, project_id))
 
 
 class RoleIn(BaseModel):
