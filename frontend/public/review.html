@@ -77,6 +77,22 @@
          로 읽히는데, 맞장구는 잘못이 아니라 그냥 안 세는 것입니다. */
       .tzero .tname, .tzero .tnum { color: var(--text-subtle); font-weight: 400; }
 
+      /* 누가 얼마나 말했나 (`AI-AUDIO-005`·`AI-REVIEW-007`).
+         ⚠️ **막대를 안 그립니다.** 값을 같은 축 위에 폭이나 위치로
+         늘어놓으면 그 순간 순위표입니다 — 정의서의 예시가 정확히 그
+         모양이었고(`윤식 32% / 민수 27% / …`), 같은 문서의 다른 두
+         조항이 그걸 금지합니다 (`docs/20` §3).
+         ⚠️ 세로로 쌓지도 않습니다. 한 줄에 이름과 값을 나란히 두면
+         눈이 값끼리 비교하지 않고 사람마다 읽습니다. */
+      .slist { list-style: none; padding: 0; margin: var(--sp-2) 0 0;
+               display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5);
+               font-size: var(--fs-label); }
+      .slist li { display: flex; gap: var(--sp-2); align-items: baseline; }
+      .sname { color: var(--text-muted); }
+      /* ⚠️ 굵게 하지 않습니다. 굵히면 큰 값이 먼저 눈에 들어와서
+         정렬하지 않아도 순위처럼 읽힙니다. */
+      .snum { color: var(--text); }
+
       /* 회의에서 눈에 띈 것 (정의서 §12).
          ⚠️ **빨강을 안 씁니다.** 이 저장소에서 빨강은 "네가 뭘 잘못했다"
          로 읽히는데, 이건 규칙 기반 관찰이고 회의에 대한 것입니다.

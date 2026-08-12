@@ -49,6 +49,7 @@ from teamflow.github import linking as gh_linking
 from teamflow.github import webhook as gh
 from teamflow.jobs import retention
 from teamflow.logging_config import configure_logging
+from teamflow.meeting import speaking
 from teamflow.meeting.approval import ApprovalRequest
 from teamflow.projects import invites, permissions
 from teamflow.services import (
@@ -2657,6 +2658,93 @@ def count_utterance_types(
     _load_meeting_for(session, meeting_id, user)
     counted = meeting_contribution_service.count_by_type(session, meeting_id)
     return UtteranceTypeCounts(**counted)
+
+
+class ShareOut(BaseModel):
+    user_id: int
+    name: str
+    speaking_ms: int
+    #: ⚠️ 못 잰 회의는 `null` 입니다. **0.0 이 아닙니다.**
+    ratio: float | None
+
+
+class SpeakingOut(BaseModel):
+    #: ⚠️ **이름 순**입니다. 몫 순으로 정렬하지 않습니다.
+    shares: list[ShareOut]
+    #: 비중을 말할 만한 회의인가. 거짓이면 화면은 값을 안 그립니다.
+    measurable: bool
+    #: 한쪽으로 쏠렸는가. ⚠️ **누가인지는 안 보냅니다.**
+    skewed: bool
+
+
+@app.get("/api/meetings/{meeting_id}/speaking", response_model=SpeakingOut)
+def read_speaking_shares(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> SpeakingOut:
+    """누가 얼마나 말했는가 (정의서 §9 `AI-AUDIO-005` · §12 `AI-REVIEW-007`).
+
+    ## ⚠️ 이 저장소에서 제일 위험한 값입니다
+
+    정의서 `AI-AUDIO-005` 의 예시가 **내림차순 목록**(= 리더보드)인데,
+    같은 문서의 `AI-REVIEW-007` 과 `NFR-005` 가 그걸 금지합니다. 요구는
+    **값을 만들라**는 것이지 **줄을 세우라**는 것이 아닙니다 (`docs/20` §3).
+
+    그래서 서버가 막습니다.
+
+    * **이름 순으로 내려보냅니다.** 몫 순으로 주면 화면은 그게 뜻있는
+      순서라고 믿고 그대로 그립니다
+    * **쏠렸는지는 참/거짓 하나**입니다. 누가인지는 안 보냅니다 — 이름을
+      실으면 화면이 그걸 적고, 그 순간 "이 회의를 독점한 사람" 표시가
+      됩니다. 사실은 목록에 다 있으니 사람이 보고 판단하면 됩니다
+    * **짧은 회의는 `measurable: false`** 입니다. 3분짜리에서 나온 70%
+      를 보여 주면 사람은 그걸 경향으로 읽습니다
+
+    ⚠️ **저장하지 않습니다.** 발화에서 읽을 때마다 셉니다 — 발화를
+    지우면 비중도 같이 사라져야 합니다(동의 철회).
+
+    ⚠️ 기여도에 안 들어갑니다. `docs/05` §5 가 "총 발언 시간 = 점수 아님
+    (참고 표시만)" 으로 정해 뒀습니다.
+    """
+    meeting = _load_meeting_for(session, meeting_id, user)
+
+    # ⚠️ **이름 순**으로 사람을 고정합니다. 여기서 순서가 정해지고,
+    #    아래 `shares()` 는 이 순서를 그대로 지킵니다.
+    members = sorted(
+        session.execute(
+            select(m.User.id, m.User.name)
+            .join(m.Member, m.Member.user_id == m.User.id)
+            .where(m.Member.project_id == meeting.project_id)
+        ).all(),
+        key=lambda row: row[1],
+    )
+    names = {uid: name for uid, name in members}
+
+    spans = [
+        speaking.Span(user_id=uid, start_ms=start, end_ms=end)
+        for uid, start, end in session.execute(
+            select(m.Utterance.speaker_id, m.Utterance.start_ms, m.Utterance.end_ms)
+            .where(
+                m.Utterance.meeting_id == meeting_id,
+                m.Utterance.speaker_id.is_not(None),
+            )
+        ).all()
+        if uid is not None
+    ]
+
+    computed = speaking.shares(spans, [uid for uid, _ in members])
+    return SpeakingOut(
+        shares=[
+            ShareOut(
+                user_id=s.user_id,
+                name=names.get(s.user_id, f"사용자 #{s.user_id}"),
+                speaking_ms=s.speaking_ms,
+                ratio=s.ratio,
+            )
+            for s in computed
+        ],
+        measurable=speaking.measurable(computed),
+        skewed=speaking.skewed(computed),
+    )
 
 
 @app.get("/api/meetings/{meeting_id}/candidates", response_model=list[CandidateOut])

@@ -56,6 +56,14 @@ import {
   type UnresolvedIssue,
 } from '../lib/review/minutes.ts';
 import { pendingNote, typeCounts, type TypeCount } from '../lib/review/labels.ts';
+import {
+  inGivenOrder,
+  notMeasurableText,
+  SHARE_NOTE,
+  shareText,
+  skewText,
+  type Speaking,
+} from '../lib/review/speaking.ts';
 import { findingViews, type Finding } from '../lib/review/findings.ts';
 import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { mountEvidence, openEvidence } from './evidence.tsx';
@@ -417,6 +425,55 @@ interface TypeTally {
  * (`AGENTS.md` 불변식 1 — 이 저장소가 두 번 어긴 규칙). **값은 글자로**
  * 적습니다.
  */
+/**
+ * 누가 얼마나 말했는가 (정의서 §9 `AI-AUDIO-005` · §12 `AI-REVIEW-007`).
+ *
+ * ## ⚠️ 이 구역이 이 제품에서 제일 위험합니다
+ *
+ * 정의서의 예시가 `윤식 32% / 민수 27% / 지연 25% / 철수 16%` — **내림차순
+ * 목록, 곧 리더보드**입니다. 같은 문서의 `AI-REVIEW-007` 과 `NFR-005` 가
+ * 그걸 금지합니다. 요구는 값을 만들라는 것이지 줄을 세우라는 것이
+ * 아닙니다 (`docs/20` §3).
+ *
+ * 1. **다시 정렬하지 않습니다** — 서버가 이름 순으로 줍니다
+ * 2. **막대를 안 그립니다** — 값을 같은 축 위에 폭으로 늘어놓으면 그게
+ *    곧 순위표입니다. 값은 글자로
+ * 3. **기여도가 아니라고 화면이 말합니다**
+ */
+function SpeakingShares({ data }: { data: Speaking | null }) {
+  if (data === null) return null;
+
+  const why = notMeasurableText(data);
+  const skew = skewText(data);
+
+  return (
+    <section className="shares">
+      <h2 className="minutes-head">누가 얼마나 말했나</h2>
+      {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
+      <p className="text-text-subtle text-[12px]">{SHARE_NOTE.replace(/\*\*/g, '')}</p>
+
+      {why !== null ? (
+        // ⚠️ 빈 칸으로 두지 않습니다 — "고장" 이나 "다들 말을 안 했다" 로
+        //    읽힙니다.
+        <p className="text-text-subtle text-[12px]">{why}</p>
+      ) : (
+        <>
+          <ul className="slist">
+            {inGivenOrder(data.shares).map((row) => (
+              <li key={row.user_id}>
+                <span className="sname">{row.name}</span>
+                <span className="snum tabular-nums">{shareText(row)}</span>
+              </li>
+            ))}
+          </ul>
+          {/* ⚠️ 누가인지 안 적고, 나무라지도 않습니다. */}
+          {skew !== null && <p className="text-text-subtle text-[12px]">{skew}</p>}
+        </>
+      )}
+    </section>
+  );
+}
+
 function SpeechTypes({ counts }: { counts: TypeTally | null }) {
   if (counts === null) return null;
 
@@ -503,6 +560,7 @@ function Findings({ findings }: { findings: Finding[] }) {
 function Review() {
   const [screen, setScreen] = useState<Screen>({ k: 'loading' });
   const [types, setTypes] = useState<TypeTally | null>(null);
+  const [speaking, setSpeaking] = useState<Speaking | null>(null);
   const [drafts, setDrafts] = useState<Map<number, Draft>>(new Map());
   const [lane, setLane] = useState<Lane | 'all'>('all');
   const [me, setMe] = useState<Me | null>(null);
@@ -520,7 +578,7 @@ function Review() {
     //
     // 끄는 것은 `whileLoading` 의 `finally` 가 책임집니다. 성공이든
     // 실패든 켠 것은 반드시 꺼집니다.
-    const [c, m, g, t] = await whileLoading(
+    const [c, m, g, t, sp] = await whileLoading(
       Promise.all([
         get(`/api/meetings/${meetingId}/candidates`),
         get(`/api/meetings/${meetingId}/members`),
@@ -529,6 +587,9 @@ function Review() {
         //    후보 검토는 유형 집계 없이도 할 수 있습니다. 아래에서 `ok`
         //    일 때만 씁니다.
         get(`/api/meetings/${meetingId}/utterance-types`),
+        // ⚠️ 같은 이유로 이것 하나가 실패해도 화면을 못 쓰게 만들지
+        //    않습니다 — 발언 비중 없이도 후보 검토는 됩니다.
+        get(`/api/meetings/${meetingId}/speaking`),
       ]),
       () => setSlow(true),
       () => setSlow(false),
@@ -547,6 +608,7 @@ function Review() {
       return;
     }
     setTypes(t !== null && t.ok ? ((await t.json()) as TypeTally) : null);
+    setSpeaking(sp !== null && sp.ok ? ((await sp.json()) as Speaking) : null);
 
     const members = (await m.json()) as Member[];
     setScreen({
@@ -690,6 +752,7 @@ function Review() {
       {header}
       <Brief meeting={meeting} />
       <SpeechTypes counts={types} />
+            <SpeakingShares data={speaking} />
       <Findings findings={meeting.findings ?? []} />
 
       {candidates.length === 0 ? (
