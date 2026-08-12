@@ -77,6 +77,22 @@
          로 읽히는데, 맞장구는 잘못이 아니라 그냥 안 세는 것입니다. */
       .tzero .tname, .tzero .tnum { color: var(--text-subtle); font-weight: 400; }
 
+      /* 회의에서 눈에 띈 것 (정의서 §12).
+         ⚠️ **빨강을 안 씁니다.** 이 저장소에서 빨강은 "네가 뭘 잘못했다"
+         로 읽히는데, 이건 규칙 기반 관찰이고 회의에 대한 것입니다.
+         못 잰 것과 같은 흙빛(--gap)도 안 씁니다 — 이건 잰 것입니다. */
+      .finds { margin: var(--sp-5) 0; }
+      .finds-note { font-size: var(--fs-caption); color: var(--text-subtle);
+                    margin: 0 0 var(--sp-3); }
+      .flist { list-style: none; padding: 0; margin: 0;
+               display: flex; flex-direction: column; gap: var(--sp-4); }
+      .fhead { display: flex; gap: var(--sp-2); align-items: baseline; margin: 0; }
+      .fname { font-size: var(--fs-label); font-weight: 600; color: var(--text); }
+      .fat { font-size: var(--fs-caption); color: var(--text-subtle);
+             font-variant-numeric: tabular-nums; }
+      .fwhat { font-size: var(--fs-label); color: var(--text-muted); margin: var(--sp-1) 0 0; }
+      .fwhy { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-1) 0 0; }
+
       #agenda, #issues { list-style: none; padding: 0; margin: 0;
                          font-size: var(--fs-label); color: var(--text-muted); }
       #agenda li, #issues li { display: flex; gap: var(--sp-2); align-items: baseline;

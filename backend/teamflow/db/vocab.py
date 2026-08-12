@@ -259,10 +259,15 @@ class MeetingEventType(StrEnum):
     DECISION_CONFLICT = "decision_conflict"  # AI-REVIEW-006 결정 번복
 
 
-#: 지금 **실제로 만들어지는** 값. 만드는 곳은 `tasks/meeting_tasks.py`.
-EVENT_PRODUCED: frozenset[MeetingEventType] = frozenset(
-    {MeetingEventType.UNANSWERED_QUESTION}
-)
+#: 지금 **실제로 만들어지는** 값.
+#:
+#: · `unanswered_question` — LLM 경로 (`tasks/meeting_tasks.py`)
+#: · 나머지 넷 — 규칙 기준선 (`services/inefficiency_service.py`)
+#:
+#: ⚠️ 넷이 오랫동안 **어휘에만 있고 만드는 코드가 0곳**이었습니다
+#: (결함 122). 주석은 다섯을 선언하는데 실제로는 하나만 나왔고, 읽는
+#: 사람은 탐지기가 다섯 개 있다고 믿게 됩니다.
+EVENT_PRODUCED: frozenset[MeetingEventType] = frozenset(MeetingEventType)
 
 #: 아직 **탐지기가 없는** 값과 그 사실.
 #:
@@ -272,14 +277,12 @@ EVENT_PRODUCED: frozenset[MeetingEventType] = frozenset(
 #:
 #: ⚠️ 여기 있는 값을 화면이 **미리 다루는 척하면 안 됩니다.** 안 나오는
 #: 값에 라벨을 붙여 두면 "이미 되는 기능" 으로 읽힙니다.
-EVENT_NOT_PRODUCED_YET: frozenset[MeetingEventType] = frozenset(
-    {
-        MeetingEventType.REPEATED_DISCUSSION,
-        MeetingEventType.INCOMPLETE_TASK,
-        MeetingEventType.TOPIC_DRIFT,
-        MeetingEventType.DECISION_CONFLICT,
-    }
-)
+#:
+#: ⚠️ **지금은 비어 있습니다.** 그렇다고 §12 가 다 된 것은 아닙니다 —
+#: `AI-REVIEW-002`(장시간 미결정)·`007`(발언 편중)·`009`(핵심 구간)은
+#: 애초에 `meeting_events` 로 표현하는 것이 아닙니다. `docs/20` §12 를
+#: 보십시오. 이 집합은 "어휘에 있는데 안 나오는 값" 만 셉니다.
+EVENT_NOT_PRODUCED_YET: frozenset[MeetingEventType] = frozenset()
 
 
 def event_values() -> tuple[str, ...]:

@@ -57,6 +57,7 @@ from teamflow.services import (
     calendar_service,
     channel_service,
     github_connection_service,
+    inefficiency_service,
     meeting_contribution_service,
     message_service,
     notification_service,
@@ -1691,6 +1692,27 @@ class UnresolvedIssueOut(BaseModel):
     evidence_utterance_ids: list[int]
 
 
+class MeetingFindingOut(BaseModel):
+    """비효율 구간 하나 (정의서 §12 · `REVIEW-003` AI 분석 마커).
+
+    ⚠️ **등급이 없습니다.** `severity` 는 전부 `info` 라 안 싣습니다 —
+    실으면 화면이 그걸로 빨강/노랑을 칠하게 되고, 규칙 기반 추정이
+    **팀에 대한 판정**으로 읽힙니다.
+
+    ⚠️ **사람이 안 실립니다.** 이건 회의에 대한 관찰이지 사람에 대한
+    것이 아닙니다. 화자를 실으면 화면이 "누가 회의를 늘어지게 했는가" 를
+    만들 수 있습니다.
+    """
+
+    kind: str
+    start_ms: int
+    end_ms: int
+    evidence_utterance_ids: list[int]
+    #: 왜 걸렸는가. 겹친 낱말·떨어진 시간 같은 것입니다.
+    #: ⚠️ 근거가 없으면 반박할 수 없고, 반박할 수 없는 지적은 잔소리입니다.
+    detail: dict
+
+
 class MeetingDetail(BaseModel):
     id: int
     project_id: int
@@ -1712,6 +1734,10 @@ class MeetingDetail(BaseModel):
     # `unanswered_question` 행입니다 — 그 표도 **쓰기만 하고 읽는 곳이
     # 0곳**이었습니다.
     unresolved_issues: list[UnresolvedIssueOut] = []
+    # 비효율 구간 (§12). ⚠️ 미해결 사안과 **따로** 싣습니다 — 저쪽은 LLM 이
+    # 만든 회의록의 일부이고 이쪽은 규칙 기반 관찰이라, 섞으면 어느 쪽이
+    # 어디서 왔는지 알 수 없게 됩니다.
+    findings: list[MeetingFindingOut] = []
 
 
 @app.get("/api/meetings/{meeting_id}", response_model=MeetingDetail)
@@ -1737,6 +1763,17 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
         .order_by(m.MeetingEvent.start_ms, m.MeetingEvent.id)
     ).all()
 
+    # ⚠️ 어휘에서 끌어옵니다. 손으로 적어 두면 탐지기를 하나 더 붙였을 때
+    #    **화면만 조용히 낡습니다** — 오류가 안 나서 안 보이는 부류입니다.
+    findings = session.scalars(
+        select(m.MeetingEvent)
+        .where(
+            m.MeetingEvent.meeting_id == meeting.id,
+            m.MeetingEvent.event_type.in_(inefficiency_service.DETECTED),
+        )
+        .order_by(m.MeetingEvent.start_ms, m.MeetingEvent.id)
+    ).all()
+
     return MeetingDetail(
         id=meeting.id,
         project_id=meeting.project_id,
@@ -1754,6 +1791,16 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
                 evidence_utterance_ids=list(row.evidence_utterance_ids or []),
             )
             for row in issues
+        ],
+        findings=[
+            MeetingFindingOut(
+                kind=row.event_type,
+                start_ms=row.start_ms,
+                end_ms=row.end_ms,
+                evidence_utterance_ids=list(row.evidence_utterance_ids or []),
+                detail=dict(row.detail or {}),
+            )
+            for row in findings
         ],
     )
 

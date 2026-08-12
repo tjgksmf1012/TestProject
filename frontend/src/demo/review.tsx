@@ -56,6 +56,7 @@ import {
   type UnresolvedIssue,
 } from '../lib/review/minutes.ts';
 import { pendingNote, typeCounts, type TypeCount } from '../lib/review/labels.ts';
+import { findingViews, type Finding } from '../lib/review/findings.ts';
 import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { mountEvidence, openEvidence } from './evidence.tsx';
 import { renderNav } from './nav.ts';
@@ -73,6 +74,8 @@ interface MeetingInfo {
   summary: string | null;
   next_agenda: string[];
   unresolved_issues: UnresolvedIssue[];
+  /** 비효율 구간 (§12). 없으면 빈 배열 — 옛 서버면 아예 안 옵니다. */
+  findings?: Finding[];
 }
 
 const params = new URLSearchParams(location.search);
@@ -449,6 +452,54 @@ function SpeechTypes({ counts }: { counts: TypeTally | null }) {
   );
 }
 
+/**
+ * 회의에서 눈에 띈 것 (정의서 §12 · `REVIEW-003` AI 분석 마커).
+ *
+ * ## ⚠️ 이것은 관찰이지 판정이 아닙니다
+ *
+ * 규칙 기반 추정이라 **틀립니다.** 그래서 등급을 안 매기고(빨강·노랑
+ * 없음), 왜 걸렸는지 적고, 근거 발화를 열 수 있게 둡니다.
+ *
+ * ⚠️ **빨강을 쓰지 않습니다.** 이 저장소에서 빨강은 "네가 뭘 잘못했다"
+ * 로 읽힙니다 — 회의를 빨갛게 칠하면 그건 팀에 대한 판정입니다.
+ */
+function Findings({ findings }: { findings: Finding[] }) {
+  const views = findingViews(findings);
+  if (views.length === 0) return null;
+
+  return (
+    <section className="finds">
+      <h2 className="minutes-head">회의에서 눈에 띈 것</h2>
+      {/* ⚠️ 규칙 기반이라는 것을 **먼저** 말합니다. 안 적으면 사람은
+          이걸 AI 의 판정으로 읽고, 틀렸을 때 신뢰가 통째로 무너집니다. */}
+      <p className="finds-note">
+        규칙으로 찾은 것이라 <b>틀릴 수 있습니다</b>. 근거를 눌러 원문을 보고 판단하세요.
+      </p>
+      <ul className="flist">
+        {views.map((view, i) => (
+          <li key={`${view.kind}-${i}`}>
+            <p className="fhead">
+              <span className="fname">{view.title}</span>
+              {view.at !== null && <span className="fat">{view.at}</span>}
+            </p>
+            {view.what !== null && <p className="fwhat">{view.what}</p>}
+            {view.why !== null && <p className="fwhy">{view.why}</p>}
+            {view.evidence.length > 0 && (
+              <button
+                type="button"
+                className="src"
+                onClick={() => openEvidence(view.evidence, view.title)}
+              >
+                근거 #{view.evidence.join(', #')}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function Review() {
   const [screen, setScreen] = useState<Screen>({ k: 'loading' });
   const [types, setTypes] = useState<TypeTally | null>(null);
@@ -639,6 +690,7 @@ function Review() {
       {header}
       <Brief meeting={meeting} />
       <SpeechTypes counts={types} />
+      <Findings findings={meeting.findings ?? []} />
 
       {candidates.length === 0 ? (
         <RawHtml html={emptyHtml(emptyReviewState(meeting.status))} />

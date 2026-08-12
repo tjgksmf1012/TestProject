@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 from teamflow.contribution.events import CATEGORY_OF, EventType
 from teamflow.db import models as m
 from teamflow.meeting import utterance_types as ut
+from teamflow.services import inefficiency_service
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +253,11 @@ def record_meeting(
     )
     attendance = record_attendance(session, meeting)
 
+    # 비효율 구간 (정의서 §12). ⚠️ **분류가 끝난 뒤**여야 합니다 — 미완성
+    # 업무 탐지가 `utterance_type == "commitment"` 을 봅니다. 앞에 두면
+    # 라벨이 전부 `None` 이라 오류 없이 **조용히 0건**이 나옵니다.
+    inefficiency = inefficiency_service.detect(session, meeting.id)
+
     logger.info(
         "meeting=%s → 발화 이벤트 %d건, 참석 %d명 (분류기=%s, 분포=%s)",
         meeting.id,
@@ -265,6 +271,7 @@ def record_meeting(
         "attendance": attendance,
         "labels": counts,
         "classifier": classifier_name,
+        "inefficiency": inefficiency,
     }
 
 

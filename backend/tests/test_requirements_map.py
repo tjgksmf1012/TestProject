@@ -125,18 +125,35 @@ def test_the_task_statuses_are_the_four_the_spec_asks_for():
     assert {str(s) for s in vocab.TASK_FINISHED} == {"done"}
 
 
-def test_the_meeting_event_gap_the_doc_describes_is_the_real_gap():
-    """§12 — "다섯 중 하나만" 이라고 적었습니다.
+def test_every_meeting_event_the_vocabulary_names_is_actually_produced():
+    """§12 — 어휘에 있는 값은 **전부 만들어지는가.**
 
-    숫자를 손으로 안 적고 `vocab` 을 읽습니다 — 탐지기가 하나 붙으면
-    이 검사가 문서를 고치라고 알려 줍니다.
+    ⚠️ 이 검사는 방향이 뒤집힌 것입니다. 예전에는 "다섯 중 하나만" 을
+    지켰습니다 — 넷이 어휘에만 있고 만드는 코드가 0곳이라는 사실을
+    잊지 않으려고요(결함 122). 이제 넷 다 붙었으니 **비어 있으면**
+    안 됩니다.
+
+    숫자를 손으로 안 적고 `vocab` 을 읽습니다.
     """
-    produced = {str(e) for e in vocab.EVENT_PRODUCED}
-    assert produced == {"unanswered_question"}, (
-        f"만들어지는 이벤트가 {sorted(produced)} 로 바뀌었습니다 — "
-        "`docs/20` §12 표와 §1 요약('다섯 중 하나만')을 고치십시오"
+    from teamflow.services import inefficiency_service
+
+    assert not vocab.EVENT_NOT_PRODUCED_YET, (
+        f"아직 안 만들어지는 이벤트가 있습니다: "
+        f"{sorted(str(e) for e in vocab.EVENT_NOT_PRODUCED_YET)}"
     )
-    assert len(vocab.EVENT_NOT_PRODUCED_YET) == 4
+
+    # ⚠️ 어휘와 **탐지기 목록**이 갈리면, 어휘에는 있는데 아무도 안
+    #    만드는 값이 다시 생깁니다. 그게 결함 122 였습니다.
+    produced = {str(e) for e in vocab.EVENT_PRODUCED}
+    wired = set(inefficiency_service.DETECTED) | {"unanswered_question"}
+    assert produced == wired, (
+        f"어휘({sorted(produced)})와 실제로 만드는 것({sorted(wired)})이 다릅니다"
+    )
+
+    assert "다섯 중 하나만" not in _doc(), (
+        "`docs/20` 이 아직 '다섯 중 하나만' 이라고 말합니다 — §12 표와 "
+        "§1 요약을 고치십시오"
+    )
 
 
 # ══════════════════════════════════════════════════════════════
