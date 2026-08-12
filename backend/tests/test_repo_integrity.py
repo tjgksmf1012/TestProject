@@ -972,6 +972,18 @@ def test_the_defect_log_does_not_claim_a_stale_count():
 
     ⚠️ 한글 수사(&#34;일흔다섯&#34;)는 기계가 세기 어려우므로 **숫자도 같이**
     적게 했습니다. 이 검사는 그 숫자를 봅니다.
+
+    ⚠️⚠️ **이 검사가 116번에서 눈을 감고 있었습니다** (결함 139). 세는 방법이
+    `&#34;결함 N&#34;` 이라는 **문구**를 찾는 것이었는데, 123번부터 제목 모양이
+    `## N. 무엇무엇` 으로 바뀌면서 그 문구가 사라졌습니다. 머리말이
+    `34~116번` 이라고 적혀 있으니 범위 밖은 애초에 안 셌고, 그래서 스무
+    개가 더 붙는 동안 **통과만 하고 있었습니다.** 요구가 아니라 **찾는
+    자리**가 낡은 것이고, `AGENTS.md` 가 경고하는 바로 그 부류입니다.
+
+    ⚠️⚠️⚠️ 그런데 제목 모양만 고쳤더니 **여전히 통과했습니다.** 진짜 원인은
+    아래 `above`/`ours` 주석에 있는 셋째였습니다 — 위쪽을 자른 뒤에
+    최댓값을 보고 있어서 그 단언이 **언제나 참**이었습니다. 고쳤다고 적어
+    둔 뒤에 심어 보고 알았습니다. **자를 고치고 나서도 다시 재야 합니다.**
     """
     import re
 
@@ -986,6 +998,9 @@ def test_the_defect_log_does_not_claim_a_stale_count():
     claimed, low, high, gap = (int(g) for g in header.groups())
 
     found: set[int] = set()
+    # 제목 두 모양 — `### ⭐ 결함 120 — …` 과 `## 123. …`
+    for head in re.finditer(r"^#{2,4}\s+(?:⭐\s*)?(?:결함\s+)?(\d+)[.\s—]", doc, re.M):
+        found.add(int(head.group(1)))
     for run in re.finditer(r"결함\s+([\d~·,\s]+)", doc):
         for part in re.split(r"[·,\s]+", run.group(1).strip()):
             if "~" in part:
@@ -995,7 +1010,12 @@ def test_the_defect_log_does_not_claim_a_stale_count():
             elif part.isdigit():
                 found.add(int(part))
 
-    ours = {n for n in found if low <= n <= high}
+    # ⚠️ 위쪽을 **자르지 않습니다.** `n <= high` 로 걸러 놓고 그 안에서
+    #    최댓값을 보면 "머리말보다 큰 번호" 는 구조적으로 못 봅니다 —
+    #    아래 `max` 단언이 언제나 참이 되어 결함 하나를 더 적어도 조용히
+    #    통과합니다. 실제로 그렇게 통과하는 것을 심어서 확인했습니다.
+    above = {n for n in found if n >= low}
+    ours = {n for n in above if n <= high}
     holes = sorted(set(range(low, high + 1)) - ours)
 
     assert holes == [gap], (
@@ -1005,7 +1025,99 @@ def test_the_defect_log_does_not_claim_a_stale_count():
         f"문서는 {claimed}건이라고 하는데 실제로 적힌 결함은 {len(ours)}건입니다 "
         f"({low}~{high})"
     )
-    assert max(ours) == high, f"가장 큰 결함 번호는 {max(ours)} 인데 머리말은 {high} 입니다"
+    assert max(above) == high, (
+        f"가장 큰 결함 번호는 {max(above)} 인데 머리말은 {high} 입니다"
+    )
+
+
+def test_agents_md_names_the_react_screens_that_actually_exist():
+    """⭐ `AGENTS.md` 가 세는 React 화면 목록이 **실제와 맞는가**.
+
+    이 목록은 "어느 화면에 어떤 규칙이 걸리는가" 를 정하는 자리라 낡으면
+    바로 잘못된 안내가 됩니다. 실제로 **일곱이라고 적힌 채 열셋**이
+    되어 있었습니다 — `reports`·`chat`·`calendar`·`notifications`·
+    `activity`·`search` 여섯이 그 뒤에 붙었는데 목록은 그대로였습니다.
+
+    `docs/17` 건수·README 표 건수와 같은 부류입니다. **사람이 세어서 적는
+    숫자는 반드시 낡습니다.**
+
+    ⚠️ 세는 자리를 `src/demo/*.tsx` **개수**로 잡으면 안 됩니다 —
+    `parts.tsx`·`evidence.tsx` 처럼 화면이 아닌 조각이 섞입니다. 화면인지
+    아닌지는 **`public/` 에 같은 이름의 `.html` 이 있는가**로 정해집니다.
+    """
+    import re
+
+    screens = {p.stem for p in (REPO_ROOT / "frontend" / "public").glob("*.html")}
+    react = {
+        s for s in screens if (REPO_ROOT / "frontend" / "src" / "demo" / f"{s}.tsx").exists()
+    }
+
+    agents = (REPO_ROOT / "AGENTS.md").read_text()
+    section = agents.partition("### React 로 옮긴 화면")[2].partition("###")[0]
+    assert section, "AGENTS.md 에서 'React 로 옮긴 화면' 절을 못 찾았습니다"
+
+    named = set(re.findall(r"`([a-z]+)`", section.partition("React 입니다")[0]))
+
+    assert named == react, (
+        f"AGENTS.md 가 적은 React 화면과 실제가 다릅니다. "
+        f"안 적힌 것: {sorted(react - named)} · 없는데 적힌 것: {sorted(named - react)}"
+    )
+
+    counted = re.search(r"React 입니다 \((\S+?)\)", section)
+    assert counted, "'React 입니다 (…)' 에서 개수를 못 찾았습니다"
+    KOREAN = {
+        7: "일곱", 8: "여덟", 9: "아홉", 10: "열", 11: "열하나", 12: "열둘",
+        13: "열셋", 14: "열넷", 15: "열다섯", 16: "열여섯", 17: "열일곱",
+    }
+    assert counted.group(1) == KOREAN.get(len(react)), (
+        f"AGENTS.md 는 '{counted.group(1)}' 이라는데 실제 React 화면은 "
+        f"{len(react)}개입니다"
+    )
+
+
+def test_the_requirements_summary_lists_every_section_once():
+    """⭐ `docs/20` 의 "한눈에" 표가 **스스로와 안 어긋나는가** (결함 137).
+
+    이 표는 요구 영역마다 한 줄씩 ✅/🟡/❌ 를 답합니다. 그런데 요구를
+    하나 채우고 나서 줄을 **고치는 대신 새로 끼워 넣으면** 같은 영역이 두
+    줄이 되고, 두 줄이 서로 다른 답을 합니다. 실제로 §21 활동 기록이
+    ✅ 와 🟡 로 **동시에** 적혀 있었습니다 — 이 저장소의 대표 실패 ②
+    (두 벌이 있으면 한쪽만 고쳐진다)가 표 하나 안에서 일어난 것입니다.
+
+    ⚠️ **번호 순서까지 봅니다.** 끼워 넣기가 잘못된 자리에서 일어나는 것이
+    원인이라, 순서가 어긋나는 것 자체가 그 사고의 신호입니다. 실제로 그
+    ✅ 줄은 §18 과 §19 사이에 있었습니다.
+
+    그리고 표가 **아래 상세와 같은 영역을 다루는지**도 봅니다. 상세에만
+    있고 표에 없으면 "한눈에" 가 한눈에 안 보여 주는 것입니다 — §25
+    비기능이 그렇게 빠져 있었습니다.
+    """
+    import re
+
+    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text()
+
+    summary = re.findall(r"^\|\s*§(\d+)\s[^|]*\|[^|]*\|[^|]*\|\s*$", doc, re.MULTILINE)
+    listed = [int(n) for n in summary]
+    assert listed, "docs/20 에서 '한눈에' 표를 못 찾았습니다"
+
+    duplicates = sorted({n for n in listed if listed.count(n) > 1})
+    assert duplicates == [], (
+        f"'한눈에' 표에 §{duplicates} 가 두 줄 이상 있습니다 — "
+        "줄을 새로 끼우지 말고 있던 줄을 고치십시오"
+    )
+    assert listed == sorted(listed), (
+        f"'한눈에' 표의 번호가 순서대로가 아닙니다: {listed}"
+    )
+
+    # 상세는 `### §16 일정 관리 · §19 알림 · §20 검색` 처럼 여럿을 묶습니다.
+    detailed: set[int] = set()
+    for heading in re.findall(r"^###\s+(.*)$", doc, re.MULTILINE):
+        detailed.update(int(n) for n in re.findall(r"§(\d+)", heading))
+
+    missing = sorted(detailed - set(listed))
+    assert missing == [], (
+        f"§{missing} 는 상세에는 있는데 '한눈에' 표에 없습니다"
+    )
 
 
 def test_the_team_calendar_is_the_same_on_both_sides():
