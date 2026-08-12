@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from teamflow.db import assignees
 from teamflow.db import models as m
 from teamflow.meeting.approval import (
     ApprovalRequest,
@@ -111,17 +112,18 @@ def review_candidates(
     # 2) 승인된 것만 업무로 만든다.
     #    승인 없이 tasks 에 쓰는 경로는 이 함수 어디에도 없다 — 그게 불변식이다.
     created: dict[int, m.Task] = {}
+    first_assignee: dict[int, int | None] = {}
     for new_task in outcome.approved:
         task = m.Task(
             project_id=new_task.project_id,
             title=new_task.title,
-            assignee_id=new_task.assignee_id,
             deadline=datetime.combine(new_task.deadline, datetime.min.time(), tzinfo=UTC),
             status="todo",
             origin_candidate_id=new_task.origin_candidate_id,
         )
         session.add(task)
         created[new_task.origin_candidate_id] = task
+        first_assignee[new_task.origin_candidate_id] = new_task.assignee_id
 
     session.flush()  # task.id 확보
 
@@ -129,6 +131,13 @@ def review_candidates(
         row = session.get(m.MeetingTaskCandidate, candidate_id)
         if row is not None:
             row.created_task_id = task.id
+
+        # ⚠️ **회의 후보의 담당자는 한 명입니다** (`assignee_hint` 하나에서
+        #    나옵니다). 여럿으로 늘리는 것은 칸반에서 합니다 — 회의 전사에서
+        #    "둘이 같이 하기로" 를 읽어 내는 것은 추측이고, 추측으로 기여
+        #    이벤트가 갈 사람을 정하면 안 됩니다.
+        who = first_assignee.get(candidate_id)
+        added = assignees.replace(session, task.id, [who] if who is not None else [])
         # NOTIFICATION-002 — 맡은 사람에게 알립니다.
         #
         # ⚠️ **여기가 업무가 만들어지는 유일한 자리입니다** (위 주석의
@@ -140,7 +149,7 @@ def review_candidates(
         #    후보 행에 이미 적혀 있으므로 거기서 가져옵니다 — 인자를 하나 더
         #    받으면 부르는 자리마다 넘겨야 하고, 그러면 한 곳이 빠집니다.
         reviewer_id = row.reviewed_by if row is not None else None
-        notification_service.record_assignment(session, task, actor_id=reviewer_id)
+        notification_service.record_assignment(session, task, added, actor_id=reviewer_id)
 
     # 3) 감사 로그. 이게 없으면 승인도 없다.
     for entry in outcome.audit:

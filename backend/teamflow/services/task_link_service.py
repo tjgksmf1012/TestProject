@@ -40,7 +40,7 @@ import logging
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from teamflow.db import live, vocab
+from teamflow.db import assignees, live, vocab
 from teamflow.db import models as m
 from teamflow.github.linking import TaskRef, find_task_refs
 from teamflow.services import notification_service
@@ -146,23 +146,29 @@ def _tell_the_assignee(
 
     ⚠️ 담당자가 없는 업무는 조용합니다. 아무에게도 안 보내는 것이
     맞습니다 — 여기서 프로젝트 전원으로 넓히면 위 규칙이 무너집니다.
+
+    ⚠️ 담당자가 여럿이면 **전원에게** 갑니다 (`TASK-006`). 여기서 한
+    명만 고르면 그건 "대표 담당자" 를 만드는 것이고, 그런 것은 없습니다.
+    사람 수만큼 알림이 생기는 것은 맞지만 그 수는 **한 업무의 담당자 수**로
+    묶여 있어서, 위에서 막으려던 "프로젝트 전원" 과는 크기가 다릅니다.
     """
     actor_id = _github_actor(session, event)
     for ref in linked:
         task = session.get(m.Task, ref.task_id)
-        if task is None or task.assignee_id is None:
+        if task is None:
             continue
-        # ⚠️ 자기가 올린 PR 은 자기에게 안 알립니다. `record_assignment` 가
-        #    같은 방식으로 거릅니다 — `record()` 자체는 누가 했는지 모릅니다.
-        if task.assignee_id == actor_id:
-            continue
-        notification_service.record(
-            session,
-            user_id=task.assignee_id,
-            project_id=task.project_id,
-            kind=vocab.NotificationKind.GITHUB,
-            task_id=task.id,
-        )
+        for user_id in assignees.of_task(session, task.id):
+            # ⚠️ 자기가 올린 PR 은 자기에게 안 알립니다. `record_assignment` 가
+            #    같은 방식으로 거릅니다 — `record()` 자체는 누가 했는지 모릅니다.
+            if user_id == actor_id:
+                continue
+            notification_service.record(
+                session,
+                user_id=user_id,
+                project_id=task.project_id,
+                kind=vocab.NotificationKind.GITHUB,
+                task_id=task.id,
+            )
 
 
 def _github_actor(session: Session, event: m.GithubEvent) -> int | None:

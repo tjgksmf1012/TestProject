@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
-from .conftest import login_as
+from .conftest import assign, login_as
 from .test_api import client, engine, seeded  # noqa: F401  (픽스처)
 
 
@@ -27,24 +27,22 @@ def piled(seeded) -> None:
     """한 사람에게 몰린 미완료 다섯 + 남들 하나씩."""
     with db_session.session_scope() as session:
         for i in range(5):
-            session.add(
-                m.Task(
-                    project_id=seeded["project_id"],
-                    title=f"몰린 일 {i}",
-                    assignee_id=seeded["user_ids"][0],
-                    status="todo",
-                    priority=2,
-                )
-            )
-        session.add(
-            m.Task(
+            piled = m.Task(
                 project_id=seeded["project_id"],
-                title="남의 일",
-                assignee_id=seeded["user_ids"][1],
+                title=f"몰린 일 {i}",
                 status="todo",
                 priority=2,
             )
+            session.add(piled)
+            assign(session, piled, seeded["user_ids"][0])
+        theirs = m.Task(
+            project_id=seeded["project_id"],
+            title="남의 일",
+            status="todo",
+            priority=2,
         )
+        session.add(theirs)
+        assign(session, theirs, seeded["user_ids"][1])
 
 
 def test_progress_comes_back(client: TestClient, seeded, piled):
@@ -88,7 +86,6 @@ def test_work_nobody_owns_is_last_and_marked(client: TestClient, seeded):
             m.Task(
                 project_id=seeded["project_id"],
                 title="주인 없는 일",
-                assignee_id=None,
                 status="todo",
                 priority=2,
             )
@@ -211,7 +208,7 @@ def test_the_skew_signal_disappears_when_the_work_is_spread(
             .all()
         )
         for i, task in enumerate(open_tasks):
-            task.assignee_id = seeded["user_ids"][i % len(seeded["user_ids"])]
+            assign(session, task, seeded["user_ids"][i % len(seeded["user_ids"])])
 
     kinds = {s["kind"] for s in read(client, seeded["project_id"])["signals"]}
     assert "workload_skew" not in kinds

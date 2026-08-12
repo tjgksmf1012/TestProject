@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from teamflow.config import Settings, get_settings
+from teamflow.db import assignees
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
@@ -411,7 +412,7 @@ def test_approve_creates_task(client: TestClient, seeded):
         task = s.scalar(select(m.Task).where(m.Task.origin_candidate_id == cid))
         assert task is not None
         assert task.title == "로그인 API 구현"
-        assert task.assignee_id == seeded["user_ids"][0]
+        assert assignees.of_task(s, task.id) == [seeded["user_ids"][0]]
         assert task.status == "todo"
 
 
@@ -453,7 +454,7 @@ def test_human_override_completes_candidate(client: TestClient, seeded):
 
     with db_session.session_scope() as s:
         task = s.scalar(select(m.Task).where(m.Task.origin_candidate_id == cid))
-        assert task.assignee_id == seeded["user_ids"][1]
+        assert assignees.of_task(s, task.id) == [seeded["user_ids"][1]]
 
 
 def test_approval_writes_audit_log(client: TestClient, seeded):

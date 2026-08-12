@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
+from .conftest import assign
 from .test_api import client, engine, seeded  # noqa: F401  (픽스처)
 
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
@@ -33,13 +34,13 @@ def dated_task(seeded) -> int:
         task = m.Task(
             project_id=seeded["project_id"],
             title="로그인 API 구현",
-            assignee_id=seeded["user_ids"][0],
             start_date=NOW + timedelta(days=1),
             deadline=NOW + timedelta(days=5),
             status="todo",
         )
         session.add(task)
         session.flush()
+        assign(session, task, seeded["user_ids"][0])
         return task.id
 
 

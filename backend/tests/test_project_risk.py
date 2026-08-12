@@ -20,14 +20,21 @@ def task(
     *,
     status: str = "todo",
     assignee: int | None = 1,
+    assignees: tuple[int, ...] | None = None,
     deadline: date | None = None,
     created: date = date(2026, 8, 25),
 ) -> risk.TaskFacts:
+    """`assignee` 하나로도, `assignees` 여럿으로도 만들 수 있게.
+
+    검사 대부분은 담당자가 한 명인 경우라 짧은 쪽을 남겨 둡니다.
+    """
+    if assignees is None:
+        assignees = () if assignee is None else (assignee,)
     return risk.TaskFacts(
         id=tid,
         title=f"업무 {tid}",
         status=status,
-        assignee_id=assignee,
+        assignee_ids=assignees,
         deadline=deadline,
         created_at=created,
     )

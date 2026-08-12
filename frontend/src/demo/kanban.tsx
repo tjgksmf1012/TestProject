@@ -38,6 +38,7 @@ import {
   toColumns,
   type Task,
 } from '../lib/kanban/board.ts';
+import { assigneeText, splitNote, toggled } from '../lib/kanban/assignees.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
@@ -148,6 +149,54 @@ function PullList({ task }: { task: Task }) {
   );
 }
 
+/**
+ * 담당자를 바꾸는 자리 (`TASK-006`).
+ *
+ * ## ⚠️ 이 자리가 없어서 요구가 반쪽이었습니다
+ *
+ * 담당자는 **회의 업무 후보를 승인할 때 한 번** 정해지고 그 뒤로는 바꿀
+ * 방법이 없었습니다. 사람이 빠지거나 일을 넘겨받아도 칸반은 옛 이름을
+ * 계속 말했고, 기여 이벤트는 계속 그 사람 앞으로 갔습니다.
+ *
+ * ## ⚠️ 접어 둡니다
+ *
+ * 카드마다 이름 목록을 펼쳐 두면 보드가 체크박스 밭이 됩니다. 매일
+ * 하는 일은 카드를 옮기는 것이지 담당자를 바꾸는 것이 아닙니다.
+ */
+function AssigneePicker({
+  task,
+  members,
+  moving,
+  onAssign,
+}: {
+  task: Task;
+  members: Member[];
+  moving: boolean;
+  onAssign: (userIds: number[]) => void;
+}) {
+  if (members.length === 0) return null;
+  return (
+    <details className="whoedit">
+      <summary>담당자 바꾸기</summary>
+      <div className="whoedit-body">
+        {members.map((member) => (
+          <label key={member.user_id}>
+            <input
+              type="checkbox"
+              checked={task.assignee_ids.includes(member.user_id)}
+              disabled={moving}
+              /* ⚠️ 넣고 빼는 계산은 `lib/kanban/assignees.ts` 가 합니다.
+                 여기서 배열을 주무르면 같은 판단이 두 벌이 됩니다. */
+              onChange={() => onAssign(toggled(task.assignee_ids, member.user_id))}
+            />
+            {member.name}
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function Card({
   task,
   today,
@@ -156,6 +205,7 @@ function Card({
   moving,
   onMove,
   onDelete,
+  onAssign,
 }: {
   task: Task;
   today: string;
@@ -164,21 +214,29 @@ function Card({
   moving: boolean;
   onMove: (to: string) => void;
   onDelete: () => void;
+  onAssign: (userIds: number[]) => void;
 }) {
   const warnings = taskWarnings(task, today);
-  const who =
-    task.assignee_id === null
-      ? '담당자 없음'
-      : (members.find((m) => m.user_id === task.assignee_id)?.name ??
-        `사용자 #${task.assignee_id}`);
+  const split = splitNote(task.assignee_ids);
 
   return (
     <article className="task" data-id={task.id}>
       <p className="title">{task.title}</p>
       <p className="meta">
-        {who}
+        {assigneeText(task.assignee_ids, members)}
         {task.deadline ? ` · 마감 ${task.deadline}` : ''}
       </p>
+
+      {/* ⭐ **나눠 셌다는 사실을 카드가 말합니다** (`TASK-006`).
+          안 적으면 사람은 같이 한 업무 때문에 자기 기여도가 낮게 나온
+          이유를 모릅니다 — 결과만 주고 이유를 안 주는 것이고, 이 저장소의
+          대표 실패 ③ 과 같은 모양입니다.
+
+          ⚠️ 흙빛(`--gap`)입니다. 빨강이 아닙니다 — 같이 맡은 것은 잘못이
+          아니라 그냥 사실입니다. */}
+      {split !== null && <p className="shared">{split}</p>}
+
+      <AssigneePicker task={task} members={members} moving={moving} onAssign={onAssign} />
 
       {/* ⭐ 이 프로젝트의 주장이 화면에서 보이는 지점. 이게 없으면 이
           화면은 그냥 할 일 목록입니다.
@@ -403,6 +461,56 @@ function Kanban() {
     }
   };
 
+  /**
+   * 담당자를 바꾼다 (`TASK-006`).
+   *
+   * ⚠️ **더하기·빼기가 아니라 통째로 보냅니다.** 서버가 받은 목록으로
+   * 바꿉니다 — 차이를 화면에서 계산하면 그 계산이 두 곳으로 갈라집니다.
+   *
+   * ⚠️ 응답으로 온 카드만 갈아 끼웁니다. 판 전체를 다시 받으면 스크롤이
+   * 튀고, 방금 연 서랍이 닫힙니다.
+   */
+  const assign = async (taskId: number, userIds: number[]): Promise<void> => {
+    setMoving(true);
+    try {
+      const response = await trySend(() =>
+        fetch(`${apiBase}/api/projects/${projectId}/tasks/${taskId}/assignees`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_ids: userIds }),
+          credentials: 'same-origin',
+        }),
+      );
+      if (response === null) {
+        setError(unreachableText('담당자를 바꾸지 못했습니다'));
+        return;
+      }
+      if (isSessionExpired(response.status)) {
+        goToLogin();
+        return;
+      }
+      if (!response.ok) {
+        setError(`담당자를 바꾸지 못했습니다 (${describeHttpStatus(response.status)})`);
+        return;
+      }
+      const updated = (await response.json()) as Task;
+      setError('');
+      setScreen((prev) =>
+        prev.k !== 'ok'
+          ? prev
+          : {
+              ...prev,
+              data: {
+                ...prev.data,
+                tasks: prev.data.tasks.map((t) => (t.id === updated.id ? updated : t)),
+              },
+            },
+      );
+    } finally {
+      setMoving(false);
+    }
+  };
+
   const header = (
     <>
       <header className="head">
@@ -534,6 +642,7 @@ function Kanban() {
                     moving={moving}
                     onMove={(to) => void move(task.id, to)}
                     onDelete={() => void drop(task)}
+                    onAssign={(userIds) => void assign(task.id, userIds)}
                   />
                 ))
               )}

@@ -31,7 +31,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
-from teamflow.db import live
+from teamflow.db import assignees, live
 from teamflow.db import models as m
 from teamflow.db.vocab import NotificationKind
 
@@ -123,22 +123,31 @@ def record_mentions(
 
 
 def record_assignment(
-    session: Session, task: m.Task, *, actor_id: int | None
-) -> m.Notification | None:
+    session: Session, task: m.Task, user_ids: list[int], *, actor_id: int | None
+) -> list[m.Notification]:
     """NOTIFICATION-002 — 새 담당자에게.
 
     ⚠️ 담당자가 없으면 알릴 사람이 없습니다. 자기가 자기에게 맡긴 것도
     안 알립니다 — 방금 자기가 한 일입니다.
+
+    ⚠️ `user_ids` 는 **새로 들어온 사람**입니다 (`TASK-006`). 지금 담당자
+    전원을 넘기면, 담당자를 한 명 더할 때마다 원래 있던 사람에게도
+    "새 업무를 맡았습니다" 가 갑니다.
     """
-    if task.assignee_id is None or task.assignee_id == actor_id:
-        return None
-    return record(
-        session,
-        user_id=task.assignee_id,
-        project_id=task.project_id,
-        kind=NotificationKind.ASSIGNED,
-        task_id=task.id,
-    )
+    made: list[m.Notification] = []
+    for user_id in user_ids:
+        if user_id == actor_id:
+            continue
+        made.append(
+            record(
+                session,
+                user_id=user_id,
+                project_id=task.project_id,
+                kind=NotificationKind.ASSIGNED,
+                task_id=task.id,
+            )
+        )
+    return made
 
 
 #: 회의 **몇 분 전**에 알리는가 (NOTIFICATION-005).
@@ -322,7 +331,7 @@ def deadline_notices(
     tasks = session.scalars(
         live.live_tasks().where(
             m.Task.project_id == project_id,
-            m.Task.assignee_id == user_id,
+            m.Task.id.in_(assignees.task_ids_of(user_id)),
             m.Task.deadline.is_not(None),
             m.Task.status != "done",
         )

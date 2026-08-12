@@ -2987,7 +2987,12 @@ class TaskGithubOut(BaseModel):
 class TaskOut(BaseModel):
     id: int
     title: str
-    assignee_id: int | None
+    #: 맡은 사람들. 비어 있으면 담당자가 없는 업무입니다 (`TASK-006`).
+    #:
+    #: ⚠️ **이름 순으로 나갑니다. 화면은 다시 정렬하지 않습니다.** 넣은
+    #: 순서로 주면 화면이 맨 앞을 "주담당" 으로 그리게 되고, 그런 것은
+    #: 없습니다.
+    assignee_ids: list[int]
     status: str
     deadline: date | None
     completed_at: datetime | None
@@ -3063,6 +3068,17 @@ class TaskPatch(BaseModel):
     # `deadline` 은 None 이 두 뜻이라 따로 받는다 — 아래 엔드포인트 주석 참조.
     deadline: date | None = None
     reason: str | None = Field(default=None, max_length=300)
+
+
+class TaskAssigneesIn(BaseModel):
+    """담당자를 이 목록으로 바꾼다 (`TASK-006`).
+
+    ⚠️ **더하기·빼기가 아니라 통째로 바꿉니다.** 더하기만 있으면 화면은
+    "지금 목록" 과 "보낼 목록" 의 차이를 스스로 계산해야 하고, 그 계산이
+    두 곳(더하기·빼기)으로 갈라집니다. 빈 목록은 "담당자 없음" 입니다.
+    """
+
+    user_ids: list[int] = Field(default_factory=list, max_length=50)
 
 
 @app.delete(
@@ -3143,6 +3159,57 @@ async def patch_task(
     rows = task_service.list_tasks(session, project_id)
     updated = next(row for row in rows if row["id"] == task.id)
     return TaskOut(**updated)
+
+
+@app.put(
+    "/api/projects/{project_id}/tasks/{task_id}/assignees", response_model=TaskOut
+)
+def set_task_assignees(
+    project_id: int,
+    task_id: int,
+    payload: TaskAssigneesIn,
+    session: DbSession,
+    user: CurrentUser,
+) -> TaskOut:
+    """담당자를 바꾼다 (`TASK-006` — 담당자는 하나 이상).
+
+    ⚠️ **팀원 누구나 바꿉니다.** 관리자만 할 수 있게 하면 사람들은 담당자를
+    안 바꾸고 그냥 남의 이름이 붙은 채로 일합니다 — 그러면 기여 이벤트가
+    **일하지 않은 사람에게** 갑니다. 업무 삭제와 같은 판단입니다.
+
+    ⚠️ 바꾼 사실은 감사 로그에 남습니다. 담당자는 기여 이벤트가 누구에게
+    가는지를 정하므로, 조용히 바뀌면 안 됩니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    try:
+        task, _now_ids, added = task_service.set_assignees(
+            session,
+            project_id=project_id,
+            task_id=task_id,
+            user_ids=payload.user_ids,
+            actor_id=user.id,
+        )
+    except task_service.TaskError as exc:
+        code = (
+            status.HTTP_404_NOT_FOUND
+            if "찾을 수 없습니다" in str(exc)
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(code, str(exc)) from exc
+
+    # NOTIFICATION-002 — 새로 맡은 사람에게만.
+    notification_service.record_assignment(session, task, added, actor_id=user.id)
+
+    rows = task_service.list_tasks(session, project_id)
+    updated = next(row for row in rows if row["id"] == task.id)
+    return TaskOut(
+        **updated,
+        marker=gh_linking.task_marker(task.id),
+        github=_github_for_tasks(session, [task.id]).get(task.id, []),
+    )
 
 
 # ══════════════════════════════════════════════════════════════

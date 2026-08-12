@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import today as team_today
-from teamflow.db import live
+from teamflow.db import assignees, live
 from teamflow.db import models as m
 from teamflow.projects import risk
 
@@ -33,12 +33,13 @@ def _tasks(session: Session, project_id: int) -> list[risk.TaskFacts]:
     rows = session.scalars(
         live.live_tasks().where(m.Task.project_id == project_id).order_by(m.Task.id)
     ).all()
+    who = assignees.of_tasks(session, [row.id for row in rows])
     return [
         risk.TaskFacts(
             id=row.id,
             title=row.title,
             status=row.status,
-            assignee_id=row.assignee_id,
+            assignee_ids=tuple(who.get(row.id, ())),
             deadline=risk.as_date(row.deadline),
             # ⚠️ `created_at` 은 NOT NULL 이지만 방어합니다 — 없으면 오늘로
             #    치는 쪽이 "21일 열려 있었다" 로 지어내는 것보다 낫습니다.

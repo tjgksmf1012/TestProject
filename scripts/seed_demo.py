@@ -44,6 +44,7 @@ from sqlalchemy import create_engine, func, or_, select
 from teamflow.auth import passwords
 from teamflow.config import get_settings
 from teamflow.contribution.events import CATEGORY_OF, EventType
+from teamflow.db import assignees
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 from teamflow.projects import invites
@@ -537,15 +538,23 @@ def _seed_contribution_events(session, project_id: int, user_ids: list[int]) -> 
 # **제목으로** 잇습니다.
 #
 #   (제목, 담당자 index(-1 이면 없음), 상태, 마감일 오프셋(일), 나온 후보 제목)
-_TASKS: list[tuple[str, int, str, int | None, str | None]] = [
+#: `(제목, 담당자 자리들, 상태, 마감까지 며칠, 나온 후보 제목)`.
+#:
+#: 담당자 자리는 `user_ids` 의 첨자입니다. **빈 튜플이면 담당자 없음**이고,
+#: 둘 이상이면 같이 맡은 업무입니다 (`TASK-006`).
+_TASKS: list[tuple[str, tuple[int, ...], str, int | None, str | None]] = [
     # 승인을 거쳐 칸반에 올라온 업무. 이게 이 프로젝트의 대표 주장이
     # 화면에서 보이는 자리다 — 카드에서 회의 발화까지 거슬러 올라간다.
-    ("DB 스키마 정리", 2, "done", 2, "DB 스키마 정리"),
+    ("DB 스키마 정리", (2,), "done", 2, "DB 스키마 정리"),
     # 손으로 만든 업무. 회의에서 나오지 않은 것도 칸반에는 있습니다.
-    ("개발 환경 문서 정리", 1, "in_progress", None, None),
+    ("개발 환경 문서 정리", (1,), "in_progress", None, None),
     # 담당자가 없는 업무 — 완료해도 기여도에 잡히지 않는다는 걸 화면이
     # 말해 줘야 하는 경우입니다.
-    ("배포 방식 조사", -1, "todo", 10, None),
+    ("배포 방식 조사", (), "todo", 10, None),
+    # ⭐ **둘이 같이 맡은 업무** (`TASK-006`). 시연에서 이게 없으면
+    #    "나눠 셌습니다" 안내와 이름 둘이 그려지는 자리를 눈으로 볼 수
+    #    없습니다 — 이 저장소의 대표 실패 ③ 입니다.
+    ("접근성 점검", (0, 1), "todo", 6, None),
 ]
 
 # ⭐ '로그인 API 구현' 은 일부러 여기 없습니다. 승인 화면에 완전한 후보로
@@ -614,7 +623,7 @@ def _seed_tasks(session, project_id: int, user_ids: list[int], meeting_id: int) 
     }
     reviewer = user_ids[0]
 
-    for title, owner, status, due_days, origin_title in _TASKS:
+    for title, owners, status, due_days, origin_title in _TASKS:
         origin = candidates.get(origin_title) if origin_title else None
         if origin_title and origin is None:
             raise SystemExit(
@@ -629,7 +638,6 @@ def _seed_tasks(session, project_id: int, user_ids: list[int], meeting_id: int) 
         task = m.Task(
             project_id=project_id,
             title=title,
-            assignee_id=user_ids[owner] if owner >= 0 else None,
             deadline=deadline,
             status=status,
             completed_at=completed_at,
@@ -638,16 +646,19 @@ def _seed_tasks(session, project_id: int, user_ids: list[int], meeting_id: int) 
             origin_candidate_id=origin.id if origin else None,
         )
         session.add(task)
+        session.flush()
+        assignees.replace(session, task.id, [user_ids[i] for i in owners])
 
         if origin is not None:
-            session.flush()
             # ⭐ 반대 방향도 잇는다. 이게 없으면 승인 화면이 이 후보를
             # "아직 승인 안 됨" 으로 보여주고, 승인하면 업무가 하나 더 생긴다.
             origin.review_status = "approved"
             origin.reviewed_by = reviewer
             origin.created_task_id = task.id
             if status == "done":
-                _seed_merged_pull_request(session, project_id, task, user_ids[owner])
+                _seed_merged_pull_request(
+                    session, project_id, task, user_ids[owners[0]]
+                )
     session.flush()
 
 

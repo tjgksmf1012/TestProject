@@ -29,7 +29,7 @@ function task(over: Partial<Task> = {}): Task {
   return {
     id: 1,
     title: '로그인 API 구현',
-    assignee_id: 1,
+    assignee_ids: [1],
     status: 'todo',
     deadline: '2026-09-20',
     completed_at: null,
@@ -261,7 +261,7 @@ describe('taskWarnings', () => {
   it('⭐ 담당자가 없으면 기여도에 안 잡힌다고 말한다', () => {
     // 서버가 실제로 그렇게 동작한다 (task_service._record_completion).
     // 화면이 말해 주지 않으면 사람은 완료했으니 반영됐다고 생각한다.
-    const warnings = taskWarnings(task({ assignee_id: null, deadline: '2026-12-31' }), TODAY);
+    const warnings = taskWarnings(task({ assignee_ids: [], deadline: '2026-12-31' }), TODAY);
     strictEqual(warnings.length, 1);
     strictEqual(warnings[0]?.includes('기여도에 반영되지 않습니다'), true);
   });
@@ -312,7 +312,7 @@ describe('summarize', () => {
 
   it('지연과 미배정을 센다', () => {
     const summary = summarize(
-      [task({ id: 1, deadline: '2026-09-01' }), task({ id: 2, assignee_id: null })],
+      [task({ id: 1, deadline: '2026-09-01' }), task({ id: 2, assignee_ids: [] })],
       TODAY,
     );
     strictEqual(summary.overdue, 1);

@@ -16,7 +16,7 @@ from teamflow.db import models as m
 from teamflow.db import session as db_session
 from teamflow.services import search_service
 
-from .conftest import login_as
+from .conftest import assign, login_as
 from .test_api import client, engine, seeded  # noqa: F401  (픽스처)
 
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
@@ -34,19 +34,20 @@ def stuff(seeded) -> dict:
             m.Task(
                 project_id=seeded["project_id"],
                 title="로그인 API 구현",
-                assignee_id=seeded["user_ids"][0],
                 status="todo",
                 priority=1,
             ),
             m.Task(
                 project_id=seeded["project_id"],
                 title="로그인 화면 접근성 점검",
-                assignee_id=seeded["user_ids"][1],
                 status="review",
                 priority=3,
             ),
         ]
         session.add_all(tasks)
+        session.flush()
+        for task, who in zip(tasks, seeded["user_ids"], strict=False):
+            assign(session, task, who)
         session.add(
             m.Utterance(
                 meeting_id=seeded["meeting_id"],

@@ -58,7 +58,12 @@ class TaskFacts:
     id: int
     title: str
     status: str
-    assignee_id: int | None
+    #: 맡은 사람들. 비어 있으면 담당자가 없는 업무입니다 (`TASK-006`).
+    #:
+    #: ⚠️ **맨 앞이 주담당이 아닙니다.** 이름 순으로 옵니다. 여기서
+    #: `[0]` 을 집어 "대표 담당자" 로 쓰는 코드가 생기면 그건 없는 개념을
+    #: 만드는 것입니다.
+    assignee_ids: tuple[int, ...]
     deadline: date | None
     created_at: date
     completed_at: date | None = None
@@ -228,7 +233,11 @@ def load_by_person(tasks: list[TaskFacts], members: list[Member]) -> list[Load]:
     open_tasks = [t for t in tasks if t.status not in FINISHED]
     counted: dict[int | None, int] = {}
     for task in open_tasks:
-        counted[task.assignee_id] = counted.get(task.assignee_id, 0) + 1
+        # ⚠️ 여럿이 맡은 업무는 **각자에게 한 건씩** 셉니다 (`TASK-006`).
+        #    나눠서 0.5 건으로 세면 안 됩니다 — 이건 점수가 아니라 "지금
+        #    무엇이 내 앞에 있는가" 이고, 같이 맡은 일도 내 앞에 있습니다.
+        for user_id in task.assignee_ids or (None,):
+            counted[user_id] = counted.get(user_id, 0) + 1
 
     known = {m.user_id: m.name for m in members}
     rows = [
@@ -259,8 +268,8 @@ def find_workload_skew(tasks: list[TaskFacts], members: list[Member]) -> Signal 
 
     counted: dict[int, int] = {}
     for task in open_tasks:
-        if task.assignee_id is not None:
-            counted[task.assignee_id] = counted.get(task.assignee_id, 0) + 1
+        for user_id in task.assignee_ids:
+            counted[user_id] = counted.get(user_id, 0) + 1
     if not counted:
         return None
 
@@ -277,9 +286,7 @@ def find_workload_skew(tasks: list[TaskFacts], members: list[Member]) -> Signal 
             "open_tasks": most,
             "team_open_tasks": len(open_tasks),
         },
-        task_ids=[
-            t.id for t in open_tasks if t.assignee_id == user_id
-        ],
+        task_ids=[t.id for t in open_tasks if user_id in t.assignee_ids],
     )
 
 

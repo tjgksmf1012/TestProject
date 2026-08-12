@@ -37,7 +37,14 @@ export interface TaskGithubLink {
 export interface Task {
   id: number;
   title: string;
-  assignee_id: number | null;
+  /**
+   * 맡은 사람들. 비어 있으면 담당자가 없는 업무입니다 (`TASK-006`).
+   *
+   * ⚠️ **서버가 이름 순으로 줍니다. 화면에서 다시 정렬하지 마십시오** —
+   * 정렬하는 순간 순서에 뜻이 생기고, 사람은 맨 앞을 "주담당" 으로
+   * 읽습니다. 적는 규칙은 `lib/kanban/assignees.ts` 에 있습니다.
+   */
+  assignee_ids: number[];
   status: string;
   /** ISO 날짜 `YYYY-MM-DD`. */
   deadline: string | null;
@@ -220,7 +227,7 @@ export function moveDirection(
 export function taskWarnings(task: Task, today: string): string[] {
   const warnings: string[] = [];
 
-  if (task.assignee_id === null) {
+  if (task.assignee_ids.length === 0) {
     warnings.push('담당자가 없습니다 — 완료해도 기여도에 반영되지 않습니다');
   }
   if (isOverdue(task, today)) {
@@ -298,7 +305,7 @@ export function summarize(tasks: readonly Task[], today: string): BoardSummary {
     done: tasks.filter((t) => t.status === 'done').length,
     overdue: tasks.filter((t) => isOverdue(t, today)).length,
     fromMeetings: tasks.filter((t) => t.origin !== null).length,
-    unassigned: tasks.filter((t) => t.assignee_id === null).length,
+    unassigned: tasks.filter((t) => t.assignee_ids.length === 0).length,
     withPulls: tasks.filter((t) => (t.github ?? []).length > 0).length,
   };
 }

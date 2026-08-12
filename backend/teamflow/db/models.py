@@ -376,7 +376,10 @@ class Task(Base):
     id: Mapped[int] = _pk()
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
-    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    #: ⚠️ **담당자 칸이 없습니다.** `task_assignees` 를 보십시오
+    #: (`TASK-006` — 담당자는 하나 이상). 예전에는 `assignee_id` 한 칸이었고,
+    #: 여럿을 받으면서 **칸과 표에 같은 사실이 두 벌**로 남지 않게 칸을
+    #: 없앴습니다. 묻는 자리는 `db/assignees.py` 하나입니다.
     #: 언제부터 할 일인가 (CALENDAR-002). ⚠️ `created_at` 이 아닙니다 —
     #: 그건 행이 생긴 때이고, 이건 사람이 정한 날입니다.
     start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -411,6 +414,27 @@ class Task(Base):
             name="ck_task_status",
         ),
     )
+
+
+class TaskAssignee(Base):
+    """업무를 맡은 사람. 업무 하나에 **여럿** 있을 수 있습니다 (`TASK-006`).
+
+    ⚠️ **순서 칸이 없습니다.** `position` 이나 `is_primary` 를 두면 그
+    순간 "주담당 / 보조" 가 생기고, 기여 이벤트를 그 등급대로 나누자는
+    말이 반드시 따라옵니다. 두 사람이 맡았으면 **둘 다 담당자**입니다.
+    누가 더 했는지는 시스템이 정할 일이 아닙니다
+    (`AGENTS.md` 불변식 4).
+
+    ⚠️ 완료 점수를 어떻게 나누는지는 `contribution/sharing.py` 에 있습니다.
+    안 나누면 **드롭다운에서 이름을 고르는 것이 곧 점수 부풀리기**입니다.
+    """
+
+    __tablename__ = "task_assignees"
+
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    #: 언제 맡았는가. 알림·감사용이고 **순서를 뜻하지 않습니다.**
+    assigned_at: Mapped[datetime] = _now()
 
 
 class TaskDeadlineChange(Base):

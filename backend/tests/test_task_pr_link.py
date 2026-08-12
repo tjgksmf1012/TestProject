@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from teamflow.db import assignees
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
@@ -295,9 +296,10 @@ def github_notices(kind: str = "github") -> list[m.Notification]:
         )
 
 
-def assign(task_id: int, user_id: int | None) -> None:
+def assign(task_id: int, *user_ids: int) -> None:
+    """담당자를 이 사람들로 바꾼다. 인자가 없으면 담당자 없음."""
     with db_session.session_scope() as s:
-        s.get(m.Task, task_id).assignee_id = user_id
+        assignees.replace(s, task_id, [uid for uid in user_ids if uid is not None])
 
 
 def test_the_assignee_hears_about_a_pull_request(client: TestClient, seeded):

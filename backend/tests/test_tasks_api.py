@@ -28,7 +28,7 @@ from teamflow.db import models as m
 from teamflow.db import session as db_session
 from teamflow.services import scoring_service
 
-from .conftest import login_as
+from .conftest import assign, login_as
 
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 
@@ -67,13 +67,19 @@ def board(engine, client: TestClient) -> dict:
         member = m.User(name="김민수", email="minsu@example.com")
         other = m.User(name="이하늘", email="haneul@example.com")
         outsider = m.User(name="외부인", email="out@example.com")
-        s.add_all([member, other, outsider])
+        # ⚠️ **이름 순이 번호 순과 달라야 합니다.** 셋 다 이름과 번호가 같은
+        #    순서면, 담당자 목록이 번호 순으로 나가도 이름 순처럼 보입니다 —
+        #    순서를 재는 검사가 **아무것도 못 재게** 됩니다. 실제로 그렇게
+        #    만들었다가 위반을 심어 보고 알았습니다(결함 163).
+        #    "강보람" 은 이름으로는 맨 앞, 번호로는 맨 뒤입니다.
+        boram = m.User(name="강보람", email="boram@example.com")
+        s.add_all([member, other, outsider, boram])
         s.flush()
 
         project = m.Project(title="TeamFlow", started_at=NOW)
         s.add(project)
         s.flush()
-        for user in (member, other):
+        for user in (member, other, boram):
             s.add(m.Member(project_id=project.id, user_id=user.id, role_shares={}))
 
         meeting = m.Meeting(
@@ -110,7 +116,6 @@ def board(engine, client: TestClient) -> dict:
         from_meeting = m.Task(
             project_id=project.id,
             title="로그인 API 구현",
-            assignee_id=member.id,
             deadline=NOW + timedelta(days=3),
             status="todo",
             origin_candidate_id=candidate.id,
@@ -118,19 +123,20 @@ def board(engine, client: TestClient) -> dict:
         by_hand = m.Task(
             project_id=project.id,
             title="개발 환경 문서 정리",
-            assignee_id=other.id,
             deadline=None,
             status="todo",
         )
         orphan = m.Task(
             project_id=project.id,
             title="배포 방식 조사",
-            assignee_id=None,
             deadline=NOW + timedelta(days=5),
             status="todo",
         )
         s.add_all([from_meeting, by_hand, orphan])
         s.flush()
+        assign(s, from_meeting, member.id)
+        assign(s, by_hand, other.id)
+        # `orphan` 은 담당자가 없는 업무입니다 — 일부러 안 붙입니다.
 
         result = {
             "project_id": project.id,
@@ -138,6 +144,7 @@ def board(engine, client: TestClient) -> dict:
             "member": member.id,
             "other": other.id,
             "outsider": outsider.id,
+            "boram": boram.id,
             "from_meeting": from_meeting.id,
             "by_hand": by_hand.id,
             "orphan": orphan.id,
@@ -665,3 +672,132 @@ def test_any_member_can_move_someone_elses_task(client: TestClient, board: dict)
 
     # 기여는 옮긴 사람이 아니라 **담당자**에게 붙는다.
     assert all(e["user_id"] == board["member"] for e in events())
+
+
+# ══════════════════════════════════════════════════════════════
+# 담당자 바꾸기 (`TASK-006`)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 이 엔드포인트가 없던 동안 담당자는 **회의 후보를 승인할 때 한 번**
+#    정해지고 그 뒤로 못 바꿨습니다. 사람이 빠지거나 일을 넘겨받아도
+#    칸반은 옛 이름을 말했고, 기여 이벤트는 계속 그 사람에게 갔습니다.
+
+
+def put_assignees(client: TestClient, board: dict, task_id: int, user_ids: list[int]):
+    return client.put(
+        f"/api/projects/{board['project_id']}/tasks/{task_id}/assignees",
+        json={"user_ids": user_ids},
+    )
+
+
+def test_a_task_can_have_two_assignees(client: TestClient, board: dict):
+    response = put_assignees(
+        client, board, board["by_hand"], [board["member"], board["other"]]
+    )
+    assert response.status_code == 200
+    assert sorted(response.json()["assignee_ids"]) == sorted(
+        [board["member"], board["other"]]
+    )
+
+
+def test_the_list_comes_back_by_name_not_by_the_order_i_sent(
+    client: TestClient, board: dict
+):
+    """⚠️ 넣은 순서로 돌려주면 화면이 맨 앞을 **주담당**으로 그립니다.
+
+    ⚠️ `강보람` 을 쓰는 이유: 이름으로는 맨 앞인데 번호로는 맨 뒤입니다.
+    이름 순과 번호 순이 같은 사람들로 재면 **아무것도 안 재는 검사**가
+    됩니다 (결함 163).
+    """
+    boram, minsu, haneul = board["boram"], board["member"], board["other"]
+
+    got = put_assignees(client, board, board["by_hand"], [haneul, minsu, boram])
+    assert got.json()["assignee_ids"] == [boram, minsu, haneul]
+
+
+def test_the_board_lists_assignees_by_name_too(client: TestClient, board: dict):
+    """⚠️ 칸반이 읽는 질의는 **다른 함수**입니다 (`of_tasks`).
+
+    한쪽만 이름 순이면 담당자 순서가 화면마다 달라집니다. 실제로 이
+    자리가 한동안 안 재지고 있었습니다 (결함 163).
+    """
+    boram, minsu, haneul = board["boram"], board["member"], board["other"]
+    put_assignees(client, board, board["by_hand"], [haneul, minsu, boram])
+
+    tasks = client.get(f"/api/projects/{board['project_id']}/tasks").json()["tasks"]
+    card = next(t for t in tasks if t["id"] == board["by_hand"])
+    assert card["assignee_ids"] == [boram, minsu, haneul]
+
+
+def test_an_empty_list_means_nobody(client: TestClient, board: dict):
+    assert put_assignees(client, board, board["by_hand"], []).json()["assignee_ids"] == []
+
+
+def test_someone_outside_the_project_cannot_be_assigned(client: TestClient, board: dict):
+    """⚠️ 안 막으면 **아무도 못 보는 점수**가 쌓입니다 — 기여도 화면은
+    명단 기준이라 그 사람이 안 나옵니다."""
+    response = put_assignees(client, board, board["by_hand"], [board["outsider"]])
+    assert response.status_code == 400
+    assert "팀원이 아닌" in response.json()["detail"]
+
+
+def test_changing_assignees_is_written_down(client: TestClient, board: dict):
+    """⚠️ 담당자는 기여 이벤트가 누구에게 가는지를 정합니다 — 조용히
+    바뀌면 안 됩니다."""
+    put_assignees(client, board, board["by_hand"], [board["member"]])
+
+    with db_session.session_scope() as s:
+        logs = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "task_assignees_changed")
+        ).all()
+        assert len(logs) == 1
+        assert logs[0].after == {"assignee_ids": [board["member"]]}
+
+
+def test_setting_the_same_people_again_writes_nothing(client: TestClient, board: dict):
+    """⚠️ 안 바뀐 것을 기록하면 활동 화면이 같은 줄로 메워집니다."""
+    put_assignees(client, board, board["by_hand"], [board["member"]])
+    put_assignees(client, board, board["by_hand"], [board["member"]])
+
+    with db_session.session_scope() as s:
+        logs = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "task_assignees_changed")
+        ).all()
+    assert len(logs) == 1
+
+
+def test_only_the_newcomer_hears_about_it(client: TestClient, board: dict):
+    """⚠️ 지금 담당자 전원에게 보내면, 한 명 더할 때마다 원래 있던
+    사람에게도 "새 업무를 맡았습니다" 가 갑니다."""
+    login_as(client, board["outsider"])  # 알림을 받을 사람과 누른 사람을 가릅니다
+    login_as(client, board["member"])
+
+    put_assignees(client, board, board["orphan"], [board["other"]])
+    put_assignees(client, board, board["orphan"], [board["other"], board["member"]])
+
+    with db_session.session_scope() as s:
+        notices = s.scalars(
+            select(m.Notification).where(m.Notification.kind == "assigned")
+        ).all()
+    # `other` 한 번만. 누른 사람(`member`)은 자기 일이라 안 받습니다.
+    assert [n.user_id for n in notices] == [board["other"]]
+
+
+def test_the_completion_splits_between_them(client: TestClient, board: dict):
+    """⭐ 둘이 맡은 업무를 끝내면 완료 이벤트가 **둘 다** 생깁니다."""
+    put_assignees(client, board, board["by_hand"], [board["member"], board["other"]])
+    assert patch(client, board, board["by_hand"], {"status": "done"}).status_code == 200
+
+    done = [e for e in events() if e["event_type"] == "task_completed"]
+    assert sorted(e["user_id"] for e in done) == sorted(
+        [board["member"], board["other"]]
+    )
+
+
+def test_an_outsider_cannot_change_assignees(client: TestClient, board: dict):
+    login_as(client, board["outsider"])
+    assert put_assignees(client, board, board["by_hand"], []).status_code == 403
+
+
+def test_unknown_task_is_404_for_assignees(client: TestClient, board: dict):
+    assert put_assignees(client, board, 9999, []).status_code == 404

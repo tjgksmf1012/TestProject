@@ -18,7 +18,7 @@ from teamflow.db import models as m
 from teamflow.db import session as db_session
 from teamflow.db.vocab import NOTIFICATION_DERIVED, NOTIFICATION_STORED, NotificationKind
 
-from .conftest import login_as
+from .conftest import assign, login_as
 from .test_api import client, engine, seeded  # noqa: F401  (픽스처)
 
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
@@ -114,11 +114,12 @@ def make_task(seeded, *, days: int, status: str = "todo", who: int = 0) -> int:
         task = m.Task(
             project_id=seeded["project_id"],
             title="통합 테스트 작성",
-            assignee_id=seeded["user_ids"][who],
             deadline=datetime.now(UTC) + timedelta(days=days),
             status=status,
         )
         session.add(task)
+        session.flush()
+        assign(session, task, seeded["user_ids"][who])
         session.flush()
         return task.id
 

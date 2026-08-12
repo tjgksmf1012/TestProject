@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
-from .conftest import login_as
+from .conftest import assign, login_as
 from .test_project_setup import (  # noqa: F401  (픽스처)
     client,
     create_project,
@@ -230,20 +230,23 @@ def test_removing_someone_keeps_what_they_did(client: TestClient, team: dict):
     `POST /me/data` 가 따로 합니다 — 그건 **동의 철회**라는 다른 일입니다.
     """
     with db_session.session_scope() as s:
-        s.add(
-            m.Task(
-                project_id=team["project_id"],
-                title="하늘이 만든 업무",
-                assignee_id=team["joiner"],
-                status="todo",
-                priority=2,
-            )
+        theirs = m.Task(
+            project_id=team["project_id"],
+            title="하늘이 만든 업무",
+            status="todo",
+            priority=2,
         )
+        s.add(theirs)
+        assign(s, theirs, team["joiner"])
 
     client.delete(f"/api/projects/{team['project_id']}/members/{team['joiner']}")
 
     with db_session.session_scope() as s:
-        kept = s.query(m.Task).filter(m.Task.assignee_id == team["joiner"]).count()
+        kept = (
+            s.query(m.TaskAssignee)
+            .filter(m.TaskAssignee.user_id == team["joiner"])
+            .count()
+        )
     assert kept == 1
 
 
@@ -309,11 +312,12 @@ def a_task(team: dict) -> int:
         task = m.Task(
             project_id=team["project_id"],
             title="지워질 업무",
-            assignee_id=team["founder"],
             status="todo",
             priority=2,
         )
         s.add(task)
+        s.flush()
+        assign(s, task, team["founder"])
         s.flush()
         return task.id
 

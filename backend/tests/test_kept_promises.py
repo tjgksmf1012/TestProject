@@ -31,6 +31,8 @@ from teamflow.meeting import utterance_types as ut
 from teamflow.services import meeting_contribution_service as svc
 from teamflow.services import scoring_service
 
+from .conftest import assign
+
 NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 
 
@@ -118,19 +120,26 @@ def task_from(
     world: dict,
     *,
     evidence: list[int],
-    assignee_id: int | None,
+    assignee_id: int | None = None,
+    assignee_ids: list[int] | None = None,
     status: str = "todo",
 ) -> int:
-    """근거 발화를 인용한 업무 후보 → 승인되어 만들어진 업무."""
+    """근거 발화를 인용한 업무 후보 → 승인되어 만들어진 업무.
+
+    담당자는 여럿일 수 있습니다 (`TASK-006`). 검사 대부분은 한 명이라
+    짧은 쪽(`assignee_id`)을 남겨 둡니다.
+    """
+    if assignee_ids is None:
+        assignee_ids = [] if assignee_id is None else [assignee_id]
     with db_session.session_scope() as s:
         task = m.Task(
             project_id=world["project_id"],
             title="로그인 API",
-            assignee_id=assignee_id,
             status=status,
         )
         s.add(task)
         s.flush()
+        assign(s, task, *assignee_ids)
         s.add(
             m.MeetingTaskCandidate(
                 meeting_id=world["meeting_id"],
@@ -300,11 +309,11 @@ def test_another_projects_task_does_not_reach_in(world):
         task = m.Task(
             project_id=other.id,
             title="로그인 API",
-            assignee_id=world["minsu"],
             status="done",
         )
         s.add(task)
         s.flush()
+        assign(s, task, world["minsu"])
         s.add(
             m.MeetingTaskCandidate(
                 meeting_id=world["meeting_id"],

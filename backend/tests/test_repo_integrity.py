@@ -2124,6 +2124,89 @@ def test_every_place_that_reads_tasks_goes_through_live():
     )
 
 
+def test_every_place_that_asks_who_owns_a_task_goes_through_assignees():
+    """⭐ 담당자를 묻는 자리를 **한 곳으로** 모읍니다 (`TASK-006`).
+
+    담당자는 `tasks.assignee_id` 한 칸이었고, 여럿을 받으면서 표가
+    됐습니다(`task_assignees`). 그러면서 "이 업무는 누구 것인가" 를 묻는
+    코드가 아홉 군데로 흩어질 수 있게 됐습니다 — 칸반·달력·검색·알림·
+    PR 연결·위험 신호·승인·기여 이벤트·지켜진 약속.
+
+    각자 `select(TaskAssignee.user_id)` 를 적으면 그중 하나는 다르게
+    적히고, **다르게 적힌 곳이 조용히 틀립니다.** 담당자는 기여 이벤트가
+    누구에게 가는지를 정하므로, 갈라지면 점수가 갈라집니다.
+
+    `db/live.py` 를 지키는 검사와 같은 판단이고 같은 이유입니다.
+
+    ⚠️ **이름이 아니라 쓰임을 셉니다.** 표를 질의에 넣는 파일이
+    `db/assignees.py` 를 안 가져오면 잡습니다.
+    """
+    import re
+
+    root = REPO_ROOT / "backend" / "teamflow"
+    offenders: list[str] = []
+    for path in root.rglob("*.py"):
+        if path.name == "assignees.py":
+            continue
+        body = path.read_text(encoding="utf-8")
+        if not re.search(r"\bm\.TaskAssignee\b", body):
+            continue
+        if "from teamflow.db import assignees" in body or "db import assignees" in body:
+            continue
+        offenders.append(str(path.relative_to(REPO_ROOT)))
+
+    assert not offenders, (
+        f"담당자 표를 직접 만지면서 `db/assignees.py` 를 안 거치는 곳: {offenders} — "
+        "`of_task()`·`of_tasks()`·`task_ids_of()`·`replace()` 를 쓰십시오"
+    )
+
+
+def test_the_assignee_column_did_not_come_back():
+    """⚠️ `tasks.assignee_id` 가 **돌아오면 안 됩니다.**
+
+    "대표 담당자는 칸에, 나머지는 표에" 가 제일 손이 덜 가는 길이고, 그래서
+    다음 사람이 반드시 그 유혹을 받습니다. 그건 같은 사실을 두 벌로 두는
+    것이고, 담당자는 기여 이벤트가 갈 사람을 정하므로 두 벌이 갈라지면
+    **점수가 갈라집니다** (대표 실패 ②).
+    """
+    from teamflow.db import models as models_mod
+
+    columns = set(models_mod.Task.__table__.columns.keys())
+    assert "assignee_id" not in columns, (
+        "`tasks.assignee_id` 가 돌아왔습니다 — 담당자는 `task_assignees` 표 "
+        "하나에만 있어야 합니다 (`TASK-006`)"
+    )
+    assert "task_assignees" in models_mod.Base.metadata.tables
+
+
+def test_the_share_is_never_written_to_a_row():
+    """⭐ 나눈 몫을 **저장하면 안 됩니다** (`TASK-006`).
+
+    완료 시점에 `share` 를 메타데이터에 적어 두면, 담당자가 나중에 늘어도
+    먼저 있던 사람의 몫이 안 줄어듭니다. 이 저장소가 여덟 번째로 같은
+    판단을 하는 자리입니다 — 파생값은 **읽을 때** 만듭니다.
+
+    ⚠️ 읽는 자리(`scoring_service.load_events`)는 예외입니다. 거기가 바로
+    "읽을 때 다시 센다" 를 하는 곳입니다.
+    """
+    import re
+
+    root = REPO_ROOT / "backend" / "teamflow"
+    offenders: list[str] = []
+    for path in root.rglob("*.py"):
+        if path.name in ("scoring_service.py", "sharing.py", "scoring.py"):
+            continue
+        body = path.read_text(encoding="utf-8")
+        # 메타데이터 사전에 `share` 키를 적는 모양만 봅니다.
+        if re.search(r"[\"']share[\"']\s*:", body):
+            offenders.append(str(path.relative_to(REPO_ROOT)))
+
+    assert not offenders, (
+        f"`share` 를 행에 적는 곳이 생겼습니다: {offenders} — 몫은 "
+        "`scoring_service.load_events` 가 읽을 때 셉니다"
+    )
+
+
 def test_the_readme_numbers_are_not_stale():
     """⭐ README 가 손으로 적은 개수를 **다시 셉니다.**
 

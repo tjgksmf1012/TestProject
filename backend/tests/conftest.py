@@ -214,3 +214,23 @@ def logout(client) -> None:
     from teamflow.services import auth_service
 
     client.cookies.delete(auth_service.COOKIE_NAME)
+
+
+# ══════════════════════════════════════════════════════════════
+# 담당자 (`TASK-006`)
+# ══════════════════════════════════════════════════════════════
+
+
+def assign(session, task, *user_ids: int):
+    """이 업무의 담당자를 이 사람들로 정한다.
+
+    ⚠️ `m.Task(assignee_id=...)` 는 **없어졌습니다** — 담당자는 칸이 아니라
+    표입니다(`task_assignees`). 검사에서 `m.TaskAssignee(...)` 를 직접
+    만들지 말고 이걸 쓰십시오. 한 곳에 모아 두면 표가 또 바뀌어도 여기만
+    고치면 됩니다.
+    """
+    from teamflow.db import assignees
+
+    session.flush()  # task.id 확보
+    assignees.replace(session, task.id, [uid for uid in user_ids if uid is not None])
+    return task

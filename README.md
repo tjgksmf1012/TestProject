@@ -103,7 +103,7 @@
 | [13. 화면 구조 (IA)](docs/13-화면-구조.md) | 화면 열 개가 어떻게 이어지는가, 각 화면의 책임, 아직 없는 화면 |
 | [15. PC 우선 방향](docs/15-PC-우선-방향.md) | **지금 방향** — 브라우저 통화로 회의, GitHub 최우선, 모바일은 보류 |
 | [18. 사용설명서](docs/18-사용설명서.md) | **처음 여는 사람용** — 실제 화면 열 개로 따라가는 안내. 되는 것과 안 되는 것 ⭐ |
-| [17. 결함 기록](docs/17-결함-기록.md) | 만들면서 찾은 조용한 결함 **128건** — 재현 방법과 되돌림 확인 |
+| [17. 결함 기록](docs/17-결함-기록.md) | 만들면서 찾은 조용한 결함 **131건** — 재현 방법과 되돌림 확인 |
 | [14. 모바일](docs/14-모바일.md) | 왜 앱이어야 하는가, PWA + 안드로이드 셸, 폰 기준 UI/UX, 비용 근거 |
 | [16. 디자인 감사 (Stage A)](docs/16-디자인-감사-StageA.md) | 화면을 실제로 렌더해 잰 첫 감사 — 대비·간격·토큰의 근거 |
 | [19. 메신저 셸 전환](docs/19-메신저-셸-전환.md) | **디자인 결정 전부** — 셸·브리프 재적용·React 이전. 렌더해 보고 쓴 것 |
@@ -126,7 +126,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 신뢰도·조정범위 계산 | ✅ | `backend/teamflow/contribution/confidence.py` |
 | **측정 불가 처리 (0점과 구분)** | ✅ | `backend/teamflow/contribution/scoring.py` |
 | 기여도 산정 엔진 | ✅ | `backend/teamflow/contribution/scoring.py` |
-| DB 스키마 (33개 테이블) | ✅ | `backend/teamflow/db/models.py` |
+| DB 스키마 (34개 테이블) | ✅ | `backend/teamflow/db/models.py` |
 | **조작 저항성 테스트** | ✅ **11 시나리오 · 24 케이스** | `backend/tests/test_anti_gaming.py` |
 | 환경 진단 스크립트 | ✅ | `scripts/check_env.py` |
 | LLM 출력 스키마 (guided decoding) | ✅ | `backend/teamflow/meeting/schema.py` |
@@ -143,7 +143,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
 | docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
 | **Dockerfile (api·gpu, ffmpeg 포함)** | ⚠️ 빌드 미검증 | `docker/` |
-| **Alembic 마이그레이션** | ✅ 33개 테이블 | `backend/migrations/` |
+| **Alembic 마이그레이션** | ✅ 34개 테이블 | `backend/migrations/` |
 | GPU 배타 락 (TTL·소유권 검증) | ✅ | `backend/teamflow/jobs/gpu_lock.py` |
 | **보존기간 삭제 잡** (법적 요구사항) | ✅ | `backend/teamflow/jobs/retention.py` |
 | **멀티트랙 정렬 (GCC-PHAT)** | ✅ | `backend/teamflow/audio/multitrack.py` |

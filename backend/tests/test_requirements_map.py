@@ -229,11 +229,11 @@ def test_the_audit_log_is_now_read_somewhere():
     assert writes > 0, "감사 로그를 쓰는 곳이 0곳이 됐습니다 — 기록이 끊겼습니다"
     # 문서가 적어 둔 개수도 같이 봅니다. ⚠️ 처음에 "다섯 곳" 이라고 적었는데
     # 실제로는 열한 곳이었습니다 — 세지 않고 눈대중으로 적은 것입니다.
-    assert writes == 12, (
+    assert writes == 13, (
         f"감사 로그를 쓰는 곳이 {writes}곳입니다 — `docs/20` ACTIVITY-001 의 "
         "개수를 고치십시오"
     )
-    assert "쓰기는 열두 곳" in _doc(), (
+    assert "쓰기는 열세 곳" in _doc(), (
         "문서에서 쓰기 개수를 적은 자리를 못 찾았습니다 — 문구가 바뀌었으면 "
         "이 검사도 같이 고치십시오"
     )

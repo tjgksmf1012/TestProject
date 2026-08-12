@@ -140,6 +140,46 @@
                      width: var(--sp-1); height: var(--sp-1); border-radius: var(--r-round);
                      background: currentColor; transform: translateY(-3px); }
 
+  /* ⭐ 여럿이 맡은 업무 — **나눠 셌다**고 카드가 말하는 자리 (`TASK-006`).
+
+     ⚠️ 흙빛(`--gap`)입니다. 빨강이 아닙니다 — 같이 맡은 것은 잘못이
+     아니라 사실이고, 이 저장소에서 빨강은 "네가 뭘 잘못했다" 입니다.
+     `.gapmark` 와 같은 색을 쓰되 앞의 점은 안 찍습니다: 저건 **못 잰
+     자리**의 표시이고 이건 **잰 방법**의 설명이라, 같은 모양으로 그리면
+     둘이 같은 종류로 읽힙니다. */
+  .task .shared { font-size: var(--fs-caption); color: var(--gap);
+                  margin: var(--sp-2) 0 0; }
+
+  /* 담당자를 바꾸는 자리. 접어 둡니다 — 안 접으면 카드마다 이름 목록이
+     펼쳐져 보드가 체크박스 밭이 됩니다.
+
+     ⚠️ 칸 하나가 **44px** 입니다. 폰에서 이름이 다닥다닥 붙으면 엉뚱한
+     사람을 담당자로 넣게 되고, 담당자는 기여 이벤트가 갈 사람을
+     정합니다 — 잘못 누르면 남의 점수가 됩니다. */
+  .whoedit { margin-top: var(--sp-3); }
+  .whoedit > summary { font-size: var(--fs-caption); color: var(--text-subtle);
+                       cursor: pointer; min-height: var(--tap);
+                       display: flex; align-items: center; }
+  /* ⚠️ **카드마다 붙는 줄**이라 데스크톱에서는 높이를 걷습니다.
+     렌더해서 보고 알았습니다 — 44px 짜리 줄이 카드 넷에 하나씩 붙으니
+     보드가 눈에 띄게 길어졌고, 정작 매일 하는 일은 카드를 옮기는 것이지
+     담당자를 바꾸는 것이 아닙니다. `.moves button` 이 같은 이유로 같은
+     처리를 하고 있습니다. **폰에서는 44px 그대로입니다** — 손가락으로
+     겨누는 자리이고, 잘못 누르면 남의 점수가 됩니다. */
+  @media (hover: hover) and (pointer: fine) {
+    .whoedit > summary { min-height: 0; }
+    .whoedit > summary:hover { color: var(--text); }
+  }
+  /* ⚠️ **칸 높이(44px)를 여기 적지 않습니다.** `app.css` 의
+     `label:has(> input[type='checkbox'])` 가 이미 그 일을 하고 있습니다 —
+     띄우기·간격·글자색까지 한 벌로. 여기 다시 적으면 같은 판단이 두 벌이
+     되고, 한쪽만 고쳐지는 날이 옵니다(대표 실패 ②).
+
+     ⚠️ 실제로 한 번 적었다가 지웠습니다. **위반을 심었는데 아무 일도 안
+     일어나서** 알았습니다 — 제가 지운 것은 공용 규칙이 이미 하고 있는
+     일의 사본이었습니다 (결함 164). */
+  .whoedit-body { display: flex; flex-direction: column; }
+
   /* 이 업무가 어느 PR 로 끝났는가. 대표 주장(회의→업무→GitHub)의 마지막 칸. */
   .gh-list { list-style: none; padding: 0; margin: var(--sp-2) 0 0; font-size: var(--fs-caption); }
   .gh-list li { display: flex; gap: var(--sp-2); padding: var(--sp-1) 0; }

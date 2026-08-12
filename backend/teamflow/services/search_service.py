@@ -32,7 +32,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
-from teamflow.db import live, vocab
+from teamflow.db import assignees, live, vocab
 from teamflow.db import models as m
 
 #: 한 종류당 최대 건수.
@@ -102,7 +102,8 @@ def search_tasks(
     if len(query.strip()) >= MIN_QUERY:
         conditions.append(m.Task.title.like(_like(query.strip()), escape="\\"))
     if assignee_id is not None:
-        conditions.append(m.Task.assignee_id == assignee_id)
+        # 담당자가 여럿이면 **그 안에 있으면** 걸립니다 (`TASK-006`).
+        conditions.append(m.Task.id.in_(assignees.task_ids_of(assignee_id)))
     if status is not None:
         conditions.append(m.Task.status == status)
     if priority is not None:
@@ -111,13 +112,13 @@ def search_tasks(
     if not conditions:
         return []
 
-    rows = session.execute(
-        select(m.Task, m.User.name)
-        .outerjoin(m.User, m.User.id == m.Task.assignee_id)
-        .where(m.Task.project_id == project_id, live.not_deleted(), *conditions)
+    tasks = session.scalars(
+        live.live_tasks()
+        .where(m.Task.project_id == project_id, *conditions)
         .order_by(m.Task.id.desc())
         .limit(MAX_PER_KIND)
     ).all()
+    who_of = assignees.names_of_tasks(session, [t.id for t in tasks])
 
     return [
         Hit(
@@ -125,10 +126,10 @@ def search_tasks(
             task_id=task.id,
             title=task.title,
             at=as_utc(task.deadline) if task.deadline is not None else None,
-            who=who,
+            who=who_of.get(task.id),
             status=vocab.TASK_STATUS_LABEL[vocab.TaskStatus(task.status)],
         )
-        for task, who in rows
+        for task in tasks
     ]
 
 

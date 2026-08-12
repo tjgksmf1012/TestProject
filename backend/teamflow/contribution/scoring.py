@@ -20,6 +20,7 @@ import math
 import statistics
 from dataclasses import dataclass, field
 
+from teamflow.contribution import sharing
 from teamflow.contribution.confidence import (
     ConfidenceBreakdown,
     CoverageStats,
@@ -79,7 +80,17 @@ def event_points(event: ContributionEvent) -> float:
     # ── task ──────────────────────────────────────────
     if et is EventType.TASK_COMPLETED:
         difficulty = float(meta.get("difficulty", 1))
-        return 10.0 * max(1.0, min(3.0, difficulty))
+        # ⭐ **여럿이 맡은 업무는 나눠 갖습니다** (`TASK-006`).
+        #
+        # 안 나누면 업무 하나에 이름을 다섯 얹는 것으로 팀 합계가 다섯
+        # 배가 됩니다 — 아무도 더 일하지 않았는데. 왜 이 몫이 담당자 수가
+        # 아니라 **완료 이벤트 수**에서 나오는지는 `sharing.py` 에 있습니다.
+        #
+        # `share` 는 저장된 값이 아닙니다. `scoring_service.load_events` 가
+        # 읽을 때마다 이벤트 로그에서 다시 셉니다. 혼자 맡은 업무에는 키가
+        # 아예 없고, 그때 1.0 입니다.
+        share = float(meta.get("share", sharing.TASK_TOTAL))
+        return 10.0 * max(1.0, min(3.0, difficulty)) * max(0.0, min(1.0, share))
 
     if et is EventType.BLOCKER_RESOLVED:
         return 5.0

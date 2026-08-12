@@ -30,7 +30,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
-from teamflow.db import live
+from teamflow.db import assignees, live
 from teamflow.db import models as m
 
 #: 달력에 놓이는 것의 종류.
@@ -89,19 +89,21 @@ def collect(
 
     items: list[CalendarItem] = []
 
-    rows = session.execute(
-        select(m.Task, m.User.name)
-        .outerjoin(m.User, m.User.id == m.Task.assignee_id)
-        .where(
+    tasks = session.scalars(
+        live.live_tasks().where(
             m.Task.project_id == project_id,
-            live.not_deleted(),
             or_(
                 m.Task.start_date.between(since, until),
                 m.Task.deadline.between(since, until),
             ),
         )
     ).all()
-    for task, who in rows:
+    # 담당자는 여럿일 수 있습니다 (`TASK-006`). 잇는 자리는
+    # `db/assignees.py` 한 곳입니다 — 화면마다 다르게 이으면 같은 업무가
+    # 달력과 검색에서 다르게 보입니다.
+    who_of = assignees.names_of_tasks(session, [t.id for t in tasks])
+    for task in tasks:
+        who = who_of.get(task.id)
         done = task.status == "done"
         if within(task.start_date):
             items.append(

@@ -682,7 +682,7 @@ def test_kanban_response_has_the_fields_the_screen_reads(client: TestClient, see
         assert {
             "id",
             "title",
-            "assignee_id",
+            "assignee_ids",
             "status",
             "deadline",
             "completed_at",
@@ -700,7 +700,10 @@ def test_seeded_board_shows_the_chain_and_the_exceptions(client: TestClient, see
 
     assert [t for t in tasks if t["origin"]], "회의에서 나온 업무가 있어야 합니다"
     assert [t for t in tasks if not t["origin"]], "손으로 만든 업무도 있어야 합니다"
-    assert [t for t in tasks if t["assignee_id"] is None], "담당자 없는 업무가 있어야 합니다"
+    assert [t for t in tasks if not t["assignee_ids"]], "담당자 없는 업무가 있어야 합니다"
+    assert [
+        t for t in tasks if len(t["assignee_ids"]) > 1
+    ], "둘이 같이 맡은 업무가 있어야 합니다 (TASK-006)"
     assert len({t["status"] for t in tasks}) >= 2, "상태가 하나뿐이면 열이 비어 보입니다"
 
 

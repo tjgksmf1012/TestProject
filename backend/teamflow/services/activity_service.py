@@ -46,6 +46,7 @@ ACTION_LABEL: dict[str, str] = {
     "github_login_changed": "GitHub 계정 연결 변경",
     "meeting_reprocess_requested": "회의 재처리 요청",
     "score_adjusted": "기여도 확정값 조정",
+    "task_assignees_changed": "업무 담당자 변경",
     "task_completed": "업무 완료",
     "task_deleted": "업무 삭제",
     "task_reopened": "업무 다시 열기",
@@ -59,8 +60,18 @@ ACTION_LABEL: dict[str, str] = {
 #: 이 제품에서 가장 되짚어 볼 일이 많은 기록입니다 — 누가 점수를
 #: 조정했는지, 누가 가중치를 바꿨는지는 분쟁이 생겼을 때 제일 먼저
 #: 확인할 것입니다.
+#: ⚠️ 담당자 변경이 여기 있는 이유: 업무를 **끝내기 전에** 담당자를 바꾸면
+#: 그 업무의 완료 점수가 갈 사람이 바뀝니다 (`TASK-006`). 끝난 뒤에 바꾸면
+#: 이미 쌓인 이벤트는 그대로라 점수가 안 움직이는데, 감사 로그는 둘을
+#: 구분할 수 없습니다. **눈에 띄는 쪽으로 틀립니다** — 안 보이는 것보다
+#: 한 번 더 보이는 것이 낫습니다.
 TOUCHES_CONTRIBUTION: frozenset[str] = frozenset(
-    {"score_adjusted", "weights_changed", "ai_output_corrected"}
+    {
+        "score_adjusted",
+        "weights_changed",
+        "ai_output_corrected",
+        "task_assignees_changed",
+    }
 )
 
 
