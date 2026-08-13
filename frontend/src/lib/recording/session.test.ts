@@ -218,12 +218,16 @@ describe('동의 철회', () => {
     assert.equal(state.chunks.length, 2);
   });
 
-  it('철회 이후에는 새 청크를 받지 않는다', () => {
+  it('철회로 멈춘 뒤 흘러나온 마지막 조각은 받는다 — 철회 전 소리다 (결함 173)', () => {
+    // 철회 순간 레코더가 마이크째로 꺼진다(그 보장은 client 테스트가 잰다).
+    // 그 뒤에 도착하는 조각은 꺼지기 **전**에 담긴 소리의 플러시라
+    // docs/07 의 "이미 수집된 것" 이다. 여기서 버리면 철회 직전 최대
+    // 타임슬라이스 하나가 매번 사라진다.
     const state = reduceAll(recording(), [
       { type: 'CONSENT', state: 'refused' },
       chunk(0, 5_000),
     ]);
-    assert.equal(state.chunks.length, 0);
+    assert.equal(state.chunks.length, 1);
   });
 });
 
@@ -241,6 +245,27 @@ describe('백프레셔', () => {
 });
 
 describe('종료', () => {
+  it('⭐ 정지 직후 흘러나온 마지막 조각은 버리지 않는다 (결함 173)', () => {
+    // MediaRecorder.stop() 은 남은 소리를 정지 **뒤에** 흘려보낸다.
+    // 그 소리는 정지 전에 녹음된 것 — 회의의 끝, 결정이 말해지는 자리다.
+    const state = reduceAll(recording(), [
+      chunk(0, 5_000),
+      { type: 'STOP', atMs: T0 + 7_000 },
+      chunk(1, 7_050),
+    ]);
+    assert.equal(state.chunks.length, 2, '마지막 조각이 세어져야 한다');
+  });
+
+  it('완료된 뒤에 온 조각은 받지 않는다 — 요약이 이미 만들어졌다', () => {
+    const state = reduceAll(recording(), [
+      chunk(0, 5_000),
+      { type: 'STOP', atMs: T0 + 7_000 },
+      { type: 'UPLOAD_DONE', lostSeqs: [] },
+      chunk(1, 8_000),
+    ]);
+    assert.equal(state.chunks.length, 1);
+  });
+
   it('정지 → 업로드 완료 → completed', () => {
     const state = reduceAll(recording(), [
       chunk(0, 5_000),

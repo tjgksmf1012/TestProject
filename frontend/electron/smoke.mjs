@@ -25,13 +25,19 @@
  * ⚠️ Playwright 는 **제 node_modules** 에서 electron 을 찾습니다. 이
  * 프로젝트에 설치한 것을 쓰려면 `executablePath` 를 직접 줘야 합니다.
  *
- * ## Phase 2 에서 여기가 자랍니다
+ * ## 녹음 생존율 (자료집 §12 · docs/21 Phase 1~2 의 마지막 반쪽)
  *
- * 자료집 §12 의 "녹음 생존율 테스트" 가 이 파일에 붙습니다 — 알려진
- * 길이의 가짜 오디오를 주입하고(`--use-file-for-fake-audio-capture`),
- * 창을 최소화·hide 한 뒤 디스크에 쌓인 청크 길이가 입력과 맞는지.
+ * 맨 아래에서 알려진 가짜 오디오를 주입하고(`--use-file-for-fake-audio-capture`
+ * — WAV 는 이 파일이 직접 만듭니다), 녹음을 시작한 뒤 **창을 hide 한 채**
+ * 청크가 계속 쌓이는지 잽니다. `backgroundThrottling: false` 가 참말인지는
+ * 설정 파일이 아니라 **숨긴 창에서 늘어나는 청크 수**로만 알 수 있습니다.
+ *
+ * ⚠️ 실제 절전·화면 잠금은 이 컨테이너(Xvfb)에서 못 일으킵니다. 여기서
+ * 재는 것은 「창을 숨겨도 산다」까지고, 「뚜껑을 덮어도 산다」는 실기기
+ * 몫입니다 (docs/21 §5).
  */
 import { execSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,11 +50,52 @@ const pwRoot =
   process.env.PLAYWRIGHT_ROOT ?? execSync('npm root -g', { encoding: 'utf8' }).trim();
 const { _electron: electron } = await import(join(pwRoot, 'playwright', 'index.mjs'));
 
+/**
+ * 길이를 **아는** 오디오를 만든다 — 16bit PCM 모노 WAV, 440Hz.
+ *
+ * ffmpeg 없이 만듭니다(이 환경에 없습니다). Chromium 은 이 파일을
+ * 반복 재생하므로 녹음이 파일보다 길어도 소리는 계속 들어옵니다.
+ */
+function makeWav(path, seconds) {
+  const rate = 44100;
+  const n = rate * seconds;
+  const data = Buffer.alloc(n * 2);
+  for (let i = 0; i < n; i += 1) {
+    data.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * 12000), i * 2);
+  }
+  const head = Buffer.alloc(44);
+  head.write('RIFF', 0);
+  head.writeUInt32LE(36 + data.length, 4);
+  head.write('WAVEfmt ', 8);
+  head.writeUInt32LE(16, 16);
+  head.writeUInt16LE(1, 20); // PCM
+  head.writeUInt16LE(1, 22); // 모노
+  head.writeUInt32LE(rate, 24);
+  head.writeUInt32LE(rate * 2, 28);
+  head.writeUInt16LE(2, 32);
+  head.writeUInt16LE(16, 34);
+  head.write('data', 36);
+  head.writeUInt32LE(data.length, 40);
+  writeFileSync(path, Buffer.concat([head, data]));
+}
+
+const SP = process.env.SP ?? '/tmp';
+const wavPath = join(SP, 'smoke-tone.wav');
+makeWav(wavPath, 20);
+
 const app = await electron.launch({
   // ⚠️ Playwright 는 **제 node_modules** 에서 electron 을 찾습니다. 이
   //    프로젝트에 설치한 것을 쓰려면 경로를 직접 줘야 합니다.
   executablePath: join(FRONTEND, 'node_modules', 'electron', 'dist', 'electron'),
-  args: ['out/main/index.cjs', '--no-sandbox'],
+  args: [
+    'out/main/index.cjs',
+    '--no-sandbox',
+    // ⭐ 아래 셋은 **이 하네스에만** 붙는 가짜 마이크입니다. 앱 코드가 아니라
+    //    Chromium 에게 주는 것이라 Electron 이 그대로 넘깁니다.
+    '--use-fake-device-for-media-stream',
+    '--use-fake-ui-for-media-stream',
+    `--use-file-for-fake-audio-capture=${wavPath}`,
+  ],
   cwd: FRONTEND,
   env: { ...process.env, TEAMFLOW_SERVER_URL: 'http://127.0.0.1:8811/home.html' },
 });
@@ -154,6 +201,46 @@ await page.goto('http://127.0.0.1:8811/index.html');
 await page.waitForTimeout(1500);
 const banner = await page.locator('#safety').innerText().catch(() => '(못 읽음)');
 console.log('안전 배너  :', banner.slice(0, 44), banner.includes('화면을 꺼도') ? '(desktop-awake OK)' : '⚠️ 꺼도 됩니다가 아님');
+
+// ⭐ 녹음 생존율 (자료집 §12) — 가짜 마이크로 **실제 녹음**을 돌리고, 창을
+//    hide 한 채 청크가 계속 쌓이는지 잽니다. `backgroundThrottling: false`
+//    와 `keepsAwake` 가 참말인지는 설정이 아니라 **이 숫자**가 말합니다.
+//    ?meeting= 없이 열었으므로 서버 없이 도는 로컬 모드입니다 — 업로드는
+//    로컬 카운터로 가고, 청크는 디스크 보관소를 스쳐 갑니다(Phase 1).
+await page.click('#consent');
+await page.click('#permission');
+// requestMicrophone(getUserMedia)이 끝나야 시작 버튼이 열립니다.
+await page.waitForFunction(() => !document.getElementById('start').disabled, null, { timeout: 10_000 });
+await page.click('#start');
+await page.waitForTimeout(6_500); // 타임슬라이스 5초 → 첫 청크가 앉을 시간
+const chunksShown = Number(await page.locator('#chunks').innerText());
+
+await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide());
+await page.waitForTimeout(11_000); // 숨긴 채 두 타임슬라이스
+const chunksHidden = Number(await page.locator('#chunks').innerText());
+const phaseHidden = await page.locator('#phase').innerText();
+await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].show());
+
+await page.click('#stop');
+await page.waitForFunction(() => !document.getElementById('result').hidden, null, { timeout: 10_000 });
+const survival = {
+  before: chunksShown,          // 보이는 채 6.5초 → 1개 이상
+  hidden: chunksHidden,         // 숨긴 채 11초 → 2개 이상 **늘어야** 합니다
+  phaseHidden,                  // '녹음 중' 이어야 — '화면이 가려짐' 이면 스로틀이 도로 켜진 것
+  coverage: await page.locator('#coverage').innerText(),
+  totalGap: await page.locator('#totalgap').innerText(),
+  usable: await page.locator('#usable').innerText(),
+  uploaded: await page.locator('#uploaded').innerText(),
+};
+// ⚠️ coverage 도 봅니다 — 결함 173(정지 직후 마지막 조각이 버려짐)이
+//    돌아오면 여기서 ~86% 로 떨어집니다. 첫 측정이 정확히 그랬습니다.
+//    (번들을 다시 만들었으면 `rm -rf ~/.config/Electron` — 서비스 워커가
+//    옛 번들을 물고 있어 고친 것이 안 재집니다)
+const survived =
+  survival.hidden - survival.before >= 2 &&
+  survival.phaseHidden === '녹음 중' &&
+  parseFloat(survival.coverage) >= 99;
+console.log('생존율     :', JSON.stringify(survival), survived ? 'OK' : '⚠️ 숨기면 죽거나 꼬리가 사라짐');
 
 // 바깥 링크로 못 나가는가 — 서버가 뚫렸을 때의 마지막 벽
 const before = page.url();

@@ -194,7 +194,14 @@ export function reduce(state: SessionState, event: SessionEvent): SessionState {
     }
 
     case 'CHUNK': {
-      if (!isLive(state.phase)) return state;
+      // ⚠️ 'stopping' 에서도 받습니다 (결함 173). `MediaRecorder.stop()` 은
+      // 마지막 조각을 **정지 뒤에** 흘려보내는데, 그 소리는 정지 **전에**
+      // 녹음된 것입니다 — 회의의 끝, 결정이 말해지는 자리입니다. 여기서
+      // 버리면 타임슬라이스 하나(최대 5초)가 매번 사라집니다. 동의 철회로
+      // 멈춘 경우에도 이 조각은 철회 전 소리라 docs/07 의 "이미 수집된
+      // 것" 에 해당합니다. completed 뒤에는 안 받습니다 — 요약이 이미
+      // 만들어져, 받아도 아무 데도 못 갑니다.
+      if (!isLive(state.phase) && state.phase !== 'stopping') return state;
       if (state.chunks.some((c) => c.seq === event.chunk.seq)) return state;
       return { ...state, chunks: [...state.chunks, event.chunk] };
     }
