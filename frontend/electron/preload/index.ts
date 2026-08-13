@@ -20,7 +20,27 @@
  * 하는데 preload 가 **조용히 안 실행됩니다.**
  */
 
-import { contextBridge } from 'electron';
+import { contextBridge, ipcRenderer } from 'electron';
+
+/**
+ * 청크 보관소 다리 (`docs/21` Phase 1).
+ *
+ * ⚠️ **경로를 받지 않습니다.** 회의 id·seq·시각·바이트만 건너갑니다.
+ * 어디에 쓸지는 main 이 `lib/desktop/chunk-paths.ts` 로 정합니다 — 이
+ * 창은 서버가 준 코드를 돌리므로, 경로를 받는 함수를 하나라도 열면 그게
+ * 곧 임의 파일 쓰기입니다.
+ *
+ * ⚠️ 채널 하나에 함수 하나입니다. `invoke` 를 그대로 내주면 서버가
+ * 뚫렸을 때 **아무 채널이나** 부를 수 있습니다.
+ */
+const chunks = {
+  put: (sessionId: string, seq: number, atMs: number, bytes: ArrayBuffer): Promise<void> =>
+    ipcRenderer.invoke('chunk:put', sessionId, seq, atMs, bytes),
+  list: (sessionId: string) => ipcRenderer.invoke('chunk:list', sessionId),
+  get: (sessionId: string, seq: number) => ipcRenderer.invoke('chunk:get', sessionId, seq),
+  drop: (sessionId: string, seq: number): Promise<void> =>
+    ipcRenderer.invoke('chunk:drop', sessionId, seq),
+};
 
 /**
  * 화면이 "나는 지금 데스크톱에 있다" 를 알아보는 자리.
@@ -51,4 +71,12 @@ contextBridge.exposeInMainWorld('teamflowDesktop', {
    * 영영 잃습니다.
    */
   keepsAwake: false,
+  /**
+   * 청크를 디스크에 붙잡아 두는 곳 (`docs/21` Phase 1).
+   *
+   * ⚠️ **이것이 있다는 것만으로 "안전" 이 되지 않습니다.** 업로드를
+   * 포기한 청크를 되찾을 수 있다는 뜻이고, 화면이 그 사실과 다시 올릴
+   * 자리를 같이 줘야 합니다.
+   */
+  chunks,
 });

@@ -94,6 +94,43 @@ const cards = await page.locator('.task .title').allInnerTexts();
 console.log('칸반 카드 :', cards.length, '장 —', cards.join(' / '));
 await page.screenshot({ path: join(process.env.SP ?? '/tmp', 'desktop-phase0.png'), fullPage: true });
 
+// ⭐ 청크 보관소를 **실제로 써 봅니다** (docs/21 Phase 1).
+//    "채널을 열었다" 와 "바이트가 디스크에 앉는다" 는 다른 이야기입니다.
+const store = await page.evaluate(async () => {
+  const api = window.teamflowDesktop?.chunks;
+  if (!api) return { ok: false, why: '다리가 없습니다' };
+  const bytes = new Uint8Array([1, 2, 3, 4, 5]).buffer;
+  await api.put('smoke', 7, 1700000000123, bytes);
+  const listed = await api.list('smoke');
+  const back = await api.get('smoke', 7);
+  await api.drop('smoke', 7);
+  const after = await api.list('smoke');
+  return {
+    ok: true,
+    listed,
+    readBytes: back ? new Uint8Array(back).join(',') : null,
+    afterDrop: after.length,
+  };
+});
+console.log('보관소     :', JSON.stringify(store));
+
+// ⭐ 경로를 벗어나려는 회의 id 가 **막히는가.** 이 창은 서버가 준 코드를
+//    돌리므로, 이것이 뚫리면 임의 파일 쓰기입니다.
+const traversal = await page.evaluate(async () => {
+  const api = window.teamflowDesktop?.chunks;
+  const out = [];
+  for (const bad of ['../../evil', 'a/b', '..']) {
+    try {
+      await api.put(bad, 0, 0, new Uint8Array([9]).buffer);
+      out.push(`${bad}: 통과함 ⚠️`);
+    } catch {
+      out.push(`${bad}: 막힘`);
+    }
+  }
+  return out;
+});
+console.log('경로 잠금  :', traversal.join(' / '));
+
 // 바깥 링크로 못 나가는가 — 서버가 뚫렸을 때의 마지막 벽
 const before = page.url();
 await page.evaluate(() => { location.href = 'https://example.com/'; });

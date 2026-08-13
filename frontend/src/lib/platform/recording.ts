@@ -30,6 +30,15 @@ export interface DesktopBridge {
    * 있어야 참입니다. Phase 0 에서는 언제나 거짓입니다.
    */
   keepsAwake: boolean;
+  /**
+   * 청크를 디스크에 붙잡아 두는 다리 (`docs/21` Phase 1).
+   *
+   * ⚠️ **선택입니다.** 셸 판이 낮으면 없을 수 있어, `desktopBridge()` 의
+   * 필수 칸에 넣지 않았습니다. 있는지는 `openChunkStore` 가 따로 봅니다 —
+   * `keepsAwake` 와 같은 원칙입니다. **셸이 있다는 것과 그 셸이 무엇을
+   * 할 수 있는가는 다릅니다.**
+   */
+  chunks?: unknown;
 }
 
 declare global {

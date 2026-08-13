@@ -44,6 +44,7 @@ import {
   sameOrigin,
   serverUrl,
 } from '../../src/lib/desktop/server.ts';
+import { registerChunkStore } from './chunks.ts';
 
 /** 이 창이 머물러도 되는 곳. 여기를 벗어나는 이동은 전부 막습니다. */
 let allowedOrigin = '';
@@ -133,6 +134,9 @@ function main(): void {
 
   void app.whenReady().then(() => {
     lockPermissions();
+    // ⚠️ 창을 만들기 **전에** 채널을 엽니다. 화면이 뜨자마자 녹음을
+    //    시작할 수 있고, 그때 채널이 없으면 첫 청크가 조용히 안 적힙니다.
+    registerChunkStore(() => allowedOrigin);
     createWindow(target);
 
     // macOS 는 창을 다 닫아도 앱이 삽니다 — 독 아이콘을 누르면 다시.

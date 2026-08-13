@@ -36,6 +36,7 @@ import {
   isRiskyForRecording,
   recordingSafety,
 } from '../lib/platform/recording.ts';
+import { describeGiveUp, openChunkStore } from '../lib/platform/chunk-store.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
@@ -99,6 +100,17 @@ const httpUpload = new HttpUploadTransport('');
  * 실험 5의 목적은 "폰이 한 시간을 버티는가" 이지 네트워크가 아니다.
  * 서버를 세워야만 돌아가는 실험은 결국 안 돌리게 된다.
  */
+/**
+ * 청크를 디스크에 붙잡아 두는 곳 (`docs/21` Phase 1).
+ *
+ * ⚠️ **브라우저에서는 `null` 입니다.** 붙잡아 둘 곳이 없으니까요 — 그때
+ * 큐는 예전과 똑같이 동작합니다. 데스크톱 앱에서만 값이 생깁니다.
+ */
+const chunkStore = openChunkStore(window.teamflowDesktop?.chunks, meetingId ?? 'local');
+
+/** 디스크에 못 적은 것. **조용히 넘어가면 "보관 중" 이 거짓말이 됩니다.** */
+const storeErrors: string[] = [];
+
 const client = new RecordingClient({
   monotonic: () => performance.now(),
   media: new BrowserMediaAdapter(),
@@ -107,6 +119,13 @@ const client = new RecordingClient({
     async send(chunk) {
       if (!trackUrl) return localUpload.send(chunk);
       return httpUpload.send(chunk);
+    },
+  },
+  uploadOptions: {
+    store: chunkStore,
+    onStoreError: (seq, reason) => {
+      storeErrors.push(`청크 ${seq}: ${reason}`);
+      render();
     },
   },
   timesliceMs: 5_000,
@@ -375,6 +394,53 @@ $('finish-retry').addEventListener('click', () => {
   }
 });
 
+/**
+ * 디스크에 남은 청크를 **다시 올린다.**
+ *
+ * ⚠️ 이 버튼이 이 기능의 절반입니다. "이 컴퓨터에 남아 있습니다" 라고
+ * 적어 놓고 올릴 자리를 안 주면, 그 문장은 사람을 안심시키기만 하고
+ * 소리는 그대로 안 올라갑니다 — 대표 실패 ③ 입니다.
+ *
+ * ⚠️ **성공한 것만 지웁니다.** 실패한 것은 디스크에 그대로 두고 다시
+ * 누를 수 있게 합니다. 한 번 실패했다고 지우면 되찾을 길이 없어집니다.
+ */
+$('reupload').addEventListener('click', () => {
+  const store = chunkStore;
+  const done = summary;
+  if (!store || !done) return;
+
+  void whilePressed($('reupload') as HTMLButtonElement, async () => {
+    const parked = new Set(done.parked);
+    const still: number[] = [];
+
+    // ⚠️ 디스크에서 `atMs` 를 같이 읽습니다. 서버가 `X-Client-At-Ms` 를
+    //    요구하고, 그게 없으면 공백을 절대 시각으로 복원할 수 없습니다.
+    //    파일 이름이 그 값을 들고 있는 이유가 정확히 이것입니다.
+    for (const meta of await store.list()) {
+      if (!parked.has(meta.seq)) continue;
+      const bytes = await store.get(meta.seq);
+      if (bytes === null) continue; // 이미 지워졌으면 올릴 것이 없습니다
+
+      // ⚠️ **올리는 방법은 한 곳에만 둡니다.** 여기서 `fetch` 를 다시
+      //    쓰면 헤더 하나가 갈라지는 순간 재업로드만 조용히 400 이 됩니다.
+      try {
+        await httpUpload.send({
+          seq: meta.seq,
+          atMs: meta.atMs,
+          byteLength: meta.byteLength,
+          payload: new Blob([bytes]),
+        });
+        await store.drop(meta.seq);
+      } catch {
+        still.push(meta.seq);
+      }
+    }
+
+    done.parked = still;
+    showResult(done);
+  });
+});
+
 document.addEventListener('visibilitychange', () => {
   client.setHidden(document.visibilityState === 'hidden');
 });
@@ -398,6 +464,20 @@ function showResult(result: RecordingSummary): void {
         )
         .join('')
     : '<li class="ok">공백 없음</li>';
+
+  // ⭐ 못 올린 청크가 **되찾을 수 있는 것인지** 말합니다.
+  //
+  // ⚠️ 알려만 주고 되찾을 자리를 안 주면 대표 실패 ③ 입니다. 그래서
+  //    버튼을 같이 켭니다 — 서버가 돌아왔을 때 누를 자리입니다.
+  const parkedText = describeGiveUp(chunkStore ? 'parked' : 'lost', result.parked.length);
+  $('parked').textContent = parkedText;
+  $('parked').hidden = parkedText === '';
+  ($('reupload') as HTMLButtonElement).hidden = result.parked.length === 0;
+
+  $('store-errors').innerHTML = storeErrors.length
+    ? storeErrors.map((e) => `<li class="bad">${escapeHtml(e)}</li>`).join('')
+    : '';
+  $('store-errors').hidden = storeErrors.length === 0;
 
   // docs/09 실험 5 표에 그대로 붙여 넣을 수 있는 한 줄
   lastRow =

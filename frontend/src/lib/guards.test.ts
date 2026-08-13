@@ -1684,9 +1684,31 @@ describe('데스크톱 셸 (Electron)', () => {
   });
 
   it('⭐ preload 가 `ipcRenderer` 를 통째로 내놓지 않는다', () => {
+    // ⚠️ **낱말을 금지하던 검사였습니다.** preload 에 IPC 가 하나도 없던
+    //    동안은 그게 요구와 같아 보였지만, Phase 1 에서 보관소 다리가
+    //    생기자 **올바른 코드를 막았습니다.** `ipcRenderer.invoke` 를
+    //    이름 붙은 함수로 감싸는 것이 정확히 권장되는 모양입니다.
+    //
+    //    요구는 "낱말을 쓰지 마라" 가 아니라 **"화면에 통째로 넘기지
+    //    마라"** 입니다. 아래 둘로 그 요구를 직접 잽니다.
     const source = shellCode('preload/index.ts');
-    ok(!/ipcRenderer/.test(source), 'ipcRenderer 가 새 나갑니다');
     ok(/contextBridge/.test(source), 'contextBridge 를 안 씁니다');
+
+    // ① 값으로 넘기지 않는다 — 부르는 자리(`.무엇(`)가 아닌 `ipcRenderer`
+    //    가 남아 있으면 `{ ipcRenderer }` 나 `invoke: ipcRenderer.invoke`
+    //    처럼 **참조를 건네주고** 있는 것입니다.
+    const withoutImports = source.replace(/import[^;]*from\s*'electron';/g, '');
+    const withoutCalls = withoutImports.replace(/ipcRenderer\s*\.\s*\w+\s*\(/g, '');
+    ok(!withoutCalls.includes('ipcRenderer'), 'ipcRenderer 를 값으로 건네고 있습니다');
+
+    // ② 채널 이름이 **글자로 박혀** 있다. 변수로 받으면 화면이 채널을
+    //    정하게 되고, 그건 `invoke` 를 통째로 내준 것과 같습니다.
+    const calls = [...withoutImports.matchAll(/ipcRenderer\s*\.\s*\w+\s*\(\s*([^,)]+)/g)];
+    ok(calls.length > 0, 'IPC 가 하나도 없습니다 — 검사가 아무것도 안 재고 있습니다');
+    for (const [, channel] of calls) {
+      const arg = (channel ?? '').trim();
+      ok(/^['"`]/.test(arg), `채널이 글자가 아닙니다: ${arg}`);
+    }
   });
 });
 

@@ -84,6 +84,14 @@ export interface RecordingSummary {
   captureConfidence: number;
   warnings: CaptureWarning[];
   /**
+   * 서버가 못 받았지만 **이 컴퓨터 디스크에 남아 있는** seq (`docs/21` Phase 1).
+   *
+   * ⚠️ `timeline` 의 공백에는 그대로 들어 있습니다 — 서버 기준으로는
+   * 지금 없는 것이 맞습니다. 이 목록은 "되찾을 수 있다" 만 더합니다.
+   * 보관소가 없으면(브라우저) 언제나 빈 배열입니다.
+   */
+  parked: number[];
+  /**
    * `MediaRecorder.start(timeslice)` 에 넘긴 값.
    *
    * 서버가 배치를 다시 계산할 때 필요합니다 — 종료 요청에 실어 보냅니다.
@@ -249,6 +257,7 @@ export class RecordingClient {
       verdict: judgeTrack(timeline),
       captureConfidence: captureConfidence(this.#warnings),
       warnings: [...this.#warnings],
+      parked: result.parked,
       timesliceMs: this.#timesliceMs,
     };
   }
