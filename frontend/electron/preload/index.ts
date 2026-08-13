@@ -41,4 +41,14 @@ contextBridge.exposeInMainWorld('teamflowDesktop', {
   platform: process.platform,
   /** 진단 화면에 적습니다 — 오디오 결함은 Electron 판에 크게 얽힙니다. */
   electron: process.versions.electron,
+  /**
+   * ⚠️ **이 셸이 재우기를 막고 있는가.** 창이 있다는 뜻이 아닙니다.
+   *
+   * Phase 0 에서는 **거짓**입니다 — `powerSaveBlocker` 가 아직 없습니다
+   * (`docs/21` Phase 2). 참으로 바꾸는 순간 녹음 화면이 "화면을 꺼도
+   * 됩니다" 라고 말하기 시작하므로, **실제로 막기 시작한 커밋에서만**
+   * 바꾸십시오. 여기서 미리 참으로 두면 사람이 화면을 끄고 그 구간을
+   * 영영 잃습니다.
+   */
+  keepsAwake: false,
 });

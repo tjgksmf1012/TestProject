@@ -35,9 +35,7 @@ import {
   describeRecordingSafety,
   isRiskyForRecording,
   recordingSafety,
-  tellShellRecordingStarted,
-  tellShellRecordingStopped,
-} from '../lib/shell/bridge.ts';
+} from '../lib/platform/recording.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
@@ -264,11 +262,15 @@ $('start').addEventListener('click', async () => {
     return;
   }
 
-  // ⭐ 안드로이드 셸에게 알린다. 셸은 지금 녹음 중인지 **모른다** —
-  // 마이크가 열린 것은 WebView 안 일이라 셸이 들여다볼 수 없다.
-  // 알려 줘야 포그라운드 서비스가 올라가고, 그래야 화면이 꺼져도
-  // 녹음이 끊기지 않는다. 셸이 없으면 아무 일도 하지 않는다.
-  tellShellRecordingStarted(window);
+  // ⚠️ **여기가 데스크톱 셸에게 "지금부터 녹음" 이라고 말할 자리입니다**
+  //    (`docs/21` Phase 2). 셸은 마이크가 열린 것을 모릅니다 — 그건 창
+  //    안에서 일어나는 일입니다. 알려 줘야 `powerSaveBlocker` 를 켜고,
+  //    그래야 화면이 잠겨도 녹음이 안 끊깁니다.
+  //
+  //    지금은 **비어 있습니다.** 안드로이드 셸에게 말하던 코드가 있었는데
+  //    그 셸을 접으면서 같이 걷어냈고, 데스크톱 쪽은 아직 받을 준비가
+  //    안 됐습니다(preload 의 `keepsAwake` 가 거짓인 이유). 없는 것을
+  //    부르는 척하지 않고 자리만 표시해 둡니다.
   // 회의 중 시계 드리프트를 흡수한다 (clock.ts: ±50ppm → 1시간에 180ms)
   resyncTimer = setInterval(() => void client.syncClock(), 5 * 60_000);
   const startedAt = Date.now();
@@ -355,9 +357,9 @@ $('stop').addEventListener('click', async () => {
   wakeLock = null;
 
   summary = await client.stop();
-  // 알림을 먼저 내린다. 서버 왕복을 기다리는 동안 "녹음 중" 이 떠
-  // 있으면 사람은 아직 듣고 있다고 생각한다.
-  tellShellRecordingStopped(window);
+  // ⚠️ 짝이 되는 자리 — 여기서 `powerSaveBlocker` 를 내립니다(Phase 2).
+  //    서버 왕복을 기다리는 동안 "녹음 중" 이 떠 있으면 사람은 아직
+  //    듣고 있다고 생각하므로, **멈춤을 먼저** 알려야 합니다.
 
   showResult(summary);
   await tellServerWeAreDone(summary);

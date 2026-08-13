@@ -101,12 +101,13 @@
 | [11. 비용 제로 구성](docs/11-비용-제로-구성.md) | 전 구성요소 비용 감사, 함정 4개, 학생 무료 리소스 |
 | [12. CCTV 영상 기반 화자판정](docs/12-CCTV-영상-기반-화자판정.md) | 모드 C 법적·기술 검토, 모드 비교, 융합 설계 |
 | [13. 화면 구조 (IA)](docs/13-화면-구조.md) | 화면 열 개가 어떻게 이어지는가, 각 화면의 책임, 아직 없는 화면 |
-| [15. PC 우선 방향](docs/15-PC-우선-방향.md) | **지금 방향** — 브라우저 통화로 회의, GitHub 최우선, 모바일은 보류 |
+| [15. PC 우선 방향](docs/15-PC-우선-방향.md) | **지금 방향** — 브라우저 통화로 회의, GitHub 최우선, 모바일 제외 |
 | [18. 사용설명서](docs/18-사용설명서.md) | **처음 여는 사람용** — 실제 화면 열 개로 따라가는 안내. 되는 것과 안 되는 것 ⭐ |
-| [17. 결함 기록](docs/17-결함-기록.md) | 만들면서 찾은 조용한 결함 **133건** — 재현 방법과 되돌림 확인 |
-| [14. 모바일](docs/14-모바일.md) | 왜 앱이어야 하는가, PWA + 안드로이드 셸, 폰 기준 UI/UX, 비용 근거 |
+| [17. 결함 기록](docs/17-결함-기록.md) | 만들면서 찾은 조용한 결함 **135건** — 재현 방법과 되돌림 확인 |
+| [14. 모바일](docs/14-모바일.md) | ⛔ **접힌 방향** — 왜 앱이어야 하는가·안드로이드 셸. `docs/15`·`docs/21` 이 덮었습니다 |
 | [16. 디자인 감사 (Stage A)](docs/16-디자인-감사-StageA.md) | 화면을 실제로 렌더해 잰 첫 감사 — 대비·간격·토큰의 근거 |
 | [19. 메신저 셸 전환](docs/19-메신저-셸-전환.md) | **디자인 결정 전부** — 셸·브리프 재적용·React 이전. 렌더해 보고 쓴 것 |
+| [21. 데스크톱 셸(Electron)](docs/21-데스크톱-셸-Electron.md) | **PC 앱** — 왜 Electron 인가(녹음이 안 끊기게), 인계 자료집의 전제 정정, Phase 0~6 |
 | [20. 요구사항 대조](docs/20-요구사항-대조.md) | **「요구사항 정의서」의 요구 ID 를 지금 코드와 하나씩 대조** — 얼마나 만들어졌나에 답하는 곳 ⭐ |
 | [원본 자료](docs/원본자료/) | ChatGPT 대화 전문, 제안서 텍스트 추출본 |
 
@@ -188,8 +189,9 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **칸반 화면 + 업무 API** (회의 근거 표시) | ✅ | `frontend/src/lib/kanban/`, `public/kanban.html` |
 | **첫 화면** (내 프로젝트·회의·다음 할 일) | ✅ | `frontend/src/lib/home/`, `public/home.html` |
 | **화면 간 이동** (막다른 길 없음) | ✅ | `frontend/src/lib/nav/`, [docs/13](docs/13-화면-구조.md) |
-| **모바일 우선 화면 + 앱 설치(PWA)** | ✅ (보류) | `frontend/public/app.css`·`sw.js`, [docs/14](docs/14-모바일.md) |
-| **안드로이드 셸** (화면 꺼도 녹음 유지) | 🔨 빌드 미확인 (보류) | `android/`, [docs/14](docs/14-모바일.md) |
+| **좁은 폭까지 견디는 판형 + 앱 설치(PWA)** | ✅ | `frontend/public/app.css`·`sw.js` — 폰 지원이 아니라 **창 반쪽·확대 200%·터치 노트북**을 위한 것 |
+| **데스크톱 앱** (Electron) | 🟡 **Phase 0** — 창은 뜨고 화면 열여섯 장이 그대로 돕니다. 절전 방지·시스템 오디오는 **아직 없습니다** | `frontend/electron/`, [docs/21](docs/21-데스크톱-셸-Electron.md) |
+| ~~안드로이드 셸~~ | ⛔ **접었습니다** — 실기기가 없고 `gradlew` 조차 없어 **빌드 자체가 불가능**했습니다 | [docs/14](docs/14-모바일.md) 머리말 |
 | **브라우저 통화로 회의** (WebRTC 메시 5명 · 헤드폰 확인) | ✅ 같은 기기 3인 통화로 확인 / **실제 네트워크는 미검증** | `backend/teamflow/call/`, `frontend/src/lib/call/`, `public/call.html` |
 | **PC 화면** (48rem↑ 상단 탭·칸반 3열 가로) | ✅ | `frontend/public/app.css`, [docs/15](docs/15-PC-우선-방향.md) §4.7 |
 | **GitHub 백필** (연결 전 활동 + 커버리지 표시) | ✅ 배선·멱등·잘림 처리 / **실제 HTTP 미검증** | `backend/teamflow/github/backfill.py`, [docs/15](docs/15-PC-우선-방향.md) §4.8 |
@@ -208,7 +210,8 @@ npm --prefix frontend test                       # 설치 불필요 — 개수�
 npm --prefix frontend install && npm --prefix frontend run check   # 타입 검사까지
 .venv/bin/python scripts/make_icons.py           # 앱 아이콘 (stdlib 만 씀)
 
-cd android && ./gradlew assembleDebug             # 안드로이드 셸 APK — docs/14
+TEAMFLOW_SERVER_URL=http://127.0.0.1:8811/home.html \
+  npm --prefix frontend run desktop               # 데스크톱 앱 — docs/21
 
 cp .env.example .env                             # 시크릿 채우기
 docker compose up -d postgres redis              # 인프라

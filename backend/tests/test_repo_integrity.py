@@ -415,118 +415,84 @@ def test_the_api_image_ships_the_screens():
 
 
 # ══════════════════════════════════════════════════════════════
-# 안드로이드 셸 — 웹과 코틀린이 어긋나면 조용히 아무 일도 안 일어난다
+# 데스크톱 셸 — 만들어 놓고 부르지 않으면 아무 일도 안 일어난다
 # ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 여기 있던 **안드로이드 셸 가드 넷**을 걷어냈습니다. 셸을 접었기
+#    때문입니다(`docs/14` 머리말 · `docs/21` §6). 넷이 대조하던 것은
+#    코틀린과 TypeScript 사이의 이름이었고, 한쪽이 없어졌으니 대조할
+#    것도 없습니다.
+#
+# ⚠️ **다섯 번째는 남겼습니다.** 그것은 코틀린을 안 읽고 웹 화면만
+#    읽습니다 — "만들어 놓고 아무도 안 부름" 을 잡는 자리이고, 그 결함은
+#    셸이 무엇이든 그대로 살아 있습니다. 절 이름만 보고 같이 지웠으면
+#    웹 쪽 그물을 잃을 뻔했습니다.
 
-ANDROID = REPO_ROOT / "android"
 
+def test_the_readme_never_tells_you_to_cd_somewhere_that_is_gone():
+    """⭐ README 의 셋업 명령이 **없는 곳**을 가리키면 안 됩니다.
 
-def _shell_kotlin(name: str) -> str:
-    return (
-        ANDROID / "app" / "src" / "main" / "java" / "com" / "teamflow" / "shell" / name
-    ).read_text()
+    ⚠️ 실제로 그런 줄이 있었고 **잡는 검사가 하나도 없었습니다.**
 
+        cd android && ./gradlew assembleDebug
 
-def test_the_shell_bridge_name_matches_on_both_sides():
-    """⭐ 웹이 찾는 이름과 셸이 심는 이름이 같아야 한다.
+    `android/` 가 없어진 뒤에도 이 줄은 그대로 남아 있었을 것이고,
+    처음 오는 사람은 제일 먼저 읽는 문서가 시키는 대로 하다가 막힙니다.
+    게다가 그 명령은 셸이 있을 때조차 **실행이 불가능**했습니다 —
+    `gradlew` 래퍼를 커밋한 적이 없었습니다.
 
-    어긋나면 **조용히 "셸이 아니다"** 가 된다. 셸 안인데 설치 안내가
-    뜨고, 서비스 워커가 셸 캐시와 겹치고, 무엇보다 녹음 시작을 셸에게
-    알리지 못해 **포그라운드 서비스가 안 올라간다** — 화면이 꺼지면
-    녹음이 끊긴다. 오류는 하나도 나지 않는다.
+    ⚠️ 명령 전체를 검사하지 않습니다. `cd <경로>` 의 경로만 봅니다 —
+    그것이 기계로 확인 가능한 부분이고, 나머지를 재는 척하면 이 검사가
+    거짓말을 하게 됩니다.
 
-    실제로 한 번 어긋나 있었다: 웹은 `TeamFlowShell` 을 봤고 셸은
-    `TeamFlowShellBridge` 를 심었다.
+    ⚠️ **빈 디렉터리는 없는 것으로 봅니다.** 처음에 `exists()` 만 봤다가
+    이 검사가 조용히 통과했습니다 — `git rm -r` 이 파일만 지우고 빈
+    `android/` 를 남겼고, 빈 껍데기로 `cd` 해 봐야 할 것이 없습니다.
+    터질 줄 알고 봤다가 안 터져서 알았습니다.
     """
     import re
 
-    kotlin = _shell_kotlin("ShellBridge.kt")
-    name = re.search(r'const val NAME = "([^"]+)"', kotlin)
-    assert name is not None, "ShellBridge.NAME 을 찾지 못했습니다"
+    def usable(path: str) -> bool:
+        target = REPO_ROOT / path
+        if not target.exists():
+            return False
+        return any(target.iterdir()) if target.is_dir() else True
 
-    web = (
-        REPO_ROOT / "frontend" / "src" / "lib" / "shell" / "bridge.ts"
-    ).read_text()
-    assert f"win.{name.group(1)}" in web, (
-        f"웹이 `{name.group(1)}` 를 찾지 않습니다. 셸이 심는 이름과 다릅니다."
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    missing = sorted(
+        {
+            path
+            for path in re.findall(r"cd ([A-Za-z0-9_./-]+)", readme)
+            if not usable(path)
+        }
+    )
+    assert not missing, (
+        f"README 가 없는 곳으로 데려갑니다: {missing} — 지웠으면 명령도 같이 지우십시오"
     )
 
 
-def test_every_bridge_method_the_web_calls_exists_in_the_shell():
-    """⭐ 웹이 부르는 브리지 함수가 셸에 전부 있어야 한다.
+def test_the_recording_screen_marks_where_the_shell_hook_goes():
+    """⭐ 녹음 시작·멈춤 자리에 **셸에게 알릴 자리**가 표시돼 있는가.
 
-    없는 함수를 부르면 그 자리에서 예외가 난다. 녹음 시작 직전이면
-    **녹음이 아예 시작되지 않는다.**
-    """
-    import re
+    안드로이드 셸에게 "지금부터 녹음" 이라고 말하던 코드가 있었습니다.
+    셸을 접으면서 걷어냈고, 데스크톱 셸은 아직 받을 준비가 안 됐습니다
+    (`docs/21` Phase 2 — `powerSaveBlocker`).
 
-    kotlin = _shell_kotlin("ShellBridge.kt")
-    exposed = set(re.findall(r"@JavascriptInterface\s+fun (\w+)\(", kotlin))
-    assert exposed, "@JavascriptInterface 함수를 하나도 못 찾았습니다"
+    ⚠️ **그 자리가 사라지면 안 됩니다.** 사라지면 Phase 2 를 하는 사람이
+    어디에 붙여야 하는지 모릅니다. 이 저장소의 대표 실패 ③ 이 정확히
+    그것입니다 — 할 일을 알려 주고 그 일을 할 자리를 안 주는 것.
 
-    web = (REPO_ROOT / "frontend" / "src" / "lib" / "shell" / "bridge.ts").read_text()
-    declared = set(
-        re.findall(
-            r"^\s*(\w+): \(\) =>",
-            web[web.index("export interface ShellBridge") : web.index("declare global")],
-            re.MULTILINE,
-        )
-    )
-    assert declared, "웹 쪽 ShellBridge 인터페이스를 못 읽었습니다"
-
-    missing = sorted(declared - exposed)
-    assert not missing, f"웹이 부르는데 셸에 없는 함수: {missing}"
-
-
-def test_the_shell_declares_the_permissions_its_code_needs():
-    """⭐ 코드가 쓰는 것을 매니페스트가 선언해야 한다.
-
-    안드로이드는 선언되지 않은 권한을 **조용히 거절**한다. 포그라운드
-    서비스가 안 올라가면 화면이 꺼졌을 때 녹음이 끊기는데, 그건
-    녹음이 끝난 뒤 커버리지를 봐야 알 수 있다 — 그때는 이미 늦었다.
-    """
-    manifest = (ANDROID / "app" / "src" / "main" / "AndroidManifest.xml").read_text()
-
-    for permission in [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.INTERNET",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
-        "android.permission.POST_NOTIFICATIONS",
-    ]:
-        assert permission in manifest, f"선언되지 않은 권한: {permission}"
-
-    # 서비스가 등록돼 있어야 `startForegroundService` 가 동작한다.
-    assert 'android:name=".RecordingService"' in manifest
-    assert 'android:foregroundServiceType="microphone"' in manifest
-
-
-def test_the_shell_refuses_plaintext_http_to_the_outside():
-    """⭐ 회의 음성과 세션 쿠키가 평문으로 나가면 안 된다.
-
-    안드로이드는 API 28+ 부터 평문을 기본으로 막지만, 이 앱은 minSdk 24
-    라 낮은 기기에서는 기본이 반대다. 명시적으로 막는다.
-    """
-    config = (
-        ANDROID / "app" / "src" / "main" / "res" / "xml" / "network_security_config.xml"
-    ).read_text()
-    assert '<base-config cleartextTrafficPermitted="false" />' in config
-
-    manifest = (ANDROID / "app" / "src" / "main" / "AndroidManifest.xml").read_text()
-    assert "android:networkSecurityConfig=" in manifest, (
-        "설정 파일만 있고 매니페스트가 가리키지 않으면 아무 효력이 없습니다"
-    )
-
-
-def test_the_recording_screen_actually_tells_the_shell():
-    """⭐ 브리지를 만들어 놓고 부르지 않으면 아무 일도 안 일어난다.
-
-    이 저장소에서 가장 자주 나온 결함이다. 여기서는 그 결과가
-    **화면이 꺼지면 녹음이 끊기는 것**이고, 오류는 안 난다.
+    ⚠️ 지금은 **호출이 아니라 표시**를 봅니다. 없는 함수를 부르는 척하면
+    그게 더 나쁩니다.
     """
     screen = (REPO_ROOT / "frontend" / "src" / "demo" / "main.ts").read_text()
-    assert "tellShellRecordingStarted(window)" in screen
-    assert "tellShellRecordingStopped(window)" in screen
+    assert screen.count("Phase 2") >= 2, (
+        "녹음 시작·멈춤 자리의 `docs/21` Phase 2 표시가 사라졌습니다 — "
+        "데스크톱 셸에게 알릴 자리를 다음 사람이 못 찾습니다"
+    )
+    assert "powerSaveBlocker" in screen, (
+        "무엇을 붙여야 하는지(`powerSaveBlocker`)가 화면 코드에서 사라졌습니다"
+    )
 
 
 def test_the_seed_makes_a_project_the_api_could_have_made():
