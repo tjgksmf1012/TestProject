@@ -2216,3 +2216,212 @@ def test_the_readme_numbers_are_not_stale():
         "`docs/20` 이 README 문서 표에 없습니다 — 얼마나 만들어졌나에 "
         "답하는 문서인데 찾을 방법이 없습니다"
     )
+
+
+# ══════════════════════════════════════════════════════════════════
+# 문서가 손으로 센 숫자 — 2026-08-13 전수 조사에서 71건이 나왔습니다
+#
+# 그중 **다시 낡을 것**만 여기서 잽니다. 한 번 고치고 마는 것은 가드를
+# 달 값이 없고, 반대로 화면·테스트 개수처럼 **코드가 움직일 때마다
+# 틀려지는 것**은 사람이 절대 못 따라갑니다.
+# ══════════════════════════════════════════════════════════════════
+
+_LIVE_DOCS = ("README.md", "AGENTS.md", *(f"docs/{n}" for n in ()))
+"""살아 있는 문서 = 지금을 주장하는 문서.
+
+⚠️ 여기에 `docs/14`·`docs/16` 을 넣지 마십시오. 그 둘은 머리말로 **시점을
+못 박은 보존 문서**라 옛 값이 맞는 기록입니다. 넣으면 이 저장소가 지키는
+원칙("계획을 덮어쓰지 않는다")을 가드가 깨뜨립니다.
+"""
+
+
+def _korean_number(n: int) -> str:
+    """세는 수사. 문서가 `열여섯 장` 처럼 한글로 적습니다."""
+    words = {
+        1: "하나", 2: "둘", 3: "셋", 4: "넷", 5: "다섯", 6: "여섯",
+        7: "일곱", 8: "여덟", 9: "아홉", 10: "열", 11: "열하나",
+        12: "열둘", 13: "열셋", 14: "열넷", 15: "열다섯", 16: "열여섯",
+        17: "열일곱", 18: "열여덟", 19: "열아홉", 20: "스물",
+    }
+    return words[n]
+
+
+def test_no_live_document_claims_a_stale_screen_count():
+    """⭐ 살아 있는 문서가 **화면 개수**를 틀리게 말하지 않는가.
+
+    이번 전수 조사에서 **가장 많이 낡은 자리**였습니다 — README 두 곳,
+    `docs/13` 한 곳, `docs/00` 한 곳, `docs/08` 한 곳이 각각 열·열·열·
+    일곱·아홉이라고 적혀 있었고 실제는 열여섯이었습니다.
+
+    ⚠️ 세는 자리는 `public/*.html` 입니다. `src/demo/*.tsx` 를 세면
+    `parts.tsx` 같은 조각이 섞입니다.
+
+    ⚠️ **`docs/14`·`docs/16` 은 안 봅니다** — 시점을 못 박은 보존 문서라
+    옛 값이 맞습니다.
+    """
+    import re
+
+    screens = len(list((REPO_ROOT / "frontend" / "public").glob("*.html")))
+    want = _korean_number(screens)
+
+    # ⚠️ **표지를 「장」 으로 좁힙니다.** 맨 "화면 N 개" 는 이 저장소에서
+    #    세 가지 뜻으로 쓰입니다 — 전체 수 · React 로 옮긴 수 · `docs/18`
+    #    이 다루는 수. 셋을 한 자로 재면 맞는 문장을 틀렸다고 잡습니다
+    #    (실제로 세 곳을 그렇게 잡았습니다). 이 저장소는 **전체 수를 셀
+    #    때만 「장」** 을 씁니다 — "화면 열여섯 장".
+    NUM = (
+        "하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉|열"
+        "|열하나|열둘|열셋|열넷|열다섯|열여섯|열일곱|열여덟|열아홉|스물"
+    )
+    pattern = re.compile(rf"화면(?:이)? ({NUM}) 장")
+
+    bad = []
+    for name in (
+        "README.md",
+        "docs/13-화면-구조.md",
+        "docs/00-이-프로그램은-무엇인가.md",
+        "docs/21-데스크톱-셸-Electron.md",
+    ):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8")
+        for line_no, line in enumerate(text.splitlines(), 1):
+            for m in pattern.finditer(line):
+                if m.group(1) != want:
+                    bad.append(f"{name}:{line_no} — '{m.group(0)}' (실제 {screens})")
+
+    assert not bad, (
+        "화면 개수를 틀리게 적은 곳이 있습니다:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_no_live_document_claims_a_stale_test_count():
+    """⭐ 문서가 `~.test.ts (N개 테스트)` 라고 적은 N 이 **실제와 맞는가**.
+
+    `docs/13` 두 곳(27↔29) · `docs/15` 두 곳(177↔184, 24↔25) ·
+    `docs/19` 한 곳(28↔29)이 같은 병이었습니다. 테스트를 하나 더하면
+    문서가 조용히 틀려집니다.
+
+    ⚠️ **면제가 필요합니다.** `docs/14`·`docs/16` 은 머리말로 시점을 못
+    박았고, 거기 적힌 옛 실측치는 **맞는 기록**입니다.
+    """
+    import re
+
+    live = [
+        p
+        for p in (REPO_ROOT / "docs").glob("*.md")
+        if p.name.split("-")[0] not in {"14", "16"}
+    ]
+
+    # `frontend/src/lib/call/mesh.ts` (25개 테스트)  /  `links.test.ts` (29)
+    ref = re.compile(r"`([^`]*?/)?([a-z-]+)(?:\.test)?\.ts` ?\((\d+)(?:개 테스트)?\)")
+
+    def count_tests(stem: str) -> int | None:
+        hits = list((REPO_ROOT / "frontend" / "src").rglob(f"{stem}.test.ts"))
+        if len(hits) != 1:
+            return None
+        return len(re.findall(r"^\s*(?:it|test)\(", hits[0].read_text(encoding="utf-8"), re.M))
+
+    bad = []
+    for doc in live:
+        for line_no, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            for m in ref.finditer(line):
+                actual = count_tests(m.group(2))
+                if actual is not None and actual != int(m.group(3)):
+                    bad.append(
+                        f"docs/{doc.name}:{line_no} — {m.group(2)} 를 "
+                        f"{m.group(3)}개라는데 {actual}개"
+                    )
+
+    assert not bad, "테스트 개수가 낡은 곳:\n  " + "\n  ".join(bad)
+
+
+def test_no_live_document_says_the_android_shell_is_merely_paused():
+    """⭐ 안드로이드 셸을 **지웠는데** 문서가 "보류" 라고 말하지 않는가.
+
+    2026-08-13 에 지웠습니다(`android/` 30파일). 그런데 `docs/08`·`docs/15`
+    두 곳·`docs/18`·`docs/17` 다섯 곳이 여전히 "보류"·"셸은 있지만" 으로
+    적고 있었습니다. **"멈춘 것" 과 "없는 것" 은 다릅니다** — 보류라고
+    읽으면 다음 사람이 되살리려고 시간을 씁니다.
+
+    ⚠️ 셸이 **다시 생기면** 이 검사는 스스로 비활성화됩니다. 그때는
+    보류라고 적는 것이 맞기 때문입니다.
+    """
+    if (REPO_ROOT / "android").exists():
+        return  # 셸이 있으면 잴 것이 없습니다
+
+    banned = ("안드로이드 셸은 별도", "안드로이드 셸 | **보류", "안드로이드 셸 | 보류")
+    bad = []
+    for doc in (REPO_ROOT / "docs").glob("*.md"):
+        if doc.name.split("-")[0] in {"14", "16"}:
+            continue
+        for line_no, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            if "안드로이드" not in line:
+                continue
+            if any(b in line for b in banned):
+                bad.append(f"docs/{doc.name}:{line_no} — {line.strip()[:70]}")
+
+    assert not bad, (
+        "안드로이드 셸을 지웠는데 보류라고 적은 곳:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_no_live_document_names_a_framework_the_project_does_not_have():
+    """⭐ 안 쓰는 프레임워크 이름이 **살아 있는 문서**에 남아 있지 않은가.
+
+    `docs/03` 두 곳·`docs/11` 두 곳이 Next.js 를 쓴다고 적고 있었습니다.
+    런타임 의존성은 react·react-dom·@radix-ui/react-dialog 셋뿐이고
+    번들은 `build.mts` 의 esbuild 입니다.
+
+    ⚠️ **브랜드 표기(`Next.js`)만 봅니다.** 소문자 `next` 로 잡으면
+    `next_agenda`·`next.test.ts`·`?next=` 가 전부 걸립니다 — 실제로 그렇게
+    짰다가 아홉 곳을 잘못 잡았습니다. 이 저장소가 적어 둔 그대로입니다:
+    **잴 구역에는 그 구역만의 이름을 붙이십시오.**
+
+    ⚠️ 면제: `docs/00-제안서-…-검토.md`(구현 이전 권고안) · `docs/16`
+    (측정일이 박힌 감사) · `docs/17`(결함 기록 — 과거 서술) ·
+    `docs/20`(정의서가 **요구한 것**과 우리가 쓴 것을 나란히 적는 표).
+    """
+    import json
+
+    pkg = json.loads((REPO_ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
+    installed = {*pkg.get("dependencies", {}), *pkg.get("devDependencies", {})}
+
+    # 브랜드 표기 → package.json 이름
+    BRANDS = {"Next.js": "next", "Zustand": "zustand", "Recharts": "recharts"}
+    missing = {brand for brand, pkg_name in BRANDS.items() if pkg_name not in installed}
+
+    exempt_names = {"00-제안서-TeamFlowAI-검토.md"}
+    exempt_prefix = {"16", "17", "20"}
+
+    bad = []
+    for doc in (REPO_ROOT / "docs").glob("*.md"):
+        if doc.name in exempt_names or doc.name.split("-")[0] in exempt_prefix:
+            continue
+        for line_no, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            for brand in missing:
+                # 부재를 말하는 줄은 통과 — "Vite 를 안 씁니다" 같은 것.
+                if brand in line and not any(
+                    k in line
+                    for k in ("안 씁니다", "안 넣", "없습니다", "아닙니다", "쓰지 않", "가 아니라")
+                ):
+                    bad.append(f"docs/{doc.name}:{line_no} — {line.strip()[:70]}")
+
+    assert not bad, (
+        "설치하지 않은 프레임워크를 쓴다고 적은 곳:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_the_defect_log_never_reuses_a_measurement_ordinal():
+    """⭐ `docs/17` 의 "n번째 자" 순번이 **겹치지 않는가**.
+
+    이 저장소는 "측정 도구가 틀렸다" 를 따로 세고 있고, 그 순번이 지금
+    열일곱까지 왔습니다. 실제로 **"열여섯 번째" 가 두 번** 쓰여 있었습니다
+    (결함 163 과 170). 순번이 겹치면 몇 번을 당했는지 셀 수 없게 됩니다.
+    """
+    import re
+    from collections import Counter
+
+    text = (REPO_ROOT / "docs" / "17-결함-기록.md").read_text(encoding="utf-8")
+    ordinals = re.findall(r"(열[가-힣]*|스물[가-힣]*) 번째(?:로)? (?:자|당한)", text)
+    dupes = [o for o, c in Counter(ordinals).items() if c > 1]
+
+    assert not dupes, f"'n번째 자' 순번이 겹칩니다: {dupes}"

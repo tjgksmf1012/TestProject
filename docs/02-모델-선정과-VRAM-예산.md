@@ -246,7 +246,8 @@ class MeetingAnalysis(BaseModel):
     summary: str
     decisions: list[Decision]
     tasks: list[TaskCandidate]
-    unresolved_issues: list[str]
+    unresolved_issues: list[UnresolvedIssue]   # 내용 + 근거 발화 id
+    next_agenda: list[str]
 
 schema = MeetingAnalysis.model_json_schema()
 # vLLM: guided_json=schema, guided_decoding_backend="xgrammar"

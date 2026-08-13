@@ -259,3 +259,77 @@ def test_the_action_labels_cover_every_action_the_code_writes():
         f"사람 말이 없는 감사 행동입니다: {missing} — "
         "`activity_service.ACTION_LABEL` 에 넣으십시오"
     )
+
+
+def test_the_doc_does_not_call_a_finished_requirement_a_next_step():
+    """⭐ `docs/20` 의 「다음에 할 일」이 **§5 가 ✅ 로 적은 요구**를 다시
+    남은 일로 부르지 않는가.
+
+    2026-08-13 전수 조사에서 나온 어긋남 71건 중 **13건이 이 한 파일 안의
+    자기모순**이었습니다 — §5 표는 채팅·활동 기록·`TASK-004`·발언 통계를
+    전부 ✅ 로 적어 두고, 같은 파일의 §1 요약과 §6 「다음에 할 일」은 그
+    넷을 아직 안 한 것으로 적고 있었습니다. 그리고 `docs/08` 이 그 틀린
+    문장을 **복사해 갔습니다.**
+
+    이 저장소의 대표 실패 ② (두 벌이 있으면 한쪽만 고쳐진다)가 표 하나와
+    그 아래 문단 사이에서 일어난 것입니다. **§5 가 기준이고 나머지가
+    따릅니다.**
+
+    ⚠️ 인용 블록(4칸 들여쓴 줄)은 봅니다 — 옛 진단을 **인용으로 보존**한
+    자리는 지금을 주장하는 것이 아니기 때문입니다.
+    """
+    import re
+
+    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text(encoding="utf-8")
+
+    # §5 표에서 ✅ 인 요구 ID 를 모읍니다.
+    done = set()
+    for line in doc.splitlines():
+        m = re.match(r"\|\s*([A-Z][A-Z-]+-\d+)[^|]*\|\s*✅", line)
+        if m:
+            done.add(m.group(1))
+    assert done, "§5 표에서 ✅ 인 요구를 하나도 못 찾았습니다 — 파서가 낡았습니다"
+
+    # 「다음에 할 일」절만 봅니다.
+    tail = doc.partition("## 6. 다음에 할 만한 것")[2]
+    assert tail, "§6 절을 못 찾았습니다"
+
+    # ⚠️ **낱말이 아니라 절 구조로 거릅니다.** 처음엔 "끝났습니다" 가 든
+    #    줄만 건너뛰게 했는데, 끝난 것을 **여러 줄에 걸쳐** 나열하면 둘째
+    #    줄부터 다시 잡힙니다 — 실제로 그렇게 잘못 잡았습니다. `###` 소절
+    #    제목에 ✅ 가 있으면 그 소절 전체가 "끝난 것" 입니다.
+    offenders = []
+    in_done_section = False
+    for line_no, line in enumerate(tail.splitlines(), 1):
+        if line.startswith("###"):
+            in_done_section = "✅" in line or "끝났" in line
+            continue
+        if in_done_section or line.startswith("    "):
+            continue  # 끝난 것을 적는 소절 · 인용으로 보존한 옛 문장
+        for rid in re.findall(r"`([A-Z][A-Z-]+-\d+)", line):
+            if rid in done:
+                offenders.append(f"§6 +{line_no}: {rid} — §5 는 ✅ 인데 남은 일로 적혀 있습니다")
+
+    assert not offenders, "\n  " + "\n  ".join(offenders)
+
+
+def test_the_summary_table_agrees_with_the_audit_log_count():
+    """⭐ `docs/20` §1 요약표의 **감사 로그 쓰기 개수**가 코드와 맞는가.
+
+    위 `test_the_audit_log_is_now_read_somewhere` 가 이미 코드를 세어
+    `writes == 13` 을 단언하는데, **문서는 12곳이라고 적고 있었습니다.**
+    코드만 재고 문서를 안 재면 이런 어긋남이 그대로 남습니다.
+    """
+    import re
+
+    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text(encoding="utf-8")
+    m = re.search(r"쓰기 (\d+)곳", doc)
+    assert m, "§1 요약표에서 '쓰기 N곳' 을 못 찾았습니다"
+
+    writes = 0
+    for path in (REPO_ROOT / "backend" / "teamflow").rglob("*.py"):
+        writes += len(re.findall(r"\bm\.AuditLog\(", path.read_text(encoding="utf-8")))
+
+    assert int(m.group(1)) == writes, (
+        f"`docs/20` 은 쓰기 {m.group(1)}곳이라는데 코드에는 {writes}곳입니다"
+    )
