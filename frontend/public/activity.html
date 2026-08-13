@@ -19,8 +19,32 @@
 
   /* ══ 활동 기록 ═════════════════════════════════════════════
 
-     ⚠️ 여기에는 **누를 것이 하나도 없습니다.** 감사 기록은 고치거나
-     지울 수 없어야 하고, 버튼이 하나라도 있으면 그게 열립니다. */
+     ⚠️ 누르는 것은 **갈래와 거르개뿐**입니다. 기록을 고치거나 지우는
+     요청은 0개입니다 — 감사 기록·저장소 기록은 나중에 확인하려고 있고,
+     화면에서 고칠 수 있으면 그 목적이 통째로 사라집니다. */
+
+  /* 갈래 — 팀 활동 / GitHub. 출처가 다른 두 흐름이라 섞지 않습니다. */
+  .lanes { display: flex; gap: var(--sp-2); margin: var(--sp-4) 0 0; }
+  .lanes button { min-height: var(--tap); padding: 0 var(--sp-4);
+                  font-size: var(--fs-label); color: var(--text-muted);
+                  background: none; border: 1px solid var(--line);
+                  border-radius: .5rem; cursor: pointer; }
+  .lanes button.on { color: var(--text); border-color: var(--primary);
+                     font-weight: 600; }
+
+  /* 종류 거르개. ⚠️ 건수는 글자입니다 — 폭·위치로 그리면 순위표입니다. */
+  .gbar { display: flex; flex-wrap: wrap; gap: var(--sp-2);
+          margin: 0 0 var(--sp-4); }
+  .gbar button { min-height: var(--tap); padding: 0 var(--sp-3);
+                 font-size: var(--fs-caption); color: var(--text-muted);
+                 background: none; border: 1px solid var(--line);
+                 border-radius: .5rem; cursor: pointer;
+                 font-variant-numeric: tabular-nums; }
+  .gbar button.on { color: var(--text); border-color: var(--primary); }
+
+  /* 커밋이 없는 이유 · 빈 목록에서 갈 곳. 본문보다 낮게. */
+  .gwhy, .gnext { max-width: 52rem; margin: var(--sp-5) 0 0;
+                  font-size: var(--fs-caption); color: var(--text-subtle); }
 
   /* ⚠️ 줄마다 가로선을 긋지 않습니다 — 백 줄이면 선이 백하나가 되고,
      그 선들이 화면에서 가장 진한 것이 됩니다. */

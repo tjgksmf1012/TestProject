@@ -38,6 +38,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from teamflow.db import models as m
+from teamflow.db import vocab
 from teamflow.github import backfill as bf
 from teamflow.github import webhook
 from teamflow.github.client import GitHubClient, GitHubError
@@ -88,7 +89,7 @@ def known_pull_request_numbers(session: Session, project_id: int) -> set[int]:
     rows = session.scalars(
         select(m.GithubEvent).where(
             m.GithubEvent.project_id == project_id,
-            m.GithubEvent.event_type == "pull_request.merged",
+            m.GithubEvent.event_type == str(vocab.GithubEventKind.PR_MERGED),
         )
     ).all()
 

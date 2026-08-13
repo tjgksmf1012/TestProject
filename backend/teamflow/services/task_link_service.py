@@ -48,7 +48,7 @@ from teamflow.services import notification_service
 logger = logging.getLogger(__name__)
 
 #: 연결을 만드는 이벤트. 리뷰나 이슈는 "이 업무가 이 PR 로 끝났다" 가 아닙니다.
-LINKED_EVENT_TYPES = frozenset({"pull_request.merged"})
+LINKED_EVENT_TYPES = frozenset({str(vocab.GithubEventKind.PR_MERGED)})
 
 
 def link_pull_request(session: Session, event: m.GithubEvent) -> list[TaskRef]:

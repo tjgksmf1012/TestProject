@@ -386,6 +386,41 @@ def reaction_values() -> tuple[str, ...]:
 
 
 # ══════════════════════════════════════════════════════════════
+# github_events.event_type — 저장되는 GitHub 사건 (요구사항 정의서 §17)
+# ══════════════════════════════════════════════════════════════
+#
+# ## ⚠️ 커밋(push)이 여기 **없는 것은 빠뜨린 게 아니라 결정**입니다
+#
+# 커밋은 쪼개기가 너무 쉬워서 지표로 쓸 수 없습니다 (`docs/05` §2.1 —
+# 오타 PR 30건이 실제 구현 1건을 이겼던 그 구멍의 커밋판입니다). 코드
+# 기여는 **병합된 PR 단위**로만 셉니다(`contribution/events.py` 의
+# COMMIT 부재와 같은 결정). 그래서 웹훅도 push 를 받지 않고, 조회
+# 화면도 커밋 목록을 만들지 않으며 — **그 이유를 화면이 말합니다.**
+#
+# ⚠️ 이 값들은 웹훅(`github/webhook.py`)과 백필이 **쓰고**, 업무 연결
+# (`task_link_service`)·조회 피드가 **읽습니다.** 예전에는 다섯 곳에
+# 문자열로 흩어져 있었습니다 — 한 곳만 바꾸면 나머지가 조용히 어긋나는
+# 자리라 여기로 모았습니다.
+
+
+class GithubEventKind(StrEnum):
+    """`github_events.event_type` 이 받는 값 전부."""
+
+    PR_MERGED = "pull_request.merged"
+    PR_REVIEW = "pull_request.review"
+    ISSUE_CLOSED = "issues.closed"
+
+
+#: 종류 → 사람 말. 서버가 라벨을 만들어 내려보냅니다 — 화면에 두 번째
+#: 표를 만들지 마십시오 (`activity` 의 `label` 과 같은 방식).
+GITHUB_EVENT_LABEL: dict[GithubEventKind, str] = {
+    GithubEventKind.PR_MERGED: "PR 병합",
+    GithubEventKind.PR_REVIEW: "PR 리뷰",
+    GithubEventKind.ISSUE_CLOSED: "이슈 닫힘",
+}
+
+
+# ══════════════════════════════════════════════════════════════
 # notifications.kind — 알림의 종류 (요구사항 정의서 §19)
 # ══════════════════════════════════════════════════════════════
 #

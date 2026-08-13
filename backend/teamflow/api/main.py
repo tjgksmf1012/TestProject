@@ -59,6 +59,7 @@ from teamflow.services import (
     calendar_service,
     channel_service,
     github_connection_service,
+    github_feed_service,
     inefficiency_service,
     meeting_contribution_service,
     message_service,
@@ -965,6 +966,71 @@ def github_health(
         coverage=gh_connection.describe_coverage(facts),
         backfilled_at=facts.backfilled_at,
         backfilled_to=facts.backfilled_to,
+    )
+
+
+class GithubFeedItemOut(BaseModel):
+    """GitHub 사건 한 줄.
+
+    ⚠️ **`payload` 의 칸이 하나도 없습니다.** 저장된 웹훅 본문에는 저장소
+    설정과 사람 이메일까지 들어 있습니다 — 여기 나열된 것 밖의 칸을
+    더하려면 그 칸이 어디서 오는지부터 확인하십시오.
+
+    ⚠️ **github.com 링크가 없습니다.** 실제 GitHub 에 붙여 본 적이 없어
+    주소가 추측입니다 — 검색 결과와 같은 결정입니다(`docs/20`).
+    """
+
+    id: int
+    kind: str
+    label: str
+    who: str
+    repo: str
+    ref: str | None
+    occurred_at: str
+
+
+class GithubKindCountOut(BaseModel):
+    """종류별 건수 한 줄. ⚠️ **사람 이름이 없습니다** — 사람별 집계는
+    기여도 화면이 근거와 함께 담당하고, 여기 또 만들면 순위표가 됩니다."""
+
+    kind: str
+    label: str
+    count: int
+
+
+class GithubFeedOut(BaseModel):
+    items: list[GithubFeedItemOut]
+    #: ⚠️ 어휘 선언 순. 건수 순이 아닙니다 — 건수 순 목록이 곧 순위표입니다.
+    counts: list[GithubKindCountOut]
+
+
+@app.get("/api/projects/{project_id}/github/feed", response_model=GithubFeedOut)
+def github_feed(project_id: int, session: DbSession, user: CurrentUser) -> GithubFeedOut:
+    """GITHUB-003~005 조회 + 008 프로젝트 단위 집계.
+
+    구성원만 봅니다 — 팀의 저장소 활동이 그대로 나가는 자리입니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    return GithubFeedOut(
+        items=[
+            GithubFeedItemOut(
+                id=item.id,
+                kind=item.kind,
+                label=item.label,
+                who=item.who,
+                repo=item.repo,
+                ref=item.ref,
+                occurred_at=item.occurred_at,
+            )
+            for item in github_feed_service.recent(session, project_id)
+        ],
+        counts=[
+            GithubKindCountOut(kind=c.kind, label=c.label, count=c.count)
+            for c in github_feed_service.counts(session, project_id)
+        ],
     )
 
 
@@ -2931,7 +2997,7 @@ async def github_webhook(
     # 결함입니다(`_enqueue_after_commit` 의 주석). 커밋은 이 함수가 아니라
     # FastAPI 의존성 teardown 에서 일어납니다.
     queued = False
-    if normalized.event_type == "pull_request.merged":
+    if normalized.event_type == str(vocab.GithubEventKind.PR_MERGED):
         _enqueue_github_after_commit(session, row.id)
         queued = True
 
