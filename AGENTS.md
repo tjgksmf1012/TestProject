@@ -235,21 +235,25 @@ React 입니다 (열셋). ⚠️ 이 숫자는 **화면을 더할 때마다 낡�
 - ⛔ **electron-vite 를 들이지 마십시오.** 그 권고의 전제(Vite 사용)가 이
   저장소에 없습니다. main·preload 도 `build.mts` 의 esbuild 로 만듭니다
 
-⚠️ **Phase 1 까지 왔습니다** — 창이 뜨고, **청크가 디스크에 앉습니다.**
-업로드를 포기해도 데스크톱에서는 소리를 안 잃습니다(`parked`). 아직
-`powerSaveBlocker`(Phase 2)도 시스템 오디오도 없습니다. 자세한 것은 `docs/21`.
+⚠️ **Phase 2 까지 왔습니다** — 창이 뜨고, 청크가 디스크에 앉고(`parked`),
+**녹음 중에는 절전을 막습니다**(`powerSaveBlocker` + `backgroundThrottling`).
+`keepsAwake` 는 이제 **참**이고 녹음 화면이 "화면을 꺼도 녹음이 이어집니다"
+라고 말합니다. 시스템 오디오(Phase 3)는 아직 없습니다. 자세한 것은 `docs/21`.
 
 - 경로 결정은 `src/lib/desktop/chunk-paths.ts`. renderer 는 **경로를 못
   줍니다** — 회의 id 만 주고 폴더·파일명은 여기서 만듭니다
-- ⛔ **`keepsAwake` 를 Phase 2 전에 참으로 바꾸지 마십시오.** 그 순간
-  화면이 "화면을 꺼도 됩니다" 라고 **거짓말**을 시작합니다
+- ⛔ **blocker 배선을 지우면 `keepsAwake` 도 같은 커밋에서 거짓으로.**
+  값만 참으로 남으면 화면이 "화면을 꺼도 됩니다" 라고 **거짓말**을
+  시작합니다 — `guards.test.ts` 짝 가드가 셋(main blocker ·
+  `backgroundThrottling` · 화면 `shouldHoldAwake`)을 잽니다
 - ⚠️ preload 가드는 이제 낱말이 아니라 **요구**를 잽니다 — `ipcRenderer`
   를 값으로 건네는가 · 채널이 글자로 박혀 있는가 (결함 170)
 
-⛔ **preload 의 `keepsAwake` 를 미리 참으로 바꾸지 마십시오.** 그 값이
-참이 되는 순간 녹음 화면이 **"화면을 꺼도 됩니다"** 라고 말하기
-시작합니다. 실제로 `powerSaveBlocker` 를 켜는 커밋에서만 바꾸십시오 —
-틀리면 사람은 화면을 끄고, 그 구간은 영영 못 잽니다.
+⛔ **절전 방지는 녹음 중에만 잡습니다** — 항상 켜면 배터리만 태우고
+"이 앱은 켜 두면 배터리가 준다" 는 인상만 남깁니다. 어느 국면에서
+잡는지는 `lib/platform/awake.ts` 의 `shouldHoldAwake` 가 정합니다
+(`interrupted` 에서도 잡습니다 — 놓으면 기계가 잠들어 되살아날 기회가
+사라집니다).
 
 ---
 

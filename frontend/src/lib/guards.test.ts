@@ -1683,6 +1683,32 @@ describe('데스크톱 셸 (Electron)', () => {
     }
   });
 
+  it('⭐ `keepsAwake` 가 참이면 절전 방지 배선이 실제로 있다', () => {
+    // ⚠️ 이 짝이 깨지는 순간 녹음 화면이 "화면을 꺼도 녹음이 이어집니다"
+    //    라고 **거짓말**을 시작합니다. 사람은 화면을 끄고, 그 구간은
+    //    영영 못 잽니다 — 이 저장소에서 제일 비싼 실패입니다.
+    //
+    //    켜는 쪽이 아니라 **지우는 쪽**을 잡는 가드입니다: 나중에 누가
+    //    main 의 powerSaveBlocker 나 화면의 hold 배선을 걷어내면서
+    //    preload 의 값만 남겨 두는 것.
+    const preload = shellCode('preload/index.ts');
+    const claims = /keepsAwake:\s*true/.test(preload);
+    if (!claims) return; // 거짓이면 약속이 없으므로 잴 것도 없습니다
+
+    const main = mainSource();
+    ok(/powerSaveBlocker/.test(main + shellCode('main/awake.ts')),
+      'keepsAwake 가 참인데 powerSaveBlocker 가 어디에도 없습니다');
+    ok(/backgroundThrottling:\s*false/.test(main),
+      'keepsAwake 가 참인데 backgroundThrottling 을 안 껐습니다');
+
+    // 화면이 실제로 잡는가 — 국면 판단(lib)을 거쳐서.
+    const screen = codeOf(
+      readFileSync(join(ROOT, 'src', 'demo', 'main.ts'), 'utf8'),
+    );
+    ok(/shouldHoldAwake/.test(screen),
+      'keepsAwake 가 참인데 녹음 화면이 잡는 배선(shouldHoldAwake)이 없습니다');
+  });
+
   it('⭐ preload 가 `ipcRenderer` 를 통째로 내놓지 않는다', () => {
     // ⚠️ **낱말을 금지하던 검사였습니다.** preload 에 IPC 가 하나도 없던
     //    동안은 그게 요구와 같아 보였지만, Phase 1 에서 보관소 다리가

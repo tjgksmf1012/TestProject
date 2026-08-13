@@ -131,6 +131,30 @@ const traversal = await page.evaluate(async () => {
 });
 console.log('경로 잠금  :', traversal.join(' / '));
 
+// ⭐ 절전 방지 (docs/21 Phase 2) — 장부 의미까지 **OS 값으로** 잽니다.
+//    돌려받는 불리언은 main 이 powerSaveBlocker.isStarted() 로 잰 것입니다.
+const awakeSeq = await page.evaluate(async () => {
+  const a = window.teamflowDesktop?.awake;
+  if (!a) return { ok: false };
+  return {
+    ok: true,
+    hold1: await a.hold(),      // 첫 hold → 켜짐 (true)
+    hold2: await a.hold(),      // 둘째 hold → 그대로 켜짐 (true)
+    release1: await a.release(), // 하나 남음 → 아직 켜짐 (true)
+    release2: await a.release(), // 마지막 → 꺼짐 (false)
+    extra: await a.release(),    // 남발 → 여전히 꺼짐 (false)
+  };
+});
+const awakeWant = { ok: true, hold1: true, hold2: true, release1: true, release2: false, extra: false };
+const awakeGood = JSON.stringify(awakeSeq) === JSON.stringify(awakeWant);
+console.log('절전 방지  :', JSON.stringify(awakeSeq), awakeGood ? 'OK' : '⚠️ 기대와 다름');
+
+// ⭐ 녹음 화면의 안전 배너 — keepsAwake=true 가 실제 문구로 이어지는가.
+await page.goto('http://127.0.0.1:8811/index.html');
+await page.waitForTimeout(1500);
+const banner = await page.locator('#safety').innerText().catch(() => '(못 읽음)');
+console.log('안전 배너  :', banner.slice(0, 44), banner.includes('화면을 꺼도') ? '(desktop-awake OK)' : '⚠️ 꺼도 됩니다가 아님');
+
 // 바깥 링크로 못 나가는가 — 서버가 뚫렸을 때의 마지막 벽
 const before = page.url();
 await page.evaluate(() => { location.href = 'https://example.com/'; });

@@ -1,5 +1,5 @@
 /**
- * 데스크톱 셸 — main 프로세스 (Phase 0).
+ * 데스크톱 셸 — main 프로세스 (Phase 0~2).
  *
  * ## 왜 Electron 인가 — 이유는 하나뿐입니다
  *
@@ -13,9 +13,11 @@
  * 없습니다(백그라운드 스로틀링은 브라우저가 정합니다). Electron 에서는
  * `powerSaveBlocker` + `backgroundThrottling: false` 로 막을 수 있습니다.
  *
- * ⚠️ **그 둘은 Phase 2 입니다.** 이 파일은 아직 창만 엽니다. 미리 켜 두면
- * **아무도 안 재는데 켜져 있는 것**이 되고, 그건 "동작한다" 는 착각을
- * 만듭니다.
+ * Phase 2 에서 그 둘이 들어왔습니다 — `backgroundThrottling: false` 는
+ * 창 설정에, `powerSaveBlocker` 는 `main/awake.ts` 에 있습니다.
+ * ⚠️ **blocker 는 항상 켜 두지 않습니다.** 녹음 화면이 국면에 따라
+ * 잡고 놓습니다(`lib/platform/awake.ts`) — 항상 켜면 아무도 안 재는데
+ * 켜져 있는 것이 되고, 노트북 배터리만 태웁니다.
  *
  * ## ⚠️ 원격 화면을 띄웁니다 — 그래서 잠금이 선택이 아닙니다
  *
@@ -44,6 +46,7 @@ import {
   sameOrigin,
   serverUrl,
 } from '../../src/lib/desktop/server.ts';
+import { registerAwake } from './awake.ts';
 import { registerChunkStore } from './chunks.ts';
 
 /** 이 창이 머물러도 되는 곳. 여기를 벗어나는 이동은 전부 막습니다. */
@@ -66,6 +69,11 @@ function createWindow(target: URL): BrowserWindow {
       webSecurity: true,
       allowRunningInsecureContent: false,
       experimentalFeatures: false,
+      // ⚠️ 창을 내리면 Chromium 이 타이머·rAF 를 조입니다. 녹음 화면의
+      //    업로드 큐·시각 재동기화가 그 타이머 위에 있어서, 조여지면
+      //    회의 내내 창을 띄워 둔 사람만 온전한 트랙을 냅니다.
+      //    이 셸이 존재하는 이유가 이 한 줄과 아래 powerSaveBlocker 입니다.
+      backgroundThrottling: false,
     },
   });
 
@@ -137,6 +145,7 @@ function main(): void {
     // ⚠️ 창을 만들기 **전에** 채널을 엽니다. 화면이 뜨자마자 녹음을
     //    시작할 수 있고, 그때 채널이 없으면 첫 청크가 조용히 안 적힙니다.
     registerChunkStore(() => allowedOrigin);
+    registerAwake(() => allowedOrigin);
     createWindow(target);
 
     // macOS 는 창을 다 닫아도 앱이 삽니다 — 독 아이콘을 누르면 다시.

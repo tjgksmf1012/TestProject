@@ -196,7 +196,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **첫 화면** (내 프로젝트·회의·다음 할 일) | ✅ | `frontend/src/lib/home/`, `public/home.html` |
 | **화면 간 이동** (막다른 길 없음) | ✅ | `frontend/src/lib/nav/`, [docs/13](docs/13-화면-구조.md) |
 | **좁은 폭까지 견디는 판형 + 앱 설치(PWA)** | ✅ | `frontend/public/app.css`·`sw.js` — 폰 지원이 아니라 **창 반쪽·확대 200%·터치 노트북**을 위한 것 |
-| **데스크톱 앱** (Electron) | 🟡 **Phase 1** — 창이 뜨고, 화면 열여섯 장이 그대로 돌고, **청크가 디스크에 앉습니다**(업로드를 포기해도 소리를 안 잃음). 절전 방지·시스템 오디오는 **아직 없습니다** | `frontend/electron/`, [docs/21](docs/21-데스크톱-셸-Electron.md) |
+| **데스크톱 앱** (Electron) | 🟡 **Phase 2** — 창이 뜨고, 화면 열여섯 장이 그대로 돌고, 청크가 디스크에 앉고(업로드를 포기해도 소리를 안 잃음), **녹음 중에는 절전을 막습니다**(화면을 꺼도 녹음이 이어짐). 시스템 오디오는 **아직 없습니다** | `frontend/electron/`, [docs/21](docs/21-데스크톱-셸-Electron.md) |
 | ~~안드로이드 셸~~ | ⛔ **접었습니다** — 실기기가 없고 `gradlew` 조차 없어 **빌드 자체가 불가능**했습니다 | [docs/14](docs/14-모바일.md) 머리말 |
 | **브라우저 통화로 회의** (WebRTC 메시 5명 · 헤드폰 확인) | ✅ 같은 기기 3인 통화로 확인 / **실제 네트워크는 미검증** | `backend/teamflow/call/`, `frontend/src/lib/call/`, `public/call.html` |
 | **PC 화면** (48rem↑ 상단 탭·칸반 3열 가로) | ✅ | `frontend/public/app.css`, [docs/15](docs/15-PC-우선-방향.md) §4.7 |

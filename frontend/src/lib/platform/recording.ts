@@ -9,13 +9,13 @@
  *
  * 예전에는 `isInShell()`(안드로이드 WebView 인가)로 갈랐습니다. 그러면
  * **셸이 있다는 것과 그 셸이 실제로 재우기를 막는다는 것**이 한 덩어리가
- * 됩니다. 둘은 다릅니다 — 지금 데스크톱 셸이 정확히 그 경우입니다.
- * 창은 있는데 `powerSaveBlocker` 는 아직 없습니다(`docs/21` Phase 2).
+ * 됩니다. 둘은 다릅니다 — Phase 0~1 의 데스크톱 셸이 정확히 그 경우였습니다.
+ * 창은 있는데 `powerSaveBlocker` 가 없었습니다.
  *
  * 그래서 셸이 **자기가 재우기를 막는지**를 스스로 말하게 하고
  * (`window.teamflowDesktop.keepsAwake`), 여기서는 그 값만 봅니다.
- * Phase 2 가 붙는 날 preload 한 곳만 바꾸면 문구가 저절로 맞습니다 —
- * 두 곳을 같이 고쳐야 하면 한 곳은 반드시 잊습니다.
+ * Phase 2 가 붙던 날 실제로 preload 한 곳만 바꿨고 문구가 저절로
+ * 맞았습니다 — 두 곳을 같이 고쳐야 했다면 한 곳은 잊었을 것입니다.
  */
 
 /** 데스크톱 셸이 preload 로 내놓는 것. `electron/preload/index.ts` 와 짝. */
@@ -26,8 +26,10 @@ export interface DesktopBridge {
   /**
    * 이 셸이 **재우기를 막고 있는가.**
    *
-   * ⚠️ 창이 있다는 뜻이 아닙니다. `powerSaveBlocker` 가 실제로 켜져
-   * 있어야 참입니다. Phase 0 에서는 언제나 거짓입니다.
+   * ⚠️ 창이 있다는 뜻이 아닙니다. **녹음 중 `powerSaveBlocker` 를 켜는
+   * 배선이 실제로 있어야** 참입니다. Phase 0~1 에서는 거짓이었고,
+   * Phase 2 부터 참입니다 — 배선을 지우면 이 값도 같은 커밋에서
+   * 거짓으로 되돌려야 하고, guards.test.ts 가 그 짝을 잽니다.
    */
   keepsAwake: boolean;
   /**
@@ -39,6 +41,11 @@ export interface DesktopBridge {
    * 할 수 있는가는 다릅니다.**
    */
   chunks?: unknown;
+  /**
+   * 재우기 방지 다리 (`docs/21` Phase 2). `chunks` 처럼 **선택**입니다 —
+   * 있는지는 `lib/platform/awake.ts` 의 `awakeBridge` 가 따로 봅니다.
+   */
+  awake?: unknown;
 }
 
 declare global {

@@ -43,6 +43,18 @@ const chunks = {
 };
 
 /**
+ * 재우기 방지 다리 (`docs/21` Phase 2).
+ *
+ * ⚠️ 돌려받는 불리언은 **main 이 `powerSaveBlocker.isStarted()` 로 잰
+ * 값**입니다 — 화면이 "켰다" 고 믿는 것과 OS 가 켰다는 것은 다릅니다.
+ */
+const awake = {
+  hold: (): Promise<boolean> => ipcRenderer.invoke('awake:hold'),
+  release: (): Promise<boolean> => ipcRenderer.invoke('awake:release'),
+};
+
+
+/**
  * 화면이 "나는 지금 데스크톱에 있다" 를 알아보는 자리.
  *
  * ⚠️ userAgent 로 알아보지 않습니다. Electron 은 userAgent 에 `Electron/`
@@ -62,15 +74,17 @@ contextBridge.exposeInMainWorld('teamflowDesktop', {
   /** 진단 화면에 적습니다 — 오디오 결함은 Electron 판에 크게 얽힙니다. */
   electron: process.versions.electron,
   /**
-   * ⚠️ **이 셸이 재우기를 막고 있는가.** 창이 있다는 뜻이 아닙니다.
+   * ⚠️ **이 셸이 녹음 중 재우기를 막는가.** 창이 있다는 뜻이 아닙니다.
    *
-   * Phase 0 에서는 **거짓**입니다 — `powerSaveBlocker` 가 아직 없습니다
-   * (`docs/21` Phase 2). 참으로 바꾸는 순간 녹음 화면이 "화면을 꺼도
-   * 됩니다" 라고 말하기 시작하므로, **실제로 막기 시작한 커밋에서만**
-   * 바꾸십시오. 여기서 미리 참으로 두면 사람이 화면을 끄고 그 구간을
-   * 영영 잃습니다.
+   * Phase 2 부터 **참**입니다 — 녹음 화면이 국면에 따라 `awake.hold()` 를
+   * 잡으면 main 이 `powerSaveBlocker('prevent-app-suspension')` 를 켭니다
+   * (`main/awake.ts` · `lib/platform/awake.ts`). 이 값이 참이 되는 순간
+   * 녹음 화면이 "화면을 꺼도 녹음이 이어집니다" 라고 말하므로,
+   * ⛔ **blocker 배선을 지우면 이 값도 같은 커밋에서 거짓으로** 되돌려야
+   * 합니다 — guards.test.ts 가 그 짝을 잽니다.
    */
-  keepsAwake: false,
+  keepsAwake: true,
+  awake,
   /**
    * 청크를 디스크에 붙잡아 두는 곳 (`docs/21` Phase 1).
    *

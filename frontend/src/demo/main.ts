@@ -36,6 +36,7 @@ import {
   isRiskyForRecording,
   recordingSafety,
 } from '../lib/platform/recording.ts';
+import { awakeBridge, shouldHoldAwake } from '../lib/platform/awake.ts';
 import { describeGiveUp, openChunkStore } from '../lib/platform/chunk-store.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
@@ -111,6 +112,27 @@ const chunkStore = openChunkStore(window.teamflowDesktop?.chunks, meetingId ?? '
 /** 디스크에 못 적은 것. **조용히 넘어가면 "보관 중" 이 거짓말이 됩니다.** */
 const storeErrors: string[] = [];
 
+/**
+ * 재우기 방지 (`docs/21` Phase 2). 브라우저에서는 `null` — 잡을 것이 없습니다.
+ *
+ * ⚠️ **국면으로 잡고 놓습니다.** 시작 버튼에 걸면 백프레셔·동의 철회처럼
+ * 화면을 거치지 않고 멈추는 경로에서 **안 놓입니다** — 상태 변화는 전부
+ * `onStateChange` 로 오므로 그 한 곳에서 정합니다. 어느 국면에서 잡는지는
+ * `lib/platform/awake.ts` 의 `shouldHoldAwake` 가 정하고 테스트가 붙습니다.
+ */
+const awake = awakeBridge(window.teamflowDesktop?.awake);
+let awakeHeld = false;
+
+function syncAwake(phase: string): void {
+  if (!awake) return;
+  const want = shouldHoldAwake(phase);
+  if (want === awakeHeld) return;
+  awakeHeld = want;
+  // 돌려받는 값은 main 이 powerSaveBlocker.isStarted 로 잰 것입니다.
+  // 실패해도 녹음은 계속돼야 하므로 여기서 던지지 않습니다.
+  void (want ? awake.hold() : awake.release()).catch(() => {});
+}
+
 const client = new RecordingClient({
   monotonic: () => performance.now(),
   media: new BrowserMediaAdapter(),
@@ -129,7 +151,10 @@ const client = new RecordingClient({
     },
   },
   timesliceMs: 5_000,
-  onStateChange: () => render(),
+  onStateChange: (state) => {
+    syncAwake(state.phase);
+    render();
+  },
 });
 
 let wakeLock: { release: () => void } | null = null;
