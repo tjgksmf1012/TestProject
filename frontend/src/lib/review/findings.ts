@@ -43,12 +43,25 @@ export interface FindingView {
   evidence: number[];
 }
 
+/**
+ * 이름.
+ *
+ * ⚠️ **`unanswered_question` 은 여기 없습니다.** 있었는데 지웠습니다 —
+ * 값이 여기까지 오지 않습니다. 그것은 LLM 이 만든 회의록의 일부라
+ * 서버가 `unresolved_issues` 로 **따로** 내려보내고(`api/main.py`),
+ * `findings` 에는 규칙 기반 관찰만 실립니다. 섞으면 어느 쪽이 어디서
+ * 왔는지 알 수 없게 됩니다.
+ *
+ * 그런데 이름만 남아 있어서 **다섯 종류를 그리는 것처럼 보였습니다.**
+ * 게다가 `WHAT`·`KIND_ORDER` 에는 없어 반만 배선된 상태였습니다 — 나중에
+ * 누가 `DETECTED` 에 그 종류를 더하면 이름은 나오는데 설명도 순서도
+ * 없습니다. 세 표가 서로 어긋나지 않는지는 이제 검사가 봅니다.
+ */
 const TITLE: Record<string, string> = {
   repeated_discussion: '반복 논의',
   topic_drift: '주제 이탈',
   incomplete_task: '미완성 업무',
   decision_conflict: '결정 번복',
-  unanswered_question: '답이 안 난 것',
 };
 
 /**

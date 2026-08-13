@@ -180,9 +180,15 @@ def test_every_code_path_the_doc_points_at_exists():
 def test_the_functions_the_doc_names_exist():
     """이름으로 가리킨 함수들이 실제로 있는가."""
     from teamflow.audio import multitrack
+    from teamflow.meeting import speaking as meeting_speaking
 
-    assert hasattr(multitrack, "speaking_ratios"), (
-        "`speaking_ratios` 가 없어졌습니다 — `docs/20` §3·§4 를 고치십시오"
+    # ⚠️ **가리키는 자리를 옮겼습니다** (결함 172). 예전에는
+    #    `multitrack.speaking_ratios` 를 가리켰는데 그건 **부르는 곳이
+    #    0곳**이었습니다 — 요구가 충족됐다고 말하면서 아무도 안 쓰는
+    #    함수를 가리키고 있었던 것입니다. 화면이 실제로 부르는 것은
+    #    `meeting/speaking.py` 입니다.
+    assert hasattr(meeting_speaking, "shares"), (
+        "`speaking.shares` 가 없어졌습니다 — `docs/20` §3·§4 를 고치십시오"
     )
     assert hasattr(multitrack, "track_stats")
     # ⚠️ 결함 121 이 되살아나지 않게. `0.0` 을 돌려주던 property 입니다.
@@ -332,4 +338,55 @@ def test_the_summary_table_agrees_with_the_audit_log_count():
 
     assert int(m.group(1)) == writes, (
         f"`docs/20` 은 쓰기 {m.group(1)}곳이라는데 코드에는 {writes}곳입니다"
+    )
+
+
+def test_the_finding_screen_tables_agree_with_the_detectors():
+    """⭐ `review/findings.ts` 의 세 표가 **서로도, 백엔드 어휘와도** 맞는가.
+
+    그 파일에는 종류마다 세 가지가 있습니다 — 이름(`TITLE`) · 무슨 뜻인지
+    (`WHAT`) · 늘어놓을 순서(`KIND_ORDER`). 셋이 손으로 적혀 있고 **아무도
+    묶어 두지 않아서** 하나만 늘어나 있었습니다: `TITLE` 에 다섯 개,
+    나머지 둘에 네 개.
+
+    다섯째(`unanswered_question`)는 애초에 이 화면으로 오지 않습니다 —
+    LLM 이 만든 회의록의 일부라 서버가 `unresolved_issues` 로 따로
+    내려보냅니다. 즉 **이름만 남아 다섯 종류를 그리는 것처럼 보였고**,
+    실제로는 설명도 순서도 없는 반쪽이었습니다.
+
+    ⚠️ 반대 방향이 더 위험합니다. 탐지기를 하나 더 만들어 `DETECTED` 에
+    넣으면 화면은 **이름도 설명도 없이** 그 구간을 그립니다. 오류는 안
+    납니다 — 이 저장소가 제일 자주 당하는 부류입니다.
+    """
+    import re
+
+    from teamflow.services import inefficiency_service
+
+    src = (
+        REPO_ROOT / "frontend" / "src" / "lib" / "review" / "findings.ts"
+    ).read_text(encoding="utf-8")
+
+    def keys_of(name: str) -> set[str]:
+        block = re.search(rf"const {name}: Record<string, string> = \{{(.*?)\}};", src, re.S)
+        assert block, f"{name} 표를 못 찾았습니다 — 검사가 낡았습니다"
+        return set(re.findall(r"^\s*([a-z_]+):", block.group(1), re.M))
+
+    order = re.search(r"KIND_ORDER: readonly string\[\] = \[(.*?)\];", src, re.S)
+    assert order, "KIND_ORDER 를 못 찾았습니다 — 검사가 낡았습니다"
+
+    titles = keys_of("TITLE")
+    whats = keys_of("WHAT")
+    ordered = set(re.findall(r"'([a-z_]+)'", order.group(1)))
+    detected = set(inefficiency_service.DETECTED)
+
+    assert titles == detected, (
+        f"`TITLE` 과 백엔드 `DETECTED` 가 다릅니다. "
+        f"이름 없는 탐지기: {sorted(detected - titles)} · "
+        f"안 오는데 이름만 있는 것: {sorted(titles - detected)}"
+    )
+    assert whats == detected, (
+        f"`WHAT` 과 `DETECTED` 가 다릅니다: {sorted(detected ^ whats)}"
+    )
+    assert ordered == detected, (
+        f"`KIND_ORDER` 와 `DETECTED` 가 다릅니다: {sorted(detected ^ ordered)}"
     )
