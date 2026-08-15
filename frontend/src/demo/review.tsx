@@ -16,7 +16,7 @@
  * 스택을 옮기면서 다시 흔들 이유가 없습니다.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -65,6 +65,15 @@ import {
   type Speaking,
 } from '../lib/review/speaking.ts';
 import { findingViews, type Finding } from '../lib/review/findings.ts';
+import {
+  audioNote,
+  emptyTimelineNote,
+  pastClipEnd,
+  timelineRows,
+  trackAudioUrl,
+  type Clip,
+  type TimelineUtterance,
+} from '../lib/review/timeline.ts';
 import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { mountEvidence, openEvidence } from './evidence.tsx';
 import { renderNav } from './nav.ts';
@@ -557,6 +566,196 @@ function Findings({ findings }: { findings: Finding[] }) {
   );
 }
 
+/**
+ * 회의 타임라인 (`REVIEW-002`) — 처음부터 끝까지 시간 순 + 구간 재생 (`REVIEW-004`).
+ *
+ * ⚠️ **접어 두고, 처음 열 때 받아 옵니다.** 발화는 수백 개일 수 있고 후보
+ * 검토(이 화면의 본업)에는 필요 없습니다 — 미리 받으면 안 여는 사람의
+ * 요청이 낭비입니다 (활동 화면의 GitHub 갈래와 같은 규칙).
+ *
+ * ⚠️ **재생은 `<audio>` 하나로 합니다.** 줄마다 만들면 같은 트랙 소리를
+ * 줄 수만큼 다시 받습니다. 어느 줄이 도는지는 `playingId` 가 압니다.
+ *
+ * ⚠️ 재생 위치는 서버가 준 `position_ms` 입니다 — `start_ms` 로 틀면
+ * 공백만큼 밀린 **엉뚱한 말**이 나옵니다 (`lib/review/timeline.ts`).
+ */
+function Timeline({ findings }: { findings: Finding[] }) {
+  type State =
+    | { k: 'idle' }
+    | { k: 'loading' }
+    | { k: 'failed'; note: string }
+    | { k: 'ok'; utterances: TimelineUtterance[]; hasAudio: boolean };
+  const [state, setState] = useState<State>({ k: 'idle' });
+  const [slow, setSlow] = useState(false);
+  const [playingId, setPlayingId] = useState<number | null>(null);
+  const [playNote, setPlayNote] = useState('');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const clipRef = useRef<Clip | null>(null);
+  const loadedTrackRef = useRef<number | null>(null);
+
+  const open = useCallback(async (): Promise<void> => {
+    setState({ k: 'loading' });
+    const response = await whileLoading(
+      get(`/api/meetings/${meetingId}/timeline`),
+      () => setSlow(true),
+      () => setSlow(false),
+    );
+    if (response === null) {
+      setState({ k: 'failed', note: unreachableText('타임라인을 불러오지 못했습니다') });
+      return;
+    }
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    if (!response.ok) {
+      setState({ k: 'failed', note: `타임라인을 불러오지 못했습니다 (HTTP ${response.status})` });
+      return;
+    }
+    const body = (await response.json()) as {
+      utterances: TimelineUtterance[];
+      has_audio: boolean;
+    };
+    setState({ k: 'ok', utterances: body.utterances, hasAudio: body.has_audio });
+  }, []);
+
+  const stop = (): void => {
+    audioRef.current?.pause();
+    clipRef.current = null;
+    setPlayingId(null);
+  };
+
+  const play = (id: number, clip: Clip): void => {
+    const el = audioRef.current;
+    if (el === null) return;
+    // 도는 줄을 다시 누르면 멈춥니다 — 같은 버튼이 멈춤 버튼입니다.
+    if (playingId === id) {
+      stop();
+      return;
+    }
+    setPlayNote('');
+    if (loadedTrackRef.current !== clip.trackId) {
+      el.src = trackAudioUrl(apiBase, meetingId, clip.trackId);
+      loadedTrackRef.current = clip.trackId;
+      // ⚠️ src 를 방금 갈았으면 위치는 **메타데이터가 온 뒤에** 잡습니다.
+      //    바로 대입하면 브라우저가 로드하면서 0 으로 되돌립니다.
+      el.addEventListener(
+        'loadedmetadata',
+        () => {
+          el.currentTime = clip.startSec;
+        },
+        { once: true },
+      );
+    } else {
+      el.currentTime = clip.startSec;
+    }
+    clipRef.current = clip;
+    setPlayingId(id);
+    void el.play().catch(() => {
+      setPlayNote('소리를 재생하지 못했습니다 — 브라우저가 이 형식을 열지 못할 수 있습니다');
+      stop();
+    });
+  };
+
+  return (
+    <details
+      className="more"
+      onToggle={(e) => {
+        if (e.currentTarget.open && state.k === 'idle') void open();
+      }}
+    >
+      <summary>타임라인 — 회의를 처음부터 끝까지</summary>
+      <div className="more-body">
+        {state.k === 'loading' && slow && (
+          <div aria-busy="true" dangerouslySetInnerHTML={{ __html: skeletonRows(3) }} />
+        )}
+        {state.k === 'failed' && (
+          <p className="mtl-note">
+            {state.note}{' '}
+            <button type="button" className="mtl-retry" onClick={() => void open()}>
+              다시 시도
+            </button>
+          </p>
+        )}
+        {state.k === 'ok' &&
+          (state.utterances.length === 0 ? (
+            <p className="mtl-note">{emptyTimelineNote()}</p>
+          ) : (
+            (() => {
+              const rows = timelineRows(state.utterances, findings);
+              /* ⚠️ 듣기 버튼이 조용히 안 뜨기만 하면 고장으로 읽힙니다.
+                 소리가 아예 없는 것과 발화에 연결이 안 된 것은 **다른
+                 사실**이고, 어느 쪽인지 lib 이 고릅니다. 흙빛입니다 —
+                 둘 다 잘못이 아니라 사실입니다. */
+              const note = audioNote(state.hasAudio, rows);
+              return (
+            <>
+              {note !== null && <p className="mtl-gap">{note}</p>}
+              {playNote !== '' && (
+                <p className="mtl-gap" role="status">
+                  {playNote}
+                </p>
+              )}
+              <ol className="mtl">
+                {rows.map((row, i) =>
+                  row.kind === 'finding' ? (
+                    <li key={`f${i}`} className="mtl-finding">
+                      {row.view.at !== null && <span className="mtl-at">{row.view.at}</span>}
+                      <span className="mtl-ftitle">{row.view.title}</span>
+                      {row.view.why !== null && <span className="mtl-fwhy">{row.view.why}</span>}
+                    </li>
+                  ) : (
+                    <li
+                      key={row.view.id}
+                      className={playingId === row.view.id ? 'mtl-utt playing' : 'mtl-utt'}
+                    >
+                      <div className="mtl-head">
+                        {row.view.at !== null && <span className="mtl-at">{row.view.at}</span>}
+                        <span className="mtl-speaker">{row.view.speaker}</span>
+                        {row.view.type !== null && <span className="mtl-type">{row.view.type}</span>}
+                        {row.view.overlap && <span className="mtl-overlap">동시 발언</span>}
+                        {row.clip !== null && (
+                          <button
+                            type="button"
+                            className="mtl-play"
+                            onClick={() => row.clip !== null && play(row.view.id, row.clip)}
+                          >
+                            {playingId === row.view.id ? '멈춤' : '듣기'}
+                          </button>
+                        )}
+                      </div>
+                      <p className="mtl-text">{row.view.text}</p>
+                      {row.view.speakerNote !== null && (
+                        <p className="mtl-note">{row.view.speakerNote}</p>
+                      )}
+                    </li>
+                  ),
+                )}
+              </ol>
+              {/* 구간이 끝나면 멈춥니다 — 구간 재생이지 트랙 전체 재생이 아닙니다. */}
+              <audio
+                ref={audioRef}
+                onTimeUpdate={(e) => {
+                  const clip = clipRef.current;
+                  if (clip !== null && pastClipEnd(e.currentTarget.currentTime, clip)) stop();
+                }}
+                onEnded={stop}
+                onError={() => {
+                  if (playingId !== null) {
+                    setPlayNote('소리를 불러오지 못했습니다 — 연결을 확인하고 다시 눌러 주세요');
+                    stop();
+                  }
+                }}
+              />
+            </>
+              );
+            })()
+          ))}
+      </div>
+    </details>
+  );
+}
+
 function Review() {
   const [screen, setScreen] = useState<Screen>({ k: 'loading' });
   const [types, setTypes] = useState<TypeTally | null>(null);
@@ -754,6 +953,7 @@ function Review() {
       <SpeechTypes counts={types} />
             <SpeakingShares data={speaking} />
       <Findings findings={meeting.findings ?? []} />
+      <Timeline findings={meeting.findings ?? []} />
 
       {candidates.length === 0 ? (
         <RawHtml html={emptyHtml(emptyReviewState(meeting.status))} />

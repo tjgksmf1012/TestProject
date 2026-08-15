@@ -27,6 +27,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import event, func, select
@@ -2626,8 +2627,11 @@ def list_utterances(
     ## `ids` 로만 가져옵니다
 
     회의 전체 대본을 주지 않습니다. 40분 회의면 발화가 수백 개인데,
-    지금 필요한 것은 **이 후보의 근거 두세 개**입니다. 전체 대본을 보는
-    화면은 아직 없고, 없는 것을 위해 엔드포인트를 넓혀 두지 않습니다.
+    지금 필요한 것은 **이 후보의 근거 두세 개**입니다. 전체를 주는 자리는
+    `meeting_timeline`(`REVIEW-002`) **하나**입니다 — 예전에는 "전체 대본을
+    보는 화면은 아직 없다" 가 이 제한의 전제였는데, 그 화면이 생기면서
+    전제가 끝났고, 여기를 넓히는 대신 전체용 자리를 따로 뒀습니다.
+    같은 물음에 답하는 문이 둘이 되면 권한·직렬화가 갈라집니다.
 
     ⚠️ **못 찾은 id 를 조용히 버립니다** — 대신 화면이 알 수 있게
     합니다. 셋을 물었는데 둘이 오면 하나는 이 회의에 없는 것이고,
@@ -2652,7 +2656,7 @@ def list_utterances(
     if not wanted:
         return []
     # 상한. 근거는 보통 한둘이고, 목록이 길면 그건 대본 전체를 떠 가려는
-    # 것입니다 — 그 화면은 아직 없습니다.
+    # 것입니다 — 전체는 `meeting_timeline` 이 답합니다.
     if len(wanted) > 50:
         raise HTTPException(status_code=400, detail="한 번에 50개까지만 가져올 수 있습니다")
 
@@ -2662,7 +2666,14 @@ def list_utterances(
         .order_by(m.Utterance.start_ms, m.Utterance.id)
         .all()
     )
+    return _utterances_out(session, rows)
 
+
+def _utterances_out(session: Session, rows: list[m.Utterance]) -> list[UtteranceOut]:
+    """발화 직렬화 한 벌 — 근거 대화상자와 타임라인이 **같은 것**을 쓴다.
+
+    갈라지면 같은 발화가 화면마다 다른 화자·다른 라벨로 보인다.
+    """
     speaker_ids = {r.speaker_id for r in rows if r.speaker_id is not None}
     names: dict[int, str] = {}
     if speaker_ids:
@@ -2688,6 +2699,129 @@ def list_utterances(
         )
         for r in rows
     ]
+
+
+# ── 타임라인 (`REVIEW-002`) · 구간 재생 (`REVIEW-004`) ─────────
+
+
+class TimelineAudioOut(BaseModel):
+    """이 발화를 **들을** 자리. 못 들으면 필드 자체가 null 이다."""
+
+    track_id: int
+    #: 트랙 소리(청크를 이어 붙인 원본) 위의 위치.
+    #: ⚠️ `start_ms` 와 다릅니다 — 이어 붙이면 공백이 사라져 뒤가
+    #: 앞당겨집니다 (`audio/playback.py`).
+    position_ms: int
+
+
+class TimelineUtteranceOut(UtteranceOut):
+    audio: TimelineAudioOut | None = None
+
+
+class TimelineOut(BaseModel):
+    utterances: list[TimelineUtteranceOut]
+    #: 이 회의에 들을 수 있는 소리가 하나라도 있는가. 없으면 화면이
+    #: **이유를 말해야** 한다 — 재생 버튼이 조용히 안 뜨는 것은
+    #: "고장" 으로 읽힌다.
+    has_audio: bool
+
+
+@app.get("/api/meetings/{meeting_id}/timeline", response_model=TimelineOut)
+def meeting_timeline(
+    meeting_id: int,
+    session: DbSession,
+    settings: AppSettings,
+    user: CurrentUser,
+) -> TimelineOut:
+    """회의 전체를 시간 순으로 (`REVIEW-002`) — 들을 자리까지 함께.
+
+    ## `list_utterances` 와 왜 갈라져 있나
+
+    저쪽은 「이 후보의 근거 두세 개」 를 답하고, 여기는 「회의가 처음부터
+    끝까지 어떻게 흘렀나」 를 답합니다. 전체 대본은 이 자리 **하나**로만
+    나갑니다 — 권한 문이 둘이 되면 한쪽만 잠기고, 안 잠긴 쪽이 구멍입니다.
+
+    ## 발화마다 `audio` 가 붙는다 (`REVIEW-004`)
+
+    들을 수 있는 발화에만. 못 듣는 이유 셋(트랙 미지정 · 소리 미보관 ·
+    유실 구간)은 `recording_service.playback_map` 참고. 시연 데이터는
+    트랙이 없어 전부 null 이고, 그때 `has_audio` 가 거짓이라 화면이
+    이유를 말합니다.
+    """
+    _load_meeting_for(session, meeting_id, user)
+
+    rows = (
+        session.query(m.Utterance)
+        .filter(m.Utterance.meeting_id == meeting_id)
+        .order_by(m.Utterance.start_ms, m.Utterance.id)
+        .all()
+    )
+
+    store = _chunk_store(settings)
+    positions = recording_service.playback_map(session, store, meeting_id=meeting_id)
+
+    return TimelineOut(
+        utterances=[
+            TimelineUtteranceOut(
+                **base.model_dump(),
+                audio=(
+                    TimelineAudioOut(
+                        track_id=positions[base.id].track_id,
+                        position_ms=positions[base.id].position_ms,
+                    )
+                    if base.id in positions
+                    else None
+                ),
+            )
+            for base in _utterances_out(session, rows)
+        ],
+        has_audio=bool(
+            recording_service.tracks_with_audio(session, store, meeting_id=meeting_id)
+        ),
+    )
+
+
+@app.get("/api/meetings/{meeting_id}/tracks/{track_id}/audio")
+def track_audio(
+    meeting_id: int,
+    track_id: int,
+    session: DbSession,
+    settings: AppSettings,
+    user: CurrentUser,
+) -> StreamingResponse:
+    """트랙 소리 원본 — 청크를 seq 순서로 이어 붙인 webm (`REVIEW-004`).
+
+    ## 누가 듣는가
+
+    회의를 볼 수 있는 사람(프로젝트 구성원)이 듣습니다 — 발화 **원문**과
+    같은 문입니다. 소리는 동의의 산물이고, 그 동의가 향한 곳이 팀입니다
+    (docs/07 §1 — 회의 분석·기여 산정 목적).
+
+    ## 재인코딩하지 않는다
+
+    서버에 인코더가 없습니다(FFmpeg 없음 — 파이프라인 디코더와 다른
+    경로). `MediaRecorder.start(timeslice)` 의 조각은 이어 붙이면 그대로
+    하나의 webm 스트림이라, 조각을 순서대로 흘리기만 합니다. ⚠️ 그래서
+    **공백은 소리에 없습니다** — 위치 계산이 그걸 보정합니다
+    (`audio/playback.py`).
+    """
+    _load_meeting_for(session, meeting_id, user)
+    track = session.get(m.MeetingTrack, track_id)
+    if track is None or track.meeting_id != meeting_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "트랙이 없습니다")
+
+    store = _chunk_store(settings)
+    if not store.stored_seqs(meeting_id, track_id):
+        # 행이 있어도 파일이 없으면(업로드 전·보존기간 삭제) 들을 수 없다.
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "이 트랙은 소리가 보관돼 있지 않습니다"
+        )
+    return StreamingResponse(
+        recording_service.iter_track_audio(
+            store, meeting_id=meeting_id, track_id=track_id
+        ),
+        media_type="audio/webm",
+    )
 
 
 class UtteranceTypeCounts(BaseModel):

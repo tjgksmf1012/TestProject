@@ -328,6 +328,40 @@
         background: var(--bg); color: var(--text);
       }
 
+      /* ── 타임라인 (REVIEW-002 · 004) ───────────────────────
+         한 줄기 시간 순 목록. ⚠️ 사람별로 줄을 가르지 않는다 — 가르는
+         순간 "누가 얼마나 말했나" 그림이 된다. 발화 줄은 근거 상자와
+         같은 재료(시각·화자·유형·원문)다. */
+      .mtl { list-style: none; margin: 0; padding: 0;
+            display: flex; flex-direction: column; gap: var(--sp-4); }
+      .mtl-head { display: flex; align-items: baseline; gap: var(--sp-2);
+                 flex-wrap: wrap; font-size: var(--fs-caption); }
+      .mtl-at { font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+      .mtl-speaker { font-weight: 600; color: var(--text-muted); }
+      .mtl-type { color: var(--text-subtle); }
+      .mtl-overlap { color: var(--gap); }
+      .mtl-text { margin: var(--sp-1) 0 0; font-size: var(--fs-item);
+                 line-height: 1.65; white-space: pre-wrap; }
+      .mtl-note { font-size: var(--fs-caption); color: var(--text-subtle);
+                 margin: var(--sp-1) 0 0; }
+      .mtl-gap { font-size: var(--fs-caption); color: var(--gap); margin: 0 0 var(--sp-3); }
+      /* 비효율 구간 머리말 — 판정이 아니라 관찰이므로 색을 안 입힌다.
+         움푹한 면으로 "여기부터" 만 표시한다. */
+      .mtl-finding { background: var(--sunken); border-radius: var(--r-badge);
+                    padding: var(--sp-2) var(--sp-3); font-size: var(--fs-caption);
+                    display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: baseline; }
+      .mtl-ftitle { font-weight: 600; color: var(--text-muted); }
+      .mtl-fwhy { color: var(--text-subtle); }
+      /* 듣기 버튼. 도는 줄은 테두리가 아니라 버튼이 말한다("멈춤"). */
+      .mtl-play { margin-left: auto; border: 1px solid var(--line-strong);
+                 background: var(--bg); border-radius: var(--r-ctrl);
+                 padding: 0 var(--sp-3); font-size: var(--fs-label);
+                 color: var(--text-muted); }
+      .mtl-utt.playing .mtl-play { border-color: var(--primary); color: var(--text); }
+      .mtl-retry { border: 1px solid var(--line-strong); background: var(--bg);
+                  border-radius: var(--r-ctrl); padding: 0 var(--sp-3);
+                  font-size: var(--fs-label); color: var(--text-muted); }
+
       /* 제출 막대. app.css 의 `.actionbar` 가 자리(탭바 바로 위 +
          홈 인디케이터 여백)를 잡고, 여기서는 안에 든 것만 배치한다. */
       .actionbar .inner { align-items: center; }
@@ -353,6 +387,8 @@
       @media (hover: hover) and (pointer: fine) {
         .seg button,
         .acts button,
+        .mtl-play,
+        .mtl-retry,
         .cand input.title,
         .cand input.memo,
         .field select,
