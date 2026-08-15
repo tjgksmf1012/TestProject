@@ -22,7 +22,7 @@
  * 이스케이프합니다. 손으로 부르는 것보다 안전합니다 — 빠뜨릴 자리가 없어서.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type DragEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -38,6 +38,7 @@ import {
   toColumns,
   type Task,
 } from '../lib/kanban/board.ts';
+import { canDropOn, draggedTaskId, dragPayload, TASK_DRAG_TYPE } from '../lib/kanban/dnd.ts';
 import { assigneeText, splitNote, toggled } from '../lib/kanban/assignees.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
@@ -203,24 +204,39 @@ function Card({
   statuses,
   members,
   moving,
+  beingDragged,
   onMove,
   onDelete,
   onAssign,
+  onDragStart,
+  onDragEnd,
 }: {
   task: Task;
   today: string;
   statuses: string[];
   members: Member[];
   moving: boolean;
+  beingDragged: boolean;
   onMove: (to: string) => void;
   onDelete: () => void;
   onAssign: (userIds: number[]) => void;
+  onDragStart: (e: DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
 }) {
   const warnings = taskWarnings(task, today);
   const split = splitNote(task.assignee_ids);
 
   return (
-    <article className="task" data-id={task.id}>
+    <article
+      className={beingDragged ? 'task dragging' : 'task'}
+      data-id={task.id}
+      /* ⭐ 끌기 (`TASK-005`) — **버튼에 더하는** 마우스 지름길입니다.
+         HTML5 DnD 라 터치에서는 아예 안 돌고, 키보드·낭독기에게는 처음부터
+         없는 기능입니다. 그 사람들의 길이 아래 `.move` 버튼이므로 버튼을
+         지우면 안 됩니다 — 가드가 짝을 잽니다. */
+      draggable={!moving}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}>
       <p className="title">{task.title}</p>
       <p className="meta">
         {assigneeText(task.assignee_ids, members)}
@@ -306,6 +322,15 @@ function Kanban() {
   const [error, setError] = useState('');
   // 옮기는 동안 잠급니다. 두 번 눌러 두 칸 건너뛰는 것을 막습니다.
   const [moving, setMoving] = useState(false);
+  /**
+   * 지금 끌고 있는 카드 (`TASK-005`).
+   *
+   * ⚠️ `dragover` 에서는 `dataTransfer` 의 **값을 못 읽습니다**(브라우저가
+   * drop 전에는 형식 이름만 보여 줍니다). 어느 열을 밝힐지는 이 상태로
+   * 판단하고, 값은 drop 에서 읽어 **다시 검증**합니다 — drop 은 다른 창의
+   * 끌기로도 일어날 수 있습니다.
+   */
+  const [dragTask, setDragTask] = useState<Task | null>(null);
   // 스켈레톤을 **켤 때만** 켜지는 깃발.
   const [slow, setSlow] = useState(false);
 
@@ -625,7 +650,35 @@ function Kanban() {
       ) : (
         <div id="board" className="board">
           {toColumns(tasks, statuses).map((column) => (
-            <section className="col" key={column.label}>
+            <section
+              /* ⭐ 놓을 수 있는 열만 밝힙니다 — 허용 범위는 버튼과 같은
+                 `nextStatuses` 에서 옵니다(`canDropOn` 이 위임). */
+              className={
+                dragTask !== null && canDropOn(dragTask, column.status, statuses)
+                  ? 'col dropok'
+                  : 'col'
+              }
+              key={column.label}
+              onDragOver={(e) => {
+                if (moving || dragTask === null) return;
+                if (!canDropOn(dragTask, column.status, statuses)) return;
+                // 기본값이 「못 놓음」 입니다 — 허용할 때만 풉니다.
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const id = draggedTaskId(e.dataTransfer.getData(TASK_DRAG_TYPE));
+                setDragTask(null);
+                if (moving || id === null) return;
+                // ⚠️ 상태에 든 카드가 아니라 **건너온 id 로 다시** 찾고
+                //    다시 판정합니다. drop 은 아무나 일으킬 수 있습니다.
+                const dropped = tasks.find((t) => t.id === id);
+                if (dropped === undefined) return;
+                if (!canDropOn(dropped, column.status, statuses)) return;
+                void move(dropped.id, column.status);
+              }}
+            >
               <h2>
                 {column.label} <span className="n">{column.tasks.length}</span>
               </h2>
@@ -640,9 +693,16 @@ function Kanban() {
                     statuses={statuses}
                     members={members}
                     moving={moving}
+                    beingDragged={dragTask !== null && dragTask.id === task.id}
                     onMove={(to) => void move(task.id, to)}
                     onDelete={() => void drop(task)}
                     onAssign={(userIds) => void assign(task.id, userIds)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(TASK_DRAG_TYPE, dragPayload(task.id));
+                      e.dataTransfer.effectAllowed = 'move';
+                      setDragTask(task);
+                    }}
+                    onDragEnd={() => setDragTask(null)}
                   />
                 ))
               )}

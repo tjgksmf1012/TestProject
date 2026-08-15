@@ -105,6 +105,20 @@
      ⚠️ `--focus` 라는 토큰을 지어낼 뻔했습니다 — 없는 이름입니다. */
   .task.found { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
 
+  /* ── 끌어 옮기기 (TASK-005) ──────────────────────────────
+     ⚠️ 버튼(.move)은 그대로 있습니다 — 끌기는 마우스 전용 지름길이고
+     키보드·터치·낭독기의 길은 버튼입니다. 가드가 짝을 잽니다.
+     잡는 손 커서는 정교한 포인터에서만 — 터치에서는 끌기가 안 돕니다. */
+  @media (hover: hover) and (pointer: fine) {
+    .task[draggable="true"] { cursor: grab; }
+    .task[draggable="true"]:active { cursor: grabbing; }
+  }
+  .task.dragging { opacity: .5; }
+  /* 놓을 수 있는 열 표시. --primary 는 .found 와 같은 「여기입니다」 색 —
+     새 hex 를 만들지 않습니다. 점선이라 .found 의 실선과 안 헷갈립니다. */
+  .col.dropok { outline: 2px dashed var(--primary); outline-offset: 2px;
+                border-radius: var(--r-card); }
+
   .task .title { font-weight: 600; margin: 0 0 var(--sp-1);
                  font-size: var(--fs-item); letter-spacing: var(--ls-item); }
   .task .meta { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0; }

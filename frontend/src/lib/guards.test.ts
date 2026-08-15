@@ -2812,6 +2812,40 @@ describe('그림자 (docs/19 §19)', () => {
   });
 });
 
+describe('칸반 끌어 옮기기 (TASK-005)', () => {
+  /**
+   * ⭐ 끌기가 있으면 **버튼 경로와 공용 판단도 같이** 있다 — 짝 가드.
+   *
+   * HTML5 DnD 는 터치에서 아예 안 돌고, 키보드·낭독기 사용자에게는
+   * 처음부터 없는 기능입니다. 끌기를 달면서 `.move` 버튼을 걷으면 그
+   * 사람들은 카드를 옮길 방법 자체를 잃습니다 — 요구는 「경로를 더하라」
+   * 이지 「바꿔치우라」 가 아닙니다.
+   *
+   * 반대 방향도 봅니다 — drop 이 lib 의 판단(`canDropOn`·`draggedTaskId`)
+   * 을 안 거치고 화면에서 제 규칙을 만들면, 「끌기로는 되는데 버튼으로는
+   * 안 되는 이동」 이 생기고 두 벌은 반드시 갈라집니다.
+   *
+   * ⚠️ 끌기를 통째로 걷어낸 미래는 통과합니다 — 그때는 지킬 짝이 없습니다.
+   */
+  it('⭐ 끌기가 있으면 버튼 경로와 lib 판단이 같이 있다', () => {
+    const code = demoSource('kanban');
+    if (code === null) throw new Error('kanban 화면이 없습니다');
+    if (!/\bdraggable=/.test(code)) return;
+    for (const needed of [
+      'nextStatuses(', // 버튼이 그리는 허용 집합
+      'className="move"', // 버튼 자체
+      'canDropOn(', // 놓을 수 있는가 — lib 의 판단
+      'draggedTaskId(', // 건너온 값 검증 — drop 은 아무나 일으킨다
+      'onDrop', // 실제로 놓는 자리
+    ]) {
+      ok(
+        code.includes(needed),
+        `끌기(draggable)는 있는데 ${needed} 가 없습니다 — 버튼 경로나 공용 판단이 빠졌습니다`,
+      );
+    }
+  });
+});
+
 describe('상태 화면 (지시서 §7)', () => {
   /** 목록을 **비동기로 채우는** 그릇. 화면과 그 그릇의 id. */
   const ASYNC_CONTAINERS: [string, string][] = [
