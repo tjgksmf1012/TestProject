@@ -85,6 +85,16 @@ class User(Base):
     # "비밀번호 없음 = 통과" 로 읽으면 그 계정 전부가 무인증으로 열립니다 —
     # `verify_password` 가 None 에서 False 를 돌려주는 이유입니다.
     password_hash: Mapped[str | None] = mapped_column(String(255))
+    # 자기소개 (`USER-004`). 길이 규칙은 `users/profile.py` 하나에만 있고
+    # 여기 숫자는 그걸 따라갑니다.
+    bio: Mapped[str | None] = mapped_column(String(300))
+    # 프로필 이미지 (`USER-004`) — `data:image/png;base64,…` 글자 그대로.
+    #
+    # 파일이 아니라 **행**입니다. 파일로 받으면 저장 자리·인증 붙은
+    # 내려받기·MIME 판별이 한 벌로 필요하고(`CHAT-006·007` 을 안 만든
+    # 이유), 행이면 이미 인증이 걸린 JSON 응답에 실려 나갑니다.
+    # 검증(PNG 시그니처·치수·크기)은 `users/profile.py` 가 합니다.
+    avatar: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _now()
 
 

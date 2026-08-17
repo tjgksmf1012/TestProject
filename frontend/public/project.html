@@ -154,6 +154,12 @@
   .mlist li { display: flex; align-items: center; gap: var(--sp-3);
               flex-wrap: wrap; min-height: var(--tap); }
   .mname { font-size: var(--fs-item); color: var(--text); }
+  /* 프로필 이미지 (`USER-004`). 없으면 안 그립니다 — 안 올린 것은 잘못이
+     아니라서 빈 자리를 세지 않습니다. */
+  .mface { width: 28px; height: 28px; border-radius: var(--r-round);
+           object-fit: cover; flex: none; }
+  /* 자기소개 — 한 줄 전부를 차지해 이름 아래로 내려앉습니다. */
+  .mbio { flex-basis: 100%; font-size: var(--fs-caption); color: var(--text-subtle); }
   /* 지금 붙어 있는가 (`USER-005`).
      ⚠️ **오프라인에는 아무 표시도 안 붙습니다** — 클래스가 없으면 이
      규칙이 아예 안 걸립니다. 회색 점을 찍어 "없음" 을 세게 만들지

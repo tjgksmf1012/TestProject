@@ -265,6 +265,10 @@ interface TeamMember {
   github_login?: string | null;
   project_role?: string;
   presence?: string;
+  /** 자기소개 (`USER-004`) — 홈의 「내 정보」 에서 적습니다. */
+  bio?: string | null;
+  /** 프로필 이미지 (`USER-004`) — 데이터 URI 그대로. */
+  avatar?: string | null;
 }
 
 function ProjectSettings() {
@@ -687,6 +691,11 @@ function ProjectSettings() {
               const options = assignableRoles(myRole);
               return (
                 <li key={person.user_id}>
+                  {/* 프로필 이미지 (`USER-004`). 없으면 아무것도 안 그립니다 —
+                      안 올린 것은 잘못이 아니라서 빈 동그라미로 세지 않습니다. */}
+                  {typeof person.avatar === 'string' && person.avatar !== '' && (
+                    <img className="mface" src={person.avatar} alt="" />
+                  )}
                   <span className="mname">
                     {/* ⭐ 지금 붙어 있는가 (`USER-005`).
                         ⚠️ **오프라인은 안 그립니다** — 팀 대부분이 그
@@ -738,6 +747,11 @@ function ProjectSettings() {
                     >
                       내보내기
                     </button>
+                  )}
+                  {/* 자기소개 (`USER-004`) — 적을 수 있는데 아무도 못 보면
+                      "할 일을 알려 주고 자리를 안 줌" 입니다. 여기가 그 자리. */}
+                  {typeof person.bio === 'string' && person.bio !== '' && (
+                    <span className="mbio">{person.bio}</span>
                   )}
                 </li>
               );

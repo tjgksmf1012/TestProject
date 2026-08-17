@@ -541,7 +541,7 @@ function Kanban() {
       <header className="head">
         <h1>칸반</h1>
         <p className="lede">회의에서 승인된 업무와 직접 만든 업무가 단계별로 놓입니다.</p>
-        {me !== null && <Byline name={me.name} what="보는 중" />}
+        {me !== null && <Byline name={me.name} avatar={me.avatar} what="보는 중" />}
       </header>
     </>
   );

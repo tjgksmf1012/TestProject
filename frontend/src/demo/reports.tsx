@@ -332,7 +332,7 @@ function App() {
         회의록·주간·최종을 만들고 내보냅니다. 사람별 기여가 들어가는 보고서에는 팀
         경고가 함께 나갑니다.
       </p>
-      {me !== null && <Byline name={me.name} what="보는 중" />}
+      {me !== null && <Byline name={me.name} avatar={me.avatar} what="보는 중" />}
     </header>
   );
 

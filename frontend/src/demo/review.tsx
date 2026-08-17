@@ -905,7 +905,7 @@ function Review() {
     <header className="head">
       <h1>업무 후보 검토</h1>
       <p className="lede">AI가 회의에서 뽑은 후보입니다. 등록해야 칸반에 올라갑니다.</p>
-      {me !== null && <Byline name={me.name} what="검토 중" />}
+      {me !== null && <Byline name={me.name} avatar={me.avatar} what="검토 중" />}
     </header>
   );
 

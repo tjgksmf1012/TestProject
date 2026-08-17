@@ -413,7 +413,7 @@ function Contributions() {
       <p className="lede">
         활동 기록에서 <strong>추정한 구간</strong>입니다. 순위가 아니고, 최종값도 아닙니다.
       </p>
-      {me !== null && <Byline name={me.name} what="보는 중" />}
+      {me !== null && <Byline name={me.name} avatar={me.avatar} what="보는 중" />}
     </header>
   );
 

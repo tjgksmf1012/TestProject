@@ -196,6 +196,22 @@ class MeOut(BaseModel):
     user_id: int
     name: str
     email: str
+    #: 자기소개 (`USER-004`). 없으면 None — 화면이 "아직 안 적음" 으로 그립니다.
+    bio: str | None = None
+    #: 프로필 이미지 (`USER-004`) — `data:image/png;base64,…` 그대로.
+    #: 파일이 아니라 이 응답에 실려 나갑니다 — 내려받기 문이 따로 없습니다.
+    avatar: str | None = None
+
+
+def _me_out(user: m.User) -> MeOut:
+    """`MeOut` 을 만드는 자리는 여기 하나입니다.
+
+    가입·로그인·조회 세 곳이 손으로 따로 만들면 칸을 더할 때마다
+    한 곳이 빠집니다 — 두 벌이 있으면 한쪽만 고쳐지는 그 모양입니다.
+    """
+    return MeOut(
+        user_id=user.id, name=user.name, email=user.email, bio=user.bio, avatar=user.avatar
+    )
 
 
 def should_mark_cookie_secure(
@@ -281,7 +297,7 @@ def signup(
         session, user_id=user.id, user_agent=request.headers.get("user-agent")
     )
     _set_session_cookie(response, token, settings, request)
-    return MeOut(user_id=user.id, name=user.name, email=user.email)
+    return _me_out(user)
 
 
 @app.post("/api/auth/login", response_model=MeOut)
@@ -305,7 +321,7 @@ def login(
         session, user_id=user.id, user_agent=request.headers.get("user-agent")
     )
     _set_session_cookie(response, token, settings, request)
-    return MeOut(user_id=user.id, name=user.name, email=user.email)
+    return _me_out(user)
 
 
 @app.post("/api/auth/logout")
@@ -343,7 +359,56 @@ def read_me(user: CurrentUser) -> MeOut:
     이게 없던 동안 화면은 주소창의 `?me=1` 을 읽었습니다. 즉 **자기가
     누구인지 스스로 선언**했고, 서버는 그걸 그대로 믿었습니다.
     """
-    return MeOut(user_id=user.id, name=user.name, email=user.email)
+    return _me_out(user)
+
+
+class ProfileIn(BaseModel):
+    """프로필 이미지·자기소개 (`USER-004`).
+
+    `GithubLoginIn` 과 같은 규칙 — `None` 은 "안 건드림", `""` 는
+    "지움" 입니다. 지울 방법이 없으면 잘못 올린 사진이 영영 남습니다.
+    """
+
+    bio: str | None = None
+    avatar: str | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+@app.patch("/api/auth/me/profile", response_model=MeOut)
+def set_my_profile(payload: ProfileIn, session: DbSession, user: CurrentUser) -> MeOut:
+    """내 프로필 이미지·자기소개를 적는다 (`USER-004`).
+
+    ## ⚠️ 파일 업로드 통로가 아닙니다
+
+    이미지는 화면이 캔버스로 96×96 PNG 로 **다시 그린 것**을
+    `data:image/png;base64,…` 글자로 받습니다. 재부호화에서 원본의
+    EXIF(찍은 위치·기기)가 떨어져 나갑니다 — 사진 원본을 그대로 받으면
+    그 사람의 집 좌표를 저장하게 될 수 있습니다. 서버는 그 재부호화를
+    믿지 않고 `users/profile.py` 가 전부 다시 봅니다 — PNG 인가(시그니처) ·
+    치수·크기 상한 아래인가. 나갈 때는 이미 인증이 걸린 JSON 응답에
+    실려 나가므로 안 잠긴 내려받기 문이 생기지 않습니다.
+
+    ## 경로가 `/me` 인 이유
+
+    역할·GitHub 아이디와 같습니다 — 남의 id 를 넣을 자리 자체를 안
+    만듭니다. 남의 소개글을 바꾸는 문은 처음부터 없습니다.
+
+    감사 로그는 안 남깁니다 — 역할·GitHub 아이디는 **점수를 바꾸기
+    때문에** 남기는 것이고, 소개글과 사진은 점수에 닿지 않습니다.
+    """
+    from teamflow.users.profile import clean_avatar, clean_bio
+
+    try:
+        if payload.bio is not None:
+            user.bio = clean_bio(payload.bio)
+        if payload.avatar is not None:
+            user.avatar = clean_avatar(payload.avatar)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    session.flush()
+    return _me_out(user)
 
 
 def _require_project_member(session: Session, project_id: int, user: m.User) -> m.Member:
@@ -2072,6 +2137,12 @@ class MemberOut(BaseModel):
     #: ⚠️ 과거를 안 보냅니다 — `마지막 접속 3일 전` 은 상태가 아니라
     #: 근태 기록입니다.
     presence: str = str(vocab.PresenceStatus.OFFLINE)
+    #: 자기소개 (`USER-004`). 적을 수 있는데 아무도 못 보면 그건
+    #: "할 일을 알려 주고 자리를 안 줌" 입니다 — 팀원 목록이 그 자리입니다.
+    bio: str | None = None
+    #: 프로필 이미지 (`USER-004`) — 데이터 URI 그대로. 팀원은 몇 명이라
+    #: 목록에 실어도 몇십 KB 입니다.
+    avatar: str | None = None
 
 
 def _presence_of(session: Session, user_ids: list[int]) -> dict[int, str]:
@@ -2137,6 +2208,8 @@ def _project_members(session: Session, project_id: int) -> list[MemberOut]:
             github_login=member.github_login,
             project_role=member.project_role,
             presence=here.get(member.user_id, str(vocab.PresenceStatus.OFFLINE)),
+            bio=user.bio,
+            avatar=user.avatar,
         )
         for member, user in rows
     ]

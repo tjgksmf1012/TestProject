@@ -49,12 +49,27 @@ export function RawHtml({
  * 글자 고르기(`avatarInitial`)는 `lib` 에 있습니다 — 한 글자를 떼는 것도
  * 판단이고, 이모지·결합 문자에서 틀리기 쉬워 테스트가 붙어 있습니다.
  */
-export function Byline({ name, what }: { name: string; what?: string }) {
+export function Byline({
+  name,
+  what,
+  avatar,
+}: {
+  name: string;
+  what?: string;
+  /** 프로필 이미지 (`USER-004`). 없으면 지금까지처럼 이름 첫 글자. */
+  avatar?: string | null;
+}) {
   return (
     <p className="by">
-      <span className="avatar" aria-hidden="true">
-        {avatarInitial(name)}
-      </span>
+      {typeof avatar === 'string' && avatar !== '' ? (
+        // alt 는 비웁니다 — 바로 옆이 그 사람의 이름이라, 읽어 주면 이름이
+        // 두 번 들립니다.
+        <img className="avatar" src={avatar} alt="" />
+      ) : (
+        <span className="avatar" aria-hidden="true">
+          {avatarInitial(name)}
+        </span>
+      )}
       {what === undefined ? name : `${name} · ${what}`}
     </p>
   );
