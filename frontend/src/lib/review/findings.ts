@@ -150,6 +150,16 @@ export function whyText(finding: Finding): string | null {
   return null;
 }
 
+/**
+ * 종류 이름 하나 — 추세(`lib/analytics/trends.ts`)와 **같은 한 벌**을 쓴다.
+ *
+ * 모르는 종류는 코드를 그대로 돌려준다 — 조용히 버리면 탐지기를 하나 더
+ * 붙였을 때 화면이 아무것도 안 보여 준다 (`findingViews` 와 같은 규칙).
+ */
+export function describeFindingKind(kind: string): string {
+  return TITLE[kind] ?? kind;
+}
+
 export function findingView(finding: Finding): FindingView {
   return {
     kind: finding.kind,

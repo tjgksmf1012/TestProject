@@ -60,6 +60,7 @@ const SHELL = [
   '/call.js',
   '/chat.html',
   '/chat.js',
+  '/chunk-3KG66IJB.js',
   '/chunk-AG7ZTB4R.js',
   '/chunk-BQ5LWPXI.js',
   '/chunk-FLPN24SJ.js',

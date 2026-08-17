@@ -131,6 +131,15 @@
      "아직 아무도 안 맡았다" 는 잘못이 아니라 **빈 자리**입니다. */
   .lnone .lname, .lnone .lnum { color: var(--gap); }
 
+  /* ── 회의 개선 추세 (REVIEW-006) ────────────────────────
+     ⚠️ 막대·점 없음 — 값은 글자로. 종류마다 한 줄이고 굵기도 같습니다
+     (굵히면 큰 값이 먼저 읽혀 순위처럼 보입니다). */
+  .trends { list-style: none; padding: 0; margin: 0; display: flex;
+            flex-direction: column; gap: var(--sp-1);
+            font-size: var(--fs-label); color: var(--text-muted); }
+  /* 못 재는 이유 — 흙빛. 회의가 아직 적은 것은 잘못이 아닙니다. */
+  .tnote { font-size: var(--fs-label); color: var(--gap); margin: 0; }
+
   .rlist { list-style: none; padding: 0; margin: 0;
            display: flex; flex-direction: column; gap: var(--sp-4); }
   .rname { font-size: var(--fs-label); font-weight: 600; color: var(--text); margin: 0; }

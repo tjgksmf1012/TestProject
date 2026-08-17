@@ -72,6 +72,7 @@ from teamflow.services import (
     search_service,
     task_link_service,
     task_service,
+    trend_service,
 )
 from teamflow.tasks import dispatch
 from teamflow.users import presence
@@ -2355,10 +2356,42 @@ class RiskSignalOut(BaseModel):
     task_ids: list[int]
 
 
+class MeetingKindTrendOut(BaseModel):
+    """비효율 구간 한 종류의 방향 (`REVIEW-006`).
+
+    ⚠️ **회의별 값이 없습니다.** 앞쪽 절반·최근 절반의 회의당 평균, 그
+    둘뿐입니다 — 회의별로 내보내면 화면이 그것으로 **회의 순위표**를
+    만들 수 있고, "3주차 회의가 문제였다" 는 그 회의를 연 사람에 대한
+    판정으로 읽힙니다. `meeting/trends.py` 머리말 참고.
+
+    ⚠️ **문장이 없습니다** — 위험 신호와 같은 규칙. 말은 화면이 만듭니다.
+    """
+
+    kind: str
+    early_avg: float
+    late_avg: float
+    #: 'falling' | 'rising' | 'flat'
+    direction: str
+
+
+class MeetingTrendsOut(BaseModel):
+    """팀 단위 회의 추세. 못 재면 **못 잰다고** 말할 재료를 준다."""
+
+    measurable: bool
+    #: 분석된 회의 수 (`needs_review`·`confirmed` — 파이프라인이 돈 것만.
+    #: 나머지를 넣으면 못 잰 회의가 "구간 0건" 으로 세어집니다)
+    meetings_counted: int
+    #: 이만큼은 쌓여야 방향을 말한다
+    needed: int
+    kinds: list[MeetingKindTrendOut]
+
+
 class ProjectAnalyticsOut(BaseModel):
     progress: ProgressOut
     load: list[LoadOut]
     signals: list[RiskSignalOut]
+    #: 회의 개선 추세 (`REVIEW-006`) — 팀 단위 관찰, 판정 없음.
+    meeting_trends: MeetingTrendsOut
 
 
 @app.get(
@@ -2388,7 +2421,10 @@ def read_project_analytics(
     if session.get(m.Project, project_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
-    return ProjectAnalyticsOut(**risk_service.read(session, project_id))
+    return ProjectAnalyticsOut(
+        **risk_service.read(session, project_id),
+        meeting_trends=MeetingTrendsOut(**trend_service.read(session, project_id)),
+    )
 
 
 class RoleIn(BaseModel):

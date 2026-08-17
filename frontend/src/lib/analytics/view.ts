@@ -45,6 +45,8 @@ export interface Analytics {
   progress: Progress;
   load: Load[];
   signals: RiskSignal[];
+  /** 회의 개선 추세 (`REVIEW-006`). 문장은 `analytics/trends.ts` 가 만든다. */
+  meeting_trends: import('./trends.ts').MeetingTrends;
 }
 
 /**

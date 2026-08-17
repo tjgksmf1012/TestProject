@@ -61,6 +61,13 @@ import {
   taskHref,
   type Analytics,
 } from '../lib/analytics/view.ts';
+import {
+  allQuiet,
+  notMeasurableText,
+  QUIET_TEXT,
+  TRENDS_NOTE,
+  trendLine,
+} from '../lib/analytics/trends.ts';
 import { presenceDot, presenceLabel, worthShowing } from '../lib/project/presence.ts';
 import {
   assignableRoles,
@@ -227,6 +234,24 @@ function ProjectHealth({ data }: { data: Analytics | null }) {
             </li>
             );
           })}
+        </ul>
+      )}
+
+      {/* ⭐ 회의 개선 추세 (`REVIEW-006`).
+          ⚠️ 막대·점 없음 — 값은 글자로 (불변식 1). 회의별 값은 서버가
+          아예 안 줍니다 — 회의를 짚는 순간 회의 순위표가 됩니다. */}
+      <h3 className="sub-head">회의에서 눈에 띈 것의 추세</h3>
+      <p className="sub">{TRENDS_NOTE}</p>
+      {!data.meeting_trends.measurable ? (
+        // ⚠️ 흙빛 — 회의가 아직 적은 것은 잘못이 아니라 사실입니다.
+        <p className="tnote">{notMeasurableText(data.meeting_trends)}</p>
+      ) : allQuiet(data.meeting_trends.kinds) ? (
+        <p className="sub">{QUIET_TEXT}</p>
+      ) : (
+        <ul className="trends">
+          {data.meeting_trends.kinds.map((kind) => (
+            <li key={kind.kind}>{trendLine(kind)}</li>
+          ))}
         </ul>
       )}
     </section>
