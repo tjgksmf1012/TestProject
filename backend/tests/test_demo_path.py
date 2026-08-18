@@ -871,11 +871,18 @@ def test_no_screen_is_a_dead_end(client: TestClient):
 
     # 로그인은 아직 신원이 없어 갈 곳이 정해지지 않았고, 오프라인 화면은
     # 연결이 없어 어디로도 못 갑니다 — 둘 다 탭이 죽은 링크가 됩니다.
+    #
+    # ⚠️ 요구는 "막다른 길 금지"이지 "#tabs 가 있을 것"이 아닙니다.
+    # 리디자인(design/redesign v2 F2) 뒤 녹음·통화는 옛 탭바 대신 SPA 셸을
+    # 미러링한 `#sparail`(레일, 좁은 폭에서 하단 탭바)을 씁니다 — 그것도
+    # 내비입니다. guards.test.ts 의 짝 가드와 같은 기준입니다.
     exempt = {"login.html", "offline.html"}
     missing = [
         page.name
         for page in sorted(public.glob("*.html"))
-        if page.name not in exempt and 'id="tabs"' not in page.read_text()
+        if page.name not in exempt
+        and 'id="tabs"' not in page.read_text()
+        and 'id="sparail"' not in page.read_text()
     ]
     assert not missing, f"빠져나올 길이 없는 화면: {missing}"
 

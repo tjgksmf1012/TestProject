@@ -2067,3 +2067,138 @@ pre {
 
 .notice-box p { margin: 0; }
 .notice-box p + p { margin-top: var(--sp-2); }
+
+/* ══════════════════════════════════════════════════════════════
+   SPA 셸 미러 — 녹음·통화 (design/redesign v2 F2)
+   ══════════════════════════════════════════════════════════════
+
+   리디자인 뒤 앱의 얼굴은 webapp 의 「레일 72px + 컨텍스트 바 56px」인데,
+   녹음·통화만 옛 상단 내비를 쓰고 있었습니다 — 같은 앱에 껍데기가 둘.
+   이 두 화면은 장치 수명 때문에 SPA 밖에 남지만(docs/19 §24.9), 껍데기는
+   같아야 합니다. 여기 규칙은 webapp/src/app.css 의 .rail/.appbar 와 짝이고,
+   치수(72px·56px·2px 활성 바)는 같은 숫자를 씁니다.
+
+   ⚠️ 이 셸을 쓰는 페이지는 `<body class="sparail-page">` 와
+   `<nav id="sparail">` 를 함께 답니다 — guards.test.ts 의 "막다른 길 금지"
+   가드가 #tabs 대신 이 레일을 셉니다. */
+
+body.sparail-page {
+  max-width: none;
+  margin: 0;
+  padding: calc(56px + var(--sp-6)) var(--sp-6) var(--sp-8)
+           calc(72px + var(--sp-6));
+}
+
+.sparail {
+  position: fixed;
+  left: 0; top: 0; bottom: 0;
+  width: 72px;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3) 0;
+  z-index: 30;
+}
+.sparail__brand {
+  font-weight: 700;
+  font-size: var(--fs-caption);
+  letter-spacing: 0.06em;
+  text-align: center;
+  color: var(--text);
+  padding-bottom: var(--sp-3);
+  margin-bottom: var(--sp-1);
+  border-bottom: 1px solid var(--line);
+}
+.sparail__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  min-height: var(--tap);
+  justify-content: center;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: var(--fs-caption);
+  border-left: 2px solid transparent;
+}
+.sparail__item[aria-current="page"] {
+  color: var(--text);
+  font-weight: 600;
+  border-left-color: var(--primary);
+}
+.sparail__item svg { width: 20px; height: 20px; stroke-width: 1.6; }
+
+.spabar {
+  position: fixed;
+  left: 72px; right: 0; top: 0;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-6);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  z-index: 29;
+}
+.spabar__title {
+  font-size: var(--fs-title);
+  letter-spacing: var(--ls-title);
+  font-weight: 700;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.spabar__meta {
+  font-family: var(--font-data);
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-subtle);
+  white-space: nowrap;
+}
+.spabar__spacer { flex: 1; }
+
+/* 이 셸에는 옛 하단 탭바(--tabbar)가 없습니다 — 컨트롤 바는 바닥에 붙고,
+   좁은 폭에서만 레일 위로 올라갑니다. */
+body.sparail-page .actionbar {
+  bottom: 0;
+  padding-bottom: calc(var(--safe-bottom) + 0.75rem);
+}
+body.sparail-page.has-actionbar { padding-bottom: 6rem; }
+
+/* 좁은 폭 — 레일이 하단 탭바로 (webapp 셸과 같은 전환점 1024px) */
+@media (max-width: 1023.5px) {
+  body.sparail-page {
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
+    padding-bottom: calc(64px + var(--safe-bottom));
+  }
+  .sparail {
+    top: auto; bottom: 0; left: 0; right: 0;
+    width: auto;
+    flex-direction: row;
+    justify-content: space-around;
+    border-right: 0;
+    border-top: 1px solid var(--line);
+    padding: var(--sp-1) 0 calc(var(--sp-1) + var(--safe-bottom));
+  }
+  .sparail__brand { display: none; }
+  .sparail__item {
+    border-left: 0;
+    border-top: 2px solid transparent;
+    min-width: 64px;
+  }
+  .sparail__item[aria-current="page"] { border-top-color: var(--primary); }
+  .spabar { left: 0; }
+  /* 하단이 레일 차지 — 통화의 고정 컨트롤 바는 레일 위에 얹힙니다 */
+  body.sparail-page .actionbar {
+    bottom: calc(56px + var(--safe-bottom));
+    padding-bottom: 0.75rem;
+  }
+  body.sparail-page.has-actionbar {
+    padding-bottom: calc(56px + var(--safe-bottom) + 6rem);
+  }
+}

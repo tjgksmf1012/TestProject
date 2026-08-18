@@ -279,15 +279,19 @@ describe('모바일 규칙', () => {
     strictEqual(missing.join(', '), '');
   });
 
-  it('⭐ 로그인 말고는 전부 아래 탭바가 있다', () => {
-    // 전체화면 PWA·WebView 에는 주소창도 뒤로가기도 없다. 탭바가 없으면
+  it('⭐ 로그인 말고는 전부 내비게이션이 있다', () => {
+    // 전체화면 PWA·WebView 에는 주소창도 뒤로가기도 없다. 내비가 없으면
     // 그 화면은 정말 막다른 길이 된다.
     // 로그인은 아직 어느 프로젝트 사람인지도 모르고, 오프라인 화면은
-    // 연결이 없어서 어디로도 갈 수 없다 — 둘 다 탭이 죽은 링크가 된다.
+    // 연결이 없어서 어디로도 갈 수 없다 — 둘 다 링크가 죽은 링크가 된다.
+    //
+    // ⚠️ 요구는 "막다른 길 금지"이지 "#tabs 가 있을 것"이 아닙니다.
+    // 리디자인(v2 F2) 뒤 녹음·통화는 옛 탭바 대신 SPA 셸을 미러링한
+    // `#sparail`(레일 + 하단 탭바 전환)을 씁니다 — 그것도 내비입니다.
     const exempt = new Set(['login.html', 'offline.html']);
     const missing = screens()
       .filter(({ name }) => !exempt.has(name))
-      .filter(({ html }) => !html.includes('id="tabs"'))
+      .filter(({ html }) => !html.includes('id="tabs"') && !html.includes('id="sparail"'))
       .map(({ name }) => name);
     strictEqual(missing.join(', '), '');
   });

@@ -46,7 +46,6 @@ import { showNote } from '../lib/ui/failure.ts';
 import { whilePressed } from '../lib/ui/pending.ts';
 import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import { escapeHtml } from '../lib/html.ts';
-import { renderNav } from './nav.ts';
 import type { SyncTransport } from '../lib/recording/client.ts';
 import type { PendingChunk, UploadTransport } from '../lib/recording/upload-queue.ts';
 import { bootApp } from './pwa.ts';
@@ -542,7 +541,19 @@ $('copy').addEventListener('click', () => {
 
 render();
 
-renderNav('record');
+// v2 F2 — 컨텍스트 바와 레일을 회의로 잇는다. 제목을 알면 바에 적고,
+// 어느 프로젝트인지 알면 레일의 칸반·기여도·설정을 그 프로젝트로 보낸다.
+// 실패해도 조용히 넘어간다 — 셸이 없다고 녹음을 막을 이유는 없다.
+async function fillShellContext(id: string): Promise<void> {
+  const response = await tryGet(`${apiBase}/api/meetings/${id}`);
+  if (response === null || !response.ok) return;
+  const meeting = (await response.json()) as { title: string | null; project_id: number };
+  if (meeting.title) $('ctx-title').textContent = `녹음 — ${meeting.title}`;
+  ($('rail-kanban') as HTMLAnchorElement).href = `/app/project/${meeting.project_id}/kanban`;
+  ($('rail-contrib') as HTMLAnchorElement).href = `/app/project/${meeting.project_id}/contributions`;
+  ($('rail-settings') as HTMLAnchorElement).href = `/app/project/${meeting.project_id}/settings/role`;
+}
+if (meetingId) void fillShellContext(meetingId);
 
 // 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
 bootApp();

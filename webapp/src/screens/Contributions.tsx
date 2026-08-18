@@ -124,12 +124,18 @@ export default function Contributions() {
       !sameValue(d.final_value, systemValues.get(d.user_id) ?? NaN),
   );
 
-  const effectiveSum = drafts.reduce((sum, d) => {
-    const system = systemValues.get(d.user_id) ?? 0;
-    const v = d.final_value !== null && !Number.isNaN(d.final_value) ? d.final_value : system;
-    return sum + v;
-  }, 0);
-  const sumOff = members.length > 0 && Math.abs(effectiveSum - 100) > 0.05;
+  // 확정값은 시스템이 아니라 **팀이 적습니다** (v2 F1-4). 빈 칸은 더 이상
+  // "시스템 값 그대로"가 아니라 "아직 안 정함"이고, 다 정해야 확정이 열립니다.
+  const allFilled =
+    members.length > 0 &&
+    drafts.every((d) => d.final_value !== null && !Number.isNaN(d.final_value));
+
+  const effectiveSum = drafts.reduce(
+    (sum, d) =>
+      sum + (d.final_value !== null && !Number.isNaN(d.final_value) ? d.final_value : 0),
+    0,
+  );
+  const sumOff = allFilled && Math.abs(effectiveSum - 100) > 0.05;
 
   // 저장된 확정을 모르는 채로 확정하면 남의 조정을 지울 수 있습니다.
   const blind = finals.isError;
@@ -204,9 +210,12 @@ export default function Contributions() {
                     <div className="crow__top">
                       <span className="crow__name">{name}</span>
                       <span className="crow__range">{describeRange(member)}</span>
+                      {/* 카드마다 자기 눈금(0~100) — 눈금 없는 동일 축 레인은
+                          순위 막대그래프로 읽힙니다 (v2 F1-2·F1-3). */}
                       <TrackRibbon
                         size="sm"
                         segments={ribbonFor(member, points)}
+                        ticks={['0', '25', '50', '75', '100']}
                         label={`${name} — 확신도 ${Math.round(member.confidence * 100)}% · 모르는 폭 ${Math.round(points)}%p`}
                       />
                       <span className="crow__counts">{countsLine(member)}</span>
@@ -255,12 +264,13 @@ export default function Contributions() {
                 return (
                   <label className="confirmbar__person" key={member.user_id}>
                     <span className="t13">{name}</span>
-                    <span className="confirmbar__sys">시스템 {member.share.toFixed(1)}</span>
+                    {/* 단일 점수를 미리 주지 않습니다 — placeholder 는 **구간**입니다
+                        (v2 F1-4). 값은 팀이 적고, 적어야 확정이 열립니다. */}
                     <input
                       className="input input--num"
                       inputMode="decimal"
-                      placeholder={member.share.toFixed(1)}
-                      aria-label={`${name} 확정값 (%)`}
+                      placeholder={`${describeRange(member)} (시스템 추정)`}
+                      aria-label={`${name} 확정값 (%) — 시스템 추정 ${describeRange(member)}`}
                       value={values[member.user_id] ?? ''}
                       onChange={(e) =>
                         setValues((prev) => ({ ...prev, [member.user_id]: e.target.value }))
@@ -273,7 +283,7 @@ export default function Contributions() {
               <button
                 type="button"
                 className="btn btn--primary"
-                disabled={problems.length > 0 || blind || confirm.isPending || members.length === 0}
+                disabled={!allFilled || problems.length > 0 || blind || confirm.isPending}
                 onClick={() => confirm.mutate(toPayload(drafts, systemValues))}
               >
                 이 값으로 확정
@@ -298,6 +308,12 @@ export default function Contributions() {
                   );
                 })}
               </div>
+            )}
+            {!allFilled && members.length > 0 && (
+              <p className="disabled-reason">
+                모든 칸을 채워야 확정할 수 있습니다 — 확정값은 시스템이 아니라
+                팀이 정합니다
+              </p>
             )}
             {problems.length > 0 && (
               <p className="disabled-reason">

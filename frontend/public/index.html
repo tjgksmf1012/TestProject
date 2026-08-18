@@ -88,7 +88,8 @@
       }
       .rec-ribbon__fill {
         height: 100%; width: 0%;
-        background: var(--text);
+        /* 잉크색 금지 — 채움은 인디고 레인 토큰 (v2 F1·F12) */
+        background: var(--lane-known);
         transition: width 1s linear;
       }
       @media (prefers-reduced-motion: reduce) {
@@ -120,8 +121,6 @@
 
       /* R2 — 1280×800 한 화면 예산. 이 페이지만 세로 여백을 조입니다.
          공용 값(app.css)을 고치면 열두 화면이 같이 움직이므로 여기서만. */
-      .head { margin-bottom: var(--sp-2); }
-      .head .lede { margin: var(--sp-1) 0 0; }
       .panel { padding-top: var(--sp-4); padding-bottom: var(--sp-4); }
       dl { margin-top: var(--sp-3); }
 
@@ -134,15 +133,13 @@
           grid-template-columns: 1fr 1fr;
           gap: 0 var(--sp-8);
           grid-template-areas:
-            "phase    steps"
             "axis     steps"
             "ribbon   steps"
             "blockers steps"
             "metrics  steps"
             ".        steps";
-          grid-template-rows: auto auto auto auto auto 1fr;
+          grid-template-rows: auto auto auto auto 1fr;
         }
-        .rec-panel .phaseline { grid-area: phase; margin: 0 0 var(--sp-2); }
         .rec-panel .rec-axis { grid-area: axis; margin-top: 0; }
         .rec-panel .rec-ribbon { grid-area: ribbon; }
         .rec-panel #blockers { grid-area: blockers; }
@@ -151,15 +148,41 @@
       }
     </style>
   </head>
-  <body>
-    <header class="head">
-      <h1>녹음</h1>
-      <p class="lede">
-        이 기기가 내 목소리 트랙을 기록합니다. 녹음이 끊긴 구간은
-        지어내지 않고 “재지 못했다”로 남습니다.
-      </p>
-      <p class="by" id="who" hidden></p>
+  <body class="sparail-page">
+    <!-- v2 F2 — 셸은 한 종류: SPA 와 같은 레일 + 컨텍스트 바.
+         레일의 프로젝트 링크는 회의를 알게 되면 main.ts 가 채웁니다. -->
+    <nav id="sparail" class="sparail" aria-label="주 메뉴">
+      <div class="sparail__brand">TF</div>
+      <a class="sparail__item" href="/app/" aria-current="page">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3.5 9.5 L10 3.5 L16.5 9.5 V16.5 H12 V12 H8 V16.5 H3.5 Z" stroke-linejoin="round"/></svg>
+        홈
+      </a>
+      <a class="sparail__item" id="rail-kanban" href="/app/">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true"><rect x="3" y="3.5" width="4" height="13" rx="1"/><rect x="8" y="3.5" width="4" height="9" rx="1"/><rect x="13" y="3.5" width="4" height="6" rx="1"/></svg>
+        칸반
+      </a>
+      <a class="sparail__item" id="rail-contrib" href="/app/">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 5 V15 M16 5 V15" stroke-linecap="round"/><path d="M6.5 10 H13.5" stroke-linecap="round"/></svg>
+        기여도
+      </a>
+      <a class="sparail__item" id="rail-settings" href="/app/">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 6.5 H16 M4 13.5 H16" stroke-linecap="round"/><circle cx="8" cy="6.5" r="1.8" fill="var(--surface)"/><circle cx="12.5" cy="13.5" r="1.8" fill="var(--surface)"/></svg>
+        설정
+      </a>
+    </nav>
+
+    <!-- 컨텍스트 바 — 회의 제목과 진행 상태 (v2 F2) -->
+    <header class="spabar">
+      <h1 class="spabar__title" id="ctx-title">녹음</h1>
+      <span class="spabar__meta"><span id="phase">준비 중</span> <span id="elapsed"></span></span>
+      <span class="spabar__spacer"></span>
+      <span class="by" id="who" hidden></span>
     </header>
+
+    <p class="note">
+      이 기기가 내 목소리 트랙을 기록합니다. 녹음이 끊긴 구간은
+      지어내지 않고 “재지 못했다”로 남습니다.
+    </p>
     <!-- ⚠️ 참가 실패는 **여기** 씁니다. 예전에는 `#who` 를 덮어써서
          "김민수 님의 트랙으로 녹음합니다" 가 사라지고 그 자리에 실패가
          부제색(회색)으로 앉았습니다 (결함 98). 로비의 `#room-note` 와
@@ -177,7 +200,6 @@
     <!-- 카드 제목이 없습니다 — 페이지 제목이 이미 "녹음" 입니다.
          같은 말을 두 번 쓰면 그만큼 4단계가 화면 밖으로 밀립니다 (R2). -->
     <section class="panel rec-panel">
-      <p class="phaseline"><span id="phase">준비 중</span> <span id="elapsed"></span></p>
 
       <!-- 시그니처 — 트랙 리본 LG. 녹음이 진행되며 채워집니다.
            축은 0~40분 고정 — 빈 상태에도 축을 그립니다. -->
@@ -277,9 +299,5 @@
 
     <script type="module" src="./main.js"></script>
   
-  <!-- 아래 탭바. `src/demo/nav.ts` 가 채운다.
-       위쪽 링크 줄에 의존하면 전체화면 PWA·WebView 에서 갇힌다 —
-       거기에는 주소창도 뒤로가기도 없다. -->
-  <nav id="tabs" aria-label="주요 화면"></nav>
 </body>
 </html>
