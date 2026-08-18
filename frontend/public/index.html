@@ -155,6 +155,16 @@
         <div><dt>판정</dt><dd id="usable">-</dd></div>
       </dl>
       <ul id="gaps"></ul>
+
+      <!-- ⭐ 못 올린 청크가 **되찾을 수 있는 것인지**.
+           데스크톱 앱에는 디스크가 있어, 서버가 잠깐 꺼져 있었다는
+           이유로 소리를 잃지 않습니다 (docs/21 Phase 1).
+           ⚠️ 알려만 주고 올릴 자리를 안 주면 대표 실패 ③ 이라
+           버튼을 바로 옆에 둡니다. -->
+      <p class="status" id="parked" role="status" hidden></p>
+      <button id="reupload" hidden>남은 청크 다시 올리기</button>
+      <ul id="store-errors" class="plain" hidden></ul>
+
       <code id="row"></code>
       <button id="copy">표에 붙일 한 줄 복사</button>
       <p class="status" id="copy-note" role="status"></p>

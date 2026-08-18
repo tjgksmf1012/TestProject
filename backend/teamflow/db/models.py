@@ -85,6 +85,16 @@ class User(Base):
     # "비밀번호 없음 = 통과" 로 읽으면 그 계정 전부가 무인증으로 열립니다 —
     # `verify_password` 가 None 에서 False 를 돌려주는 이유입니다.
     password_hash: Mapped[str | None] = mapped_column(String(255))
+    # 자기소개 (`USER-004`). 길이 규칙은 `users/profile.py` 하나에만 있고
+    # 여기 숫자는 그걸 따라갑니다.
+    bio: Mapped[str | None] = mapped_column(String(300))
+    # 프로필 이미지 (`USER-004`) — `data:image/png;base64,…` 글자 그대로.
+    #
+    # 파일이 아니라 **행**입니다. 파일로 받으면 저장 자리·인증 붙은
+    # 내려받기·MIME 판별이 한 벌로 필요하고(`CHAT-006·007` 을 안 만든
+    # 이유), 행이면 이미 인증이 걸린 JSON 응답에 실려 나갑니다.
+    # 검증(PNG 시그니처·치수·크기)은 `users/profile.py` 가 합니다.
+    avatar: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _now()
 
 
@@ -118,6 +128,15 @@ class UserSession(Base):
     # 로그인해 있었는가" 는 기여도 분쟁에서 확인할 거리가 됩니다.
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     user_agent: Mapped[str | None] = mapped_column(String(300))
+    #: 이 세션으로 마지막 요청이 온 때 (`USER-005`).
+    #:
+    #: ⚠️ **상태를 저장하는 칸이 아닙니다.** `접속 중`·`자리 비움` 은
+    #: 여기서 읽을 때 계산합니다(`users/presence.py`). 상태를 행으로
+    #: 쌓으면 그 표는 곧 **출퇴근부**가 되고, 그건 이 제품이 절대
+    #: 만들면 안 되는 물건입니다.
+    #:
+    #: ⚠️ 요청마다 쓰지 않습니다 — `presence.should_touch` 를 지납니다.
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (Index("ix_user_sessions_user", "user_id"),)
 
@@ -201,6 +220,135 @@ class Project(Base):
         return cleaned or None
 
 
+# ══════════════════════════════════════════════════════════════
+# 1-b. 채널과 채팅 (요구사항 정의서 §6·§7)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **채팅은 이 제품에서 유일하게 "재지 않는" 자리입니다.**
+#
+# 정의서 §7 머리말이 못 박습니다 — "채팅 내용에 대한 AI 분석, 업무 자동
+# 생성, 프로젝트 분석 등의 기능은 제공하지 않는다."
+#
+# 그냥 안 만든 게 아니라 **만들면 안 되는** 것입니다. 이 제품은 사람의
+# 기여를 숫자로 말하는데, 메시지가 기여로 세어지는 순간 **도배가 기여도를
+# 올리는 방법**이 됩니다. 회의 발언은 트랙·근거·신뢰도가 붙어 조작이
+# 어렵지만(`docs/05` §5, `test_anti_gaming.py`), 채팅은 아무 때나 아무나
+# 무한히 칠 수 있습니다.
+#
+# 그래서 `messages` 는 `contribution_events` 와 **닿지 않습니다.**
+# `test_chat_is_not_measured.py` 가 그 경계를 지킵니다.
+
+
+class Channel(Base):
+    """텍스트 채널과 음성 채널 (CHANNEL-001·002).
+
+    ⚠️ **음성 채널은 회의가 아닙니다.** 음성 채널은 *방 이름*이고
+    (`주간회의`), 회의는 그 방에서 **열리는 사건**입니다. 둘을 한 표에
+    뭉치면 "지난 주간회의" 를 가리킬 방법이 없어집니다.
+    """
+
+    __tablename__ = "channels"
+
+    id: Mapped[int] = _pk()
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    # 값과 뜻은 `db/vocab.py` 한 곳에만 있습니다.
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    #: 목록에서의 자리 (CHANNEL-005). 작을수록 위.
+    #:
+    #: ⚠️ 정수 하나로 둡니다. "위/아래로 한 칸" 을 링크드리스트로 만들면
+    #: 중간이 끊겼을 때 목록이 통째로 사라집니다 — 순서가 깨지는 것보다
+    #: 나쁩니다.
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = _now()
+    #: 지운 채널. ⚠️ **행을 지우지 않습니다** — 메시지가 딸려 있고, 그
+    #: 메시지는 사람이 쓴 것입니다. 채널을 지웠다고 남의 말이 사라지면
+    #: 안 됩니다 (CHANNEL-004).
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            # ⚠️ 목록을 손으로 적지 않습니다 — `vocab.ChannelKind` 가 원본.
+            "kind IN (" + ",".join(f"'{v}'" for v in vocab.channel_values()) + ")",
+            name="ck_channel_kind",
+        ),
+        UniqueConstraint("project_id", "kind", "name", name="uq_channel_name"),
+        Index("ix_channels_project_order", "project_id", "position", "id"),
+    )
+
+
+class Message(Base):
+    """채팅 메시지 (CHAT-001~009).
+
+    ⚠️ **기여도와 닿지 않습니다.** 위 머리말을 보십시오.
+    """
+
+    __tablename__ = "messages"
+
+    id: Mapped[int] = _pk()
+    channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id"), nullable=False)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    #: 답글이면 부모 (CHAT-004).
+    reply_to_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"))
+    created_at: Mapped[datetime] = _now()
+    #: 고친 시각. ⚠️ 화면이 "(수정됨)" 을 붙일 근거입니다 (CHAT-002) —
+    #: 고친 사실을 감추면 나중에 말이 달라진 것을 아무도 모릅니다.
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: 지운 시각. ⚠️ **행을 지우지 않습니다** (CHAT-003). 답글이 달린 말을
+    #: 통째로 지우면 남의 답글이 허공에 뜹니다. 본문만 가리고 자리는 남깁니다.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        # 최근 것부터 거슬러 올라가는 조회 (CHAT-009).
+        Index("ix_messages_channel_time", "channel_id", "id"),
+    )
+
+
+class MessageMention(Base):
+    """이 메시지가 부른 사람 (CHAT-005).
+
+    ⚠️ **서버가 본문에서 뽑아 저장합니다.** 화면이 보낸 목록을 믿으면
+    아무나 "누가 멘션됐는지" 를 지어내 알림을 쏠 수 있습니다.
+    """
+
+    __tablename__ = "message_mentions"
+
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+
+
+class MessageReaction(Base):
+    """메시지에 다는 반응 (CHAT-008).
+
+    ⚠️ **자유 이모지가 아니라 정해진 이름입니다.** 왜 그렇게 했는지는
+    `db/vocab.py` 의 `ReactionMark` 머리말에 있습니다 — 요약하면 색
+    이모지는 화면 규칙이 막고, 자유 입력은 조롱 통로가 됩니다.
+    """
+
+    __tablename__ = "message_reactions"
+
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("messages.id"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    #: ⚠️ 한 사람이 같은 메시지에 반응을 **하나만** 답니다 — 위 복합
+    #: 기본키가 (메시지, 사람) 이기 때문입니다. `mark` 를 키에 넣으면 한
+    #: 사람이 넷을 전부 달아 반응 수를 부풀릴 수 있습니다.
+    mark: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = _now()
+
+    __table_args__ = (
+        CheckConstraint(
+            "mark IN (" + ",".join(f"'{v}'" for v in vocab.reaction_values()) + ")",
+            name="ck_reaction_mark",
+        ),
+    )
+
+
 class Member(Base):
     __tablename__ = "members"
 
@@ -208,11 +356,28 @@ class Member(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     # 겸직 지원: {"developer": 0.7, "planner": 0.3}
+    #
+    # ⚠️ **권한이 아닙니다.** 이건 기여도를 나눌 때 쓰는 가중치입니다.
+    #    권한은 아래 `project_role` 입니다 — 한 칸에 담으면 기획자 비중을
+    #    0.3 으로 바꾼 것이 권한 변경이 됩니다.
     role_shares: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    #: 프로젝트 안에서의 권한 (`PROJECT-004`). 판단은 전부
+    #: `projects/permissions.py` 에 있습니다 — 여기서 비교하지 마십시오.
+    project_role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=str(vocab.DEFAULT_PROJECT_ROLE)
+    )
     skills: Mapped[list | None] = mapped_column(JSONType)
     github_login: Mapped[str | None] = mapped_column(String(100))
 
-    __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_member"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "user_id", name="uq_member"),
+        CheckConstraint(
+            "project_role IN ("
+            + ",".join(f"'{v}'" for v in vocab.project_role_values())
+            + ")",
+            name="ck_member_project_role",
+        ),
+    )
 
 
 class Task(Base):
@@ -221,8 +386,17 @@ class Task(Base):
     id: Mapped[int] = _pk()
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
-    assignee_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    #: ⚠️ **담당자 칸이 없습니다.** `task_assignees` 를 보십시오
+    #: (`TASK-006` — 담당자는 하나 이상). 예전에는 `assignee_id` 한 칸이었고,
+    #: 여럿을 받으면서 **칸과 표에 같은 사실이 두 벌**로 남지 않게 칸을
+    #: 없앴습니다. 묻는 자리는 `db/assignees.py` 하나입니다.
+    #: 언제부터 할 일인가 (CALENDAR-002). ⚠️ `created_at` 이 아닙니다 —
+    #: 그건 행이 생긴 때이고, 이건 사람이 정한 날입니다.
+    start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: ⚠️ 제약이 **없던** 열입니다 — 허용값이 서비스 튜플 하나뿐이었습니다
+    #: (`db/vocab.py` 의 `TaskStatus` 머리말). 서비스를 안 거치는 경로가
+    #: 하나라도 생기면 칸반에 어느 열에도 안 속하는 카드가 생깁니다.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     difficulty: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -230,10 +404,47 @@ class Task(Base):
     # 회의에서 만들어진 업무라면 그 후보를 가리킨다
     origin_candidate_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = _now()
+    #: 지운 때 (`TASK-003`). NULL 이면 살아 있는 업무입니다.
+    #:
+    #: ⚠️ **행을 안 지웁니다.** 기여 이벤트·PR 연결·회의 후보가 이 업무를
+    #: 가리키고 있습니다. 진짜로 지우면 "근거 업무 #7" 이 아무것도 안
+    #: 가리키게 되고, 그건 이 저장소의 대표 실패 ③ 입니다. 채널을
+    #: `archive_channel` 로 다루는 것과 같은 판단입니다.
+    #:
+    #: ⚠️ 읽을 때는 **반드시** `db/live.py` 의 `live_tasks()` 를 쓰십시오.
+    #: 조건을 손으로 적으면 일곱 곳 중 하나를 빠뜨립니다.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         CheckConstraint("difficulty BETWEEN 1 AND 3", name="ck_task_difficulty"),
+        CheckConstraint(
+            "status IN ("
+            + ",".join(f"'{v}'" for v in vocab.task_status_values())
+            + ")",
+            name="ck_task_status",
+        ),
     )
+
+
+class TaskAssignee(Base):
+    """업무를 맡은 사람. 업무 하나에 **여럿** 있을 수 있습니다 (`TASK-006`).
+
+    ⚠️ **순서 칸이 없습니다.** `position` 이나 `is_primary` 를 두면 그
+    순간 "주담당 / 보조" 가 생기고, 기여 이벤트를 그 등급대로 나누자는
+    말이 반드시 따라옵니다. 두 사람이 맡았으면 **둘 다 담당자**입니다.
+    누가 더 했는지는 시스템이 정할 일이 아닙니다
+    (`AGENTS.md` 불변식 4).
+
+    ⚠️ 완료 점수를 어떻게 나누는지는 `contribution/sharing.py` 에 있습니다.
+    안 나누면 **드롭다운에서 이름을 고르는 것이 곧 점수 부풀리기**입니다.
+    """
+
+    __tablename__ = "task_assignees"
+
+    task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    #: 언제 맡았는가. 알림·감사용이고 **순서를 뜻하지 않습니다.**
+    assigned_at: Mapped[datetime] = _now()
 
 
 class TaskDeadlineChange(Base):
@@ -379,10 +590,22 @@ class Meeting(Base):
     id: Mapped[int] = _pk()
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     title: Mapped[str | None] = mapped_column(String(200))
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: ⚠️ **널일 수 있습니다** — 예정만 잡고 아직 안 연 회의입니다
+    #: (CALENDAR-003). 예전에는 회의가 곧 녹음이라 늘 값이 있었습니다.
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: 예정 시각 (CALENDAR-003·004). ⚠️ 예정을 별도 표에 두지 않습니다 —
+    #: 그러면 "그 예정이 이 회의가 됐다" 를 잇는 칸이 또 필요하고, 안
+    #: 이어진 것들이 쌓입니다.
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_sec: Mapped[int | None] = mapped_column(Integer)
     # multitrack | single  — docs/04 의 모드 A / 모드 B
     capture_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="multitrack")
+    #: 이 회의가 열린 **음성 채널** (CHANNEL-002). 없으면 채널 밖에서 연 회의.
+    #:
+    #: ⚠️ 채널은 방 이름이고 회의는 그 방에서 열린 사건입니다. 널을 허용하는
+    #: 이유는 채널이 생기기 전에 열린 회의가 있고, 그것들을 아무 채널에나
+    #: 밀어 넣으면 **없던 사실을 만드는** 것이기 때문입니다.
+    channel_id: Mapped[int | None] = mapped_column(ForeignKey("channels.id"))
     #: 값의 뜻은 `MeetingStatus` 참조. 그쪽이 유일한 출처다.
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=MeetingStatus.PENDING.value
@@ -414,6 +637,10 @@ class MeetingTrack(Base):
     meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     device_label: Mapped[str | None] = mapped_column(String(100))
+    #: ⚠️ **트랙은 언제나 시작 시각이 있습니다.** 녹음이 시작돼야 트랙이
+    #: 생기기 때문입니다 — 회의(`Meeting.started_at`)와 달리 여기는 널이
+    #: 될 수 없습니다. 널을 허용하면 시간 정렬(`offset_ms`)의 기준이
+    #: 사라지고, 그 트랙 구간은 영영 못 잽니다.
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 트랙 간 시간 정렬 보정값
@@ -486,7 +713,10 @@ class Utterance(Base):
     speaker_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
     is_overlap: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # docs/10 Q9 확정 8개 라벨
+    # 발언 유형 (요구사항 정의서 §10). 값과 뜻은 `db/vocab.py` 한 곳에만
+    # 있습니다 — 여기 제약이 **아예 없던** 동안 허용값은 분류기 모듈의 튜플
+    # 하나뿐이었고, 그 목록은 요구 열 개와 1:1 이 아니었습니다.
+    # ⚠️ `None` 은 "아직 분류 안 함" 입니다. `other`(모르겠음)와 다릅니다.
     utterance_type: Mapped[str | None] = mapped_column(String(20))
     type_confidence: Mapped[float | None] = mapped_column(Numeric(4, 3))
 
@@ -502,6 +732,13 @@ class Utterance(Base):
             + ",".join(f"'{v}'" for v in vocab.stored_values())
             + ")",
             name="ck_speaker_source",
+        ),
+        CheckConstraint(
+            # ⚠️ 목록을 손으로 적지 않습니다. `vocab.UTTERANCE_STORED` 가 원본입니다.
+            "utterance_type IS NULL OR utterance_type IN ("
+            + ",".join(f"'{v}'" for v in vocab.utterance_type_values())
+            + ")",
+            name="ck_utterance_type",
         ),
         Index("ix_utterances_meeting_time", "meeting_id", "start_ms"),
     )
@@ -569,6 +806,48 @@ class MeetingTaskCandidate(Base):
     created_at: Mapped[datetime] = _now()
 
 
+class Notification(Base):
+    """알림 하나 (요구사항 정의서 §19).
+
+    ## ⚠️ **문장을 저장하지 않습니다**
+
+    여기에는 무엇을 가리키는지(업무 번호·메시지 번호)만 있고 "…님이 나를
+    불렀습니다" 같은 글자는 없습니다. 문장을 저장하면 업무 이름을 고쳤을 때
+    **알림만 옛 이름을 말합니다.** 문장은 읽을 때 만듭니다
+    (`notification_service._text_for`).
+
+    ## ⚠️ 마감 알림은 **이 표에 없습니다**
+
+    `due_soon`·`overdue` 는 지금 상태에서 나옵니다. 행으로 쌓으면 마감일을
+    미뤘을 때 "곧 마감" 이 남고, 업무를 끝냈을 때 "지연" 이 남습니다 —
+    알림이 **베낀 순간의 사실**을 가리키게 됩니다. 그래서 CHECK 제약이
+    그 둘을 아예 거절합니다 (`vocab.NOTIFICATION_STORED`).
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = _pk()
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: 무엇을 가리키는가. 종류마다 하나만 채워집니다.
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"))
+    meeting_id: Mapped[int | None] = mapped_column(ForeignKey("meetings.id"))
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"))
+    created_at: Mapped[datetime] = _now()
+    #: 읽은 시각. ⚠️ **행을 지우지 않습니다** — 지우면 "언제 알렸는가" 가
+    #: 사라지고, 기여도 분쟁에서 그게 확인할 거리가 됩니다.
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN (" + ",".join(f"'{v}'" for v in vocab.notification_values()) + ")",
+            name="ck_notification_kind",
+        ),
+        Index("ix_notifications_inbox", "user_id", "project_id", "id"),
+    )
+
+
 class MeetingEvent(Base):
     """비효율 구간 등 회의 분석 결과 (제안서 6.5)."""
 
@@ -576,8 +855,12 @@ class MeetingEvent(Base):
 
     id: Mapped[int] = _pk()
     meeting_id: Mapped[int] = mapped_column(ForeignKey("meetings.id"), nullable=False)
-    # repeated_discussion | unanswered_question | incomplete_task |
-    # topic_drift | decision_conflict
+    # 값과 뜻은 `db/vocab.py` 한 곳에만 있습니다 — 아래 CHECK 제약이 거기서
+    # 끌어다 씁니다.
+    #
+    # ⚠️ 예전에는 여기 주석이 다섯 값을 늘어놓는 것이 전부였고, 그중
+    # **넷은 만드는 코드가 0곳**이었습니다. 읽는 사람은 탐지기가 다섯 개
+    # 있다고 믿게 됩니다 — `vocab.EVENT_NOT_PRODUCED_YET` 을 보십시오.
     event_type: Mapped[str] = mapped_column(String(40), nullable=False)
     severity: Mapped[str] = mapped_column(String(10), nullable=False, default="info")
     start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -586,6 +869,17 @@ class MeetingEvent(Base):
         BigIntArray, nullable=False
     )
     detail: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+
+    __table_args__ = (
+        CheckConstraint(
+            # ⚠️ 목록을 손으로 적지 않습니다 — `vocab.MeetingEventType` 이 원본.
+            "event_type IN ("
+            + ",".join(f"'{v}'" for v in vocab.event_values())
+            + ")",
+            name="ck_meeting_event_type",
+        ),
+        CheckConstraint("end_ms >= start_ms", name="ck_meeting_event_span"),
+    )
 
 
 # ══════════════════════════════════════════════════════════════

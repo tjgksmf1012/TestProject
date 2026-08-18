@@ -41,19 +41,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC = ROOT / "frontend" / "public"
 
-#: 안드로이드 셸의 런처 아이콘.
-#:
-#: API 26+ 는 `mipmap-anydpi-v26/ic_launcher.xml`(적응형)을 쓰지만,
-#: 24·25 는 PNG 를 봅니다. 같은 그림을 두 번 그리지 않으려고 여기서
-#: 같이 굽습니다 — 손으로 맞추면 반드시 갈라집니다.
-ANDROID_RES = ROOT / "android" / "app" / "src" / "main" / "res"
-ANDROID_DENSITIES = [
-    ("mipmap-mdpi", 48),
-    ("mipmap-hdpi", 72),
-    ("mipmap-xhdpi", 96),
-    ("mipmap-xxhdpi", 144),
-    ("mipmap-xxxhdpi", 192),
-]
+# ⚠️ 여기 안드로이드 런처 아이콘(밀도 다섯)을 굽는 코드가 있었습니다.
+#    셸을 접으면서 걷어냈습니다 (`docs/14` 머리말 · `docs/21` §6).
+#    데스크톱 앱의 아이콘은 패키징(Phase 6)에서 정하고, 그때는
+#    `electron-builder` 가 `icon.png` 하나에서 OS 별로 만듭니다.
 
 BG = (0x25, 0x63, 0xEB)
 FG = (0xFF, 0xFF, 0xFF)
@@ -216,19 +207,6 @@ def main() -> int:
         (PUBLIC / name).write_bytes(data)
         print(f"  {name:26} {size}×{size}  {len(data):>7,} bytes")
 
-    if not ANDROID_RES.is_dir():
-        print("\n안드로이드 셸이 없어 런처 아이콘은 건너뜁니다.")
-        return 0
-
-    print(f"\n안드로이드 ({ANDROID_RES.relative_to(ROOT)})")
-    for folder, size in ANDROID_DENSITIES:
-        target = ANDROID_RES / folder
-        target.mkdir(parents=True, exist_ok=True)
-        data = _png(size, _render(size, maskable=False))
-        (target / "ic_launcher.png").write_bytes(data)
-        # `ic_launcher_round` 도 같은 그림. 둥근 모양은 런처가 깎습니다.
-        (target / "ic_launcher_round.png").write_bytes(data)
-        print(f"  {folder:20} {size}×{size}  {len(data):>7,} bytes")
     return 0
 
 

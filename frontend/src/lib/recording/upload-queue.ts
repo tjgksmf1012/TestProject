@@ -18,7 +18,23 @@
  *    앞에서 붙잡고 있으면 네트워크가 돌아와도 밀린 청크가 못 나간다.
  * 4. **포기한 건 기록한다.** 최대 시도 횟수를 넘긴 seq 는 `lost` 로 남고,
  *    `buildTimeline` 이 그 자리를 공백으로 표시한다. 조용히 사라지지 않는다.
+ *
+ * ## 보관소가 있으면 포기해도 **소리는 안 잃는다** (`docs/21` Phase 1)
+ *
+ * 데스크톱 앱에는 디스크가 있습니다. `store` 를 주면 청크가 들어올 때
+ * 디스크에도 적고, 포기한 seq 중 **디스크에 무사히 앉은 것**은 `parked`
+ * 로 따로 셉니다.
+ *
+ * ⚠️ **`parked` 도 `lost` 에 그대로 들어갑니다.** 지금 이 순간 서버에
+ * 없다는 사실은 똑같고, `buildTimeline` 은 서버가 가진 것을 그립니다.
+ * 빼 버리면 화면이 "구멍 없음" 이라고 말하는데 서버에는 구멍이 있는
+ * 상태가 됩니다. `parked` 는 "되찾을 수 있다" 만 더해 주는 것입니다.
+ *
+ * ⚠️ 보관소가 없으면(`store` 가 `null` — 브라우저) **동작이 예전과
+ * 한 글자도 다르지 않아야 합니다.**
  */
+
+import { toBytes, type ChunkStore } from '../platform/chunk-store.ts';
 
 export interface PendingChunk {
   seq: number;
@@ -54,9 +70,18 @@ export interface UploadQueueOptions {
   sleep?: (ms: number) => Promise<void>;
   /** 지터용. 테스트에서 고정하면 백오프가 결정적이 된다. */
   random?: () => number;
+  /**
+   * 청크를 붙잡아 둘 곳. 없으면(브라우저) `null`.
+   *
+   * ⚠️ 있어도 **업로드 경로를 바꾸지 않습니다.** 그대로 올리고, 올라가면
+   * 지웁니다. 보관소는 실패했을 때만 쓸모가 있는 뒷문입니다.
+   */
+  store?: ChunkStore | null;
   onAck?: (seq: number) => void;
   onGiveUp?: (seq: number, reason: string) => void;
   onRetry?: (seq: number, attempt: number, delayMs: number) => void;
+  /** 디스크에 적다 실패했을 때. 조용히 넘어가면 "보관 중" 이 거짓말이 된다. */
+  onStoreError?: (seq: number, reason: string) => void;
 }
 
 export interface QueueStatus {
@@ -68,7 +93,19 @@ export interface QueueStatus {
 
 export interface UploadResult {
   acked: number[];
+  /**
+   * 서버가 못 받은 seq. **`parked` 도 여기 들어 있습니다.**
+   *
+   * `buildTimeline` 이 이 목록으로 공백을 그립니다 — 서버 기준의 사실을
+   * 그리는 것이므로, 디스크에 남아 있어도 지금은 공백이 맞습니다.
+   */
   lost: number[];
+  /**
+   * 그중 **디스크에 무사히 앉아 되찾을 수 있는** seq.
+   *
+   * 보관소가 없으면 언제나 빈 배열입니다.
+   */
+  parked: number[];
   /** seq → 포기 사유 */
   failures: Map<number, string>;
   totalAttempts: number;
@@ -101,10 +138,11 @@ export function backoffDelay(
   return Math.round(exponential * (0.5 + 0.5 * random()));
 }
 
+type Hooks = 'onAck' | 'onGiveUp' | 'onRetry' | 'onStoreError' | 'store';
+
 export class UploadQueue {
   #transport: UploadTransport;
-  #options: Required<Omit<UploadQueueOptions, 'onAck' | 'onGiveUp' | 'onRetry'>> &
-    Pick<UploadQueueOptions, 'onAck' | 'onGiveUp' | 'onRetry'>;
+  #options: Required<Omit<UploadQueueOptions, Hooks>> & Pick<UploadQueueOptions, Hooks>;
 
   #pending: QueueItem[] = [];
   #processing = new Set<number>();
@@ -116,6 +154,15 @@ export class UploadQueue {
   #waiters: Array<() => void> = [];
   #workers: Promise<void>[] | null = null;
 
+  /**
+   * seq → **디스크에 무사히 앉았는가.**
+   *
+   * ⚠️ 던지지 않는 약속으로 만들어 둡니다. 디스크 쓰기는 업로드보다 훨씬
+   * 자주 성공하지만 실패할 수 있고(용량·권한), 그때 붙잡지 않은 거절이
+   * 뜨면 Electron 이 창 위에 오류를 던집니다. **녹음 중에.**
+   */
+  #onDisk = new Map<number, Promise<boolean>>();
+
   constructor(transport: UploadTransport, options: UploadQueueOptions = {}) {
     this.#transport = transport;
     this.#options = {
@@ -126,9 +173,11 @@ export class UploadQueue {
       maxPendingBytes: options.maxPendingBytes ?? DEFAULTS.maxPendingBytes,
       sleep: options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
       random: options.random ?? Math.random,
+      store: options.store ?? null,
       onAck: options.onAck,
       onGiveUp: options.onGiveUp,
       onRetry: options.onRetry,
+      onStoreError: options.onStoreError,
     };
   }
 
@@ -150,8 +199,45 @@ export class UploadQueue {
     if (this.#acked.has(chunk.seq) || this.#failures.has(chunk.seq)) return this.status;
     this.#pending.push({ chunk, attempts: 0 });
     this.#pendingBytes += chunk.byteLength;
+    this.#keep(chunk);
     this.#notify();
     return this.status;
+  }
+
+  /**
+   * 디스크에도 적어 둔다. 보관소가 없으면 아무 일도 안 한다.
+   *
+   * ⚠️ **기다리지 않습니다.** `enqueue` 는 `MediaRecorder` 의 데이터
+   * 콜백에서 불립니다. 거기서 디스크를 기다리면 다음 청크가 밀리고,
+   * 밀리면 녹음이 끊깁니다 — 고치려던 바로 그 결함입니다. 대신 약속을
+   * 붙잡아 뒀다가 **포기 시점과 `finish()` 에서** 확인합니다.
+   */
+  #keep(chunk: PendingChunk): void {
+    const store = this.#options.store;
+    if (!store) return;
+
+    // ⚠️ `payload` 는 보통 **`Blob`** 입니다 (`browser-adapter.ts`).
+    //    `ArrayBuffer` 만 받게 짜면 테스트는 다 통과하는데 실기에서는
+    //    한 개도 안 적힙니다 — 테스트가 `ArrayBuffer` 를 넣기 때문입니다.
+    const bytes = toBytes(chunk.payload);
+    if (bytes === null) {
+      this.#onDisk.set(chunk.seq, Promise.resolve(false));
+      this.#options.onStoreError?.(chunk.seq, '보관소에 넣을 수 있는 바이트가 아닙니다');
+      return;
+    }
+
+    const fail = (error: unknown): false => {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.#options.onStoreError?.(chunk.seq, reason);
+      return false;
+    };
+
+    this.#onDisk.set(
+      chunk.seq,
+      bytes
+        .then((buffer) => store.put({ seq: chunk.seq, atMs: chunk.atMs, bytes: buffer }))
+        .then(() => true, fail),
+    );
   }
 
   /**
@@ -181,12 +267,43 @@ export class UploadQueue {
     this.#closed = true;
     this.#notify();
     await Promise.all(this.#workers!);
+
+    const lost = [...this.#failures.keys()].sort((a, b) => a - b);
     return {
       acked: [...this.#acked].sort((a, b) => a - b),
-      lost: [...this.#failures.keys()].sort((a, b) => a - b),
+      lost,
+      parked: await this.#parked(lost),
       failures: new Map(this.#failures),
       totalAttempts: this.#totalAttempts,
     };
+  }
+
+  /**
+   * 포기한 것 중 **디스크에 무사히 앉은** seq.
+   *
+   * ⚠️ 여기서 처음으로 디스크 약속을 기다립니다. 포기한 청크만 보므로
+   * 보통은 빈 목록이고, 그때는 기다릴 것도 없습니다.
+   */
+  async #parked(lost: readonly number[]): Promise<number[]> {
+    if (!this.#options.store || lost.length === 0) return [];
+    const settled = await Promise.all(
+      lost.map(async (seq) => ((await this.#onDisk.get(seq)) === true ? seq : null)),
+    );
+    return settled.filter((seq): seq is number => seq !== null);
+  }
+
+  /**
+   * 서버가 받았으니 디스크에서 지운다.
+   *
+   * ⚠️ **지우기 실패는 조용히 넘어갑니다.** 서버가 이미 받은 청크라
+   * 소리는 안전하고, 남은 것은 다음 실행에서 정리됩니다. 여기서 던지면
+   * 성공한 업로드가 실패로 뒤집힙니다.
+   */
+  #release(seq: number): void {
+    const store = this.#options.store;
+    if (!store) return;
+    this.#onDisk.delete(seq);
+    void store.drop(seq).catch(() => {});
   }
 
   async #worker(): Promise<void> {
@@ -215,6 +332,7 @@ export class UploadQueue {
       await this.#transport.send(item.chunk);
       this.#acked.add(seq);
       this.#pendingBytes -= item.chunk.byteLength;
+      this.#release(seq);
       this.#options.onAck?.(seq);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);

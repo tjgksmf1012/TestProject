@@ -25,13 +25,14 @@ docs/04-회의-처리-파이프라인.md §2, docs/07-법적-윤리-요구사항
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from teamflow.audio import assembly
+from teamflow.audio import assembly, playback
 from teamflow.audio.chunk_store import ChunkStore
 from teamflow.config import get_settings
 from teamflow.db import models as m
@@ -882,3 +883,105 @@ def force_finish_tracks(
             )
     session.flush()
     return [t.id for t in live]
+
+
+# ══════════════════════════════════════════════════════════════
+# 구간 재생 (`REVIEW-004`) — 발화를 소리로
+# ══════════════════════════════════════════════════════════════
+#
+# 발화 시각은 정렬된 공통 축의 값이고, 서빙하는 것은 청크를 이어 붙인
+# 원본이다. 두 좌표 변환(공통 축 → 트랙 축 → 소리 위 위치)의 계산은
+# `audio/playback.py` 에 있다 — 여기는 DB·디스크의 사실을 모아 넘긴다.
+
+
+@dataclass(frozen=True, slots=True)
+class PlaybackPosition:
+    """이 발화를 들으려면 어느 트랙의 소리를 몇 ms 에서 틀어야 하는가."""
+
+    track_id: int
+    position_ms: int
+
+
+def tracks_with_audio(
+    session: Session, store: ChunkStore, *, meeting_id: int
+) -> dict[int, list[int]]:
+    """소리가 **디스크에 실제로 있는** 트랙 → 있는 seq 목록.
+
+    DB 행이 아니라 파일을 센다 — 보존기간이 지나 지워진 트랙은 행이
+    남아 있어도 들을 수 없고, 그건 "없다" 고 답해야 한다.
+    """
+    track_ids = session.scalars(
+        select(m.MeetingTrack.id).where(m.MeetingTrack.meeting_id == meeting_id)
+    ).all()
+    found: dict[int, list[int]] = {}
+    for track_id in track_ids:
+        seqs = store.stored_seqs(meeting_id, track_id)
+        if seqs:
+            found[track_id] = seqs
+    return found
+
+
+def playback_map(
+    session: Session,
+    store: ChunkStore,
+    *,
+    meeting_id: int,
+    timeslice_ms: int = 5_000,
+) -> dict[int, PlaybackPosition]:
+    """발화 id → 소리 위의 위치. 들을 수 없는 발화는 **빠져 있다.**
+
+    빠지는 경우 셋 — 트랙이 안 정해진 발화(시연 데이터·미매핑 화자),
+    소리 파일이 없는 트랙(업로드 전·보존기간 삭제), 공백 위의 발화
+    (유실 구간 — 가장 가까운 소리로 당겨 붙이면 엉뚱한 말이 나온다).
+
+    ⚠️ `timeslice_ms` 는 파이프라인의 배치 계산과 같은 값이어야 한다
+    (`pipeline/runtime.py` 기본 5초). 다르면 위치가 청크 경계만큼 어긋난다.
+    """
+    audible = tracks_with_audio(session, store, meeting_id=meeting_id)
+    if not audible:
+        return {}
+
+    tracks = session.scalars(
+        select(m.MeetingTrack).where(m.MeetingTrack.id.in_(audible))
+    ).all()
+    # ⚠️ 이동량의 기준(min)은 소리가 있는 트랙들 위에서 잡는다 — 정렬에
+    #    참여 안 한 트랙의 기본값 0 이 섞이면 기준이 오염된다 (playback.py).
+    shifts = playback.track_shifts({t.id: t.offset_ms for t in tracks})
+
+    placements: dict[int, list[assembly.PlacedChunk]] = {}
+    for track in tracks:
+        plan = build_plan(session, track, timeslice_ms=timeslice_ms)
+        # 서빙되는 것은 디스크의 파일뿐이다. DB 행만 있고 파일이 없는
+        # 청크(orphaned)를 계산에 넣으면 위치가 그만큼 뒤로 밀린다.
+        on_disk = set(audible[track.id])
+        placements[track.id] = [p for p in plan.placements if p.seq in on_disk]
+
+    positions: dict[int, PlaybackPosition] = {}
+    utterances = session.scalars(
+        select(m.Utterance).where(
+            m.Utterance.meeting_id == meeting_id,
+            m.Utterance.track_id.in_(audible),
+        )
+    ).all()
+    for utterance in utterances:
+        track_id = utterance.track_id
+        assert track_id is not None  # 위 in_() 필터가 보장
+        track_ms = playback.track_axis_ms(
+            utterance.start_ms, shift_ms=shifts[track_id]
+        )
+        position = playback.concat_position_ms(placements[track_id], track_ms)
+        if position is not None:
+            positions[utterance.id] = PlaybackPosition(track_id, position)
+    return positions
+
+
+def iter_track_audio(
+    store: ChunkStore, *, meeting_id: int, track_id: int
+) -> Iterator[bytes]:
+    """트랙의 청크 파일을 seq 순서로 흘려보낸다.
+
+    `MediaRecorder.start(timeslice)` 의 조각은 순서대로 이어 붙이면
+    그대로 하나의 webm 스트림이다 — 첫 조각이 컨테이너 머리를 들고 있다.
+    """
+    for seq in store.stored_seqs(meeting_id, track_id):
+        yield store.read(meeting_id, track_id, seq)

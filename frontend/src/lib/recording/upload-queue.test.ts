@@ -316,3 +316,169 @@ describe('UploadQueue — 동시 업로드', () => {
     assert.equal(result.acked.length, 19);
   });
 });
+
+// ══════════════════════════════════════════════════════════════
+// 보관소 (docs/21 Phase 1)
+// ══════════════════════════════════════════════════════════════
+
+/** 디스크를 흉내 낸다. `failPut` 에 든 seq 는 못 적는다. */
+class FakeStore {
+  readonly saved = new Map<number, number>(); // seq → byteLength
+  readonly dropped: number[] = [];
+  readonly failPut: Set<number>;
+
+  constructor(failPut: Set<number> = new Set()) {
+    this.failPut = failPut;
+  }
+
+  async put({ seq, bytes }: { seq: number; atMs: number; bytes: ArrayBuffer }): Promise<void> {
+    if (this.failPut.has(seq)) throw new Error('디스크가 꽉 찼습니다');
+    this.saved.set(seq, bytes.byteLength);
+  }
+  async list() {
+    return [...this.saved].map(([seq, byteLength]) => ({ seq, atMs: seq, byteLength }));
+  }
+  async get(seq: number) {
+    return this.saved.has(seq) ? new ArrayBuffer(this.saved.get(seq)!) : null;
+  }
+  async drop(seq: number): Promise<void> {
+    this.saved.delete(seq);
+    this.dropped.push(seq);
+  }
+}
+
+/** 진짜 청크와 같은 모양 — `payload` 가 **`Blob` 같은 것**이다. */
+function blobChunks(count: number, byteLength = 1000): PendingChunk[] {
+  return Array.from({ length: count }, (_, seq) => ({
+    seq,
+    byteLength,
+    atMs: 1_700_000_000_000 + seq * 5_000,
+    payload: { arrayBuffer: async () => new ArrayBuffer(byteLength) },
+  }));
+}
+
+describe('UploadQueue — 보관소가 없을 때 (브라우저)', () => {
+  it('⭐ 동작이 예전과 한 글자도 다르지 않다', async () => {
+    // ⚠️ 이 변경이 브라우저 화면을 건드리면 안 됩니다.
+    const transport = new FakeTransport([[2, Infinity]]);
+    const queue = new UploadQueue(transport, { sleep: fakeSleep().sleep, maxAttempts: 2 });
+    for (const c of chunks(4)) queue.enqueue(c);
+
+    const result = await queue.finish();
+    assert.deepEqual(result.lost, [2]);
+    assert.deepEqual(result.parked, [], '보관소가 없는데 parked 가 생겼습니다');
+  });
+});
+
+describe('UploadQueue — 보관소가 있을 때 (데스크톱)', () => {
+  it('⭐ 포기한 청크가 **디스크에 남는다**', async () => {
+    // 서버가 3분 꺼져 있었다는 이유로 소리를 잃지 않는 것이 이 기능입니다.
+    const store = new FakeStore();
+    const transport = new FakeTransport([[2, Infinity]]);
+    const queue = new UploadQueue(transport, {
+      sleep: fakeSleep().sleep,
+      maxAttempts: 2,
+      store,
+    });
+    for (const c of blobChunks(4)) queue.enqueue(c);
+
+    const result = await queue.finish();
+    assert.deepEqual(result.lost, [2]);
+    assert.deepEqual(result.parked, [2], '되찾을 수 있는데 없다고 합니다');
+    assert.ok(store.saved.has(2), '디스크에 안 남았습니다');
+  });
+
+  it('⭐ `parked` 는 `lost` 에서 빠지지 않는다', async () => {
+    // ⚠️ 빼면 화면이 "구멍 없음" 이라고 말하는데 **서버에는 구멍이**
+    //    있습니다. buildTimeline 은 서버가 가진 것을 그립니다.
+    const store = new FakeStore();
+    const queue = new UploadQueue(new FakeTransport([[1, Infinity]]), {
+      sleep: fakeSleep().sleep,
+      maxAttempts: 2,
+      store,
+    });
+    for (const c of blobChunks(3)) queue.enqueue(c);
+
+    const result = await queue.finish();
+    assert.ok(result.lost.includes(1), 'parked 를 lost 에서 빼 버렸습니다');
+    for (const seq of result.parked) assert.ok(result.lost.includes(seq));
+  });
+
+  it('올라간 청크는 디스크에서 지운다', async () => {
+    const store = new FakeStore();
+    const queue = new UploadQueue(new FakeTransport(), { store });
+    for (const c of blobChunks(3)) queue.enqueue(c);
+
+    await queue.finish();
+    assert.deepEqual(store.dropped.sort((a, b) => a - b), [0, 1, 2]);
+    assert.equal(store.saved.size, 0, '올라갔는데 디스크에 남아 있습니다');
+  });
+
+  it('⭐ 디스크에 못 적었으면 `parked` 라고 하지 않는다', async () => {
+    // "이 컴퓨터에 남아 있습니다" 가 거짓이면 사람은 되찾으려다 못 찾습니다.
+    const store = new FakeStore(new Set([1]));
+    const errors: number[] = [];
+    const queue = new UploadQueue(new FakeTransport([[1, Infinity]]), {
+      sleep: fakeSleep().sleep,
+      maxAttempts: 2,
+      store,
+      onStoreError: (seq) => errors.push(seq),
+    });
+    for (const c of blobChunks(3)) queue.enqueue(c);
+
+    const result = await queue.finish();
+    assert.deepEqual(result.lost, [1]);
+    assert.deepEqual(result.parked, [], '못 적었는데 남아 있다고 합니다');
+    assert.deepEqual(errors, [1], '못 적은 것을 조용히 넘어갔습니다');
+  });
+
+  it('⭐ 바이트를 못 꺼내는 payload 는 조용히 넘어가지 않는다', async () => {
+    // 기존 검사 헬퍼는 `payload` 가 문자열입니다. 실기의 `Blob` 과 다르고,
+    // 그 차이가 **실기에서만 아무것도 안 적히는** 상태를 만들 수 있습니다.
+    const store = new FakeStore();
+    const errors: string[] = [];
+    const queue = new UploadQueue(new FakeTransport([[0, Infinity]]), {
+      sleep: fakeSleep().sleep,
+      maxAttempts: 2,
+      store,
+      onStoreError: (_seq, reason) => errors.push(reason),
+    });
+    for (const c of chunks(1)) queue.enqueue(c); // payload 가 문자열
+
+    const result = await queue.finish();
+    assert.deepEqual(result.parked, []);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0] ?? '', /바이트/);
+  });
+
+  it('⭐ 디스크 쓰기를 기다리느라 큐가 멈추지 않는다', async () => {
+    // ⚠️ `enqueue` 는 MediaRecorder 데이터 콜백에서 불립니다. 거기서
+    //    디스크를 기다리면 다음 청크가 밀리고, 밀리면 녹음이 끊깁니다 —
+    //    고치려던 바로 그 결함입니다.
+    // ⚠️ 풀어 줄 손잡이를 **전부** 모읍니다. 하나만 붙잡아 두면 나머지
+    //    넷은 영영 안 끝나고, 그런데도 이 검사는 통과합니다 — `finish()`
+    //    는 잃은 것이 없으면 디스크 약속을 아예 안 기다리기 때문입니다.
+    const releases: Array<() => void> = [];
+    const slow = {
+      put: () => new Promise<void>((r) => void releases.push(r)),
+      list: async () => [],
+      get: async () => null,
+      drop: async () => {},
+    };
+    const queue = new UploadQueue(new FakeTransport(), { store: slow });
+
+    const before = Date.now();
+    for (const c of blobChunks(5)) queue.enqueue(c);
+    assert.ok(Date.now() - before < 50, 'enqueue 가 디스크를 기다렸습니다');
+
+    // ⚠️ 여기서 `releases.length` 를 **바로** 재면 0 입니다. `Blob` 에서
+    //    바이트를 꺼내는 것 자체가 약속이라, 디스크 쓰기는 한 틱 뒤에
+    //    시작합니다. 그걸 모르고 "시작조차 안 됐다" 고 적을 뻔했습니다.
+    await new Promise((r) => setTimeout(r, 0));
+    assert.equal(releases.length, 5, '디스크 쓰기가 시작조차 안 됐습니다');
+
+    for (const r of releases) r();
+    const result = await queue.finish();
+    assert.equal(result.acked.length, 5);
+  });
+});

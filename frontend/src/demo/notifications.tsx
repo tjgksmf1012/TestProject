@@ -1,0 +1,208 @@
+/**
+ * 알림 화면 (요구사항 정의서 §19).
+ *
+ * ## ⚠️ 만들었으면 **볼 자리**를 줍니다
+ *
+ * 알림을 쌓아 두고 볼 화면이 없으면 그건 이 저장소가 반복해서 당한
+ * 실패 ③ 입니다 — "할 일을 알려 주고 그 일을 할 자리를 안 줌".
+ *
+ * ## ⚠️ 문장은 **서버가** 만듭니다
+ *
+ * `notifications` 표에는 가리키는 번호만 있고 글자가 없습니다. 서버가
+ * 읽을 때 만들어 주므로 업무 이름을 고치면 문장도 따라옵니다. 화면이
+ * 자기 문장을 만들면 그 표가 두 벌이 되고 반드시 갈라집니다.
+ *
+ * ## ⚠️ 마감 알림은 **읽을 수 없습니다**
+ *
+ * 저장된 것이 아니라 지금 상태에서 나온 것이라, 읽음 표시를 보내 봐야
+ * 서버가 할 일이 없습니다. `readableIds` 가 그것을 거릅니다.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+
+import {
+  badgeText,
+  describeKind,
+  emptyNote,
+  hrefFor,
+  isUrgent,
+  readableIds,
+  type Notice,
+} from '../lib/notifications/view.ts';
+import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
+import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
+import { emptyHtml } from '../lib/ui/empty.ts';
+import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
+import { whileLoading } from '../lib/ui/pending.ts';
+import { rows as rowSkeleton } from '../lib/ui/skeleton.ts';
+import { NoteLine, RawHtml, type Note } from './parts.tsx';
+import { renderNav } from './nav.ts';
+import { bootApp } from './pwa.ts';
+
+const params = new URLSearchParams(location.search);
+const apiBase = safeApiBase(params.get('api'), location.origin);
+const projectId = Number(params.get('project') ?? '1');
+
+const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
+
+function goToLogin(): void {
+  location.href = loginUrlFor(location.pathname + location.search);
+}
+
+function App() {
+  const [notices, setNotices] = useState<Notice[] | null>(null);
+  const [unread, setUnread] = useState(0);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [slow, setSlow] = useState(false);
+  const [note, setNote] = useState<Note | null>(null);
+  const [sending, setSending] = useState(false);
+
+  const load = useCallback(async (): Promise<void> => {
+    const response = await whileLoading(
+      get(`/api/projects/${projectId}/notifications`),
+      () => setSlow(true),
+      () => setSlow(false),
+    );
+    if (response === null) {
+      setFailure(unreachableText('알림을 못 불러왔습니다'));
+      setNotices([]);
+      return;
+    }
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    if (!response.ok) {
+      setFailure(describeHttpStatus(response.status) ?? '알림을 못 불러왔습니다');
+      setNotices([]);
+      return;
+    }
+    setFailure(null);
+    setNotices((await response.json()) as Notice[]);
+
+    const badge = await get(`/api/projects/${projectId}/notifications/unread`);
+    if (badge !== null && badge.ok) {
+      setUnread(((await badge.json()) as { unread: number }).unread);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const markRead = useCallback(async (): Promise<void> => {
+    const ids = readableIds(notices ?? []);
+    if (ids.length === 0) return;
+    setSending(true);
+    try {
+      const response = await trySend(() =>
+        fetch(`${apiBase}/api/projects/${projectId}/notifications/read`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notification_ids: ids }),
+        }),
+      );
+      if (response === null) {
+        setNote({ text: unreachableText('읽음 표시를 못 보냈습니다'), tone: 'bad' });
+        return;
+      }
+      if (!response.ok) {
+        setNote({
+          text: describeHttpStatus(response.status) ?? '읽음 표시를 못 보냈습니다',
+          tone: 'bad',
+        });
+        return;
+      }
+      setNote(null);
+      await load();
+    } finally {
+      setSending(false);
+    }
+  }, [notices, load]);
+
+  const badge = badgeText(unread);
+
+  const header = (
+    <header className="head">
+      <h1>알림</h1>
+      <p className="lede">
+        나를 부른 대화, 맡은 업무, 다가오는 마감과 회의입니다. 마감과 지연은{' '}
+        <b>따로 쌓아 두지 않고</b> 지금 상태에서 만들기 때문에, 마감일을 미루거나
+        업무를 끝내면 그 자리에서 사라집니다.
+      </p>
+    </header>
+  );
+
+  if (failure !== null && notices !== null && notices.length === 0) {
+    return (
+      <>
+        {header}
+        <RawHtml html={failureHtml({ what: failure, retry: true })} onRetry={() => void load()} />
+      </>
+    );
+  }
+
+  if (notices === null) {
+    return (
+      <>
+        {header}
+        {slow && <div aria-busy="true" dangerouslySetInnerHTML={{ __html: rowSkeleton(4) }} />}
+      </>
+    );
+  }
+
+  const canRead = readableIds(notices).length > 0;
+
+  return (
+    <>
+      {header}
+
+      <div className="nbar">
+        <p className="ncount">
+          안 읽은 알림{' '}
+          {/* ⚠️ 0 이면 배지를 안 그립니다 — "0건" 은 뜻이 없습니다. */}
+          {badge === null ? <span className="none">없음</span> : <b className="badge">{badge}</b>}
+        </p>
+        {/* ⚠️ 읽을 것이 없으면 버튼을 잠급니다. 눌러도 아무 일이 안 일어나는
+            버튼을 두면 사람은 화면이 고장 났다고 읽습니다. */}
+        <button type="button" id="read-all" disabled={!canRead || sending} onClick={() => void markRead()}>
+          다 읽음으로
+        </button>
+      </div>
+
+      <NoteLine note={note} id="notice-note" />
+
+      {notices.length === 0 ? (
+        <RawHtml html={emptyHtml(emptyNote())} />
+      ) : (
+        <ul className="nlist">
+          {notices.map((notice, i) => {
+            const href = hrefFor(notice, projectId);
+            const classes = ['nitem'];
+            if (!notice.read && notice.notification_id !== null) classes.push('fresh');
+            if (isUrgent(notice)) classes.push('urgent');
+            return (
+              <li key={`${notice.kind}-${notice.notification_id}-${i}`} className={classes.join(' ')}>
+                <span className="nkind">{describeKind(notice.kind)}</span>
+                {href === null ? (
+                  <span className="ntext">{notice.text}</span>
+                ) : (
+                  <a className="ntext" href={href}>
+                    {notice.text}
+                  </a>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </>
+  );
+}
+
+const host = document.getElementById('app');
+if (host !== null) createRoot(host).render(<App />);
+renderNav('notifications');
+bootApp();

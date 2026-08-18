@@ -225,3 +225,518 @@ CARRIES_CONTRIBUTION: frozenset[ReportType] = frozenset(
 def report_values() -> tuple[str, ...]:
     """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
     return tuple(sorted(str(r) for r in ReportType))
+
+
+# ══════════════════════════════════════════════════════════════
+# meeting_events.event_type — 회의 분석이 찾아낸 것
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **같은 결함의 세 번째 사례입니다.** `speaker_source` 는 값이 갈라져
+#    있었고, `report_type` 은 주석 한 줄뿐이었으며, 이 열은 **둘 다**
+#    입니다 — 주석이 다섯 값을 선언하는데 CHECK 제약은 없고, 그중
+#    **실제로 만들어지는 것은 하나**뿐입니다.
+#
+#        # repeated_discussion | unanswered_question | incomplete_task |
+#        # topic_drift | decision_conflict
+#
+#    나머지 넷을 만드는 프로덕션 코드가 0곳입니다. 그런데 주석은 다섯을
+#    다 말하고 있으니, 읽는 사람은 "탐지기가 다섯 개 있다" 고 믿습니다.
+#    요구사항 정의서 §12(AI-REVIEW-001·003·004·006)가 그 넷이고, 그래서
+#    이 표의 주석이 **요구가 이미 구현된 것처럼** 보이게 만들고 있었습니다.
+
+
+class MeetingEventType(StrEnum):
+    """회의에서 찾아낸 문제 구간 (요구사항 정의서 §12).
+
+    ⚠️ 새 값을 넣으면 아래 `EVENT_PRODUCED` / `EVENT_NOT_PRODUCED_YET`
+    양쪽에서 자리를 정하기 전까지 테스트가 터집니다.
+    """
+
+    REPEATED_DISCUSSION = "repeated_discussion"  # AI-REVIEW-001 반복 논의
+    UNANSWERED_QUESTION = "unanswered_question"  # AI-REVIEW-005 미응답 질문
+    INCOMPLETE_TASK = "incomplete_task"  # AI-REVIEW-004 미완성 업무
+    TOPIC_DRIFT = "topic_drift"  # AI-REVIEW-003 주제 이탈
+    DECISION_CONFLICT = "decision_conflict"  # AI-REVIEW-006 결정 번복
+
+
+#: 지금 **실제로 만들어지는** 값.
+#:
+#: · `unanswered_question` — LLM 경로 (`tasks/meeting_tasks.py`)
+#: · 나머지 넷 — 규칙 기준선 (`services/inefficiency_service.py`)
+#:
+#: ⚠️ 넷이 오랫동안 **어휘에만 있고 만드는 코드가 0곳**이었습니다
+#: (결함 122). 주석은 다섯을 선언하는데 실제로는 하나만 나왔고, 읽는
+#: 사람은 탐지기가 다섯 개 있다고 믿게 됩니다.
+EVENT_PRODUCED: frozenset[MeetingEventType] = frozenset(MeetingEventType)
+
+#: 아직 **탐지기가 없는** 값과 그 사실.
+#:
+#: ⚠️ 이 집합이 비어 있지 않다는 것 자체가 "요구사항 §12 가 아직 다 안
+#: 됐다" 는 뜻입니다. `docs/20` 의 대조표가 이 집합을 그대로 읽습니다 —
+#: 문서에 숫자를 손으로 적어 두면 구현이 늘어도 문서는 그대로 낡습니다.
+#:
+#: ⚠️ 여기 있는 값을 화면이 **미리 다루는 척하면 안 됩니다.** 안 나오는
+#: 값에 라벨을 붙여 두면 "이미 되는 기능" 으로 읽힙니다.
+#:
+#: ⚠️ **지금은 비어 있습니다.** 그렇다고 §12 가 다 된 것은 아닙니다 —
+#: `AI-REVIEW-002`(장시간 미결정)·`007`(발언 편중)·`009`(핵심 구간)은
+#: 애초에 `meeting_events` 로 표현하는 것이 아닙니다. `docs/20` §12 를
+#: 보십시오. 이 집합은 "어휘에 있는데 안 나오는 값" 만 셉니다.
+EVENT_NOT_PRODUCED_YET: frozenset[MeetingEventType] = frozenset()
+
+
+def event_values() -> tuple[str, ...]:
+    """CHECK 제약에 쓸 문자열들.
+
+    ⚠️ **`EVENT_PRODUCED` 가 아니라 전부**입니다. `speaker_source` 와 다른
+    점인데, 저쪽은 못 만드는 값을 DB 가 거절해야 앞단이 없다는 사실이
+    드러나지만 이쪽은 탐지기가 붙는 즉시 값이 들어옵니다 — 그때 마이그
+    레이션을 또 하게 만들 이유가 없습니다. 대신 "아직 안 나온다" 는 사실은
+    위 두 집합과 테스트가 지킵니다.
+    """
+    return tuple(sorted(str(e) for e in MeetingEventType))
+
+
+# ══════════════════════════════════════════════════════════════
+# channels.kind — 채널의 종류 (요구사항 정의서 §6)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **둘 다 실제로 만들어집니다.** `speaker_source` 처럼 "아직 못 만드는
+#    값" 을 미리 열어 두지 않았고, `meeting_events` 처럼 주석으로만 선언
+#    하지도 않았습니다 — 두 종류 다 화면에서 만들 수 있고 목록에 뜹니다.
+
+
+class ChannelKind(StrEnum):
+    """텍스트 채널인가 음성 채널인가 (요구사항 정의서 CHANNEL-001·002).
+
+    ⚠️ **음성 채널은 회의를 대신하지 않습니다.** 음성 채널은 *방 이름*
+    이고(`주간회의`·`개발회의`), 회의는 그 방에서 **열리는 사건**입니다.
+    `meetings.channel_id` 가 그 둘을 잇습니다. 방과 사건을 한 표에 뭉치면
+    "지난 주간회의" 를 가리킬 방법이 없어집니다.
+    """
+
+    TEXT = "text"  # #일반 · #공지 — 메시지가 쌓이는 곳
+    VOICE = "voice"  # 주간회의 · 개발회의 — 회의가 열리는 방
+
+
+#: `channels.kind` 가 받는 값 전부. 둘 다 만들 수 있습니다.
+CHANNEL_STORED: frozenset[ChannelKind] = frozenset(ChannelKind)
+
+#: 메시지를 담을 수 있는 종류.
+#:
+#: ⚠️ 음성 채널에 메시지를 쓰게 두면 "회의 중 채팅" 이 생기는데, 그건
+#: 정의서에 없는 기능입니다. 없는 것을 조용히 만들지 않습니다 — 필요해지면
+#: 그때 여기에 넣고 화면도 같이 만듭니다.
+CHANNEL_CARRIES_MESSAGES: frozenset[ChannelKind] = frozenset({ChannelKind.TEXT})
+
+
+def channel_values() -> tuple[str, ...]:
+    return tuple(sorted(str(c) for c in ChannelKind))
+
+
+# ══════════════════════════════════════════════════════════════
+# message_reactions.mark — 메시지에 다는 반응 (요구사항 정의서 CHAT-004)
+# ══════════════════════════════════════════════════════════════
+#
+# ## ⚠️ 정의서는 "이모지 반응" 이라고 적었는데 왜 이름인가
+#
+# 두 가지 이유가 있고, 둘 다 이 저장소가 **이미 겪은 것**입니다.
+#
+# ① **색 이모지는 화면에 못 나갑니다.** `guards.test.ts` 가 막습니다 —
+#    기기마다 다른 그림이 나오고, 색이 박혀 있어 어두운 모드를 안 따라
+#    가고, 베이스라인이 서체에 딸려 있어 세로 정렬이 틀어집니다. 칸반
+#    카드의 `🗣` 를 SVG 로 바꾼 것이 그 규칙이 생긴 자리입니다.
+#
+# ② **아무 이모지나 받으면 그건 조롱 통로입니다.** 이 제품은 성적에 쓰일
+#    수 있는 기여도를 다루고(`docs/07`), 반응은 **남이 쓴 글 위에** 붙습니다.
+#    자유 입력이면 `💩` 을 막을 방법이 없고, 지금 이 저장소에는 신고도
+#    차단도 없습니다. 없는 것을 전제로 통로부터 열지 않습니다.
+#
+# 그래서 **정해진 넷**만 있고, 넷 다 중립이거나 긍정입니다.
+# ⚠️ **부정 반응을 넣지 마십시오.** 하나 생기는 순간 그것이 몰매의 도구가
+#    됩니다 — 반대는 말로 적게 두는 편이 낫습니다.
+
+
+class ReactionMark(StrEnum):
+    """반응 하나. 값은 **이름**이고, 그림은 화면이 SVG 로 그립니다."""
+
+    OK = "ok"  # 확인했어요
+    AGREE = "agree"  # 동의해요
+    QUESTION = "question"  # 궁금해요
+    THANKS = "thanks"  # 고마워요
+
+
+#: `message_reactions.mark` 가 받는 값 전부.
+REACTION_STORED: frozenset[ReactionMark] = frozenset(ReactionMark)
+
+#: 이름 → 사람 말. 화면과 낭독기가 같이 씁니다.
+#:
+#: ⚠️ 화면에 두 번째 표를 만들지 마십시오. 하나만 고쳐지면 낭독기가 읽는
+#: 말과 눈에 보이는 말이 갈라집니다.
+REACTION_LABEL: dict[ReactionMark, str] = {
+    ReactionMark.OK: "확인했어요",
+    ReactionMark.AGREE: "동의해요",
+    ReactionMark.QUESTION: "궁금해요",
+    ReactionMark.THANKS: "고마워요",
+}
+
+
+def reaction_values() -> tuple[str, ...]:
+    return tuple(sorted(str(r) for r in ReactionMark))
+
+
+# ══════════════════════════════════════════════════════════════
+# github_events.event_type — 저장되는 GitHub 사건 (요구사항 정의서 §17)
+# ══════════════════════════════════════════════════════════════
+#
+# ## ⚠️ 커밋(push)이 여기 **없는 것은 빠뜨린 게 아니라 결정**입니다
+#
+# 커밋은 쪼개기가 너무 쉬워서 지표로 쓸 수 없습니다 (`docs/05` §2.1 —
+# 오타 PR 30건이 실제 구현 1건을 이겼던 그 구멍의 커밋판입니다). 코드
+# 기여는 **병합된 PR 단위**로만 셉니다(`contribution/events.py` 의
+# COMMIT 부재와 같은 결정). 그래서 웹훅도 push 를 받지 않고, 조회
+# 화면도 커밋 목록을 만들지 않으며 — **그 이유를 화면이 말합니다.**
+#
+# ⚠️ 이 값들은 웹훅(`github/webhook.py`)과 백필이 **쓰고**, 업무 연결
+# (`task_link_service`)·조회 피드가 **읽습니다.** 예전에는 다섯 곳에
+# 문자열로 흩어져 있었습니다 — 한 곳만 바꾸면 나머지가 조용히 어긋나는
+# 자리라 여기로 모았습니다.
+
+
+class GithubEventKind(StrEnum):
+    """`github_events.event_type` 이 받는 값 전부."""
+
+    PR_MERGED = "pull_request.merged"
+    PR_REVIEW = "pull_request.review"
+    ISSUE_CLOSED = "issues.closed"
+
+
+#: 종류 → 사람 말. 서버가 라벨을 만들어 내려보냅니다 — 화면에 두 번째
+#: 표를 만들지 마십시오 (`activity` 의 `label` 과 같은 방식).
+GITHUB_EVENT_LABEL: dict[GithubEventKind, str] = {
+    GithubEventKind.PR_MERGED: "PR 병합",
+    GithubEventKind.PR_REVIEW: "PR 리뷰",
+    GithubEventKind.ISSUE_CLOSED: "이슈 닫힘",
+}
+
+
+# ══════════════════════════════════════════════════════════════
+# notifications.kind — 알림의 종류 (요구사항 정의서 §19)
+# ══════════════════════════════════════════════════════════════
+#
+# ## ⚠️ 여섯 중 넷만 **저장**됩니다
+#
+# 정의서의 여섯을 두 종류로 갈랐습니다.
+#
+#     저장한다  MENTION · ASSIGNED · MEETING_SOON · GITHUB
+#               → **일어난 사건**입니다. 그 순간이 아니면 다시 알 수 없습니다
+#
+#     안 한다   DUE_SOON · OVERDUE
+#               → **지금 상태에서 나옵니다.** 행으로 쌓으면 마감일을 미뤘을 때
+#                 "곧 마감" 이 남고, 끝냈을 때 "지연" 이 남습니다
+#
+# 아래 두 집합이 그 경계이고, `test_column_vocabularies.py` 가 "저장한다고
+# 적은 값에 진짜 저장하는 코드가 있는지" 를 소스에서 셉니다.
+#
+# ⚠️ **`GITHUB` 은 아직 만드는 코드가 0곳입니다.** 웹훅에서 부를 자리를
+#    아직 안 잡았습니다 — `speaker_source` 처럼 "곧 온다" 를 미리 열어 두는
+#    것이고, 그 사실을 아래 집합과 테스트가 지킵니다.
+
+
+class NotificationKind(StrEnum):
+    """알림 하나의 종류."""
+
+    MENTION = "mention"  # NOTIFICATION-001 채팅에서 불렸다
+    ASSIGNED = "assigned"  # NOTIFICATION-002 업무를 맡았다
+    DUE_SOON = "due_soon"  # NOTIFICATION-003 곧 마감 — **파생**
+    OVERDUE = "overdue"  # NOTIFICATION-004 지났다 — **파생**
+    MEETING_SOON = "meeting_soon"  # NOTIFICATION-005 곧 회의
+    GITHUB = "github"  # NOTIFICATION-006 PR 상태가 바뀌었다
+
+
+#: `notifications.kind` 가 받는 값. **파생 둘은 빠집니다** — 저장 안 합니다.
+NOTIFICATION_STORED: frozenset[NotificationKind] = frozenset(
+    {
+        NotificationKind.MENTION,
+        NotificationKind.ASSIGNED,
+        NotificationKind.MEETING_SOON,
+        NotificationKind.GITHUB,
+    }
+)
+
+#: 저장하지 않고 **읽을 때 만드는** 것. 표에 들어가면 안 됩니다.
+NOTIFICATION_DERIVED: frozenset[NotificationKind] = frozenset(
+    {NotificationKind.DUE_SOON, NotificationKind.OVERDUE}
+)
+
+#: 저장은 하는데 **아직 만드는 코드가 없는** 것.
+#:
+#: ⚠️ `MEETING_SOON` 이 여기 있을 뻔했습니다 — 읽는 코드(`_text_for`)만
+#: 만들어 놓고 만드는 코드를 안 붙였습니다. 이 저장소의 대표 실패 ①
+#: 이고, 검사가 아니라 눈으로 grep 해서 알았습니다. 지금은
+#: `announce_upcoming_meetings` 가 만듭니다.
+#:
+#: ⚠️ **지금은 비어 있습니다.** `GITHUB` 이 마지막이었고,
+#: `task_link_service._tell_the_assignee` 가 만듭니다 — PR 과 업무가
+#: 실제로 이어지는 순간이 붙일 자리였습니다.
+#:
+#: ⚠️ 비었다고 이 집합을 **지우지 마십시오.** 다음에 어휘를 늘릴 때
+#: "만드는 코드를 아직 안 붙였다" 를 적을 자리가 여기입니다. 적을 자리가
+#: 없으면 사람은 그냥 안 적고, 그게 결함 122 가 생긴 방식입니다.
+NOTIFICATION_NOT_PRODUCED_YET: frozenset[NotificationKind] = frozenset()
+
+
+def notification_values() -> tuple[str, ...]:
+    """CHECK 제약에 들어갈 값. **저장하는 것만.**"""
+    return tuple(sorted(str(k) for k in NOTIFICATION_STORED))
+
+
+# ══════════════════════════════════════════════════════════════
+# tasks.status — 칸반 열 (요구사항 정의서 TASK-004)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **같은 결함의 네 번째 사례입니다.** 이 열에는 CHECK 제약이 **아예
+#    없었고**, 허용값은 `services/task_service.py` 의 튜플 하나뿐이었습니다.
+#
+#        STATUSES = ("todo", "in_progress", "done")   # ← 여기가 전부
+#        status: Mapped[str] = mapped_column(String(20), ...)  # 제약 없음
+#
+#    `String(20)` 이라 `"Done"` 도 `"완료"` 도 `"todo "`(뒤 공백)도
+#    들어갑니다. 서비스를 안 거치는 경로가 하나라도 생기면 그 순간
+#    칸반에 **어느 열에도 안 속하는 카드**가 생기고, 화면에서는 그냥
+#    사라진 것처럼 보입니다.
+#
+# ⚠️ **순서가 곧 칸반 열 순서입니다.** 선언 순서를 바꾸면 화면이 바뀝니다.
+
+
+class TaskStatus(StrEnum):
+    """업무가 지금 어느 열에 있는가.
+
+    ⚠️ `REVIEW` 는 정의서 `TASK-004` 가 요구하는 넷째 열입니다. 이것이
+    없던 동안 "다 만들었는데 아직 아무도 안 본" 일이 `in_progress` 와
+    `done` 어느 쪽에도 정확히 안 맞았습니다 — `done` 에 두면 검토를
+    건너뛴 것이 완료로 보이고, `in_progress` 에 두면 만든 사람이 아직
+    붙잡고 있는 것처럼 보입니다.
+    """
+
+    TODO = "todo"  # 할 일
+    IN_PROGRESS = "in_progress"  # 하는 중
+    REVIEW = "review"  # 검토 중 — 만든 사람 손을 떠났고 아직 확인 전
+    DONE = "done"  # 완료
+
+
+#: `tasks.status` 가 받는 값 전부. **선언 순서 = 칸반 열 순서.**
+TASK_STATUSES: tuple[TaskStatus, ...] = tuple(TaskStatus)
+
+#: 끝난 것으로 세는 상태.
+#:
+#: ⚠️ `REVIEW` 는 여기 없습니다. 검토 중인 일을 완료로 세면 진행률이
+#: 실제보다 높게 나오고, 그 숫자로 "우리 팀은 80% 했다" 를 말하게 됩니다.
+#: 아직 아무도 안 본 것은 안 끝난 것입니다.
+TASK_FINISHED: frozenset[TaskStatus] = frozenset({TaskStatus.DONE})
+
+#: 사람이 읽을 이름.
+#:
+#: ⚠️ **화면의 `lib/kanban/board.ts` 의 `STATUS_LABEL` 과 짝입니다.**
+#: 두 벌이지만 런타임이 달라 어쩔 수 없고, 대신
+#: `test_repo_integrity.py` 의 교차 검사가 값이 갈라지면 터집니다.
+#: 처음 적을 때 여기는 `하는 중`, 화면은 `진행 중` 으로 이미 갈려
+#: 있었습니다 — 화면 쪽 말로 맞췄습니다.
+TASK_STATUS_LABEL: dict[TaskStatus, str] = {
+    TaskStatus.TODO: "할 일",
+    TaskStatus.IN_PROGRESS: "진행 중",
+    TaskStatus.REVIEW: "검토 중",
+    TaskStatus.DONE: "완료",
+}
+
+
+def task_status_values() -> tuple[str, ...]:
+    """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
+    return tuple(sorted(str(s) for s in TaskStatus))
+
+
+# ══════════════════════════════════════════════════════════════
+# utterances.utterance_type — 발언 유형 (요구사항 정의서 §10)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **같은 결함의 다섯 번째 사례입니다.** 이 열도 CHECK 제약이 **아예
+#    없었고**, 허용값은 `meeting/utterance_types.py` 의 `LABELS` 튜플
+#    하나뿐이었습니다. `speaker_source`(118) · `report_type`(119) ·
+#    `meeting_events`(122) · `tasks.status`(132) 에 이어 다섯 번째입니다.
+#
+# ⚠️ **요구 열 개와 라벨 여덟 개가 1:1 이 아니었습니다.** 동의·반대·보완이
+#    전부 `opinion` 하나로 뭉개져 있어서 `REVIEW-005`("동의 수 · 반대 의견
+#    수")를 **셀 수가 없었습니다.** 화면부터 만들었으면 0 이 뜨거나 빈 칸이
+#    생겼을 것입니다.
+
+
+class UtteranceType(StrEnum):
+    """이 발언이 무엇을 하고 있는가.
+
+    ⚠️ **라벨은 "무엇을 말했나" 이지 "얼마나 기여했나" 가 아닙니다.**
+    점수는 `contribution/scoring.py` 가 따로 정하고, 화면은 라벨로 세고
+    점수는 점수대로 씁니다. 둘을 한 축에 묶으면 "동의는 몇 점짜리인가"
+    같은 질문에 **시스템이 답하게** 됩니다.
+    """
+
+    QUESTION = "question"  # AI-SPEECH-001 질문
+    PROPOSAL = "proposal"  # AI-SPEECH-002 제안
+    ANSWER = "answer"  # AI-SPEECH-003 정보 제공·응답
+    AGREEMENT = "agreement"  # AI-SPEECH-004 동의
+    OBJECTION = "objection"  # AI-SPEECH-005 반대 의견
+    REFINEMENT = "refinement"  # AI-SPEECH-006 보완 의견
+    DECISION = "decision"  # AI-SPEECH-007 결정
+    REQUEST = "request"  # AI-SPEECH-008 업무 요청
+    COMMITMENT = "commitment"  # AI-SPEECH-009 일정 약속
+    CONFIRMATION = "confirmation"  # AI-SPEECH-010 확인 요청
+    OPINION = "opinion"  # 어느 쪽도 아닌 의견 — 아래 설명
+    SOCIAL = "social"  # 맞장구·잡담 → 0점
+    OTHER = "other"  # 모르는 것 → 0점
+
+
+#: `utterances.utterance_type` 이 받는 값 전부.
+UTTERANCE_STORED: frozenset[UtteranceType] = frozenset(UtteranceType)
+
+#: 기여도에 **값을 더하지 않는** 라벨.
+#:
+#: ⚠️ 여기 떨어져도 발언은 회의록에 그대로 남습니다. 0점은 "말을 안 했다"
+#: 가 아니라 "이 발언은 점수 계산에 넣지 않는다" 입니다 — 불변식 3
+#: (측정 불가 ≠ 0점)과 헷갈리면 안 되는 자리입니다.
+UTTERANCE_ZERO_SCORE: frozenset[UtteranceType] = frozenset(
+    {UtteranceType.SOCIAL, UtteranceType.OTHER}
+)
+
+#: 찬반·보완 — `REVIEW-005` 가 세는 것.
+#:
+#: ⚠️ `OPINION` 은 여기 **없습니다.** 어느 쪽도 아닌 의견이라 "동의 수" 에도
+#: "반대 수" 에도 넣을 수 없습니다. 넣으면 둘 다 부풀고, 어느 쪽에 넣을지
+#: 고르는 순간 **시스템이 사람의 입장을 정하는** 것이 됩니다.
+UTTERANCE_STANCE: frozenset[UtteranceType] = frozenset(
+    {UtteranceType.AGREEMENT, UtteranceType.OBJECTION, UtteranceType.REFINEMENT}
+)
+
+#: 사람이 읽을 이름.
+#:
+#: ⚠️ **화면의 `lib/review/labels.ts` 와 짝입니다.** 두 벌이지만 런타임이
+#: 달라 어쩔 수 없고, `test_repo_integrity.py` 의 교차 검사가 갈라지면
+#: 터집니다 (`TASK_STATUS_LABEL` 과 같은 방식).
+UTTERANCE_LABEL: dict[UtteranceType, str] = {
+    UtteranceType.QUESTION: "질문",
+    UtteranceType.PROPOSAL: "제안",
+    UtteranceType.ANSWER: "정보 제공",
+    UtteranceType.AGREEMENT: "동의",
+    UtteranceType.OBJECTION: "반대 의견",
+    UtteranceType.REFINEMENT: "보완 의견",
+    UtteranceType.DECISION: "결정",
+    UtteranceType.REQUEST: "업무 요청",
+    UtteranceType.COMMITMENT: "일정 약속",
+    UtteranceType.CONFIRMATION: "확인 요청",
+    UtteranceType.OPINION: "의견",
+    UtteranceType.SOCIAL: "맞장구",
+    UtteranceType.OTHER: "기타",
+}
+
+
+def utterance_type_values() -> tuple[str, ...]:
+    """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
+    return tuple(sorted(str(t) for t in UTTERANCE_STORED))
+
+
+# ══════════════════════════════════════════════════════════════
+# members.project_role — 프로젝트 안에서의 권한 (요구사항 정의서 §5)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **`role_shares` 와 헷갈리지 마십시오.** 그 칸은 `{"developer": 0.7,
+#    "planner": 0.3}` 처럼 **기여도 가중치**를 담습니다. 권한이 아닙니다.
+#    `docs/20` 이 그 혼동을 이미 한 번 적어 뒀습니다 — "`Member.role_shares`
+#    는 기여도 가중치지 권한이 아닙니다".
+#
+#    둘을 한 칸에 담으면 **기획자 비중을 0.3 으로 바꾼 것이 권한 변경이
+#    됩니다.** 완전히 다른 것이라 칸을 따로 둡니다.
+#
+# ⚠️ **제약 없는 열 여섯 번째가 되지 않게** 처음부터 CHECK 를 답니다
+#    (`speaker_source` 118 · `report_type` 119 · `meeting_events` 122 ·
+#    `tasks.status` 132 · `utterance_type` 이 앞의 다섯입니다).
+
+
+class ProjectRole(StrEnum):
+    """프로젝트 안에서 무엇을 할 수 있는가.
+
+    ⚠️ **선언 순서 = 권한 크기 순**입니다. `ROLE_RANK` 가 이 순서를
+    씁니다 — 값을 사이에 끼워 넣으면 조용히 위계가 바뀝니다.
+    """
+
+    OWNER = "owner"  # 프로젝트를 만든 사람. 넘겨줄 수는 있어도 스스로 사라질 수 없음
+    ADMIN = "admin"  # 팀원·설정을 다룰 수 있음. 프로젝트를 지우지는 못함
+    MEMBER = "member"  # 자기 일을 함
+
+
+#: `members.project_role` 이 받는 값 전부.
+PROJECT_ROLES: tuple[ProjectRole, ...] = tuple(ProjectRole)
+
+#: 새로 합류하는 사람의 기본값. **`member` 입니다** — 초대 코드만 알면
+#: 들어올 수 있으므로, 기본이 그보다 크면 코드가 새는 순간 팀이 열립니다.
+DEFAULT_PROJECT_ROLE: ProjectRole = ProjectRole.MEMBER
+
+#: 클수록 권한이 큽니다. **비교는 이 표로만** 하십시오 — 문자열 비교
+#: (`"admin" < "member"`)는 알파벳 순이라 뜻이 정반대가 됩니다.
+ROLE_RANK: dict[ProjectRole, int] = {
+    role: len(PROJECT_ROLES) - at for at, role in enumerate(PROJECT_ROLES)
+}
+
+#: 사람이 읽을 이름.
+#:
+#: ⚠️ **화면의 `lib/project/roles.ts` 와 짝입니다** (`TASK_STATUS_LABEL`
+#: 과 같은 방식). 갈라지면 `test_repo_integrity.py` 가 터집니다.
+PROJECT_ROLE_LABEL: dict[ProjectRole, str] = {
+    ProjectRole.OWNER: "소유자",
+    ProjectRole.ADMIN: "관리자",
+    ProjectRole.MEMBER: "팀원",
+}
+
+
+def project_role_values() -> tuple[str, ...]:
+    """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
+    return tuple(sorted(str(r) for r in PROJECT_ROLES))
+
+
+# ══════════════════════════════════════════════════════════════
+# 사용자 상태 표시 (요구사항 정의서 §4 `USER-005`)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **이 값은 표에 없습니다.** 어디에도 저장하지 않고 읽을 때마다
+#    계산합니다. 상태를 행으로 쌓으면 그건 곧 **출퇴근 기록**이 되고,
+#    이 제품에서 제일 만들면 안 되는 물건입니다 — 기여도는 "무엇을
+#    했는가" 로 재기로 했는데 옆에 "언제 앉아 있었는가" 표가 생기면
+#    사람은 그걸 같이 봅니다.
+#
+#    `calendar_events`·알림·위험 신호를 안 만든 것과 같은 판단이고,
+#    여기서는 이유가 하나 더 있습니다. **감시입니다.**
+
+
+class PresenceStatus(StrEnum):
+    """지금 이 사람이 붙어 있는가.
+
+    ⚠️ **과거를 말하지 않습니다.** `마지막 접속 3일 전` 같은 값은 두지
+    않습니다 — 그건 상태가 아니라 **근태 기록**입니다. 지금 안 붙어
+    있으면 그냥 `offline` 입니다.
+    """
+
+    ONLINE = "online"  # 방금까지 쓰고 있었음
+    AWAY = "away"  # 로그인은 살아 있는데 한동안 조용함
+    OFFLINE = "offline"  # 세션이 없거나 오래됨
+    IN_MEETING = "in_meeting"  # 녹음 중인 회의에 트랙이 열려 있음
+
+
+PRESENCE_STATUSES: tuple[PresenceStatus, ...] = tuple(PresenceStatus)
+
+#: 사람이 읽을 이름.
+#:
+#: ⚠️ **화면의 `lib/project/presence.ts` 와 짝입니다.**
+#: `test_repo_integrity.py` 의 교차 검사가 갈라지면 터집니다.
+PRESENCE_LABEL: dict[PresenceStatus, str] = {
+    PresenceStatus.ONLINE: "접속 중",
+    PresenceStatus.AWAY: "자리 비움",
+    PresenceStatus.OFFLINE: "오프라인",
+    PresenceStatus.IN_MEETING: "회의 중",
+}

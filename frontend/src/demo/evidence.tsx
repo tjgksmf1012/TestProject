@@ -109,6 +109,10 @@ function Body({ apiBase, meetingId, ask }: { apiBase: string; meetingId: number;
           <div className="flex items-baseline gap-2 text-[12px] text-text-subtle">
             {view.at !== null && <span className="tabular-nums">{view.at}</span>}
             <span className="font-semibold text-text-muted">{view.speaker}</span>
+            {/* ⚠️ 유형은 서버가 오래전부터 보내고 있었는데 **화면이 안 쓰고
+                있었습니다** — 대표 실패 ①. 이게 보여야 사람이 잘못 매겨진
+                라벨을 발견할 수 있습니다. */}
+            {view.type !== null && <span className="text-text-subtle">{view.type}</span>}
             {view.overlap && <span className="text-gap">동시 발언</span>}
           </div>
           {/* 원문. 손대지 않고 그대로 — 줄바꿈도 살립니다. */}

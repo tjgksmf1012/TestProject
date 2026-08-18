@@ -9,6 +9,7 @@
  * 판단은 전부 여기 있습니다. 화면(`demo/evidence.tsx`)은 그리기만 합니다.
  */
 
+import { describeType } from './labels.ts';
 import { atText } from './minutes.ts';
 
 /** 서버가 주는 발화 한 줄 (`GET /api/meetings/{id}/utterances`). */
@@ -44,6 +45,15 @@ export interface EvidenceView {
   speakerNote: string | null;
   /** 동시에 말한 구간인가. 발언량 계산이 흔들리는 자리입니다. */
   overlap: boolean;
+  /**
+   * 무슨 발언인가 — `제안` · `반대 의견` 처럼 사람 말로.
+   *
+   * ⚠️ 아직 분류 전이면 `null` 입니다. 서버는 이 값을 오래전부터 보내고
+   * 있었는데 **화면이 안 쓰고 있었습니다**(대표 실패 ①). 이게 보여야
+   * 사람이 잘못 매겨진 라벨을 발견하고 고칠 수 있습니다 — 규칙 기반
+   * 분류기는 틀리고, 틀린 것을 아무도 못 보면 영영 안 고쳐집니다.
+   */
+  type: string | null;
 }
 
 /** `?ids=` 에 실을 문자열. 빈 목록이면 요청 자체를 보내지 않게 `''`. */
@@ -88,6 +98,9 @@ export function evidenceView(utterance: Utterance): EvidenceView {
     speaker: utterance.speaker_name ?? '화자 미확정',
     speakerNote: speakerNote(utterance.speaker_source, utterance.speaker_confidence),
     overlap: utterance.is_overlap,
+    // ⚠️ 아직 분류 안 한 발화는 `null` 이고, 화면은 **아무 말도 안 합니다.**
+    // `기타` 라고 적으면 재고 나서 모르는 것처럼 보입니다 (불변식 3).
+    type: describeType(utterance.utterance_type),
   };
 }
 

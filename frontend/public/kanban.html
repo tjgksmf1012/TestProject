@@ -41,9 +41,30 @@
             margin-left: var(--sp-2); }
   .flow .late b { color: var(--gap); }
 
-  /* 좁은 화면에서는 세로로 쌓인다. 폰에서 열어보는 게 기본이다. */
+  /* 좁은 화면에서는 세로로 쌓인다. 폰에서 열어보는 게 기본이다.
+
+     ⚠️ **열 수를 숫자로 박지 마십시오.** `repeat(3, 1fr)` 이었는데
+     `TASK-004` 로 넷째 열(`검토 중`)이 생기자 **`완료` 가 아랫줄로
+     내려가** `할 일` 밑에 붙었습니다 — 칸반은 왼쪽에서 오른쪽으로 가는
+     판인데 완료가 할 일 아래에 있으면 그 뜻이 통째로 깨집니다.
+     렌더해서 보고 알았습니다.
+
+     ⚠️ `auto-fit` 도 안 됩니다 — 폭에 따라 **셋이 서고 완료 하나만
+     아랫줄**로 떨어집니다(1024px·900px 에서 실측). 고아가 생기는 순간
+     같은 결함입니다.
+
+     그래서 나는 자리를 **넷 아니면 둘 아니면 하나**로 못 박습니다.
+     둘이면 `할 일·진행 중 / 검토 중·완료` 라 읽는 순서가 유지됩니다.
+
+     ⚠️ 여기 숫자 `4` 는 서버의 `task_service.STATUSES` 와 짝입니다.
+     상태가 다섯이 되면 `test_repo_integrity.py` 의 교차 검사가 터집니다. */
   #board { display: grid; gap: var(--sp-5); }
-  @media (min-width: 46rem) { #board { grid-template-columns: repeat(3, 1fr); align-items: start; } }
+  @media (min-width: 40rem) {
+    #board { grid-template-columns: repeat(2, 1fr); align-items: start; }
+  }
+  @media (min-width: 64rem) {
+    #board { grid-template-columns: repeat(4, 1fr); }
+  }
 
   /* ── 열 ────────────────────────────────────────────────
 
@@ -76,6 +97,28 @@
   @media (hover: hover) and (pointer: fine) {
     .task:hover { border-color: var(--line-strong); }
   }
+  /* 근거 링크를 타고 온 카드 (`?task=N`).
+     ⚠️ **빨강이 아닙니다.** 이 표시는 "여기입니다" 이지 "잘못됐습니다" 가
+     아닙니다. 테두리만 굵게 하고 새 hex 는 만들지 않습니다 —
+     `--primary` 는 이미 두 테마에서 대비를 재어 둔 값이고, 이 저장소의
+     초점 표시(`app.css` 의 `:focus-visible`)가 쓰는 것과 같습니다.
+     ⚠️ `--focus` 라는 토큰을 지어낼 뻔했습니다 — 없는 이름입니다. */
+  .task.found { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
+
+  /* ── 끌어 옮기기 (TASK-005) ──────────────────────────────
+     ⚠️ 버튼(.move)은 그대로 있습니다 — 끌기는 마우스 전용 지름길이고
+     키보드·터치·낭독기의 길은 버튼입니다. 가드가 짝을 잽니다.
+     잡는 손 커서는 정교한 포인터에서만 — 터치에서는 끌기가 안 돕니다. */
+  @media (hover: hover) and (pointer: fine) {
+    .task[draggable="true"] { cursor: grab; }
+    .task[draggable="true"]:active { cursor: grabbing; }
+  }
+  .task.dragging { opacity: .5; }
+  /* 놓을 수 있는 열 표시. --primary 는 .found 와 같은 「여기입니다」 색 —
+     새 hex 를 만들지 않습니다. 점선이라 .found 의 실선과 안 헷갈립니다. */
+  .col.dropok { outline: 2px dashed var(--primary); outline-offset: 2px;
+                border-radius: var(--r-card); }
+
   .task .title { font-weight: 600; margin: 0 0 var(--sp-1);
                  font-size: var(--fs-item); letter-spacing: var(--ls-item); }
   .task .meta { font-size: var(--fs-caption); color: var(--text-subtle); margin: 0; }
@@ -111,6 +154,46 @@
                      width: var(--sp-1); height: var(--sp-1); border-radius: var(--r-round);
                      background: currentColor; transform: translateY(-3px); }
 
+  /* ⭐ 여럿이 맡은 업무 — **나눠 셌다**고 카드가 말하는 자리 (`TASK-006`).
+
+     ⚠️ 흙빛(`--gap`)입니다. 빨강이 아닙니다 — 같이 맡은 것은 잘못이
+     아니라 사실이고, 이 저장소에서 빨강은 "네가 뭘 잘못했다" 입니다.
+     `.gapmark` 와 같은 색을 쓰되 앞의 점은 안 찍습니다: 저건 **못 잰
+     자리**의 표시이고 이건 **잰 방법**의 설명이라, 같은 모양으로 그리면
+     둘이 같은 종류로 읽힙니다. */
+  .task .shared { font-size: var(--fs-caption); color: var(--gap);
+                  margin: var(--sp-2) 0 0; }
+
+  /* 담당자를 바꾸는 자리. 접어 둡니다 — 안 접으면 카드마다 이름 목록이
+     펼쳐져 보드가 체크박스 밭이 됩니다.
+
+     ⚠️ 칸 하나가 **44px** 입니다. 폰에서 이름이 다닥다닥 붙으면 엉뚱한
+     사람을 담당자로 넣게 되고, 담당자는 기여 이벤트가 갈 사람을
+     정합니다 — 잘못 누르면 남의 점수가 됩니다. */
+  .whoedit { margin-top: var(--sp-3); }
+  .whoedit > summary { font-size: var(--fs-caption); color: var(--text-subtle);
+                       cursor: pointer; min-height: var(--tap);
+                       display: flex; align-items: center; }
+  /* ⚠️ **카드마다 붙는 줄**이라 데스크톱에서는 높이를 걷습니다.
+     렌더해서 보고 알았습니다 — 44px 짜리 줄이 카드 넷에 하나씩 붙으니
+     보드가 눈에 띄게 길어졌고, 정작 매일 하는 일은 카드를 옮기는 것이지
+     담당자를 바꾸는 것이 아닙니다. `.moves button` 이 같은 이유로 같은
+     처리를 하고 있습니다. **폰에서는 44px 그대로입니다** — 손가락으로
+     겨누는 자리이고, 잘못 누르면 남의 점수가 됩니다. */
+  @media (hover: hover) and (pointer: fine) {
+    .whoedit > summary { min-height: 0; }
+    .whoedit > summary:hover { color: var(--text); }
+  }
+  /* ⚠️ **칸 높이(44px)를 여기 적지 않습니다.** `app.css` 의
+     `label:has(> input[type='checkbox'])` 가 이미 그 일을 하고 있습니다 —
+     띄우기·간격·글자색까지 한 벌로. 여기 다시 적으면 같은 판단이 두 벌이
+     되고, 한쪽만 고쳐지는 날이 옵니다(대표 실패 ②).
+
+     ⚠️ 실제로 한 번 적었다가 지웠습니다. **위반을 심었는데 아무 일도 안
+     일어나서** 알았습니다 — 제가 지운 것은 공용 규칙이 이미 하고 있는
+     일의 사본이었습니다 (결함 164). */
+  .whoedit-body { display: flex; flex-direction: column; }
+
   /* 이 업무가 어느 PR 로 끝났는가. 대표 주장(회의→업무→GitHub)의 마지막 칸. */
   .gh-list { list-style: none; padding: 0; margin: var(--sp-2) 0 0; font-size: var(--fs-caption); }
   .gh-list li { display: flex; gap: var(--sp-2); padding: var(--sp-1) 0; }
@@ -138,9 +221,18 @@
                   padding: var(--sp-2) var(--sp-4); }
   .moves button[data-dir="back"] { background: transparent; border-color: transparent;
                                    color: var(--text-subtle); font-weight: 500; }
+  /* 지우기 (`TASK-003`) — **되돌리기와 같은 무게**입니다.
+     ⚠️ 빨강이 아닙니다. 이 저장소에서 빨강은 "네가 뭘 잘못했다" 이고,
+     잘못 만든 카드를 치우는 것은 잘못이 아닙니다.
+     ⚠️ 맨 앞에 그리지 않습니다 — 주된 행동은 앞으로 보내는 것입니다.
+     `order` 로 눈에 보이는 자리만 뒤로 미룹니다(마크업 순서는 그대로 둬야
+     탭 이동이 카드 안에서 자연스럽습니다). */
+  .moves .drop { order: 9; background: transparent; border-color: transparent;
+                 color: var(--text-subtle); font-weight: 500; margin-left: auto; }
   @media (hover: hover) and (pointer: fine) {
     .moves button { min-height: 0; }
     .moves button[data-dir="back"]:hover { color: var(--text); background: transparent; }
+    .moves .drop:hover { color: var(--text); background: transparent; }
   }
 
   /* ⚠️ 여백을 id(1,0,0)로 적으면 공용 `[role='status']:empty { margin: 0 }`

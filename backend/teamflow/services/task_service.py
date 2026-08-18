@@ -39,13 +39,18 @@ from sqlalchemy.orm import Session
 
 from teamflow.clock import local_date
 from teamflow.contribution.events import CATEGORY_OF, EventType, SourceKind
+from teamflow.db import assignees, live, vocab
 from teamflow.db import models as m
 
 logger = logging.getLogger(__name__)
 
 # 칸반 열. 순서가 곧 화면의 열 순서다.
-STATUSES = ("todo", "in_progress", "done")
-DONE = "done"
+#
+# ⚠️ **여기서 정하지 않습니다.** 예전에는 이 튜플이 허용값의 유일한
+#    출처였고 데이터베이스에는 제약이 없었습니다 — `db/vocab.py` 의
+#    `TaskStatus` 머리말을 보십시오. 지금은 어휘에서 끌어옵니다.
+STATUSES = tuple(str(s) for s in vocab.TASK_STATUSES)
+DONE = str(vocab.TaskStatus.DONE)
 
 
 class TaskError(Exception):
@@ -70,7 +75,7 @@ def list_tasks(session: Session, project_id: int) -> list[dict]:
     할 일 목록이고, "회의 결정이 업무가 됐다" 는 주장을 확인할 방법이 없습니다.
     """
     rows = session.scalars(
-        select(m.Task).where(m.Task.project_id == project_id).order_by(m.Task.id)
+        live.live_tasks().where(m.Task.project_id == project_id).order_by(m.Task.id)
     ).all()
 
     # 후보 → 회의를 한 번에 끌어온다. 업무마다 조회하면 N+1 이다.
@@ -89,11 +94,15 @@ def list_tasks(session: Session, project_id: int) -> list[dict]:
                 "evidence_utterance_ids": list(candidate.evidence_utterance_ids or []),
             }
 
+    # 담당자는 여럿일 수 있습니다 (`TASK-006`). 카드마다 물으면 N+1 이라
+    # 한 번에 끌어옵니다. 순서는 이름 순이고 **화면은 그대로 그립니다.**
+    who = assignees.of_tasks(session, [t.id for t in rows])
+
     return [
         {
             "id": task.id,
             "title": task.title,
-            "assignee_id": task.assignee_id,
+            "assignee_ids": who.get(task.id, []),
             "status": task.status,
             "deadline": task.deadline.date().isoformat() if task.deadline else None,
             "completed_at": (
@@ -124,12 +133,20 @@ def _emit(
     그때마다 이벤트를 하나씩 더 넣으면 **버튼을 반복해서 눌러 점수를 올릴 수
     있습니다.** 유니크 제약이 DB 차원에서 막지만, 여기서 먼저 확인해
     IntegrityError 로 요청 전체가 실패하지 않게 합니다.
+
+    ⚠️ **`user_id` 까지 봐야 합니다.** 유니크 제약은 네 칸
+    `(source_kind, source_id, event_type, user_id)` 인데 여기서 셋만 보면,
+    담당자가 둘인 업무에서 **먼저 넣은 사람 하나만 기록되고 나머지는
+    조용히 사라집니다.** DB 는 막지 않습니다 — 막을 이유가 없는 행이라
+    통과시키는데, 이 확인이 먼저 걸러 버립니다. 담당자가 하나뿐이던
+    시절에는 셋만 봐도 같은 결과라 아무 표시가 나지 않았습니다.
     """
     exists = session.scalar(
         select(m.ContributionEventRow.id).where(
             m.ContributionEventRow.source_kind == source_kind.value,
             m.ContributionEventRow.source_id == source_id,
             m.ContributionEventRow.event_type == event_type.value,
+            m.ContributionEventRow.user_id == user_id,
         )
     )
     if exists:
@@ -151,6 +168,39 @@ def _emit(
     return True
 
 
+def _completed_before(session: Session, task_id: int) -> bool:
+    """이 업무가 **전에도** 완료된 적이 있는가."""
+    return (
+        session.scalar(
+            select(m.ContributionEventRow.id).where(
+                m.ContributionEventRow.source_kind == SourceKind.TASK.value,
+                m.ContributionEventRow.source_id == task_id,
+                m.ContributionEventRow.event_type == EventType.TASK_COMPLETED.value,
+            )
+        )
+        is not None
+    )
+
+
+def _past_verdict(session: Session, task_id: int) -> EventType | None:
+    """이 업무의 마감 준수를 **이미 판정했다면** 그 판정.
+
+    판정은 업무 하나당 한 번입니다. 담당자가 나중에 늘어도 새로 판정하지
+    않고 **먼저 내린 판정을 그대로** 씁니다 — 아래 `_record_completion`
+    주석에 왜 그런지 적어 두었습니다.
+    """
+    row = session.scalar(
+        select(m.ContributionEventRow.event_type).where(
+            m.ContributionEventRow.source_kind == SourceKind.TASK.value,
+            m.ContributionEventRow.source_id == task_id,
+            m.ContributionEventRow.event_type.in_(
+                (EventType.DEADLINE_MET.value, EventType.DEADLINE_MISSED.value)
+            ),
+        )
+    )
+    return EventType(row) if row else None
+
+
 def _record_completion(
     session: Session, task: m.Task, completed_at: datetime, *, actor_id: int | None = None
 ) -> None:
@@ -162,70 +212,94 @@ def _record_completion(
     `actor_id` 는 **누른 사람**입니다. 점수는 담당자에게 가지만, 누가
     눌렀는지를 이벤트에도 실어 둡니다 — 감사 로그와 기여 이벤트는 다른
     표라, 둘 중 하나만 보고 판단하는 사람이 반드시 생깁니다.
+
+    ## 담당자가 여럿이면 (`TASK-006`)
+
+    **전원에게 하나씩 만듭니다.** 그리고 그 몫은 `1/N` 이 됩니다 —
+    나누는 자리는 여기가 아니라 산정할 때이고, 왜 그런지는
+    `contribution/sharing.py` 에 있습니다. 여기서 몫을 계산해 메타데이터에
+    적어 두면 담당자가 나중에 바뀌었을 때 **얼어붙은 옛 몫**이 남습니다.
     """
-    if task.assignee_id is None:
+    who = assignees.of_task(session, task.id)
+    if not who:
         logger.info(
             "task=%s 는 담당자가 없어 기여 이벤트를 만들지 않습니다", task.id
         )
         return
 
-    first_completion = _emit(
-        session,
-        project_id=task.project_id,
-        user_id=task.assignee_id,
-        event_type=EventType.TASK_COMPLETED,
-        source_id=task.id,
-        occurred_at=completed_at,
-        metadata={"completed_by": actor_id} if actor_id is not None else None,
-    )
+    # ⚠️ **완료 이벤트를 만들기 전에** 물어야 합니다. 만든 뒤에 물으면
+    #    방금 만든 것이 잡혀서 언제나 "전에도 완료됐다" 가 됩니다.
+    completed_before = _completed_before(session, task.id)
+
+    for user_id in who:
+        _emit(
+            session,
+            project_id=task.project_id,
+            user_id=user_id,
+            event_type=EventType.TASK_COMPLETED,
+            source_id=task.id,
+            occurred_at=completed_at,
+            metadata={"completed_by": actor_id} if actor_id is not None else None,
+        )
 
     # ⚠️ **마감 준수는 업무 하나당 딱 한 번만 판정한다.**
     #
-    # `_emit` 의 멱등성은 `(source_kind, source_id, event_type)` 기준이라
-    # `DEADLINE_MET` 과 `DEADLINE_MISSED` 를 **서로 다른 행**으로 본다.
-    # 그래서 여기서 막지 않으면 한 업무가 met 과 missed 를 동시에 갖는다.
-    # `scoring._schedule_raw` 는 met/(met+missed) 를 쓰므로, 늦게 끝낸
-    # 업무 하나가 준수율 0 에서 0.5 로 올라간다.
+    # `_emit` 의 멱등성은 `(source_kind, source_id, event_type, user_id)`
+    # 기준이라 `DEADLINE_MET` 과 `DEADLINE_MISSED` 를 **서로 다른 행**으로
+    # 본다. 그래서 여기서 막지 않으면 한 업무가 met 과 missed 를 동시에
+    # 갖는다. `scoring._schedule_raw` 는 met/(met+missed) 를 쓰므로, 늦게
+    # 끝낸 업무 하나가 준수율 0 에서 0.5 로 올라간다.
     #
     # 더 나쁜 경로도 있었다. 마감일 없이 완료한 업무(판정 없음)를 되돌린 뒤
     # 마감일을 미래로 넣고 다시 완료하면 **없던 met 이 생겼다.** 아무도
     # 마감일을 과거로 넣지는 않으므로 이 조작은 한쪽으로만 작동한다 —
     # 버튼 세 번으로 점수가 오르는 경로였다.
     #
-    # 되돌리기 자체는 막지 않는다. 그건 정상적인 일이고, 되돌렸다는 사실은
-    # 감사 로그에 남는다. 다시 판정하지 않을 뿐이다.
-    if not first_completion:
-        logger.info(
-            "task=%s 는 이미 완료된 적이 있어 마감 준수를 다시 판정하지 않습니다",
-            task.id,
+    # ⚠️ 담당자가 여럿이 되면서 이 판정을 **사람별로** 두고 싶어집니다.
+    # 두면 안 됩니다 — 나중에 담당자로 넣은 사람은 "아직 판정 안 됨" 이라
+    # 지금 마감일로 새로 재게 되고, 위의 조작이 **사람을 한 명 추가하는
+    # 것만으로** 다시 열립니다. 판정은 업무의 사실이지 사람의 사실이
+    # 아닙니다. 나중에 합류한 담당자에게는 **먼저 내린 판정을 그대로**
+    # 붙입니다.
+    verdict = _past_verdict(session, task.id)
+
+    if verdict is None:
+        if completed_before:
+            # 첫 완료 때 마감일이 없어 판정하지 않았다. 그 사실이 결론이다.
+            logger.info(
+                "task=%s 는 이미 완료된 적이 있어 마감 준수를 다시 판정하지 않습니다",
+                task.id,
+            )
+            return
+
+        deadline = _aware(task.deadline)
+        if deadline is None:
+            # 마감일이 없으면 준수 여부를 물을 수 없다. **지켰다고 치지 않는다.**
+            return
+
+        # ⚠️ **팀이 사는 달력으로 봅니다** (결함 107). `.date()` 는 UTC
+        # 달력일이라 한국(UTC+9)에서는 사람이 보는 날짜와 다릅니다.
+        #
+        #     완료 2026-09-04T16:00Z = KST 09-05 01:00   마감 09-04
+        #     UTC 로 보면   09-04 <= 09-04  → 제때  ← 틀림
+        #     KST 로 보면   09-05 >  09-04  → 늦음
+        #
+        # 칸반 화면(`kanban/board.ts` 의 `localDateOf`)은 이미 로컬 달력으로
+        # 고쳐 놓고 그 이유를 주석에 길게 적어 뒀습니다. **서버만 안 고쳐져
+        # 있었습니다** — 같은 업무를 칸반은 "늦음", 기여도는 "제때" 로
+        # 말했습니다. 사람은 어느 쪽을 믿을지 모릅니다.
+        met = local_date(completed_at) <= local_date(deadline)
+        verdict = EventType.DEADLINE_MET if met else EventType.DEADLINE_MISSED
+
+    for user_id in who:
+        _emit(
+            session,
+            project_id=task.project_id,
+            user_id=user_id,
+            event_type=verdict,
+            source_id=task.id,
+            occurred_at=completed_at,
         )
-        return
-
-    deadline = _aware(task.deadline)
-    if deadline is None:
-        # 마감일이 없으면 준수 여부를 물을 수 없다. **지켰다고 치지 않는다.**
-        return
-
-    # ⚠️ **팀이 사는 달력으로 봅니다** (결함 107). `.date()` 는 UTC
-    # 달력일이라 한국(UTC+9)에서는 사람이 보는 날짜와 다릅니다.
-    #
-    #     완료 2026-09-04T16:00Z = KST 09-05 01:00   마감 09-04
-    #     UTC 로 보면   09-04 <= 09-04  → 제때  ← 틀림
-    #     KST 로 보면   09-05 >  09-04  → 늦음
-    #
-    # 칸반 화면(`kanban/board.ts` 의 `localDateOf`)은 이미 로컬 달력으로
-    # 고쳐 놓고 그 이유를 주석에 길게 적어 뒀습니다. **서버만 안 고쳐져
-    # 있었습니다** — 같은 업무를 칸반은 "늦음", 기여도는 "제때" 로
-    # 말했습니다. 사람은 어느 쪽을 믿을지 모릅니다.
-    met = local_date(completed_at) <= local_date(deadline)
-    _emit(
-        session,
-        project_id=task.project_id,
-        user_id=task.assignee_id,
-        event_type=EventType.DEADLINE_MET if met else EventType.DEADLINE_MISSED,
-        source_id=task.id,
-        occurred_at=completed_at,
-    )
 
 
 def change_task(
@@ -259,6 +333,109 @@ def change_task(
 
     session.flush()
     return task
+
+
+def delete_task(
+    session: Session, *, project_id: int, task_id: int, actor_id: int
+) -> m.Task:
+    """업무를 지운다 (`TASK-003`).
+
+    ⚠️ **행을 안 지웁니다.** `deleted_at` 만 적습니다. 기여 이벤트·PR
+    연결·회의 후보가 이 업무를 가리키고 있어서, 진짜로 지우면 화면의
+    `근거 업무 #7` 이 아무것도 안 가리키게 됩니다 (대표 실패 ③).
+
+    ⚠️ **기여 이벤트를 안 지웁니다.** 지운 업무로 쌓인 기여까지 사라지면
+    업무 하나를 지우는 것으로 남의 기여도를 깎을 수 있습니다 — 그건
+    조작 통로입니다.
+
+    ⚠️ 두 번 지워도 오류가 아닙니다. 이미 지워진 게 원하던 결과입니다.
+    """
+    task = session.get(m.Task, task_id)
+    if task is None or task.project_id != project_id:
+        raise TaskError("업무를 찾을 수 없습니다")
+
+    if task.deleted_at is None:
+        task.deleted_at = datetime.now(UTC)
+        _log_deletion(session, task, actor_id)
+        session.flush()
+    return task
+
+
+def set_assignees(
+    session: Session, *, project_id: int, task_id: int, user_ids: list[int], actor_id: int
+) -> tuple[m.Task, list[int], list[int]]:
+    """담당자를 바꾼다 (`TASK-006`). `(업무, 지금 담당자, 새로 들어온 사람)`.
+
+    ## ⚠️ 이 함수가 없어서 요구가 반쪽이었습니다
+
+    담당자는 **회의 업무 후보를 승인할 때 한 번** 정해지고 그 뒤로는 바꿀
+    수가 없었습니다. 사람이 빠지거나 일을 넘겨받아도 칸반은 옛 이름을
+    계속 말했고, 기여 이벤트는 계속 그 사람에게 갔습니다. "담당자를
+    여럿" 만 만들고 **바꿀 자리를 안 주면** 이 저장소의 대표 실패 ③ 입니다.
+
+    ## ⚠️ 팀원만 담당자가 될 수 있습니다
+
+    안 막으면 프로젝트 밖의 사람에게 기여 이벤트가 쌓입니다. 그 사람은
+    기여도 화면에 안 나오므로(명단 기준) **아무도 못 보는 점수**가 되고,
+    프로젝트 합계만 조용히 커집니다.
+    """
+    task = session.get(m.Task, task_id)
+    if task is None or task.project_id != project_id or task.deleted_at is not None:
+        raise TaskError("업무를 찾을 수 없습니다")
+
+    wanted = assignees.normalize(user_ids)
+    if wanted:
+        members = set(
+            session.scalars(
+                select(m.Member.user_id).where(
+                    m.Member.project_id == project_id,
+                    m.Member.user_id.in_(wanted),
+                )
+            ).all()
+        )
+        missing = [uid for uid in wanted if uid not in members]
+        if missing:
+            raise TaskError(
+                "이 프로젝트의 팀원이 아닌 사람은 담당자로 지정할 수 없습니다"
+            )
+
+    before = assignees.of_task(session, task_id)
+    added = assignees.replace(session, task_id, wanted)
+    now = assignees.of_task(session, task_id)
+
+    if set(before) != set(now):
+        session.add(
+            m.AuditLog(
+                project_id=task.project_id,
+                actor_id=actor_id,
+                action="task_assignees_changed",
+                target=f"task:{task.id}",
+                before={"assignee_ids": before},
+                after={"assignee_ids": now},
+                at=_now(),
+            )
+        )
+    session.flush()
+    return task, now, added
+
+
+def _log_deletion(session: Session, task: m.Task, actor_id: int) -> None:
+    """지웠다는 사실을 남깁니다.
+
+    ⚠️ 안 남기면 카드가 조용히 사라지고, 남은 사람은 **누가 지웠는지도
+    지워진 건지도** 모릅니다. 완료·되돌리기와 같은 표에 적습니다.
+    """
+    session.add(
+        m.AuditLog(
+            project_id=task.project_id,
+            actor_id=actor_id,
+            action="task_deleted",
+            target=f"task:{task.id}",
+            before={"status": task.status},
+            after={"deleted": True},
+            at=task.deleted_at,
+        )
+    )
 
 
 def _change_deadline(
@@ -301,27 +478,33 @@ def _change_deadline(
     session.add(change)
     task.deadline = new_value
 
-    if task.assignee_id is None:
+    who = assignees.of_task(session, task.id)
+    if not who:
         # 담당자가 없으면 흔들릴 준수율도 없다. 변경 이력은 위에서 이미 남겼다.
         return
 
     # `change.id` 가 있어야 변경마다 다른 근거를 가리킬 수 있다.
     session.flush()
-    _emit(
-        session,
-        project_id=task.project_id,
-        # ⭐ **담당자**에게 붙인다. 바꾼 사람이 아니다.
-        # `_detect_integrity_flags` 가 이 사람의 met/missed 건수와 비교하므로,
-        # 바꾼 사람에게 붙이면 두 사람의 숫자를 섞은 비율이 된다.
-        # 남이 바꿨다는 사실은 아래 `changed_by` 로 근거에 남는다.
-        user_id=task.assignee_id,
-        event_type=EventType.DEADLINE_CHANGED,
-        source_kind=SourceKind.DEADLINE_CHANGE,
-        source_id=change.id,
-        occurred_at=_now(),
-        magnitude=0.0,
-        metadata={"task_id": task.id, "changed_by": actor_id},
-    )
+    for user_id in who:
+        _emit(
+            session,
+            project_id=task.project_id,
+            # ⭐ **담당자**에게 붙인다. 바꾼 사람이 아니다.
+            # `_detect_integrity_flags` 가 이 사람의 met/missed 건수와 비교하므로,
+            # 바꾼 사람에게 붙이면 두 사람의 숫자를 섞은 비율이 된다.
+            # 남이 바꿨다는 사실은 아래 `changed_by` 로 근거에 남는다.
+            #
+            # ⚠️ **몫을 안 나눕니다.** 이건 점수가 아니라 표시(`magnitude=0`)라
+            # 나눌 것이 없습니다. 둘이 맡은 업무의 마감이 밀렸으면 둘 다
+            # 그 사실 위에 있습니다.
+            user_id=user_id,
+            event_type=EventType.DEADLINE_CHANGED,
+            source_kind=SourceKind.DEADLINE_CHANGE,
+            source_id=change.id,
+            occurred_at=_now(),
+            magnitude=0.0,
+            metadata={"task_id": task.id, "changed_by": actor_id},
+        )
 
 
 def _change_status(session: Session, task: m.Task, status: str, actor_id: int) -> None:

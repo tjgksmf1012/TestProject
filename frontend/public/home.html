@@ -108,6 +108,27 @@
   .install h2 { font-size: var(--fs-caption); font-weight: 600; color: var(--text-subtle);
                 margin: 0 0 var(--sp-3); }
 
+  /* ── 내 정보 (USER-004) ──────────────────────────────────
+     사진은 화면이 96×96 으로 줄여 보냅니다 — 원본(찍은 위치가 든 EXIF
+     포함)은 서버로 가지 않습니다. 판단은 lib/profile/edit.ts 에. */
+  .me-card { background: var(--surface); border: 1px solid var(--line);
+             border-radius: var(--r-card); padding: var(--sp-5); margin-top: var(--sp-4); }
+  .me-card h2 { font-size: var(--fs-caption); font-weight: 600; color: var(--text-subtle);
+                letter-spacing: .02em; margin: 0 0 var(--sp-2); }
+  .me-photo { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-3) 0; }
+  .me-face { width: 48px; height: 48px; border-radius: var(--r-round);
+             object-fit: cover; flex: none; }
+  .me-face-empty { display: grid; place-items: center;
+                   background: color-mix(in srgb, var(--primary) 14%, transparent);
+                   color: var(--primary); font-weight: 700; }
+  /* file input 의 기본 모양은 브라우저마다 다르고 44px 를 못 지킵니다.
+     label 이 .btn 을 입고 input 은 그 위에 투명하게 — 누르면 고르기 창. */
+  .file-btn { position: relative; }
+  .file-btn input { position: absolute; inset: 0; width: 100%; height: 100%;
+                    opacity: 0; cursor: pointer; }
+  .file-btn:focus-within { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .me-card textarea { margin-bottom: var(--sp-2); }
+
 </style>
 </head>
 <body>

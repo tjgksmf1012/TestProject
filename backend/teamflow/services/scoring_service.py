@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from teamflow.contribution import sharing
 from teamflow.contribution.confidence import CoverageStats
 from teamflow.contribution.events import (
     Category,
@@ -29,8 +30,8 @@ from teamflow.contribution.profiles import (
     blended_profile,
 )
 from teamflow.contribution.scoring import MeasurementGap, TeamScoreResult, score_team
+from teamflow.db import assignees, vocab
 from teamflow.db import models as m
-from teamflow.db import vocab
 from teamflow.jobs import retention
 from teamflow.meeting import utterance_types as ut
 from teamflow.meeting.utterance_types import CLASSIFIER_MODEL
@@ -63,6 +64,10 @@ def kept_promises(session: Session, project_id: int) -> set[tuple[int, int]]:
     하늘이 끝냈으면 민수는 약속을 지킨 게 아닙니다. 이걸 안 보면
     "말만 하고 남이 하게 두는" 쪽이 가장 이득을 봅니다.
 
+    ⚠️ 담당자가 여럿이면 **그 안에 있으면** 지킨 것입니다 (`TASK-006`).
+    둘이 나눠 맡은 일을 둘이 끝냈는데 "혼자 안 했으니 약속을 안 지켰다"
+    고 하면, 이 시스템은 **같이 하는 것을 벌주는** 물건이 됩니다.
+
     ⚠️ **업무 하나가 약속 하나를 지웁니다.** 같은 회의에서 "제가
     하겠습니다" 를 세 번 말하면 근거 발화가 셋이 될 수 있고, 그걸 다
     인정하면 4.5 가 18 이 됩니다 — **반복이 점수가 됩니다.** 가장
@@ -72,13 +77,17 @@ def kept_promises(session: Session, project_id: int) -> set[tuple[int, int]]:
         select(
             m.MeetingTaskCandidate.evidence_utterance_ids,
             m.Task.id,
-            m.Task.assignee_id,
+            m.TaskAssignee.user_id,
         )
         .join(m.Task, m.Task.id == m.MeetingTaskCandidate.created_task_id)
+        # ⚠️ **inner join 입니다.** 담당자가 없는 업무는 지킨 약속의 근거가
+        #    될 수 없습니다 — 예전 `assignee_id IS NOT NULL` 과 같은 뜻입니다.
+        #    조건은 `db/assignees.py` 에 있습니다 — 담당자를 묻는 자리가
+        #    두 벌이 되면 한쪽만 고쳐집니다.
+        .join(m.TaskAssignee, assignees.joined_to_tasks())
         .where(
             m.Task.project_id == project_id,
             m.Task.status == task_service.DONE,
-            m.Task.assignee_id.is_not(None),
         )
     ).all()
 
@@ -121,6 +130,17 @@ def load_events(session: Session, project_id: int) -> dict[int, list[Contributio
 
     kept = kept_promises(session, project_id)
 
+    # ⭐ **여럿이 맡은 업무의 몫**(`TASK-006`). 완료 이벤트가 몇 건인지
+    # 세기만 하면 되고, 그 값이 곧 분모입니다 — 담당자 표를 보지 않습니다.
+    # 왜 담당자 수가 아닌지는 `contribution/sharing.py` 에 있습니다.
+    completions: dict[int, int] = {}
+    for row in rows:
+        if (
+            row.event_type == EventType.TASK_COMPLETED.value
+            and row.source_kind == SourceKind.TASK.value
+        ):
+            completions[row.source_id] = completions.get(row.source_id, 0) + 1
+
     by_user: dict[int, list[ContributionEvent]] = {}
     for row in rows:
         metadata = dict(row.event_metadata or {})
@@ -129,6 +149,14 @@ def load_events(session: Session, project_id: int) -> dict[int, list[Contributio
         # 판정이고, 낡은 쪽이 이기면 위 docstring 의 이유가 무너집니다.
         if row.event_type == EventType.UTT_COMMITMENT.value:
             metadata["fulfilled"] = (row.source_id, row.user_id) in kept
+
+        # 같은 이유로 몫도 **읽을 때** 셉니다. 완료 시점에 적어 두면
+        # 담당자가 나중에 늘어도 먼저 있던 사람의 몫이 안 줄어듭니다.
+        if (
+            row.event_type == EventType.TASK_COMPLETED.value
+            and row.source_kind == SourceKind.TASK.value
+        ):
+            metadata["share"] = sharing.split_share(completions.get(row.source_id, 1))
 
         by_user.setdefault(row.user_id, []).append(
             ContributionEvent(

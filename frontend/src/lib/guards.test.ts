@@ -481,8 +481,16 @@ describe('모바일 규칙', () => {
     const offenders: string[] = [];
     for (const { name, html } of screens()) {
       const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+      // ⚠️ **주석을 먼저 걷어냅니다.** 이 검사는 `{` 앞의 글자를 통째로
+      //    선택자로 보는데, 바로 위에 붙은 주석도 거기 딸려 들어옵니다.
+      //    그래서 주석에 `select` 라는 낱말이 있으면 `<span>` 규칙이
+      //    입력 칸으로 잡혔습니다 — 실제로 `.mrole-flat` 이 그렇게
+      //    걸렸습니다(그 주석은 "잠긴 select 대신 글자" 라고 적혀
+      //    있었습니다). 바로 아래 44px 검사는 이미 이렇게 하고 있었고,
+      //    여기만 빠져 있었습니다.
+      const bare = style.replace(/\/\*[\s\S]*?\*\//g, '');
       // 마우스 전용 블록은 통째로 들어냅니다.
-      const touch = style.replace(
+      const touch = bare.replace(
         /@media\s*\([^)]*hover:\s*hover[^)]*\)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,
         '',
       );
@@ -540,6 +548,45 @@ describe('모바일 규칙', () => {
       '',
       '`min-height: 0` 은 `@media (hover: hover) and (pointer: fine)` 안에서만 쓰세요 — '
         + '손가락에서는 44px 이어야 합니다',
+    );
+  });
+
+  it('⭐ **상자로 만든 링크**도 손가락을 받아야 한다 (`--tap` 44px)', () => {
+    // ⚠️ 위 가드는 `button`·`input`·`select`·`.btn` 이 `min-height: 0` 으로
+    //    **되돌리는 것**만 봅니다. 그래서 링크에는 눈을 감습니다 — `<a>` 는
+    //    애초에 공용 44px 규칙을 안 받으므로 되돌릴 것도 없습니다.
+    //
+    // 실제로 프로젝트 상태 화면의 근거 링크가 그 틈으로 들어갔습니다.
+    // 폰에서 재니 **13×14px** 이고 이웃과 **6.4px** 떨어져 있었습니다.
+    // 위 가드는 통과했습니다. 요구가 아니라 **찾는 자리**가 좁았던 것입니다.
+    //
+    // 여기서는 "링크를 상자로 만든 것" 만 봅니다 — `display` 를 준 순간
+    // 그건 글줄 속 낱말이 아니라 **누르는 칸**이고, 누르는 칸은 44px 이
+    // 하한입니다. 문장 속 보통 링크는 대상이 아닙니다(상자가 없습니다).
+    const offenders: string[] = [];
+    for (const { name, html } of screens()) {
+      const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+      const bare = style.replace(/\/\*[\s\S]*?\*\//g, '');
+      const touch = bare.replace(
+        /@media\s*\([^)]*hover:\s*hover[^)]*\)[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g,
+        '',
+      );
+      for (const rule of touch.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+        const selector = (rule[1] ?? '').trim();
+        const body = rule[2] ?? '';
+        // 선택자가 `a` 를 겨냥하는가 (`.rsrc a`·`a.chip`·`li > a` …)
+        if (!/(^|[\s,>+~])a([.:#[\s,]|$)/.test(selector)) continue;
+        // 상자가 됐는가
+        if (!/display:\s*(inline-)?(flex|grid|block)/.test(body)) continue;
+        if (/min-height:\s*var\(--tap\)/.test(body)) continue;
+        offenders.push(`${name} → ${selector.replace(/\s+/g, ' ')}`);
+      }
+    }
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '링크를 상자로 만들었으면 `min-height: var(--tap)` 도 주세요 — '
+        + '누르는 칸은 손가락에서 44px 이 하한입니다',
     );
   });
 });
@@ -1569,6 +1616,128 @@ describe('처리되지 않은 거부 (결함 115)', () => {
   });
 });
 
+describe('데스크톱 셸 (Electron)', () => {
+  // 이 창은 **원격 코드**를 돌립니다 — 화면을 전부 서버가 주기 때문입니다.
+  // 그래서 아래 넷은 "권장 사항" 이 아니라 서버가 뚫렸을 때 사용자 기계를
+  // 지키는 **유일한 벽**입니다. 하나만 꺼도 서버의 XSS 가 곧 사용자 PC 의
+  // 코드 실행이 됩니다.
+  /* ⚠️ **`codeOf` 를 거칩니다.** 이 저장소의 주석은 "이렇게 하면 안
+     됩니다" 를 나쁜 예와 함께 적어 둡니다 — 그대로 읽으면 규칙이 제
+     설명문에 걸립니다. 실제로 그렇게 만들었다가 preload 가 `ipcRenderer`
+     를 내놓는다고 잡혔습니다(결함 167). 결함 156 과 같은 실수입니다. */
+  const shellCode = (file: string): string =>
+    codeOf(readFileSync(join(ROOT, 'electron', file), 'utf8'));
+  const mainSource = (): string => shellCode('main/index.ts');
+
+  it('⭐ 창의 보안 기본값 넷이 켜져 있다', () => {
+    const source = mainSource();
+    for (const [key, want] of [
+      ['contextIsolation', 'true'],
+      ['nodeIntegration', 'false'],
+      ['sandbox', 'true'],
+      ['webSecurity', 'true'],
+    ] as const) {
+      const found = new RegExp(`${key}:\\s*(\\w+)`).exec(source)?.[1];
+      strictEqual(found, want, `webPreferences.${key} 가 ${found} 입니다`);
+    }
+  });
+
+  it('⭐ 바깥으로 나가는 문을 전부 잠근다', () => {
+    const source = mainSource();
+    // 새 창은 preload 를 물려받습니다 — 남의 사이트가 이 앱의 다리 위에서
+    // 돌게 두면 안 됩니다.
+    ok(/setWindowOpenHandler/.test(source), '새 창 처리를 안 겁니다');
+    ok(/action: 'deny'/.test(source), '새 창을 열어 주고 있습니다');
+    // 서버가 뚫려 `location =` 을 실행해도 창은 안 따라가야 합니다.
+    ok(/will-navigate/.test(source), '이동 잠금이 없습니다');
+    // 권한은 기본이 거절이어야 합니다 — 안 걸면 Electron 이 대부분 내줍니다.
+    ok(/setPermissionRequestHandler/.test(source), '권한 요청을 안 막습니다');
+    ok(/setPermissionCheckHandler/.test(source), '권한 **확인** 경로가 열려 있습니다');
+  });
+
+  it('⭐ 진입을 `require.main` 으로 감싸지 않는다 (결함 166)', () => {
+    // Electron 은 진입 파일을 제 모듈 시스템으로 읽어서 `require.main` 이
+    // 그 모듈이 아닙니다. 감싸 두면 조건이 **언제나 거짓**이고, 앱은
+    // 창을 하나도 안 연 채 살아 있습니다 — 오류는 한 줄도 안 납니다.
+    ok(
+      !/if\s*\(require\.main === module\)/.test(mainSource()),
+      '`require.main === module` 로 감쌌습니다 — Electron 에서는 언제나 거짓입니다',
+    );
+  });
+
+  it('⭐ 판단이 main 프로세스에 살지 않는다', () => {
+    // main 에는 자동 검사가 안 붙습니다. 여기 판단을 두면 검증 밖입니다.
+    const source = mainSource();
+    ok(
+      /from '\.\.\/\.\.\/src\/lib\/desktop\/server\.ts'/.test(source),
+      '`lib/desktop/server.ts` 를 안 씁니다 — 판단이 main 으로 샜습니다',
+    );
+    ok(!/hostname ===/.test(source), '허용 주소 판단이 main 에 있습니다');
+  });
+
+  it('⭐ `--no-sandbox` 를 앱 코드에 박지 않는다', () => {
+    // 검사 하네스에서는 붙입니다(컨테이너가 root 라서). 앱이 스스로 붙이면
+    // 그건 위 보안 기본값을 통째로 무르는 것입니다.
+    for (const file of ['main/index.ts', 'preload/index.ts']) {
+      ok(!shellCode(file).includes('no-sandbox'), `${file} 이 sandbox 를 끄고 있습니다`);
+    }
+  });
+
+  it('⭐ `keepsAwake` 가 참이면 절전 방지 배선이 실제로 있다', () => {
+    // ⚠️ 이 짝이 깨지는 순간 녹음 화면이 "화면을 꺼도 녹음이 이어집니다"
+    //    라고 **거짓말**을 시작합니다. 사람은 화면을 끄고, 그 구간은
+    //    영영 못 잽니다 — 이 저장소에서 제일 비싼 실패입니다.
+    //
+    //    켜는 쪽이 아니라 **지우는 쪽**을 잡는 가드입니다: 나중에 누가
+    //    main 의 powerSaveBlocker 나 화면의 hold 배선을 걷어내면서
+    //    preload 의 값만 남겨 두는 것.
+    const preload = shellCode('preload/index.ts');
+    const claims = /keepsAwake:\s*true/.test(preload);
+    if (!claims) return; // 거짓이면 약속이 없으므로 잴 것도 없습니다
+
+    const main = mainSource();
+    ok(/powerSaveBlocker/.test(main + shellCode('main/awake.ts')),
+      'keepsAwake 가 참인데 powerSaveBlocker 가 어디에도 없습니다');
+    ok(/backgroundThrottling:\s*false/.test(main),
+      'keepsAwake 가 참인데 backgroundThrottling 을 안 껐습니다');
+
+    // 화면이 실제로 잡는가 — 국면 판단(lib)을 거쳐서.
+    const screen = codeOf(
+      readFileSync(join(ROOT, 'src', 'demo', 'main.ts'), 'utf8'),
+    );
+    ok(/shouldHoldAwake/.test(screen),
+      'keepsAwake 가 참인데 녹음 화면이 잡는 배선(shouldHoldAwake)이 없습니다');
+  });
+
+  it('⭐ preload 가 `ipcRenderer` 를 통째로 내놓지 않는다', () => {
+    // ⚠️ **낱말을 금지하던 검사였습니다.** preload 에 IPC 가 하나도 없던
+    //    동안은 그게 요구와 같아 보였지만, Phase 1 에서 보관소 다리가
+    //    생기자 **올바른 코드를 막았습니다.** `ipcRenderer.invoke` 를
+    //    이름 붙은 함수로 감싸는 것이 정확히 권장되는 모양입니다.
+    //
+    //    요구는 "낱말을 쓰지 마라" 가 아니라 **"화면에 통째로 넘기지
+    //    마라"** 입니다. 아래 둘로 그 요구를 직접 잽니다.
+    const source = shellCode('preload/index.ts');
+    ok(/contextBridge/.test(source), 'contextBridge 를 안 씁니다');
+
+    // ① 값으로 넘기지 않는다 — 부르는 자리(`.무엇(`)가 아닌 `ipcRenderer`
+    //    가 남아 있으면 `{ ipcRenderer }` 나 `invoke: ipcRenderer.invoke`
+    //    처럼 **참조를 건네주고** 있는 것입니다.
+    const withoutImports = source.replace(/import[^;]*from\s*'electron';/g, '');
+    const withoutCalls = withoutImports.replace(/ipcRenderer\s*\.\s*\w+\s*\(/g, '');
+    ok(!withoutCalls.includes('ipcRenderer'), 'ipcRenderer 를 값으로 건네고 있습니다');
+
+    // ② 채널 이름이 **글자로 박혀** 있다. 변수로 받으면 화면이 채널을
+    //    정하게 되고, 그건 `invoke` 를 통째로 내준 것과 같습니다.
+    const calls = [...withoutImports.matchAll(/ipcRenderer\s*\.\s*\w+\s*\(\s*([^,)]+)/g)];
+    ok(calls.length > 0, 'IPC 가 하나도 없습니다 — 검사가 아무것도 안 재고 있습니다');
+    for (const [, channel] of calls) {
+      const arg = (channel ?? '').trim();
+      ok(/^['"`]/.test(arg), `채널이 글자가 아닙니다: ${arg}`);
+    }
+  });
+});
+
 describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
   // 이 저장소의 **대표 실패 방식**입니다 — 결함 47(`renderNav`),
   // 감사 #8(진행률), #12(`extract_task_refs`), #13(확정 테이블),
@@ -1603,19 +1772,29 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
 
   it('⭐ `lib/` 의 export 를 화면이 실제로 부른다', () => {
     const files: { rel: string; source: string }[] = [];
-    const walk = (dir: string): void => {
+    const walk = (dir: string, prefix: string): void => {
       for (const name of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, name.name);
-        if (name.isDirectory()) walk(full);
+        if (name.isDirectory()) walk(full, prefix);
         else if (SCREEN_EXT.test(name.name)) {
           files.push({
-            rel: full.slice(join(ROOT, 'src').length + 1).split('\\').join('/'),
+            rel: full.slice(prefix.length + 1).split('\\').join('/'),
             source: readFileSync(full, 'utf8'),
           });
         }
       }
     };
-    walk(join(ROOT, 'src'));
+    walk(join(ROOT, 'src'), join(ROOT, 'src'));
+    /* ⭐ **데스크톱 셸도 부르는 쪽입니다** (`electron/`).
+
+       여기를 안 보면 `lib/desktop/**` 이 통째로 "테스트만 씀" 으로
+       잡힙니다 — 실제로는 Electron main 이 부르고 있는데요. 그리고
+       반대 방향이 더 위험합니다: 셸이 부르던 것을 지웠을 때 이 가드가
+       **아무 말도 안 하게** 됩니다.
+
+       ⚠️ 화면을 옮길 때마다 이 저장소의 가드가 눈을 감았습니다(여덟 번).
+       셸이 하나 늘었으면 **찾는 자리**부터 늘려야 합니다. */
+    walk(join(ROOT, 'electron'), join(ROOT));
 
     const offenders: string[] = [];
     for (const { rel, source } of files) {
@@ -2630,6 +2809,40 @@ describe('그림자 (docs/19 §19)', () => {
       '',
       '컨트롤에 그림자를 걸었습니다 — 경계는 `--line-strong` 선 하나가 말합니다',
     );
+  });
+});
+
+describe('칸반 끌어 옮기기 (TASK-005)', () => {
+  /**
+   * ⭐ 끌기가 있으면 **버튼 경로와 공용 판단도 같이** 있다 — 짝 가드.
+   *
+   * HTML5 DnD 는 터치에서 아예 안 돌고, 키보드·낭독기 사용자에게는
+   * 처음부터 없는 기능입니다. 끌기를 달면서 `.move` 버튼을 걷으면 그
+   * 사람들은 카드를 옮길 방법 자체를 잃습니다 — 요구는 「경로를 더하라」
+   * 이지 「바꿔치우라」 가 아닙니다.
+   *
+   * 반대 방향도 봅니다 — drop 이 lib 의 판단(`canDropOn`·`draggedTaskId`)
+   * 을 안 거치고 화면에서 제 규칙을 만들면, 「끌기로는 되는데 버튼으로는
+   * 안 되는 이동」 이 생기고 두 벌은 반드시 갈라집니다.
+   *
+   * ⚠️ 끌기를 통째로 걷어낸 미래는 통과합니다 — 그때는 지킬 짝이 없습니다.
+   */
+  it('⭐ 끌기가 있으면 버튼 경로와 lib 판단이 같이 있다', () => {
+    const code = demoSource('kanban');
+    if (code === null) throw new Error('kanban 화면이 없습니다');
+    if (!/\bdraggable=/.test(code)) return;
+    for (const needed of [
+      'nextStatuses(', // 버튼이 그리는 허용 집합
+      'className="move"', // 버튼 자체
+      'canDropOn(', // 놓을 수 있는가 — lib 의 판단
+      'draggedTaskId(', // 건너온 값 검증 — drop 은 아무나 일으킨다
+      'onDrop', // 실제로 놓는 자리
+    ]) {
+      ok(
+        code.includes(needed),
+        `끌기(draggable)는 있는데 ${needed} 가 없습니다 — 버튼 경로나 공용 판단이 빠졌습니다`,
+      );
+    }
   });
 });
 

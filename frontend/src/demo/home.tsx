@@ -41,10 +41,19 @@ import {
 import { channelState } from '../lib/nav/channels.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
+import {
+  AVATAR_SIDE,
+  bioProblem,
+  coverCrop,
+  MAX_BIO,
+  PHOTO_NOTE,
+  photoProblem,
+} from '../lib/profile/edit.ts';
+import { avatarInitial } from '../lib/ui/byline.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { projectCards } from '../lib/ui/skeleton.ts';
-import { Byline, RawHtml } from './parts.tsx';
+import { Byline, NoteLine, RawHtml, type Note } from './parts.tsx';
 import { renderNav } from './nav.ts';
 import { wireLogout } from './logout.ts';
 import { bootApp } from './pwa.ts';
@@ -148,6 +157,10 @@ function Home() {
   // 누르는 동안 잠근다 (결함 89). 이 요청은 **멱등이 아니라** 누른 만큼
   // 프로젝트가 생깁니다.
   const [busy, setBusy] = useState(false);
+  // 내 정보 (`USER-004`).
+  const [bio, setBio] = useState('');
+  const [profileNote, setProfileNote] = useState<Note | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async (): Promise<void> => {
     const response = await whileLoading(
@@ -194,7 +207,9 @@ function Home() {
           goToLogin();
           return;
         }
-        setMe((await response.json()) as Me);
+        const who = (await response.json()) as Me;
+        setMe(who);
+        setBio(who.bio ?? '');
       }
       await load();
     })();
@@ -235,6 +250,90 @@ function Home() {
     }
   };
 
+  /** 내 정보 저장 (`USER-004`). `""` 는 지움 — 서버와 같은 약속입니다. */
+  const patchProfile = async (
+    body: { bio?: string; avatar?: string },
+    whatFailed: string,
+  ): Promise<void> => {
+    setSaving(true);
+    try {
+      const response = await trySend(() =>
+        fetch(`${apiBase}/api/auth/me/profile`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(body),
+        }),
+      );
+      if (response === null) {
+        setProfileNote({ text: unreachableText(whatFailed), tone: 'bad' });
+        return;
+      }
+      if (isSessionExpired(response.status)) {
+        goToLogin();
+        return;
+      }
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => null)) as unknown;
+        setProfileNote({
+          text: detailText(detail, `${whatFailed} (HTTP ${response.status})`),
+          tone: 'bad',
+        });
+        return;
+      }
+      const next = (await response.json()) as Me;
+      setMe(next);
+      setBio(next.bio ?? '');
+      setProfileNote({ text: '저장했습니다', tone: 'plain' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /**
+   * 고른 사진을 캔버스에 다시 그려 96×96 PNG 로 보냅니다.
+   *
+   * ⚠️ 원본 파일은 서버로 가지 않습니다 — 재부호화에서 EXIF(찍은 위치)가
+   * 떨어져 나갑니다. 판단(형식·상한·가운데 자르기)은 `lib/profile/edit.ts`,
+   * 여기는 그리기만.
+   */
+  const pickPhoto = async (file: File): Promise<void> => {
+    const problem = photoProblem(file);
+    if (problem !== null) {
+      setProfileNote({ text: problem, tone: 'bad' });
+      return;
+    }
+    let bitmap: ImageBitmap;
+    try {
+      bitmap = await createImageBitmap(file);
+    } catch {
+      setProfileNote({ text: '이미지를 읽을 수 없습니다', tone: 'bad' });
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = AVATAR_SIDE;
+    canvas.height = AVATAR_SIDE;
+    const context = canvas.getContext('2d');
+    if (context === null) {
+      bitmap.close();
+      setProfileNote({ text: '이 브라우저에서는 사진을 줄일 수 없습니다', tone: 'bad' });
+      return;
+    }
+    const { sx, sy, size } = coverCrop(bitmap.width, bitmap.height);
+    context.drawImage(bitmap, sx, sy, size, size, 0, 0, AVATAR_SIDE, AVATAR_SIDE);
+    bitmap.close();
+    await patchProfile({ avatar: canvas.toDataURL('image/png') }, '사진을 저장하지 못했습니다');
+  };
+
+  const saveBio = (): void => {
+    const bad = bioProblem(bio);
+    if (bad !== null) {
+      setProfileNote({ text: bad, tone: 'bad' });
+      return;
+    }
+    void patchProfile({ bio }, '소개를 저장하지 못했습니다');
+  };
+
   const create = (): void => {
     const bad = titleProblem(title);
     if (bad) {
@@ -269,7 +368,7 @@ function Home() {
           회의는 녹음 → 처리 → 사람이 검토 → 칸반 순서로 갑니다. 각 회의 아래 문구가 지금 어느
           단계인지와 다음에 할 일을 말합니다.
         </p>
-        {me !== null && <Byline name={me.name} />}
+        {me !== null && <Byline name={me.name} avatar={me.avatar} />}
       </header>
 
       <div id="projects" {...(screen.k === 'loading' && slow ? { 'aria-busy': 'true' } : {})}>
@@ -370,6 +469,69 @@ function Home() {
           </p>
         )}
       </section>
+
+      {/* ⭐ 내 정보 (`USER-004`).
+          ⚠️ 적은 것이 어디에 보이는지를 화면이 말합니다 — 말 안 하면
+          "이건 누가 보나" 를 모른 채 적거나, 몰래 보인다고 느낍니다. */}
+      {me !== null && (
+        <section className="me-card">
+          <h2>내 정보</h2>
+          <p className="hint">여기 적는 것은 각 프로젝트 설정 화면의 팀원 목록에 보입니다.</p>
+          <div className="me-photo">
+            {typeof me.avatar === 'string' && me.avatar !== '' ? (
+              <img className="me-face" src={me.avatar} alt="내 프로필 이미지" />
+            ) : (
+              <span className="me-face me-face-empty" aria-hidden="true">
+                {avatarInitial(me.name)}
+              </span>
+            )}
+            {/* label 이 input 을 감싸서 눌립니다 — file input 의 기본 모양은
+                브라우저마다 다르고 44px 를 못 지킵니다. `.btn` 을 그대로
+                입어서 버튼 규칙(경계·터치 타깃)이 두 벌이 안 됩니다. */}
+            <label className="btn file-btn" {...(saving ? { 'aria-disabled': 'true' } : {})}>
+              사진 고르기
+              <input
+                type="file"
+                accept="image/*"
+                disabled={saving}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  // 같은 파일을 다시 골라도 change 가 나게 비웁니다.
+                  e.target.value = '';
+                  if (file !== undefined) void pickPhoto(file);
+                }}
+              />
+            </label>
+            {typeof me.avatar === 'string' && me.avatar !== '' && (
+              <button
+                id="drop-photo"
+                type="button"
+                disabled={saving}
+                onClick={() => void patchProfile({ avatar: '' }, '사진을 지우지 못했습니다')}
+              >
+                사진 지우기
+              </button>
+            )}
+          </div>
+          <p className="hint">{PHOTO_NOTE}</p>
+          <div className="field">
+            <textarea
+              id="bio"
+              rows={2}
+              maxLength={MAX_BIO}
+              placeholder="자기소개 — 팀원에게 하는 한두 마디"
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+            />
+            <div className="row">
+              <button id="save-bio" type="button" disabled={saving} onClick={saveBio}>
+                소개 저장
+              </button>
+            </div>
+          </div>
+          <NoteLine note={profileNote} />
+        </section>
+      )}
     </>
   );
 }

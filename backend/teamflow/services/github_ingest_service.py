@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from teamflow.contribution.events import ContributionEvent
 from teamflow.contribution.github_ingest import pr_to_events, reviews_to_events
 from teamflow.db import models as m
+from teamflow.db import vocab
 from teamflow.github import mapping
 from teamflow.github.client import GitHubClient, GitHubError
 
@@ -178,7 +179,7 @@ def ingest_github_event(session: Session, client: GitHubClient, event_id: int) -
     row = session.get(m.GithubEvent, event_id)
     if row is None:
         return {"status": "not_found", "event_id": event_id}
-    if row.event_type != "pull_request.merged":
+    if row.event_type != str(vocab.GithubEventKind.PR_MERGED):
         return {"status": "ignored", "event_type": row.event_type}
 
     number = ((row.payload or {}).get("pull_request") or {}).get("number")

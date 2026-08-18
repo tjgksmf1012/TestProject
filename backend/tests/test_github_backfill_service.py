@@ -26,6 +26,8 @@ from teamflow.github.client import FakeGitHubClient, GitHubError, PullRequestDet
 from teamflow.services import github_backfill_service as svc
 from teamflow.services import task_link_service
 
+from .conftest import assign
+
 NOW = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
 REPO = "team/teamflow"
 
@@ -65,9 +67,10 @@ def world(engine) -> dict:
                 github_login="minsu",
             )
         )
-        task = m.Task(project_id=project.id, title="로그인 API", assignee_id=minsu.id)
+        task = m.Task(project_id=project.id, title="로그인 API")
         s.add(task)
         s.flush()
+        assign(s, task, minsu.id)
         return {"project_id": project.id, "user_id": minsu.id, "task_id": task.id}
 
 

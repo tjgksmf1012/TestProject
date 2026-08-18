@@ -11,14 +11,13 @@
  */
 
 import { describeInstall, installState, whyInstall } from '../lib/pwa/install.ts';
-import { isInShell } from '../lib/shell/bridge.ts';
+import { isDesktopApp } from '../lib/platform/recording.ts';
 
-// ⚠️ 셸 판별은 `lib/shell/bridge.ts` 한 곳에서만 합니다.
+// ⚠️ 셸 판별은 `lib/platform/recording.ts` 한 곳에서만 합니다.
 //
-// 예전에 여기서 `window.TeamFlowShell` 을 봤는데, 셸이 실제로 심는
-// 이름은 `TeamFlowShellBridge` 였습니다. **이름이 어긋나면 조용히
-// "셸이 아니다" 가 됩니다** — 셸 안에서 설치 안내가 뜨고, 서비스
-// 워커가 셸 캐시와 겹칩니다. 오류는 하나도 안 납니다.
+// 예전에 여기서 이름을 직접 봤는데 셸이 심는 이름과 한 글자가 달랐고,
+// **이름이 어긋나면 조용히 "셸이 아니다" 가 됩니다** — 셸 안에서 설치
+// 안내가 뜹니다. 오류는 하나도 안 납니다.
 
 /** 브라우저가 준 설치 제안. 붙잡아 뒀다가 사람이 누를 때 쓴다. */
 let deferredPrompt: (Event & { prompt: () => Promise<void> }) | null = null;
@@ -37,10 +36,10 @@ export function registerServiceWorker(): void {
     console.info('[pwa] 이 브라우저는 서비스 워커를 지원하지 않습니다');
     return;
   }
-  // 안드로이드 셸 안에서는 등록하지 않습니다. 셸과 서비스 워커가 각자
-  // 캐시를 가지면 지금 어느 쪽 화면을 보고 있는지 알 수 없습니다.
-  if (isInShell(window)) return;
-
+  // ⚠️ **데스크톱 앱에서도 등록합니다.** 안드로이드 셸에서는 건너뛰었는데,
+  //    그건 셸이 제 캐시를 따로 들고 있어서 어느 쪽 화면인지 알 수 없게
+  //    되기 때문이었습니다. Electron 셸은 캐시를 따로 안 들고 서버 화면을
+  //    그대로 띄우므로, 오프라인 대비는 브라우저에서와 똑같이 값이 있습니다.
   navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => {
     console.warn(
       '[pwa] 서비스 워커를 등록하지 못했습니다 — 오프라인 화면이 뜨지 않습니다.',
@@ -67,7 +66,7 @@ export function renderInstallHint(): void {
     iosStandalone:
       (navigator as Navigator & { standalone?: boolean }).standalone === true,
     hasPrompt: deferredPrompt !== null,
-    inShell: isInShell(window),
+    inShell: isDesktopApp(window),
   });
 
   const text = describeInstall(state);

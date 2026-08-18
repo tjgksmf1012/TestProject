@@ -62,6 +62,53 @@
       /* ⚠️ **줄마다 가로선을 긋지 않습니다** (브리프 §7). 안건 셋에 선이
          셋이면 화면을 가로지르는 줄이 셋 생기고, 그 선들이 카드 목록의
          테두리와 경쟁합니다. 나누는 일은 여백이 합니다. */
+      /* 발언 유형 (정의서 §10 · REVIEW-005).
+         ⚠️ **막대를 그리지 않습니다.** 값을 같은 축 위에 세로로 늘어놓으면
+         그게 곧 순위표입니다(AGENTS.md 불변식 1 — 두 번 어긴 규칙).
+         값은 글자로 적고, 가로로 흘려서 크기 비교가 안 되게 둡니다. */
+      .types { margin: var(--sp-5) 0; }
+      .stance { font-size: var(--fs-label); color: var(--text); margin: 0 0 var(--sp-2); }
+      .tlist { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap;
+               gap: var(--sp-2) var(--sp-5); font-size: var(--fs-label); }
+      .tlist li { display: flex; gap: var(--sp-1); align-items: baseline; }
+      .tname { color: var(--text-muted); }
+      .tnum { color: var(--text); font-weight: 600; }
+      /* 0점짜리는 흐리게. ⚠️ 빨강이 아닙니다 — 빨강은 "네가 뭘 잘못했다"
+         로 읽히는데, 맞장구는 잘못이 아니라 그냥 안 세는 것입니다. */
+      .tzero .tname, .tzero .tnum { color: var(--text-subtle); font-weight: 400; }
+
+      /* 누가 얼마나 말했나 (`AI-AUDIO-005`·`AI-REVIEW-007`).
+         ⚠️ **막대를 안 그립니다.** 값을 같은 축 위에 폭이나 위치로
+         늘어놓으면 그 순간 순위표입니다 — 정의서의 예시가 정확히 그
+         모양이었고(`윤식 32% / 민수 27% / …`), 같은 문서의 다른 두
+         조항이 그걸 금지합니다 (`docs/20` §3).
+         ⚠️ 세로로 쌓지도 않습니다. 한 줄에 이름과 값을 나란히 두면
+         눈이 값끼리 비교하지 않고 사람마다 읽습니다. */
+      .slist { list-style: none; padding: 0; margin: var(--sp-2) 0 0;
+               display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5);
+               font-size: var(--fs-label); }
+      .slist li { display: flex; gap: var(--sp-2); align-items: baseline; }
+      .sname { color: var(--text-muted); }
+      /* ⚠️ 굵게 하지 않습니다. 굵히면 큰 값이 먼저 눈에 들어와서
+         정렬하지 않아도 순위처럼 읽힙니다. */
+      .snum { color: var(--text); }
+
+      /* 회의에서 눈에 띈 것 (정의서 §12).
+         ⚠️ **빨강을 안 씁니다.** 이 저장소에서 빨강은 "네가 뭘 잘못했다"
+         로 읽히는데, 이건 규칙 기반 관찰이고 회의에 대한 것입니다.
+         못 잰 것과 같은 흙빛(--gap)도 안 씁니다 — 이건 잰 것입니다. */
+      .finds { margin: var(--sp-5) 0; }
+      .finds-note { font-size: var(--fs-caption); color: var(--text-subtle);
+                    margin: 0 0 var(--sp-3); }
+      .flist { list-style: none; padding: 0; margin: 0;
+               display: flex; flex-direction: column; gap: var(--sp-4); }
+      .fhead { display: flex; gap: var(--sp-2); align-items: baseline; margin: 0; }
+      .fname { font-size: var(--fs-label); font-weight: 600; color: var(--text); }
+      .fat { font-size: var(--fs-caption); color: var(--text-subtle);
+             font-variant-numeric: tabular-nums; }
+      .fwhat { font-size: var(--fs-label); color: var(--text-muted); margin: var(--sp-1) 0 0; }
+      .fwhy { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-1) 0 0; }
+
       #agenda, #issues { list-style: none; padding: 0; margin: 0;
                          font-size: var(--fs-label); color: var(--text-muted); }
       #agenda li, #issues li { display: flex; gap: var(--sp-2); align-items: baseline;
@@ -281,6 +328,40 @@
         background: var(--bg); color: var(--text);
       }
 
+      /* ── 타임라인 (REVIEW-002 · 004) ───────────────────────
+         한 줄기 시간 순 목록. ⚠️ 사람별로 줄을 가르지 않는다 — 가르는
+         순간 "누가 얼마나 말했나" 그림이 된다. 발화 줄은 근거 상자와
+         같은 재료(시각·화자·유형·원문)다. */
+      .mtl { list-style: none; margin: 0; padding: 0;
+            display: flex; flex-direction: column; gap: var(--sp-4); }
+      .mtl-head { display: flex; align-items: baseline; gap: var(--sp-2);
+                 flex-wrap: wrap; font-size: var(--fs-caption); }
+      .mtl-at { font-variant-numeric: tabular-nums; color: var(--text-subtle); }
+      .mtl-speaker { font-weight: 600; color: var(--text-muted); }
+      .mtl-type { color: var(--text-subtle); }
+      .mtl-overlap { color: var(--gap); }
+      .mtl-text { margin: var(--sp-1) 0 0; font-size: var(--fs-item);
+                 line-height: 1.65; white-space: pre-wrap; }
+      .mtl-note { font-size: var(--fs-caption); color: var(--text-subtle);
+                 margin: var(--sp-1) 0 0; }
+      .mtl-gap { font-size: var(--fs-caption); color: var(--gap); margin: 0 0 var(--sp-3); }
+      /* 비효율 구간 머리말 — 판정이 아니라 관찰이므로 색을 안 입힌다.
+         움푹한 면으로 "여기부터" 만 표시한다. */
+      .mtl-finding { background: var(--sunken); border-radius: var(--r-badge);
+                    padding: var(--sp-2) var(--sp-3); font-size: var(--fs-caption);
+                    display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: baseline; }
+      .mtl-ftitle { font-weight: 600; color: var(--text-muted); }
+      .mtl-fwhy { color: var(--text-subtle); }
+      /* 듣기 버튼. 도는 줄은 테두리가 아니라 버튼이 말한다("멈춤"). */
+      .mtl-play { margin-left: auto; border: 1px solid var(--line-strong);
+                 background: var(--bg); border-radius: var(--r-ctrl);
+                 padding: 0 var(--sp-3); font-size: var(--fs-label);
+                 color: var(--text-muted); }
+      .mtl-utt.playing .mtl-play { border-color: var(--primary); color: var(--text); }
+      .mtl-retry { border: 1px solid var(--line-strong); background: var(--bg);
+                  border-radius: var(--r-ctrl); padding: 0 var(--sp-3);
+                  font-size: var(--fs-label); color: var(--text-muted); }
+
       /* 제출 막대. app.css 의 `.actionbar` 가 자리(탭바 바로 위 +
          홈 인디케이터 여백)를 잡고, 여기서는 안에 든 것만 배치한다. */
       .actionbar .inner { align-items: center; }
@@ -306,6 +387,8 @@
       @media (hover: hover) and (pointer: fine) {
         .seg button,
         .acts button,
+        .mtl-play,
+        .mtl-retry,
         .cand input.title,
         .cand input.memo,
         .field select,

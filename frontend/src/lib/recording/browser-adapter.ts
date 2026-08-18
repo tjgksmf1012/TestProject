@@ -90,8 +90,16 @@ class BrowserRecorder implements RecorderHandle {
     this.#recorder.start(timesliceMs);
   }
 
-  stop(): void {
-    if (this.#recorder.state !== 'inactive') this.#recorder.stop();
+  stop(): Promise<void> {
+    // ⚠️ 마지막 조각은 stop() **뒤에** 옵니다 — `dataavailable` 가 먼저
+    //    서고 'stop' 이벤트가 그 다음입니다. 그 순서를 약속으로 돌려줘야
+    //    호출자가 큐를 닫기 전에 마지막 조각이 앉습니다 (결함 173).
+    //    이미 inactive 면(두 번째 halt) 흘러나올 것이 없습니다.
+    if (this.#recorder.state === 'inactive') return Promise.resolve();
+    return new Promise((resolve) => {
+      this.#recorder.addEventListener('stop', () => resolve(), { once: true });
+      this.#recorder.stop();
+    });
   }
 
   onData(listener: (data: { byteLength: number; payload: unknown }) => void): void {

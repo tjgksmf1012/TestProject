@@ -53,7 +53,14 @@ export interface AudioTrackHandle {
 
 export interface RecorderHandle {
   start(timesliceMs: number): void;
-  stop(): void;
+  /**
+   * 약속을 돌려주면 **마지막 조각까지 흘러나온 뒤** 이행돼야 한다.
+   *
+   * `MediaRecorder.stop()` 은 남은 소리를 정지 뒤에 `dataavailable` 로
+   * 흘려보낸다. 그 완료를 알 수 없으면 호출자가 큐를 너무 일찍 닫아
+   * 회의의 마지막 타임슬라이스가 사라진다 (결함 173).
+   */
+  stop(): void | Promise<void>;
   onData(listener: (data: { byteLength: number; payload: unknown }) => void): void;
   onError(listener: (error: Error) => void): void;
 }
@@ -83,6 +90,14 @@ export interface RecordingSummary {
   /** 캡처 설정 문제로 낮아진 신뢰도 (0~1) */
   captureConfidence: number;
   warnings: CaptureWarning[];
+  /**
+   * 서버가 못 받았지만 **이 컴퓨터 디스크에 남아 있는** seq (`docs/21` Phase 1).
+   *
+   * ⚠️ `timeline` 의 공백에는 그대로 들어 있습니다 — 서버 기준으로는
+   * 지금 없는 것이 맞습니다. 이 목록은 "되찾을 수 있다" 만 더합니다.
+   * 보관소가 없으면(브라우저) 언제나 빈 배열입니다.
+   */
+  parked: number[];
   /**
    * `MediaRecorder.start(timeslice)` 에 넘긴 값.
    *
@@ -233,7 +248,11 @@ export class RecordingClient {
     if (this.#state.startedAtMs === null) {
       throw new Error('녹음을 시작한 적이 없습니다');
     }
-    this.#halt();
+    // ⚠️ 마지막 조각이 큐에 앉을 때까지 기다린 **뒤에** 큐를 닫습니다
+    //    (결함 173). 안 기다리면 `finish()` 가 워커를 먼저 접고, 정지
+    //    직후 흘러나온 마지막 타임슬라이스는 닫힌 큐에 앉아 영영 안
+    //    올라갑니다 — 회의의 끝이 매번 최대 5초씩 사라집니다.
+    await this.#halt();
 
     const result = await this.#queue.finish();
     this.#dispatch({ type: 'UPLOAD_DONE', lostSeqs: result.lost });
@@ -249,12 +268,14 @@ export class RecordingClient {
       verdict: judgeTrack(timeline),
       captureConfidence: captureConfidence(this.#warnings),
       warnings: [...this.#warnings],
+      parked: result.parked,
       timesliceMs: this.#timesliceMs,
     };
   }
 
   #onData(data: { byteLength: number; payload: unknown }): void {
-    // 녹음이 끝난 뒤 도착한 마지막 청크는 세션이 알아서 무시한다.
+    // 정지 직후 흘러나온 마지막 조각도 여기로 온다 — 세션이 'stopping'
+    // 에서 받아 주고, stop() 이 큐를 닫기 전에 플러시를 기다린다 (결함 173).
     const seq = this.#nextSeq;
     this.#nextSeq += 1;
 
@@ -274,11 +295,20 @@ export class RecordingClient {
     }
   }
 
-  /** 마이크를 끄고 종료 시각을 찍는다. 여러 경로에서 불려도 한 번만 먹는다. */
-  #halt(): void {
-    this.#recorder?.stop();
+  /**
+   * 마이크를 끄고 종료 시각을 찍는다. 여러 경로에서 불려도 한 번만 먹는다.
+   *
+   * 돌려주는 것은 레코더의 **마지막 플러시가 끝났다는 신호**다. STOP 은
+   * 기다리지 않고 즉시 찍는다 — 멈춤을 화면에 먼저 알려야 하고, 마지막
+   * 조각은 'stopping' 국면이 받아 준다. 철회·백프레셔 경로는 이 반환값을
+   * 안 기다려도 된다: 큐를 닫는 것은 `stop()` 뿐이고, 워커는 그때까지
+   * 계속 돌므로 조각은 어느 경로에서든 큐에 앉는다.
+   */
+  #halt(): void | Promise<void> {
+    const flushed = this.#recorder?.stop();
     this.#track?.stop();
     this.#dispatch({ type: 'STOP', atMs: this.#clock.now() });
+    return flushed;
   }
 
   /** 이벤트를 적용하고 **새 상태를 돌려준다.** 호출자가 다시 읽지 않게 하려는 것이다. */

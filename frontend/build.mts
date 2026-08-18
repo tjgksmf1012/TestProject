@@ -213,6 +213,53 @@ export function writeShellList(): number {
   return files.length;
 }
 
+/**
+ * 데스크톱 셸(main·preload)을 빌드합니다.
+ *
+ * ## ⚠️ `public/` 에 넣지 않습니다
+ *
+ * `shellFiles()` 가 `public/` 을 통째로 세어 오프라인 목록을 만듭니다.
+ * 거기 두면 **브라우저 사용자가 Electron main 번들을 내려받습니다** —
+ * 쓰지도 못하는 것을. `out/` 으로 뺍니다.
+ *
+ * ## ⚠️ 왜 electron-vite 를 안 쓰는가
+ *
+ * 인계 자료집이 권한 도구인데, 그 권고의 전제가 **"이미 Vite 를 쓰고
+ * 있다"** 입니다. 이 저장소는 Vite 를 안 씁니다 — esbuild 와 이 파일이
+ * 전부이고, 화면도 SPA 가 아니라 HTML 열여섯 장짜리입니다. 도입하면
+ * 얻는 것 없이 **번들러가 두 벌**이 됩니다 (대표 실패 ②).
+ *
+ * ## ⚠️ `.cjs` 로 내보냅니다
+ *
+ * `package.json` 이 `"type": "module"` 이라 `.js` 는 ESM 으로 읽힙니다.
+ * 그런데 **sandbox 가 켜진 preload 는 ESM 을 못 씁니다** — 확장자를
+ * 잘못 두면 창은 뜨는데 preload 만 **조용히 안 돕니다.** 오류도 안 납니다.
+ */
+export async function buildDesktop(): Promise<string[]> {
+  const outdir = join(ROOT, 'out');
+  const result = await build({
+    entryPoints: [
+      join(ROOT, 'electron', 'main', 'index.ts'),
+      join(ROOT, 'electron', 'preload', 'index.ts'),
+    ],
+    outdir,
+    outbase: join(ROOT, 'electron'),
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    outExtension: { '.js': '.cjs' },
+    target: 'node22',
+    charset: 'utf8',
+    // ⚠️ `electron` 은 런타임이 주는 것이라 번들에 넣으면 안 됩니다.
+    external: ['electron'],
+    // 압축하지 않습니다 — 웹 번들과 달리 내려받는 것이 아니라 사용자
+    // 기계에서 도는 코드이고, 크래시 스택을 읽을 수 있어야 합니다.
+    minify: false,
+    metafile: true,
+  });
+  return Object.keys(result.metafile.outputs).sort();
+}
+
 /** 지금 `public/` 에 놓인 공용 조각. 이름에 해시가 붙습니다. */
 export const chunkFiles = (): string[] =>
   readdirSync(PUBLIC).filter((name) => /^chunk-[A-Z0-9]+\.js$/.test(name));
@@ -229,5 +276,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // ⚠️ **번들을 만든 뒤에** 셉니다. 먼저 세면 이번에 새로 생긴 화면의
   // 번들이 아직 디스크에 없어서 목록에서 빠집니다.
   const cached = writeShellList();
-  console.log(`${entries.length}개 화면을 빌드했고, 오프라인 목록 ${cached}개를 적었습니다.`);
+  const desktop = await buildDesktop();
+  console.log(
+    `${entries.length}개 화면을 빌드했고, 오프라인 목록 ${cached}개를 적었습니다. ` +
+      `데스크톱 셸 ${desktop.length}개.`,
+  );
 }

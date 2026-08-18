@@ -56,6 +56,8 @@ class FakeRecorder implements RecorderHandle {
   started = false;
   stopCount = 0;
   timesliceMs = 0;
+  /** stop() 때 흘러나올 마지막 조각 크기. 0 이면 없음. */
+  finalFlushBytes = 0;
   #data: ((d: { byteLength: number; payload: unknown }) => void) | null = null;
   #error: ((e: Error) => void) | null = null;
 
@@ -63,9 +65,15 @@ class FakeRecorder implements RecorderHandle {
     this.started = true;
     this.timesliceMs = timesliceMs;
   }
-  stop(): void {
+  stop(): void | Promise<void> {
     this.stopCount += 1;
     this.started = false;
+    if (this.finalFlushBytes === 0) return;
+    // 실제 MediaRecorder 의 순서 그대로 — stop() 이 돌아간 **뒤에**
+    // dataavailable 이 서고, 'stop'(= 이 약속의 이행)이 그 다음이다.
+    const bytes = this.finalFlushBytes;
+    this.finalFlushBytes = 0;
+    return Promise.resolve().then(() => this.emit(bytes));
   }
   onData(listener: (d: { byteLength: number; payload: unknown }) => void): void {
     this.#data = listener;
@@ -275,6 +283,29 @@ describe('RecordingClient — 종료', () => {
     assert.deepEqual(h.uploaded, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 
+  it('⭐ 정지 직후 흘러나온 마지막 조각도 세고 올린다 (결함 173)', async () => {
+    // MediaRecorder.stop() 은 남은 소리(타임슬라이스 미만)를 정지 **뒤에**
+    // 흘려보낸다. 예전에는 세션이 버리고 큐는 이미 닫혀 있어서, 회의의
+    // 끝 — 결정이 말해지는 자리 — 이 매번 최대 5초씩 사라졌다.
+    const h = await prepared();
+    h.client.start();
+    for (let i = 0; i < 3; i += 1) {
+      h.clock.advance(5_000);
+      h.recorder.emit();
+    }
+    h.clock.advance(2_500); // 타임슬라이스 절반에서 정지 버튼
+    h.recorder.finalFlushBytes = 9_000;
+    const summary = await h.client.stop();
+
+    assert.deepEqual(
+      summary.state.chunks.map((c) => c.seq),
+      [0, 1, 2, 3],
+      '마지막 조각이 타임라인에 세어져야 한다',
+    );
+    assert.deepEqual(h.uploaded, [0, 1, 2, 3], '마지막 조각이 서버로 올라가야 한다');
+    assert.equal(summary.timeline.coverage, 1, '꼬리 공백이 없어야 한다');
+  });
+
   it('시작한 적이 없으면 정지할 수 없다', async () => {
     const { client } = await prepared();
     await assert.rejects(() => client.stop(), /시작한 적이 없습니다/);
@@ -349,13 +380,17 @@ describe('RecordingClient — 자동 중단', () => {
     assert.equal(h.client.state.chunks.length, 1, '이미 받은 건 버리지 않는다');
   });
 
-  it('철회 이후 도착한 청크는 받지 않는다', async () => {
+  it('철회 뒤 흘러나온 마지막 조각은 남는다 — 마이크가 먼저 꺼져 있다 (결함 173)', async () => {
+    // 철회 순간 레코더와 트랙이 같이 죽는다(위 테스트가 잰다). 그러므로
+    // 그 뒤에 도착하는 것은 철회 **전**에 담긴 소리의 플러시뿐이고,
+    // docs/07 은 그것을 남기라고 한다 — "이미 수집된 것은 보존기간까지".
+    // 예전에는 이것까지 버려서 철회 직전 구간이 매번 사라졌다.
     const h = await prepared();
     h.client.start();
     h.client.setConsent('refused');
-    h.clock.advance(5_000);
-    h.recorder.emit();
-    assert.equal(h.client.state.chunks.length, 0);
+    assert.equal(h.track.stopped, true, '새 소리가 담길 길이 먼저 끊겨 있어야 한다');
+    h.recorder.emit(9_000);
+    assert.equal(h.client.state.chunks.length, 1);
   });
 });
 

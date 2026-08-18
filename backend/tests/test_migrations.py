@@ -93,14 +93,33 @@ def test_models_and_migrations_are_in_sync(alembic_config: Config):
         engine.dispose()
 
     # SQLite는 일부 제약(CHECK, 서버 기본값 표현)을 그대로 반영하지 못해
-    # 오탐이 난다. 테이블·컬럼 수준의 차이만 본다 — 진짜 잊어버린 마이그레이션은
-    # 반드시 이 범주로 나타난다.
-    significant = [
-        d
-        for d in diff
-        if isinstance(d, tuple)
-        and d[0] in ("add_table", "remove_table", "add_column", "remove_column")
-    ]
+    # 오탐이 난다. 그래서 **볼 것을 골라서** 본다.
+    #
+    # ⚠️ 예전에는 여기 "테이블·컬럼 수준의 차이만 본다 — 진짜 잊어버린
+    #    마이그레이션은 **반드시** 이 범주로 나타난다" 고 적혀 있었습니다.
+    #    **그 말이 틀렸습니다.**
+    #
+    #    `nullable` 변경은 add/remove 어디에도 안 나타납니다. 게다가
+    #    alembic 은 그것을 **리스트 안에 담아** 돌려주므로 아래
+    #    `isinstance(d, tuple)` 이 통째로 걸러 냈습니다. 실제로 찾기·바꾸기가
+    #    두 곳을 쳐서 `meeting_tracks.started_at` 이 조용히 널 허용으로
+    #    바뀐 적이 있고(결함 128), 이 검사는 **그때 통과했습니다.**
+    #
+    #    널 허용은 잊어버린 마이그레이션 중에서도 나쁜 쪽입니다 — 배포된
+    #    DB 는 여전히 NOT NULL 이라 널을 넣는 코드가 **배포에서만** 터집니다.
+    KINDS = ("add_table", "remove_table", "add_column", "remove_column", "modify_nullable")
+
+    def flatten(entries: object) -> list[tuple]:
+        """alembic 은 컬럼 변경을 **리스트로 감싸서** 돌려준다."""
+        out: list[tuple] = []
+        if isinstance(entries, tuple):
+            out.append(entries)
+        elif isinstance(entries, list):
+            for entry in entries:
+                out.extend(flatten(entry))
+        return out
+
+    significant = [d for entry in diff for d in flatten(entry) if d and d[0] in KINDS]
     assert not significant, (
         "모델과 마이그레이션이 어긋났습니다. "
         "`alembic revision --autogenerate` 로 새 마이그레이션을 만드세요:\n"
@@ -235,3 +254,52 @@ def test_migrated_database_can_actually_be_written_to(alembic_config: Config):
             )
     finally:
         engine.dispose()
+
+
+def test_every_check_constraint_appears_in_some_migration():
+    """⭐ 모델에만 CHECK 를 걸고 **마이그레이션을 안 쓴 것**을 잡는다.
+
+    ⚠️ 위 `test_models_and_migrations_are_in_sync` 는 이걸 **못 봅니다.**
+    `compare_metadata` 가 CHECK 제약을 아예 비교 대상에 안 넣기 때문입니다
+    (alembic 이 기본으로 반영하지 않습니다). 실제로 심어서 확인했습니다 —
+    `utterances` 의 마이그레이션을 통째로 지워도, 모델에 없는 제약을 하나
+    더 넣어도 **둘 다 통과했습니다** (결함 142).
+
+    이게 나쁜 이유는 `nullable`(결함 128)과 같습니다. 새로 만든 DB 는
+    제약이 있고 **배포된 DB 는 없습니다.** 그러면 테스트는 전부 통과하는데
+    운영에서는 아무 값이나 들어가고, 그 사실을 아무도 모릅니다 —
+    `tasks.status` 가 정확히 그 상태였습니다(결함 132).
+
+    ⚠️ 이름만 봅니다. 제약의 **내용**이 맞는지는 `test_*_vocabulary` 쪽이
+    잽니다. 여기서 내용까지 보려고 하면 SQL 문자열 비교가 되고, 그건
+    금방 낡습니다.
+
+    ⚠️⚠️ **처음에 `CheckConstraint\\([^)]*name="..."` 로 찾았고, 열넷 중
+    다섯만 걸렸습니다.** 어휘 제약은 목록을 이어 붙여 만들기 때문에
+
+        "speaker_source IN (" + ",".join(...) + ")"
+
+    안에 `)` 가 있고, `[^)]*` 가 거기서 끊깁니다. 못 본 아홉 개가 전부
+    **어휘 제약** — 이 검사가 지키려던 바로 그것들이었습니다. 심어서
+    확인하지 않았으면 초록인 채로 아무것도 안 재고 있었을 것입니다.
+    이름 규약(`ck_` 접두사)으로 찾습니다.
+    """
+    import re
+
+    models = (REPO_ROOT / "backend" / "teamflow" / "db" / "models.py").read_text()
+    declared = set(re.findall(r'name="(ck_\w+)"', models))
+    assert len(declared) >= 14, (
+        f"CHECK 제약을 {len(declared)}개만 찾았습니다 — 찾는 방법이 낡았는지 "
+        "먼저 보십시오 (예전에 열넷 중 다섯만 걸린 적이 있습니다)"
+    )
+
+    written = ""
+    for path in (REPO_ROOT / "backend" / "migrations" / "versions").glob("*.py"):
+        written += path.read_text()
+
+    missing = sorted(name for name in declared if name not in written)
+    assert missing == [], (
+        f"모델에는 있는데 어느 마이그레이션에도 안 적힌 CHECK 제약입니다: {missing}. "
+        "새로 만든 DB 에만 걸리고 **배포된 DB 에는 안 걸립니다** — "
+        "마이그레이션을 쓰십시오"
+    )

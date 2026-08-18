@@ -15,6 +15,10 @@ export interface Me {
   user_id: number;
   name: string;
   email: string;
+  /** 자기소개 (`USER-004`). 안 적었으면 `null`. */
+  bio?: string | null;
+  /** 프로필 이미지 (`USER-004`) — `data:image/png;base64,…` 그대로. */
+  avatar?: string | null;
 }
 
 /** 서버 `passwords.MIN_PASSWORD_LENGTH` 와 같아야 한다. */

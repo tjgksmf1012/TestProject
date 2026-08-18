@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
+<link rel="stylesheet" href="/app.css" />
+<title>찾기 — TeamFlow</title>
+<style>
+
+  /* ══ 찾기 ═════════════════════════════════════════════════
+
+     ⚠️ **결과에 값이 없습니다.** 종류별 건수는 "몇 개 나왔나" 이지
+     "누가 얼마나" 가 아닙니다. 사람별로 세는 곳이 화면에도 서버에도
+     없습니다 (`AGENTS.md` 불변식 1). */
+
+  .qform { display: grid; gap: var(--sp-2); max-width: 34rem;
+           margin: 0 0 var(--sp-8); }
+  .clabel { font-size: var(--fs-caption); color: var(--text-subtle); }
+
+  /* 거르개 둘. ⚠️ 폰에서는 세로로 쌓입니다 — 390px 에 나란히 두면
+     `select` 가 눌러지지 않을 만큼 좁아집니다. */
+  .filters { display: grid; gap: var(--sp-3); }
+  @media (min-width: 30rem) { .filters { grid-template-columns: 1fr 1fr; } }
+  .fitem { display: grid; gap: var(--sp-1); }
+
+  /* 왜 못 찾는지. ⚠️ 버튼만 흐려 두면 사람은 계속 누릅니다. */
+  .cwhy { margin: 0; font-size: var(--fs-caption); color: var(--text-muted); }
+
+  /* ── 결과 ─────────────────────────────────────────── */
+  .kgroup { max-width: 48rem; margin: 0 0 var(--sp-8); }
+  .shead { display: flex; align-items: baseline; gap: var(--sp-3);
+           font-size: var(--fs-item); letter-spacing: var(--ls-item);
+           margin: 0 0 var(--sp-3); }
+
+  /* 종류별 건수. ⚠️ **글자**입니다 — 개수만큼 점을 찍으면 그게 막대이고,
+     막대는 순위표입니다. */
+  .kcount { font-size: var(--fs-caption); color: var(--text-subtle);
+            font-variant-numeric: tabular-nums; font-weight: 400; }
+
+  /* ⚠️ 줄마다 가로선을 긋지 않습니다 — 결과가 서른이면 선이 서른하나가
+     되고, 그 선들이 화면에서 가장 진한 것이 됩니다. */
+  .hlist { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp-4); }
+
+  .htitle { display: flex; flex-wrap: wrap; align-items: baseline;
+            gap: var(--sp-3); margin: 0 0 var(--sp-1);
+            font-size: var(--fs-label); color: var(--text); }
+  .hstatus, .hwho { font-size: var(--fs-caption); color: var(--text-subtle); }
+
+  /* 찾은 대목. ⚠️ `…` 로 잘린 자리를 표시합니다 — 안 하면 사람이 원문이
+     그렇게 짧은 줄 압니다. 자르는 자리는 `lib/search/view.ts` 가 정합니다. */
+  .hbody { margin: 0; font-size: var(--fs-caption); color: var(--text-muted);
+           overflow-wrap: anywhere; }
+
+  /* ⚠️ 손가락에서는 입력 칸 글자를 16px 밑으로 내리지 않습니다. */
+  @media (hover: none) and (pointer: coarse) {
+    .htitle { font-size: 1rem; }
+    .hbody, .hstatus, .hwho, .kcount, .cwhy { font-size: .875rem; }
+  }
+        </style>
+</head>
+<body>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24). -->
+  <div id="app"></div>
+
+  <script type="module" src="/search.js"></script>
+
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
+</html>

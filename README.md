@@ -5,15 +5,21 @@
 
 **현재 상태: 설계 확정 + GPU 없이 검증 가능한 전 구간 구현 완료.**
 기여도 엔진, 회의 처리 파이프라인, 녹음 수집(클라이언트·서버), 브라우저
-통화(WebRTC), 화면 열 개까지 동작하고 테스트로 고정돼 있습니다.
+통화(WebRTC), 화면 열여섯 장까지 동작하고 테스트로 고정돼 있습니다.
 
 **남은 것 하나** — 모델 구현(GPU 필요).
 회의 → 업무 → GitHub → 기여도 경로는 **끝까지 이어졌습니다.**
 지금 순서와 근거는 [`docs/08` §4.1](docs/08-MVP-로드맵.md) 에 있습니다.
 
 > ⚠️ **2026-08-07 방향 전환** — 주력이 **PC 브라우저 + 통화**가 됐습니다
-> ([`docs/15`](docs/15-PC-우선-방향.md)). 모바일은 지운 게 아니라 뒤로 미뤘고,
-> `docs/04` 의 **오디오 설정 두 개가 원격에서는 반대**가 됩니다.
+> ([`docs/15`](docs/15-PC-우선-방향.md)). `docs/04` 의 **오디오 설정 두 개가
+> 원격에서는 반대**가 됩니다.
+>
+> ⚠️ **2026-08-13 모바일 제외** — 그때는 "뒤로 미뤘다" 였는데 **범위에서
+> 뺐습니다.** 안드로이드 셸은 지웠습니다(`gradlew` 를 커밋한 적이 없어
+> 애초에 빌드가 불가능했습니다). 셸은 **PC 웹 + PC 앱(Electron)** 둘입니다.
+> 좁은 폭 레이아웃과 44px 손가락 표적은 **남깁니다** — 그건 폰 지원이 아니라
+> 창 반쪽·확대 200%·터치 노트북을 위한 것입니다.
 
 이 저장소는 "무엇을 어떻게 만들 것인가"를 검증·기록하고, 검증된 것부터 코드로 옮기는 곳입니다.
 
@@ -35,7 +41,7 @@
 
 ---
 
-## 먼저 읽을 것 — 결론 10가지
+## 먼저 읽을 것 — 결론 11가지
 
 1. **방향 자체는 타당합니다.** LLM을 처음부터 학습시키는 건 비추천이고,
    오픈 웨이트 모델 + 규칙 기반 계산 조합이 맞습니다.
@@ -96,17 +102,19 @@
 | [06. 데이터 모델](docs/06-데이터-모델.md) | 제안서 스키마 + 재계산 구조 + 법적 요구사항 반영 |
 | [07. 법적·윤리 요구사항](docs/07-법적-윤리-요구사항.md) | 통신비밀보호법 · 개인정보보호법 · 윤리 제약 |
 | [08. MVP 로드맵](docs/08-MVP-로드맵.md) | 범위 축소안 + 16주 일정 + **§4.1 방향 전환 이후의 순서** ⭐ 지금 계획 |
-| [09. 리스크와 검증 실험](docs/09-리스크와-검증-실험.md) | 지금 당장 돌릴 실험 6개 + 위험 등록부 |
-| [10. 열린 질문](docs/10-열린-질문.md) | 결정이 필요한 10가지 |
+| [09. 리스크와 검증 실험](docs/09-리스크와-검증-실험.md) | 지금 당장 돌릴 실험 7개 + 위험 등록부 |
+| [10. 열린 질문](docs/10-열린-질문.md) | 결정이 필요한 11가지 |
 | [11. 비용 제로 구성](docs/11-비용-제로-구성.md) | 전 구성요소 비용 감사, 함정 4개, 학생 무료 리소스 |
 | [12. CCTV 영상 기반 화자판정](docs/12-CCTV-영상-기반-화자판정.md) | 모드 C 법적·기술 검토, 모드 비교, 융합 설계 |
-| [13. 화면 구조 (IA)](docs/13-화면-구조.md) | 화면 열 개가 어떻게 이어지는가, 각 화면의 책임, 아직 없는 화면 |
-| [15. PC 우선 방향](docs/15-PC-우선-방향.md) | **지금 방향** — 브라우저 통화로 회의, GitHub 최우선, 모바일은 보류 |
+| [13. 화면 구조 (IA)](docs/13-화면-구조.md) | 화면 열여섯 장이 어떻게 이어지는가, 각 화면의 책임, 아직 없는 화면 |
+| [15. PC 우선 방향](docs/15-PC-우선-방향.md) | **지금 방향** — 브라우저 통화로 회의, GitHub 최우선, 모바일 제외 |
 | [18. 사용설명서](docs/18-사용설명서.md) | **처음 여는 사람용** — 실제 화면 열 개로 따라가는 안내. 되는 것과 안 되는 것 ⭐ |
-| [17. 결함 기록](docs/17-결함-기록.md) | 만들면서 찾은 조용한 결함 여든하나 — 재현 방법과 되돌림 확인 |
-| [14. 모바일](docs/14-모바일.md) | 왜 앱이어야 하는가, PWA + 안드로이드 셸, 폰 기준 UI/UX, 비용 근거 |
+| [17. 결함 기록](docs/17-결함-기록.md) | 만들면서 찾은 조용한 결함 **140건** — 재현 방법과 되돌림 확인 |
+| [14. 모바일](docs/14-모바일.md) | ⛔ **접힌 방향** — 왜 앱이어야 하는가·안드로이드 셸. `docs/15`·`docs/21` 이 덮었습니다 |
 | [16. 디자인 감사 (Stage A)](docs/16-디자인-감사-StageA.md) | 화면을 실제로 렌더해 잰 첫 감사 — 대비·간격·토큰의 근거 |
 | [19. 메신저 셸 전환](docs/19-메신저-셸-전환.md) | **디자인 결정 전부** — 셸·브리프 재적용·React 이전. 렌더해 보고 쓴 것 |
+| [21. 데스크톱 셸(Electron)](docs/21-데스크톱-셸-Electron.md) | **PC 앱** — 왜 Electron 인가(녹음이 안 끊기게), 인계 자료집의 전제 정정, Phase 0~6 |
+| [20. 요구사항 대조](docs/20-요구사항-대조.md) | **「요구사항 정의서」의 요구 ID 를 지금 코드와 하나씩 대조** — 얼마나 만들어졌나에 답하는 곳 ⭐ |
 | [원본 자료](docs/원본자료/) | ChatGPT 대화 전문, 제안서 텍스트 추출본 |
 
 ---
@@ -125,7 +133,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 신뢰도·조정범위 계산 | ✅ | `backend/teamflow/contribution/confidence.py` |
 | **측정 불가 처리 (0점과 구분)** | ✅ | `backend/teamflow/contribution/scoring.py` |
 | 기여도 산정 엔진 | ✅ | `backend/teamflow/contribution/scoring.py` |
-| DB 스키마 (28개 테이블) | ✅ | `backend/teamflow/db/models.py` |
+| DB 스키마 (34개 테이블) | ✅ | `backend/teamflow/db/models.py` |
 | **조작 저항성 테스트** | ✅ **11 시나리오 · 24 케이스** | `backend/tests/test_anti_gaming.py` |
 | 환경 진단 스크립트 | ✅ | `scripts/check_env.py` |
 | LLM 출력 스키마 (guided decoding) | ✅ | `backend/teamflow/meeting/schema.py` |
@@ -136,13 +144,13 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **GitHub 웹훅 (HMAC 서명 검증)** | ✅ | `backend/teamflow/github/webhook.py` |
 | **GitHub 연결 진단** (배달이 오는지·이름 오타·팀원 계정) | ✅ | `backend/teamflow/github/connection.py` |
 | **업무 ↔ PR 연결** (확정/추정 구분·근거 표시) | ✅ | `backend/teamflow/github/linking.py` |
-| **발언 유형 분류** (8라벨·규칙 기준선·확신 하한) | ✅ | `backend/teamflow/meeting/utterance_types.py` |
+| **발언 유형 분류** (13라벨·규칙 기준선·확신 하한) | ✅ | `backend/teamflow/meeting/utterance_types.py` |
 | **회의 발화 → 기여 이벤트** | ✅ | `backend/teamflow/services/meeting_contribution_service.py` |
 | **통화 시그널링** (인증·중계 규칙·메시 상한) | 🟡 서버만, 실측 불가 | `backend/teamflow/call/` |
 | 기여도 재계산 서비스 | ✅ | `backend/teamflow/services/scoring_service.py` |
 | docker-compose (pg/redis/api/worker/llm) | ✅ | `docker-compose.yml` |
 | **Dockerfile (api·gpu, ffmpeg 포함)** | ⚠️ 빌드 미검증 | `docker/` |
-| **Alembic 마이그레이션** | ✅ 28개 테이블 | `backend/migrations/` |
+| **Alembic 마이그레이션** | ✅ 34개 테이블 | `backend/migrations/` |
 | GPU 배타 락 (TTL·소유권 검증) | ✅ | `backend/teamflow/jobs/gpu_lock.py` |
 | **보존기간 삭제 잡** (법적 요구사항) | ✅ | `backend/teamflow/jobs/retention.py` |
 | **멀티트랙 정렬 (GCC-PHAT)** | ✅ | `backend/teamflow/audio/multitrack.py` |
@@ -187,8 +195,9 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **칸반 화면 + 업무 API** (회의 근거 표시) | ✅ | `frontend/src/lib/kanban/`, `public/kanban.html` |
 | **첫 화면** (내 프로젝트·회의·다음 할 일) | ✅ | `frontend/src/lib/home/`, `public/home.html` |
 | **화면 간 이동** (막다른 길 없음) | ✅ | `frontend/src/lib/nav/`, [docs/13](docs/13-화면-구조.md) |
-| **모바일 우선 화면 + 앱 설치(PWA)** | ✅ (보류) | `frontend/public/app.css`·`sw.js`, [docs/14](docs/14-모바일.md) |
-| **안드로이드 셸** (화면 꺼도 녹음 유지) | 🔨 빌드 미확인 (보류) | `android/`, [docs/14](docs/14-모바일.md) |
+| **좁은 폭까지 견디는 판형 + 앱 설치(PWA)** | ✅ | `frontend/public/app.css`·`sw.js` — 폰 지원이 아니라 **창 반쪽·확대 200%·터치 노트북**을 위한 것 |
+| **데스크톱 앱** (Electron) | 🟡 **Phase 2** — 창이 뜨고, 화면 열여섯 장이 그대로 돌고, 청크가 디스크에 앉고(업로드를 포기해도 소리를 안 잃음), **녹음 중에는 절전을 막습니다**(화면을 꺼도 녹음이 이어짐). 시스템 오디오는 **아직 없습니다** | `frontend/electron/`, [docs/21](docs/21-데스크톱-셸-Electron.md) |
+| ~~안드로이드 셸~~ | ⛔ **접었습니다** — 실기기가 없고 `gradlew` 조차 없어 **빌드 자체가 불가능**했습니다 | [docs/14](docs/14-모바일.md) 머리말 |
 | **브라우저 통화로 회의** (WebRTC 메시 5명 · 헤드폰 확인) | ✅ 같은 기기 3인 통화로 확인 / **실제 네트워크는 미검증** | `backend/teamflow/call/`, `frontend/src/lib/call/`, `public/call.html` |
 | **PC 화면** (48rem↑ 상단 탭·칸반 3열 가로) | ✅ | `frontend/public/app.css`, [docs/15](docs/15-PC-우선-방향.md) §4.7 |
 | **GitHub 백필** (연결 전 활동 + 커버리지 표시) | ✅ 배선·멱등·잘림 처리 / **실제 HTTP 미검증** | `backend/teamflow/github/backfill.py`, [docs/15](docs/15-PC-우선-방향.md) §4.8 |
@@ -207,7 +216,8 @@ npm --prefix frontend test                       # 설치 불필요 — 개수�
 npm --prefix frontend install && npm --prefix frontend run check   # 타입 검사까지
 .venv/bin/python scripts/make_icons.py           # 앱 아이콘 (stdlib 만 씀)
 
-cd android && ./gradlew assembleDebug             # 안드로이드 셸 APK — docs/14
+TEAMFLOW_SERVER_URL=http://127.0.0.1:8811/home.html \
+  npm --prefix frontend run desktop               # 데스크톱 앱 — docs/21
 
 cp .env.example .env                             # 시크릿 채우기
 docker compose up -d postgres redis              # 인프라
@@ -311,5 +321,5 @@ ASR_BACKEND=fake .venv/bin/uvicorn teamflow.api.main:app --app-dir backend --rel
 
 이 연구를 수행한 세션의 네트워크 정책이 `huggingface.co`, `arxiv.org`, `pyannote.ai`,
 `gt-kim.github.io`, `chatgpt.com` 등에 대한 직접 페이지 열람을 차단했습니다.
-내용은 웹 검색 결과를 교차 대조한 것이며, **직접 확인이 필요한 항목 10개**를
+내용은 웹 검색 결과를 교차 대조한 것이며, **직접 확인이 필요한 항목 14개**를
 [09번 문서 §C](docs/09-리스크와-검증-실험.md)에 정리해 두었습니다.

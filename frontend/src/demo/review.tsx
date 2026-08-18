@@ -16,7 +16,7 @@
  * 스택을 옮기면서 다시 흔들 이유가 없습니다.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -55,6 +55,25 @@ import {
   issueViews,
   type UnresolvedIssue,
 } from '../lib/review/minutes.ts';
+import { pendingNote, typeCounts, type TypeCount } from '../lib/review/labels.ts';
+import {
+  inGivenOrder,
+  notMeasurableText,
+  SHARE_NOTE,
+  shareText,
+  skewText,
+  type Speaking,
+} from '../lib/review/speaking.ts';
+import { findingViews, type Finding } from '../lib/review/findings.ts';
+import {
+  audioNote,
+  emptyTimelineNote,
+  pastClipEnd,
+  timelineRows,
+  trackAudioUrl,
+  type Clip,
+  type TimelineUtterance,
+} from '../lib/review/timeline.ts';
 import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { mountEvidence, openEvidence } from './evidence.tsx';
 import { renderNav } from './nav.ts';
@@ -72,6 +91,8 @@ interface MeetingInfo {
   summary: string | null;
   next_agenda: string[];
   unresolved_issues: UnresolvedIssue[];
+  /** 비효율 구간 (§12). 없으면 빈 배열 — 옛 서버면 아예 안 옵니다. */
+  findings?: Finding[];
 }
 
 const params = new URLSearchParams(location.search);
@@ -392,8 +413,353 @@ function emptyReviewState(status: string): EmptyState {
 // 화면
 // ══════════════════════════════════════════════════════════════
 
+interface TypeTally {
+  labels: Record<string, number>;
+  unclassified: number;
+  total: number;
+}
+
+/**
+ * 이 회의에서 무슨 말이 오갔나 (요구사항 정의서 §10 · `REVIEW-005`).
+ *
+ * ## ⚠️ 사람 이름이 여기 없습니다
+ *
+ * 회의 단위로만 셉니다. 사람별로 세면 그 순간 "누가 제일 많이 제안했나"
+ * 표가 되고, 그건 이 저장소가 금지한 리더보드입니다. 서버도 사람별
+ * 건수를 **안 줍니다** — 막는 자리를 화면이 아니라 API 에 뒀습니다.
+ *
+ * ## ⚠️ 막대를 안 그립니다
+ *
+ * 값을 같은 축 위에 세로로 늘어놓으면 그게 곧 순위표입니다
+ * (`AGENTS.md` 불변식 1 — 이 저장소가 두 번 어긴 규칙). **값은 글자로**
+ * 적습니다.
+ */
+/**
+ * 누가 얼마나 말했는가 (정의서 §9 `AI-AUDIO-005` · §12 `AI-REVIEW-007`).
+ *
+ * ## ⚠️ 이 구역이 이 제품에서 제일 위험합니다
+ *
+ * 정의서의 예시가 `윤식 32% / 민수 27% / 지연 25% / 철수 16%` — **내림차순
+ * 목록, 곧 리더보드**입니다. 같은 문서의 `AI-REVIEW-007` 과 `NFR-005` 가
+ * 그걸 금지합니다. 요구는 값을 만들라는 것이지 줄을 세우라는 것이
+ * 아닙니다 (`docs/20` §3).
+ *
+ * 1. **다시 정렬하지 않습니다** — 서버가 이름 순으로 줍니다
+ * 2. **막대를 안 그립니다** — 값을 같은 축 위에 폭으로 늘어놓으면 그게
+ *    곧 순위표입니다. 값은 글자로
+ * 3. **기여도가 아니라고 화면이 말합니다**
+ */
+function SpeakingShares({ data }: { data: Speaking | null }) {
+  if (data === null) return null;
+
+  const why = notMeasurableText(data);
+  const skew = skewText(data);
+
+  return (
+    <section className="shares">
+      <h2 className="minutes-head">누가 얼마나 말했나</h2>
+      {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
+      <p className="text-text-subtle text-[12px]">{SHARE_NOTE.replace(/\*\*/g, '')}</p>
+
+      {why !== null ? (
+        // ⚠️ 빈 칸으로 두지 않습니다 — "고장" 이나 "다들 말을 안 했다" 로
+        //    읽힙니다.
+        <p className="text-text-subtle text-[12px]">{why}</p>
+      ) : (
+        <>
+          <ul className="slist">
+            {inGivenOrder(data.shares).map((row) => (
+              <li key={row.user_id}>
+                <span className="sname">{row.name}</span>
+                <span className="snum tabular-nums">{shareText(row)}</span>
+              </li>
+            ))}
+          </ul>
+          {/* ⚠️ 누가인지 안 적고, 나무라지도 않습니다. */}
+          {skew !== null && <p className="text-text-subtle text-[12px]">{skew}</p>}
+        </>
+      )}
+    </section>
+  );
+}
+
+function SpeechTypes({ counts }: { counts: TypeTally | null }) {
+  if (counts === null) return null;
+
+  const rows: TypeCount[] = typeCounts(counts.labels);
+  const pending = pendingNote(counts.unclassified, counts.total);
+
+  // 아무 말도 안 오간 회의는 표를 그리지 않습니다 — 0 열세 줄은 소음입니다.
+  if (counts.total === 0) return null;
+
+  const spoken = rows.filter((row) => row.count > 0);
+
+  return (
+    <section className="types">
+      <h2 className="minutes-head">무슨 말이 오갔나</h2>
+      {/* ⚠️ 안 잰 것을 0 옆에 두지 않습니다 — 위에 따로 적습니다. */}
+      {pending !== null && <p className="text-gap text-[12px]">{pending}</p>}
+      <ul className="tlist">
+        {spoken.map((row) => (
+          <li key={row.type} className={row.zero ? 'tzero' : undefined}>
+            <span className="tname">{row.label}</span>
+            <span className="tnum tabular-nums">{row.count}</span>
+          </li>
+        ))}
+      </ul>
+      {/* ⚠️ 0건인 유형을 통째로 숨기면 "반대가 없었다" 가 안 보입니다.
+          줄로 세우면 시끄러우니 한 줄로 적습니다. */}
+      {spoken.length < rows.length && (
+        <p className="text-text-subtle text-[12px]">
+          없던 것 — {rows.filter((r) => r.count === 0).map((r) => r.label).join(' · ')}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * 회의에서 눈에 띈 것 (정의서 §12 · `REVIEW-003` AI 분석 마커).
+ *
+ * ## ⚠️ 이것은 관찰이지 판정이 아닙니다
+ *
+ * 규칙 기반 추정이라 **틀립니다.** 그래서 등급을 안 매기고(빨강·노랑
+ * 없음), 왜 걸렸는지 적고, 근거 발화를 열 수 있게 둡니다.
+ *
+ * ⚠️ **빨강을 쓰지 않습니다.** 이 저장소에서 빨강은 "네가 뭘 잘못했다"
+ * 로 읽힙니다 — 회의를 빨갛게 칠하면 그건 팀에 대한 판정입니다.
+ */
+function Findings({ findings }: { findings: Finding[] }) {
+  const views = findingViews(findings);
+  if (views.length === 0) return null;
+
+  return (
+    <section className="finds">
+      <h2 className="minutes-head">회의에서 눈에 띈 것</h2>
+      {/* ⚠️ 규칙 기반이라는 것을 **먼저** 말합니다. 안 적으면 사람은
+          이걸 AI 의 판정으로 읽고, 틀렸을 때 신뢰가 통째로 무너집니다. */}
+      <p className="finds-note">
+        규칙으로 찾은 것이라 <b>틀릴 수 있습니다</b>. 근거를 눌러 원문을 보고 판단하세요.
+      </p>
+      <ul className="flist">
+        {views.map((view, i) => (
+          <li key={`${view.kind}-${i}`}>
+            <p className="fhead">
+              <span className="fname">{view.title}</span>
+              {view.at !== null && <span className="fat">{view.at}</span>}
+            </p>
+            {view.what !== null && <p className="fwhat">{view.what}</p>}
+            {view.why !== null && <p className="fwhy">{view.why}</p>}
+            {view.evidence.length > 0 && (
+              <button
+                type="button"
+                className="src"
+                onClick={() => openEvidence(view.evidence, view.title)}
+              >
+                근거 #{view.evidence.join(', #')}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * 회의 타임라인 (`REVIEW-002`) — 처음부터 끝까지 시간 순 + 구간 재생 (`REVIEW-004`).
+ *
+ * ⚠️ **접어 두고, 처음 열 때 받아 옵니다.** 발화는 수백 개일 수 있고 후보
+ * 검토(이 화면의 본업)에는 필요 없습니다 — 미리 받으면 안 여는 사람의
+ * 요청이 낭비입니다 (활동 화면의 GitHub 갈래와 같은 규칙).
+ *
+ * ⚠️ **재생은 `<audio>` 하나로 합니다.** 줄마다 만들면 같은 트랙 소리를
+ * 줄 수만큼 다시 받습니다. 어느 줄이 도는지는 `playingId` 가 압니다.
+ *
+ * ⚠️ 재생 위치는 서버가 준 `position_ms` 입니다 — `start_ms` 로 틀면
+ * 공백만큼 밀린 **엉뚱한 말**이 나옵니다 (`lib/review/timeline.ts`).
+ */
+function Timeline({ findings }: { findings: Finding[] }) {
+  type State =
+    | { k: 'idle' }
+    | { k: 'loading' }
+    | { k: 'failed'; note: string }
+    | { k: 'ok'; utterances: TimelineUtterance[]; hasAudio: boolean };
+  const [state, setState] = useState<State>({ k: 'idle' });
+  const [slow, setSlow] = useState(false);
+  const [playingId, setPlayingId] = useState<number | null>(null);
+  const [playNote, setPlayNote] = useState('');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const clipRef = useRef<Clip | null>(null);
+  const loadedTrackRef = useRef<number | null>(null);
+
+  const open = useCallback(async (): Promise<void> => {
+    setState({ k: 'loading' });
+    const response = await whileLoading(
+      get(`/api/meetings/${meetingId}/timeline`),
+      () => setSlow(true),
+      () => setSlow(false),
+    );
+    if (response === null) {
+      setState({ k: 'failed', note: unreachableText('타임라인을 불러오지 못했습니다') });
+      return;
+    }
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    if (!response.ok) {
+      setState({ k: 'failed', note: `타임라인을 불러오지 못했습니다 (HTTP ${response.status})` });
+      return;
+    }
+    const body = (await response.json()) as {
+      utterances: TimelineUtterance[];
+      has_audio: boolean;
+    };
+    setState({ k: 'ok', utterances: body.utterances, hasAudio: body.has_audio });
+  }, []);
+
+  const stop = (): void => {
+    audioRef.current?.pause();
+    clipRef.current = null;
+    setPlayingId(null);
+  };
+
+  const play = (id: number, clip: Clip): void => {
+    const el = audioRef.current;
+    if (el === null) return;
+    // 도는 줄을 다시 누르면 멈춥니다 — 같은 버튼이 멈춤 버튼입니다.
+    if (playingId === id) {
+      stop();
+      return;
+    }
+    setPlayNote('');
+    if (loadedTrackRef.current !== clip.trackId) {
+      el.src = trackAudioUrl(apiBase, meetingId, clip.trackId);
+      loadedTrackRef.current = clip.trackId;
+      // ⚠️ src 를 방금 갈았으면 위치는 **메타데이터가 온 뒤에** 잡습니다.
+      //    바로 대입하면 브라우저가 로드하면서 0 으로 되돌립니다.
+      el.addEventListener(
+        'loadedmetadata',
+        () => {
+          el.currentTime = clip.startSec;
+        },
+        { once: true },
+      );
+    } else {
+      el.currentTime = clip.startSec;
+    }
+    clipRef.current = clip;
+    setPlayingId(id);
+    void el.play().catch(() => {
+      setPlayNote('소리를 재생하지 못했습니다 — 브라우저가 이 형식을 열지 못할 수 있습니다');
+      stop();
+    });
+  };
+
+  return (
+    <details
+      className="more"
+      onToggle={(e) => {
+        if (e.currentTarget.open && state.k === 'idle') void open();
+      }}
+    >
+      <summary>타임라인 — 회의를 처음부터 끝까지</summary>
+      <div className="more-body">
+        {state.k === 'loading' && slow && (
+          <div aria-busy="true" dangerouslySetInnerHTML={{ __html: skeletonRows(3) }} />
+        )}
+        {state.k === 'failed' && (
+          <p className="mtl-note">
+            {state.note}{' '}
+            <button type="button" className="mtl-retry" onClick={() => void open()}>
+              다시 시도
+            </button>
+          </p>
+        )}
+        {state.k === 'ok' &&
+          (state.utterances.length === 0 ? (
+            <p className="mtl-note">{emptyTimelineNote()}</p>
+          ) : (
+            (() => {
+              const rows = timelineRows(state.utterances, findings);
+              /* ⚠️ 듣기 버튼이 조용히 안 뜨기만 하면 고장으로 읽힙니다.
+                 소리가 아예 없는 것과 발화에 연결이 안 된 것은 **다른
+                 사실**이고, 어느 쪽인지 lib 이 고릅니다. 흙빛입니다 —
+                 둘 다 잘못이 아니라 사실입니다. */
+              const note = audioNote(state.hasAudio, rows);
+              return (
+            <>
+              {note !== null && <p className="mtl-gap">{note}</p>}
+              {playNote !== '' && (
+                <p className="mtl-gap" role="status">
+                  {playNote}
+                </p>
+              )}
+              <ol className="mtl">
+                {rows.map((row, i) =>
+                  row.kind === 'finding' ? (
+                    <li key={`f${i}`} className="mtl-finding">
+                      {row.view.at !== null && <span className="mtl-at">{row.view.at}</span>}
+                      <span className="mtl-ftitle">{row.view.title}</span>
+                      {row.view.why !== null && <span className="mtl-fwhy">{row.view.why}</span>}
+                    </li>
+                  ) : (
+                    <li
+                      key={row.view.id}
+                      className={playingId === row.view.id ? 'mtl-utt playing' : 'mtl-utt'}
+                    >
+                      <div className="mtl-head">
+                        {row.view.at !== null && <span className="mtl-at">{row.view.at}</span>}
+                        <span className="mtl-speaker">{row.view.speaker}</span>
+                        {row.view.type !== null && <span className="mtl-type">{row.view.type}</span>}
+                        {row.view.overlap && <span className="mtl-overlap">동시 발언</span>}
+                        {row.clip !== null && (
+                          <button
+                            type="button"
+                            className="mtl-play"
+                            onClick={() => row.clip !== null && play(row.view.id, row.clip)}
+                          >
+                            {playingId === row.view.id ? '멈춤' : '듣기'}
+                          </button>
+                        )}
+                      </div>
+                      <p className="mtl-text">{row.view.text}</p>
+                      {row.view.speakerNote !== null && (
+                        <p className="mtl-note">{row.view.speakerNote}</p>
+                      )}
+                    </li>
+                  ),
+                )}
+              </ol>
+              {/* 구간이 끝나면 멈춥니다 — 구간 재생이지 트랙 전체 재생이 아닙니다. */}
+              <audio
+                ref={audioRef}
+                onTimeUpdate={(e) => {
+                  const clip = clipRef.current;
+                  if (clip !== null && pastClipEnd(e.currentTarget.currentTime, clip)) stop();
+                }}
+                onEnded={stop}
+                onError={() => {
+                  if (playingId !== null) {
+                    setPlayNote('소리를 불러오지 못했습니다 — 연결을 확인하고 다시 눌러 주세요');
+                    stop();
+                  }
+                }}
+              />
+            </>
+              );
+            })()
+          ))}
+      </div>
+    </details>
+  );
+}
+
 function Review() {
   const [screen, setScreen] = useState<Screen>({ k: 'loading' });
+  const [types, setTypes] = useState<TypeTally | null>(null);
+  const [speaking, setSpeaking] = useState<Speaking | null>(null);
   const [drafts, setDrafts] = useState<Map<number, Draft>>(new Map());
   const [lane, setLane] = useState<Lane | 'all'>('all');
   const [me, setMe] = useState<Me | null>(null);
@@ -411,11 +777,18 @@ function Review() {
     //
     // 끄는 것은 `whileLoading` 의 `finally` 가 책임집니다. 성공이든
     // 실패든 켠 것은 반드시 꺼집니다.
-    const [c, m, g] = await whileLoading(
+    const [c, m, g, t, sp] = await whileLoading(
       Promise.all([
         get(`/api/meetings/${meetingId}/candidates`),
         get(`/api/meetings/${meetingId}/members`),
         get(`/api/meetings/${meetingId}`),
+        // ⚠️ 이것 하나가 실패해도 화면 전체를 못 쓰게 만들지 않습니다 —
+        //    후보 검토는 유형 집계 없이도 할 수 있습니다. 아래에서 `ok`
+        //    일 때만 씁니다.
+        get(`/api/meetings/${meetingId}/utterance-types`),
+        // ⚠️ 같은 이유로 이것 하나가 실패해도 화면을 못 쓰게 만들지
+        //    않습니다 — 발언 비중 없이도 후보 검토는 됩니다.
+        get(`/api/meetings/${meetingId}/speaking`),
       ]),
       () => setSlow(true),
       () => setSlow(false),
@@ -433,6 +806,9 @@ function Review() {
       setScreen({ k: 'error' });
       return;
     }
+    setTypes(t !== null && t.ok ? ((await t.json()) as TypeTally) : null);
+    setSpeaking(sp !== null && sp.ok ? ((await sp.json()) as Speaking) : null);
+
     const members = (await m.json()) as Member[];
     setScreen({
       k: 'ok',
@@ -529,7 +905,7 @@ function Review() {
     <header className="head">
       <h1>업무 후보 검토</h1>
       <p className="lede">AI가 회의에서 뽑은 후보입니다. 등록해야 칸반에 올라갑니다.</p>
-      {me !== null && <Byline name={me.name} what="검토 중" />}
+      {me !== null && <Byline name={me.name} avatar={me.avatar} what="검토 중" />}
     </header>
   );
 
@@ -574,6 +950,10 @@ function Review() {
     <>
       {header}
       <Brief meeting={meeting} />
+      <SpeechTypes counts={types} />
+            <SpeakingShares data={speaking} />
+      <Findings findings={meeting.findings ?? []} />
+      <Timeline findings={meeting.findings ?? []} />
 
       {candidates.length === 0 ? (
         <RawHtml html={emptyHtml(emptyReviewState(meeting.status))} />

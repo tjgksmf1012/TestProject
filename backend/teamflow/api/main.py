@@ -20,12 +20,14 @@ from fastapi import (
     FastAPI,
     Header,
     HTTPException,
+    Query,
     Request,
     Response,
     WebSocket,
     WebSocketDisconnect,
     status,
 )
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import event, func, select
@@ -35,10 +37,12 @@ from teamflow.audio.chunk_store import ChunkStore
 from teamflow.auth import passwords
 from teamflow.call import rooms as call_rooms
 from teamflow.call import signaling as call_signaling_module
+from teamflow.chat import hub as chat_hub
+from teamflow.clock import as_utc
 from teamflow.config import Settings, get_settings, safe_dump
+from teamflow.db import live, vocab
 from teamflow.db import models as m
 from teamflow.db import session as db_session
-from teamflow.db import vocab
 from teamflow.db.session import get_db
 from teamflow.github import backfill as gh_backfill
 from teamflow.github import connection as gh_connection
@@ -46,19 +50,32 @@ from teamflow.github import linking as gh_linking
 from teamflow.github import webhook as gh
 from teamflow.jobs import retention
 from teamflow.logging_config import configure_logging
+from teamflow.meeting import speaking
 from teamflow.meeting.approval import ApprovalRequest
-from teamflow.projects import invites
+from teamflow.projects import invites, permissions
 from teamflow.services import (
+    activity_service,
     approval_service,
     auth_service,
+    calendar_service,
+    channel_service,
     github_connection_service,
+    github_feed_service,
+    inefficiency_service,
+    meeting_contribution_service,
+    message_service,
+    notification_service,
     progress_service,
     recording_service,
     report_service,
+    risk_service,
+    search_service,
     task_link_service,
     task_service,
+    trend_service,
 )
 from teamflow.tasks import dispatch
+from teamflow.users import presence
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +196,22 @@ class MeOut(BaseModel):
     user_id: int
     name: str
     email: str
+    #: 자기소개 (`USER-004`). 없으면 None — 화면이 "아직 안 적음" 으로 그립니다.
+    bio: str | None = None
+    #: 프로필 이미지 (`USER-004`) — `data:image/png;base64,…` 그대로.
+    #: 파일이 아니라 이 응답에 실려 나갑니다 — 내려받기 문이 따로 없습니다.
+    avatar: str | None = None
+
+
+def _me_out(user: m.User) -> MeOut:
+    """`MeOut` 을 만드는 자리는 여기 하나입니다.
+
+    가입·로그인·조회 세 곳이 손으로 따로 만들면 칸을 더할 때마다
+    한 곳이 빠집니다 — 두 벌이 있으면 한쪽만 고쳐지는 그 모양입니다.
+    """
+    return MeOut(
+        user_id=user.id, name=user.name, email=user.email, bio=user.bio, avatar=user.avatar
+    )
 
 
 def should_mark_cookie_secure(
@@ -264,7 +297,7 @@ def signup(
         session, user_id=user.id, user_agent=request.headers.get("user-agent")
     )
     _set_session_cookie(response, token, settings, request)
-    return MeOut(user_id=user.id, name=user.name, email=user.email)
+    return _me_out(user)
 
 
 @app.post("/api/auth/login", response_model=MeOut)
@@ -288,7 +321,7 @@ def login(
         session, user_id=user.id, user_agent=request.headers.get("user-agent")
     )
     _set_session_cookie(response, token, settings, request)
-    return MeOut(user_id=user.id, name=user.name, email=user.email)
+    return _me_out(user)
 
 
 @app.post("/api/auth/logout")
@@ -326,14 +359,67 @@ def read_me(user: CurrentUser) -> MeOut:
     이게 없던 동안 화면은 주소창의 `?me=1` 을 읽었습니다. 즉 **자기가
     누구인지 스스로 선언**했고, 서버는 그걸 그대로 믿었습니다.
     """
-    return MeOut(user_id=user.id, name=user.name, email=user.email)
+    return _me_out(user)
 
 
-def _require_project_member(session: Session, project_id: int, user: m.User) -> None:
-    """이 프로젝트 사람인가.
+class ProfileIn(BaseModel):
+    """프로필 이미지·자기소개 (`USER-004`).
+
+    `GithubLoginIn` 과 같은 규칙 — `None` 은 "안 건드림", `""` 는
+    "지움" 입니다. 지울 방법이 없으면 잘못 올린 사진이 영영 남습니다.
+    """
+
+    bio: str | None = None
+    avatar: str | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+@app.patch("/api/auth/me/profile", response_model=MeOut)
+def set_my_profile(payload: ProfileIn, session: DbSession, user: CurrentUser) -> MeOut:
+    """내 프로필 이미지·자기소개를 적는다 (`USER-004`).
+
+    ## ⚠️ 파일 업로드 통로가 아닙니다
+
+    이미지는 화면이 캔버스로 96×96 PNG 로 **다시 그린 것**을
+    `data:image/png;base64,…` 글자로 받습니다. 재부호화에서 원본의
+    EXIF(찍은 위치·기기)가 떨어져 나갑니다 — 사진 원본을 그대로 받으면
+    그 사람의 집 좌표를 저장하게 될 수 있습니다. 서버는 그 재부호화를
+    믿지 않고 `users/profile.py` 가 전부 다시 봅니다 — PNG 인가(시그니처) ·
+    치수·크기 상한 아래인가. 나갈 때는 이미 인증이 걸린 JSON 응답에
+    실려 나가므로 안 잠긴 내려받기 문이 생기지 않습니다.
+
+    ## 경로가 `/me` 인 이유
+
+    역할·GitHub 아이디와 같습니다 — 남의 id 를 넣을 자리 자체를 안
+    만듭니다. 남의 소개글을 바꾸는 문은 처음부터 없습니다.
+
+    감사 로그는 안 남깁니다 — 역할·GitHub 아이디는 **점수를 바꾸기
+    때문에** 남기는 것이고, 소개글과 사진은 점수에 닿지 않습니다.
+    """
+    from teamflow.users.profile import clean_avatar, clean_bio
+
+    try:
+        if payload.bio is not None:
+            user.bio = clean_bio(payload.bio)
+        if payload.avatar is not None:
+            user.avatar = clean_avatar(payload.avatar)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    session.flush()
+    return _me_out(user)
+
+
+def _require_project_member(session: Session, project_id: int, user: m.User) -> m.Member:
+    """이 프로젝트 사람인가. **그 사람의 구성원 행을 돌려줍니다.**
 
     회의 내용·기여도는 팀 내부 자료입니다. 로그인만 확인하고 통과시키면,
     가입만 하면 남의 팀 회의록을 읽을 수 있습니다.
+
+    ⚠️ 예전에는 `None` 을 돌려줬습니다. 권한을 물으려면 부르는 쪽이
+    `members` 를 **한 번 더** 읽어야 했고, 그렇게 두면 조회 조건이 두
+    벌이 됩니다. 여기서 찾은 행을 그대로 넘깁니다.
     """
     member = session.scalars(
         select(m.Member).where(
@@ -344,6 +430,25 @@ def _require_project_member(session: Session, project_id: int, user: m.User) -> 
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "이 프로젝트의 구성원이 아닙니다"
         )
+    return member
+
+
+def _require_can(
+    session: Session, project_id: int, user: m.User, action: permissions.Action
+) -> m.Member:
+    """구성원인가 + **그 행동을 해도 되는가** (`PROJECT-004`).
+
+    ⚠️ 판단은 `projects/permissions.py` 의 표 하나에만 있습니다. 여기서
+    등급을 직접 비교하지 마십시오 — 권한이 두 벌이 되면 한쪽에서만
+    막히고, **막히지 않는 쪽이 곧 구멍**입니다.
+    """
+    member = _require_project_member(session, project_id, user)
+    if not permissions.can(member.project_role, action):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "이 작업을 할 권한이 없습니다",
+        )
+    return member
 
 
 def _load_meeting_for(session: Session, meeting_id: int, user: m.User) -> m.Meeting:
@@ -635,8 +740,17 @@ def create_project(payload: ProjectIn, session: DbSession, user: CurrentUser) ->
     #
     # 만든 사람을 빠뜨리면 자기가 만든 프로젝트를 자기가 못 봅니다 —
     # 모든 조회가 구성원 확인을 지나기 때문입니다.
+    #
+    # ⚠️ **소유자로 넣습니다.** 기본값(`member`)으로 두면 만든 사람이
+    #    자기 프로젝트 설정을 못 고치고, 소유자가 0명이라 아무도 못
+    #    고치는 프로젝트가 됩니다.
     session.add(
-        m.Member(project_id=project.id, user_id=user.id, role_shares={"developer": 1.0})
+        m.Member(
+            project_id=project.id,
+            user_id=user.id,
+            role_shares={"developer": 1.0},
+            project_role=str(vocab.ProjectRole.OWNER),
+        )
     )
     session.flush()
 
@@ -758,7 +872,8 @@ def patch_project(
     project = session.get(m.Project, project_id)
     if project is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
-    _require_project_member(session, project_id, user)
+    # ⚠️ 예전에는 **구성원이면 누구나** 이름과 저장소를 바꿀 수 있었습니다.
+    _require_can(session, project_id, user, permissions.Action.EDIT_PROJECT)
 
     if payload.title is not None:
         project.title = payload.title
@@ -841,7 +956,9 @@ def rotate_invite_code(
     project = session.get(m.Project, project_id)
     if project is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
-    _require_project_member(session, project_id, user)
+    # ⚠️ 코드를 새로 뽑으면 **옛 코드로 들어오려던 사람이 전부 막힙니다.**
+    #    구성원이면 누구나 할 수 있게 두면 한 사람이 팀 합류를 끊을 수 있습니다.
+    _require_can(session, project_id, user, permissions.Action.ROTATE_INVITE)
 
     project.invite_code = _fresh_invite_code(session)
     session.flush()
@@ -916,6 +1033,71 @@ def github_health(
         coverage=gh_connection.describe_coverage(facts),
         backfilled_at=facts.backfilled_at,
         backfilled_to=facts.backfilled_to,
+    )
+
+
+class GithubFeedItemOut(BaseModel):
+    """GitHub 사건 한 줄.
+
+    ⚠️ **`payload` 의 칸이 하나도 없습니다.** 저장된 웹훅 본문에는 저장소
+    설정과 사람 이메일까지 들어 있습니다 — 여기 나열된 것 밖의 칸을
+    더하려면 그 칸이 어디서 오는지부터 확인하십시오.
+
+    ⚠️ **github.com 링크가 없습니다.** 실제 GitHub 에 붙여 본 적이 없어
+    주소가 추측입니다 — 검색 결과와 같은 결정입니다(`docs/20`).
+    """
+
+    id: int
+    kind: str
+    label: str
+    who: str
+    repo: str
+    ref: str | None
+    occurred_at: str
+
+
+class GithubKindCountOut(BaseModel):
+    """종류별 건수 한 줄. ⚠️ **사람 이름이 없습니다** — 사람별 집계는
+    기여도 화면이 근거와 함께 담당하고, 여기 또 만들면 순위표가 됩니다."""
+
+    kind: str
+    label: str
+    count: int
+
+
+class GithubFeedOut(BaseModel):
+    items: list[GithubFeedItemOut]
+    #: ⚠️ 어휘 선언 순. 건수 순이 아닙니다 — 건수 순 목록이 곧 순위표입니다.
+    counts: list[GithubKindCountOut]
+
+
+@app.get("/api/projects/{project_id}/github/feed", response_model=GithubFeedOut)
+def github_feed(project_id: int, session: DbSession, user: CurrentUser) -> GithubFeedOut:
+    """GITHUB-003~005 조회 + 008 프로젝트 단위 집계.
+
+    구성원만 봅니다 — 팀의 저장소 활동이 그대로 나가는 자리입니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    return GithubFeedOut(
+        items=[
+            GithubFeedItemOut(
+                id=item.id,
+                kind=item.kind,
+                label=item.label,
+                who=item.who,
+                repo=item.repo,
+                ref=item.ref,
+                occurred_at=item.occurred_at,
+            )
+            for item in github_feed_service.recent(session, project_id)
+        ],
+        counts=[
+            GithubKindCountOut(kind=c.kind, label=c.label, count=c.count)
+            for c in github_feed_service.counts(session, project_id)
+        ],
     )
 
 
@@ -1682,6 +1864,27 @@ class UnresolvedIssueOut(BaseModel):
     evidence_utterance_ids: list[int]
 
 
+class MeetingFindingOut(BaseModel):
+    """비효율 구간 하나 (정의서 §12 · `REVIEW-003` AI 분석 마커).
+
+    ⚠️ **등급이 없습니다.** `severity` 는 전부 `info` 라 안 싣습니다 —
+    실으면 화면이 그걸로 빨강/노랑을 칠하게 되고, 규칙 기반 추정이
+    **팀에 대한 판정**으로 읽힙니다.
+
+    ⚠️ **사람이 안 실립니다.** 이건 회의에 대한 관찰이지 사람에 대한
+    것이 아닙니다. 화자를 실으면 화면이 "누가 회의를 늘어지게 했는가" 를
+    만들 수 있습니다.
+    """
+
+    kind: str
+    start_ms: int
+    end_ms: int
+    evidence_utterance_ids: list[int]
+    #: 왜 걸렸는가. 겹친 낱말·떨어진 시간 같은 것입니다.
+    #: ⚠️ 근거가 없으면 반박할 수 없고, 반박할 수 없는 지적은 잔소리입니다.
+    detail: dict
+
+
 class MeetingDetail(BaseModel):
     id: int
     project_id: int
@@ -1703,6 +1906,10 @@ class MeetingDetail(BaseModel):
     # `unanswered_question` 행입니다 — 그 표도 **쓰기만 하고 읽는 곳이
     # 0곳**이었습니다.
     unresolved_issues: list[UnresolvedIssueOut] = []
+    # 비효율 구간 (§12). ⚠️ 미해결 사안과 **따로** 싣습니다 — 저쪽은 LLM 이
+    # 만든 회의록의 일부이고 이쪽은 규칙 기반 관찰이라, 섞으면 어느 쪽이
+    # 어디서 왔는지 알 수 없게 됩니다.
+    findings: list[MeetingFindingOut] = []
 
 
 @app.get("/api/meetings/{meeting_id}", response_model=MeetingDetail)
@@ -1728,6 +1935,17 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
         .order_by(m.MeetingEvent.start_ms, m.MeetingEvent.id)
     ).all()
 
+    # ⚠️ 어휘에서 끌어옵니다. 손으로 적어 두면 탐지기를 하나 더 붙였을 때
+    #    **화면만 조용히 낡습니다** — 오류가 안 나서 안 보이는 부류입니다.
+    findings = session.scalars(
+        select(m.MeetingEvent)
+        .where(
+            m.MeetingEvent.meeting_id == meeting.id,
+            m.MeetingEvent.event_type.in_(inefficiency_service.DETECTED),
+        )
+        .order_by(m.MeetingEvent.start_ms, m.MeetingEvent.id)
+    ).all()
+
     return MeetingDetail(
         id=meeting.id,
         project_id=meeting.project_id,
@@ -1745,6 +1963,16 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
                 evidence_utterance_ids=list(row.evidence_utterance_ids or []),
             )
             for row in issues
+        ],
+        findings=[
+            MeetingFindingOut(
+                kind=row.event_type,
+                start_ms=row.start_ms,
+                end_ms=row.end_ms,
+                evidence_utterance_ids=list(row.evidence_utterance_ids or []),
+                detail=dict(row.detail or {}),
+            )
+            for row in findings
         ],
     )
 
@@ -1900,6 +2128,68 @@ class MemberOut(BaseModel):
     # 이 사람의 GitHub 아이디 (결함 112). 안 이었으면 None —
     # 화면이 "아직 연결 안 됨" 으로 그립니다.
     github_login: str | None = None
+    #: 프로젝트 안에서의 권한 (`PROJECT-004`).
+    #:
+    #: ⚠️ `role_shares` 와 **다른 것**입니다. 그건 기여도 가중치입니다.
+    project_role: str = str(vocab.DEFAULT_PROJECT_ROLE)
+    #: 지금 붙어 있는가 (`USER-005`). **읽을 때 계산합니다.**
+    #:
+    #: ⚠️ 과거를 안 보냅니다 — `마지막 접속 3일 전` 은 상태가 아니라
+    #: 근태 기록입니다.
+    presence: str = str(vocab.PresenceStatus.OFFLINE)
+    #: 자기소개 (`USER-004`). 적을 수 있는데 아무도 못 보면 그건
+    #: "할 일을 알려 주고 자리를 안 줌" 입니다 — 팀원 목록이 그 자리입니다.
+    bio: str | None = None
+    #: 프로필 이미지 (`USER-004`) — 데이터 URI 그대로. 팀원은 몇 명이라
+    #: 목록에 실어도 몇십 KB 입니다.
+    avatar: str | None = None
+
+
+def _presence_of(session: Session, user_ids: list[int]) -> dict[int, str]:
+    """지금 붙어 있는가 (`USER-005`).
+
+    ⚠️ **아무것도 저장하지 않습니다.** 세션의 마지막 요청 시각과 열려
+    있는 회의 트랙을 읽어 그때그때 계산합니다. 상태를 행으로 쌓으면 그
+    표는 곧 출퇴근부가 되고, 이 제품은 기여를 "무엇을 했는가" 로 재기로
+    했습니다 — 옆에 "언제 앉아 있었는가" 가 쌓이면 사람은 둘을 같이
+    봅니다.
+    """
+    if not user_ids:
+        return {}
+
+    now = datetime.now(UTC)
+    # 사람마다 **제일 최근** 세션. 여러 기기로 들어와 있을 수 있습니다.
+    seen: dict[int, datetime] = {}
+    for uid, at in session.execute(
+        select(m.UserSession.user_id, m.UserSession.last_seen_at).where(
+            m.UserSession.user_id.in_(user_ids),
+            m.UserSession.revoked_at.is_(None),
+            m.UserSession.last_seen_at.is_not(None),
+        )
+    ).all():
+        when = as_utc(at)
+        if when is not None and (uid not in seen or when > seen[uid]):
+            seen[uid] = when
+
+    # ⚠️ 끝나지 않은 트랙 = 지금 녹음 중. 회의 화면은 요청을 자주 안
+    #    보내서, 시간만 보면 회의하는 사람이 자리 비움으로 뜹니다.
+    meeting = set(
+        session.scalars(
+            select(m.MeetingTrack.user_id).where(
+                m.MeetingTrack.user_id.in_(user_ids),
+                m.MeetingTrack.ended_at.is_(None),
+            )
+        )
+    )
+
+    return {
+        uid: str(
+            presence.status_of(
+                last_seen=seen.get(uid), in_meeting=uid in meeting, now=now
+            )
+        )
+        for uid in user_ids
+    }
 
 
 def _project_members(session: Session, project_id: int) -> list[MemberOut]:
@@ -1909,12 +2199,17 @@ def _project_members(session: Session, project_id: int) -> list[MemberOut]:
         .where(m.Member.project_id == project_id)
         .order_by(m.Member.id)
     ).all()
+    here = _presence_of(session, [member.user_id for member, _ in rows])
     return [
         MemberOut(
             user_id=member.user_id,
             name=user.name,
             role_shares={k: float(v) for k, v in (member.role_shares or {}).items()},
             github_login=member.github_login,
+            project_role=member.project_role,
+            presence=here.get(member.user_id, str(vocab.PresenceStatus.OFFLINE)),
+            bio=user.bio,
+            avatar=user.avatar,
         )
         for member, user in rows
     ]
@@ -1939,6 +2234,270 @@ def list_project_members(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
     return _project_members(session, project_id)
+
+
+class RolePatch(BaseModel):
+    project_role: str
+
+
+def _member_roles(session: Session, project_id: int) -> list[str]:
+    """지금 구성원 전부의 등급. `last_owner_problem` 에 넘길 재료입니다."""
+    return list(
+        session.scalars(
+            select(m.Member.project_role).where(m.Member.project_id == project_id)
+        )
+    )
+
+
+def _load_member(session: Session, project_id: int, user_id: int) -> m.Member:
+    member = session.scalars(
+        select(m.Member).where(
+            m.Member.project_id == project_id, m.Member.user_id == user_id
+        )
+    ).first()
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "그런 팀원이 없습니다")
+    return member
+
+
+@app.patch(
+    "/api/projects/{project_id}/members/{user_id}/role", response_model=MemberOut
+)
+def change_member_role(
+    project_id: int,
+    user_id: int,
+    payload: RolePatch,
+    session: DbSession,
+    user: CurrentUser,
+) -> MemberOut:
+    """남의 권한을 바꾼다 (`PROJECT-003`·`PROJECT-004`).
+
+    ⚠️ **자기 등급을 스스로 올릴 수 없습니다.** 막지 않으면 팀원이
+    관리자가 되는 데 아무 절차가 없고, 권한 3단계가 장식이 됩니다.
+
+    ⚠️ **같은 등급끼리도 못 바꿉니다.** 관리자 둘이 서로를 강등할 수
+    있으면 먼저 누른 쪽이 이기는 경주가 됩니다.
+    """
+    actor = _require_can(session, project_id, user, permissions.Action.CHANGE_ROLE)
+
+    try:
+        wanted = vocab.ProjectRole(payload.project_role)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "그런 권한이 없습니다"
+        ) from None
+
+    target = _load_member(session, project_id, user_id)
+
+    if target.user_id == actor.user_id:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "자기 권한은 스스로 바꿀 수 없습니다"
+        )
+    if not permissions.outranks(actor.project_role, target.project_role):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "나보다 높거나 같은 사람은 바꿀 수 없습니다"
+        )
+    # ⚠️ **올려 주는 것도 자기 위로는 못 합니다.** 안 막으면 관리자가
+    #    팀원을 소유자로 만들어 놓고 그 사람을 통해 자기를 올릴 수 있습니다.
+    if permissions.ROLE_RANK[wanted] >= permissions.ROLE_RANK[
+        vocab.ProjectRole(actor.project_role)
+    ]:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "자기보다 높거나 같은 권한은 줄 수 없습니다"
+        )
+
+    problem = permissions.last_owner_problem(
+        _member_roles(session, project_id), leaving=target.project_role
+    )
+    if problem is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, problem)
+
+    target.project_role = str(wanted)
+    session.flush()
+    return next(
+        row
+        for row in _project_members(session, project_id)
+        if row.user_id == user_id
+    )
+
+
+@app.delete(
+    "/api/projects/{project_id}/members/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def remove_member(
+    project_id: int, user_id: int, session: DbSession, user: CurrentUser
+) -> Response:
+    """팀원을 내보낸다 (`PROJECT-003`).
+
+    ⚠️ **그 사람이 한 일은 안 지웁니다.** 업무·발화·기여 이벤트는 그대로
+    남습니다. 나갔다고 해서 그 사람이 한 일이 없던 일이 되면, 남은 팀의
+    기여도 비율이 조용히 부풀고 회의록에 구멍이 납니다. 지우는 것은
+    본인이 요청할 때 `POST /me/data` 가 따로 합니다 — 그건 **동의 철회**
+    라는 다른 일입니다.
+    """
+    actor = _require_can(session, project_id, user, permissions.Action.REMOVE_MEMBER)
+    target = _load_member(session, project_id, user_id)
+
+    if target.user_id == actor.user_id:
+        # 스스로 나가는 것은 권한이 아니라 **본인의 결정**입니다. 다른 문을
+        # 씁니다 — 관리자가 아니어도 나갈 수 있어야 하니까요.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "스스로 나가려면 나가기를 쓰십시오",
+        )
+    if not permissions.outranks(actor.project_role, target.project_role):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "나보다 높거나 같은 사람은 내보낼 수 없습니다"
+        )
+
+    session.delete(target)
+    session.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.post(
+    "/api/projects/{project_id}/members/me/leave",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def leave_project(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> Response:
+    """스스로 나간다 (`PROJECT-006`).
+
+    ⚠️ **권한을 안 봅니다.** 나가는 것은 남에게 하는 일이 아니라 자기
+    일입니다. 관리자 허락을 받아야 나갈 수 있으면 그건 팀이 아닙니다.
+
+    ⚠️ 다만 **마지막 소유자는 못 나갑니다** — 나가면 아무도 팀원을 못
+    다루는 프로젝트가 남고, 되돌릴 화면이 없습니다.
+
+    ⚠️ **한 일은 그대로 둡니다** (`remove_member` 와 같은 이유).
+    """
+    member = _require_project_member(session, project_id, user)
+
+    problem = permissions.last_owner_problem(
+        _member_roles(session, project_id), leaving=member.project_role
+    )
+    if problem is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, problem)
+
+    session.delete(member)
+    session.flush()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+class ProgressOut(BaseModel):
+    total: int
+    finished: int
+    #: 끝나지 않았는데 마감이 지난 것.
+    overdue: int
+    #: 0.0~1.0. ⚠️ 업무가 없으면 **`null`** 입니다 — 0.0 이 아닙니다.
+    #: 0을 보내면 화면이 "시작도 안 했다" 로 그리고, 그건 이 저장소가
+    #: 제일 하면 안 된다고 정한 것입니다 (측정 불가 ≠ 0점).
+    ratio: float | None
+
+
+class LoadOut(BaseModel):
+    """사람별 **미완료** 업무 수.
+
+    ⚠️ **기여도가 아닙니다.** 업무를 많이 맡은 것이 기여가 많은 것이
+    아니고, 적게 맡은 것이 게으른 것도 아닙니다. 순서는 **이름 순**이고
+    서버가 그렇게 내보냅니다 — 화면이 다시 정렬하면 그게 순위표입니다.
+    """
+
+    #: 담당자 없는 업무는 `null` 로 맨 뒤에 옵니다.
+    user_id: int | None
+    name: str
+    open_tasks: int
+
+
+class RiskSignalOut(BaseModel):
+    """위험 신호 하나 (제안서 §4.5).
+
+    ⚠️ **등급이 없습니다.** 규칙으로 센 값에 빨강·노랑을 붙이면 그건
+    팀에 대한 판정이 됩니다 — `meeting_events` 와 같은 규칙입니다.
+
+    ⚠️ **문장이 없습니다.** 숫자만 나가고 말은 화면이 만듭니다
+    (`lib/analytics/view.ts`). 서버가 문장을 만들면 같은 판단이 두 벌이
+    되고, 한글 문구 하나를 고치려고 서버를 배포해야 합니다.
+    """
+
+    kind: str
+    detail: dict
+    #: 눌러서 볼 업무들. ⚠️ 활동 감소만 비어 있습니다 — 그건 **없는 것**에
+    #: 대한 신호라 가리킬 업무가 없습니다.
+    task_ids: list[int]
+
+
+class MeetingKindTrendOut(BaseModel):
+    """비효율 구간 한 종류의 방향 (`REVIEW-006`).
+
+    ⚠️ **회의별 값이 없습니다.** 앞쪽 절반·최근 절반의 회의당 평균, 그
+    둘뿐입니다 — 회의별로 내보내면 화면이 그것으로 **회의 순위표**를
+    만들 수 있고, "3주차 회의가 문제였다" 는 그 회의를 연 사람에 대한
+    판정으로 읽힙니다. `meeting/trends.py` 머리말 참고.
+
+    ⚠️ **문장이 없습니다** — 위험 신호와 같은 규칙. 말은 화면이 만듭니다.
+    """
+
+    kind: str
+    early_avg: float
+    late_avg: float
+    #: 'falling' | 'rising' | 'flat'
+    direction: str
+
+
+class MeetingTrendsOut(BaseModel):
+    """팀 단위 회의 추세. 못 재면 **못 잰다고** 말할 재료를 준다."""
+
+    measurable: bool
+    #: 분석된 회의 수 (`needs_review`·`confirmed` — 파이프라인이 돈 것만.
+    #: 나머지를 넣으면 못 잰 회의가 "구간 0건" 으로 세어집니다)
+    meetings_counted: int
+    #: 이만큼은 쌓여야 방향을 말한다
+    needed: int
+    kinds: list[MeetingKindTrendOut]
+
+
+class ProjectAnalyticsOut(BaseModel):
+    progress: ProgressOut
+    load: list[LoadOut]
+    signals: list[RiskSignalOut]
+    #: 회의 개선 추세 (`REVIEW-006`) — 팀 단위 관찰, 판정 없음.
+    meeting_trends: MeetingTrendsOut
+
+
+@app.get(
+    "/api/projects/{project_id}/analytics", response_model=ProjectAnalyticsOut
+)
+def read_project_analytics(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> ProjectAnalyticsOut:
+    """프로젝트가 지금 어떤 상태인가 (정의서 §18 · 제안서 §4.5).
+
+    > **제출 직전이 아니라 진행 중에 문제를 발견한다.**
+
+    ## ⚠️ 표를 안 만듭니다
+
+    위험 신호를 행으로 쌓지 않습니다. 쌓으면 업무를 끝냈는데 "완료율이
+    낮습니다" 가 남고, 담당자를 바꿨는데 "한 사람에게 몰려 있습니다" 가
+    남습니다. **읽을 때마다 셉니다.**
+
+    ## ⚠️ 재배정을 제안하지 않습니다
+
+    제안서 §4.5 의 다섯째가 "근거 기반 재배정 및 일정 조정 제안" 인데
+    **안 만들었습니다.** "김민수의 업무를 이지연에게 넘기세요" 는 사람에
+    대한 판정이고, 그중에서도 제일 무거운 것입니다 — 누가 못 하고 있다는
+    말이 되니까요. 사실만 내고 어떻게 할지는 팀이 정합니다
+    (`AGENTS.md` 불변식 4).
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+    return ProjectAnalyticsOut(
+        **risk_service.read(session, project_id),
+        meeting_trends=MeetingTrendsOut(**trend_service.read(session, project_id)),
+    )
 
 
 class RoleIn(BaseModel):
@@ -2177,8 +2736,11 @@ def list_utterances(
     ## `ids` 로만 가져옵니다
 
     회의 전체 대본을 주지 않습니다. 40분 회의면 발화가 수백 개인데,
-    지금 필요한 것은 **이 후보의 근거 두세 개**입니다. 전체 대본을 보는
-    화면은 아직 없고, 없는 것을 위해 엔드포인트를 넓혀 두지 않습니다.
+    지금 필요한 것은 **이 후보의 근거 두세 개**입니다. 전체를 주는 자리는
+    `meeting_timeline`(`REVIEW-002`) **하나**입니다 — 예전에는 "전체 대본을
+    보는 화면은 아직 없다" 가 이 제한의 전제였는데, 그 화면이 생기면서
+    전제가 끝났고, 여기를 넓히는 대신 전체용 자리를 따로 뒀습니다.
+    같은 물음에 답하는 문이 둘이 되면 권한·직렬화가 갈라집니다.
 
     ⚠️ **못 찾은 id 를 조용히 버립니다** — 대신 화면이 알 수 있게
     합니다. 셋을 물었는데 둘이 오면 하나는 이 회의에 없는 것이고,
@@ -2203,7 +2765,7 @@ def list_utterances(
     if not wanted:
         return []
     # 상한. 근거는 보통 한둘이고, 목록이 길면 그건 대본 전체를 떠 가려는
-    # 것입니다 — 그 화면은 아직 없습니다.
+    # 것입니다 — 전체는 `meeting_timeline` 이 답합니다.
     if len(wanted) > 50:
         raise HTTPException(status_code=400, detail="한 번에 50개까지만 가져올 수 있습니다")
 
@@ -2213,7 +2775,14 @@ def list_utterances(
         .order_by(m.Utterance.start_ms, m.Utterance.id)
         .all()
     )
+    return _utterances_out(session, rows)
 
+
+def _utterances_out(session: Session, rows: list[m.Utterance]) -> list[UtteranceOut]:
+    """발화 직렬화 한 벌 — 근거 대화상자와 타임라인이 **같은 것**을 쓴다.
+
+    갈라지면 같은 발화가 화면마다 다른 화자·다른 라벨로 보인다.
+    """
     speaker_ids = {r.speaker_id for r in rows if r.speaker_id is not None}
     names: dict[int, str] = {}
     if speaker_ids:
@@ -2239,6 +2808,252 @@ def list_utterances(
         )
         for r in rows
     ]
+
+
+# ── 타임라인 (`REVIEW-002`) · 구간 재생 (`REVIEW-004`) ─────────
+
+
+class TimelineAudioOut(BaseModel):
+    """이 발화를 **들을** 자리. 못 들으면 필드 자체가 null 이다."""
+
+    track_id: int
+    #: 트랙 소리(청크를 이어 붙인 원본) 위의 위치.
+    #: ⚠️ `start_ms` 와 다릅니다 — 이어 붙이면 공백이 사라져 뒤가
+    #: 앞당겨집니다 (`audio/playback.py`).
+    position_ms: int
+
+
+class TimelineUtteranceOut(UtteranceOut):
+    audio: TimelineAudioOut | None = None
+
+
+class TimelineOut(BaseModel):
+    utterances: list[TimelineUtteranceOut]
+    #: 이 회의에 들을 수 있는 소리가 하나라도 있는가. 없으면 화면이
+    #: **이유를 말해야** 한다 — 재생 버튼이 조용히 안 뜨는 것은
+    #: "고장" 으로 읽힌다.
+    has_audio: bool
+
+
+@app.get("/api/meetings/{meeting_id}/timeline", response_model=TimelineOut)
+def meeting_timeline(
+    meeting_id: int,
+    session: DbSession,
+    settings: AppSettings,
+    user: CurrentUser,
+) -> TimelineOut:
+    """회의 전체를 시간 순으로 (`REVIEW-002`) — 들을 자리까지 함께.
+
+    ## `list_utterances` 와 왜 갈라져 있나
+
+    저쪽은 「이 후보의 근거 두세 개」 를 답하고, 여기는 「회의가 처음부터
+    끝까지 어떻게 흘렀나」 를 답합니다. 전체 대본은 이 자리 **하나**로만
+    나갑니다 — 권한 문이 둘이 되면 한쪽만 잠기고, 안 잠긴 쪽이 구멍입니다.
+
+    ## 발화마다 `audio` 가 붙는다 (`REVIEW-004`)
+
+    들을 수 있는 발화에만. 못 듣는 이유 셋(트랙 미지정 · 소리 미보관 ·
+    유실 구간)은 `recording_service.playback_map` 참고. 시연 데이터는
+    트랙이 없어 전부 null 이고, 그때 `has_audio` 가 거짓이라 화면이
+    이유를 말합니다.
+    """
+    _load_meeting_for(session, meeting_id, user)
+
+    rows = (
+        session.query(m.Utterance)
+        .filter(m.Utterance.meeting_id == meeting_id)
+        .order_by(m.Utterance.start_ms, m.Utterance.id)
+        .all()
+    )
+
+    store = _chunk_store(settings)
+    positions = recording_service.playback_map(session, store, meeting_id=meeting_id)
+
+    return TimelineOut(
+        utterances=[
+            TimelineUtteranceOut(
+                **base.model_dump(),
+                audio=(
+                    TimelineAudioOut(
+                        track_id=positions[base.id].track_id,
+                        position_ms=positions[base.id].position_ms,
+                    )
+                    if base.id in positions
+                    else None
+                ),
+            )
+            for base in _utterances_out(session, rows)
+        ],
+        has_audio=bool(
+            recording_service.tracks_with_audio(session, store, meeting_id=meeting_id)
+        ),
+    )
+
+
+@app.get("/api/meetings/{meeting_id}/tracks/{track_id}/audio")
+def track_audio(
+    meeting_id: int,
+    track_id: int,
+    session: DbSession,
+    settings: AppSettings,
+    user: CurrentUser,
+) -> StreamingResponse:
+    """트랙 소리 원본 — 청크를 seq 순서로 이어 붙인 webm (`REVIEW-004`).
+
+    ## 누가 듣는가
+
+    회의를 볼 수 있는 사람(프로젝트 구성원)이 듣습니다 — 발화 **원문**과
+    같은 문입니다. 소리는 동의의 산물이고, 그 동의가 향한 곳이 팀입니다
+    (docs/07 §1 — 회의 분석·기여 산정 목적).
+
+    ## 재인코딩하지 않는다
+
+    서버에 인코더가 없습니다(FFmpeg 없음 — 파이프라인 디코더와 다른
+    경로). `MediaRecorder.start(timeslice)` 의 조각은 이어 붙이면 그대로
+    하나의 webm 스트림이라, 조각을 순서대로 흘리기만 합니다. ⚠️ 그래서
+    **공백은 소리에 없습니다** — 위치 계산이 그걸 보정합니다
+    (`audio/playback.py`).
+    """
+    _load_meeting_for(session, meeting_id, user)
+    track = session.get(m.MeetingTrack, track_id)
+    if track is None or track.meeting_id != meeting_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "트랙이 없습니다")
+
+    store = _chunk_store(settings)
+    if not store.stored_seqs(meeting_id, track_id):
+        # 행이 있어도 파일이 없으면(업로드 전·보존기간 삭제) 들을 수 없다.
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, "이 트랙은 소리가 보관돼 있지 않습니다"
+        )
+    return StreamingResponse(
+        recording_service.iter_track_audio(
+            store, meeting_id=meeting_id, track_id=track_id
+        ),
+        media_type="audio/webm",
+    )
+
+
+class UtteranceTypeCounts(BaseModel):
+    """유형별 건수. **원문은 안 나갑니다.**"""
+
+    labels: dict[str, int]
+    #: 아직 분류하지 않은 발화 수. ⚠️ `labels["other"]` 와 **다릅니다** —
+    #: 앞은 아직 안 잰 것이고 뒤는 재고 나서 모르는 것입니다.
+    unclassified: int
+    total: int
+
+
+@app.get(
+    "/api/meetings/{meeting_id}/utterance-types", response_model=UtteranceTypeCounts
+)
+def count_utterance_types(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> UtteranceTypeCounts:
+    """이 회의의 발언을 유형별로 센다 (요구사항 정의서 §10 · `REVIEW-005`).
+
+    ## ⚠️ 사람별 건수를 주지 않습니다
+
+    회의 단위 집계만 나갑니다. 사람별로 나가면 화면이 그것으로
+    **"누가 제일 많이 제안했나" 표**를 만들 수 있고, 그건 이 저장소가
+    금지한 리더보드입니다 (`AGENTS.md` 불변식 1). 서버가 안 주면 화면이
+    못 만듭니다 — 화면 코드에는 자동 테스트가 없으므로 **막는 자리는
+    여기**입니다.
+
+    ## ⚠️ 대본을 대신하지 않습니다
+
+    숫자만 나갑니다. 위 `list_utterances` 가 `ids` 로만 원문을 주는 것과
+    같은 이유이고, 이 엔드포인트로 회의록을 재구성할 수 없습니다.
+    """
+    _load_meeting_for(session, meeting_id, user)
+    counted = meeting_contribution_service.count_by_type(session, meeting_id)
+    return UtteranceTypeCounts(**counted)
+
+
+class ShareOut(BaseModel):
+    user_id: int
+    name: str
+    speaking_ms: int
+    #: ⚠️ 못 잰 회의는 `null` 입니다. **0.0 이 아닙니다.**
+    ratio: float | None
+
+
+class SpeakingOut(BaseModel):
+    #: ⚠️ **이름 순**입니다. 몫 순으로 정렬하지 않습니다.
+    shares: list[ShareOut]
+    #: 비중을 말할 만한 회의인가. 거짓이면 화면은 값을 안 그립니다.
+    measurable: bool
+    #: 한쪽으로 쏠렸는가. ⚠️ **누가인지는 안 보냅니다.**
+    skewed: bool
+
+
+@app.get("/api/meetings/{meeting_id}/speaking", response_model=SpeakingOut)
+def read_speaking_shares(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> SpeakingOut:
+    """누가 얼마나 말했는가 (정의서 §9 `AI-AUDIO-005` · §12 `AI-REVIEW-007`).
+
+    ## ⚠️ 이 저장소에서 제일 위험한 값입니다
+
+    정의서 `AI-AUDIO-005` 의 예시가 **내림차순 목록**(= 리더보드)인데,
+    같은 문서의 `AI-REVIEW-007` 과 `NFR-005` 가 그걸 금지합니다. 요구는
+    **값을 만들라**는 것이지 **줄을 세우라**는 것이 아닙니다 (`docs/20` §3).
+
+    그래서 서버가 막습니다.
+
+    * **이름 순으로 내려보냅니다.** 몫 순으로 주면 화면은 그게 뜻있는
+      순서라고 믿고 그대로 그립니다
+    * **쏠렸는지는 참/거짓 하나**입니다. 누가인지는 안 보냅니다 — 이름을
+      실으면 화면이 그걸 적고, 그 순간 "이 회의를 독점한 사람" 표시가
+      됩니다. 사실은 목록에 다 있으니 사람이 보고 판단하면 됩니다
+    * **짧은 회의는 `measurable: false`** 입니다. 3분짜리에서 나온 70%
+      를 보여 주면 사람은 그걸 경향으로 읽습니다
+
+    ⚠️ **저장하지 않습니다.** 발화에서 읽을 때마다 셉니다 — 발화를
+    지우면 비중도 같이 사라져야 합니다(동의 철회).
+
+    ⚠️ 기여도에 안 들어갑니다. `docs/05` §5 가 "총 발언 시간 = 점수 아님
+    (참고 표시만)" 으로 정해 뒀습니다.
+    """
+    meeting = _load_meeting_for(session, meeting_id, user)
+
+    # ⚠️ **이름 순**으로 사람을 고정합니다. 여기서 순서가 정해지고,
+    #    아래 `shares()` 는 이 순서를 그대로 지킵니다.
+    members = sorted(
+        session.execute(
+            select(m.User.id, m.User.name)
+            .join(m.Member, m.Member.user_id == m.User.id)
+            .where(m.Member.project_id == meeting.project_id)
+        ).all(),
+        key=lambda row: row[1],
+    )
+    names = {uid: name for uid, name in members}
+
+    spans = [
+        speaking.Span(user_id=uid, start_ms=start, end_ms=end)
+        for uid, start, end in session.execute(
+            select(m.Utterance.speaker_id, m.Utterance.start_ms, m.Utterance.end_ms)
+            .where(
+                m.Utterance.meeting_id == meeting_id,
+                m.Utterance.speaker_id.is_not(None),
+            )
+        ).all()
+        if uid is not None
+    ]
+
+    computed = speaking.shares(spans, [uid for uid, _ in members])
+    return SpeakingOut(
+        shares=[
+            ShareOut(
+                user_id=s.user_id,
+                name=names.get(s.user_id, f"사용자 #{s.user_id}"),
+                speaking_ms=s.speaking_ms,
+                ratio=s.ratio,
+            )
+            for s in computed
+        ],
+        measurable=speaking.measurable(computed),
+        skewed=speaking.skewed(computed),
+    )
 
 
 @app.get("/api/meetings/{meeting_id}/candidates", response_model=list[CandidateOut])
@@ -2296,7 +3111,7 @@ def review(
     )
 
     task_ids = session.scalars(
-        select(m.Task.id).where(
+        live.live_task_ids().where(
             m.Task.origin_candidate_id.in_([t.origin_candidate_id for t in outcome.approved])
         )
     ).all() if outcome.approved else []
@@ -2425,7 +3240,7 @@ async def github_webhook(
     # 결함입니다(`_enqueue_after_commit` 의 주석). 커밋은 이 함수가 아니라
     # FastAPI 의존성 teardown 에서 일어납니다.
     queued = False
-    if normalized.event_type == "pull_request.merged":
+    if normalized.event_type == str(vocab.GithubEventKind.PR_MERGED):
         _enqueue_github_after_commit(session, row.id)
         queued = True
 
@@ -2481,7 +3296,12 @@ class TaskGithubOut(BaseModel):
 class TaskOut(BaseModel):
     id: int
     title: str
-    assignee_id: int | None
+    #: 맡은 사람들. 비어 있으면 담당자가 없는 업무입니다 (`TASK-006`).
+    #:
+    #: ⚠️ **이름 순으로 나갑니다. 화면은 다시 정렬하지 않습니다.** 넣은
+    #: 순서로 주면 화면이 맨 앞을 "주담당" 으로 그리게 되고, 그런 것은
+    #: 없습니다.
+    assignee_ids: list[int]
     status: str
     deadline: date | None
     completed_at: datetime | None
@@ -2559,6 +3379,47 @@ class TaskPatch(BaseModel):
     reason: str | None = Field(default=None, max_length=300)
 
 
+class TaskAssigneesIn(BaseModel):
+    """담당자를 이 목록으로 바꾼다 (`TASK-006`).
+
+    ⚠️ **더하기·빼기가 아니라 통째로 바꿉니다.** 더하기만 있으면 화면은
+    "지금 목록" 과 "보낼 목록" 의 차이를 스스로 계산해야 하고, 그 계산이
+    두 곳(더하기·빼기)으로 갈라집니다. 빈 목록은 "담당자 없음" 입니다.
+    """
+
+    user_ids: list[int] = Field(default_factory=list, max_length=50)
+
+
+@app.delete(
+    "/api/projects/{project_id}/tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_task(
+    project_id: int, task_id: int, session: DbSession, user: CurrentUser
+) -> Response:
+    """업무를 지운다 (`TASK-003`).
+
+    ⚠️ **팀원도 지울 수 있습니다.** 칸반은 매일 쓰는 화면이고, 잘못 만든
+    카드 하나를 지우려고 관리자를 부르게 하면 사람들은 지우는 대신
+    **완료로 옮겨 버립니다** — 그러면 진행률이 거짓이 되고 그 숫자가
+    기여도와 보고서로 흘러갑니다.
+
+    ⚠️ 행은 남습니다. 사유는 `task_service.delete_task` 에 있습니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_can(session, project_id, user, permissions.Action.DELETE_TASK)
+
+    try:
+        task_service.delete_task(
+            session, project_id=project_id, task_id=task_id, actor_id=user.id
+        )
+    except task_service.TaskError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.patch("/api/projects/{project_id}/tasks/{task_id}", response_model=TaskOut)
 async def patch_task(
     project_id: int,
@@ -2607,6 +3468,57 @@ async def patch_task(
     rows = task_service.list_tasks(session, project_id)
     updated = next(row for row in rows if row["id"] == task.id)
     return TaskOut(**updated)
+
+
+@app.put(
+    "/api/projects/{project_id}/tasks/{task_id}/assignees", response_model=TaskOut
+)
+def set_task_assignees(
+    project_id: int,
+    task_id: int,
+    payload: TaskAssigneesIn,
+    session: DbSession,
+    user: CurrentUser,
+) -> TaskOut:
+    """담당자를 바꾼다 (`TASK-006` — 담당자는 하나 이상).
+
+    ⚠️ **팀원 누구나 바꿉니다.** 관리자만 할 수 있게 하면 사람들은 담당자를
+    안 바꾸고 그냥 남의 이름이 붙은 채로 일합니다 — 그러면 기여 이벤트가
+    **일하지 않은 사람에게** 갑니다. 업무 삭제와 같은 판단입니다.
+
+    ⚠️ 바꾼 사실은 감사 로그에 남습니다. 담당자는 기여 이벤트가 누구에게
+    가는지를 정하므로, 조용히 바뀌면 안 됩니다.
+    """
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    try:
+        task, _now_ids, added = task_service.set_assignees(
+            session,
+            project_id=project_id,
+            task_id=task_id,
+            user_ids=payload.user_ids,
+            actor_id=user.id,
+        )
+    except task_service.TaskError as exc:
+        code = (
+            status.HTTP_404_NOT_FOUND
+            if "찾을 수 없습니다" in str(exc)
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(code, str(exc)) from exc
+
+    # NOTIFICATION-002 — 새로 맡은 사람에게만.
+    notification_service.record_assignment(session, task, added, actor_id=user.id)
+
+    rows = task_service.list_tasks(session, project_id)
+    updated = next(row for row in rows if row["id"] == task.id)
+    return TaskOut(
+        **updated,
+        marker=gh_linking.task_marker(task.id),
+        github=_github_for_tasks(session, [task.id]).get(task.id, []),
+    )
 
 
 # ══════════════════════════════════════════════════════════════
@@ -3060,6 +3972,827 @@ def generate_minutes(
         generated_at=report.generated_at,
         content=report.content,
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 채널과 채팅 (요구사항 정의서 §6 · §7)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **글은 HTTP 로 쓰고, 소켓은 읽기 전용입니다.**
+#
+# 소켓으로 받은 것을 그대로 남에게 뿌리면 저장은 안 됐는데 화면에만 뜬
+# 메시지가 생깁니다 — 새로고침하면 사라지고, 쓴 사람은 자기 말이 갔다고
+# 믿습니다. 그래서 POST 가 저장하고, 저장된 뒤에 `chat_hub` 로 흘립니다.
+#
+# ⚠️ **기여도와 닿지 않습니다.** 정의서 §7 머리말이 채팅에 대한 AI 분석·
+# 업무 자동 생성·프로젝트 분석을 금지합니다. 메시지가 기여로 세어지면
+# 도배가 기여도를 올리는 방법이 됩니다 — `test_chat_is_not_measured.py`.
+
+
+class ChannelIn(BaseModel):
+    kind: str = Field(default="text")
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ChannelPatch(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ChannelOrderIn(BaseModel):
+    #: ⚠️ **전체 순서**입니다. 한 칸씩 위/아래가 아닙니다 — 이유는
+    #: `channel_service.reorder_channels` 머리말에.
+    channel_ids: list[int]
+
+
+class ChannelOut(BaseModel):
+    id: int
+    kind: str
+    name: str
+    position: int
+
+
+class ReactionOut(BaseModel):
+    mark: str
+    #: 사람 말. ⚠️ 화면이 두 번째 표를 만들지 않게 서버가 같이 보냅니다.
+    label: str
+    count: int
+
+
+class MessageOut(BaseModel):
+    id: int
+    channel_id: int
+    author_id: int
+    author_name: str
+    #: ⚠️ 지워진 메시지는 **본문이 비어 옵니다.** 자리는 남습니다(답글이
+    #: 가리키는 곳이라서) — `deleted` 를 보고 화면이 "지워진 메시지" 라고 씁니다.
+    body: str
+    reply_to_id: int | None
+    created_at: datetime
+    edited_at: datetime | None
+    deleted: bool
+    mentions: list[str]
+    reactions: list[ReactionOut]
+    #: 내가 단 반응. 없으면 `null`. 이게 없으면 누른 사람이 뗄 길을 못 찾습니다.
+    my_reaction: str | None
+
+
+class MessageIn(BaseModel):
+    body: str = Field(min_length=1, max_length=message_service.MAX_BODY)
+    reply_to_id: int | None = None
+
+
+class MessageEditIn(BaseModel):
+    """고칠 때는 **본문만** 받습니다.
+
+    ⚠️ 처음에는 `MessageIn` 을 그대로 썼습니다. 그러면 화면이
+    `reply_to_id` 를 같이 보낼 수 있는데 `edit_message` 는 그 칸을 안
+    읽습니다 — 200 을 돌려주면서 아무 일도 안 하는 칸입니다.
+    무엇에 단 답글인지는 애초에 고칠 수 있는 것이 아닙니다.
+    """
+
+    body: str = Field(min_length=1, max_length=message_service.MAX_BODY)
+
+
+class ReactionIn(BaseModel):
+    #: `null` 이면 뗍니다.
+    mark: str | None = None
+
+
+def _channel_out(channel: m.Channel) -> ChannelOut:
+    return ChannelOut(
+        id=channel.id,
+        kind=channel.kind,
+        name=channel.name,
+        position=channel.position,
+    )
+
+
+def _messages_out(
+    session: Session, rows: list[m.Message], viewer_id: int
+) -> list[MessageOut]:
+    """행 → 화면이 읽을 것. **한 번에 모아 옵니다.**
+
+    ⚠️ 메시지마다 작성자·반응·멘션을 따로 물으면 50건에 150번을 묻습니다.
+    """
+    ids = [row.id for row in rows]
+    authors = {
+        int(user_id): str(name)
+        for user_id, name in session.execute(
+            select(m.User.id, m.User.name).where(
+                m.User.id.in_({row.author_id for row in rows} or {0})
+            )
+        ).all()
+    }
+    reactions = message_service.reactions_for(session, ids)
+    mine = message_service.mine_for(session, ids, viewer_id)
+    mentions = message_service.mentioned_names(session, ids)
+
+    return [
+        MessageOut(
+            id=row.id,
+            channel_id=row.channel_id,
+            author_id=row.author_id,
+            author_name=authors.get(row.author_id, "알 수 없음"),
+            # ⚠️ 지운 글의 본문은 **서버에서** 뺍니다. 화면에 보내 놓고
+            #    화면이 가리게 하면, 개발자 도구를 열면 그대로 보입니다.
+            body="" if row.deleted_at is not None else row.body,
+            reply_to_id=row.reply_to_id,
+            created_at=row.created_at,
+            edited_at=row.edited_at,
+            deleted=row.deleted_at is not None,
+            mentions=mentions.get(row.id, []),
+            reactions=[ReactionOut(**r) for r in reactions.get(row.id, [])],
+            my_reaction=mine.get(row.id),
+        )
+        for row in rows
+    ]
+
+
+def _load_channel_for(session: Session, channel_id: int, user: m.User) -> m.Channel:
+    """채널을 가져오고 **구성원인지 확인한다.**
+
+    ⚠️ 없는 채널과 남의 채널에 **같은 404** 를 줍니다. 403 으로 나누면
+    번호를 훑어 "저 팀에 이런 채널이 있다" 를 알아낼 수 있습니다.
+    """
+    channel = session.get(m.Channel, channel_id)
+    if channel is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "채널을 찾을 수 없습니다")
+    member = session.scalar(
+        select(m.Member.id).where(
+            m.Member.project_id == channel.project_id,
+            m.Member.user_id == user.id,
+        )
+    )
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "채널을 찾을 수 없습니다")
+    return channel
+
+
+class ReactionChoice(BaseModel):
+    mark: str
+    label: str
+
+
+@app.get("/api/chat/reactions", response_model=list[ReactionChoice])
+def list_reaction_choices(user: CurrentUser) -> list[ReactionChoice]:
+    """고를 수 있는 반응 전부 (CHAT-008).
+
+    ⚠️ **화면이 이 표를 자기 안에 두면 안 됩니다.** 메시지에 딸려 오는
+    `label` 은 **이미 달린** 반응에만 있어서, 아직 아무도 안 단 것은 화면이
+    이름을 알 방법이 없습니다. 거기서 화면이 자기 표를 만들면 서버의
+    `REACTION_LABEL` 과 두 벌이 되고, 반드시 한쪽만 고쳐집니다.
+
+    ⚠️ 순서는 **어휘 순서**입니다. 개수 순으로 세우면 그 순간 순위표입니다.
+    """
+    return [
+        ReactionChoice(mark=str(mark), label=vocab.REACTION_LABEL[mark])
+        for mark in vocab.ReactionMark
+    ]
+
+
+@app.get("/api/projects/{project_id}/channels", response_model=list[ChannelOut])
+def list_channels(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> list[ChannelOut]:
+    """CHANNEL-005 — 자리 순으로."""
+    _require_project_member(session, project_id, user)
+    return [_channel_out(c) for c in channel_service.list_channels(session, project_id)]
+
+
+@app.post(
+    "/api/projects/{project_id}/channels",
+    response_model=ChannelOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_channel(
+    project_id: int, payload: ChannelIn, session: DbSession, user: CurrentUser
+) -> ChannelOut:
+    """CHANNEL-001·002."""
+    _require_project_member(session, project_id, user)
+    try:
+        kind = vocab.ChannelKind(payload.kind)
+    except ValueError:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "채널 종류는 텍스트 아니면 음성입니다",
+        ) from None
+    try:
+        channel = channel_service.create_channel(
+            session, project_id, kind=kind, name=payload.name, created_by=user.id
+        )
+    except channel_service.ChannelError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return _channel_out(channel)
+
+
+@app.patch("/api/channels/{channel_id}", response_model=ChannelOut)
+def rename_channel(
+    channel_id: int, payload: ChannelPatch, session: DbSession, user: CurrentUser
+) -> ChannelOut:
+    """CHANNEL-003."""
+    channel = _load_channel_for(session, channel_id, user)
+    try:
+        channel_service.rename_channel(session, channel, payload.name)
+    except channel_service.ChannelError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return _channel_out(channel)
+
+
+@app.delete("/api/channels/{channel_id}", response_model=ChannelOut)
+def archive_channel(
+    channel_id: int, session: DbSession, user: CurrentUser
+) -> ChannelOut:
+    """CHANNEL-004 — **행을 지우지 않습니다.** 메시지가 딸려 있습니다."""
+    channel = _load_channel_for(session, channel_id, user)
+    channel_service.archive_channel(session, channel)
+    session.commit()
+    return _channel_out(channel)
+
+
+@app.put("/api/projects/{project_id}/channels/order", response_model=list[ChannelOut])
+def reorder_channels(
+    project_id: int, payload: ChannelOrderIn, session: DbSession, user: CurrentUser
+) -> list[ChannelOut]:
+    """CHANNEL-005."""
+    _require_project_member(session, project_id, user)
+    try:
+        ordered = channel_service.reorder_channels(
+            session, project_id, payload.channel_ids
+        )
+    except channel_service.ChannelError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return [_channel_out(c) for c in ordered]
+
+
+@app.get("/api/channels/{channel_id}/messages", response_model=list[MessageOut])
+def list_messages(
+    channel_id: int,
+    session: DbSession,
+    user: CurrentUser,
+    before_id: int | None = None,
+    limit: int = message_service.MAX_PAGE,
+) -> list[MessageOut]:
+    """CHAT-009 — 오래된 것 → 새것 순. `before_id` 로 거슬러 올라갑니다."""
+    _load_channel_for(session, channel_id, user)
+    rows = message_service.history(
+        session, channel_id, before_id=before_id, limit=limit
+    )
+    return _messages_out(session, rows, user.id)
+
+
+@app.post(
+    "/api/channels/{channel_id}/messages",
+    response_model=MessageOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_message(
+    channel_id: int, payload: MessageIn, session: DbSession, user: CurrentUser
+) -> MessageOut:
+    """CHAT-001·004·005 — 쓰고, **저장된 뒤에** 보고 있는 사람들에게 흘린다."""
+    _load_channel_for(session, channel_id, user)
+    try:
+        channel = channel_service.load_for_message(session, channel_id)
+        message = message_service.send_message(
+            session,
+            channel,
+            author_id=user.id,
+            body=payload.body,
+            reply_to_id=payload.reply_to_id,
+        )
+    except (channel_service.ChannelError, message_service.MessageError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    # NOTIFICATION-001 — 부른 사람들에게. ⚠️ 누구를 불렀는지는 서버가
+    # 본문에서 뽑아 이미 저장했습니다. 여기서 다시 뽑지 않습니다.
+    notification_service.record_mentions(
+        session, message, project_id=channel.project_id, author_id=user.id
+    )
+    out = _messages_out(session, [message], user.id)[0]
+    session.commit()
+    # ⚠️ 커밋 **뒤에** 흘립니다. 앞에서 흘리면 롤백된 메시지가 남의 화면에
+    #    남고, 그 사람이 새로고침하기 전까지는 있는 말로 보입니다.
+    await chat_hub.hub.publish(
+        channel_id, {"kind": "message", "message": out.model_dump(mode="json")}
+    )
+    return out
+
+
+@app.patch("/api/messages/{message_id}", response_model=MessageOut)
+async def edit_message(
+    message_id: int, payload: MessageEditIn, session: DbSession, user: CurrentUser
+) -> MessageOut:
+    """CHAT-002 — 쓴 사람만. `edited_at` 이 반드시 남습니다."""
+    message = message_service.load_message(session, message_id)
+    _load_channel_for(session, message.channel_id, user)
+    try:
+        message_service.edit_message(
+            session, message, editor_id=user.id, body=payload.body
+        )
+    except message_service.MessageError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    out = _messages_out(session, [message], user.id)[0]
+    session.commit()
+    await chat_hub.hub.publish(
+        message.channel_id, {"kind": "edit", "message": out.model_dump(mode="json")}
+    )
+    return out
+
+
+@app.delete("/api/messages/{message_id}", response_model=MessageOut)
+async def delete_message(
+    message_id: int, session: DbSession, user: CurrentUser
+) -> MessageOut:
+    """CHAT-003 — **행을 지우지 않습니다.** 답글이 가리킬 자리는 남습니다."""
+    message = message_service.load_message(session, message_id)
+    _load_channel_for(session, message.channel_id, user)
+    try:
+        message_service.delete_message(session, message, actor_id=user.id)
+    except message_service.MessageError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    out = _messages_out(session, [message], user.id)[0]
+    session.commit()
+    await chat_hub.hub.publish(
+        message.channel_id, {"kind": "delete", "message": out.model_dump(mode="json")}
+    )
+    return out
+
+
+@app.put("/api/messages/{message_id}/reaction", response_model=MessageOut)
+async def set_reaction(
+    message_id: int, payload: ReactionIn, session: DbSession, user: CurrentUser
+) -> MessageOut:
+    """CHAT-008 — **한 사람당 하나.** `mark: null` 이면 뗍니다."""
+    message = message_service.load_message(session, message_id)
+    _load_channel_for(session, message.channel_id, user)
+    try:
+        message_service.set_reaction(
+            session, message, user_id=user.id, mark=payload.mark
+        )
+    except message_service.MessageError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    out = _messages_out(session, [message], user.id)[0]
+    session.commit()
+    # ⚠️ 남에게 보낼 때 `my_reaction` 은 **내 것**입니다. 그대로 뿌리면
+    #    남의 화면에 내가 누른 것이 자기가 누른 것으로 그려집니다.
+    body = out.model_dump(mode="json")
+    body["my_reaction"] = None
+    await chat_hub.hub.publish(message.channel_id, {"kind": "reaction", "message": body})
+    return out
+
+
+class MessageSearchOut(BaseModel):
+    channel_id: int
+    channel_name: str
+    message: MessageOut
+
+
+@app.get("/api/projects/{project_id}/messages/search")
+def search_messages(
+    project_id: int, q: str, session: DbSession, user: CurrentUser
+) -> list[MessageSearchOut]:
+    """CHAT-010 — 이 프로젝트 안에서만. 지워진 것은 안 나옵니다."""
+    _require_project_member(session, project_id, user)
+    rows = message_service.search(session, project_id, q)
+    names = {
+        c.id: c.name
+        for c in channel_service.list_channels(session, project_id, include_archived=True)
+    }
+    return [
+        MessageSearchOut(
+            channel_id=row.channel_id,
+            channel_name=names.get(row.channel_id, "지워진 채널"),
+            message=out,
+        )
+        for row, out in zip(rows, _messages_out(session, rows, user.id), strict=True)
+    ]
+
+
+@app.get("/api/projects/{project_id}/mentions")
+def my_mentions(project_id: int, session: DbSession, user: CurrentUser) -> dict[str, int]:
+    """나를 부른 메시지 건수 (CHAT-005).
+
+    ⚠️ 이름이 `mention_total` 입니다 — **안 읽은 것이 아니라 전부**입니다.
+    읽음 표시는 표가 하나 더 필요하고 아직 없습니다. `unread` 라고 부르면
+    화면이 "읽으면 준다" 고 믿고 안 줄어드는 배지를 그립니다.
+    """
+    _require_project_member(session, project_id, user)
+    return {
+        "mention_total": message_service.unread_mentions(session, user.id, project_id)
+    }
+
+
+@app.websocket("/api/channels/{channel_id}/stream")
+async def channel_stream(websocket: WebSocket, channel_id: int) -> None:
+    """새 메시지를 실시간으로 받는 통로 (CHAT-001).
+
+    ⚠️ **인증과 구성원 확인을 `accept()` 앞에서** 합니다. 받아 놓고 나중에
+    끊으면 그 사이에 남의 팀 대화가 이미 샙니다.
+
+    ⚠️ **읽기 전용입니다.** 소켓으로 오는 것은 전부 버립니다 — 글을 여기로
+    받으면 저장 안 된 메시지가 남의 화면에만 뜹니다.
+    """
+    with db_session.session_scope() as session:
+        user = auth_service.resolve_session(
+            session, websocket.cookies.get(auth_service.COOKIE_NAME)
+        )
+        if user is None:
+            # 1008 = policy violation. WS 에는 401 이 없습니다.
+            await websocket.close(code=1008, reason="로그인이 필요합니다")
+            return
+
+        channel = session.get(m.Channel, channel_id)
+        if channel is None:
+            await websocket.close(code=1008, reason="채널을 찾을 수 없습니다")
+            return
+
+        member = session.scalar(
+            select(m.Member.id).where(
+                m.Member.project_id == channel.project_id,
+                m.Member.user_id == user.id,
+            )
+        )
+        if member is None:
+            # 없는 채널과 같은 말입니다 — 여기서 존재 여부를 흘리지 않습니다.
+            await websocket.close(code=1008, reason="채널을 찾을 수 없습니다")
+            return
+
+    await websocket.accept()
+    connection_id = uuid4().hex
+
+    async def send(body: dict[str, Any]) -> None:
+        await websocket.send_json(body)
+
+    await chat_hub.hub.join(channel_id, connection_id, send)
+    try:
+        while True:
+            # ⚠️ 받은 것을 **쓰지 않습니다.** 소켓을 살려 두기 위해 읽을 뿐입니다.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await chat_hub.hub.part(channel_id, connection_id)
+
+
+# ══════════════════════════════════════════════════════════════
+# 일정 (요구사항 정의서 §16)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **달력 표를 만들지 않았습니다.** 요구하는 다섯 중 넷은 이미 있는
+# 행에서 나옵니다 — 베껴 담으면 업무 마감일을 고쳤을 때 달력만 옛 날짜를
+# 말합니다. 자세한 것은 `services/calendar_service.py` 머리말에.
+
+
+class CalendarItemOut(BaseModel):
+    kind: str
+    #: ⚠️ **자르지 않은 순간**입니다. 어느 날인지는 화면이 팀 달력으로
+    #: 정합니다 — 여기서 또 자르면 시간대 계산이 두 벌이 됩니다.
+    at: datetime
+    title: str
+    task_id: int | None
+    meeting_id: int | None
+    who: str | None
+    done: bool
+
+
+class ScheduleIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    at: datetime
+    channel_id: int | None = None
+
+
+class RescheduleIn(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    at: datetime | None = None
+
+
+class ScheduledOut(BaseModel):
+    meeting_id: int
+    title: str | None
+    scheduled_at: datetime | None
+    started_at: datetime | None
+    channel_id: int | None
+
+
+def _scheduled_out(meeting: m.Meeting) -> ScheduledOut:
+    return ScheduledOut(
+        meeting_id=meeting.id,
+        title=meeting.title,
+        scheduled_at=meeting.scheduled_at,
+        started_at=meeting.started_at,
+        channel_id=meeting.channel_id,
+    )
+
+
+@app.get("/api/projects/{project_id}/calendar", response_model=list[CalendarItemOut])
+def read_calendar(
+    project_id: int,
+    since: datetime,
+    until: datetime,
+    session: DbSession,
+    user: CurrentUser,
+) -> list[CalendarItemOut]:
+    """CALENDAR-001·002·005 — 이 기간에 놓이는 것 전부.
+
+    ⚠️ 범위를 **반드시 받습니다.** 전부 주면 3년치가 한 번에 오고 화면은
+    그중 한 달만 씁니다.
+    """
+    _require_project_member(session, project_id, user)
+    try:
+        items = calendar_service.collect(session, project_id, since=since, until=until)
+    except calendar_service.CalendarError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return [
+        CalendarItemOut(
+            kind=item.kind,
+            at=item.at,
+            title=item.title,
+            task_id=item.task_id,
+            meeting_id=item.meeting_id,
+            who=item.who,
+            done=item.done,
+        )
+        for item in items
+    ]
+
+
+@app.post(
+    "/api/projects/{project_id}/scheduled-meetings",
+    response_model=ScheduledOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def schedule_meeting(
+    project_id: int, payload: ScheduleIn, session: DbSession, user: CurrentUser
+) -> ScheduledOut:
+    """CALENDAR-003 — 일정을 잡는다. **아직 회의를 여는 것이 아닙니다.**"""
+    _require_project_member(session, project_id, user)
+    try:
+        meeting = calendar_service.schedule_meeting(
+            session,
+            project_id,
+            title=payload.title,
+            at=payload.at,
+            created_by=user.id,
+            channel_id=payload.channel_id,
+        )
+    except calendar_service.CalendarError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return _scheduled_out(meeting)
+
+
+@app.patch("/api/scheduled-meetings/{meeting_id}", response_model=ScheduledOut)
+def reschedule_meeting(
+    meeting_id: int, payload: RescheduleIn, session: DbSession, user: CurrentUser
+) -> ScheduledOut:
+    """CALENDAR-004."""
+    meeting = _load_meeting_for(session, meeting_id, user)
+    try:
+        calendar_service.reschedule_meeting(
+            session, meeting, at=payload.at, title=payload.title
+        )
+    except calendar_service.CalendarError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return _scheduled_out(meeting)
+
+
+@app.delete("/api/scheduled-meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_scheduled_meeting(
+    meeting_id: int, session: DbSession, user: CurrentUser
+) -> Response:
+    """잡아 둔 일정을 무른다. **아직 안 연 회의만.**"""
+    meeting = _load_meeting_for(session, meeting_id, user)
+    try:
+        calendar_service.cancel_meeting(session, meeting)
+    except calendar_service.CalendarError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ══════════════════════════════════════════════════════════════
+# 알림 (요구사항 정의서 §19)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **여섯 중 넷만 저장돼 있습니다.** 마감 임박·지연은 지금 상태에서
+# 만들어 붙입니다 — 행으로 쌓으면 마감일을 미뤘을 때 "곧 마감" 이 남고,
+# 끝냈을 때 "지연" 이 남습니다. 자세한 것은 `notification_service` 머리말에.
+
+
+class NoticeOut(BaseModel):
+    kind: str
+    at: datetime
+    #: ⚠️ 저장된 글자가 아니라 **지금 만든** 문장입니다. 업무 이름을 고치면
+    #: 이 문장도 따라옵니다.
+    text: str
+    task_id: int | None
+    meeting_id: int | None
+    message_id: int | None
+    #: 저장된 알림만 번호가 있습니다. 파생(마감)은 `null` —
+    #: ⚠️ 읽었다고 마감이 사라지지 않습니다.
+    notification_id: int | None
+    read: bool
+
+
+class ReadIn(BaseModel):
+    notification_ids: list[int]
+
+
+@app.get("/api/projects/{project_id}/notifications", response_model=list[NoticeOut])
+def read_notifications(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> list[NoticeOut]:
+    """NOTIFICATION-001~005 — 저장된 사건 + 지금 상태에서 나오는 마감."""
+    _require_project_member(session, project_id, user)
+    notices = notification_service.collect(
+        session, user.id, project_id, now=datetime.now(UTC)
+    )
+    return [
+        NoticeOut(
+            kind=n.kind,
+            at=n.at,
+            text=n.text,
+            task_id=n.task_id,
+            meeting_id=n.meeting_id,
+            message_id=n.message_id,
+            notification_id=n.notification_id,
+            read=n.read,
+        )
+        for n in notices
+    ]
+
+
+@app.get("/api/projects/{project_id}/notifications/unread")
+def read_unread_count(
+    project_id: int, session: DbSession, user: CurrentUser
+) -> dict[str, int]:
+    """배지에 쓸 수.
+
+    ⚠️ **마감은 안 셉니다.** 읽어도 안 없어지므로 영영 안 줄어드는 숫자가
+    되고, 그러면 사람은 배지를 아예 안 봅니다.
+    """
+    _require_project_member(session, project_id, user)
+    return {
+        "unread": notification_service.unread_count(
+            session, user.id, project_id, now=datetime.now(UTC)
+        )
+    }
+
+
+@app.post("/api/projects/{project_id}/notifications/read")
+def mark_notifications_read(
+    project_id: int, payload: ReadIn, session: DbSession, user: CurrentUser
+) -> dict[str, int]:
+    """읽음 표시. ⚠️ **남의 알림은 못 읽습니다** — 서비스가 한 번 더 거릅니다."""
+    _require_project_member(session, project_id, user)
+    marked = notification_service.mark_read(session, user.id, payload.notification_ids)
+    session.commit()
+    return {"marked": marked}
+
+
+# ══════════════════════════════════════════════════════════════
+# 활동 기록 (요구사항 정의서 §21 ACTIVITY-001)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **이 엔드포인트가 생기기 전까지 `audit_logs` 는 쓰기만 하고 읽는 곳이
+# 0곳이었습니다.** 열한 곳에서 성실하게 쌓고 있었는데 볼 방법이 없었습니다 —
+# 이 저장소가 대표 실패 ① 로 적어 둔 그것입니다.
+
+
+class ActivityOut(BaseModel):
+    id: int
+    at: datetime
+    action: str
+    #: 사람 말. ⚠️ 서버가 줍니다 — 화면이 두 번째 표를 만들지 않습니다.
+    label: str
+    who: str | None
+    target: str
+    #: 사람의 기여 숫자를 건드린 기록인가. 분쟁에서 제일 먼저 볼 것입니다.
+    touches_contribution: bool
+
+
+@app.get("/api/projects/{project_id}/activity", response_model=list[ActivityOut])
+def read_activity(
+    project_id: int, session: DbSession, user: CurrentUser, limit: int = 100
+) -> list[ActivityOut]:
+    """ACTIVITY-001 — 이 프로젝트에서 일어난 일. 최근 것부터.
+
+    ⚠️ **구성원만** 볼 수 있습니다. 감사 기록에는 누가 무엇을 고쳤는지가
+    그대로 있어서, 남에게 보이면 팀 내부 사정이 통째로 새어 나갑니다.
+    """
+    _require_project_member(session, project_id, user)
+    return [
+        ActivityOut(
+            id=entry.id,
+            at=entry.at,
+            action=entry.action,
+            label=entry.label,
+            who=entry.who,
+            target=entry.target,
+            touches_contribution=entry.touches_contribution,
+        )
+        for entry in activity_service.recent(session, project_id, limit=limit)
+    ]
+
+
+# ══════════════════════════════════════════════════════════════
+# 검색 (요구사항 정의서 §20)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **프로젝트 밖으로 새지 않습니다.** 검색은 회의 전사·팀 대화·기여
+# 근거를 한 상자에서 꺼내는 문이라, 범위가 한 번 새면 남의 팀 회의록이
+# 결과로 나옵니다. 종류마다 `project_id` 로 먼저 좁힙니다.
+#
+# ⚠️ 채팅 검색(SEARCH-001)은 이미 위에 있습니다 — 채널 권한을 같이 봐야
+# 해서 자리가 다릅니다.
+
+
+class HitOut(BaseModel):
+    kind: str
+    task_id: int | None
+    meeting_id: int | None
+    title: str
+    #: ⚠️ **자르지 않은 대목**입니다. 어디를 잘라야 뜻이 사는지는 화면이
+    #: 폭을 알아야 정합니다 — 여기서 자르면 그 판단이 두 벌이 됩니다.
+    body: str
+    at: datetime | None
+    who: str | None
+    status: str | None
+
+
+def _hits_out(hits: list[search_service.Hit]) -> list[HitOut]:
+    return [
+        HitOut(
+            kind=hit.kind,
+            task_id=hit.task_id,
+            meeting_id=hit.meeting_id,
+            title=hit.title,
+            body=hit.body,
+            at=hit.at,
+            who=hit.who,
+            status=hit.status,
+        )
+        for hit in hits
+    ]
+
+
+@app.get("/api/projects/{project_id}/search", response_model=list[HitOut])
+def search_everything(
+    project_id: int,
+    session: DbSession,
+    user: CurrentUser,
+    q: str = "",
+    kind: str | None = None,
+    assignee_id: int | None = None,
+    # ⚠️ **매개변수 이름을 `status` 로 두면 안 됩니다.** 이 파일은
+    #    `from fastapi import status` 를 쓰고 있어서, 그 이름을 가리는
+    #    순간 함수 안의 `status.HTTP_400_BAD_REQUEST` 가
+    #    `AttributeError: 'str' object has no attribute ...` 로 터집니다.
+    #    **오류 경로에서만** 나므로 정상 요청으로는 영영 안 보입니다 —
+    #    잘못된 상태를 넣어 본 테스트가 잡았습니다 (결함 135).
+    task_status: str | None = Query(default=None, alias="status"),
+    priority: int | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> list[HitOut]:
+    """SEARCH-002~005 — 업무·회의·회의 내용·GitHub.
+
+    `kind` 를 주면 그 종류만, 안 주면 전부 찾습니다.
+
+    ⚠️ **구성원만** 찾을 수 있습니다. 회의 전사는 팀 내부 자료입니다.
+    """
+    _require_project_member(session, project_id, user)
+
+    wants = {kind} if kind is not None else {"task", "meeting", "utterance", "github"}
+    hits: list[search_service.Hit] = []
+    try:
+        if "task" in wants:
+            hits += search_service.search_tasks(
+                session,
+                project_id,
+                query=q,
+                assignee_id=assignee_id,
+                status=task_status,
+                priority=priority,
+            )
+        if "meeting" in wants:
+            hits += search_service.search_meetings(
+                session, project_id, query=q, since=since, until=until
+            )
+        if "utterance" in wants:
+            hits += search_service.search_utterances(session, project_id, q)
+        if "github" in wants:
+            hits += search_service.search_github(session, project_id, q)
+    except search_service.SearchError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    return _hits_out(hits)
 
 
 # ══════════════════════════════════════════════════════════════

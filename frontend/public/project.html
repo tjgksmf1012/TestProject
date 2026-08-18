@@ -109,6 +109,109 @@
      녹음 화면에도 같은 것이 필요해서 옮겼습니다. */
   .panel > .sub { max-width: 44rem; }
 
+  /* 프로젝트 상태 (정의서 §18).
+     ⚠️⚠️ **막대를 그리지 마십시오.** 사람별 미완료 건수를 같은 축 위에
+     늘어놓으면 그게 곧 순위표입니다 — 이 저장소가 두 번 어긴 규칙이고,
+     여기는 그중에서도 제일 위험한 자리입니다(부하는 성적으로 읽힙니다).
+     값은 **글자로**, 목록은 **이름 순** 그대로. */
+  .sub-head { font-size: var(--fs-caption); font-weight: 600; color: var(--text-subtle);
+              letter-spacing: .02em; margin: var(--sp-5) 0 var(--sp-2); }
+  .prog { font-size: var(--fs-body); color: var(--text); margin: var(--sp-2) 0 0;
+          font-variant-numeric: tabular-nums; }
+  /* ⚠️ 마감이 지난 건수도 **빨강이 아닙니다.** 이 저장소에서 빨강은
+     "네가 뭘 잘못했다" 로 읽히는데, 이건 팀이 같이 보는 사실입니다. */
+  .prog-late { font-size: var(--fs-label); color: var(--text-muted); margin: var(--sp-1) 0 0; }
+
+  .loads { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap;
+           gap: var(--sp-2) var(--sp-5); font-size: var(--fs-label); }
+  .loads li { display: flex; gap: var(--sp-1); align-items: baseline; }
+  .lname { color: var(--text-muted); }
+  .lnum { color: var(--text); font-weight: 600; }
+  /* 담당자 없는 것. ⚠️ 흙빛(`--gap`)입니다 — 빨강이 아닙니다.
+     "아직 아무도 안 맡았다" 는 잘못이 아니라 **빈 자리**입니다. */
+  .lnone .lname, .lnone .lnum { color: var(--gap); }
+
+  /* ── 회의 개선 추세 (REVIEW-006) ────────────────────────
+     ⚠️ 막대·점 없음 — 값은 글자로. 종류마다 한 줄이고 굵기도 같습니다
+     (굵히면 큰 값이 먼저 읽혀 순위처럼 보입니다). */
+  .trends { list-style: none; padding: 0; margin: 0; display: flex;
+            flex-direction: column; gap: var(--sp-1);
+            font-size: var(--fs-label); color: var(--text-muted); }
+  /* 못 재는 이유 — 흙빛. 회의가 아직 적은 것은 잘못이 아닙니다. */
+  .tnote { font-size: var(--fs-label); color: var(--gap); margin: 0; }
+
+  .rlist { list-style: none; padding: 0; margin: 0;
+           display: flex; flex-direction: column; gap: var(--sp-4); }
+  .rname { font-size: var(--fs-label); font-weight: 600; color: var(--text); margin: 0; }
+  .rwhy { font-size: var(--fs-caption); color: var(--text-muted); margin: var(--sp-1) 0 0;
+          font-variant-numeric: tabular-nums; }
+  /* ── 팀원과 권한 (`PROJECT-003`·`PROJECT-004`) ─────────── */
+  /* ⚠️ **줄을 세우지 않습니다.** 서버가 주는 순서 그대로입니다 — 권한 순
+     으로 정렬하면 맨 위가 "제일 높은 사람" 이 되고, 이 화면이 만들면 안
+     되는 그림입니다. */
+  .mlist { list-style: none; padding: 0; margin: var(--sp-3) 0 0;
+           display: flex; flex-direction: column; gap: var(--sp-2); }
+  .mlist li { display: flex; align-items: center; gap: var(--sp-3);
+              flex-wrap: wrap; min-height: var(--tap); }
+  .mname { font-size: var(--fs-item); color: var(--text); }
+  /* 프로필 이미지 (`USER-004`). 없으면 안 그립니다 — 안 올린 것은 잘못이
+     아니라서 빈 자리를 세지 않습니다. */
+  .mface { width: 28px; height: 28px; border-radius: var(--r-round);
+           object-fit: cover; flex: none; }
+  /* 자기소개 — 한 줄 전부를 차지해 이름 아래로 내려앉습니다. */
+  .mbio { flex-basis: 100%; font-size: var(--fs-caption); color: var(--text-subtle); }
+  /* 지금 붙어 있는가 (`USER-005`).
+     ⚠️ **오프라인에는 아무 표시도 안 붙습니다** — 클래스가 없으면 이
+     규칙이 아예 안 걸립니다. 회색 점을 찍어 "없음" 을 세게 만들지
+     않습니다.
+     ⚠️ 빨강·초록 신호등을 안 씁니다. 색으로 좋고 나쁨을 말하는 순간
+     자리에 없는 것이 잘못이 됩니다. `--primary` 하나만 씁니다. */
+  .pdot { display: inline-block; width: 8px; height: 8px;
+          border-radius: var(--r-round); margin-right: var(--sp-2);
+          vertical-align: middle; }
+  .pdot.here { background: var(--primary); }
+  /* 자리 비움은 **속이 빈 점** — 형태로 말합니다. */
+  .pdot.away { border: 1.5px solid var(--primary); }
+  /* ⚠️ 점만 찍으면 색을 못 보는 사람에게는 아무 표시도 없는 것입니다. */
+  .pstat { margin-left: var(--sp-2); font-size: var(--fs-caption);
+           color: var(--text-subtle); }
+  /* 내 줄을 알아보게. ⚠️ 색이 아니라 **글자**로 말합니다 — 색만으로
+     구분하면 색을 못 보는 사람에게는 아무 표시도 없는 것입니다. */
+  .mme { margin-left: var(--sp-2); font-size: var(--fs-caption);
+         color: var(--text-subtle); }
+  /* ⚠️ **공용 CSS 가 `select` 에 `width: 100%` 를 줍니다.** 그대로 두면
+     칸이 줄 전체를 먹고, 이름·권한·버튼이 한 줄에서 **세 줄로 흩어집니다.**
+     렌더해서 보기 전에는 안 보였습니다 — 값은 다 맞았고 배치만 틀렸습니다.
+     `AGENTS.md` 가 경고하는 그 자리(공용 규칙이 화면 칸을 부풀리는 것)입니다. */
+  .mrole { margin-left: auto; width: auto; min-width: 7rem; }
+  /* 못 바꾸는 사람의 등급 — 잠긴 select 대신 **글자**입니다.
+     ⚠️ `disabled` 된 select 를 두면 "눌리는데 안 눌린다" 로 읽힙니다. */
+  .mrole-flat { margin-left: auto; font-size: var(--fs-caption);
+                color: var(--text-subtle); }
+  /* ⚠️ 되돌릴 수 없는 행동이라 **주된 버튼처럼 보이면 안 됩니다.**
+     빨강도 아닙니다 — 이 저장소에서 빨강은 "네가 뭘 잘못했다" 입니다. */
+  .mout { font-size: var(--fs-caption); }
+  .leave { margin-top: var(--sp-2); }
+
+  /* 근거로 든 업무 — **누르면 그 카드로 갑니다.**
+     ⚠️ 처음엔 글자 그대로 두었더니 폰에서 접촉면이 13×14px 이었고 이웃과
+     6.4px 떨어져 있었습니다. 옆 것을 누릅니다. 누르는 것은 `--tap`(44px)
+     이 하한이라는 것이 이 저장소의 규칙입니다 (`docs/14` §5.3).
+     ⚠️ 쉼표를 글자로 넣지 않습니다 — flex 가 쉼표를 낱개 칸으로 만들어
+     줄 사이에 떠다닙니다(문장을 흩어 놓는 실패). 칸 자체로 나눕니다. */
+  .rsrc { display: flex; flex-wrap: wrap; align-items: center;
+          gap: var(--sp-1); margin: var(--sp-1) 0 0; }
+  .rsrc-label { font-size: var(--fs-caption); color: var(--text-subtle); }
+  .rsrc a { display: inline-flex; align-items: center; justify-content: center;
+            min-height: var(--tap); min-width: var(--tap);
+            padding: 0 var(--sp-2); font-size: var(--fs-caption);
+            font-variant-numeric: tabular-nums;
+            color: var(--text-subtle); text-decoration: none;
+            border: 1px solid var(--line); border-radius: var(--r-ctrl); }
+  @media (hover: hover) and (pointer: fine) {
+    .rsrc a:hover { color: var(--primary); border-color: var(--primary); }
+  }
+
   /* 저장 버튼은 **보조**입니다 (브리프 §14). 이 화면의 주 행동은
      `회의를 열고 로비로` 하나뿐이고, 나머지는 값을 고친 뒤 눌러
      확정하는 것입니다. 여섯 개가 다 청록이면 주 행동이 사라집니다. */

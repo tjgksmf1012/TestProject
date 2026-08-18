@@ -22,7 +22,7 @@
  * 이스케이프합니다. 손으로 부르는 것보다 안전합니다 — 빠뜨릴 자리가 없어서.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type DragEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -38,9 +38,12 @@ import {
   toColumns,
   type Task,
 } from '../lib/kanban/board.ts';
+import { canDropOn, draggedTaskId, dragPayload, TASK_DRAG_TYPE } from '../lib/kanban/dnd.ts';
+import { assigneeText, splitNote, toggled } from '../lib/kanban/assignees.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
+import { deleteTaskConfirm } from '../lib/project/roles.ts';
 import { withJosa } from '../lib/text/josa.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
@@ -147,35 +150,109 @@ function PullList({ task }: { task: Task }) {
   );
 }
 
+/**
+ * 담당자를 바꾸는 자리 (`TASK-006`).
+ *
+ * ## ⚠️ 이 자리가 없어서 요구가 반쪽이었습니다
+ *
+ * 담당자는 **회의 업무 후보를 승인할 때 한 번** 정해지고 그 뒤로는 바꿀
+ * 방법이 없었습니다. 사람이 빠지거나 일을 넘겨받아도 칸반은 옛 이름을
+ * 계속 말했고, 기여 이벤트는 계속 그 사람 앞으로 갔습니다.
+ *
+ * ## ⚠️ 접어 둡니다
+ *
+ * 카드마다 이름 목록을 펼쳐 두면 보드가 체크박스 밭이 됩니다. 매일
+ * 하는 일은 카드를 옮기는 것이지 담당자를 바꾸는 것이 아닙니다.
+ */
+function AssigneePicker({
+  task,
+  members,
+  moving,
+  onAssign,
+}: {
+  task: Task;
+  members: Member[];
+  moving: boolean;
+  onAssign: (userIds: number[]) => void;
+}) {
+  if (members.length === 0) return null;
+  return (
+    <details className="whoedit">
+      <summary>담당자 바꾸기</summary>
+      <div className="whoedit-body">
+        {members.map((member) => (
+          <label key={member.user_id}>
+            <input
+              type="checkbox"
+              checked={task.assignee_ids.includes(member.user_id)}
+              disabled={moving}
+              /* ⚠️ 넣고 빼는 계산은 `lib/kanban/assignees.ts` 가 합니다.
+                 여기서 배열을 주무르면 같은 판단이 두 벌이 됩니다. */
+              onChange={() => onAssign(toggled(task.assignee_ids, member.user_id))}
+            />
+            {member.name}
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function Card({
   task,
   today,
   statuses,
   members,
   moving,
+  beingDragged,
   onMove,
+  onDelete,
+  onAssign,
+  onDragStart,
+  onDragEnd,
 }: {
   task: Task;
   today: string;
   statuses: string[];
   members: Member[];
   moving: boolean;
+  beingDragged: boolean;
   onMove: (to: string) => void;
+  onDelete: () => void;
+  onAssign: (userIds: number[]) => void;
+  onDragStart: (e: DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
 }) {
   const warnings = taskWarnings(task, today);
-  const who =
-    task.assignee_id === null
-      ? '담당자 없음'
-      : (members.find((m) => m.user_id === task.assignee_id)?.name ??
-        `사용자 #${task.assignee_id}`);
+  const split = splitNote(task.assignee_ids);
 
   return (
-    <article className="task" data-id={task.id}>
+    <article
+      className={beingDragged ? 'task dragging' : 'task'}
+      data-id={task.id}
+      /* ⭐ 끌기 (`TASK-005`) — **버튼에 더하는** 마우스 지름길입니다.
+         HTML5 DnD 라 터치에서는 아예 안 돌고, 키보드·낭독기에게는 처음부터
+         없는 기능입니다. 그 사람들의 길이 아래 `.move` 버튼이므로 버튼을
+         지우면 안 됩니다 — 가드가 짝을 잽니다. */
+      draggable={!moving}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}>
       <p className="title">{task.title}</p>
       <p className="meta">
-        {who}
+        {assigneeText(task.assignee_ids, members)}
         {task.deadline ? ` · 마감 ${task.deadline}` : ''}
       </p>
+
+      {/* ⭐ **나눠 셌다는 사실을 카드가 말합니다** (`TASK-006`).
+          안 적으면 사람은 같이 한 업무 때문에 자기 기여도가 낮게 나온
+          이유를 모릅니다 — 결과만 주고 이유를 안 주는 것이고, 이 저장소의
+          대표 실패 ③ 과 같은 모양입니다.
+
+          ⚠️ 흙빛(`--gap`)입니다. 빨강이 아닙니다 — 같이 맡은 것은 잘못이
+          아니라 그냥 사실입니다. */}
+      {split !== null && <p className="shared">{split}</p>}
+
+      <AssigneePicker task={task} members={members} moving={moving} onAssign={onAssign} />
 
       {/* ⭐ 이 프로젝트의 주장이 화면에서 보이는 지점. 이게 없으면 이
           화면은 그냥 할 일 목록입니다.
@@ -199,6 +276,17 @@ function Card({
       {warnings.length > 0 && <p className="gapmark">기여도에 반영 안 됨</p>}
 
       <div className="moves">
+        {/* ⭐ 지우기 (`TASK-003`).
+
+            ⚠️ **팀원도 지웁니다.** 관리자만 지울 수 있으면 사람들은
+            지우는 대신 완료 칸으로 밀어 넣고, 그러면 진행률이 거짓이
+            되어 기여도와 보고서로 흘러갑니다.
+
+            ⚠️ 빨강이 아닙니다. 이 저장소에서 빨강은 "네가 뭘 잘못했다"
+            이고, 카드를 지우는 것은 잘못이 아닙니다. */}
+        <button className="drop" disabled={moving} onClick={() => onDelete()}>
+          지우기
+        </button>
         {nextStatuses(task, statuses).map((s) => (
           <button
             key={s}
@@ -234,6 +322,15 @@ function Kanban() {
   const [error, setError] = useState('');
   // 옮기는 동안 잠급니다. 두 번 눌러 두 칸 건너뛰는 것을 막습니다.
   const [moving, setMoving] = useState(false);
+  /**
+   * 지금 끌고 있는 카드 (`TASK-005`).
+   *
+   * ⚠️ `dragover` 에서는 `dataTransfer` 의 **값을 못 읽습니다**(브라우저가
+   * drop 전에는 형식 이름만 보여 줍니다). 어느 열을 밝힐지는 이 상태로
+   * 판단하고, 값은 drop 에서 읽어 **다시 검증**합니다 — drop 은 다른 창의
+   * 끌기로도 일어날 수 있습니다.
+   */
+  const [dragTask, setDragTask] = useState<Task | null>(null);
   // 스켈레톤을 **켤 때만** 켜지는 깃발.
   const [slow, setSlow] = useState(false);
 
@@ -291,6 +388,61 @@ function Kanban() {
     })();
   }, [load]);
 
+  // ⭐ `?task=N` 으로 들어오면 **그 카드까지 데려다 줍니다.**
+  //
+  // 프로젝트 상태 화면의 근거 링크(`analytics/view.ts::taskHref`)가 여기로
+  // 옵니다. 이게 없으면 근거를 눌러도 판만 열리고, 열두 장 중 어느 것인지
+  // 사람이 다시 찾아야 합니다 — 링크가 있는데 도착을 안 시키는 것은 링크가
+  // 없는 것과 거의 같습니다.
+  //
+  // ⚠️ 숫자인지 먼저 봅니다. 주소창에서 온 글자를 그대로 선택자에 넣으면
+  //    남이 판을 열어 놓고 아무 선택자나 던질 수 있습니다.
+  useEffect(() => {
+    if (screen.k !== 'ok') return;
+    const wanted = params.get('task');
+    if (wanted === null || !/^\d+$/.test(wanted)) return;
+    const card = document.querySelector(`.task[data-id="${wanted}"]`);
+    if (card === null) return;
+    card.classList.add('found');
+    card.scrollIntoView({ block: 'center' });
+  }, [screen]);
+
+  /**
+   * 업무를 지운다 (`TASK-003`).
+   *
+   * ⚠️ **먼저 묻습니다.** 되돌릴 방법을 화면이 안 줍니다.
+   * ⚠️ 문구는 `lib/project/roles.ts` 가 만듭니다 — 조사(`을/를`)를
+   *    받침 보고 골라야 하고, 그건 판단이라 화면에 두면 안 됩니다.
+   */
+  const drop = async (task: Task): Promise<void> => {
+    if (!confirm(deleteTaskConfirm(task.title))) return;
+    setMoving(true);
+    try {
+      const response = await trySend(() =>
+        fetch(`${apiBase}/api/projects/${projectId}/tasks/${task.id}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        }),
+      );
+      if (response === null) {
+        setError(unreachableText('지우지 못했습니다'));
+        return;
+      }
+      if (isSessionExpired(response.status)) {
+        goToLogin();
+        return;
+      }
+      if (!response.ok) {
+        setError(`지우지 못했습니다 (${describeHttpStatus(response.status)})`);
+        return;
+      }
+      setError('');
+      await load();
+    } finally {
+      setMoving(false);
+    }
+  };
+
   const move = async (taskId: number, to: string): Promise<void> => {
     setMoving(true);
     try {
@@ -334,12 +486,62 @@ function Kanban() {
     }
   };
 
+  /**
+   * 담당자를 바꾼다 (`TASK-006`).
+   *
+   * ⚠️ **더하기·빼기가 아니라 통째로 보냅니다.** 서버가 받은 목록으로
+   * 바꿉니다 — 차이를 화면에서 계산하면 그 계산이 두 곳으로 갈라집니다.
+   *
+   * ⚠️ 응답으로 온 카드만 갈아 끼웁니다. 판 전체를 다시 받으면 스크롤이
+   * 튀고, 방금 연 서랍이 닫힙니다.
+   */
+  const assign = async (taskId: number, userIds: number[]): Promise<void> => {
+    setMoving(true);
+    try {
+      const response = await trySend(() =>
+        fetch(`${apiBase}/api/projects/${projectId}/tasks/${taskId}/assignees`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_ids: userIds }),
+          credentials: 'same-origin',
+        }),
+      );
+      if (response === null) {
+        setError(unreachableText('담당자를 바꾸지 못했습니다'));
+        return;
+      }
+      if (isSessionExpired(response.status)) {
+        goToLogin();
+        return;
+      }
+      if (!response.ok) {
+        setError(`담당자를 바꾸지 못했습니다 (${describeHttpStatus(response.status)})`);
+        return;
+      }
+      const updated = (await response.json()) as Task;
+      setError('');
+      setScreen((prev) =>
+        prev.k !== 'ok'
+          ? prev
+          : {
+              ...prev,
+              data: {
+                ...prev.data,
+                tasks: prev.data.tasks.map((t) => (t.id === updated.id ? updated : t)),
+              },
+            },
+      );
+    } finally {
+      setMoving(false);
+    }
+  };
+
   const header = (
     <>
       <header className="head">
         <h1>칸반</h1>
         <p className="lede">회의에서 승인된 업무와 직접 만든 업무가 단계별로 놓입니다.</p>
-        {me !== null && <Byline name={me.name} what="보는 중" />}
+        {me !== null && <Byline name={me.name} avatar={me.avatar} what="보는 중" />}
       </header>
     </>
   );
@@ -448,7 +650,35 @@ function Kanban() {
       ) : (
         <div id="board" className="board">
           {toColumns(tasks, statuses).map((column) => (
-            <section className="col" key={column.label}>
+            <section
+              /* ⭐ 놓을 수 있는 열만 밝힙니다 — 허용 범위는 버튼과 같은
+                 `nextStatuses` 에서 옵니다(`canDropOn` 이 위임). */
+              className={
+                dragTask !== null && canDropOn(dragTask, column.status, statuses)
+                  ? 'col dropok'
+                  : 'col'
+              }
+              key={column.label}
+              onDragOver={(e) => {
+                if (moving || dragTask === null) return;
+                if (!canDropOn(dragTask, column.status, statuses)) return;
+                // 기본값이 「못 놓음」 입니다 — 허용할 때만 풉니다.
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const id = draggedTaskId(e.dataTransfer.getData(TASK_DRAG_TYPE));
+                setDragTask(null);
+                if (moving || id === null) return;
+                // ⚠️ 상태에 든 카드가 아니라 **건너온 id 로 다시** 찾고
+                //    다시 판정합니다. drop 은 아무나 일으킬 수 있습니다.
+                const dropped = tasks.find((t) => t.id === id);
+                if (dropped === undefined) return;
+                if (!canDropOn(dropped, column.status, statuses)) return;
+                void move(dropped.id, column.status);
+              }}
+            >
               <h2>
                 {column.label} <span className="n">{column.tasks.length}</span>
               </h2>
@@ -463,7 +693,16 @@ function Kanban() {
                     statuses={statuses}
                     members={members}
                     moving={moving}
+                    beingDragged={dragTask !== null && dragTask.id === task.id}
                     onMove={(to) => void move(task.id, to)}
+                    onDelete={() => void drop(task)}
+                    onAssign={(userIds) => void assign(task.id, userIds)}
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(TASK_DRAG_TYPE, dragPayload(task.id));
+                      e.dataTransfer.effectAllowed = 'move';
+                      setDragTask(task);
+                    }}
+                    onDragEnd={() => setDragTask(null)}
                   />
                 ))
               )}

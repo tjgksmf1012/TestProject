@@ -49,6 +49,34 @@ import {
 import { whileLoading } from '../lib/ui/pending.ts';
 import { rows as skeletonRows } from '../lib/ui/skeleton.ts';
 import { NoteLine, type Note } from './parts.tsx';
+import {
+  LOAD_NOTE,
+  NOTHING_FOUND,
+  overdueText,
+  progressText,
+  PROGRESS_NOTE,
+  RULES_NOTE,
+  signalViews,
+  srcView,
+  taskHref,
+  type Analytics,
+} from '../lib/analytics/view.ts';
+import {
+  allQuiet,
+  notMeasurableText,
+  QUIET_TEXT,
+  TRENDS_NOTE,
+  trendLine,
+} from '../lib/analytics/trends.ts';
+import { presenceDot, presenceLabel, worthShowing } from '../lib/project/presence.ts';
+import {
+  assignableRoles,
+  canChangeRoleOf,
+  canRemove,
+  LEAVE_CONFIRM,
+  leaveBlockedBecause,
+  roleLabel,
+} from '../lib/project/roles.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -129,8 +157,123 @@ function Emphasized({ text }: { text: string }) {
 // 화면
 // ══════════════════════════════════════════════════════════════
 
+/**
+ * 프로젝트가 지금 어떤 상태인가 (정의서 §18 · 제안서 §4.5).
+ *
+ * > **제출 직전이 아니라 진행 중에 문제를 발견한다.**
+ *
+ * ## ⚠️ 이 구역은 사람을 평가하지 않습니다
+ *
+ * 부하 목록이 사람별 숫자를 냅니다. 그래서 리더보드로 오해되기 제일 쉬운
+ * 자리이고, 셋으로 막습니다.
+ *
+ * 1. **이름 순** — 서버가 그렇게 내려보내고 화면은 다시 정렬하지 않습니다
+ * 2. **막대 없음** — 값을 같은 축에 늘어놓으면 그게 곧 순위표입니다
+ * 3. **"기여도가 아닙니다" 를 화면이 말합니다** — 안 적으면 성적으로 읽힙니다
+ */
+function ProjectHealth({ data }: { data: Analytics | null }) {
+  if (data === null) return null;
+
+  const views = signalViews(data.signals);
+  const late = overdueText(data.progress);
+
+  return (
+    // ⚠️ `pstate` 는 스타일용이 아니라 **셀 자리**입니다. 이 이름이 없을
+    //    때 검사 스크립트가 `.health`(=GitHub 연결 진단)를 대신 집어서,
+    //    남의 칸을 재 놓고 "막대 없음·빨강 없음" 이라고 적을 뻔했습니다.
+    //    ⚠️ `health` 로 짓지 마십시오 — 그 이름은 이미 임자가 있습니다.
+    <section className="panel pstate">
+      <h2>프로젝트 상태</h2>
+      <p className="sub">{RULES_NOTE}</p>
+
+      <p className="prog">{progressText(data.progress)}</p>
+      {/* ⚠️ 검토 중인 것이 왜 안 들어가는지 안 적으면 "버그" 로 읽힙니다. */}
+      <p className="sub">{PROGRESS_NOTE}</p>
+      {late !== null && <p className="prog-late">{late}</p>}
+
+      <h3 className="sub-head">지금 맡고 있는 일</h3>
+      {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
+      <p className="sub">{LOAD_NOTE.replace(/\*\*/g, '')}</p>
+      <ul className="loads">
+        {data.load.map((row) => (
+          <li key={row.user_id ?? 'none'} className={row.user_id === null ? 'lnone' : undefined}>
+            <span className="lname">{row.name}</span>
+            <span className="lnum tabular-nums">{row.open_tasks}</span>
+          </li>
+        ))}
+      </ul>
+
+      <h3 className="sub-head">눈에 띈 것</h3>
+      {views.length === 0 ? (
+        <p className="sub">{NOTHING_FOUND}</p>
+      ) : (
+        <ul className="rlist">
+          {views.map((view) => {
+            const src = srcView(view.taskIds);
+            return (
+            <li key={view.kind}>
+              <p className="rname">{view.title}</p>
+              {view.reason !== null && <p className="rwhy">{view.reason}</p>}
+              {/* ⚠️ **누를 수 있어야 합니다.** 맨 위에서 "근거를 눌러 직접
+                  보세요" 라고 해 놓고 글자만 있던 적이 있습니다.
+                  ⚠️ 그리고 **손가락으로** 누를 수 있어야 합니다 — 링크로
+                  바꾼 첫 판은 폰에서 13px 짜리였습니다. */}
+              {view.taskIds.length > 0 && (
+                <div className="rsrc">
+                  <span className="rsrc-label">근거 업무</span>
+                  {src.shown.map((id) => (
+                    <a key={id} href={taskHref(projectId, id)}>
+                      #{id}
+                    </a>
+                  ))}
+                  {/* ⚠️ 자른 것을 **말합니다.** 조용히 자르면 화면이
+                      "이게 전부" 로 읽힙니다. */}
+                  {src.more > 0 && <span className="rsrc-label">외 {src.more}건</span>}
+                </div>
+              )}
+            </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {/* ⭐ 회의 개선 추세 (`REVIEW-006`).
+          ⚠️ 막대·점 없음 — 값은 글자로 (불변식 1). 회의별 값은 서버가
+          아예 안 줍니다 — 회의를 짚는 순간 회의 순위표가 됩니다. */}
+      <h3 className="sub-head">회의에서 눈에 띈 것의 추세</h3>
+      <p className="sub">{TRENDS_NOTE}</p>
+      {!data.meeting_trends.measurable ? (
+        // ⚠️ 흙빛 — 회의가 아직 적은 것은 잘못이 아니라 사실입니다.
+        <p className="tnote">{notMeasurableText(data.meeting_trends)}</p>
+      ) : allQuiet(data.meeting_trends.kinds) ? (
+        <p className="sub">{QUIET_TEXT}</p>
+      ) : (
+        <ul className="trends">
+          {data.meeting_trends.kinds.map((kind) => (
+            <li key={kind.kind}>{trendLine(kind)}</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+interface TeamMember {
+  user_id: number;
+  name?: string;
+  role_shares?: Record<string, number>;
+  github_login?: string | null;
+  project_role?: string;
+  presence?: string;
+  /** 자기소개 (`USER-004`) — 홈의 「내 정보」 에서 적습니다. */
+  bio?: string | null;
+  /** 프로필 이미지 (`USER-004`) — 데이터 URI 그대로. */
+  avatar?: string | null;
+}
+
 function ProjectSettings() {
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [error, setError] = useState('');
   const [title, setTitle] = useState('');
   const [repo, setRepo] = useState('');
@@ -138,6 +281,9 @@ function ProjectSettings() {
   const [copyNote, setCopyNote] = useState<Note | null>(null);
   const [copyLabel, setCopyLabel] = useState('코드 복사');
   const [health, setHealth] = useState<HealthView | null>(null);
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  const [myId, setMyId] = useState<number | null>(null);
+  const [teamNote, setTeamNote] = useState<Note | null>(null);
   const [slow, setSlow] = useState(false);
   const [backfill, setBackfill] = useState<Note | null>(null);
   const [roles, setRoles] = useState<Record<string, number>>({});
@@ -175,15 +321,15 @@ function ProjectSettings() {
   const loadRoles = useCallback(async (): Promise<void> => {
     const response = await call(`/api/projects/${projectId}/members`);
     if (response === null || !response.ok) return;
-    const members = (await response.json()) as {
-      user_id: number;
-      role_shares?: Record<string, number>;
-      github_login?: string | null;
-    }[];
+    const members = (await response.json()) as TeamMember[];
     const meRes = await call('/api/auth/me');
     if (meRes === null || !meRes.ok) return;
     const me = (await meRes.json()) as { user_id: number };
     const mine = members.find((entry) => entry.user_id === me.user_id);
+    // ⚠️ 명단과 "나" 를 같이 들고 있어야 합니다. 누구를 바꿀 수 있는지는
+    //    **내 등급과 상대 등급을 같이 봐야** 정해집니다.
+    setTeam(members);
+    setMyId(me.user_id);
     setRoles(mine?.role_shares ?? {});
     setRoleMessage({ text: `지금 ${describeRoles(mine?.role_shares)}`, tone: 'plain' });
     // ⚠️ **저장한 것이 화면으로 돌아와야 합니다.** 안 돌아오면 사람은 매번
@@ -191,6 +337,61 @@ function ProjectSettings() {
     setGhLogin(mine?.github_login ?? '');
     setGhLoginMessage({ text: githubLoginStatus(mine?.github_login ?? null), tone: 'plain' });
   }, []);
+
+  /** 남의 권한을 바꾼다. ⚠️ 서버가 거절하면 **이유를 그대로 보여 줍니다.** */
+  const changeRole = async (userId: number, role: string): Promise<void> => {
+    const response = await send(
+      `/api/projects/${projectId}/members/${userId}/role`,
+      { method: 'PATCH', body: JSON.stringify({ project_role: role }) },
+    );
+    if (response === null) {
+      setTeamNote({ text: unreachableText('권한을 바꾸지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    if (!response.ok) {
+      setTeamNote({ text: await detailText(response, '권한을 바꾸지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    setTeamNote({ text: '권한을 바꿨습니다.', tone: 'plain' });
+    await loadRoles();
+  };
+
+  const removeMember = async (userId: number, name: string): Promise<void> => {
+    // ⚠️ 되돌릴 수 없으므로 먼저 묻습니다.
+    if (!confirm(`${name} 님을 팀에서 내보냅니다. 맡은 업무와 회의 기록은 남습니다.`)) {
+      return;
+    }
+    const response = await send(`/api/projects/${projectId}/members/${userId}`, {
+      method: 'DELETE',
+    });
+    if (response === null) {
+      setTeamNote({ text: unreachableText('내보내지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    if (!response.ok) {
+      setTeamNote({ text: await detailText(response, '내보내지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    setTeamNote({ text: `${name} 님이 팀에서 빠졌습니다.`, tone: 'plain' });
+    await loadRoles();
+  };
+
+  const leave = async (): Promise<void> => {
+    if (!confirm(LEAVE_CONFIRM)) return;
+    const response = await send(`/api/projects/${projectId}/members/me/leave`, {
+      method: 'POST',
+    });
+    if (response === null) {
+      setTeamNote({ text: unreachableText('나가지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    if (!response.ok) {
+      setTeamNote({ text: await detailText(response, '나가지 못했습니다'), tone: 'bad' });
+      return;
+    }
+    // 나간 프로젝트는 더 볼 수 없습니다. 빈 화면에 남겨 두면 오류로 읽힙니다.
+    location.href = '/home.html';
+  };
 
   const load = useCallback(async (): Promise<void> => {
     const response = await call(`/api/projects/${projectId}`);
@@ -210,11 +411,21 @@ function ProjectSettings() {
     applyDetail((await response.json()) as Detail);
   }, []);
 
+  const loadAnalytics = useCallback(async (): Promise<void> => {
+    // ⚠️ 이것 하나가 실패해도 설정 화면 전체를 못 쓰게 만들지 않습니다 —
+    //    역할·GitHub 설정은 프로젝트 상태 없이도 고칠 수 있습니다.
+    //    `ok` 일 때만 그리고, 아니면 구역 자체가 안 나옵니다.
+    const response = await call(`/api/projects/${projectId}/analytics`);
+    if (response === null || !response.ok) return;
+    setAnalytics((await response.json()) as Analytics);
+  }, []);
+
   useEffect(() => {
     void load();
     void loadHealth();
     void loadRoles();
-  }, [load, loadHealth, loadRoles]);
+    void loadAnalytics();
+  }, [load, loadHealth, loadRoles, loadAnalytics]);
 
   /** 잠그고 → 하고 → 푼다. 여덟 자리가 같은 모양이라 한 곳에 둡니다. */
   const guarded = async (run: () => Promise<void>): Promise<void> => {
@@ -437,6 +648,12 @@ function ProjectSettings() {
   const inviteCode = detail?.invite_code || null;
   const roleTotal = sumOf(roles);
 
+  const myRole = team.find((entry) => entry.user_id === myId)?.project_role ?? null;
+  const leaveWhy = leaveBlockedBecause(
+    myRole,
+    team.map((entry) => entry.project_role ?? 'member'),
+  );
+
   return (
     <>
       <header className="head">
@@ -449,6 +666,114 @@ function ProjectSettings() {
       <p className="meta-line" id="members">
         {detail === null ? '' : `팀원 ${detail.member_count}명`}
       </p>
+
+      <ProjectHealth data={analytics} />
+
+      {/* ⭐ 팀원과 권한 (`PROJECT-003`·`PROJECT-004`).
+
+          ⚠️ 여기 버튼을 숨기는 것은 **보안이 아닙니다.** 진짜 문은
+          서버입니다. 여기서 하는 일은 못 하는 버튼을 안 보여 주는
+          것뿐입니다 — 눌렀더니 403 이 뜨는 화면은 "고장" 으로 읽힙니다.
+
+          ⚠️ **줄을 세우지 않습니다.** 서버가 주는 순서 그대로 씁니다.
+          권한 순으로 정렬하면 맨 위가 "제일 높은 사람" 이 되고, 그건
+          이 화면이 만들면 안 되는 그림입니다. */}
+      {team.length > 0 && (
+        <section className="panel team">
+          <h2>팀원</h2>
+          <p className="sub">
+            권한은 무엇을 바꿀 수 있는가입니다. 기여도 가중치(위의 내 역할)와는 다릅니다.
+          </p>
+          <ul className="mlist">
+            {team.map((person) => {
+              const isMe = person.user_id === myId;
+              const canEdit = canChangeRoleOf(myRole, person.project_role, { isMe });
+              const options = assignableRoles(myRole);
+              return (
+                <li key={person.user_id}>
+                  {/* 프로필 이미지 (`USER-004`). 없으면 아무것도 안 그립니다 —
+                      안 올린 것은 잘못이 아니라서 빈 동그라미로 세지 않습니다. */}
+                  {typeof person.avatar === 'string' && person.avatar !== '' && (
+                    <img className="mface" src={person.avatar} alt="" />
+                  )}
+                  <span className="mname">
+                    {/* ⭐ 지금 붙어 있는가 (`USER-005`).
+                        ⚠️ **오프라인은 안 그립니다** — 팀 대부분이 그
+                        상태라 다 그리면 목록이 회색 점으로 덮이고,
+                        "누가 없는지" 를 한눈에 세게 만듭니다.
+                        ⚠️ 색으로만 말하지 않습니다. 점만 찍으면 색을 못
+                        보는 사람에게는 아무 표시도 없는 것입니다. */}
+                    {worthShowing(person.presence) && (
+                      <span className={`pdot ${presenceDot(person.presence)}`} aria-hidden="true" />
+                    )}
+                    {person.name ?? `사용자 #${person.user_id}`}
+                    {worthShowing(person.presence) && (
+                      <span className="pstat">{presenceLabel(person.presence)}</span>
+                    )}
+                    {isMe && <span className="mme">나</span>}
+                  </span>
+                  {canEdit ? (
+                    <select
+                      className="mrole"
+                      value={person.project_role ?? 'member'}
+                      onChange={(e) => void changeRole(person.user_id, e.target.value)}
+                      aria-label={`${person.name ?? ''} 권한`}
+                    >
+                      {/* ⚠️ 지금 값이 목록에 없을 수 있습니다(내가 줄 수 없는
+                          등급). 빼면 select 가 엉뚱한 값을 보여 줍니다. */}
+                      {!options.includes((person.project_role ?? 'member') as never) && (
+                        <option value={person.project_role ?? 'member'}>
+                          {roleLabel(person.project_role)}
+                        </option>
+                      )}
+                      {options.map((r) => (
+                        <option key={r} value={r}>
+                          {roleLabel(r)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="mrole-flat">{roleLabel(person.project_role)}</span>
+                  )}
+                  {canRemove(myRole, person.project_role, { isMe }) && (
+                    <button
+                      className="mout"
+                      onClick={() =>
+                        void removeMember(
+                          person.user_id,
+                          person.name ?? `사용자 #${person.user_id}`,
+                        )
+                      }
+                    >
+                      내보내기
+                    </button>
+                  )}
+                  {/* 자기소개 (`USER-004`) — 적을 수 있는데 아무도 못 보면
+                      "할 일을 알려 주고 자리를 안 줌" 입니다. 여기가 그 자리. */}
+                  {typeof person.bio === 'string' && person.bio !== '' && (
+                    <span className="mbio">{person.bio}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+
+          <NoteLine note={teamNote} />
+
+          {/* ⭐ 나가기 (`PROJECT-006`).
+              ⚠️ 막힐 때 **버튼을 지우지 않고 이유를 말합니다.** 없어진
+              버튼은 "이 화면은 나갈 수 없다" 가 아니라 "고장" 으로
+              읽힙니다. */}
+          <h3 className="sub-head">이 프로젝트에서 나가기</h3>
+          {leaveWhy === null ? (
+            <button className="leave" onClick={() => void leave()}>
+              나가기
+            </button>
+          ) : (
+            <p className="sub">{leaveWhy}</p>
+          )}
+        </section>
+      )}
 
       {/* ⭐ 역할. 이 값이 기여도 **가중치**를 정합니다 — 바꿀 자리가 없던
           동안 전원이 개발자로 계산돼, 문서만 쓴 사람이 이유 없이 낮게

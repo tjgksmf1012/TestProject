@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="TeamFlow" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<link rel="stylesheet" href="/tokens.css" />
+<link rel="stylesheet" href="/app.css" />
+<title>일정 — TeamFlow</title>
+<style>
+
+  /* ══ 일정 ═════════════════════════════════════════════════
+
+     ⚠️ **달력에는 값이 없습니다.** 칸에 적히는 것은 "몇 건" 이라는 개수뿐
+     이고, 그건 기여가 아니라 할 일의 수입니다. 값을 폭이나 높이로 그리는
+     규칙이 하나도 없습니다 (`AGENTS.md` 불변식 1). */
+
+  /* ── 달 옮기기 ─────────────────────────────────────── */
+  .mbar { display: flex; flex-wrap: wrap; align-items: center;
+          justify-content: space-between; gap: var(--sp-3);
+          margin: 0 0 var(--sp-5); }
+  .mbar button { min-height: var(--tap); padding: var(--sp-2) var(--sp-4);
+                 background: var(--surface); border: 1px solid var(--line);
+                 border-radius: var(--r-ctrl); color: var(--text); }
+  .mhead { font-size: var(--fs-title); letter-spacing: var(--ls-title); margin: 0; }
+
+  /* ── 격자 ─────────────────────────────────────────────
+
+     ⚠️ 일곱 열 고정입니다. 폰에서 열을 줄이면 요일이 안 맞고, 달력에서
+     요일이 안 맞으면 그건 달력이 아닙니다. 대신 **칸을 작게** 만듭니다. */
+  .grid { display: grid; grid-template-columns: repeat(7, 1fr);
+          gap: var(--sp-1); margin: 0 0 var(--sp-8); }
+
+  .wd { text-align: center; font-size: var(--fs-caption);
+        color: var(--text-subtle); padding: var(--sp-1) 0; }
+
+  .cell {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: flex-start; gap: var(--sp-1);
+    /* ⚠️ 손가락 하한. 날짜 칸은 누르는 것입니다. */
+    min-height: var(--tap);
+    padding: var(--sp-2) var(--sp-1);
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-card); color: var(--text);
+    font-size: var(--fs-caption);
+  }
+
+  /* 이웃 달 칸. ⚠️ **지우지 않고 흐리게** 둡니다 — 빈칸을 두면 격자가
+     끊겨 보이고, 지난달 말일에 걸린 마감이 사라집니다. */
+  .cell.out { color: var(--text-subtle); background: transparent; border-color: transparent; }
+
+  /* 오늘. ⚠️ 색을 채우지 않고 **테두리**로 표시합니다 — 한 칸만 색이 차면
+     그 칸이 화면에서 가장 진한 것이 되고, 그건 "오늘 뭔가 있다" 로 읽힙니다. */
+  .cell.today { border-color: var(--primary); }
+  .cell.picked { border-color: var(--primary); background: var(--primary-tint); }
+
+  .dnum { font-variant-numeric: tabular-nums; }
+
+  /* 그 날의 건수. ⚠️ **글자**입니다 — 점을 개수만큼 찍으면 그게 곧
+     막대가 되고, 막대는 순위표입니다. */
+  .dots { min-width: 1.25rem; padding: 0 var(--sp-1);
+          border-radius: var(--r-round); background: var(--line);
+          color: var(--text-muted); font-size: var(--fs-caption);
+          font-variant-numeric: tabular-nums; }
+
+  /* ⚠️ 늦은 것은 **경고색**입니다. 흙빛(`--gap`)이 아닙니다 — 흙빛은 이
+     저장소 전체에서 "못 쟀다" 는 뜻이고, 늦은 것은 잰 사실입니다.
+
+     ⚠️ 새 hex 를 만들지 않습니다. 바탕은 `--bad` 에서 `color-mix()` 로
+     파생시킵니다 (`tokens.css` 머리말). */
+  .dots.late { background: color-mix(in oklab, var(--bad) 14%, transparent);
+               color: var(--bad); font-weight: 600; }
+
+  /* ── 그 날에 있는 일 ─────────────────────────────── */
+  .detail { max-width: 44rem; margin: 0 0 var(--sp-8); }
+  .dbar { display: flex; flex-wrap: wrap; align-items: baseline;
+          justify-content: space-between; gap: var(--sp-3); margin: 0 0 var(--sp-3); }
+  .dbar button { min-height: var(--tap); padding: var(--sp-1) var(--sp-3);
+                 background: transparent; border: 1px solid var(--line);
+                 border-radius: var(--r-ctrl); color: var(--text-muted);
+                 font-size: var(--fs-caption); }
+  .shead { font-size: var(--fs-item); letter-spacing: var(--ls-item); margin: 0; }
+
+  /* ⚠️ 줄마다 가로선을 긋지 않습니다 — 열 줄이면 선이 열하나가 되고, 그
+     선들이 화면에서 가장 진한 것이 됩니다. 나누는 일은 여백이 합니다. */
+  .ilist { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--sp-3); }
+  .ilist li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3); }
+
+  /* 며칠. ⚠️ 숫자를 오른쪽 맞춤으로 — `tabular-nums` 만으로는 자릿수가
+     다른 날(9일·10일)이 어긋나 보입니다. */
+  .iday { flex: none; min-width: 2.75rem; text-align: right;
+          font-size: var(--fs-caption); color: var(--text-subtle);
+          font-variant-numeric: tabular-nums; }
+
+  .kind { flex: none; min-width: 5.5rem; font-size: var(--fs-caption);
+          color: var(--text-subtle); }
+  .kind.late { color: var(--bad); font-weight: 600; }
+  .ititle { font-size: var(--fs-label); color: var(--text); }
+  .iwho { font-size: var(--fs-caption); color: var(--text-subtle); }
+
+  /* ── 일정 잡기 ─────────────────────────────────────── */
+  .sform { display: grid; gap: var(--sp-2); max-width: 26rem; }
+  .clabel { font-size: var(--fs-caption); color: var(--text-subtle); }
+
+  /* ⚠️ 손가락에서는 입력 칸 글자를 16px 밑으로 내리지 않습니다 — 그
+     아래면 iOS 가 입력할 때 화면을 확대합니다. */
+  @media (hover: none) and (pointer: coarse) {
+    .ititle, .cell { font-size: 1rem; }
+    .kind, .iwho, .iday, .wd, .dots, .dnum { font-size: .875rem; }
+  }
+        </style>
+</head>
+<body>
+  <!-- ⭐ **이 화면은 React 가 그립니다** (docs/19 §24). 마크업을 여기
+       남겨 두면 두 벌이 되고, React 가 마운트하는 순간 지워지므로 고쳐도
+       아무 일이 안 일어납니다. -->
+  <div id="app"></div>
+
+  <script type="module" src="/calendar.js"></script>
+
+  <nav id="tabs" aria-label="주요 화면"></nav>
+</body>
+</html>

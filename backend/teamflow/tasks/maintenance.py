@@ -15,6 +15,7 @@ from teamflow.config import get_settings
 from teamflow.db import models as m
 from teamflow.db.session import session_scope
 from teamflow.jobs.retention import purge_expired_audio, revoke_project_voiceprints
+from teamflow.services import notification_service
 from teamflow.tasks import app
 
 logger = logging.getLogger(__name__)
@@ -87,3 +88,26 @@ def reconcile_github_task(lookback_days: int = 7) -> dict:
     #       구현 전까지는 연결된 저장소 목록만 보고한다.
     logger.info("연결된 저장소 %d개: %s", len(repos), repos)
     return {"repos": len(repos), "backfilled": 0, "implemented": False}
+
+
+@app.task(name="teamflow.tasks.maintenance.announce_upcoming_meetings_task")
+def announce_upcoming_meetings_task() -> dict:
+    """곧 시작할 회의를 팀원에게 알린다 (NOTIFICATION-005). 5분마다.
+
+    ## ⚠️ 이게 없으면 `meeting_soon` 은 **읽는 코드만 있는 값**입니다
+
+    알림을 문장으로 만드는 코드는 있는데 **만드는 코드가 없던** 상태가
+    잠깐 있었습니다 — 이 저장소의 대표 실패 ① 이고, 검사가 아니라 눈으로
+    grep 해서 알았습니다. `vocab.NOTIFICATION_NOT_PRODUCED_YET` 이 그
+    경계를 지킵니다.
+
+    ⚠️ **5분마다 도는데 같은 회의를 다시 알리지 않습니다.** 서비스가 이미
+    남긴 것이 있으면 건너뜁니다 — 안 그러면 30분 동안 알림이 여섯 개
+    쌓입니다.
+    """
+    with session_scope() as session:
+        made = notification_service.announce_upcoming_meetings(
+            session, now=datetime.now(UTC)
+        )
+    logger.info("회의 임박 알림 %d건", made)
+    return {"made": made}

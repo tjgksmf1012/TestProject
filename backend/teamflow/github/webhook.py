@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from teamflow.db import vocab
+
 SIGNATURE_HEADER = "X-Hub-Signature-256"
 EVENT_HEADER = "X-GitHub-Event"
 DELIVERY_HEADER = "X-GitHub-Delivery"
@@ -106,7 +108,7 @@ def normalize(
             return None
         return NormalizedEvent(
             delivery_id=delivery_id,
-            event_type="pull_request.merged",
+            event_type=str(vocab.GithubEventKind.PR_MERGED),
             repo=repo,
             actor_login=(pr.get("user") or {}).get("login", ""),
             ref=(pr.get("head") or {}).get("ref"),
@@ -121,7 +123,7 @@ def normalize(
             return None
         return NormalizedEvent(
             delivery_id=delivery_id,
-            event_type="pull_request.review",
+            event_type=str(vocab.GithubEventKind.PR_REVIEW),
             repo=repo,
             actor_login=(review.get("user") or {}).get("login", ""),
             ref=(pr.get("head") or {}).get("ref"),
@@ -137,7 +139,7 @@ def normalize(
         issue = body.get("issue") or {}
         return NormalizedEvent(
             delivery_id=delivery_id,
-            event_type="issues.closed",
+            event_type=str(vocab.GithubEventKind.ISSUE_CLOSED),
             repo=repo,
             actor_login=(body.get("sender") or {}).get("login", ""),
             ref=None,

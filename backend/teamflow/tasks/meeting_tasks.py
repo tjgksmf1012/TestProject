@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from teamflow.clock import local_date
 from teamflow.config import get_settings
+from teamflow.db import live
 from teamflow.db import models as m
 from teamflow.db.session import session_scope
 from teamflow.jobs import retention
@@ -132,6 +133,7 @@ def process_meeting_task(self: Task, meeting_id: int) -> dict:
         open_tasks = list(
             session.scalars(
                 select(m.Task.title).where(
+                    live.not_deleted(),
                     m.Task.project_id == project_id,
                     m.Task.status.in_(("todo", "in_progress")),
                 )

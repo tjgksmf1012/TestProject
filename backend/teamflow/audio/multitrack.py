@@ -506,9 +506,16 @@ class TrackStats:
     mean_turn_ms: float
     overlap_ms: int
 
-    @property
-    def speaking_ratio(self) -> float:
-        return 0.0
+    # ⚠️ **`speaking_ratio` 라는 property 가 여기 있었고 언제나 `0.0` 을
+    #    돌려줬습니다** (결함 121). 부르는 곳은 0곳이었습니다.
+    #
+    #    구조적으로 계산이 불가능한 자리였습니다 — 비중에는 분모(팀 전체
+    #    발언 시간)가 필요한데 이 dataclass 는 자기 트랙만 압니다. 그래서
+    #    스텁으로 0.0 을 박아 둔 것으로 보이는데, **0.0 은 "안 쟀다" 가
+    #    아니라 "한마디도 안 했다" 로 읽힙니다.** 이 저장소가 제일 하면 안
+    #    된다고 정한 것(측정 불가 ≠ 0점)을 정면으로 어기는 값입니다.
+    #
+    #    아래 `speaking_ratios()` 가 목록 전체를 받아 계산합니다.
 
 
 def track_stats(analysis: TrackAnalysis, n_tracks: int) -> list[TrackStats]:
@@ -529,3 +536,21 @@ def track_stats(analysis: TrackAnalysis, n_tracks: int) -> list[TrackStats]:
             )
         )
     return stats
+
+
+# ⚠️ **`speaking_ratios()` 는 지웠습니다** (결함 172).
+#
+# 발언 비중을 만드는 두 번째 자리였습니다. 결함 121 에서 값을 고치고
+# 결함 162 에서 "부르는 곳이 0곳" 을 발견했는데, 그때 **배선하지 않고
+# 다른 곳에 새로 만들었습니다** — `meeting/speaking.py`. 그래서 같은
+# 물음("누가 얼마나 말했나")에 답하는 코드가 두 벌이 됐고, 규칙 스무
+# 줄(정렬 금지·0.0 이 아니라 None·기여도에 안 넣음)이 양쪽에 복사돼
+# 있었습니다. 한쪽만 고쳐지는 것은 시간 문제였습니다.
+#
+# **남긴 쪽은 `meeting/speaking.py` 입니다.** 이유:
+#   * 화면이 그것을 부릅니다 (이쪽은 0곳)
+#   * 키가 **사람**입니다 (이쪽은 트랙 index — 화면이 쓸 수 없습니다)
+#   * 짧은 회의 억제(`measurable`)와 쏠림 판정(`skewed`)이 거기 있습니다
+#
+# `TrackStats` 와 `track_stats()` 는 **남습니다** — 파이프라인이 씁니다
+# (`pipeline/meeting_pipeline.py`). 지운 것은 비중 계산 하나입니다.

@@ -35,9 +35,9 @@ import {
   describeRecordingSafety,
   isRiskyForRecording,
   recordingSafety,
-  tellShellRecordingStarted,
-  tellShellRecordingStopped,
-} from '../lib/shell/bridge.ts';
+} from '../lib/platform/recording.ts';
+import { awakeBridge, shouldHoldAwake } from '../lib/platform/awake.ts';
+import { describeGiveUp, openChunkStore } from '../lib/platform/chunk-store.ts';
 import { describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
@@ -101,6 +101,38 @@ const httpUpload = new HttpUploadTransport('');
  * 실험 5의 목적은 "폰이 한 시간을 버티는가" 이지 네트워크가 아니다.
  * 서버를 세워야만 돌아가는 실험은 결국 안 돌리게 된다.
  */
+/**
+ * 청크를 디스크에 붙잡아 두는 곳 (`docs/21` Phase 1).
+ *
+ * ⚠️ **브라우저에서는 `null` 입니다.** 붙잡아 둘 곳이 없으니까요 — 그때
+ * 큐는 예전과 똑같이 동작합니다. 데스크톱 앱에서만 값이 생깁니다.
+ */
+const chunkStore = openChunkStore(window.teamflowDesktop?.chunks, meetingId ?? 'local');
+
+/** 디스크에 못 적은 것. **조용히 넘어가면 "보관 중" 이 거짓말이 됩니다.** */
+const storeErrors: string[] = [];
+
+/**
+ * 재우기 방지 (`docs/21` Phase 2). 브라우저에서는 `null` — 잡을 것이 없습니다.
+ *
+ * ⚠️ **국면으로 잡고 놓습니다.** 시작 버튼에 걸면 백프레셔·동의 철회처럼
+ * 화면을 거치지 않고 멈추는 경로에서 **안 놓입니다** — 상태 변화는 전부
+ * `onStateChange` 로 오므로 그 한 곳에서 정합니다. 어느 국면에서 잡는지는
+ * `lib/platform/awake.ts` 의 `shouldHoldAwake` 가 정하고 테스트가 붙습니다.
+ */
+const awake = awakeBridge(window.teamflowDesktop?.awake);
+let awakeHeld = false;
+
+function syncAwake(phase: string): void {
+  if (!awake) return;
+  const want = shouldHoldAwake(phase);
+  if (want === awakeHeld) return;
+  awakeHeld = want;
+  // 돌려받는 값은 main 이 powerSaveBlocker.isStarted 로 잰 것입니다.
+  // 실패해도 녹음은 계속돼야 하므로 여기서 던지지 않습니다.
+  void (want ? awake.hold() : awake.release()).catch(() => {});
+}
+
 const client = new RecordingClient({
   monotonic: () => performance.now(),
   media: new BrowserMediaAdapter(),
@@ -111,8 +143,18 @@ const client = new RecordingClient({
       return httpUpload.send(chunk);
     },
   },
+  uploadOptions: {
+    store: chunkStore,
+    onStoreError: (seq, reason) => {
+      storeErrors.push(`청크 ${seq}: ${reason}`);
+      render();
+    },
+  },
   timesliceMs: 5_000,
-  onStateChange: () => render(),
+  onStateChange: (state) => {
+    syncAwake(state.phase);
+    render();
+  },
 });
 
 let wakeLock: { release: () => void } | null = null;
@@ -264,11 +306,15 @@ $('start').addEventListener('click', async () => {
     return;
   }
 
-  // ⭐ 안드로이드 셸에게 알린다. 셸은 지금 녹음 중인지 **모른다** —
-  // 마이크가 열린 것은 WebView 안 일이라 셸이 들여다볼 수 없다.
-  // 알려 줘야 포그라운드 서비스가 올라가고, 그래야 화면이 꺼져도
-  // 녹음이 끊기지 않는다. 셸이 없으면 아무 일도 하지 않는다.
-  tellShellRecordingStarted(window);
+  // ⚠️ **여기가 데스크톱 셸에게 "지금부터 녹음" 이라고 말할 자리입니다**
+  //    (`docs/21` Phase 2). 셸은 마이크가 열린 것을 모릅니다 — 그건 창
+  //    안에서 일어나는 일입니다. 알려 줘야 `powerSaveBlocker` 를 켜고,
+  //    그래야 화면이 잠겨도 녹음이 안 끊깁니다.
+  //
+  //    지금은 **비어 있습니다.** 안드로이드 셸에게 말하던 코드가 있었는데
+  //    그 셸을 접으면서 같이 걷어냈고, 데스크톱 쪽은 아직 받을 준비가
+  //    안 됐습니다(preload 의 `keepsAwake` 가 거짓인 이유). 없는 것을
+  //    부르는 척하지 않고 자리만 표시해 둡니다.
   // 회의 중 시계 드리프트를 흡수한다 (clock.ts: ±50ppm → 1시간에 180ms)
   resyncTimer = setInterval(() => void client.syncClock(), 5 * 60_000);
   const startedAt = Date.now();
@@ -355,9 +401,9 @@ $('stop').addEventListener('click', async () => {
   wakeLock = null;
 
   summary = await client.stop();
-  // 알림을 먼저 내린다. 서버 왕복을 기다리는 동안 "녹음 중" 이 떠
-  // 있으면 사람은 아직 듣고 있다고 생각한다.
-  tellShellRecordingStopped(window);
+  // ⚠️ 짝이 되는 자리 — 여기서 `powerSaveBlocker` 를 내립니다(Phase 2).
+  //    서버 왕복을 기다리는 동안 "녹음 중" 이 떠 있으면 사람은 아직
+  //    듣고 있다고 생각하므로, **멈춤을 먼저** 알려야 합니다.
 
   showResult(summary);
   await tellServerWeAreDone(summary);
@@ -371,6 +417,53 @@ $('finish-retry').addEventListener('click', () => {
       tellServerWeAreDone(done),
     );
   }
+});
+
+/**
+ * 디스크에 남은 청크를 **다시 올린다.**
+ *
+ * ⚠️ 이 버튼이 이 기능의 절반입니다. "이 컴퓨터에 남아 있습니다" 라고
+ * 적어 놓고 올릴 자리를 안 주면, 그 문장은 사람을 안심시키기만 하고
+ * 소리는 그대로 안 올라갑니다 — 대표 실패 ③ 입니다.
+ *
+ * ⚠️ **성공한 것만 지웁니다.** 실패한 것은 디스크에 그대로 두고 다시
+ * 누를 수 있게 합니다. 한 번 실패했다고 지우면 되찾을 길이 없어집니다.
+ */
+$('reupload').addEventListener('click', () => {
+  const store = chunkStore;
+  const done = summary;
+  if (!store || !done) return;
+
+  void whilePressed($('reupload') as HTMLButtonElement, async () => {
+    const parked = new Set(done.parked);
+    const still: number[] = [];
+
+    // ⚠️ 디스크에서 `atMs` 를 같이 읽습니다. 서버가 `X-Client-At-Ms` 를
+    //    요구하고, 그게 없으면 공백을 절대 시각으로 복원할 수 없습니다.
+    //    파일 이름이 그 값을 들고 있는 이유가 정확히 이것입니다.
+    for (const meta of await store.list()) {
+      if (!parked.has(meta.seq)) continue;
+      const bytes = await store.get(meta.seq);
+      if (bytes === null) continue; // 이미 지워졌으면 올릴 것이 없습니다
+
+      // ⚠️ **올리는 방법은 한 곳에만 둡니다.** 여기서 `fetch` 를 다시
+      //    쓰면 헤더 하나가 갈라지는 순간 재업로드만 조용히 400 이 됩니다.
+      try {
+        await httpUpload.send({
+          seq: meta.seq,
+          atMs: meta.atMs,
+          byteLength: meta.byteLength,
+          payload: new Blob([bytes]),
+        });
+        await store.drop(meta.seq);
+      } catch {
+        still.push(meta.seq);
+      }
+    }
+
+    done.parked = still;
+    showResult(done);
+  });
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -396,6 +489,20 @@ function showResult(result: RecordingSummary): void {
         )
         .join('')
     : '<li class="ok">공백 없음</li>';
+
+  // ⭐ 못 올린 청크가 **되찾을 수 있는 것인지** 말합니다.
+  //
+  // ⚠️ 알려만 주고 되찾을 자리를 안 주면 대표 실패 ③ 입니다. 그래서
+  //    버튼을 같이 켭니다 — 서버가 돌아왔을 때 누를 자리입니다.
+  const parkedText = describeGiveUp(chunkStore ? 'parked' : 'lost', result.parked.length);
+  $('parked').textContent = parkedText;
+  $('parked').hidden = parkedText === '';
+  ($('reupload') as HTMLButtonElement).hidden = result.parked.length === 0;
+
+  $('store-errors').innerHTML = storeErrors.length
+    ? storeErrors.map((e) => `<li class="bad">${escapeHtml(e)}</li>`).join('')
+    : '';
+  $('store-errors').hidden = storeErrors.length === 0;
 
   // docs/09 실험 5 표에 그대로 붙여 넣을 수 있는 한 줄
   lastRow =

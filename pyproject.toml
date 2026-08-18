@@ -77,5 +77,17 @@ ignore = [
 # **뒤엣것이 앞엣것을 조용히 덮어써서 한 쪽이 아예 안 돕니다** — 그건
 # 이 저장소가 잡아야 하는 부류라 그물을 남겨 둡니다.
 "backend/tests/test_github_health_api.py" = ["F811"]
+"backend/tests/test_github_feed.py" = ["F811"]
+"backend/tests/test_chat_api.py" = ["F811"]
+"backend/tests/test_calendar_api.py" = ["F811"]
+"backend/tests/test_notifications.py" = ["F811"]
+"backend/tests/test_activity_api.py" = ["F811"]
+"backend/tests/test_search_api.py" = ["F811"]
+"backend/tests/test_utterance_type_counts.py" = ["F811"]
+"backend/tests/test_inefficiency_wiring.py" = ["F811"]
+"backend/tests/test_project_analytics_api.py" = ["F811"]
+"backend/tests/test_project_roles_api.py" = ["F811"]
+"backend/tests/test_presence_api.py" = ["F811"]
+"backend/tests/test_speaking_api.py" = ["F811"]
 "backend/tests/test_task_pr_link.py" = ["F811"]
 "backend/tests/test_call_api.py" = ["F811"]

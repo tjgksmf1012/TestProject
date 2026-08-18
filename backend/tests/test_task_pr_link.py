@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from teamflow.db import assignees
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
@@ -52,7 +53,12 @@ def pr_payload(
 
 def make_task(project_id: int, title: str = "로그인 API 구현") -> int:
     with db_session.session_scope() as s:
-        task = m.Task(project_id=project_id, title=title, status="doing")
+        # ⚠️ 예전에는 `status="doing"` 이었습니다 — **어느 상태 목록에도 없는
+        #    값**입니다(`todo`·`in_progress`·`review`·`done`). 그 열에는
+        #    CHECK 제약이 없어서 몇 달 동안 아무도 몰랐고, 칸반은 이런
+        #    카드를 "알 수 없는 상태" 열로 밀어냅니다. 제약을 걸자
+        #    이 열네 개가 한꺼번에 터졌습니다 (결함 134).
+        task = m.Task(project_id=project_id, title=title, status="in_progress")
         s.add(task)
         s.flush()
         return task.id
@@ -272,3 +278,98 @@ def test_the_board_needs_membership(client: TestClient, seeded):
 
     login_as(client, outsider_id)
     assert client.get(f"/api/projects/{seeded['project_id']}/tasks").status_code == 403
+
+
+# ══════════════════════════════════════════════════════════════
+# NOTIFICATION-006 — 내 업무에 PR 이 붙었다
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 이 알림 종류는 **어휘에만 있고 만드는 코드가 0곳**이었습니다
+#    (`vocab.NOTIFICATION_NOT_PRODUCED_YET` 이 그렇게 적어 뒀습니다).
+#    대표 실패 ① 이고, 붙일 자리는 PR 과 업무가 실제로 이어지는 순간입니다.
+
+
+def github_notices(kind: str = "github") -> list[m.Notification]:
+    with db_session.session_scope() as s:
+        return list(
+            s.scalars(select(m.Notification).where(m.Notification.kind == kind)).all()
+        )
+
+
+def assign(task_id: int, *user_ids: int) -> None:
+    """담당자를 이 사람들로 바꾼다. 인자가 없으면 담당자 없음."""
+    with db_session.session_scope() as s:
+        assignees.replace(s, task_id, [uid for uid in user_ids if uid is not None])
+
+
+def test_the_assignee_hears_about_a_pull_request(client: TestClient, seeded):
+    """담당자에게 알림이 갑니다.
+
+    ⚠️ 올린 사람과 **다른 사람**이 맡고 있어야 합니다 — 자기가 올린 PR 은
+    자기에게 안 알립니다.
+    """
+    task_id = make_task(seeded["project_id"])
+    assign(task_id, seeded["user_ids"][1])
+
+    post_webhook(client, pr_payload(body=f"TASK-{task_id} 완료"))
+
+    notices = github_notices()
+    assert len(notices) == 1
+    assert notices[0].user_id == seeded["user_ids"][1]
+    assert notices[0].task_id == task_id
+
+
+def test_nobody_hears_twice_about_the_same_pull_request(client: TestClient, seeded):
+    """⭐ 웹훅은 **같은 배달을 다시 보냅니다.**
+
+    두 번째에 알림이 또 생기면 사람은 같은 PR 로 알림을 여러 번 받습니다.
+    """
+    task_id = make_task(seeded["project_id"])
+    assign(task_id, seeded["user_ids"][1])
+
+    payload = pr_payload(body=f"TASK-{task_id} 완료")
+    post_webhook(client, payload)
+    post_webhook(client, payload)
+
+    assert len(github_notices()) == 1
+
+
+def test_a_task_with_no_assignee_is_quiet(client: TestClient, seeded):
+    """⚠️ 담당자가 없으면 **아무에게도 안 보냅니다.**
+
+    여기서 프로젝트 전원으로 넓히면 PR 하나에 알림이 사람 수만큼 생기고,
+    그러면 사람들은 알림을 통째로 무시합니다.
+    """
+    task_id = make_task(seeded["project_id"])
+    assign(task_id, None)
+
+    post_webhook(client, pr_payload(body=f"TASK-{task_id} 완료"))
+
+    assert github_notices() == []
+
+
+def test_you_do_not_hear_about_your_own_pull_request(client: TestClient, seeded):
+    """⭐ 자기가 올린 PR 로 자기에게 알림이 오면 **목록만 지저분해집니다.**
+
+    `minsu-dev` 가 시연 데이터에서 첫 사용자의 GitHub 계정입니다.
+    """
+    task_id = make_task(seeded["project_id"])
+    assign(task_id, seeded["user_ids"][0])
+
+    post_webhook(client, pr_payload(login="minsu-dev", body=f"TASK-{task_id} 완료"))
+
+    assert github_notices() == []
+
+
+def test_every_notification_kind_is_produced_somewhere():
+    """⭐ 어휘에 있는데 **만드는 코드가 0곳**인 종류가 없는가.
+
+    `meeting_soon` 이 읽는 코드만 있던 것(대표 실패 ①)과 같은 부류를
+    막습니다. 늘릴 때 만드는 코드를 안 붙이면 여기서 터집니다.
+    """
+    from teamflow.db import vocab
+
+    assert frozenset() == vocab.NOTIFICATION_NOT_PRODUCED_YET, (
+        "어휘에만 있고 만드는 코드가 없는 알림 종류가 있습니다: "
+        f"{sorted(vocab.NOTIFICATION_NOT_PRODUCED_YET)}"
+    )

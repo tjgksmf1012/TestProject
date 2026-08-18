@@ -37,6 +37,7 @@ from sqlalchemy import create_engine, select
 
 from teamflow.audio import decode
 from teamflow.config import Settings, get_settings
+from teamflow.db import assignees
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 from teamflow.meeting.resolve import TeamMemberName
@@ -536,7 +537,7 @@ def test_approval_puts_it_on_the_kanban(processed: dict, client: TestClient):
             select(m.Task).where(m.Task.project_id == processed["project_id"])
         ).all()
         assert [t.title for t in tasks] == ["로그인 API 구현"]
-        assert tasks[0].assignee_id == processed["user_ids"][0]
+        assert assignees.of_task(s, tasks[0].id) == [processed["user_ids"][0]]
         assert tasks[0].origin_candidate_id == candidate["id"]
 
 

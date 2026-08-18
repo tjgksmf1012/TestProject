@@ -423,7 +423,7 @@ function Lobby() {
           녹음은 <strong>전원이 동의해야</strong> 시작됩니다. 회의 중에 누구의 트랙이 끊겼는지도
           여기서 봅니다.
         </p>
-        {me !== null && <Byline name={me.name} />}
+        {me !== null && <Byline name={me.name} avatar={me.avatar} />}
       </header>
 
       <p className="meta-line" id="sub">

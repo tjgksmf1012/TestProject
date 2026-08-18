@@ -210,6 +210,7 @@ def _screen_vocabularies():
     from teamflow.audio.assembly import GapReason
     from teamflow.contribution.events import Category
     from teamflow.contribution.profiles import Role
+    from teamflow.db import vocab
     from teamflow.db.models import MeetingStatus
     from teamflow.meeting.approval import ApprovalError
     from teamflow.services import task_service
@@ -244,6 +245,31 @@ def _screen_vocabularies():
             {r.value for r in GapReason},
             "frontend/src/lib/track/diagram.ts",
             "REASON_TEXT",
+        ),
+        # 발언 유형 (정의서 §10). 서버가 `utterance_type` 을 코드로 보내고
+        # 화면이 옮깁니다. ⚠️ 동의·반대·보완을 가르면서 다섯이 한꺼번에
+        # 늘었는데, 한쪽만 늘리면 검토 화면에 `objection` 이라는 **영어
+        # 식별자**가 그대로 찍힙니다.
+        (
+            "발언 유형",
+            {str(t) for t in vocab.UtteranceType},
+            "frontend/src/lib/review/labels.ts",
+            "TYPE_LABEL",
+        ),
+        # 프로젝트 권한 (정의서 §5 `PROJECT-004`). 한쪽만 늘리면 팀원
+        # 목록에 `admin` 이라는 영어 식별자가 그대로 찍힙니다.
+        (
+            "프로젝트 권한",
+            {str(r) for r in vocab.ProjectRole},
+            "frontend/src/lib/project/roles.ts",
+            "ROLE_LABEL",
+        ),
+        # 사용자 상태 (정의서 §4 `USER-005`).
+        (
+            "사용자 상태",
+            {str(s) for s in vocab.PresenceStatus},
+            "frontend/src/lib/project/presence.ts",
+            "PRESENCE_LABEL",
         ),
         # 승인이 막힌 이유. 서버가 `failures` 로 코드만 내보내고 화면이
         # 옮긴다. 화면이 스스로도 판정하는 코드가 일곱이라 **다 있는 줄
@@ -389,118 +415,84 @@ def test_the_api_image_ships_the_screens():
 
 
 # ══════════════════════════════════════════════════════════════
-# 안드로이드 셸 — 웹과 코틀린이 어긋나면 조용히 아무 일도 안 일어난다
+# 데스크톱 셸 — 만들어 놓고 부르지 않으면 아무 일도 안 일어난다
 # ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 여기 있던 **안드로이드 셸 가드 넷**을 걷어냈습니다. 셸을 접었기
+#    때문입니다(`docs/14` 머리말 · `docs/21` §6). 넷이 대조하던 것은
+#    코틀린과 TypeScript 사이의 이름이었고, 한쪽이 없어졌으니 대조할
+#    것도 없습니다.
+#
+# ⚠️ **다섯 번째는 남겼습니다.** 그것은 코틀린을 안 읽고 웹 화면만
+#    읽습니다 — "만들어 놓고 아무도 안 부름" 을 잡는 자리이고, 그 결함은
+#    셸이 무엇이든 그대로 살아 있습니다. 절 이름만 보고 같이 지웠으면
+#    웹 쪽 그물을 잃을 뻔했습니다.
 
-ANDROID = REPO_ROOT / "android"
 
+def test_the_readme_never_tells_you_to_cd_somewhere_that_is_gone():
+    """⭐ README 의 셋업 명령이 **없는 곳**을 가리키면 안 됩니다.
 
-def _shell_kotlin(name: str) -> str:
-    return (
-        ANDROID / "app" / "src" / "main" / "java" / "com" / "teamflow" / "shell" / name
-    ).read_text()
+    ⚠️ 실제로 그런 줄이 있었고 **잡는 검사가 하나도 없었습니다.**
 
+        cd android && ./gradlew assembleDebug
 
-def test_the_shell_bridge_name_matches_on_both_sides():
-    """⭐ 웹이 찾는 이름과 셸이 심는 이름이 같아야 한다.
+    `android/` 가 없어진 뒤에도 이 줄은 그대로 남아 있었을 것이고,
+    처음 오는 사람은 제일 먼저 읽는 문서가 시키는 대로 하다가 막힙니다.
+    게다가 그 명령은 셸이 있을 때조차 **실행이 불가능**했습니다 —
+    `gradlew` 래퍼를 커밋한 적이 없었습니다.
 
-    어긋나면 **조용히 "셸이 아니다"** 가 된다. 셸 안인데 설치 안내가
-    뜨고, 서비스 워커가 셸 캐시와 겹치고, 무엇보다 녹음 시작을 셸에게
-    알리지 못해 **포그라운드 서비스가 안 올라간다** — 화면이 꺼지면
-    녹음이 끊긴다. 오류는 하나도 나지 않는다.
+    ⚠️ 명령 전체를 검사하지 않습니다. `cd <경로>` 의 경로만 봅니다 —
+    그것이 기계로 확인 가능한 부분이고, 나머지를 재는 척하면 이 검사가
+    거짓말을 하게 됩니다.
 
-    실제로 한 번 어긋나 있었다: 웹은 `TeamFlowShell` 을 봤고 셸은
-    `TeamFlowShellBridge` 를 심었다.
+    ⚠️ **빈 디렉터리는 없는 것으로 봅니다.** 처음에 `exists()` 만 봤다가
+    이 검사가 조용히 통과했습니다 — `git rm -r` 이 파일만 지우고 빈
+    `android/` 를 남겼고, 빈 껍데기로 `cd` 해 봐야 할 것이 없습니다.
+    터질 줄 알고 봤다가 안 터져서 알았습니다.
     """
     import re
 
-    kotlin = _shell_kotlin("ShellBridge.kt")
-    name = re.search(r'const val NAME = "([^"]+)"', kotlin)
-    assert name is not None, "ShellBridge.NAME 을 찾지 못했습니다"
+    def usable(path: str) -> bool:
+        target = REPO_ROOT / path
+        if not target.exists():
+            return False
+        return any(target.iterdir()) if target.is_dir() else True
 
-    web = (
-        REPO_ROOT / "frontend" / "src" / "lib" / "shell" / "bridge.ts"
-    ).read_text()
-    assert f"win.{name.group(1)}" in web, (
-        f"웹이 `{name.group(1)}` 를 찾지 않습니다. 셸이 심는 이름과 다릅니다."
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    missing = sorted(
+        {
+            path
+            for path in re.findall(r"cd ([A-Za-z0-9_./-]+)", readme)
+            if not usable(path)
+        }
+    )
+    assert not missing, (
+        f"README 가 없는 곳으로 데려갑니다: {missing} — 지웠으면 명령도 같이 지우십시오"
     )
 
 
-def test_every_bridge_method_the_web_calls_exists_in_the_shell():
-    """⭐ 웹이 부르는 브리지 함수가 셸에 전부 있어야 한다.
+def test_the_recording_screen_marks_where_the_shell_hook_goes():
+    """⭐ 녹음 시작·멈춤 자리에 **셸에게 알릴 자리**가 표시돼 있는가.
 
-    없는 함수를 부르면 그 자리에서 예외가 난다. 녹음 시작 직전이면
-    **녹음이 아예 시작되지 않는다.**
-    """
-    import re
+    안드로이드 셸에게 "지금부터 녹음" 이라고 말하던 코드가 있었습니다.
+    셸을 접으면서 걷어냈고, 데스크톱 셸은 아직 받을 준비가 안 됐습니다
+    (`docs/21` Phase 2 — `powerSaveBlocker`).
 
-    kotlin = _shell_kotlin("ShellBridge.kt")
-    exposed = set(re.findall(r"@JavascriptInterface\s+fun (\w+)\(", kotlin))
-    assert exposed, "@JavascriptInterface 함수를 하나도 못 찾았습니다"
+    ⚠️ **그 자리가 사라지면 안 됩니다.** 사라지면 Phase 2 를 하는 사람이
+    어디에 붙여야 하는지 모릅니다. 이 저장소의 대표 실패 ③ 이 정확히
+    그것입니다 — 할 일을 알려 주고 그 일을 할 자리를 안 주는 것.
 
-    web = (REPO_ROOT / "frontend" / "src" / "lib" / "shell" / "bridge.ts").read_text()
-    declared = set(
-        re.findall(
-            r"^\s*(\w+): \(\) =>",
-            web[web.index("export interface ShellBridge") : web.index("declare global")],
-            re.MULTILINE,
-        )
-    )
-    assert declared, "웹 쪽 ShellBridge 인터페이스를 못 읽었습니다"
-
-    missing = sorted(declared - exposed)
-    assert not missing, f"웹이 부르는데 셸에 없는 함수: {missing}"
-
-
-def test_the_shell_declares_the_permissions_its_code_needs():
-    """⭐ 코드가 쓰는 것을 매니페스트가 선언해야 한다.
-
-    안드로이드는 선언되지 않은 권한을 **조용히 거절**한다. 포그라운드
-    서비스가 안 올라가면 화면이 꺼졌을 때 녹음이 끊기는데, 그건
-    녹음이 끝난 뒤 커버리지를 봐야 알 수 있다 — 그때는 이미 늦었다.
-    """
-    manifest = (ANDROID / "app" / "src" / "main" / "AndroidManifest.xml").read_text()
-
-    for permission in [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.INTERNET",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
-        "android.permission.POST_NOTIFICATIONS",
-    ]:
-        assert permission in manifest, f"선언되지 않은 권한: {permission}"
-
-    # 서비스가 등록돼 있어야 `startForegroundService` 가 동작한다.
-    assert 'android:name=".RecordingService"' in manifest
-    assert 'android:foregroundServiceType="microphone"' in manifest
-
-
-def test_the_shell_refuses_plaintext_http_to_the_outside():
-    """⭐ 회의 음성과 세션 쿠키가 평문으로 나가면 안 된다.
-
-    안드로이드는 API 28+ 부터 평문을 기본으로 막지만, 이 앱은 minSdk 24
-    라 낮은 기기에서는 기본이 반대다. 명시적으로 막는다.
-    """
-    config = (
-        ANDROID / "app" / "src" / "main" / "res" / "xml" / "network_security_config.xml"
-    ).read_text()
-    assert '<base-config cleartextTrafficPermitted="false" />' in config
-
-    manifest = (ANDROID / "app" / "src" / "main" / "AndroidManifest.xml").read_text()
-    assert "android:networkSecurityConfig=" in manifest, (
-        "설정 파일만 있고 매니페스트가 가리키지 않으면 아무 효력이 없습니다"
-    )
-
-
-def test_the_recording_screen_actually_tells_the_shell():
-    """⭐ 브리지를 만들어 놓고 부르지 않으면 아무 일도 안 일어난다.
-
-    이 저장소에서 가장 자주 나온 결함이다. 여기서는 그 결과가
-    **화면이 꺼지면 녹음이 끊기는 것**이고, 오류는 안 난다.
+    ⚠️ 지금은 **호출이 아니라 표시**를 봅니다. 없는 함수를 부르는 척하면
+    그게 더 나쁩니다.
     """
     screen = (REPO_ROOT / "frontend" / "src" / "demo" / "main.ts").read_text()
-    assert "tellShellRecordingStarted(window)" in screen
-    assert "tellShellRecordingStopped(window)" in screen
+    assert screen.count("Phase 2") >= 2, (
+        "녹음 시작·멈춤 자리의 `docs/21` Phase 2 표시가 사라졌습니다 — "
+        "데스크톱 셸에게 알릴 자리를 다음 사람이 못 찾습니다"
+    )
+    assert "powerSaveBlocker" in screen, (
+        "무엇을 붙여야 하는지(`powerSaveBlocker`)가 화면 코드에서 사라졌습니다"
+    )
 
 
 def test_the_seed_makes_a_project_the_api_could_have_made():
@@ -972,6 +964,18 @@ def test_the_defect_log_does_not_claim_a_stale_count():
 
     ⚠️ 한글 수사(&#34;일흔다섯&#34;)는 기계가 세기 어려우므로 **숫자도 같이**
     적게 했습니다. 이 검사는 그 숫자를 봅니다.
+
+    ⚠️⚠️ **이 검사가 116번에서 눈을 감고 있었습니다** (결함 139). 세는 방법이
+    `&#34;결함 N&#34;` 이라는 **문구**를 찾는 것이었는데, 123번부터 제목 모양이
+    `## N. 무엇무엇` 으로 바뀌면서 그 문구가 사라졌습니다. 머리말이
+    `34~116번` 이라고 적혀 있으니 범위 밖은 애초에 안 셌고, 그래서 스무
+    개가 더 붙는 동안 **통과만 하고 있었습니다.** 요구가 아니라 **찾는
+    자리**가 낡은 것이고, `AGENTS.md` 가 경고하는 바로 그 부류입니다.
+
+    ⚠️⚠️⚠️ 그런데 제목 모양만 고쳤더니 **여전히 통과했습니다.** 진짜 원인은
+    아래 `above`/`ours` 주석에 있는 셋째였습니다 — 위쪽을 자른 뒤에
+    최댓값을 보고 있어서 그 단언이 **언제나 참**이었습니다. 고쳤다고 적어
+    둔 뒤에 심어 보고 알았습니다. **자를 고치고 나서도 다시 재야 합니다.**
     """
     import re
 
@@ -986,6 +990,9 @@ def test_the_defect_log_does_not_claim_a_stale_count():
     claimed, low, high, gap = (int(g) for g in header.groups())
 
     found: set[int] = set()
+    # 제목 두 모양 — `### ⭐ 결함 120 — …` 과 `## 123. …`
+    for head in re.finditer(r"^#{2,4}\s+(?:⭐\s*)?(?:결함\s+)?(\d+)[.\s—]", doc, re.M):
+        found.add(int(head.group(1)))
     for run in re.finditer(r"결함\s+([\d~·,\s]+)", doc):
         for part in re.split(r"[·,\s]+", run.group(1).strip()):
             if "~" in part:
@@ -995,7 +1002,12 @@ def test_the_defect_log_does_not_claim_a_stale_count():
             elif part.isdigit():
                 found.add(int(part))
 
-    ours = {n for n in found if low <= n <= high}
+    # ⚠️ 위쪽을 **자르지 않습니다.** `n <= high` 로 걸러 놓고 그 안에서
+    #    최댓값을 보면 "머리말보다 큰 번호" 는 구조적으로 못 봅니다 —
+    #    아래 `max` 단언이 언제나 참이 되어 결함 하나를 더 적어도 조용히
+    #    통과합니다. 실제로 그렇게 통과하는 것을 심어서 확인했습니다.
+    above = {n for n in found if n >= low}
+    ours = {n for n in above if n <= high}
     holes = sorted(set(range(low, high + 1)) - ours)
 
     assert holes == [gap], (
@@ -1005,7 +1017,99 @@ def test_the_defect_log_does_not_claim_a_stale_count():
         f"문서는 {claimed}건이라고 하는데 실제로 적힌 결함은 {len(ours)}건입니다 "
         f"({low}~{high})"
     )
-    assert max(ours) == high, f"가장 큰 결함 번호는 {max(ours)} 인데 머리말은 {high} 입니다"
+    assert max(above) == high, (
+        f"가장 큰 결함 번호는 {max(above)} 인데 머리말은 {high} 입니다"
+    )
+
+
+def test_agents_md_names_the_react_screens_that_actually_exist():
+    """⭐ `AGENTS.md` 가 세는 React 화면 목록이 **실제와 맞는가**.
+
+    이 목록은 "어느 화면에 어떤 규칙이 걸리는가" 를 정하는 자리라 낡으면
+    바로 잘못된 안내가 됩니다. 실제로 **일곱이라고 적힌 채 열셋**이
+    되어 있었습니다 — `reports`·`chat`·`calendar`·`notifications`·
+    `activity`·`search` 여섯이 그 뒤에 붙었는데 목록은 그대로였습니다.
+
+    `docs/17` 건수·README 표 건수와 같은 부류입니다. **사람이 세어서 적는
+    숫자는 반드시 낡습니다.**
+
+    ⚠️ 세는 자리를 `src/demo/*.tsx` **개수**로 잡으면 안 됩니다 —
+    `parts.tsx`·`evidence.tsx` 처럼 화면이 아닌 조각이 섞입니다. 화면인지
+    아닌지는 **`public/` 에 같은 이름의 `.html` 이 있는가**로 정해집니다.
+    """
+    import re
+
+    screens = {p.stem for p in (REPO_ROOT / "frontend" / "public").glob("*.html")}
+    react = {
+        s for s in screens if (REPO_ROOT / "frontend" / "src" / "demo" / f"{s}.tsx").exists()
+    }
+
+    agents = (REPO_ROOT / "AGENTS.md").read_text()
+    section = agents.partition("### React 로 옮긴 화면")[2].partition("###")[0]
+    assert section, "AGENTS.md 에서 'React 로 옮긴 화면' 절을 못 찾았습니다"
+
+    named = set(re.findall(r"`([a-z]+)`", section.partition("React 입니다")[0]))
+
+    assert named == react, (
+        f"AGENTS.md 가 적은 React 화면과 실제가 다릅니다. "
+        f"안 적힌 것: {sorted(react - named)} · 없는데 적힌 것: {sorted(named - react)}"
+    )
+
+    counted = re.search(r"React 입니다 \((\S+?)\)", section)
+    assert counted, "'React 입니다 (…)' 에서 개수를 못 찾았습니다"
+    KOREAN = {
+        7: "일곱", 8: "여덟", 9: "아홉", 10: "열", 11: "열하나", 12: "열둘",
+        13: "열셋", 14: "열넷", 15: "열다섯", 16: "열여섯", 17: "열일곱",
+    }
+    assert counted.group(1) == KOREAN.get(len(react)), (
+        f"AGENTS.md 는 '{counted.group(1)}' 이라는데 실제 React 화면은 "
+        f"{len(react)}개입니다"
+    )
+
+
+def test_the_requirements_summary_lists_every_section_once():
+    """⭐ `docs/20` 의 "한눈에" 표가 **스스로와 안 어긋나는가** (결함 137).
+
+    이 표는 요구 영역마다 한 줄씩 ✅/🟡/❌ 를 답합니다. 그런데 요구를
+    하나 채우고 나서 줄을 **고치는 대신 새로 끼워 넣으면** 같은 영역이 두
+    줄이 되고, 두 줄이 서로 다른 답을 합니다. 실제로 §21 활동 기록이
+    ✅ 와 🟡 로 **동시에** 적혀 있었습니다 — 이 저장소의 대표 실패 ②
+    (두 벌이 있으면 한쪽만 고쳐진다)가 표 하나 안에서 일어난 것입니다.
+
+    ⚠️ **번호 순서까지 봅니다.** 끼워 넣기가 잘못된 자리에서 일어나는 것이
+    원인이라, 순서가 어긋나는 것 자체가 그 사고의 신호입니다. 실제로 그
+    ✅ 줄은 §18 과 §19 사이에 있었습니다.
+
+    그리고 표가 **아래 상세와 같은 영역을 다루는지**도 봅니다. 상세에만
+    있고 표에 없으면 "한눈에" 가 한눈에 안 보여 주는 것입니다 — §25
+    비기능이 그렇게 빠져 있었습니다.
+    """
+    import re
+
+    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text()
+
+    summary = re.findall(r"^\|\s*§(\d+)\s[^|]*\|[^|]*\|[^|]*\|\s*$", doc, re.MULTILINE)
+    listed = [int(n) for n in summary]
+    assert listed, "docs/20 에서 '한눈에' 표를 못 찾았습니다"
+
+    duplicates = sorted({n for n in listed if listed.count(n) > 1})
+    assert duplicates == [], (
+        f"'한눈에' 표에 §{duplicates} 가 두 줄 이상 있습니다 — "
+        "줄을 새로 끼우지 말고 있던 줄을 고치십시오"
+    )
+    assert listed == sorted(listed), (
+        f"'한눈에' 표의 번호가 순서대로가 아닙니다: {listed}"
+    )
+
+    # 상세는 `### §16 일정 관리 · §19 알림 · §20 검색` 처럼 여럿을 묶습니다.
+    detailed: set[int] = set()
+    for heading in re.findall(r"^###\s+(.*)$", doc, re.MULTILINE):
+        detailed.update(int(n) for n in re.findall(r"§(\d+)", heading))
+
+    missing = sorted(detailed - set(listed))
+    assert missing == [], (
+        f"§{missing} 는 상세에는 있는데 '한눈에' 표에 없습니다"
+    )
 
 
 def test_the_team_calendar_is_the_same_on_both_sides():
@@ -1913,3 +2017,411 @@ def test_no_document_makes_the_bundle_a_required_setup_step():
         + " | ".join(offenders)
         + ". 소스를 고쳤을 때만 다시 만들면 됩니다."
     )
+
+
+def test_the_kanban_css_column_count_matches_the_statuses():
+    """⭐ 칸반 CSS 의 열 수가 서버의 상태 수와 같은가.
+
+    ## ⚠️ 왜 CSS 에 숫자를 박았는가
+
+    처음에는 `repeat(3, 1fr)` 이었고, `TASK-004` 로 넷째 열이 생기자
+    **`완료` 가 아랫줄로 내려가 `할 일` 밑에 붙었습니다.** 칸반은 왼쪽에서
+    오른쪽으로 가는 판이라 그 순간 뜻이 통째로 깨집니다.
+
+    `repeat(auto-fit, minmax(...))` 로 바꿔 봤지만 폭에 따라 **셋이 서고
+    완료 하나만 떨어지는** 모양이 남았습니다(1024px·900px 에서 실측).
+    고아가 생기는 것은 같은 결함입니다.
+
+    그래서 넷/둘/하나로 못 박았고, **그 대신 이 검사를 답니다** — 상태가
+    다섯이 되면 여기서 터져서 CSS 를 같이 고치라고 알려 줍니다.
+    """
+    import re
+
+    from teamflow.services import task_service
+
+    css = (REPO_ROOT / "frontend" / "public" / "kanban.html").read_text(encoding="utf-8")
+    widest = re.findall(r"grid-template-columns:\s*repeat\((\d+),", css)
+    assert widest, "칸반 CSS 에서 열 수를 못 찾았습니다 — 정규식이 낡았습니다"
+
+    biggest = max(int(n) for n in widest)
+    assert biggest == len(task_service.STATUSES), (
+        f"CSS 는 열을 최대 {biggest}개로 세우는데 상태는 "
+        f"{len(task_service.STATUSES)}개입니다 — `frontend/public/kanban.html` 의 "
+        "`#board` 규칙을 고치십시오. 안 고치면 마지막 열이 아랫줄로 떨어져 "
+        "`완료` 가 `할 일` 밑에 붙습니다"
+    )
+
+
+def test_every_place_that_reads_tasks_goes_through_live():
+    """⭐ 지운 업무를 **한 곳에서만** 걸러 냅니다 (`TASK-003`).
+
+    업무를 읽는 곳이 일곱입니다 — 칸반·달력·검색·알림·위험 신호·회의
+    업무 후보·PR 연결. 각자 `deleted_at IS NULL` 을 적게 두면 그중 하나는
+    반드시 빠지고, **빠진 곳에서 지운 업무가 되살아납니다.**
+
+    되살아난 자리가 조용한 것이 문제입니다. 오류가 안 나고 달력에만,
+    진행률에만 남습니다 — 이 저장소의 대표 실패 ② 가 정확히 이 모양이고,
+    그래서 세는 자리를 여기 둡니다.
+
+    ⚠️ **이름이 아니라 쓰임을 셉니다.** `m.Task` 를 질의에 넣는 파일이
+    `db/live.py` 를 안 가져오면 잡습니다.
+    """
+    import re
+
+    root = REPO_ROOT / "backend" / "teamflow"
+    offenders: list[str] = []
+    for path in root.rglob("*.py"):
+        if path.name == "live.py":
+            continue
+        body = path.read_text(encoding="utf-8")
+        # `select(m.Task)` · `select(m.Task, ...)` · `select(m.Task.id)` 처럼
+        # **업무 표를 고르는** 질의만 봅니다. `m.TaskGithubLink` 같은 다른
+        # 표는 대상이 아닙니다 — `\b` 로 끊습니다.
+        if not re.search(r"select\(\s*m\.Task\b(?!\w)", body):
+            continue
+        if "from teamflow.db import live" in body or "db import live" in body:
+            continue
+        offenders.append(str(path.relative_to(REPO_ROOT)))
+
+    assert not offenders, (
+        f"업무를 읽으면서 `db/live.py` 를 안 거치는 곳: {offenders} — "
+        "`live_tasks()`·`live_task_ids()`·`not_deleted()` 중 하나를 쓰십시오. "
+        "직접 조건을 적으면 다음 사람이 빠뜨립니다"
+    )
+
+
+def test_every_place_that_asks_who_owns_a_task_goes_through_assignees():
+    """⭐ 담당자를 묻는 자리를 **한 곳으로** 모읍니다 (`TASK-006`).
+
+    담당자는 `tasks.assignee_id` 한 칸이었고, 여럿을 받으면서 표가
+    됐습니다(`task_assignees`). 그러면서 "이 업무는 누구 것인가" 를 묻는
+    코드가 아홉 군데로 흩어질 수 있게 됐습니다 — 칸반·달력·검색·알림·
+    PR 연결·위험 신호·승인·기여 이벤트·지켜진 약속.
+
+    각자 `select(TaskAssignee.user_id)` 를 적으면 그중 하나는 다르게
+    적히고, **다르게 적힌 곳이 조용히 틀립니다.** 담당자는 기여 이벤트가
+    누구에게 가는지를 정하므로, 갈라지면 점수가 갈라집니다.
+
+    `db/live.py` 를 지키는 검사와 같은 판단이고 같은 이유입니다.
+
+    ⚠️ **이름이 아니라 쓰임을 셉니다.** 표를 질의에 넣는 파일이
+    `db/assignees.py` 를 안 가져오면 잡습니다.
+    """
+    import re
+
+    root = REPO_ROOT / "backend" / "teamflow"
+    offenders: list[str] = []
+    for path in root.rglob("*.py"):
+        if path.name == "assignees.py":
+            continue
+        body = path.read_text(encoding="utf-8")
+        if not re.search(r"\bm\.TaskAssignee\b", body):
+            continue
+        if "from teamflow.db import assignees" in body or "db import assignees" in body:
+            continue
+        offenders.append(str(path.relative_to(REPO_ROOT)))
+
+    assert not offenders, (
+        f"담당자 표를 직접 만지면서 `db/assignees.py` 를 안 거치는 곳: {offenders} — "
+        "`of_task()`·`of_tasks()`·`task_ids_of()`·`replace()` 를 쓰십시오"
+    )
+
+
+def test_the_assignee_column_did_not_come_back():
+    """⚠️ `tasks.assignee_id` 가 **돌아오면 안 됩니다.**
+
+    "대표 담당자는 칸에, 나머지는 표에" 가 제일 손이 덜 가는 길이고, 그래서
+    다음 사람이 반드시 그 유혹을 받습니다. 그건 같은 사실을 두 벌로 두는
+    것이고, 담당자는 기여 이벤트가 갈 사람을 정하므로 두 벌이 갈라지면
+    **점수가 갈라집니다** (대표 실패 ②).
+    """
+    from teamflow.db import models as models_mod
+
+    columns = set(models_mod.Task.__table__.columns.keys())
+    assert "assignee_id" not in columns, (
+        "`tasks.assignee_id` 가 돌아왔습니다 — 담당자는 `task_assignees` 표 "
+        "하나에만 있어야 합니다 (`TASK-006`)"
+    )
+    assert "task_assignees" in models_mod.Base.metadata.tables
+
+
+def test_the_share_is_never_written_to_a_row():
+    """⭐ 나눈 몫을 **저장하면 안 됩니다** (`TASK-006`).
+
+    완료 시점에 `share` 를 메타데이터에 적어 두면, 담당자가 나중에 늘어도
+    먼저 있던 사람의 몫이 안 줄어듭니다. 이 저장소가 여덟 번째로 같은
+    판단을 하는 자리입니다 — 파생값은 **읽을 때** 만듭니다.
+
+    ⚠️ 읽는 자리(`scoring_service.load_events`)는 예외입니다. 거기가 바로
+    "읽을 때 다시 센다" 를 하는 곳입니다.
+    """
+    import re
+
+    root = REPO_ROOT / "backend" / "teamflow"
+    offenders: list[str] = []
+    for path in root.rglob("*.py"):
+        if path.name in ("scoring_service.py", "sharing.py", "scoring.py"):
+            continue
+        body = path.read_text(encoding="utf-8")
+        # 메타데이터 사전에 `share` 키를 적는 모양만 봅니다.
+        if re.search(r"[\"']share[\"']\s*:", body):
+            offenders.append(str(path.relative_to(REPO_ROOT)))
+
+    assert not offenders, (
+        f"`share` 를 행에 적는 곳이 생겼습니다: {offenders} — 몫은 "
+        "`scoring_service.load_events` 가 읽을 때 셉니다"
+    )
+
+
+def test_the_readme_numbers_are_not_stale():
+    """⭐ README 가 손으로 적은 개수를 **다시 셉니다.**
+
+    이 저장소는 문서가 사실과 다른 곳을 열세 군데 발견했고, 그중 여럿이
+    "처음 적을 때는 맞았는데 코드가 움직인 뒤로 아무도 안 고친" 것입니다.
+    README 는 **제일 먼저 읽는 문서**라 틀리면 제일 오래 갑니다.
+
+    ⚠️ 실제로 낡아 있었습니다 — 발언 라벨을 여덟이라고 적어 뒀는데
+    열셋이었고, 결함 기록을 `여든하나` 라고 부르는데 백스물다섯이었습니다.
+
+    ⚠️ **여기서 세는 것은 기계로 확인 가능한 것뿐입니다.** "화면이
+    예쁜가" 같은 것까지 재는 척하면 이 검사가 거짓말을 하게 됩니다.
+    """
+    import re
+
+    from teamflow.db import models as models_mod
+    from teamflow.db import vocab
+
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    labels = len(vocab.UTTERANCE_LABEL)
+    assert f"{labels}라벨" in readme, (
+        f"발언 유형이 {labels}개인데 README 가 그렇게 안 적혀 있습니다"
+    )
+
+    tables = len(models_mod.Base.metadata.tables)
+    assert f"{tables}개 테이블" in readme, (
+        f"표가 {tables}개인데 README 가 그렇게 안 적혀 있습니다"
+    )
+
+    # `docs/17` 이 스스로 밝힌 건수와 README 가 부르는 이름이 맞는가.
+    defects = (REPO_ROOT / "docs" / "17-결함-기록.md").read_text(encoding="utf-8")
+    claimed = re.search(r"번호가 붙은 항목 \*\*(\d+)건\*\*", defects)
+    assert claimed is not None, "`docs/17` 머리말에서 건수를 못 찾았습니다"
+    assert f"결함 **{claimed.group(1)}건**" in readme, (
+        f"`docs/17` 은 {claimed.group(1)}건이라는데 README 가 다르게 부릅니다"
+    )
+
+    # 얼마나 만들어졌나에 답하는 문서를 README 가 가리키는가.
+    assert "docs/20-요구사항-대조.md" in readme, (
+        "`docs/20` 이 README 문서 표에 없습니다 — 얼마나 만들어졌나에 "
+        "답하는 문서인데 찾을 방법이 없습니다"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# 문서가 손으로 센 숫자 — 2026-08-13 전수 조사에서 71건이 나왔습니다
+#
+# 그중 **다시 낡을 것**만 여기서 잽니다. 한 번 고치고 마는 것은 가드를
+# 달 값이 없고, 반대로 화면·테스트 개수처럼 **코드가 움직일 때마다
+# 틀려지는 것**은 사람이 절대 못 따라갑니다.
+# ══════════════════════════════════════════════════════════════════
+
+_LIVE_DOCS = ("README.md", "AGENTS.md", *(f"docs/{n}" for n in ()))
+"""살아 있는 문서 = 지금을 주장하는 문서.
+
+⚠️ 여기에 `docs/14`·`docs/16` 을 넣지 마십시오. 그 둘은 머리말로 **시점을
+못 박은 보존 문서**라 옛 값이 맞는 기록입니다. 넣으면 이 저장소가 지키는
+원칙("계획을 덮어쓰지 않는다")을 가드가 깨뜨립니다.
+"""
+
+
+def _korean_number(n: int) -> str:
+    """세는 수사. 문서가 `열여섯 장` 처럼 한글로 적습니다."""
+    words = {
+        1: "하나", 2: "둘", 3: "셋", 4: "넷", 5: "다섯", 6: "여섯",
+        7: "일곱", 8: "여덟", 9: "아홉", 10: "열", 11: "열하나",
+        12: "열둘", 13: "열셋", 14: "열넷", 15: "열다섯", 16: "열여섯",
+        17: "열일곱", 18: "열여덟", 19: "열아홉", 20: "스물",
+    }
+    return words[n]
+
+
+def test_no_live_document_claims_a_stale_screen_count():
+    """⭐ 살아 있는 문서가 **화면 개수**를 틀리게 말하지 않는가.
+
+    이번 전수 조사에서 **가장 많이 낡은 자리**였습니다 — README 두 곳,
+    `docs/13` 한 곳, `docs/00` 한 곳, `docs/08` 한 곳이 각각 열·열·열·
+    일곱·아홉이라고 적혀 있었고 실제는 열여섯이었습니다.
+
+    ⚠️ 세는 자리는 `public/*.html` 입니다. `src/demo/*.tsx` 를 세면
+    `parts.tsx` 같은 조각이 섞입니다.
+
+    ⚠️ **`docs/14`·`docs/16` 은 안 봅니다** — 시점을 못 박은 보존 문서라
+    옛 값이 맞습니다.
+    """
+    import re
+
+    screens = len(list((REPO_ROOT / "frontend" / "public").glob("*.html")))
+    want = _korean_number(screens)
+
+    # ⚠️ **표지를 「장」 으로 좁힙니다.** 맨 "화면 N 개" 는 이 저장소에서
+    #    세 가지 뜻으로 쓰입니다 — 전체 수 · React 로 옮긴 수 · `docs/18`
+    #    이 다루는 수. 셋을 한 자로 재면 맞는 문장을 틀렸다고 잡습니다
+    #    (실제로 세 곳을 그렇게 잡았습니다). 이 저장소는 **전체 수를 셀
+    #    때만 「장」** 을 씁니다 — "화면 열여섯 장".
+    NUM = (
+        "하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉|열"
+        "|열하나|열둘|열셋|열넷|열다섯|열여섯|열일곱|열여덟|열아홉|스물"
+    )
+    pattern = re.compile(rf"화면(?:이)? ({NUM}) 장")
+
+    bad = []
+    for name in (
+        "README.md",
+        "docs/13-화면-구조.md",
+        "docs/00-이-프로그램은-무엇인가.md",
+        "docs/21-데스크톱-셸-Electron.md",
+    ):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8")
+        for line_no, line in enumerate(text.splitlines(), 1):
+            for m in pattern.finditer(line):
+                if m.group(1) != want:
+                    bad.append(f"{name}:{line_no} — '{m.group(0)}' (실제 {screens})")
+
+    assert not bad, (
+        "화면 개수를 틀리게 적은 곳이 있습니다:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_no_live_document_claims_a_stale_test_count():
+    """⭐ 문서가 `~.test.ts (N개 테스트)` 라고 적은 N 이 **실제와 맞는가**.
+
+    `docs/13` 두 곳(27↔29) · `docs/15` 두 곳(177↔184, 24↔25) ·
+    `docs/19` 한 곳(28↔29)이 같은 병이었습니다. 테스트를 하나 더하면
+    문서가 조용히 틀려집니다.
+
+    ⚠️ **면제가 필요합니다.** `docs/14`·`docs/16` 은 머리말로 시점을 못
+    박았고, 거기 적힌 옛 실측치는 **맞는 기록**입니다.
+    """
+    import re
+
+    live = [
+        p
+        for p in (REPO_ROOT / "docs").glob("*.md")
+        if p.name.split("-")[0] not in {"14", "16"}
+    ]
+
+    # `frontend/src/lib/call/mesh.ts` (25개 테스트)  /  `links.test.ts` (29)
+    ref = re.compile(r"`([^`]*?/)?([a-z-]+)(?:\.test)?\.ts` ?\((\d+)(?:개 테스트)?\)")
+
+    def count_tests(stem: str) -> int | None:
+        hits = list((REPO_ROOT / "frontend" / "src").rglob(f"{stem}.test.ts"))
+        if len(hits) != 1:
+            return None
+        return len(re.findall(r"^\s*(?:it|test)\(", hits[0].read_text(encoding="utf-8"), re.M))
+
+    bad = []
+    for doc in live:
+        for line_no, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            for m in ref.finditer(line):
+                actual = count_tests(m.group(2))
+                if actual is not None and actual != int(m.group(3)):
+                    bad.append(
+                        f"docs/{doc.name}:{line_no} — {m.group(2)} 를 "
+                        f"{m.group(3)}개라는데 {actual}개"
+                    )
+
+    assert not bad, "테스트 개수가 낡은 곳:\n  " + "\n  ".join(bad)
+
+
+def test_no_live_document_says_the_android_shell_is_merely_paused():
+    """⭐ 안드로이드 셸을 **지웠는데** 문서가 "보류" 라고 말하지 않는가.
+
+    2026-08-13 에 지웠습니다(`android/` 30파일). 그런데 `docs/08`·`docs/15`
+    두 곳·`docs/18`·`docs/17` 다섯 곳이 여전히 "보류"·"셸은 있지만" 으로
+    적고 있었습니다. **"멈춘 것" 과 "없는 것" 은 다릅니다** — 보류라고
+    읽으면 다음 사람이 되살리려고 시간을 씁니다.
+
+    ⚠️ 셸이 **다시 생기면** 이 검사는 스스로 비활성화됩니다. 그때는
+    보류라고 적는 것이 맞기 때문입니다.
+    """
+    if (REPO_ROOT / "android").exists():
+        return  # 셸이 있으면 잴 것이 없습니다
+
+    banned = ("안드로이드 셸은 별도", "안드로이드 셸 | **보류", "안드로이드 셸 | 보류")
+    bad = []
+    for doc in (REPO_ROOT / "docs").glob("*.md"):
+        if doc.name.split("-")[0] in {"14", "16"}:
+            continue
+        for line_no, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            if "안드로이드" not in line:
+                continue
+            if any(b in line for b in banned):
+                bad.append(f"docs/{doc.name}:{line_no} — {line.strip()[:70]}")
+
+    assert not bad, (
+        "안드로이드 셸을 지웠는데 보류라고 적은 곳:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_no_live_document_names_a_framework_the_project_does_not_have():
+    """⭐ 안 쓰는 프레임워크 이름이 **살아 있는 문서**에 남아 있지 않은가.
+
+    `docs/03` 두 곳·`docs/11` 두 곳이 Next.js 를 쓴다고 적고 있었습니다.
+    런타임 의존성은 react·react-dom·@radix-ui/react-dialog 셋뿐이고
+    번들은 `build.mts` 의 esbuild 입니다.
+
+    ⚠️ **브랜드 표기(`Next.js`)만 봅니다.** 소문자 `next` 로 잡으면
+    `next_agenda`·`next.test.ts`·`?next=` 가 전부 걸립니다 — 실제로 그렇게
+    짰다가 아홉 곳을 잘못 잡았습니다. 이 저장소가 적어 둔 그대로입니다:
+    **잴 구역에는 그 구역만의 이름을 붙이십시오.**
+
+    ⚠️ 면제: `docs/00-제안서-…-검토.md`(구현 이전 권고안) · `docs/16`
+    (측정일이 박힌 감사) · `docs/17`(결함 기록 — 과거 서술) ·
+    `docs/20`(정의서가 **요구한 것**과 우리가 쓴 것을 나란히 적는 표).
+    """
+    import json
+
+    pkg = json.loads((REPO_ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
+    installed = {*pkg.get("dependencies", {}), *pkg.get("devDependencies", {})}
+
+    # 브랜드 표기 → package.json 이름
+    BRANDS = {"Next.js": "next", "Zustand": "zustand", "Recharts": "recharts"}
+    missing = {brand for brand, pkg_name in BRANDS.items() if pkg_name not in installed}
+
+    exempt_names = {"00-제안서-TeamFlowAI-검토.md"}
+    exempt_prefix = {"16", "17", "20"}
+
+    bad = []
+    for doc in (REPO_ROOT / "docs").glob("*.md"):
+        if doc.name in exempt_names or doc.name.split("-")[0] in exempt_prefix:
+            continue
+        for line_no, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            for brand in missing:
+                # 부재를 말하는 줄은 통과 — "Vite 를 안 씁니다" 같은 것.
+                if brand in line and not any(
+                    k in line
+                    for k in ("안 씁니다", "안 넣", "없습니다", "아닙니다", "쓰지 않", "가 아니라")
+                ):
+                    bad.append(f"docs/{doc.name}:{line_no} — {line.strip()[:70]}")
+
+    assert not bad, (
+        "설치하지 않은 프레임워크를 쓴다고 적은 곳:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_the_defect_log_never_reuses_a_measurement_ordinal():
+    """⭐ `docs/17` 의 "n번째 자" 순번이 **겹치지 않는가**.
+
+    이 저장소는 "측정 도구가 틀렸다" 를 따로 세고 있고, 그 순번이 지금
+    열일곱까지 왔습니다. 실제로 **"열여섯 번째" 가 두 번** 쓰여 있었습니다
+    (결함 163 과 170). 순번이 겹치면 몇 번을 당했는지 셀 수 없게 됩니다.
+    """
+    import re
+    from collections import Counter
+
+    text = (REPO_ROOT / "docs" / "17-결함-기록.md").read_text(encoding="utf-8")
+    ordinals = re.findall(r"(열[가-힣]*|스물[가-힣]*) 번째(?:로)? (?:자|당한)", text)
+    dupes = [o for o, c in Counter(ordinals).items() if c > 1]
+
+    assert not dupes, f"'n번째 자' 순번이 겹칩니다: {dupes}"

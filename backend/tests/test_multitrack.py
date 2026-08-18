@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -671,3 +673,35 @@ def test_noise_floor_of_all_silence_is_the_floor():
 
     assert estimate_noise_floor_db(np.full(50, DB_FLOOR)) == DB_FLOOR
     assert estimate_noise_floor_db(np.zeros(0)) == DB_FLOOR
+
+
+# ══════════════════════════════════════════════════════════════
+# 7. 발언 비중 (AI-AUDIO-005) — ⚠️ 0.0 을 돌려주던 자리
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 여기 `TrackStats.speaking_ratio` 라는 property 가 있었고 **언제나
+#    `0.0`** 을 돌려줬습니다(결함 121). 부르는 곳은 0곳이었습니다.
+#    비중에는 분모(팀 전체 발언 시간)가 필요한데 그 dataclass 는 자기
+#    트랙만 아니까, 구조적으로 계산이 불가능한 자리에 스텁이 박혀 있던
+#    것입니다.
+
+
+def test_the_second_speaking_share_implementation_is_gone():
+    """⭐ 발언 비중을 만드는 코드가 **다시 두 벌이 되지 않는가** (결함 172).
+
+    `speaking_ratios()` 가 여기 있었습니다. 결함 121 에서 값을 고치고
+    결함 162 에서 부르는 곳이 0곳인 것을 발견했는데, 배선하는 대신
+    `meeting/speaking.py` 에 새로 만들었습니다 — 그래서 같은 물음에
+    답하는 코드가 둘이 됐고 규칙 스무 줄이 양쪽에 복사돼 있었습니다.
+
+    ⚠️ **이 모듈에 비중 계산을 다시 만들지 마십시오.** 여기는 트랙만
+    알고 화면은 사람을 그립니다. 트랙 index 로 만든 비중은 화면까지
+    올 수 없어서, 또 "만들어 놓고 아무도 안 부름" 이 됩니다.
+    """
+    from teamflow.audio import multitrack
+
+    assert not hasattr(multitrack, "speaking_ratios"), (
+        "`speaking_ratios` 가 돌아왔습니다 — 비중은 `meeting/speaking.py` 한 곳입니다"
+    )
+    source = Path(multitrack.__file__).read_text(encoding="utf-8")
+    assert "def speaking_ratio" not in source, "이름만 바꾼 같은 함수가 있습니다"

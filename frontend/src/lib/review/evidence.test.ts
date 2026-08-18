@@ -96,6 +96,19 @@ describe('evidenceView', () => {
     strictEqual(evidenceView(utterance({ is_overlap: true })).overlap, true);
   });
 
+  it('⭐ 무슨 발언인지 사람 말로 붙인다 — 규칙은 틀리고, 보여야 고쳐진다', () => {
+    // 서버는 `utterance_type` 을 오래전부터 보내고 있었는데 화면이 안
+    // 썼습니다(대표 실패 ①). 잘못 매겨진 라벨을 아무도 못 보면 영영
+    // 안 고쳐집니다.
+    strictEqual(evidenceView(utterance()).type, '결정');
+    strictEqual(evidenceView(utterance({ utterance_type: 'objection' })).type, '반대 의견');
+  });
+
+  it('⭐ 아직 분류 전이면 **아무 말도 안 한다**', () => {
+    // `기타` 라고 적으면 재고 나서 모르는 것처럼 보입니다 (불변식 3).
+    strictEqual(evidenceView(utterance({ utterance_type: null })).type, null);
+  });
+
   it('원문을 손대지 않는다', () => {
     const text = '  띄어쓰기가  이상해도   그대로  ';
     strictEqual(evidenceView(utterance({ text })).text, text);
