@@ -2316,7 +2316,7 @@ describe('CSS 토큰', () => {
     // 그러면 한쪽에서만 깨집니다.
     for (const name of ['--ink-900', '--ink-700', '--ink-500', '--ink-300',
                         '--ink-200', '--ink-100', '--ink-050', '--ink-000',
-                        '--teal-700', '--teal-100', '--clay-600', '--clay-100',
+                        '--indigo-700', '--indigo-100', '--clay-600', '--clay-100',
                         '--green-700', '--amber-800', '--red-700']) {
       strictEqual(darkTokens.has(name), true, `어두운 모드에 ${name} 이 없습니다`);
     }

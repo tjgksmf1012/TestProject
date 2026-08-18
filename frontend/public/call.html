@@ -128,6 +128,8 @@
   <section class="panel">
     <h2>내 마이크</h2>
     <p class="sub" id="mic" role="status">확인 중…</p>
+    <!-- 권한 대기는 오류가 아니라 상태다 — 흙빛 안내 옆에 할 일을 준다. -->
+    <button id="mic-retry" hidden type="button">마이크 권한 허용하기</button>
     <!-- ⚠️ 이게 없으면 마이크가 죽은 걸 회의가 끝난 뒤에 안다.
          그때는 그 사람의 발언이 이미 사라진 뒤다. -->
     <div class="meter"><span id="level"></span></div>

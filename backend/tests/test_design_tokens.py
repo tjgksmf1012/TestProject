@@ -226,7 +226,7 @@ def test_the_mix_matches_the_browser(css: str):
     읽으면 전부 검정에 가깝게 잡힙니다 (실제로 한 번 그렇게 틀렸습니다).
     """
     light, dark = _blocks(css)
-    for token, want_light, want_dark in [("--gap", "#775939", "#ccac87")]:
+    for token, want_light, want_dark in [("--gap", "#785539", "#ceac8a")]:
         got_light = _resolve(token, light, dark, dark=False)
         got_dark = _resolve(token, light, dark, dark=True)
         assert got_light == want_light, (

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>기여도 — TeamFlow 프로토타입</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.0.18/index.min.css">
+<link rel="stylesheet" href="../tokens/tokens.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  .content { flex:1; display:flex; flex-direction:column; min-height:0; }
+  .scroller { flex:1; overflow-y:auto; padding: var(--sp-7) var(--sp-10); }
+
+  .person { display:grid; grid-template-columns: 168px 190px 1fr; gap: var(--sp-8);
+    padding: var(--sp-6) 0; border-bottom: 1px dashed var(--c-line); align-items:start; }
+  .person:last-of-type { border-bottom: 0; }
+  .person__name { font-size: var(--fs-16); font-weight: var(--fw-semibold); }
+  .person__role { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--c-ink-faint); margin-top: var(--sp-2); }
+
+  .range { font-family: var(--font-mono); font-size: var(--fs-34); font-weight: var(--fw-medium);
+    letter-spacing: var(--ls-34); line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .range__sep { color: var(--c-ink-faint); }
+  .certainty { margin-top: var(--sp-4); }
+  .certainty__label { font-family: var(--font-mono); font-size: var(--fs-11);
+    color: var(--c-ink-faint); margin-top: var(--sp-3); }
+
+  .facts { display:flex; flex-wrap:wrap; gap: var(--sp-3) var(--sp-6); font-size: var(--fs-12);
+    color: var(--c-ink-muted); margin-top: var(--sp-4); }
+  .facts b { font-family: var(--font-mono); font-weight: var(--fw-medium); color: var(--c-ink); }
+  .flag { display:flex; gap:var(--sp-3); align-items:flex-start; font-size: var(--fs-13);
+    color: var(--c-unknown); line-height:1.55; }
+  .flag--faint { color: var(--c-ink-muted); }
+
+  /* 확정 바 — 하단 고정 */
+  .confirm { flex:0 0 auto; border-top: 1px solid var(--c-line); background: var(--c-surface);
+    padding: var(--sp-6) var(--sp-10); }
+  .confirm__lede { font-size: var(--fs-12); color: var(--c-ink-muted); margin: 0 0 var(--sp-5); }
+  .confirm__row { display:flex; gap: var(--sp-8); align-items:flex-end; flex-wrap:wrap; }
+  .cfield { display:flex; flex-direction:column; gap: var(--sp-3); }
+  .cfield__top { display:flex; gap: var(--sp-4); align-items:baseline; }
+  .cfield__name { font-size: var(--fs-13); font-weight: var(--fw-medium); }
+  .cfield__sys { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--c-ink-faint); }
+  .cfield input { width: 84px; }
+  .reason { display:none; margin-top: var(--sp-3); }
+  .reason.is-open { display:block; }
+  .reason input { width: 220px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <nav class="rail">
+    <div class="rail__brand">TF</div>
+    <a class="rail__item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 10l9-7 9 7v10a1 1 0 01-1 1h-5v-7H9v7H4a1 1 0 01-1-1z"/></svg>홈</a>
+    <a class="rail__item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="5" height="16"/><rect x="10" y="4" width="5" height="16"/><rect x="17" y="4" width="4" height="16"/></svg>칸반</a>
+    <a class="rail__item" href="contributions.html" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h10M4 17h13"/></svg>기여도</a>
+    <a class="rail__item" href="project-settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h16M4 17h16"/></svg>설정</a>
+  </nav>
+
+  <div class="main">
+    <header class="appbar">
+      <span class="appbar__title">기여도</span>
+      <span class="appbar__meta">scoring-v1 · 2026-08-18 01:53</span>
+      <span class="appbar__spacer"></span>
+      <span class="chip chip--neutral">참고값 · 확정 전</span>
+    </header>
+
+    <div class="content">
+      <div class="scroller">
+
+        <div class="notice" style="margin-bottom: var(--sp-7);">
+          <strong>팀 전원의 신뢰도가 낮습니다.</strong> 이 수치로 서로를 비교하지 마세요 —
+          연결되지 않은 데이터가 무엇인지 먼저 확인해야 합니다.
+          <details class="disc" style="margin-top:var(--sp-3)">
+            <summary>이번 계산에서 빠진 것 3가지</summary>
+            <div>문서, 일정 준수, 동료 평가 활동은 이번 계산에서 빠졌습니다.</div>
+          </details>
+        </div>
+
+        <!-- 김민수 -->
+        <div class="person">
+          <div>
+            <div class="person__name">김민수</div>
+            <div class="person__role">개발 100%</div>
+          </div>
+          <div>
+            <div class="range">32<span class="range__sep">~</span>52%</div>
+            <div class="certainty">
+              <svg class="ribbon ribbon--sm" viewBox="0 0 200 6" preserveAspectRatio="none" role="img" aria-label="김민수 확신 폭 — 아는 것 80%, 모르는 폭 20%p">
+                <defs><pattern id="h1" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+                  <rect width="6" height="6" fill="var(--c-unknown-tint)"/><line x1="0" y1="0" x2="0" y2="6" stroke="var(--c-unknown)" stroke-width="3"/></pattern></defs>
+                <rect x="0" y="0" width="160" height="6" fill="var(--ribbon-known)"/>
+                <rect x="160" y="0" width="40" height="6" fill="url(#h1)"/>
+              </svg>
+              <div class="certainty__label">모르는 폭 20%p · 점 하나가 4%p</div>
+            </div>
+          </div>
+          <div>
+            <div class="flag flag--faint">▸ 녹음되지 않은 회의가 있습니다</div>
+            <div class="facts"><span>코드 <b>4건</b> · 팀의 <b>56%</b></span><span>업무 <b>1건</b> · 팀의 <b>25%</b></span><span>회의 <b>6건</b> · 팀의 <b>42%</b></span></div>
+            <details class="disc"><summary>신뢰도 사유</summary><div>회의 5건 중 1건이 녹음되지 않아 발언량 근거가 부족합니다.</div></details>
+          </div>
+        </div>
+
+        <!-- 박지원 — 결측 케이스 -->
+        <div class="person">
+          <div>
+            <div class="person__name">박지원</div>
+            <div class="person__role">개발 60% · 디자인 40%</div>
+          </div>
+          <div>
+            <div class="range">19<span class="range__sep">~</span>31%</div>
+            <div class="certainty">
+              <svg class="ribbon ribbon--sm" viewBox="0 0 200 6" preserveAspectRatio="none" role="img" aria-label="박지원 확신 폭 — 아는 것 88%, 모르는 폭 12%p">
+                <rect x="0" y="0" width="176" height="6" fill="var(--ribbon-known)"/>
+                <rect x="176" y="0" width="24" height="6" fill="url(#h1)"/>
+              </svg>
+              <div class="certainty__label">모르는 폭 12%p · 점 하나가 4%p</div>
+            </div>
+          </div>
+          <div>
+            <div class="flag">⚠ 회의 기여를 측정하지 못했습니다 — 녹음 1건 중 1건이 끊겼습니다.
+              0으로 계산하지 않고 나머지 활동으로 추정했습니다.</div>
+            <div class="facts"><span>업무 <b>1건</b> · 팀의 <b>25%</b></span><span>코드 <b>2건</b> · 팀의 <b>24%</b></span><span class="faint">회의 <b>측정 불가</b></span></div>
+            <details class="disc"><summary>신뢰도 사유</summary><div>트랙 커버리지가 42%로 발언량을 신뢰할 수 없어 회의 기여를 계산에서 제외했습니다.</div></details>
+          </div>
+        </div>
+
+        <!-- 이하늘 -->
+        <div class="person">
+          <div>
+            <div class="person__name">이하늘</div>
+            <div class="person__role">개발 70% · 기획 30%</div>
+          </div>
+          <div>
+            <div class="range">26<span class="range__sep">~</span>41%</div>
+            <div class="certainty">
+              <svg class="ribbon ribbon--sm" viewBox="0 0 200 6" preserveAspectRatio="none" role="img" aria-label="이하늘 확신 폭 — 아는 것 84%, 모르는 폭 16%p">
+                <rect x="0" y="0" width="168" height="6" fill="var(--ribbon-known)"/>
+                <rect x="168" y="0" width="32" height="6" fill="url(#h1)"/>
+              </svg>
+              <div class="certainty__label">모르는 폭 16%p · 점 하나가 4%p</div>
+            </div>
+          </div>
+          <div>
+            <div class="flag flag--faint">▸ 녹음되지 않은 회의가 있습니다</div>
+            <div class="facts"><span>업무 <b>2건</b> · 팀의 <b>49%</b></span><span>코드 <b>2건</b> · 팀의 <b>20%</b></span><span>회의 <b>6건</b> · 팀의 <b>16%</b></span></div>
+            <details class="disc"><summary>신뢰도 사유</summary><div>회의 5건 중 1건이 녹음되지 않았습니다.</div></details>
+          </div>
+        </div>
+
+        <p class="t12 faint" style="margin-top:var(--sp-7);max-width:var(--measure)">
+          리본에서 채워진 길이는 <strong>기여도가 아니라 확신도</strong>입니다.
+          리본이 짧은 사람은 기여가 적은 사람이 아니라, 우리가 가장 모르는 사람입니다.
+        </p>
+      </div>
+
+      <!-- 확정 바 -->
+      <div class="confirm">
+        <p class="confirm__lede">이 값은 참고값입니다. 최종 기여도는 팀이 합의해 확정합니다. 시스템 값은 지워지지 않고 나란히 남습니다.</p>
+        <div class="confirm__row">
+          <div class="cfield">
+            <div class="cfield__top"><span class="cfield__name">김민수</span><span class="cfield__sys">시스템 41.7</span></div>
+            <input class="input input--num" data-sys="41.7" value="41.7">
+            <div class="reason"><input class="input" placeholder="다르게 정한 이유"></div>
+          </div>
+          <div class="cfield">
+            <div class="cfield__top"><span class="cfield__name">박지원</span><span class="cfield__sys">시스템 24.9</span></div>
+            <input class="input input--num" data-sys="24.9" value="24.9">
+            <div class="reason"><input class="input" placeholder="다르게 정한 이유"></div>
+          </div>
+          <div class="cfield">
+            <div class="cfield__top"><span class="cfield__name">이하늘</span><span class="cfield__sys">시스템 33.0</span></div>
+            <input class="input input--num" data-sys="33.0" value="33.0">
+            <div class="reason"><input class="input" placeholder="다르게 정한 이유"></div>
+          </div>
+          <span class="appbar__spacer"></span>
+          <button class="btn btn--primary">이 값으로 확정</button>
+        </div>
+        <p class="t12 faint" style="margin-top:var(--sp-4)">사유 없는 조정은 근거 없는 점수와 같습니다.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="proto-note">
+  <span>프로토타입 · 기여도</span>
+  <a href="index.html">← 목록</a>
+  <button class="btn btn--ghost btn--sm" id="themeBtn">다크</button>
+</div>
+
+<script>
+// 값이 시스템 값과 달라지면 그 행에만 사유 입력칸이 펼쳐진다
+document.querySelectorAll('.cfield input[data-sys]').forEach(inp => {
+  inp.addEventListener('input', () => {
+    const reason = inp.parentElement.querySelector('.reason');
+    reason.classList.toggle('is-open', inp.value.trim() !== inp.dataset.sys);
+  });
+});
+document.getElementById('themeBtn').addEventListener('click', e => {
+  const root = document.documentElement;
+  const dark = root.getAttribute('data-theme') === 'dark';
+  root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  e.target.textContent = dark ? '다크' : '라이트';
+});
+</script>
+</body>
+</html>

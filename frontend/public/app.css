@@ -694,6 +694,11 @@ label:has(> input[type='radio']) {
   color: var(--warn);
 }
 
+/* 대기·결측 — 잘못이 아니라 "아직/못 잼". showNote 의 'gap' 톤이 쓴다. */
+.gap {
+  color: var(--gap);
+}
+
 .ok {
   color: var(--ok);
 }

@@ -92,6 +92,10 @@ const meetingId = params.get('meeting');
 // 아래 `joinMeeting()` 이 로그인한 사람의 트랙을 서버에서 받아 온다.
 let trackUrl = params.get('track');
 
+// 개발자 진단 패널 (R7) — 실험 조건·복사 한 줄은 사용자에게 하는 말이
+// 아니라서 기본 숨김이고, `?debug=1` 로만 열린다.
+if (params.get('debug') === '1') $('debug').hidden = false;
+
 const localUpload = new LocalUploadTransport();
 const httpUpload = new HttpUploadTransport('');
 
@@ -321,6 +325,9 @@ $('start').addEventListener('click', async () => {
   elapsedTimer = setInterval(() => {
     const sec = Math.floor((Date.now() - startedAt) / 1000);
     $('elapsed').textContent = `${Math.floor(sec / 60)}분 ${sec % 60}초`;
+    // 트랙 리본 LG — 40분 축 위에서 채움이 자란다 (design/redesign §녹음).
+    // 40분을 넘겨도 100% 에서 멈춘다 — 축 밖을 그리면 축이 거짓이 된다.
+    $('ribbon-fill').style.width = `${Math.min((sec / 2400) * 100, 100)}%`;
   }, 1000);
 });
 

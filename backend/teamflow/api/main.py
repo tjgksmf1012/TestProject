@@ -4811,11 +4811,36 @@ def search_everything(
 # 잘못됐다는 신호다.
 
 
+class _SpaStaticFiles(StaticFiles):
+    """SPA 마운트 — 없는 경로는 index.html 로 돌린다.
+
+    `/app/project/3/kanban` 같은 주소는 디스크에 파일이 없다. 라우팅은
+    브라우저의 React Router 가 하므로, 404 대신 index.html 을 준다.
+    (API 는 이 마운트 밖(`/api/...`)이라 여기 오지 않는다.)
+    """
+
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
+
+
 def _mount_frontend(application: FastAPI) -> Path | None:
-    """`frontend/public` 이 있으면 `/` 에 붙인다.
+    """화면을 붙인다 — `/app` 에 SPA(webapp/dist), `/` 에 frontend/public.
 
     없어도 API 는 정상 동작한다 — 백엔드만 띄우는 배포와 테스트가 있다.
+    `/` 마운트가 앞의 모든 경로를 삼키므로 `/app` 을 먼저 붙여야 한다.
     """
+    if SPA_EXPECTED_AT.is_dir():
+        application.mount(
+            "/app", _SpaStaticFiles(directory=SPA_EXPECTED_AT, html=True), name="spa"
+        )
+
     if not FRONTEND_EXPECTED_AT.is_dir():
         # 여기서 로그를 찍지 않는다 — 이 함수는 import 시점에 돌고
         # 로깅은 lifespan 에서 설정된다. 지금 찍으면 사라진다.
@@ -4829,5 +4854,8 @@ def _mount_frontend(application: FastAPI) -> Path | None:
 
 #: 화면이 있어야 할 자리. 없을 때 **어디를 봐야 하는지** 말해 주려고 둔다.
 FRONTEND_EXPECTED_AT = Path(__file__).resolve().parents[3] / "frontend" / "public"
+
+#: 리디자인 SPA (webapp) 의 빌드 산출물. `npm --prefix webapp run build` 가 만든다.
+SPA_EXPECTED_AT = Path(__file__).resolve().parents[3] / "webapp" / "dist"
 
 FRONTEND_DIR = _mount_frontend(app)

@@ -24,6 +24,13 @@ node_modules/
 out/
 dist/
 build/
+# ⚠️ 리디자인 SPA 번들(`webapp/dist`)도 같은 이유로 **커밋합니다** —
+# FastAPI 가 `/app` 에 이 폴더를 그대로 얹으므로(api/main.py 의
+# `SPA_EXPECTED_AT`), 없으면 clone → uvicorn 에서 /app 이 404 입니다.
+# 소스를 고치면 `npm --prefix webapp run build` 로 다시 만들어 같이
+# 커밋하세요.
+!/webapp/dist/
+!/webapp/dist/**
 *.tsbuildinfo
 
 # ── 환경 변수 / 시크릿 ─────────────────────────────────────

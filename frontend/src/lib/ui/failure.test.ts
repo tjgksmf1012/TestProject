@@ -86,6 +86,18 @@ describe('showNote (결함 92)', () => {
     strictEqual(el.classes.has('bad'), false);
   });
 
+  it('⭐ 대기·결측은 흙빛이다 — 빨강도 회색도 아니다', () => {
+    // 마이크 권한을 아직 안 준 것은 잘못이 아니라 순서상의 상태입니다.
+    // 빨강이면 "고장" 으로, 회색이면 "평범한 상태 줄" 로 읽힙니다
+    // (design/redesign §통화 · docs/05 §5 — 측정 불가 ≠ 0점).
+    const el = slot();
+    showNote(el, '마이크가 아직 꺼져 있습니다 — 권한을 허용하면 켜집니다.', 'gap');
+    strictEqual(el.classes.has('gap'), true);
+    strictEqual(el.classes.has('bad'), false);
+    showNote(el, '');
+    strictEqual(el.classes.has('gap'), false, '지울 때 색도 같이 지웁니다');
+  });
+
   it('⭐ 지울 때 색도 같이 지운다', () => {
     // 클래스만 남으면 다음 안내가 엉뚱한 색으로 뜹니다.
     const el = slot();

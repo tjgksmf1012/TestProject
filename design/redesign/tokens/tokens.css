@@ -1,0 +1,225 @@
+/* ==========================================================================
+   TeamFlow — Design Tokens  "Instrument"
+   --------------------------------------------------------------------------
+   원칙: 인터페이스의 99%는 무채색이다.
+        색은 "근거가 있다"(인디고) 또는 "모른다"(황토) 두 경우에만 나타난다.
+
+   Tailwind v4를 쓴다면 이 파일을 @theme 블록으로 감싸 import 하세요.
+   ========================================================================== */
+
+:root {
+  /* ---------- 색: 무채색 ---------- */
+  --c-paper:            #FAFAFB;   /* 페이지 배경 */
+  --c-surface:          #FFFFFF;   /* 카드/올라온 면 */
+  --c-surface-raised:   #FFFFFF;   /* 팝오버·드롭다운 (라이트에선 그림자로 구분) */
+  --c-sunken:           #F0F1F4;   /* 전사·코드·입력 우물 */
+
+  --c-line:             #E3E5EA;   /* 헤어라인 (비인터랙티브) */
+  --c-line-strong:      #C9CDD6;   /* 인터랙티브 테두리 */
+
+  --c-ink:              #15171E;   /* 본문·제목 */
+  --c-ink-muted:        #5B6172;   /* 보조 설명 */
+  --c-ink-faint:        #878EA0;   /* 비필수. 여기에만 있는 정보 금지 */
+  --c-ink-inverse:      #FFFFFF;
+
+  /* ---------- 색: 의미 ---------- */
+  /* 근거가 있다 / 실행할 수 있다 */
+  --c-evidence:         #3D3AAE;
+  --c-evidence-hover:   #322F94;
+  --c-evidence-active:  #29277C;
+  --c-evidence-tint:    #ECECF9;
+  --c-evidence-line:    #C9C7EE;
+
+  /* 측정하지 못했다 / 모른다  ← 빨강 대용 아님. 비난 아님. */
+  --c-unknown:          #A8701A;
+  --c-unknown-tint:     #FAF1E0;
+  --c-unknown-line:     #E8D3AC;
+
+  /* 되돌릴 수 없는 파괴적 작업에만 */
+  --c-danger:           #B02E2E;
+  --c-danger-tint:      #FCEEEE;
+  --c-danger-line:      #F0C7C7;
+
+  /* 시스템 연결 상태에만. 점수/성과에 쓰지 말 것 */
+  --c-ok:               #1F6B45;
+  --c-ok-tint:          #E9F5EE;
+
+  --c-focus:            var(--c-evidence);
+
+  /* ---------- 타이포 ---------- */
+  --font-sans:    "Pretendard Variable", Pretendard, -apple-system,
+                  BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Wanted Sans Variable", "Wanted Sans", var(--font-sans);
+  --font-mono:    "JetBrains Mono", "IBM Plex Mono", ui-monospace,
+                  "SF Mono", Consolas, monospace;
+
+  --fs-11: 0.6875rem;   --lh-11: 1.4;   --ls-11:  0.06em;
+  --fs-12: 0.75rem;     --lh-12: 1.5;   --ls-12: -0.005em;
+  --fs-13: 0.8125rem;   --lh-13: 1.55;  --ls-13: -0.005em;
+  --fs-14: 0.875rem;    --lh-14: 1.6;   --ls-14: -0.01em;
+  --fs-16: 1rem;        --lh-16: 1.6;   --ls-16: -0.01em;
+  --fs-20: 1.25rem;     --lh-20: 1.4;   --ls-20: -0.015em;
+  --fs-26: 1.625rem;    --lh-26: 1.3;   --ls-26: -0.02em;
+  --fs-34: 2.125rem;    --lh-34: 1.2;   --ls-34: -0.03em;
+  --fs-46: 2.875rem;    --lh-46: 1.15;  --ls-46: -0.035em;
+
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* ---------- 간격 (4px 그리드) ---------- */
+  --sp-1:  0.125rem;  /*  2 */
+  --sp-2:  0.25rem;   /*  4 */
+  --sp-3:  0.375rem;  /*  6 */
+  --sp-4:  0.5rem;    /*  8 */
+  --sp-5:  0.75rem;   /* 12 */
+  --sp-6:  1rem;      /* 16 */
+  --sp-7:  1.25rem;   /* 20 */
+  --sp-8:  1.5rem;    /* 24 */
+  --sp-9:  2rem;      /* 32 */
+  --sp-10: 2.5rem;    /* 40 */
+  --sp-11: 3.5rem;    /* 56 */
+  --sp-12: 4.5rem;    /* 72 */
+
+  /* ---------- 모양 ---------- */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --r-full: 999px;
+
+  --shadow-pop: 0 1px 2px rgba(21,23,30,.08), 0 8px 24px rgba(21,23,30,.10);
+  --shadow-card: none;              /* 카드는 그림자 대신 선으로 구분 */
+
+  /* ---------- 레이아웃 ---------- */
+  --rail-w: 72px;
+  --header-h: 56px;
+  --pane-gap: 1px;                  /* 판 사이는 헤어라인 하나 */
+  --measure: 72ch;                  /* 최대 본문 폭 */
+
+  /* ---------- 시그니처: 트랙 리본 ---------- */
+  --ribbon-h-lg: 30px;              /* 로비 — 참가자별 40분 축 */
+  --ribbon-h-md: 14px;              /* 홈 — 회의별 커버리지 */
+  --ribbon-h-sm: 6px;               /* 기여도 — 확신 폭 */
+  --ribbon-radius: 2px;
+  --ribbon-known: var(--c-ink);     /* 측정된 구간 */
+  --ribbon-unknown: var(--c-unknown);
+  --ribbon-empty: var(--c-line);    /* 아직 아무것도 없음 (축은 그린다) */
+
+  /* ---------- 모션 ---------- */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 320ms;                /* 리본 스윕 1회에만 */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ==========================================================================
+   다크 — 반전이 아니라 별도 설계
+   베이스 명도 8~12%, elevation은 명도 +4~8%, 액센트는 밝히고 채도 낮춤
+   ========================================================================== */
+:root[data-theme="dark"] {
+  --c-paper:            #121319;
+  --c-surface:          #191B23;
+  --c-surface-raised:   #21242E;
+  --c-sunken:           #0E0F14;
+
+  --c-line:             #2A2E3B;
+  --c-line-strong:      #3D4354;
+
+  --c-ink:              #E9EBF2;    /* 순백 아님 — 헤일레이션 방지 */
+  --c-ink-muted:        #9BA2B5;
+  --c-ink-faint:        #6E7688;
+  --c-ink-inverse:      #121319;
+
+  --c-evidence:         #8F8BF2;
+  --c-evidence-hover:   #A3A0F5;
+  --c-evidence-active:  #B6B3F8;
+  --c-evidence-tint:    #23234A;
+  --c-evidence-line:    #3A3A6E;
+
+  --c-unknown:          #D6A24F;
+  --c-unknown-tint:     #332A16;
+  --c-unknown-line:     #55431F;
+
+  --c-danger:           #E06A6A;
+  --c-danger-tint:      #3A1E1E;
+  --c-danger-line:      #5C2E2E;
+
+  --c-ok:               #5FBF8C;
+  --c-ok-tint:          #16301F;
+
+  --shadow-pop: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.45);
+  --ribbon-known: var(--c-ink);
+  --ribbon-empty: var(--c-line);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --c-paper: #121319;          --c-surface: #191B23;
+    --c-surface-raised: #21242E; --c-sunken: #0E0F14;
+    --c-line: #2A2E3B;           --c-line-strong: #3D4354;
+    --c-ink: #E9EBF2;            --c-ink-muted: #9BA2B5;
+    --c-ink-faint: #6E7688;      --c-ink-inverse: #121319;
+    --c-evidence: #8F8BF2;       --c-evidence-hover: #A3A0F5;
+    --c-evidence-active: #B6B3F8;--c-evidence-tint: #23234A;
+    --c-evidence-line: #3A3A6E;
+    --c-unknown: #D6A24F;        --c-unknown-tint: #332A16;
+    --c-unknown-line: #55431F;
+    --c-danger: #E06A6A;         --c-danger-tint: #3A1E1E;
+    --c-danger-line: #5C2E2E;
+    --c-ok: #5FBF8C;             --c-ok-tint: #16301F;
+    --shadow-pop: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.45);
+  }
+}
+
+/* ==========================================================================
+   기반 스타일
+   ========================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  /* 앱 셸이 뷰포트를 채우고, 스크롤은 안쪽 판이 담당한다. */
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--c-paper);
+  color: var(--c-ink);
+  font-family: var(--font-sans);
+  font-size: var(--fs-14);
+  line-height: var(--lh-14);
+  letter-spacing: var(--ls-14);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 한국어 필수 — 어절 단위 줄바꿈 */
+body, p, li, td, th, label, button, input, textarea, h1, h2, h3, h4 {
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+/* 측정된 값은 전부 모노 + 표 정렬 숫자 */
+.num, .measured, time, code, kbd, samp {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: 0;
+}
+
+h1, h2, h3 { font-family: var(--font-display); margin: 0; }
+
+:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

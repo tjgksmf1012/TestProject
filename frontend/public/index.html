@@ -15,7 +15,7 @@
 <link rel="apple-touch-icon" href="/icon-180.png" />
 <link rel="stylesheet" href="/tokens.css" />
 <link rel="stylesheet" href="/app.css" />
-    <title>녹음 생존율 테스트 — TeamFlow AI</title>
+    <title>녹음 — TeamFlow</title>
     <style>
 
 
@@ -26,10 +26,10 @@
          나왔습니다 (렌더해서 봤습니다). 목록 마커를 손으로 그릴 때는
          기본 마커를 반드시 꺼야 합니다 — 홈의 상태 점에서 이미 한 번
          겪은 자리입니다. */
-      ul#blockers, ul#capture { list-style: none; padding-left: 0; margin: 0; }
-      #blockers li, #capture li { position: relative; padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
+      ul#blockers, ul#warnings { list-style: none; padding-left: 0; margin: 0; }
+      #blockers li, #warnings li { position: relative; padding: var(--sp-1) 0 var(--sp-1) var(--sp-4);
                                   font-size: var(--fs-label); color: var(--text-muted); }
-      #blockers li::before, #capture li::before {
+      #blockers li::before, #warnings li::before {
         content: ""; position: absolute; left: 0; top: 1em;
         width: var(--sp-1); height: var(--sp-1); border-radius: var(--r-round);
         background: currentColor;
@@ -73,14 +73,90 @@
       dt { font-size: var(--fs-caption); color: var(--text-subtle); }
       dd { margin: 0; font-size: var(--fs-label); font-weight: 600;
            font-variant-numeric: tabular-nums; }
+
+      /* ── 트랙 리본 LG — 이 화면의 주인공 (design/redesign §녹음) ──
+         채움은 경과 시간입니다. 40분 축 위에서 실시간으로 자랍니다. */
+      .rec-axis {
+        display: flex; justify-content: space-between;
+        font-family: var(--font-data); font-size: var(--fs-caption);
+        font-variant-numeric: tabular-nums; color: var(--text-subtle);
+        margin: var(--sp-3) 0 var(--sp-1);
+      }
+      .rec-ribbon {
+        height: 30px; border-radius: 2px; background: var(--sunken);
+        overflow: hidden; margin-bottom: var(--sp-4);
+      }
+      .rec-ribbon__fill {
+        height: 100%; width: 0%;
+        background: var(--text);
+        transition: width 1s linear;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .rec-ribbon__fill { transition: none; }
+      }
+
+      /* ── 4단계 — 카드 하나 안의 순서 ── */
+      ol.steps { list-style: none; counter-reset: step; margin: 0 0 var(--sp-3); padding: 0; }
+      ol.steps > li {
+        counter-increment: step;
+        position: relative;
+        padding: var(--sp-2) 0 var(--sp-2) var(--sp-8);
+        border-bottom: 1px dashed var(--line);
+      }
+      ol.steps > li:last-child { border-bottom: 0; }
+      ol.steps > li::before {
+        content: counter(step);
+        position: absolute; left: 0; top: var(--sp-2);
+        width: var(--sp-6); height: var(--sp-6);
+        border: 1px solid var(--line-strong); border-radius: var(--r-round);
+        display: grid; place-items: center;
+        font-family: var(--font-data); font-size: var(--fs-caption);
+        color: var(--text-muted);
+      }
+      .steps__label { font-size: var(--fs-label); color: var(--text-muted); }
+      details.disc > summary {
+        cursor: pointer; font-size: var(--fs-caption); color: var(--text-subtle);
+      }
+
+      /* R2 — 1280×800 한 화면 예산. 이 페이지만 세로 여백을 조입니다.
+         공용 값(app.css)을 고치면 열두 화면이 같이 움직이므로 여기서만. */
+      .head { margin-bottom: var(--sp-2); }
+      .head .lede { margin: var(--sp-1) 0 0; }
+      .panel { padding-top: var(--sp-4); padding-bottom: var(--sp-4); }
+      dl { margin-top: var(--sp-3); }
+
+      /* 넓은 화면에서는 상태(리본·차단 사유·수치)와 4단계를 좌우로.
+         좁은 폭 기본값은 그대로 한 열입니다 — 기본값을 걷어내면 창
+         반쪽에서 무너집니다 (AGENTS §셸은 둘뿐). */
+      @media (min-width: 48rem) {
+        .rec-panel {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 0 var(--sp-8);
+          grid-template-areas:
+            "phase    steps"
+            "axis     steps"
+            "ribbon   steps"
+            "blockers steps"
+            "metrics  steps"
+            ".        steps";
+          grid-template-rows: auto auto auto auto auto 1fr;
+        }
+        .rec-panel .phaseline { grid-area: phase; margin: 0 0 var(--sp-2); }
+        .rec-panel .rec-axis { grid-area: axis; margin-top: 0; }
+        .rec-panel .rec-ribbon { grid-area: ribbon; }
+        .rec-panel #blockers { grid-area: blockers; }
+        .rec-panel ol.steps { grid-area: steps; margin: 0; }
+        .rec-panel dl { grid-area: metrics; }
+      }
     </style>
   </head>
   <body>
     <header class="head">
-      <h1>녹음 생존율 테스트</h1>
+      <h1>녹음</h1>
       <p class="lede">
-        docs/09 실험 5 — 폰이 회의 끝까지 녹음을 유지하는지 확인합니다.
-        <strong>모드 A(멀티트랙)의 성립 여부</strong>가 여기서 결정됩니다.
+        이 기기가 내 목소리 트랙을 기록합니다. 녹음이 끊긴 구간은
+        지어내지 않고 “재지 못했다”로 남습니다.
       </p>
       <p class="by" id="who" hidden></p>
     </header>
@@ -94,47 +170,59 @@
          정하고 15개 테스트가 붙습니다. -->
     <p id="safety" class="banner"></p>
 
-    <section class="panel">
-      <h2>상태</h2>
-      <p><span id="phase">준비 중</span> <span id="elapsed"></span></p>
+    <!-- 리디자인(design/redesign §녹음): 네 카드를 **한 카드의 4단계**로.
+         단계는 위에서 아래로 한 번만 흐르고, 지금 어디까지 왔는지는
+         상태 줄과 리본이 말합니다. 요소 id 는 전부 그대로입니다 —
+         main.ts 가 이름으로 붙잡고 있습니다. -->
+    <!-- 카드 제목이 없습니다 — 페이지 제목이 이미 "녹음" 입니다.
+         같은 말을 두 번 쓰면 그만큼 4단계가 화면 밖으로 밀립니다 (R2). -->
+    <section class="panel rec-panel">
+      <p class="phaseline"><span id="phase">준비 중</span> <span id="elapsed"></span></p>
+
+      <!-- 시그니처 — 트랙 리본 LG. 녹음이 진행되며 채워집니다.
+           축은 0~40분 고정 — 빈 상태에도 축을 그립니다. -->
+      <div class="rec-axis" aria-hidden="true">
+        <span>0분</span><span>7</span><span>13</span><span>20</span><span>27</span><span>33</span><span>40분</span>
+      </div>
+      <div class="rec-ribbon" role="img" aria-label="이 기기의 녹음 진행. 축은 0분에서 40분까지">
+        <div class="rec-ribbon__fill" id="ribbon-fill"></div>
+      </div>
+
       <ul id="blockers"></ul>
-    </section>
 
-    <section class="panel">
-      <h2>준비</h2>
-      <button id="consent">1. 녹음에 동의</button>
-      <button id="permission">2. 마이크 권한 + 시각 동기화</button>
-      <label class="check">
-        <input type="checkbox" id="wakelock" checked />
-        화면 꺼짐 방지(Wake Lock) 사용
-      </label>
-      <p class="note">
-        Wake Lock을 껐다 켰다 하며 각각 측정하세요. iOS는 16.4 이상, 설치형 PWA는 18.4 이상에서 동작합니다.
-      </p>
-    </section>
+      <ol class="steps">
+        <li>
+          <button id="consent">녹음에 동의</button>
+        </li>
+        <li>
+          <button id="permission">마이크 권한 허용</button>
+        </li>
+        <li>
+          <span class="steps__label">캡처 설정 확인</span>
+          <ul id="warnings"></ul>
+          <details class="disc">
+            <summary>이 확인이 왜 필요한가</summary>
+            <p class="note">
+              <code>autoGainControl</code>이 안 꺼지면 조용한 트랙이 증폭되고,
+              <code>noiseSuppression</code>이 안 꺼지면 트랙 정렬의 근거인 누출이 지워집니다.
+            </p>
+          </details>
+        </li>
+        <li>
+          <button id="start" class="primary" disabled>녹음 시작</button>
+          <button id="stop" disabled>정지</button>
+          <label class="check">
+            <input type="checkbox" id="wakelock" checked />
+            화면 꺼짐 방지(Wake Lock) 사용
+          </label>
+        </li>
+      </ol>
 
-    <section class="panel">
-      <h2>캡처 설정 확인</h2>
-      <ul id="warnings"></ul>
-      <p class="note">
-        <code>autoGainControl</code>이 안 꺼지면 조용한 트랙이 증폭되고,
-        <code>noiseSuppression</code>이 안 꺼지면 트랙 정렬의 근거인 누출이 지워집니다.
-      </p>
-    </section>
-
-    <section class="panel">
-      <h2>녹음</h2>
-      <button id="start" class="primary" disabled>녹음 시작</button>
-      <button id="stop" disabled>정지</button>
       <dl>
         <div><dt>청크</dt><dd><span id="chunks">0</span></dd></div>
         <div><dt>화면 가려짐</dt><dd><span id="interruptions">0</span>회</dd></div>
         <div><dt>업로드</dt><dd id="uploaded">-</dd></div>
       </dl>
-      <p class="note">
-        실험 조건: ① 화면 켜둠 ② 화면 잠금 ③ 다른 앱 전환 ④ 통화 수신.
-        각각 10분씩 돌리세요.
-      </p>
     </section>
 
     <section id="result" class="panel" hidden>
@@ -165,14 +253,26 @@
       <button id="reupload" hidden>남은 청크 다시 올리기</button>
       <ul id="store-errors" class="plain" hidden></ul>
 
+    </section>
+
+    <!-- 개발자 진단 — 사용자 화면이 아닙니다 (R7).
+         `?debug=1` 로 열 때만 보입니다. 실험 조건·복사 한 줄처럼
+         개발자에게 하는 말은 전부 여기로 왔습니다. -->
+    <section id="debug" class="panel" hidden>
+      <h2>개발자 진단</h2>
+      <p class="note">
+        실험 조건: ① 화면 켜둠 ② 화면 잠금 ③ 다른 앱 전환 ④ 통화 수신.
+        각각 10분씩 돌리세요. Wake Lock을 껐다 켰다 하며 각각 측정하세요.
+        iOS는 16.4 이상, 설치형 PWA는 18.4 이상에서 동작합니다.
+      </p>
+      <p class="note">
+        커버리지 <strong>95% 미만</strong>이면(화면 켜둠 + Wake Lock 조건에서)
+        멀티트랙 녹음을 주력에서 내려야 합니다. 배터리 소모가 시간당 30%를
+        넘으면 2시간 회의를 못 버팁니다.
+      </p>
       <code id="row"></code>
       <button id="copy">표에 붙일 한 줄 복사</button>
       <p class="status" id="copy-note" role="status"></p>
-      <p class="note">
-        커버리지 <strong>95% 미만</strong>이면(화면 켜둠 + Wake Lock 조건에서)
-        모드 A를 주력에서 내려야 합니다. 배터리 소모가 시간당 30%를 넘으면
-        2시간 회의를 못 버팁니다.
-      </p>
     </section>
 
     <script type="module" src="./main.js"></script>
