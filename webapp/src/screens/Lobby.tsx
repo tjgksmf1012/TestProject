@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
 import { Disclosure } from '../components/Disclosure.tsx';
+import { Why } from '../components/Why.tsx';
+import { Conditions, describeConditions, type Condition } from '../components/Conditions.tsx';
 import { useConsent, useLobbyMutations, useMe, useMeeting, useTracks } from '../api/hooks.ts';
 import {
   captureAlerts,
@@ -20,6 +22,15 @@ import { axisTicks, buildDiagram, describeGap, meetingWindow, type TrackInput } 
 // 빈 리본은 "여기에 곧 기록이 쌓인다" 고 말합니다.
 
 const EMPTY_TICKS = ['0분', '7', '13', '20', '27', '33', '40분'];
+
+/** 상태를 한 낱말로. 문장은 `Why` 안에서 원문 그대로 나옵니다. */
+const VERDICT_WORD: Record<string, string> = {
+  not_joined: '대기',
+  healthy: '녹음 중',
+  at_risk: '끊김',
+  broken: '못 씀',
+  finished: '종료',
+};
 
 export default function Lobby() {
   const params = useParams();
@@ -75,6 +86,13 @@ export default function Lobby() {
   const voiceprintValue = voiceprint ?? saved.voiceprint ?? true;
   const iAgreed = mine !== undefined && mine.recording === true;
 
+  // 녹음 화면으로 넘어가는 두 관문. 문장이 아니라 **칩**으로 버튼 옆에 섭니다.
+  const startConditions: Condition[] = [
+    { label: '내 동의', met: iAgreed },
+    { label: '전원 동의', met: blockers.length === 0 },
+  ];
+  const canGoRecord = startConditions.every((c) => c.met);
+
   const submitConsent = async (consented: boolean) => {
     // ②③ 을 먼저 남기고 ① 을 마지막에 — 서버는 저장된 값으로 판단합니다.
     if (consented) {
@@ -111,15 +129,25 @@ export default function Lobby() {
           <a className="btn btn--secondary" href={`/call.html?meeting=${meetingId}`}>
             통화 열기
           </a>
-          <span title={blockers.join(' · ') || undefined}>
-            <a
-              className={`btn btn--primary${!iAgreed || blockers.length > 0 ? ' btn--disabled-link' : ''}`}
-              href={iAgreed && blockers.length === 0 ? `/index.html?meeting=${meetingId}` : undefined}
-              aria-disabled={!iAgreed || blockers.length > 0}
-            >
-              녹음 화면으로
-            </a>
-          </span>
+          {/* 못 넘어가는 이유는 **버튼 옆에** 둡니다 (GOV.UK 권고).
+              예전에는 이 사유가 왼쪽 판 한가운데 문장으로 앉아 있었고,
+              헤더가 이미 같은 말을 하고 있어 한 화면에서 방 상태를 **네 번**
+              말했습니다 — 그중 둘은 글자까지 같았습니다. */}
+          {startConditions.some((c) => !c.met) && (
+            <span className="conds-slot">
+              <Conditions items={startConditions} id="start-conds" />
+              {blockers.length > 0 && <Why about="녹음 시작 조건" lines={blockers} />}
+            </span>
+          )}
+          <a
+            className={`btn btn--primary${!canGoRecord ? ' btn--disabled-link' : ''}`}
+            href={canGoRecord ? `/index.html?meeting=${meetingId}` : undefined}
+            aria-disabled={!canGoRecord}
+            aria-describedby={!canGoRecord ? 'start-conds' : undefined}
+            title={!canGoRecord ? describeConditions(startConditions) : undefined}
+          >
+            녹음 화면으로
+          </a>
         </div>
       }
     >
@@ -143,34 +171,32 @@ export default function Lobby() {
                       ticks={ticks}
                       label={`${status.name} — ${status.message}`}
                     />
-                    {gapSpans.length > 0 && (
-                      <p className="t12 crow__flags">
-                        {gapSpans.map((span) => describeGap(span, diagram.durationMs)).join(' · ')}
-                      </p>
-                    )}
-                    {captureAlerts(track).map((alert) => (
-                      <p className="t12 crow__flags" key={alert}>
-                        {alert}
-                      </p>
-                    ))}
                   </div>
-                  <span className="lrow__status t12">{status.message}</span>
+                  {/* 상태는 **한 낱말**, 문장은 `?` 안에.
+                      예전에는 사람마다 같은 문장(`아직 참가하지 않았습니다`)이
+                      그대로 붙어 셋이면 세 번 반복됐고, 끊긴 트랙의 진짜
+                      경고가 그 반복 속에 묻혔습니다. */}
+                  <span className="lrow__status">
+                    <span className="lrow__word">{VERDICT_WORD[status.verdict]}</span>
+                    <Why
+                      about={`${status.name} — 트랙 상태`}
+                      lines={[
+                        status.message,
+                        ...gapSpans.map((span) => describeGap(span, diagram.durationMs)),
+                        ...captureAlerts(track),
+                      ]}
+                    />
+                  </span>
                 </div>
               );
             })}
             {roster.length === 0 && consent.isSuccess && (
               <div className="empty">이 프로젝트에 팀원이 없습니다.</div>
             )}
-            {room.recording === 0 && statuses.every((s) => s.verdict === 'not_joined') && roster.length > 0 && (
-              <p className="muted t13" style={{ marginTop: 'var(--sp-4)' }}>
-                아직 아무도 참가하지 않았습니다
-              </p>
-            )}
-            {blockers.length > 0 && (
-              <p className="notice" role="note" style={{ marginTop: 'var(--sp-5)' }}>
-                {blockers.join(' · ')}
-              </p>
-            )}
+            {/* ⚠️ "아직 아무도 참가하지 않았습니다" 를 여기 또 적지 않습니다 —
+                헤더 meta 가 `room.message` 로 **같은 문장을 글자까지 똑같이**
+                말하고 있었습니다. 동의 사유도 여기 있었지만, 그 사유가 막는
+                것은 헤더의 버튼이므로 사유도 버튼 옆으로 옮겼습니다. */}
           </div>
         </section>
 

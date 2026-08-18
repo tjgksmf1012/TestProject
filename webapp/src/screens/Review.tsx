@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { Disclosure } from '../components/Disclosure.tsx';
 import { EvidenceChip } from '../components/EvidenceChip.tsx';
+import { Conditions, describeConditions, type Condition } from '../components/Conditions.tsx';
+import { Why } from '../components/Why.tsx';
 import {
   useCandidates,
   useMeeting,
@@ -13,8 +15,9 @@ import {
 import {
   approvalBlockers,
   attentionReasons,
-  blockerLine,
   buildReviewPayload,
+  effectiveAssignee,
+  effectiveDeadline,
   canSubmit,
   describeSubmitResult,
   emptyDraft,
@@ -195,7 +198,7 @@ export default function Review() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
           {submitBlockedReason !== null && (
             <span className="disabled-reason" style={{ margin: 0 }}>
-              {submitBlockedReason}
+              {lanes.pending > 0 ? `${lanes.pending}건 남음` : submitBlockedReason}
             </span>
           )}
           <button
@@ -204,7 +207,7 @@ export default function Review() {
             disabled={submitBlockedReason !== null || submit.isPending}
             onClick={onSubmit}
           >
-            {lanes.all}건 모두 처리하고 제출
+            검토 끝내기
           </button>
         </div>
       }
@@ -249,7 +252,12 @@ export default function Review() {
                 )}
               </>
             )}
-            {note !== null && <p className="notice">{note}</p>}
+            {note !== null && (
+              <p className="notice">
+                소리 없음
+                <Why about="이 회의의 소리" lines={[note]} />
+              </p>
+            )}
             {rows.length === 0 && <div className="empty">{emptyTimelineNote()}</div>}
             {rows.map((row, i) =>
               row.kind === 'finding' ? (
@@ -328,8 +336,21 @@ export default function Review() {
               const draft = drafts.get(candidate.id) ?? emptyDraft();
               const lane = reviewLane(candidate, draft);
               const blockers = approvalBlockers(candidate, draft, context);
-              const line = blockerLine(blockers);
               const noEvidence = candidate.evidence_utterance_ids.length === 0;
+              const blocked = blockers.length > 0;
+              // 문장 셋이 하던 말을 칩 셋이 합니다. 근거는 영구 조건이라
+              // 못 채우면 이 후보는 등록될 수 없습니다 (불변식).
+              const conditions: Condition[] = [
+                {
+                  label: `근거 ${candidate.evidence_utterance_ids.length}`,
+                  met: !noEvidence,
+                },
+                { label: '담당자', met: effectiveAssignee(candidate, draft) !== null },
+                {
+                  label: '마감',
+                  met: (effectiveDeadline(candidate, draft) ?? '') !== '',
+                },
+              ];
               return (
                 <article
                   key={candidate.id}
@@ -343,7 +364,17 @@ export default function Review() {
                     <span className="cand__source">AI 초안</span>
                     {lane === 'approve' && <span className="cand__state cand__state--approve">등록 표시됨</span>}
                     {lane === 'reject' && <span className="cand__state cand__state--reject">거절 표시됨</span>}
-                    <span className="cand__conf">확신 {Math.round(candidate.confidence * 100)}%</span>
+                    <span className="cand__conf">
+                      확신 {Math.round(candidate.confidence * 100)}%
+                      {/* "왜 확신이 낮은가" 는 **지우지 않습니다** — 원문 그대로
+                          한 번의 동작으로 닿습니다. 카드마다 같은 문장을
+                          펼쳐 두면 셋이면 186자가 되고, 늘 있는 글자는
+                          배경이 되어 아무도 안 읽습니다. */}
+                      <Why
+                        about={`${candidate.title} — 확신이 낮은 이유`}
+                        lines={attentionReasons(candidate)}
+                      />
+                    </span>
                   </div>
                   <h3 className="cand__title">{candidate.title}</h3>
                   <div className="cand__chips">
@@ -359,14 +390,13 @@ export default function Review() {
                       ))
                     )}
                   </div>
-                  {attentionReasons(candidate).map((reason) => (
-                    <p className="cand__hint" key={reason}>
-                      {reason}
-                    </p>
-                  ))}
                   {/* 점선 아래 — 여기부터 사람의 몫 */}
                   <hr className="cand__divider" />
-                  <div className="cand__controls" onClick={(e) => e.stopPropagation()}>
+                  <div
+                    className="cand__controls"
+                    id={`cand-fields-${candidate.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <label className="field">
                       <span className="field__label">
                         담당자
@@ -413,19 +443,28 @@ export default function Review() {
                       />
                     </label>
                   </div>
-                  {line.tone !== 'none' && lane === 'pending' && (
-                    <p className={line.tone === 'error' ? 'disabled-reason' : 'cand__hint'}>
-                      {line.text}
-                    </p>
-                  )}
                   <div className="cand__actions" onClick={(e) => e.stopPropagation()}>
+                    {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다. 비활성
+                        버튼은 포커스를 못 받아 낭독기에 사유를 못 전합니다
+                        (GOV.UK). 누르면 못 채운 칸으로 데려다 줍니다. */}
                     <button
                       type="button"
-                      className="btn btn--primary btn--sm"
-                      disabled={blockers.length > 0}
-                      onClick={() => update(candidate.id, { decision: 'approve' })}
+                      className={`btn btn--primary btn--sm${blocked ? ' btn--unmet' : ''}`}
+                      aria-disabled={blocked}
+                      aria-describedby={blocked ? `conds-${candidate.id}` : undefined}
+                      title={blocked ? describeConditions(conditions) : undefined}
+                      onClick={() => {
+                        if (blocked) {
+                          (
+                            document.getElementById(`cand-fields-${candidate.id}`)
+                              ?.querySelector<HTMLElement>('select, input')
+                          )?.focus();
+                          return;
+                        }
+                        update(candidate.id, { decision: 'approve' });
+                      }}
                     >
-                      업무로 등록
+                      등록
                     </button>
                     <button
                       type="button"
@@ -441,6 +480,9 @@ export default function Review() {
                     >
                       거절
                     </button>
+                    {lane === 'pending' && (
+                      <Conditions items={conditions} id={`conds-${candidate.id}`} />
+                    )}
                   </div>
                 </article>
               );

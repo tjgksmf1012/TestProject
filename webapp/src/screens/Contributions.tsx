@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
-import { Disclosure } from '../components/Disclosure.tsx';
+import { Chain, type ChainLink } from '../components/Chain.tsx';
+import { Stat } from '../components/Stat.tsx';
+import { Why } from '../components/Why.tsx';
 import { useConfirmFinals, useContributions, useFinals, useMembers } from '../api/hooks.ts';
 import {
   categoriesForDisplay,
@@ -44,12 +46,29 @@ function ribbonFor(member: MemberScore, widthPoints: number): RibbonSegment[] {
   ];
 }
 
-/** `코드 4 · 업무 1` — 근거 **건수**. 0건 카테고리는 접힌 상세에서 말합니다. */
-function countsLine(member: MemberScore): string {
-  const parts = categoriesForDisplay(member)
-    .filter((c) => c.event_count > 0)
-    .map((c) => `${describeCategory(c.category)} ${c.event_count}`);
-  return parts.length > 0 ? parts.join(' · ') : '근거 0건';
+/**
+ * 이 사람의 근거를 **사슬**로 — 회의 → 업무 → 코드.
+ *
+ * ⭐ 사슬이 여기서 하는 일은 이 제품의 전부입니다: **0건과 못 잼을
+ * 가릅니다.** 예전 `코드 4 · 업무 1 · 회의 6` 은 0건 카테고리를 아예
+ * 빼 버려서, "한 적 없음" 과 "못 쟀음" 이 화면에서 똑같이 사라졌습니다.
+ * 지금은 0 이면 `0` 을 적고, 못 잰 것만 **빈 고리**로 둡니다.
+ */
+function evidenceChain(member: MemberScore): ChainLink[] {
+  const gaps = new Set((member.measurement_gaps ?? []).map((g) => g.category));
+  const counts = new Map(categoriesForDisplay(member).map((c) => [c.category, c.event_count]));
+  return ['meeting', 'task', 'code'].map((category) => {
+    const label = describeCategory(category);
+    if (gaps.has(category)) {
+      return { label, value: null, hint: `${label} 기여를 측정하지 못했습니다 — 0이 아니라 모르는 값입니다` };
+    }
+    const n = counts.get(category) ?? 0;
+    return {
+      label,
+      value: String(n),
+      hint: n === 0 ? `${label} 활동 기록이 0건입니다 — 측정은 됐고, 값이 0입니다` : `${label} 근거 ${n}건`,
+    };
+  });
 }
 
 function fmtComputedAt(iso: string): string {
@@ -136,6 +155,7 @@ export default function Contributions() {
     0,
   );
   const sumOff = allFilled && Math.abs(effectiveSum - 100) > 0.05;
+  const unfilled = drafts.filter((d) => d.final_value === null || Number.isNaN(d.final_value)).length;
 
   // 저장된 확정을 모르는 채로 확정하면 남의 조정을 지울 수 있습니다.
   const blind = finals.isError;
@@ -170,6 +190,9 @@ export default function Contributions() {
 
   const team = score.data;
   const warnings = teamWarnings(team, people);
+  // 맨 앞에 세울 한 줄 — 「서로 비교하지 마세요」가 이 화면에서 가장 중요한
+  // 문장입니다. 없으면(팀 신뢰도가 낮지 않으면) 첫 경고를 세웁니다.
+  const headline = warnings.find((w) => w.includes('비교하지 마세요')) ?? warnings[0];
 
   return (
     <AppShell
@@ -179,12 +202,16 @@ export default function Contributions() {
       <div className="panes">
         <section className="pane">
           {warnings.length > 0 && (
+            /* ⭐ **경고문은 지우지 않습니다** (검수 D). 다만 셋을 한꺼번에
+               펼쳐 두면 110px 짜리 글자 벽이 되고, 늘 있는 글자는 배경이
+               되어 정작 아무도 안 읽습니다.
+               그래서 **가장 중요한 한 줄만** 세워 두고 — 서로를 비교하지
+               말라는 그 문장입니다 — 나머지는 `?` 한 번에 원문 그대로. */
             <div className="warnband" role="note">
-              {warnings.map((w) => (
-                <p key={w}>
-                  <strong>⚠</strong> {w}
-                </p>
-              ))}
+              <p>
+                <strong>⚠</strong> {headline}
+              </p>
+              <Why about="이 수치를 읽기 전에" lines={warnings} />
             </div>
           )}
 
@@ -199,52 +226,53 @@ export default function Contributions() {
                 const span = spans.find((s) => s.userId === member.user_id);
                 const points = span?.points ?? 0;
                 const name = nameOf(member.user_id, people);
-                const detail = [...readBeforeTheNumber(member), ...integrityNotes(member)];
-                const zeroCats = categoriesForDisplay(member)
-                  .filter((c) => c.event_count === 0)
-                  .map((c) => describeCategory(c.category));
-                const gapCats = (member.measurement_gaps ?? [])
-                  .map((g) => (g.category ? describeCategory(g.category) : '일부 활동'));
+                // 사유는 **지우지 않고 한 자리에 모읍니다** — 팝오버 안에서
+                // 원문 그대로 나옵니다. 요약하면 그게 곧 정보 손실입니다.
+                const whyLines = [
+                  `신뢰도 ${member.confidence_label} — 모르는 폭 ${Math.round(points)}%p`,
+                  ...readBeforeTheNumber(member),
+                  ...integrityNotes(member),
+                  ...(hasNoEvidence(member)
+                    ? ['근거가 하나도 없는 숫자입니다 — 활동 기록이 이 사람에게 하나도 붙지 않았습니다.']
+                    : []),
+                  ...categoriesForDisplay(member)
+                    .filter((c) => c.event_count === 0)
+                    .map(
+                      (c) =>
+                        `${describeCategory(c.category)} 활동은 기록이 0건입니다 — 안 한 것인지 측정이 안 닿은 것인지는 팀이 압니다.`,
+                    ),
+                ];
                 return (
                   <article className="crow" key={member.user_id}>
-                    <div className="crow__top">
+                    <div className="crow__id">
                       <span className="crow__name">{name}</span>
-                      <span className="crow__range">{describeRange(member)}</span>
-                      {/* 카드마다 자기 눈금(0~100) — 눈금 없는 동일 축 레인은
-                          순위 막대그래프로 읽힙니다 (v2 F1-2·F1-3). */}
+                      <span className="crow__role">{roleOf(member, people)}</span>
+                    </div>
+
+                    {/* 구간은 **글자가 주인공**입니다. 레인은 보조이고,
+                        카드마다 자기 눈금을 가집니다 (v2 F1 · 조사 R3-4). */}
+                    <div className="crow__range-cell">
+                      <Stat value={describeRange(member)} label="기여 구간" />
                       <TrackRibbon
                         size="sm"
                         segments={ribbonFor(member, points)}
                         ticks={['0', '25', '50', '75', '100']}
                         label={`${name} — 확신도 ${Math.round(member.confidence * 100)}% · 모르는 폭 ${Math.round(points)}%p`}
                       />
-                      <span className="crow__counts">{countsLine(member)}</span>
                     </div>
-                    <div className="crow__sub">
-                      <span>{roleOf(member, people)}</span>
-                      <div>
-                        <span className="num">
-                          신뢰도 {member.confidence_label} · 모르는 폭 {Math.round(points)}%p
-                        </span>
-                        {gapCats.length > 0 && (
-                          <span className="crow__flags"> · ⚠ {gapCats.join('·')} 기여 측정 못 함</span>
-                        )}
-                        {hasNoEvidence(member) && (
-                          <span className="crow__flags"> · ⚠ 근거가 하나도 없는 숫자입니다</span>
-                        )}
-                        <Disclosure summary="신뢰도 사유">
-                          {detail.map((line) => (
-                            <p key={line}>{line.replace(/\*\*/g, '')}</p>
-                          ))}
-                          {zeroCats.length > 0 && (
-                            <p>
-                              {zeroCats.join(', ')} 활동은 기록이 0건입니다 — 안 한 것인지
-                              측정이 안 닿은 것인지는 팀이 압니다.
-                            </p>
-                          )}
-                        </Disclosure>
-                      </div>
-                    </div>
+
+                    {/* ⚠️ 예전에는 `신뢰도 낮음 · 모르는 폭 20%p` 였습니다. 앞을
+                        떼고 수치만 남긴 이유는 **겹쳐서**가 아닙니다 — 불확실성
+                        연구가 말하는 것은 겹침이 해롭다가 아니라, "낮음" 같은
+                        **말은 사람마다 다른 확률로 번역된다**는 것입니다. 그래서
+                        화면은 잰 값(20%p)을 앞세우고, "낮음" 은 사유 팝오버에
+                        둡니다. 근거는 `design/redesign/06-텍스트-최소화-조사.md` R4. */}
+                    <Stat value={`${Math.round(points)}%p`} label="모름" tone="unknown">
+                      <Why about={`${name} — 이 숫자를 읽기 전에`} lines={whyLines} />
+                    </Stat>
+
+                    {/* 회의 → 업무 → 코드. 0 은 `0`, 못 잰 것만 빈 고리. */}
+                    <Chain links={evidenceChain(member)} />
                   </article>
                 );
               })
@@ -252,11 +280,20 @@ export default function Contributions() {
           </div>
 
           <div className="confirmbar">
+            {/* 예전에는 여기 안내 한 문장(37자)과 아래 비활성 사유 한
+                문장(33자)이 **같은 말을 두 번** 하고 있었습니다. 한 줄만
+                남기고 전문은 `?` 로. */}
             <p className="confirmbar__notice">
-              {team.notice}
-              {finals.data && finals.data.finals.length > 0 && (
-                <> — {describeFinals(finals.data.finals, new Map(people.map((p) => [p.user_id, p.name])))}</>
-              )}
+              확정값은 팀이 정합니다
+              <Why
+                about="확정에 대해"
+                lines={[
+                  team.notice,
+                  ...(finals.data && finals.data.finals.length > 0
+                    ? [describeFinals(finals.data.finals, new Map(people.map((p) => [p.user_id, p.name])))]
+                    : []),
+                ]}
+              />
             </p>
             <div className="confirmbar__row">
               {members.map((member) => {
@@ -310,10 +347,7 @@ export default function Contributions() {
               </div>
             )}
             {!allFilled && members.length > 0 && (
-              <p className="disabled-reason">
-                모든 칸을 채워야 확정할 수 있습니다 — 확정값은 시스템이 아니라
-                팀이 정합니다
-              </p>
+              <p className="disabled-reason">{unfilled}칸 남음</p>
             )}
             {problems.length > 0 && (
               <p className="disabled-reason">

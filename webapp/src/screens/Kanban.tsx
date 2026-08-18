@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import { AppShell } from '../components/AppShell.tsx';
+import { Chain } from '../components/Chain.tsx';
+import { Why } from '../components/Why.tsx';
 import { useMembers, useTaskMutations, useTasks } from '../api/hooks.ts';
 import {
+  isOverdue,
   moveDirection,
   nextStatuses,
   statusPatch,
@@ -42,6 +45,7 @@ function Card({
 }) {
   const today = todayInTeamCalendar();
   const warnings = taskWarnings(task, today);
+  const overdue = isOverdue(task, today);
   const others = nextStatuses(task, statuses);
 
   // 카드 포커스 후 1~4 키 — 접근성 경로. 버튼을 상시 펼치지 않는 대신입니다.
@@ -112,20 +116,41 @@ function Card({
       </div>
       <div className="kcard__meta">
         <span>{assigneeText(task.assignee_ids, people)}</span>
-        {task.deadline !== null && <span className="num">{task.deadline}</span>}
+        {task.deadline !== null && (
+          <span className="num">
+            {task.deadline}
+            {overdue && <span className="kcard__late">지남</span>}
+          </span>
+        )}
+        {/* 표식은 사람이 PR 에 적어야 하는 값입니다 — 설명 대신 값만 둡니다.
+            무엇에 쓰는지는 열 머리말에서 **한 번** 말합니다. */}
+        <span className="kcard__marker num">{task.marker}</span>
+        <Why about={task.title} lines={warnings} />
       </div>
-      {task.origin !== null && (
-        <Link className="kcard__origin" to={`/meeting/${task.origin.meeting_id}/review`}>
-          💬 {task.origin.meeting_title ?? '회의'} · 근거{' '}
-          {task.origin.evidence_utterance_ids.length}
-        </Link>
-      )}
-      <div className="kcard__gh">{describeLinkState(task)}</div>
-      {warnings.map((w) => (
-        <p className="kcard__warn" key={w}>
-          {w}
-        </p>
-      ))}
+      {/* 회의 → 이 업무 → PR. **빈 고리가 "아직 안 이어졌다" 를 말합니다** —
+          카드마다 반복하던 안내 문장(26자 × 카드 수)이 이걸로 사라집니다. */}
+      <Chain
+        links={[
+          {
+            label: '근거',
+            value:
+              task.origin === null
+                ? null
+                : String(task.origin.evidence_utterance_ids.length),
+            ...(task.origin !== null
+              ? {
+                  to: `/meeting/${task.origin.meeting_id}/review`,
+                  hint: `${task.origin.meeting_title ?? '회의'}에서 나온 업무입니다 — 근거 발화 보기`,
+                }
+              : { hint: '사람이 손으로 만든 업무입니다 — 회의 근거가 없습니다' }),
+          },
+          {
+            label: 'PR',
+            value: (task.github ?? []).length === 0 ? null : String(task.github.length),
+            hint: describeLinkState(task),
+          },
+        ]}
+      />
     </article>
   );
 }
@@ -160,7 +185,21 @@ export default function Kanban() {
   return (
     <AppShell
       title="칸반"
-      meta={`회의에서 나온 업무 ${s.fromMeetings} · PR로 이어진 업무 ${s.withPulls} · 지연 ${s.overdue}`}
+      meta={
+        <>
+          회의에서 {s.fromMeetings} · PR 연결 {s.withPulls} · 지연 {s.overdue}
+          {/* ⭐ 표식 규칙은 **여기서 한 번만** 말합니다. 예전에는 카드마다
+              같은 안내를 적어 넉 장이면 네 번(106자) 반복됐고, 늘 있는
+              글자는 배경이 되어 아무도 안 읽었습니다. */}
+          <Why
+            about="PR 자동 연결"
+            lines={[
+              'PR 제목이나 본문에 카드의 업무 표식(TASK-n)을 적으면 그 PR이 이 업무에 자동으로 붙습니다.',
+              '표식 없이 병합된 PR은 제목이 비슷하면 추정으로 붙고, 카드에 "추정" 으로 표시됩니다.',
+            ]}
+          />
+        </>
+      }
     >
       <div className="board">
         {board.isSuccess && tasks.length === 0 && (

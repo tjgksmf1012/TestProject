@@ -87,7 +87,13 @@ function MeetingRow({ meeting, projectId }: { meeting: MeetingSummary; projectId
             {step.label}
           </Link>
         ) : (
-          <span className="t12 muted">{step.reason}</span>
+          /* 갈 곳이 없는 상태(처리 중)입니다. 이유는 이미 **그룹 머리말**이
+             말하고 있으므로 여기서 되풀이하지 않습니다 — 화면에 보이는 것을
+             다시 쓰는 문장이 가장 먼저 지울 것입니다. 자리는 비워 두지 않고
+             `—` 로 예약합니다(행마다 우측 끝이 어긋나면 세로 스캔이 죽습니다). */
+          <span className="mrow__none" title={step.reason}>
+            —
+          </span>
         )}
       </span>
     </div>

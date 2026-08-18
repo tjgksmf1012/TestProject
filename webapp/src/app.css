@@ -610,6 +610,9 @@ details.disc > .disc__body {
    ========================================================================== */
 .warnband {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
   padding: var(--sp-4) var(--sp-6);
   border-bottom: 1px solid var(--c-line);
   background: var(--c-unknown-tint);
@@ -617,7 +620,6 @@ details.disc > .disc__body {
   line-height: var(--lh-13);
 }
 .warnband p { margin: 0; }
-.warnband p + p { margin-top: var(--sp-2); }
 
 /* 사람마다 **개별 카드** — 레인이 같은 축에 나란히 서면 눈금이 있어도
    길이 비교표로 읽힙니다 (v2 F1-3 A안). 카드 테두리와 간격이 축을 끊고,
@@ -629,35 +631,25 @@ details.disc > .disc__body {
   background: var(--c-surface);
   margin-bottom: var(--sp-6);
 }
-.crow__top {
+/* 카드 = 넉 칸. 문장이 아니라 **값들**이 나란히 섭니다.
+   [이름·역할] [구간 + 레인] [모르는 폭] [근거 사슬] */
+.crow {
   display: grid;
-  grid-template-columns: 9rem 5.5rem minmax(160px, 280px) 1fr;
+  grid-template-columns: 9rem minmax(200px, 1fr) 7rem auto;
   align-items: center;
-  gap: var(--sp-6);
+  gap: var(--sp-8);
 }
+.crow__id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .crow__name { font-weight: var(--fw-semibold); font-size: var(--fs-14); }
-.crow__range {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-14);
-}
-.crow__counts {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-12);
-  color: var(--c-ink-muted);
-  text-align: right;
-  white-space: nowrap;
-}
-.crow__sub {
-  display: grid;
-  grid-template-columns: 9rem 1fr;
-  gap: var(--sp-6);
-  margin-top: var(--sp-2);
-  font-size: var(--fs-12);
-  color: var(--c-ink-muted);
-}
+.crow__role { font-size: var(--fs-11); color: var(--c-ink-faint); }
+.crow__range-cell { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 .crow__flags { color: var(--c-unknown); }
+
+@media (max-width: 1100px) {
+  /* 좁아지면 사슬을 아래 줄로 — 값을 줄이지 않고 접습니다. */
+  .crow { grid-template-columns: 9rem minmax(160px, 1fr) 7rem; }
+  .crow .chain { grid-column: 2 / -1; }
+}
 
 .confirmbar {
   flex: 0 0 auto;
@@ -665,7 +657,14 @@ details.disc > .disc__body {
   background: var(--c-surface);
   padding: var(--sp-4) var(--sp-6);
 }
-.confirmbar__notice { font-size: var(--fs-12); color: var(--c-ink-muted); margin: 0 0 var(--sp-3); }
+.confirmbar__notice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-12);
+  color: var(--c-ink-muted);
+  margin: 0 0 var(--sp-3);
+}
 .confirmbar__row {
   display: flex;
   align-items: center;
@@ -872,6 +871,7 @@ details.disc > .disc__body {
 .mrow__title { font-weight: var(--fw-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mrow__date, .mrow__cov { font-size: var(--fs-12); color: var(--c-ink-muted); }
 .mrow__action { text-align: right; }
+.mrow__none { font-family: var(--font-mono); color: var(--c-ink-faint); }
 .mrow__action .btn { text-decoration: none; }
 
 /* 대화 상자 — 시작하기 (홈 헤더) */
@@ -961,8 +961,23 @@ details.disc > .disc__body {
   margin-top: var(--sp-2);
 }
 .kcard__origin:hover { text-decoration: underline; }
-.kcard__gh { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--c-ink-muted); margin-top: var(--sp-2); }
-.kcard__warn { font-size: var(--fs-12); color: var(--c-unknown); margin-top: var(--sp-2); }
+/* 표식 — 사람이 PR 에 옮겨 적는 값. 설명은 열 머리말에서 한 번만 합니다. */
+.kcard__marker {
+  font-size: var(--fs-11);
+  color: var(--c-ink-faint);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-sm);
+  padding: 0 var(--sp-2);
+}
+/* 마감이 지난 것은 색이 아니라 **낱말**로 말합니다 — 황토는 이 저장소에서
+   "못 잼" 이라는 뜻이라, 지난 마감에 쓰면 색 어휘가 무너집니다. */
+.kcard__late {
+  font-family: var(--font-sans);
+  font-size: var(--fs-11);
+  color: var(--c-ink-faint);
+  margin-left: var(--sp-2);
+}
+.kcard .chain { margin-top: var(--sp-3); }
 
 /* ==========================================================================
    화면 — 회의 로비 (참가자마다 리본 LG · 빈 상태에도 축)
@@ -977,7 +992,13 @@ details.disc > .disc__body {
 }
 .lrow:last-of-type { border-bottom: 0; }
 .lrow__name { font-weight: var(--fw-medium); padding-top: 14px; }
-.lrow__status { color: var(--c-ink-muted); padding-top: 14px; }
+.lrow__status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding-top: 14px;
+}
+.lrow__word { font-size: var(--fs-13); color: var(--c-ink-muted); }
 .btn--disabled-link { opacity: .45; pointer-events: none; }
 .btn { text-decoration: none; }
 
@@ -1027,3 +1048,163 @@ details.disc > .disc__body {
 @media (max-width: 1023.5px) {
   .login__hero { display: none; }
 }
+
+/* ==========================================================================
+   계기판 문법 — 문장을 값·사슬·팝오버로 (텍스트 최소화 리모델링)
+
+   실측이 말한 것: 9화면 2,812자, 검토 한 화면에만 878자(문장 16개).
+   글자 위계 범위는 11~16px, 겨우 1.45배 — 12·13·14px 이 검토 화면 글자의
+   93% 라 **모든 것이 같은 목소리 크기**로 말하고 있었습니다.
+
+   여기 셋이 그 문장들을 받아 갑니다:
+     .stat   값은 크게, 뜻은 작게 (2:1)
+     .why    이유는 팝오버로 (지우지 않고 한 겹 아래로)
+     .chain  관계는 사슬로, **빈 칸이 결측을 말한다**
+   ========================================================================== */
+
+/* ── Stat — 값이 주인공 ───────────────────────────────────── */
+.stat { display: inline-flex; flex-direction: column; gap: 1px; line-height: 1; }
+.stat__value {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  /* 28px / 라벨 11px = 2.55 — 대시보드 통설의 하한 2.5:1 을 넘깁니다.
+     (22px 로 뒀다가 2.0 이라 미달이었습니다. 4px 격자 위 값으로 올림) */
+  font-size: 1.75rem;
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.02em;
+  color: var(--c-ink);
+  white-space: nowrap;
+}
+.stat__label {
+  /* ⚠️ 11px 이 하한입니다. 영문 UI 의 10px 캡션을 그대로 가져오면 한글
+     자소가 뭉개집니다 — 이 저장소는 한국어가 기본입니다. */
+  font-size: var(--fs-11);
+  line-height: var(--lh-11);
+  /* ⚠️ `--c-ink-faint` 를 쓰면 흰 바탕에서 3.28:1 로 **하한 미달**입니다.
+     이 라벨은 장식이 아니라 값의 뜻을 나르므로 본문 하한(4.5:1)을 지킵니다
+     — `--c-ink-muted` 는 6.18:1(밝은)·7.77:1(어두운). */
+  color: var(--c-ink-muted);
+  white-space: nowrap;
+}
+.stat--unknown .stat__value { color: var(--c-unknown); }
+.stat--evidence .stat__value { color: var(--c-evidence); }
+
+/* ── Why — 이유는 부르면 온다 ─────────────────────────────── */
+.why {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18px; height: 18px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--c-line-strong);
+  background: transparent;
+  /* `?` 는 글자입니다 — 4.5:1 을 지킵니다. 테두리는 UI 컴포넌트라 3:1
+     (`--c-line-strong` 은 3.53:1). */
+  color: var(--c-ink-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+.why:hover { border-color: var(--c-evidence); color: var(--c-evidence); }
+/* 손가락 표적 44px — 눈에 보이는 원은 18px 이지만 누를 수 있는 넓이는
+   따로 줍니다 (창 반쪽·터치 노트북·확대 200%). */
+.why::after { content: ""; position: absolute; inset: -13px; }
+
+.why__pop {
+  max-width: 22rem;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  padding: var(--sp-5) var(--sp-6);
+  z-index: 60;
+}
+.why__title {
+  font-size: var(--fs-11);
+  letter-spacing: var(--ls-11);
+  text-transform: uppercase;
+  color: var(--c-ink-faint);
+  margin-bottom: var(--sp-3);
+}
+.why__line {
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--c-ink);
+}
+.why__line + .why__line { margin-top: var(--sp-3); }
+.why__arrow { fill: var(--c-surface-raised); }
+
+/* ── Chain — 빈 칸이 문장을 대신한다 ──────────────────────── */
+.chain { display: inline-flex; align-items: stretch; }
+.chain__cell { display: flex; align-items: center; }
+.chain__arrow {
+  width: var(--sp-6);
+  height: 1px;
+  background: var(--c-line-strong);
+  flex: 0 0 auto;
+}
+.chain__link {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-sm);
+  background: var(--c-surface);
+  text-decoration: none;
+  min-width: 3.25rem;
+}
+a.chain__link:hover { border-color: var(--c-evidence); }
+.chain__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink);
+  line-height: 1.2;
+  min-height: 1.2em;
+}
+/* 라벨이 곧 이 칸의 뜻입니다 — 본문 하한(4.5:1)을 지킵니다. */
+.chain__label { font-size: var(--fs-11); color: var(--c-ink-muted); line-height: 1.2; }
+/* ⚠️ 빈 고리는 **0 이 아니라 빈 칸**입니다. 0 을 적으면 "0건 측정됨" 이
+   되는데 실제로는 "아직 안 이어짐" 입니다 — 이 구분이 이 제품의 전부입니다. */
+/* ⚠️ 빈 고리를 **테두리 모양으로만** 알리지 않습니다. 점선 + 흙빛 `—` +
+   라벨, 셋 중 둘 이상이 함께 말해야 색각이상·저시력에서도 읽힙니다. */
+.chain__link--empty {
+  border-style: dashed;
+  border-color: var(--c-unknown-line);
+  background: transparent;
+}
+.chain__link--empty .chain__value { color: var(--c-unknown); }
+.chain__link--empty .chain__label { color: var(--c-ink-muted); }
+
+.chain--md .chain__link { min-width: 3.75rem; padding: var(--sp-3) var(--sp-5); }
+.chain--md .chain__value { font-size: var(--fs-16); }
+
+
+/* ── 조건 칩 — 비활성 사유를 문장이 아니라 상태로 ─────────── */
+.conds { display: inline-flex; gap: var(--sp-4); align-items: center; margin-left: auto; }
+.cond {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-11);
+  color: var(--c-unknown);
+  white-space: nowrap;
+}
+.cond--met { color: var(--c-ink-muted); }
+/* 행동 줄(헤더 오른쪽) 안에 설 때. 거기서는 이미 오른쪽에 모여 있어
+   `.conds` 의 `margin-left: auto` 가 할 일이 없습니다. */
+.conds-slot { display: inline-flex; align-items: center; gap: var(--sp-3); }
+.conds-slot .conds { margin-left: 0; }
+/* 못 채운 조건이 있는 버튼 — 흐리게 두되 **누를 수는 있습니다**.
+   누르면 첫 빈 칸으로 데려갑니다 (GOV.UK 권고). */
+.btn--unmet { opacity: .5; }
+.notice { display: flex; align-items: center; gap: var(--sp-3); }
