@@ -27,6 +27,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -120,6 +121,60 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+# ══════════════════════════════════════════════════════════════
+# 압축 — 화면이 뜨기까지 사람이 흰 화면을 보는 시간
+# ══════════════════════════════════════════════════════════════
+#
+# 이 서버는 화면도 같이 내줍니다(같은 오리진). 그런데 SPA 번들을 **압축
+# 없이** 보내고 있었습니다:
+#
+#     GET /app/assets/index-*.js  →  content-length: 526215   (압축 없음)
+#     같은 파일을 gzip 하면            161KB
+#
+# 재 봤습니다 — 400kbps 회선에서 캐시를 비우고 처음 열면 **6초가 넘게 흰
+# 화면**이었습니다. 졸업작품 시연은 터널이나 학교 와이파이로 열립니다.
+#
+# ⚠️ `compresslevel` 은 9 가 아니라 6 입니다. 정적 파일은 **요청마다 다시
+#    압축**되므로(앞에 프록시가 없습니다) 9 는 매 요청 CPU 를 태우는데,
+#    줄어드는 양은 6 과 몇 % 차이입니다. nginx 기본값도 이 근처입니다.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+
+
+class _NoCompressionForAudio:
+    """⚠️ **소리는 압축하지 않습니다.**
+
+    webm 은 이미 압축된 형식이라 gzip 이 줄이는 양이 0에 가깝습니다. 그런데
+    회의 한 시간짜리 트랙은 수십 MB 이고, 그걸 매 재생마다 다시 압축하면
+    **재생이 끊깁니다** — 아무것도 얻지 못하면서.
+
+    끄는 방법으로 응답에 `Content-Encoding: identity` 를 적는 길도 있지만,
+    그 값은 규격이 쓰지 말라고 한 값입니다(RFC 9110 §8.4.1). 대신 **요청이
+    gzip 을 받겠다고 말하지 않게** 합니다 — 그러면 `GZipMiddleware` 가
+    스스로 지나갑니다.
+
+    ⚠️ 이 미들웨어는 `GZipMiddleware` **바깥**에 있어야 합니다. Starlette 은
+    나중에 더한 것이 바깥이므로 **아래에 더합니다.** 순서가 뒤집히면 이미
+    압축을 결정한 뒤라 아무 일도 안 일어납니다.
+    """
+
+    #: 소리를 흘리는 자리. 늘어나면 여기 적습니다.
+    AUDIO = re.compile(r"^/api/meetings/\d+/tracks/\d+/audio")
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http" and self.AUDIO.match(scope.get("path", "")):
+            scope = dict(scope)
+            scope["headers"] = [
+                (k, v) for (k, v) in scope["headers"] if k.lower() != b"accept-encoding"
+            ]
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_NoCompressionForAudio)
 
 DbSession = Annotated[Session, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_settings)]

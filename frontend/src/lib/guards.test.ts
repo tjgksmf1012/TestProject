@@ -3695,3 +3695,68 @@ describe('베타 체험 QA — 화면이 터졌을 때·프로젝트가 둘일 �
     strictEqual(offenders.join(', '), '', 'TanStack Query 를 무효화하세요 — 앱을 다시 띄우지 말고');
   });
 });
+
+
+describe('첫 화면 껍데기 (`webapp/index.html`)', () => {
+  const raw = readFileSync(join(ROOT, '..', 'webapp', 'index.html'), 'utf8');
+  // ⚠️ **주석을 걷어냅니다.** 이 파일의 주석에는 `role="status"` 같은 낱말이
+  //    "왜 그렇게 했는지" 설명으로 적혀 있습니다. 안 걷으면 마크업에서
+  //    지워도 가드가 통과합니다 — 심어 보다 실제로 그랬습니다.
+  const html = raw.replace(/<!--[\s\S]*?-->/g, ' ');
+  const css = readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
+
+  it('⭐ 껍데기가 실제로 있다 — 첫 방문의 흰 화면을 메우는 자리', () => {
+    // 재 봤습니다: 400kbps 에서 캐시를 비우고 열면 **아무것도 없는 흰
+    // 화면이 4.4초**였습니다(압축을 켠 뒤에도). 사람은 그걸 "고장" 으로
+    // 읽고 새로고침을 누르고, 그러면 처음부터 다시입니다.
+    ok(/<div id="boot">/.test(html), '`#boot` 이 없습니다');
+    ok(/<style>/.test(html), '스타일이 인라인이 아니면 왕복이 한 번 더 늘어 의미가 없습니다');
+  });
+
+  it('⭐ 낭독기에도 무언가 말한다 — 모양은 아무 말도 안 해 준다', () => {
+    ok(/role="status"/.test(html), '5초 동안 낭독기에는 아무 일도 안 일어난 것과 같습니다');
+  });
+
+  it('⭐ 껍데기 색이 팔레트와 **같은 값**이다', () => {
+    // ⚠️ 여기는 `app.css` 가 도착하기 전이라 변수를 쓸 수 없어 hex 를 손으로
+    //    적습니다. 그래서 **갈라질 수 있는 자리**입니다 — 팔레트를 고치고
+    //    여기를 안 고치면 진짜 화면이 뜨는 순간 바탕이 번쩍입니다.
+    const inline = /<style>([\s\S]*?)<\/style>/.exec(raw)?.[1] ?? '';
+    const hexes = [...new Set((inline.match(/#[0-9A-Fa-f]{6}/g) ?? []).map((h) => h.toUpperCase()))];
+    ok(hexes.length >= 4, `껍데기에서 색을 못 찾았습니다 (${hexes.length}개)`);
+    const palette = new Set((css.match(/#[0-9A-Fa-f]{6}/g) ?? []).map((h) => h.toUpperCase()));
+    const strangers = hexes.filter((h) => !palette.has(h));
+    strictEqual(
+      strangers.join(', '),
+      '',
+      'app.css 에 없는 색입니다 — 팔레트에서 가져오세요 (안 그러면 진짜 화면이 뜰 때 번쩍입니다)',
+    );
+  });
+
+  it('⭐ 껍데기를 **진짜 화면이 나온 뒤에** 걷는다', () => {
+    // ⚠️ "React 가 mount 됐을 때" 걷으면 안 됩니다. 로그인 판별 중에는
+    //    `RequireAuth` 가 `null` 을 그리므로 걷어 놓고 **다시 흰 화면**이
+    //    됩니다 — 서버가 느릴 때 그 구간이 3.2초였습니다.
+    const main = readFileSync(join(ROOT, '..', 'webapp', 'src', 'main.tsx'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+    // ⚠️ **낱말이 아니라 부르는가**를 잽니다. `dropBootShell` 이라는 글자는
+    //    함수를 **정의**하기만 해도 파일에 있습니다 — 심어 보고 알았습니다.
+    //    호출을 통째로 지웠는데 가드가 조용했습니다.
+    ok(
+      /^\s*dropBootShell\(\);\s*$/m.test(main),
+      '`dropBootShell()` 을 안 부릅니다 — 함수만 있고 껍데기는 안 걷힙니다',
+    );
+    // ⚠️ 마찬가지로 `childElementCount` 가 파일 어딘가에 있는가가 아니라,
+    //    **껍데기를 걷는 자리마다** 그 확인을 지나는가를 봅니다.
+    const 걷는곳 = main.split(/boot\.remove\(\)/);
+    ok(걷는곳.length >= 2, '껍데기를 걷는 코드가 없습니다');
+    걷는곳.slice(0, -1).forEach((앞, i) => {
+      ok(
+        /childElementCount\s*>\s*0/.test(앞),
+        `${i + 1}번째 \`boot.remove()\` 가 \`#root\` 에 자식이 생겼는지 안 보고 걷습니다 — ` +
+          '로그인 판별 중에 걷으면 다시 흰 화면입니다(재 보니 3.2초)',
+      );
+    });
+  });
+});

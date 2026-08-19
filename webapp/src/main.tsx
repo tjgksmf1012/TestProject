@@ -62,10 +62,42 @@ const router = createBrowserRouter(
 // ErrorBoundary 가 못 잡습니다. 그게 대부분입니다.
 watchForUncaught();
 
-createRoot(document.getElementById('root')!).render(
+const container = document.getElementById('root')!;
+
+/**
+ * `index.html` 의 껍데기를 **진짜 화면이 나온 뒤에** 걷습니다.
+ *
+ * ⚠️ "React 가 mount 됐을 때" 가 아닙니다. 로그인 판별이 끝나기 전에는
+ *    `RequireAuth` 가 `null` 을 그리므로, mount 를 신호로 삼으면 껍데기를
+ *    걷어 놓고 **다시 흰 화면**이 됩니다. 재 봤더니 서버가 느릴 때 그
+ *    구간이 3.2초였습니다.
+ *
+ * ⚠️ 화면마다 걷는 코드를 두면 반드시 몇 곳이 빠집니다(로그인·오류 화면도
+ *    있습니다). `#root` 에 자식이 생기는 것 하나만 봅니다 — 어느 화면이든
+ *    같은 신호입니다.
+ */
+function dropBootShell() {
+  const boot = document.getElementById('boot');
+  if (boot === null) return;
+  if (container.childElementCount > 0) {
+    boot.remove();
+    return;
+  }
+  const watcher = new MutationObserver(() => {
+    if (container.childElementCount > 0) {
+      watcher.disconnect();
+      boot.remove();
+    }
+  });
+  watcher.observe(container, { childList: true });
+}
+
+createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>
   </StrictMode>,
 );
+
+dropBootShell();
