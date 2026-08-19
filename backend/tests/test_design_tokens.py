@@ -482,3 +482,360 @@ def test_the_channel_dots_are_visible_on_both_the_list_and_the_selected_row(css:
                 weak.append(f"{dot} on {bed}: {ratio:.2f}:1 (필요 {need})")
 
     assert weak == [], "채널 점이 안 보입니다 — " + " | ".join(weak)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 리디자인 SPA 팔레트 (`webapp/src/app.css`)
+#
+# ⚠️ **이 팔레트는 여태 아무도 안 쟀습니다.** 위의 검사들은 전부
+# `frontend/public/tokens.css` 만 읽습니다. 주 화면 아홉의 새 얼굴은
+# `webapp/` 이고 색은 거기 따로 적혀 있는데, 그쪽에는 대비를 재는 코드가
+# 한 줄도 없었습니다 — 이 저장소가 여러 번 당한 "두 벌이 있으면 한쪽만
+# 고쳐진다" 그대로입니다. 레거시가 결함 117 로 이미 겪고 고친 문제
+# (결측색이 글자 하한 아래)가 SPA 에 **그대로 다시 있었습니다.**
+#
+# ⚠️ 색 계산은 **위의 `contrast()` 를 그대로 씁니다.** 두 벌로 만들면
+# 언젠가 한쪽만 고쳐집니다.
+# ══════════════════════════════════════════════════════════════════════
+
+SPA = Path(__file__).resolve().parents[2] / "webapp" / "src" / "app.css"
+
+#: 본문 글자로 쓰는 색.
+#:
+#: ⚠️ `--c-ink-faint-base`·`--c-unknown-base` 는 **여기 없습니다** — 재료라
+#: 글자로 쓰면 안 되고, 그 규칙은 아래 `test_spa_..._재료를_직접_쓰지_않는가`
+#: 가 따로 잽니다.
+SPA_INKS = ("--c-ink", "--c-ink-muted", "--c-ink-faint", "--c-unknown", "--c-ok")
+
+#: 그 글자가 놓이는 바탕. 네 면 전부입니다 — 하나라도 빼면 **뺀 면에서만
+#: 안 읽히는** 상태가 영원히 안 잡힙니다 (결함 117 이 그렇게 오래 남았습니다).
+SPA_BEDS = ("--c-paper", "--c-surface", "--c-surface-raised", "--c-sunken")
+
+#: 띠 위에 같은 뜻의 글자가 얹히는 자리 (칩·알림 배너).
+SPA_TINTED = (
+    ("--c-unknown", "--c-unknown-tint"),
+    ("--c-evidence", "--c-evidence-tint"),
+    ("--c-danger", "--c-danger-tint"),
+    ("--c-ok", "--c-ok-tint"),
+)
+
+
+def _brace_block(css: str, start_at: int) -> str:
+    """`{` 부터 짝이 맞는 `}` 까지."""
+    open_at = css.index("{", start_at)
+    depth = 0
+    for i in range(open_at, len(css)):
+        if css[i] == "{":
+            depth += 1
+        elif css[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return css[open_at : i + 1]
+    raise AssertionError("닫는 중괄호를 못 찾았습니다")
+
+
+def _spa_declarations(block: str) -> dict[str, str]:
+    return {
+        m.group(1): m.group(2).strip()
+        for m in re.finditer(r"(--[a-z0-9-]+)\s*:\s*([^;{}]+);", block)
+    }
+
+
+def _spa_blocks(css: str) -> tuple[dict[str, str], dict[str, str]]:
+    """(밝은 선언, 어두운 선언).
+
+    ⚠️ **어두운 블록이 두 곳**입니다 — `:root[data-theme="dark"]`(사람이 고른
+    것)과 `@media (prefers-color-scheme: dark)`(기계 설정). 위쪽 `_blocks()`
+    처럼 "미디어 쿼리에서 자른다" 로 가르면 `[data-theme]` 블록이 **밝은
+    쪽에 섞여** 밝은 값이 통째로 다크 값으로 오염됩니다. 그래서 여는
+    선택자를 이름으로 집습니다.
+    """
+    light = _spa_declarations(_brace_block(css, css.index(":root {")))
+    dark = _spa_declarations(_brace_block(css, css.index(':root[data-theme="dark"]')))
+    return light, dark
+
+
+def _spa_resolve(name: str, light: dict[str, str], dark: dict[str, str], *, mode: str) -> str:
+    decls = dict(light)
+    if mode == "dark":
+        decls.update(dark)
+
+    seen: set[str] = set()
+    cur = name
+    while cur not in seen:
+        seen.add(cur)
+        expr = decls.get(cur)
+        assert expr is not None, f"[{mode}] {name} → {cur} 을 못 찾았습니다"
+        if expr.startswith("#"):
+            return expr
+        mix = MIX.search(expr)
+        if mix is not None:
+            a = _spa_resolve(mix.group(1), light, dark, mode=mode)
+            b = _spa_resolve(mix.group(3), light, dark, mode=mode)
+            w = int(mix.group(2)) / 100
+            return "#" + "".join(
+                f"{round(ca * w + cb * (1 - w)):02x}"
+                for ca, cb in zip(_hex_to_rgb(a), _hex_to_rgb(b), strict=True)
+            )
+        var = re.fullmatch(r"var\((--[a-z0-9-]+)\)", expr)
+        assert var is not None, f"[{mode}] {cur} 의 값을 못 읽었습니다: {expr}"
+        cur = var.group(1)
+    raise AssertionError(f"[{mode}] {name} 이 자기를 참조합니다")
+
+
+@pytest.fixture(scope="module")
+def spa() -> str:
+    return SPA.read_text(encoding="utf-8")
+
+
+def test_spa_body_ink_reads_on_every_body_bed(spa: str):
+    """SPA 의 본문 글자색이 **네 면 전부**에서 4.5:1 을 넘는가.
+
+    ⚠️ 처음 재 봤을 때 밝은 모드 93건·어두운 모드 69건이 미달이었습니다.
+    종류로는 열아홉 가지 — 칸반 열의 개수, 타임라인의 시각, 후보의 출처와
+    신뢰도, 역할 이름, 카드의 표식처럼 **하필 뜻을 나르는 11~12px 글자**
+    들이었습니다. 화면은 "조용한 회색" 이라고 생각하고 썼고, 아무도 재지
+    않았습니다.
+    """
+    light, dark = _spa_blocks(spa)
+    weak: list[str] = []
+    for mode in ("light", "dark"):
+        for ink in SPA_INKS:
+            fg = _spa_resolve(ink, light, dark, mode=mode)
+            for bed in SPA_BEDS:
+                bg = _spa_resolve(bed, light, dark, mode=mode)
+                ratio = contrast(fg, bg)
+                if ratio < 4.5:
+                    weak.append(f"[{mode}] {ink} on {bed}: {ratio:.2f}:1")
+
+    assert weak == [], (
+        "SPA 본문 글자가 안 읽힙니다 (하한 4.5:1) — " + " | ".join(weak)
+    )
+
+
+def test_spa_text_on_a_tinted_chip_still_reads(spa: str):
+    """띠 위 글자.
+
+    ⚠️ 흙빛이 제 띠 위에서 3.75:1 이었습니다. 흰 바탕(4.20:1)만 재고
+    넘어가면 **칩 안에서만 안 읽히는** 상태가 남습니다 — 그리고 결측을
+    설명하는 말은 대부분 칩 안에 있습니다.
+    """
+    light, dark = _spa_blocks(spa)
+    weak: list[str] = []
+    for mode in ("light", "dark"):
+        for ink, tint in SPA_TINTED:
+            fg = _spa_resolve(ink, light, dark, mode=mode)
+            bg = _spa_resolve(tint, light, dark, mode=mode)
+            ratio = contrast(fg, bg)
+            if ratio < 4.5:
+                weak.append(f"[{mode}] {ink} on {tint}: {ratio:.2f}:1")
+
+    assert weak == [], "칩 안 글자가 안 읽힙니다 (하한 4.5:1) — " + " | ".join(weak)
+
+
+def test_spa_a_filled_button_label_reads_on_every_fill(spa: str):
+    """채운 버튼의 글자 — **의미색 셋 전부**.
+
+    ⚠️ `--c-ink-inverse` 는 다크에서 **어두운 색으로 뒤집힙니다**(#121319).
+    채움도 같이 밝아지므로 두 모드 다 재야 합니다.
+
+    ⚠️ 예전에는 `--c-evidence` 하나만 쟀습니다. 그동안 위험 버튼은
+    `color: #fff` 를 손으로 적어 두고 있었고, 다크에서 밝은 빨강 위 흰
+    글자가 **3.26:1** 이었습니다 — 하필 "내 녹음과 성문 지우기", 되돌릴 수
+    없는 버튼입니다. 재는 자리가 하나 모자라면 안 재는 자리가 남습니다.
+    """
+    light, dark = _spa_blocks(spa)
+    weak: list[str] = []
+    for mode in ("light", "dark"):
+        fg = _spa_resolve("--c-ink-inverse", light, dark, mode=mode)
+        for fill in ("--c-evidence", "--c-danger", "--c-ok"):
+            bg = _spa_resolve(fill, light, dark, mode=mode)
+            ratio = contrast(fg, bg)
+            if ratio < 4.5:
+                weak.append(f"[{mode}] --c-ink-inverse on {fill}: {ratio:.2f}:1")
+
+    assert weak == [], "채운 버튼 글자가 안 읽힙니다 — " + " | ".join(weak)
+
+
+def test_spa_a_pressable_button_is_never_dimmed_by_opacity(spa: str):
+    """⛔ 누를 수 있는 것을 `opacity` 로 흐리게 하지 않았는가.
+
+    ⚠️ **대비 검사가 못 잡는 구멍입니다.** `opacity` 는 글자와 채움을 같이
+    바탕 쪽으로 끌어당기므로 색 토큰은 그대로인데 눈에 보이는 대비만
+    떨어집니다 — `getComputedStyle().color` 를 읽는 감사는 0건이라고
+    답합니다. 실제로 "이 값으로 확정" 버튼이 **2.57:1** 인 채로 그렇게
+    통과하고 있었습니다.
+
+    이 저장소의 "조건 미충족" 버튼은 `aria-disabled` 라 **초점도 받고 눌리기도
+    합니다** (누르면 첫 빈 칸으로 데려갑니다). 그러니 WCAG 1.4.3 의 비활성
+    컨트롤 예외를 쓸 수 없습니다. 흐리게 하지 말고 **모양**을 바꾸세요.
+
+    ⚠️ 정말로 못 누르는 것은 예외입니다 — 예외의 경계는 "보기에 흐린가" 가
+    아니라 **누를 수 있는가** 입니다. 그래서 같은 규칙이 `pointer-events:
+    none` 을 걸었거나 선택자가 HTML `:disabled` 인 경우만 통과시킵니다.
+    """
+    rules = re.sub(r"/\*.*?\*/", "", spa, flags=re.S)
+    dim: list[str] = []
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", rules):
+        selector, body = m.group(1).strip(), m.group(2)
+        if "btn" not in selector and 'role="button"' not in selector:
+            continue
+        inert = ":disabled" in selector or re.search(r"pointer-events:\s*none", body)
+        if inert:
+            continue
+        for o in re.finditer(r"(?<![-a-z])opacity:\s*([0-9.]+)", body):
+            if float(o.group(1)) < 0.8:
+                dim.append(f"{selector.splitlines()[-1].strip()} → opacity {o.group(1)}")
+
+    assert dim == [], (
+        "누를 수 있는 버튼이 흐려져 있습니다 — " + " | ".join(dim) + ". "
+        "`opacity` 대신 채움·테두리·글자색으로 상태를 말하세요."
+    )
+
+
+def test_spa_no_rule_hardcodes_black_or_white_text(spa: str):
+    """⛔ 규칙 안에 `color: #fff` · `color: #000` 을 적지 않았는가.
+
+    ⚠️ 팔레트 밖에 적은 날 hex 는 **영영 안 뒤집힙니다.** 채움만 밝아지고
+    글자는 흰색으로 남아 다크에서만 안 읽히는 상태가 되고, 자기 모드로
+    보고 있는 사람에게는 **보이지 않습니다.** 레거시가 화면 넷에서 겪은
+    결함 60 이 이 모양이었고, SPA 에도 하나 있었습니다.
+
+    글자색은 `--c-ink-inverse` 를 쓰십시오 — 그 토큰이 뒤집힙니다.
+    """
+    palette_end = spa.index("}", spa.index(":root {"))
+    # ⚠️ **주석을 먼저 걷어냅니다.** 안 걷으면 "여기 `color: #fff` 가 박혀
+    #    있었습니다" 라고 적은 설명 자체가 잡힙니다 — 고친 사실을 적을수록
+    #    검사가 빨개지는, 아무도 못 고치는 검사가 됩니다.
+    rules = re.sub(r"/\*.*?\*/", "", spa[palette_end:], flags=re.S)
+    # ⚠️ `(?<![-a-z])` 가 없으면 `background-color: #fff` 가 같이 걸립니다.
+    #    바탕은 이 검사의 대상이 아닙니다 (면은 `--c-surface` 가 정합니다).
+    bad = re.findall(r"(?<![-a-z])color:\s*(#(?:fff|ffffff|000|000000))\b", rules, re.I)
+    assert bad == [], (
+        "규칙에 날 hex 글자색이 있습니다 — " + ", ".join(bad) + ". "
+        "`--c-ink-inverse` 를 쓰세요 (다크에서 같이 뒤집힙니다)."
+    )
+
+
+def test_spa_controls_have_a_visible_edge(spa: str):
+    """입력창·버튼의 테두리가 보이는가 (UI 컴포넌트 하한 3:1, WCAG 1.4.11).
+
+    ⚠️ `--c-line` 은 **장식선**이라 여기 없습니다. 칸을 가르는 얇은 줄까지
+    3:1 을 요구하면 화면이 표가 됩니다 — 재는 것은 "누를 수 있는 것의
+    가장자리" 뿐입니다.
+    """
+    light, dark = _spa_blocks(spa)
+    weak: list[str] = []
+    for mode in ("light", "dark"):
+        edge = _spa_resolve("--c-line-strong", light, dark, mode=mode)
+        for bed in ("--c-surface", "--c-paper"):
+            bg = _spa_resolve(bed, light, dark, mode=mode)
+            ratio = contrast(edge, bg)
+            if ratio < 3.0:
+                weak.append(f"[{mode}] --c-line-strong on {bed}: {ratio:.2f}:1")
+
+    assert weak == [], "컨트롤 가장자리가 안 보입니다 — " + " | ".join(weak)
+
+
+def test_spa_the_missing_colour_is_still_clay_not_red(spa: str):
+    """⭐ **결측은 빨강이 아닙니다** (AGENTS.md 불변식 ③ · docs/05 §5).
+
+    잉크 쪽으로 밀면서 색이 죽으면 흙빛이 빨강 쪽으로 갈 수 있습니다. 그러면
+    "못 쟀다" 가 "네가 뭘 잘못했다" 로 읽힙니다 — 이 제품이 제일 하면 안
+    되는 일입니다. 그래서 **위험색과 색상환에서 떨어져 있는지** 잽니다.
+    """
+    light, dark = _spa_blocks(spa)
+    for mode in ("light", "dark"):
+        clay = _hex_to_rgb(_spa_resolve("--c-unknown", light, dark, mode=mode))
+        red = _hex_to_rgb(_spa_resolve("--c-danger", light, dark, mode=mode))
+        gap = abs(_hue(clay) - _hue(red))
+        gap = min(gap, 360 - gap)
+        assert gap >= 20, (
+            f"[{mode}] 결측색이 위험색과 색상 {gap:.0f}° 차이입니다. "
+            "빨강으로 읽히면 결측이 오류가 됩니다 — 흙빛을 유지하세요."
+        )
+
+
+def _hue(rgb: tuple[int, int, int]) -> float:
+    r, g, b = (c / 255 for c in rgb)
+    hi, lo = max(r, g, b), min(r, g, b)
+    if hi == lo:
+        return 0.0
+    d = hi - lo
+    if hi == r:
+        h = ((g - b) / d) % 6
+    elif hi == g:
+        h = (b - r) / d + 2
+    else:
+        h = (r - g) / d + 4
+    return h * 60
+
+
+def test_spa_raw_material_is_never_painted_directly(spa: str):
+    """⚠️ 재료값(`--c-*-base`)을 화면이 직접 쓰고 있지 않은가.
+
+    재료는 하한 아래입니다. "직접 쓰지 마십시오" 를 **주석으로만** 적어 두면
+    다음 사람이 `var(--c-unknown-base)` 라고 적고, 그 자리만 조용히 3.28:1 로
+    돌아갑니다 — 주석은 안 틀리고 색만 틀립니다.
+    """
+    light, _ = _spa_blocks(spa)
+    materials = [name for name in light if name.endswith("-base")]
+    assert materials, "재료 토큰이 하나도 없습니다 — 이 검사가 아무것도 안 잽니다"
+
+    palette_end = spa.index("}", spa.index(":root {"))
+    rules = spa[palette_end:]
+    used = [name for name in materials if f"var({name})" in rules]
+    assert used == [], (
+        "재료값을 화면이 직접 쓰고 있습니다 — " + ", ".join(used) + ". "
+        "파생값(`--c-ink-faint`·`--c-unknown`)을 쓰세요."
+    )
+
+
+def test_spa_both_dark_blocks_say_the_same_thing(spa: str):
+    """⚠️ 어두운 값이 **두 곳**에 적혀 있습니다.
+
+    `:root[data-theme="dark"]`(사람이 고른 것)과
+    `@media (prefers-color-scheme: dark)`(기계 설정). 두 벌이 있으면
+    갈라집니다 — 실제로 이 저장소가 여러 번 당한 모양이고, 갈라져도
+    **자기 모드로 보고 있는 사람에게는 안 보입니다.**
+    """
+    picked = _spa_declarations(_brace_block(spa, spa.index(':root[data-theme="dark"]')))
+    system = _spa_declarations(
+        _brace_block(spa, spa.index('@media (prefers-color-scheme: dark)'))
+    )
+    drift = [
+        f"{name}: 고른 것 {picked[name]} · 기계 설정 {system.get(name, '없음')}"
+        for name in picked
+        if picked[name] != system.get(name)
+    ]
+    assert drift == [], "두 다크 블록이 갈라졌습니다 — " + " | ".join(drift)
+
+
+def test_spa_the_claims_written_next_to_the_derived_colours_are_true(spa: str):
+    """파생색 옆에 적어 둔 비율을 **다시 잽니다.**
+
+    `카드 N:1` 은 밝은 모드의 `--c-surface` 위, `다크 N:1` 은 어두운 모드의
+    `--c-surface` 위입니다. 값만 고치고 숫자를 안 고치면 여기서 터집니다 —
+    이 파일이 위쪽 팔레트에 대해 하는 일과 같습니다.
+    """
+    light, dark = _spa_blocks(spa)
+    claim = re.compile(r"(카드|다크)\s+(\d+\.\d+):1")
+    checked = 0
+    for decl in DECL.finditer(spa):
+        token, comment = decl.group(1), decl.group(3)
+        for m in claim.finditer(comment):
+            mode = "light" if m.group(1) == "카드" else "dark"
+            said = float(m.group(2))
+            fg = _spa_resolve(token, light, dark, mode=mode)
+            bg = _spa_resolve("--c-surface", light, dark, mode=mode)
+            actual = contrast(fg, bg)
+            assert abs(actual - said) < 0.05, (
+                f"{token} 이 {m.group(1)} {said}:1 이라고 적어 뒀는데 "
+                f"실제는 {actual:.2f}:1 입니다"
+            )
+            checked += 1
+
+    assert checked >= 4, (
+        f"주장을 {checked} 개밖에 못 읽었습니다. 주석 모양이 바뀌면 이 검사는 "
+        "아무것도 안 재면서 통과합니다 — 정규식을 고치세요."
+    )

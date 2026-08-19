@@ -117,6 +117,14 @@
       .steps__label { font-size: var(--fs-label); color: var(--text-muted); }
       details.disc > summary {
         cursor: pointer; font-size: var(--fs-caption); color: var(--text-subtle);
+        /* 손가락 표적 44px. ⚠️ **폰 지원이 아닙니다** — 창 반쪽·확대 200%·
+           터치 노트북에서 필요합니다. 여기만 20px 로 남아 있었습니다
+           (터치 모드로 재서 나왔습니다 — 폭만 줄이면 안 잡힙니다). */
+        display: inline-flex; align-items: center; min-height: var(--tap);
+      }
+      @media (hover: hover) and (pointer: fine) {
+        /* 마우스에서는 조밀하게. ⚠️ 이 안에서만 줄입니다. */
+        details.disc > summary { min-height: 0; }
       }
 
       /* R2 — 1280×800 한 화면 예산. 이 페이지만 세로 여백을 조입니다.

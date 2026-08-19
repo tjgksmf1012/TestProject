@@ -155,7 +155,7 @@ export default function Lobby() {
             </span>
           )}
           <a
-            className={`btn btn--primary${!canGoRecord ? ' btn--disabled-link' : ''}`}
+            className={`btn btn--primary${!canGoRecord ? ' btn--unmet btn--disabled-link' : ''}`}
             href={canGoRecord ? `/index.html?meeting=${meetingId}` : undefined}
             aria-disabled={!canGoRecord}
             aria-describedby={!canGoRecord ? 'start-conds' : undefined}

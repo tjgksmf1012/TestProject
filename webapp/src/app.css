@@ -40,11 +40,43 @@
   --c-sunken:           #F0F1F4;
 
   --c-line:             #E3E5EA;
-  --c-line-strong:      #C9CDD6;
+  /* ⚠️ **화면에서 직접 쓰지 마십시오** — 아래 `--c-line-strong` 의 재료입니다. */
+  --c-line-strong-base: #C9CDD6;
+  /* 누를 수 있는 것의 **가장자리** — 보조 버튼 테두리 · 고른 날의 안쪽 링 ·
+     `?` 단추의 동그라미 · 고리를 잇는 실선.
+
+     ⚠️ 재료값은 흰 바탕에서 **1.59:1** 입니다. UI 컴포넌트 하한은 3:1
+     (WCAG 1.4.11) 이라 보조 버튼의 테두리가 사실상 안 보였습니다. 더 나쁜
+     것은 `.why` 옆에 **"`--c-line-strong` 은 3.53:1"** 이라고 적혀 있었던
+     것입니다 — 레거시 팔레트의 숫자를 그대로 옮겨 적었고, 값은 안 옮겨
+     왔습니다. 주석은 안 틀리고 색만 틀렸습니다.
+
+     ⚠️ `--c-line`(칸을 가르는 장식선)은 여기 안 딸려옵니다. 그것까지 3:1 로
+     올리면 화면이 표가 됩니다. */
+  --c-line-strong: color-mix(in srgb, var(--c-line-strong-base) 60%, var(--c-ink)); /* 카드 3.74:1 ✅ 다크 4.73:1 ✅ */
 
   --c-ink:              #15171E;
   --c-ink-muted:        #5B6172;
-  --c-ink-faint:        #878EA0;
+  /* ⚠️ **화면에서 직접 쓰지 마십시오** — 바로 아래 `--c-ink-faint` 의
+     재료입니다. 이 값 자체는 흰 바탕 3.28:1 · 가라앉은 면 2.90:1 로 글자가
+     안 됩니다. */
+  --c-ink-faint-base:   #878EA0;
+  /* 셋째 잉크 단 — 가장 조용한 **글자**.
+
+     ⚠️ 재료값을 그대로 쓰고 있었고, 그래서 시각·눈금·개수·역할처럼 **뜻을
+     나르는 11~12px 글자 열아홉 가지**가 3.28:1 아래에 있었습니다. 레거시
+     `frontend/public/tokens.css` 는 이 문제를 진작 겪고 `--gap` 을 잉크
+     쪽으로 밀어 고쳤는데(결함 117), SPA 팔레트는 그 교훈 없이 새로 쓰였고
+     **대비를 재는 검사가 하나도 없어서** 아무도 몰랐습니다.
+
+     그래서 색기운은 남긴 채 잉크 쪽으로 30% 만 밀었습니다. `--c-ink` 는
+     어두운 모드에서 뒤집히므로 **두 모드가 같은 식 하나로** 각자의 바탕에서
+     멀어집니다 (밝은 5.40:1 · 어두운 6.02:1, 카드 기준).
+     `--c-ink-muted`(6.18:1)와는 단이 갈라진 채 남습니다.
+
+     ⚠️ 아래 숫자는 **주석이 아니라 검사입니다** — `test_design_tokens.py` 가
+     매번 다시 잽니다. 값만 고치고 숫자를 안 고치면 거기서 터집니다. */
+  --c-ink-faint: color-mix(in srgb, var(--c-ink-faint-base) 70%, var(--c-ink)); /* 카드 5.40:1 ✅ 다크 6.02:1 ✅ */
   --c-ink-inverse:      #FFFFFF;
 
   /* ---------- 색: 의미 ---------- */
@@ -54,7 +86,19 @@
   --c-evidence-tint:    #ECECF9;
   --c-evidence-line:    #C9C7EE;
 
-  --c-unknown:          #A8701A;
+  /* ⚠️ **화면에서 직접 쓰지 마십시오** — 아래 `--c-unknown` 의 재료입니다. */
+  --c-unknown-base:     #A8701A;
+  /* 결측 — 흙빛. ⚠️ **빨강이 아닙니다** (docs/05 §5 — 측정 불가 ≠ 0점).
+
+     ⚠️ 이 색은 거의 전부 **글자**로 쓰입니다 — "측정하지 못했습니다" ·
+     비활성 사유 · 안 이어진 고리의 `—` · 조건 칩. 하필 결측을 설명하는
+     문장들이라 안 읽히면 뜻이 통째로 사라집니다. 재료값은 흰 바탕
+     4.20:1 · 제 흙빛 띠 위 3.75:1 로 본문 하한 미달이었습니다.
+
+     그래서 흙빛을 유지한 채 잉크 쪽으로 20% 밀었습니다 (밝은 5.65:1 ·
+     어두운 8.59:1, 카드 기준). 그림(리본의 「모르는 폭」·왼쪽 굵은 선)은
+     하한이 3:1 이라 같이 좋아지기만 합니다. */
+  --c-unknown: color-mix(in srgb, var(--c-unknown-base) 80%, var(--c-ink)); /* 카드 5.65:1 ✅ 다크 8.59:1 ✅ */
   --c-unknown-tint:     #FAF1E0;
   --c-unknown-line:     #E8D3AC;
 
@@ -99,6 +143,11 @@
   /* ---------- 레이아웃 ---------- */
   --rail-w: 72px;
   --header-h: 56px;
+  /* 손가락 끝 접촉면. ⚠️ **폰 지원이 아닙니다** — 창 반쪽·브라우저 확대
+     200%·터치 노트북에서 필요합니다. 없앴다가 낸 결함이 기록에 있습니다
+     (72·150). 레거시 `app.css` 는 이 규칙을 전체에 걸고 있었는데 SPA 로
+     옮기며 **통째로 빠졌고**, 터치로 재니 버튼이 32px 이었습니다. */
+  --tap: 2.75rem;
   --measure: 72ch;
 
   /* ---------- 시그니처: 트랙 리본 ---------- */
@@ -123,13 +172,13 @@
 :root[data-theme="dark"] {
   --c-paper: #121319;          --c-surface: #191B23;
   --c-surface-raised: #21242E; --c-sunken: #0E0F14;
-  --c-line: #2A2E3B;           --c-line-strong: #3D4354;
+  --c-line: #2A2E3B;           --c-line-strong-base: #3D4354;
   --c-ink: #E9EBF2;            --c-ink-muted: #9BA2B5;
-  --c-ink-faint: #6E7688;      --c-ink-inverse: #121319;
+  --c-ink-faint-base: #6E7688; --c-ink-inverse: #121319;
   --c-evidence: #8F8BF2;       --c-evidence-hover: #A3A0F5;
   --c-evidence-active: #B6B3F8;--c-evidence-tint: #23234A;
   --c-evidence-line: #3A3A6E;
-  --c-unknown: #D6A24F;        --c-unknown-tint: #332A16;
+  --c-unknown-base: #D6A24F;   --c-unknown-tint: #332A16;
   --c-unknown-line: #55431F;
   --c-danger: #E06A6A;         --c-danger-tint: #3A1E1E;
   --c-danger-line: #5C2E2E;
@@ -141,13 +190,13 @@
   :root:not([data-theme="light"]) {
     --c-paper: #121319;          --c-surface: #191B23;
     --c-surface-raised: #21242E; --c-sunken: #0E0F14;
-    --c-line: #2A2E3B;           --c-line-strong: #3D4354;
+    --c-line: #2A2E3B;           --c-line-strong-base: #3D4354;
     --c-ink: #E9EBF2;            --c-ink-muted: #9BA2B5;
-    --c-ink-faint: #6E7688;      --c-ink-inverse: #121319;
+    --c-ink-faint-base: #6E7688; --c-ink-inverse: #121319;
     --c-evidence: #8F8BF2;       --c-evidence-hover: #A3A0F5;
     --c-evidence-active: #B6B3F8;--c-evidence-tint: #23234A;
     --c-evidence-line: #3A3A6E;
-    --c-unknown: #D6A24F;        --c-unknown-tint: #332A16;
+    --c-unknown-base: #D6A24F;   --c-unknown-tint: #332A16;
     --c-unknown-line: #55431F;
     --c-danger: #E06A6A;         --c-danger-tint: #3A1E1E;
     --c-danger-line: #5C2E2E;
@@ -371,7 +420,10 @@ a { color: var(--c-evidence); }
   align-items: center;
   justify-content: center;
   gap: var(--sp-3);
-  height: 32px;
+  /* ⚠️ **터치가 기본값입니다.** 마우스에서 줄이는 것은 아래
+     `@media (hover: hover) and (pointer: fine)` 안에서만 합니다 —
+     그 밖에서 줄이면 손가락이 못 누릅니다. */
+  min-height: var(--tap);
   padding: 0 var(--sp-5);
   border-radius: var(--r-sm);
   border: 1px solid transparent;
@@ -391,8 +443,13 @@ a { color: var(--c-evidence); }
 .btn--secondary:hover:not(:disabled) { background: var(--c-sunken); }
 .btn--ghost { color: var(--c-ink-muted); }
 .btn--ghost:hover:not(:disabled) { color: var(--c-ink); background: var(--c-sunken); }
-.btn--danger { background: var(--c-danger); color: #fff; }
-.btn--sm { height: 28px; padding: 0 var(--sp-4); font-size: var(--fs-12); }
+/* ⚠️ 여기 `color: #fff` 가 박혀 있었습니다. 어두운 모드에서는 채움
+   (`--c-danger`)이 **밝게 뒤집히는데** 글자만 흰색으로 남아 3.26:1 이
+   됐습니다 — 하필 "내 녹음과 성문 지우기", 되돌릴 수 없는 버튼입니다.
+   레거시가 결함 60 으로 겪은 것과 같은 모양이고, `--c-ink-inverse` 는
+   바로 이걸 막으려고 있는 토큰입니다. */
+.btn--danger { background: var(--c-danger); color: var(--c-ink-inverse); }
+.btn--sm { padding: 0 var(--sp-4); font-size: var(--fs-12); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 
 /* 비활성 버튼은 반드시 사유를 동반한다 — 버튼 바로 위 12px 황토 */
@@ -532,6 +589,66 @@ a { color: var(--c-evidence); }
   font-weight: var(--fw-medium);
 }
 .cal__clear { margin-top: var(--sp-5); width: 100%; }
+
+/* ==========================================================================
+   손가락 표적 — **터치가 기본, 마우스에서만 줄입니다**
+
+   ⚠️ 레거시 `app.css` 는 `button, .btn { min-height: var(--tap) }` 을 전체에
+   걸고 있었는데 **SPA 로 옮기며 통째로 빠졌습니다.** 세 군데만 손으로
+   44px 을 적어 두었고 나머지는 32px 이었습니다. 터치 모드(`hasTouch`)로
+   재서야 나왔습니다 — 폭만 390px 로 줄이면 Chromium 이 여전히
+   `pointer: fine` 을 보고해 마우스용 규칙이 그대로 먹습니다.
+
+   ⚠️ **아이콘 버튼은 커 보이게 하지 않습니다.** 보이는 원은 그대로 두고
+   `::after` 로 누를 수 있는 넓이만 넓힙니다 — 화면이 뚱뚱해지지 않으면서
+   손가락은 받습니다.
+   ========================================================================== */
+button,
+summary,
+[role="button"] {
+  min-height: var(--tap);
+}
+/* 상자가 없는 것들 — 보이는 크기는 그대로, 누를 넓이만 넓힙니다. */
+.why,
+.kcard__menu-btn,
+.cal__nav,
+.chain__link,
+.login__switch {
+  position: relative;
+  min-height: 0;
+}
+.why::after,
+.kcard__menu-btn::after,
+.cal__nav::after,
+.chain__link::after,
+.login__switch::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, var(--tap));
+  height: var(--tap);
+  transform: translate(-50%, -50%);
+}
+/* 체크박스는 **라벨이 표적**입니다 — 네모 자체를 키우면 글자 칸 크기가
+   되어 줄이 뚱뚱해집니다(결함 72 가 그것). */
+label:has(> input[type="checkbox"]),
+label:has(> input[type="radio"]) {
+  min-height: var(--tap);
+  align-items: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  /* 마우스에서는 조밀하게. ⚠️ 이 안에서만 줄입니다. */
+  .btn { min-height: 32px; }
+  .btn--sm { min-height: 28px; }
+  button,
+  summary,
+  [role="button"] { min-height: 0; }
+  .tabs__item { min-height: 44px; }
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]) { min-height: 0; }
+}
 
 /* ==========================================================================
    칩
@@ -1177,7 +1294,13 @@ details.disc > .disc__body {
   padding-top: 14px;
 }
 .lrow__word { font-size: var(--fs-13); color: var(--c-ink-muted); }
-.btn--disabled-link { opacity: .45; pointer-events: none; }
+/* 아직 갈 수 없는 링크 — 조건이 차면 `href` 가 붙습니다.
+   ⚠️ `opacity: .45` 였습니다. 정말로 못 누르니 WCAG 1.4.3 예외에는
+   걸리지만, **같은 앱 안에서 「아직 안 됨」 이 두 가지 얼굴**을 갖게
+   됩니다 — 검토·기여도는 `btn--unmet`(덜 채운 모양), 여기만 흐림.
+   흐림은 지우고 모양은 `btn--unmet` 에 맡깁니다. 무엇이 모자란지는 바로
+   옆 조건 칩이 말합니다. */
+.btn--disabled-link { pointer-events: none; }
 .btn { text-decoration: none; }
 
 /* ==========================================================================
@@ -1278,8 +1401,10 @@ details.disc > .disc__body {
   border-radius: var(--r-full);
   border: 1px solid var(--c-line-strong);
   background: transparent;
-  /* `?` 는 글자입니다 — 4.5:1 을 지킵니다. 테두리는 UI 컴포넌트라 3:1
-     (`--c-line-strong` 은 3.53:1). */
+  /* `?` 는 글자입니다 — 4.5:1 을 지킵니다. 테두리는 UI 컴포넌트라 3:1.
+     ⚠️ 여기 **"3.53:1" 이라고 적혀 있었습니다** — 레거시 팔레트의 숫자를
+     옮겨 적은 것이고, 이 팔레트의 실제 값은 1.59:1 이었습니다. 숫자는
+     주석이 아니라 팔레트 선언 옆에 두고 검사가 다시 잽니다. */
   color: var(--c-ink-muted);
   font-family: var(--font-mono);
   font-size: var(--fs-11);
@@ -1408,7 +1533,23 @@ a.chain__link:hover { border-color: var(--c-evidence); }
 }
 .preflight__item--met { color: var(--c-ink-muted); }
 .preflight__label { color: var(--c-ink); }
-/* 못 채운 조건이 있는 버튼 — 흐리게 두되 **누를 수는 있습니다**.
-   누르면 첫 빈 칸으로 데려갑니다 (GOV.UK 권고). */
-.btn--unmet { opacity: .5; }
+/* 못 채운 조건이 있는 버튼 — **누를 수 있습니다.** 누르면 첫 빈 칸으로
+   데려갑니다 (GOV.UK 권고).
+
+   ⚠️ 예전에는 `opacity: .5` 였습니다. 두 가지가 틀렸습니다.
+   ① 글자가 **2.57:1** 로 내려앉습니다. `opacity` 는 글자와 채움을 **같이**
+      바탕 쪽으로 끌어당기므로 색 토큰을 아무리 맞춰도 소용이 없고, 대비를
+      재는 도구도 `getComputedStyle().color` 만 보면 **못 잡습니다** —
+      실제로 이 저장소의 자가 감사가 0건이라고 답하는 동안 여기 있었습니다.
+   ② 흐림은 "못 누른다" 는 뜻으로 읽히는데, 이 버튼은 초점도 받고 눌리기도
+      합니다. 비활성 컨트롤 예외(WCAG 1.4.3)를 쓸 수 없는 자리입니다.
+
+   그래서 흐리게 하는 대신 **아직 안 채운 모양**으로 바꿉니다 — 빈 고리를
+   점선과 흙빛으로 그리는 것과 같은 문법입니다. 무엇이 모자란지는 옆의 조건
+   칩(`●`/`○`)과 `disabled-reason` 이 이미 말합니다. */
+.btn--unmet {
+  background: var(--c-evidence-tint);
+  color: var(--c-evidence);
+  border-color: var(--c-evidence-line);
+}
 .notice { display: flex; align-items: center; gap: var(--sp-3); }

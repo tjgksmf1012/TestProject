@@ -160,6 +160,38 @@ export default function Contributions() {
   // 저장된 확정을 모르는 채로 확정하면 남의 조정을 지울 수 있습니다.
   const blind = finals.isError;
 
+  // 확정이 막혀 있다면 **무엇 때문인지** — 값은 아래 사유 문단의 id 입니다.
+  // ⚠️ 순서가 곧 우선순위입니다. 빈 칸이 있으면 그것부터 말합니다.
+  const confirmBlocked: string | null =
+    !allFilled && members.length > 0
+      ? 'confirm-unfilled'
+      : problems.length > 0
+        ? 'confirm-problems'
+        : blind
+          ? 'confirm-blind'
+          : null;
+
+  /** 막힌 버튼을 눌렀을 때 **데려갈 자리**. 알려만 주고 갈 곳이 없으면
+   *  이 저장소의 실패 ③(할 일을 알려 주고 그 일을 할 자리를 안 줌)입니다. */
+  const focusFirstGap = () => {
+    const emptyValue = drafts.find(
+      (d) => d.final_value === null || Number.isNaN(d.final_value),
+    );
+    const target =
+      emptyValue !== undefined
+        ? `final-${emptyValue.user_id}`
+        : (() => {
+            const noReason = changed.find((d) => (reasons[d.user_id] ?? '').trim() === '');
+            return noReason !== undefined ? `reason-${noReason.user_id}` : null;
+          })();
+    if (target === null) return;
+    const el = document.getElementById(target);
+    if (el instanceof HTMLInputElement) {
+      el.scrollIntoView({ block: 'center' });
+      el.focus();
+    }
+  };
+
   if (score.isPending || membersQuery.isPending) {
     return (
       <AppShell title="기여도">
@@ -304,6 +336,7 @@ export default function Contributions() {
                     {/* 단일 점수를 미리 주지 않습니다 — placeholder 는 **구간**입니다
                         (v2 F1-4). 값은 팀이 적고, 적어야 확정이 열립니다. */}
                     <input
+                      id={`final-${member.user_id}`}
                       className="input input--num"
                       inputMode="decimal"
                       placeholder={`${describeRange(member)} (시스템 추정)`}
@@ -317,11 +350,26 @@ export default function Contributions() {
                 );
               })}
               <span className="appbar__spacer" />
+              {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 — 검토 화면의
+                  `검토 끝내기` 와 같은 규칙입니다. 비활성 버튼은 **초점을 못
+                  받아** 낭독기에 사유를 전할 수 없고(GOV.UK), 탭으로 닿지
+                  않으니 키보드만 쓰는 사람은 "왜 안 되는지" 를 들을 방법이
+                  없습니다. 여기만 HTML `disabled` 로 남아 있었고, 하필 팀이
+                  값을 확정하는 이 화면에서 가장 중요한 버튼이었습니다.
+                  누르면 아직 안 채운 첫 칸으로 데려다 줍니다. */}
               <button
                 type="button"
-                className="btn btn--primary"
-                disabled={!allFilled || problems.length > 0 || blind || confirm.isPending}
-                onClick={() => confirm.mutate(toPayload(drafts, systemValues))}
+                className={`btn btn--primary${confirmBlocked !== null ? ' btn--unmet' : ''}`}
+                aria-disabled={confirmBlocked !== null || confirm.isPending}
+                aria-describedby={confirmBlocked ?? undefined}
+                onClick={() => {
+                  if (confirm.isPending) return;
+                  if (confirmBlocked !== null) {
+                    focusFirstGap();
+                    return;
+                  }
+                  confirm.mutate(toPayload(drafts, systemValues));
+                }}
               >
                 이 값으로 확정
               </button>
@@ -334,6 +382,7 @@ export default function Contributions() {
                     <label className="confirmbar__reason" key={d.user_id}>
                       <span className="t12 muted">{name} 조정 사유</span>
                       <input
+                        id={`reason-${d.user_id}`}
                         className="input"
                         placeholder="시스템 값과 다르게 정한 이유"
                         value={reasons[d.user_id] ?? ''}
@@ -347,14 +396,14 @@ export default function Contributions() {
               </div>
             )}
             {!allFilled && members.length > 0 && (
-              <p className="disabled-reason">{unfilled}칸 남음</p>
+              <p className="disabled-reason" id="confirm-unfilled">{unfilled}칸 남음</p>
             )}
             {problems.length > 0 && (
-              <p className="disabled-reason">
+              <p className="disabled-reason" id="confirm-problems">
                 {problems.join(' · ')} — 사유 없는 조정은 근거 없는 점수와 같습니다
               </p>
             )}
-            {blind && <p className="disabled-reason">{BLIND_CONFIRM}</p>}
+            {blind && <p className="disabled-reason" id="confirm-blind">{BLIND_CONFIRM}</p>}
             {sumOff && (
               <p className="disabled-reason">
                 합계가 <span className="num">{effectiveSum.toFixed(1)}</span> 입니다 — 100이
