@@ -3760,3 +3760,24 @@ describe('첫 화면 껍데기 (`webapp/index.html`)', () => {
     });
   });
 });
+
+
+describe('둘이 같이 쓸 때 (베타 QA)', () => {
+  it('⭐ 창으로 돌아오면 화면이 서버를 다시 읽는다', () => {
+    // ⚠️ 여태 `refetchOnWindowFocus: false` 였습니다. 혼자 쓰면 안 보이고
+    //    **둘이 쓰면 보입니다** — 브라우저 둘로 재 봤습니다:
+    //
+    //      A 가 카드를 「완료」로 옮김
+    //      → B 의 칸반은 20초가 지나도 그대로. 새로고침해야 바뀝니다.
+    //
+    //    그 상태에서 B 가 같은 카드를 옮기면 A 의 결정을 조용히 덮고,
+    //    이 제품에서 업무 완료는 **기여도로 들어갑니다.**
+    const main = readFileSync(join(ROOT, '..', 'webapp', 'src', 'main.tsx'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+    ok(
+      /refetchOnWindowFocus:\s*true/.test(main),
+      '창으로 돌아와도 옛 화면을 그대로 들고 있습니다 — 둘이 쓰면 서로의 결정을 덮습니다',
+    );
+  });
+});
