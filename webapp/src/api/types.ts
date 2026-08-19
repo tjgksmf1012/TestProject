@@ -25,6 +25,11 @@ export interface MeetingSummary {
   status: string;
   started_at: string;
   pending_candidates: number;
+  /**
+   * 트랙 커버리지 평균. **`null` 은 0 이 아니라 「못 쟀다」** 입니다
+   * (docs/05 불변식 셋째). 아직 회의가 안 끝났으면 잰 적이 없습니다.
+   */
+  coverage: number | null;
 }
 
 /** ⚠️ 서버가 camelCase 로 보냅니다 (`recording_service.py`). */

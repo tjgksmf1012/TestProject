@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
 import { StatusChip } from '../components/StatusChip.tsx';
@@ -7,11 +8,16 @@ import {
   useMeetings,
   useProjects,
   useSettingsMutations,
-  useTracks,
 } from '../api/hooks.ts';
 import { api, ApiError } from '../api/client.ts';
 import type { MeetingSummary } from '../api/types.ts';
-import { hasLane, nextStepFor, orderProjects, sectionMeetings } from '@lib/home/next.ts';
+import {
+  hasLane,
+  homeProject,
+  nextStepFor,
+  requestedProjectId,
+  sectionMeetings,
+} from '@lib/home/next.ts';
 import { codeProblem, normalizeCode, titleProblem } from '@lib/project/setup.ts';
 import { Problem } from '../components/Problem.tsx';
 
@@ -63,16 +69,17 @@ function MeetingRow({
    */
   waiting: boolean;
 }) {
-  // 녹음 전 회의는 트랙이 없으므로 묻지 않습니다 — 빈 축이 정답입니다.
-  const recorded = meeting.status !== 'pending';
-  const tracks = useTracks(recorded ? meeting.meeting_id : undefined);
   const step = nextStepFor({ ...meeting, title: meeting.title });
 
-  const coverages = (tracks.data?.tracks ?? [])
-    .map((t) => t.coverage)
-    .filter((c): c is number => c !== null && Number.isFinite(c));
-  const coverage =
-    coverages.length > 0 ? coverages.reduce((a, b) => a + b, 0) / coverages.length : null;
+  // ⚠️ 예전에는 **줄마다** `GET /api/meetings/{id}/tracks` 를 불렀습니다.
+  //    회의 다섯짜리 시연 데이터로 홈 한 번에 요청 7건이었고(재서 확인),
+  //    회의 서른인 팀이면 33건입니다 — 브라우저는 호스트당 여섯 개씩만
+  //    동시에 여니 나머지는 줄을 섭니다. 목록이 길수록 홈이 느려지는
+  //    구조였습니다.
+  //
+  //    이제 목록 응답이 `coverage` 를 함께 줍니다. **`null` 은 0 이 아니라
+  //    "못 쟀다" 입니다** — `hasLane` 이 그때 레인을 안 그립니다.
+  const coverage = meeting.coverage;
 
   return (
     <div className="mrow">
@@ -132,10 +139,28 @@ function MeetingRow({
 /** 프로젝트 만들기/참가 — 상시 노출할 이유가 없어 헤더 뒤 대화 상자로. */
 function StartDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  /**
+   * 만들었으면 **거기로 데려갑니다.**
+   *
+   * ⚠️ 예전에는 `navigate(0)` — 즉 **문서 전체 새로고침**이었습니다.
+   *    재 봤더니 3.5초 동안 `/app/` · `index-*.js` · `index-*.css` 를 다시
+   *    받으며 앱이 통째로 재부팅됐고, 그러고 나서도 홈은 **첫 번째
+   *    프로젝트**를 보여 줬습니다 — 방금 만든 것이 아니라.
+   *
+   *    TanStack Query 가 이미 `['projects']` 를 들고 있으므로 무효화 한
+   *    줄이면 됩니다. 그리고 주소로 어느 프로젝트인지 말합니다.
+   */
+  const land = async (projectId: number) => {
+    await queryClient.invalidateQueries({ queryKey: ['projects'] });
+    navigate(`/?project=${projectId}`);
+    onClose();
+  };
 
   const create = async () => {
     const bad = titleProblem(title);
@@ -145,8 +170,8 @@ function StartDialog({ onClose }: { onClose: () => void }) {
     }
     setBusy(true);
     try {
-      await api.post('/api/projects', { title: title.trim() });
-      navigate(0);
+      const made = await api.post<{ project_id: number }>('/api/projects', { title: title.trim() });
+      await land(made.project_id);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : '만들지 못했습니다');
       setBusy(false);
@@ -160,8 +185,10 @@ function StartDialog({ onClose }: { onClose: () => void }) {
     }
     setBusy(true);
     try {
-      await api.post('/api/projects/join', { invite_code: normalizeCode(code) });
-      navigate(0);
+      const joined = await api.post<{ project_id: number }>('/api/projects/join', {
+        invite_code: normalizeCode(code),
+      });
+      await land(joined.project_id);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : '참가하지 못했습니다');
       setBusy(false);
@@ -206,12 +233,15 @@ function StartDialog({ onClose }: { onClose: () => void }) {
 
 export default function Home() {
   const navigate = useNavigate();
+  const { search } = useLocation();
   const projectsQuery = useProjects();
-  const projects = useMemo(
-    () => orderProjects(projectsQuery.data ?? []),
-    [projectsQuery.data],
+  // ⭐ **주소가 어느 프로젝트인지 말합니다** (`?project=`). 없으면 예전처럼
+  //    할 일이 있는 것부터. 판단은 `@lib/home/next.ts` 에 있습니다 —
+  //    "내 목록에 없는 id 는 조용히 첫 번째로" 까지 거기서 정합니다.
+  const project = useMemo(
+    () => homeProject(projectsQuery.data ?? [], requestedProjectId(search)),
+    [projectsQuery.data, search],
   );
-  const project = projects[0];
   const meetings = useMeetings(project?.project_id);
   const m = useSettingsMutations(project?.project_id);
   const [startOpen, setStartOpen] = useState(false);
@@ -221,6 +251,11 @@ export default function Home() {
 
   return (
     <AppShell
+      /* ⚠️ 이 줄이 없으면 레일의 「지금 보는 프로젝트」 표시가 **거짓말을
+         합니다.** 홈 주소에는 `:projectId` 가 없어서 셸이 목록 첫 번째로
+         떨어지고, `?project=2` 를 보고 있는데 1번에 표시가 붙습니다.
+         렌더해서 잡았습니다 — 코드만 봤을 때는 안 보였습니다. */
+      projectId={project?.project_id}
       title={project?.title ?? '홈'}
       meta={
         project !== undefined

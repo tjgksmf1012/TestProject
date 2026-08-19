@@ -7,8 +7,10 @@ import {
   emptyProjectsMessage,
   formatMeetingTime,
   hasLane,
+  homeProject,
   nextStepFor,
   orderProjects,
+  requestedProjectId,
   sectionMeetings,
   type Meeting,
   type Project,
@@ -260,5 +262,65 @@ describe('hasLane', () => {
 
   it('보통 값', () => {
     strictEqual(hasLane(0.8), true);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 홈이 보여 줄 프로젝트 — 베타에서 "내 프로젝트가 사라졌다" 가 나온 자리
+// ══════════════════════════════════════════════════════════════
+
+describe('homeProject', () => {
+  // ⚠️ **두 기준이 갈라지는 데이터**로 잽니다. 예전에 순서를 재면서
+  //    이름 순과 번호 순이 같은 명단을 써서 아무것도 못 잡은 적이
+  //    있습니다. 여기서는 `orderProjects` 의 첫 번째(#9 — 검토 있음)와
+  //    목록의 첫 번째(#3)와 사람이 고른 것(#5)이 전부 다릅니다.
+  const 내것 = project({ project_id: 3, title: '내가 만든 프로젝트', needs_review: 0 });
+  const 고른것 = project({ project_id: 5, title: '고른 프로젝트', needs_review: 0 });
+  const 팀것 = project({ project_id: 9, title: '팀 프로젝트', needs_review: 2 });
+  const 셋 = [내것, 고른것, 팀것];
+
+  it('갈라지는 데이터인지 먼저 확인한다 — 안 그러면 이 검사는 아무것도 안 잰다', () => {
+    strictEqual(orderProjects(셋)[0]?.project_id, 9);
+    strictEqual(셋[0]?.project_id, 3);
+  });
+
+  it('⭐ 주소가 가리키는 것을 보여 준다 — 검토거리가 있는 팀 프로젝트가 밀어내지 않는다', () => {
+    strictEqual(homeProject(셋, 5)?.project_id, 5);
+    strictEqual(homeProject(셋, 3)?.project_id, 3);
+  });
+
+  it('주소에 아무 말 없으면 할 일이 있는 것부터 — 예전 동작 그대로', () => {
+    strictEqual(homeProject(셋, null)?.project_id, 9);
+  });
+
+  it('⚠️ 내 목록에 없는 id 는 조용히 첫 번째로 — 남의 프로젝트를 넘겨다볼 수 없다', () => {
+    strictEqual(homeProject(셋, 99999)?.project_id, 9);
+    strictEqual(homeProject(셋, -1)?.project_id, 9);
+  });
+
+  it('프로젝트가 없으면 undefined — 화면이 안내 문구를 그린다', () => {
+    strictEqual(homeProject([], 5), undefined);
+    strictEqual(homeProject([], null), undefined);
+  });
+});
+
+describe('requestedProjectId', () => {
+  it('숫자를 읽는다 — 앞에 `?` 가 있든 없든', () => {
+    strictEqual(requestedProjectId('?project=5'), 5);
+    strictEqual(requestedProjectId('project=5'), 5);
+    strictEqual(requestedProjectId('?tab=x&project=12'), 12);
+  });
+
+  it('⚠️ 빈 값은 `null` 이다 — `Number("")` 은 0 이라 그냥 넘기면 "0번 프로젝트" 가 된다', () => {
+    strictEqual(requestedProjectId('?project='), null);
+    strictEqual(requestedProjectId('?project=   '), null);
+  });
+
+  it('말이 안 되는 값도 null', () => {
+    strictEqual(requestedProjectId(''), null);
+    strictEqual(requestedProjectId('?project=abc'), null);
+    strictEqual(requestedProjectId('?project=1.5'), null);
+    strictEqual(requestedProjectId('?project=0'), null);
+    strictEqual(requestedProjectId('?project=-3'), null);
   });
 });

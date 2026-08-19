@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useProjects } from '../api/hooks.ts';
 import { pageTitle } from '@lib/shell/title.ts';
+import { appScreenOf } from '@lib/nav/links.ts';
+import { appRailHref, railAriaLabel, railIsWorthIt, railItems } from '@lib/nav/rail.ts';
 
 // 앱 셸 — 레일 72px + 헤더 56px + 판. R1: body 는 스크롤하지 않습니다.
 // 레일은 넷뿐입니다 (R8): 홈 · 칸반 · 기여도 · 설정. 레거시 화면은 여기 없습니다.
@@ -70,6 +72,21 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
     projectId ??
     (params['projectId'] !== undefined ? Number(params['projectId']) : projects?.[0]?.project_id);
 
+  // ⭐ **프로젝트가 둘 이상이면 바꿀 자리를 준다.**
+  //
+  // 이게 없던 동안: 프로젝트를 만들거나 초대 코드로 참가하면 서버는 둘 다
+  // 알고 있는데 화면의 링크는 전부 하나만 가리켰고, 나머지로 갈 길이
+  // **하나도 없었습니다.** 주소를 손으로 쳐야 했는데 사람은 그 id 를
+  // 모릅니다. 옛 화면(`/home.html`)에는 있던 것이 리디자인에서 빠진
+  // 자리입니다 — 판단(`lib/nav/rail.ts`)은 그대로 있었고 부르는 곳만
+  // 없었습니다(이 저장소가 반복해서 당한 실패 ①).
+  //
+  // ⚠️ 하나뿐이면 **안 그립니다.** 누를 것이 자기 자신뿐인 칸은 빈칸이고,
+  //    셸 1단계에서 그 이유로 레일을 통째로 걷어낸 적이 있습니다.
+  const projectRail = railIsWorthIt(projects ?? [])
+    ? railItems(projects ?? [], appScreenOf(pathname), pid ?? null, appRailHref)
+    : [];
+
   const items = [
     { label: '홈', to: '/', active: pathname === '/' || pathname.startsWith('/meeting/'), icon: <IconHome /> },
     { label: '칸반', to: pid !== undefined ? `/project/${pid}/kanban` : '/', active: pathname.includes('/kanban'), icon: <IconKanban /> },
@@ -95,6 +112,27 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
       </a>
       <nav className="rail" aria-label="주 메뉴">
         <div className="rail__brand">TF</div>
+        {projectRail.length > 0 && (
+          /* ⚠️ 자리는 `project_id` 로 고정입니다(`railItems`). 검토거리가
+             하나 생겼다고 자리가 바뀌면 어제 누르던 곳에 다른 팀이 옵니다.
+             할 일이 있다는 사실은 **자리가 아니라 점**으로 말합니다. */
+          <div className="prail" role="navigation" aria-label="프로젝트 바꾸기">
+            {projectRail.map((item) => (
+              <Link
+                key={item.projectId}
+                to={item.href}
+                className="prail__item"
+                aria-label={railAriaLabel(item)}
+                aria-current={item.current ? 'true' : undefined}
+              >
+                {/* 네모 안은 한 글자뿐이라 낭독기에는 `aria-label` 이
+                    전체 이름을 읽어 줍니다. */}
+                <span aria-hidden="true">{item.initial}</span>
+                {item.needsReview && <span className="prail__dot" aria-hidden="true" />}
+              </Link>
+            ))}
+          </div>
+        )}
         {items.map((item) => (
           <Link
             key={item.label}

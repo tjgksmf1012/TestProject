@@ -72,6 +72,38 @@ export function railHref(screen: ScreenId, projectId: number): string {
 }
 
 /**
+ * 같은 판단, **다른 셸.**
+ *
+ * 위 `railHref` 는 옛 화면의 주소(`/kanban.html?project=7`)를 만듭니다.
+ * 리디자인 SPA 는 라우터 주소(`/project/7/kanban`)를 씁니다 — basename
+ * `/app` 은 라우터가 붙이므로 **여기서 적으면 `/app/app/…` 이 됩니다.**
+ *
+ * ⚠️ 주소 형식이 다르다는 이유로 SPA 쪽에 목록·순서·머리글자를 다시
+ * 적으면 **두 벌**이 되고, 두 벌은 반드시 갈라집니다(이 저장소가 반복해서
+ * 당한 실패 ②). 갈라지는 것은 주소 한 줄뿐이므로 그것만 함수로 빼고
+ * `railItems` 는 한 벌로 씁니다.
+ *
+ * ## ⚠️ 홈만 두 셸이 서로 다릅니다
+ *
+ * 옛 홈은 **모든 프로젝트**를 한 줄씩 늘어놓는 화면이라, 프로젝트를 고른
+ * 직후에 홈으로 보내면 방금 고른 것이 어디 있는지 알 수 없었습니다.
+ * 그래서 `railHref` 는 홈에서도 칸반으로 보냅니다.
+ *
+ * SPA 의 홈은 그 화면이 아닙니다 — **프로젝트 하나의 계기판**입니다
+ * (v2 리모델링). 그러니 여기서는 홈에 머무르는 것이 맞고, 어느 프로젝트의
+ * 계기판인지를 `?project=` 로 말합니다.
+ */
+export function appRailHref(screen: ScreenId, projectId: number): string {
+  if (screen === 'home') return `/?project=${projectId}`;
+  const target = STAYS.has(screen) ? screen : 'kanban';
+  // ⚠️ SPA 설정은 구역까지 있어야 합니다. `/settings` 만 주면 라우터가
+  //    `role` 로 한 번 더 튕기고(`<Navigate replace>`), 그 사이 한 프레임이
+  //    빈 화면입니다.
+  if (target === 'project') return `/project/${projectId}/settings/role`;
+  return `/project/${projectId}/${target}`;
+}
+
+/**
  * 네모 안에 넣을 한 글자.
  *
  * ⚠️ `title[0]` 이 아니라 `Array.from` 입니다. 이모지나 일부 문자는
@@ -105,6 +137,8 @@ export function railItems(
   projects: readonly RailProject[],
   screen: ScreenId,
   currentProjectId?: number | null,
+  /** 주소 만드는 법. 기본은 옛 화면, SPA 는 `appRailHref` 를 넘깁니다. */
+  href: (screen: ScreenId, projectId: number) => string = railHref,
 ): RailItem[] {
   return [...projects]
     .sort((a, b) => a.project_id - b.project_id)
@@ -112,7 +146,7 @@ export function railItems(
       projectId: project.project_id,
       initial: railInitial(project.title),
       label: project.title,
-      href: railHref(screen, project.project_id),
+      href: href(screen, project.project_id),
       current: currentProjectId != null && currentProjectId === project.project_id,
       needsReview: project.needs_review > 0,
     }));

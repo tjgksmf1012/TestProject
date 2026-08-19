@@ -77,6 +77,31 @@ export function labelOf(screen: ScreenId): string {
   return LABEL[screen];
 }
 
+/**
+ * SPA 주소 → 지금 있는 화면.
+ *
+ * ## 왜 화면 코드에 안 두는가
+ *
+ * "지금 어느 화면인가" 는 **판단**입니다. 프로젝트 레일이 어디로 보낼지,
+ * 어느 칸에 지금 표시를 붙일지가 여기서 갈립니다. 화면 코드(`webapp/src`)
+ * 에는 자동 테스트가 없으므로 거기 적으면 검증 밖으로 나갑니다.
+ *
+ * ⚠️ **basename(`/app`) 이 붙기 전의 주소**를 받습니다. React Router 의
+ *    `useLocation().pathname` 이 그렇습니다 — `/app/project/7/kanban` 이
+ *    아니라 `/project/7/kanban` 입니다. 앞에 `/app` 이 붙어 오면 그때도
+ *    맞게 읽도록 한 번 벗겨 냅니다(주소창을 그대로 넘기는 실수가
+ *    조용히 `home` 으로 떨어지지 않게).
+ */
+export function appScreenOf(pathname: string): ScreenId {
+  const path = (pathname || '/').replace(/^\/app(?=\/|$)/, '') || '/';
+  if (/^\/project\/\d+\/kanban/.test(path)) return 'kanban';
+  if (/^\/project\/\d+\/contributions/.test(path)) return 'contributions';
+  if (/^\/project\/\d+\/settings/.test(path)) return 'project';
+  if (/^\/meeting\/\d+\/lobby/.test(path)) return 'lobby';
+  if (/^\/meeting\/\d+\/review/.test(path)) return 'review';
+  return 'home';
+}
+
 function positive(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }

@@ -169,6 +169,59 @@ export function orderProjects(projects: readonly Project[]): Project[] {
   });
 }
 
+/**
+ * ⭐ **홈이 지금 보여 줄 프로젝트.**
+ *
+ * ## 이게 없어서 생겼던 일
+ *
+ * SPA 의 홈은 `orderProjects(projects)[0]` 하나만 그렸고, 어느 것을 볼지
+ * 고를 방법이 없었습니다. 베타에서 재현한 것:
+ *
+ *  1. 새로 가입해 `내가 만든 프로젝트` 를 만든다 → 홈이 그것을 보여 준다.
+ *  2. 팀에게 받은 초대 코드로 참가한다.
+ *  3. **홈이 팀 프로젝트로 바뀌고 내 프로젝트는 화면에서 사라진다.**
+ *     서버는 둘 다 알고 있는데 화면의 링크는 전부 팀 프로젝트를 가리켰고,
+ *     내 것으로 돌아갈 길이 **하나도 없었습니다.**
+ *
+ * 검토할 회의가 있는 프로젝트를 앞으로 보내는 `orderProjects` 는 "무엇을
+ * 먼저 볼까" 에 옳은 답입니다. 문제는 그 답이 **유일한 답**이었다는 것.
+ *
+ * ## 왜 주소(`?project=`)인가
+ *
+ * 기억해 두는 방법(localStorage)도 있지만, 그러면 "지금 무엇을 보고 있나"
+ * 가 화면 어디에도 안 적힙니다. 새로고침·뒤로가기·링크 공유가 전부
+ * 달라지고, 그건 이 저장소가 여러 번 당한 **숨은 상태**입니다.
+ *
+ * ⚠️ 내 목록에 없는 id 를 주소에 적어도 **조용히 첫 번째로** 돌아갑니다.
+ *    남의 프로젝트 id 를 넣어 보는 것으로 이름을 알아낼 수는 없어야 하고,
+ *    오타 하나에 "없습니다" 를 띄우면 사람은 자기가 뭘 망가뜨린 줄 압니다.
+ */
+export function homeProject(
+  projects: readonly Project[],
+  requestedId: number | null,
+): Project | undefined {
+  if (requestedId !== null) {
+    const asked = projects.find((p) => p.project_id === requestedId);
+    if (asked !== undefined) return asked;
+  }
+  return orderProjects(projects)[0];
+}
+
+/**
+ * 주소의 `?project=` 를 숫자로. 없거나 말이 안 되면 `null`.
+ *
+ * ⚠️ `Number('')` 은 **0** 입니다. 빈 값을 그대로 넘기면 "0번 프로젝트를
+ *    보여 달라" 가 되고, 그건 없는 id 라 조용히 첫 번째로 떨어집니다 —
+ *    지금은 결과가 같지만, 나중에 "없으면 오류" 로 바꾸는 순간 빈 주소가
+ *    오류 화면이 됩니다.
+ */
+export function requestedProjectId(search: string): number | null {
+  const raw = new URLSearchParams(search).get('project');
+  if (raw === null || raw.trim() === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 /** 프로젝트가 하나도 없을 때. "없습니다" 로 끝내면 사람은 막힙니다. */
 export function emptyProjectsMessage(): string {
   // ⭐ 예전 문구는 "팀원 중 한 명이 만들고 당신을 넣어야 합니다" 였다.

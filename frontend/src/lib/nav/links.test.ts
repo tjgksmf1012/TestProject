@@ -2,6 +2,7 @@ import { deepStrictEqual, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  appScreenOf,
   contextFromSearch,
   labelOf,
   missingLinks,
@@ -230,5 +231,35 @@ describe('navTabs', () => {
     for (const scoped of ['lobby', 'review', 'record']) {
       strictEqual(screens.includes(scoped as never), false, scoped);
     }
+  });
+});
+
+describe('appScreenOf — SPA 주소가 어느 화면인가 (베타 QA)', () => {
+  it('⭐ 프로젝트 화면 셋', () => {
+    strictEqual(appScreenOf('/project/7/kanban'), 'kanban');
+    strictEqual(appScreenOf('/project/7/contributions'), 'contributions');
+    strictEqual(appScreenOf('/project/7/settings/role'), 'project');
+  });
+
+  it('⭐ 회의 화면 둘', () => {
+    strictEqual(appScreenOf('/meeting/3/lobby'), 'lobby');
+    strictEqual(appScreenOf('/meeting/3/review'), 'review');
+  });
+
+  it('홈과 모르는 주소는 홈', () => {
+    strictEqual(appScreenOf('/'), 'home');
+    strictEqual(appScreenOf(''), 'home');
+    strictEqual(appScreenOf('/없는주소'), 'home');
+  });
+
+  it('⚠️ basename 이 붙어 와도 같게 읽는다 — 주소창을 그대로 넘기는 실수가 조용히 홈이 되지 않게', () => {
+    strictEqual(appScreenOf('/app/project/7/kanban'), 'kanban');
+    strictEqual(appScreenOf('/app/meeting/3/review'), 'review');
+    strictEqual(appScreenOf('/app'), 'home');
+    strictEqual(appScreenOf('/app/'), 'home');
+  });
+
+  it('⚠️ `/application/…` 처럼 `app` 으로 시작만 하는 것을 벗기지 않는다', () => {
+    strictEqual(appScreenOf('/apple/project/7/kanban'), 'home');
   });
 });

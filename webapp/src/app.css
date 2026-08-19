@@ -313,6 +313,69 @@ a { color: var(--c-evidence); }
 .rail__item svg { width: 20px; height: 20px; stroke-width: 1.6; }
 .rail__spacer { flex: 1; }
 
+/* ── 프로젝트 레일 — 둘 이상일 때만 그립니다 (`railIsWorthIt`).
+ *
+ * ⚠️ `.rail` 이 `overflow: hidden` 이라 프로젝트가 많으면 아래가 잘립니다.
+ *    이 묶음만 따로 스크롤하게 두고, 화면 메뉴 넷은 **언제나 보이게**
+ *    `flex-shrink` 를 여기서만 허용합니다.
+ * ⚠️ 네모는 44px 이상입니다 — 폰을 뺐어도 창 반쪽·확대 200%·터치
+ *    노트북에서 필요한 크기입니다(결함 72·150). */
+.prail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-4);
+  margin-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--c-line);
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.prail__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: var(--r-md);
+  /* ⚠️ `--c-line` 은 **줄 긋는 색**이라 일부러 3:1 아래입니다. 눌러야
+     하는 것의 테두리에 쓰면 안 보입니다 — 재 보니 레일 배경 대비
+     **1.26:1** 이었습니다(WCAG 1.4.11 은 3:1). 안 고른 칸은 배경도
+     레일과 거의 같아서, 글자 한 자만 허공에 떠 있는 모양이었습니다. */
+  border: 1px solid var(--c-line-strong);
+  background: var(--c-sunken);
+  color: var(--c-ink-muted);
+  font-family: var(--font-display);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  text-decoration: none;
+  flex: none;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.prail__item:hover { color: var(--c-ink); border-color: var(--c-line-strong); }
+/* ⚠️ 지금 보는 것은 **테두리와 글자색**으로 말합니다. 배경을 칠하면
+   검토 점(`--c-evidence`)과 같은 색이 두 뜻으로 쓰입니다. */
+.prail__item[aria-current="true"] {
+  color: var(--c-ink);
+  border-color: var(--c-evidence);
+  box-shadow: inset 0 0 0 1px var(--c-evidence);
+}
+/* 할 일이 있다는 것은 **개수가 아니라 있다/없다** 입니다 (`needsReview`).
+   숫자를 찍으면 프로젝트끼리 견주게 되고, 그건 여기가 답할 질문이
+   아닙니다 — 여기는 "어디를 눌러야 하나" 에만 답합니다. */
+.prail__dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-evidence);
+  border: 1px solid var(--c-surface);
+}
+
 .main {
   display: flex;
   flex-direction: column;
@@ -1662,3 +1725,33 @@ a.chain__link:hover { border-color: var(--c-evidence); }
 
    이 저장소의 결함 기록에 `display: flex` 가 문장을 흩어 놓은 사례가
    이미 있습니다. 줄 하나가 필요하면 **`.notice--row` 처럼 따로** 만드세요. */
+
+/* ── 화면이 터졌을 때. 라우터 기본 오류 화면(영문 + 압축 스택)을 대신합니다. */
+.crash {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-7);
+  background: var(--c-paper);
+}
+.crash__box {
+  max-width: 32rem;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  padding: var(--sp-7);
+}
+.crash__title { font-family: var(--font-display); font-size: var(--fs-20); color: var(--c-ink); margin: 0; }
+/* ⚠️ 줄 길이는 `rem` 입니다. `ch` 는 숫자 0 의 폭이라 한글에서 너무 일찍 끊깁니다. */
+.crash__body { color: var(--c-ink-muted); margin: var(--sp-4) 0 var(--sp-6); max-width: 28rem; }
+.crash__actions { display: flex; gap: var(--sp-4); flex-wrap: wrap; }
+/* 원래 오류 문구 — 옮겨 적어 줄 수 있게 남기되, 눈의 무게는 주지 않습니다. */
+.crash__detail {
+  margin: var(--sp-6) 0 0;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-line);
+  color: var(--c-ink-faint);
+  font-size: var(--fs-11);
+  word-break: break-word;
+}

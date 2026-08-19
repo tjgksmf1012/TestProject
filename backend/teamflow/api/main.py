@@ -137,6 +137,64 @@ def health(settings: AppSettings) -> dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════════
+# 브라우저에서 난 일 — 서버 로그가 볼 수 없는 절반
+# ══════════════════════════════════════════════════════════════
+#
+# `uvicorn.access` 는 요청만 남긴다. 화면이 렌더 중에 터지면 **요청은
+# 200 이고 로그는 조용하다.** 베타 체험에서 실제로 확인했다 — 화면 하나를
+# 터뜨렸더니 사람은 영문 스택을 봤고 서버 로그에는 한 줄도 안 남았다.
+#
+# ⚠️ **인증을 걸지 않는다.** 로그인 화면에서 터진 것이 가장 알고 싶은
+#    것인데, 인증을 걸면 그건 영영 안 들어온다.
+#
+# ⚠️ 그래서 **양을 막는다.** 인증이 없는 자리는 로그를 채우는 자리가 될 수
+#    있다. 렌더 루프 하나면 초당 수백 번이 들어온다. 길이는 스키마가,
+#    빈도는 아래 토큰 통이 막는다. 넘치면 조용히 204 를 준다 — 429 를
+#    주면 화면이 그걸 또 오류로 보고하려 든다.
+
+
+class ClientErrorIn(BaseModel):
+    """화면이 보내는 것. **사람이 친 글자는 없다** (docs/07 P4).
+
+    상한은 `frontend/src/lib/diag/report.ts` 의 `MAX_*` 와 같아야 한다 —
+    다르면 화면은 보냈다고 믿는데 서버가 422 로 버린다.
+    """
+
+    kind: str = Field(max_length=40)
+    message: str = Field(max_length=500)
+    stack: str | None = Field(default=None, max_length=4000)
+    #: `?…`·`#…` 를 뗀 경로만. 떼는 것은 화면이 한다.
+    route: str = Field(max_length=200)
+
+
+#: 분당 몇 줄까지 받아 줄 것인가. 사람 한 명이 화면을 열다 터지는 것은
+#: 분당 한둘이다. 60 은 "고장 난 화면 하나가 계속 터지는 것" 까지는
+#: 남기고, 그 이상은 같은 줄의 반복이라 버려도 잃는 것이 없다.
+_CLIENT_ERROR_PER_MINUTE = 60
+_client_error_window: list[float] = []
+
+
+@app.post("/api/client-errors", status_code=status.HTTP_204_NO_CONTENT)
+def report_client_error(payload: ClientErrorIn) -> Response:
+    now = time.monotonic()
+    cutoff = now - 60.0
+    while _client_error_window and _client_error_window[0] < cutoff:
+        _client_error_window.pop(0)
+    if len(_client_error_window) < _CLIENT_ERROR_PER_MINUTE:
+        _client_error_window.append(now)
+        # ⚠️ WARNING 이다. INFO 면 요청 로그에 묻히고, ERROR 면 서버가
+        #    고장 난 것처럼 보인다 — 고장 난 것은 화면이다.
+        logger.warning(
+            "client %s at %s: %s%s",
+            payload.kind,
+            payload.route,
+            payload.message,
+            f"\n{payload.stack}" if payload.stack else "",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ══════════════════════════════════════════════════════════════
 # 시각 동기화
 # ══════════════════════════════════════════════════════════════
 #
@@ -1804,6 +1862,17 @@ class MeetingSummary(BaseModel):
     started_at: datetime
     #: 이 회의에서 사람이 아직 결정하지 않은 업무 후보 수
     pending_candidates: int
+    #: 트랙 커버리지의 평균. **못 잰 것은 `None`** 이고 0.0 이 아니다.
+    #:
+    #: ⚠️ 이 구분이 이 제품의 불변식이다 (docs/05 · "측정 불가 ≠ 0점").
+    #: 0.0 으로 채우면 화면은 "녹음이 하나도 안 됐다" 를 그리는데, 실제로는
+    #: **아직 회의가 안 끝나서 잰 적이 없는** 것이다.
+    #:
+    #: ⚠️ 이 칸이 생기기 전, 홈은 회의 줄마다
+    #: `GET /api/meetings/{id}/tracks` 를 따로 불렀다. 회의 다섯짜리
+    #: 시연 데이터로 홈 한 번에 요청 7건이었고(재서 확인), 회의 서른인
+    #: 팀이면 33건이다. 브라우저는 호스트당 여섯 개씩만 동시에 연다.
+    coverage: float | None = None
 
 
 @app.get("/api/projects/{project_id}/meetings", response_model=list[MeetingSummary])
@@ -1826,14 +1895,29 @@ def list_project_meetings(
     if not meetings:
         return []
 
+    meeting_ids = [x.id for x in meetings]
     pending = dict(
         session.execute(
             select(m.MeetingTaskCandidate.meeting_id, func.count())
             .where(
-                m.MeetingTaskCandidate.meeting_id.in_([x.id for x in meetings]),
+                m.MeetingTaskCandidate.meeting_id.in_(meeting_ids),
                 m.MeetingTaskCandidate.review_status == "pending",
             )
             .group_by(m.MeetingTaskCandidate.meeting_id)
+        ).all()
+    )
+    # ⚠️ `coverage IS NULL` 인 트랙은 **빼고** 평균 낸다. 넣으면 아직
+    #    안 끝난 트랙 하나가 회의 전체의 커버리지를 끌어내리고, 화면은
+    #    "녹음이 반만 됐다" 를 그린다 — 잰 적이 없는데.
+    #    한 개도 없으면 행이 안 나오고, 그래서 `None` 이다 (0.0 이 아니라).
+    coverage = dict(
+        session.execute(
+            select(m.MeetingTrack.meeting_id, func.avg(m.MeetingTrack.coverage))
+            .where(
+                m.MeetingTrack.meeting_id.in_(meeting_ids),
+                m.MeetingTrack.coverage.is_not(None),
+            )
+            .group_by(m.MeetingTrack.meeting_id)
         ).all()
     )
 
@@ -1844,6 +1928,9 @@ def list_project_meetings(
             status=meeting.status,
             started_at=meeting.started_at,
             pending_candidates=pending.get(meeting.id, 0),
+            coverage=(
+                float(coverage[meeting.id]) if coverage.get(meeting.id) is not None else None
+            ),
         )
         for meeting in meetings
     ]

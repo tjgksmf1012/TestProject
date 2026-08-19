@@ -3580,3 +3580,118 @@ describe('SPA 의 「안 됩니다」 는 들려야 한다 (docs/22 · WCAG 4.1.
     }
   });
 });
+
+// ══════════════════════════════════════════════════════════════
+// 베타 체험에서 나온 것들 (docs/23)
+// ══════════════════════════════════════════════════════════════
+
+describe('베타 체험 QA — 화면이 터졌을 때·프로젝트가 둘일 때', () => {
+  const webapp = (...parts: string[]) =>
+    readFileSync(join(ROOT, '..', 'webapp', 'src', ...parts), 'utf8');
+  /**
+   * 주석을 걷어낸 판.
+   *
+   * ⚠️ 낱말만 세면 **주석에 적힌 이름**이 배선으로 잡힙니다. 심어서
+   *    확인하다 알았습니다 — `watchForUncaught();` 를 주석 처리했는데
+   *    가드가 그대로 통과했습니다. 가드가 요구를 재고 있지 않았던 것입니다.
+   */
+  const code = (...parts: string[]) =>
+    webapp(...parts)
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ 라우터에 **우리** 오류 화면이 걸려 있다', () => {
+    // ⚠️ 안 걸면 라우터 기본 화면이 뜹니다. 베타 체험에서 찍은 실제 화면:
+    //
+    //     Unexpected Application Error!
+    //     e.filter is not a function
+    //     at ls (…/assets/index-DskNXvnA.js:12:42055)
+    //
+    // 영문이고, 압축된 스택이고, **나가는 문이 하나도 없습니다.** 그리고
+    // 서버 로그에는 아무것도 안 남습니다 — 요청은 200 이었으니까요.
+    const main = code('main.tsx');
+    ok(/import Crashed from/.test(main), '`Crashed` 를 불러오지 않습니다');
+    const wired = main.match(/errorElement:\s*<Crashed\s*\/>/g) ?? [];
+    ok(
+      wired.length >= 2,
+      `errorElement 가 ${wired.length}곳뿐입니다 — 로그인 갈래와 로그인 뒤 갈래 둘 다 덮어야 합니다`,
+    );
+  });
+
+  it('⭐ 렌더 **밖에서** 던져진 것도 줍는다', () => {
+    // ErrorBoundary 는 렌더 중에 던진 것만 잡습니다. `setTimeout` 안,
+    // 거절된 `await` 은 못 잡는데 실제로는 그쪽이 더 많습니다.
+    ok(/watchForUncaught\(\)/.test(code('main.tsx')), '`watchForUncaught()` 를 안 부릅니다');
+  });
+
+  it('⚠️ 오류 보고는 실패해도 조용하다 — 보고가 또 오류를 내면 브라우저가 멈춘다', () => {
+    const diag = code('api', 'diag.ts');
+    ok(/\.catch\(\(\)\s*=>\s*\{\}\)/.test(diag), 'fetch 실패를 삼키지 않습니다');
+    ok(/keepalive:\s*true/.test(diag), '화면이 사라지는 중이면 마지막 보고가 취소됩니다');
+  });
+
+  it('⭐ 프로젝트가 둘 이상이면 셸이 **바꿀 자리**를 그린다', () => {
+    // ⚠️ 판단(`lib/nav/rail.ts`)은 처음부터 있었고 **부르는 곳만
+    //    없었습니다.** 옛 화면(`demo/nav.ts`)이 부르고 있어서 "아무도 안
+    //    쓰는 export" 가드도 통과했습니다 — 화면을 옮기면 가드가 눈을
+    //    감는다는 그 자리입니다.
+    //
+    //    그 동안 사람은 프로젝트를 만들거나 초대 코드로 참가해도 거기로
+    //    갈 길이 하나도 없었습니다.
+    const shell = code('components', 'AppShell.tsx');
+    ok(/railIsWorthIt\(/.test(shell), '하나뿐일 때 안 그리는 판단을 안 씁니다');
+    ok(/railAriaLabel\(/.test(shell), '네모 안은 한 글자뿐이라 낭독기가 이름을 못 읽습니다');
+    // ⚠️ `appRailHref` 라는 **낱말이 있는가**로 재면 `import` 줄 하나로
+    //    통과합니다. 심어서 확인했습니다 — `railItems(..., appRailHref)` 의
+    //    마지막 인자를 떼도 가드가 조용했습니다. 넘기는지를 재야 합니다.
+    const call = /railItems\(([^;]*?)\)\s*:/.exec(shell)?.[1] ?? '';
+    ok(call !== '', '레일 항목을 `railItems` 로 안 만듭니다');
+    ok(
+      /appRailHref\s*\)?\s*$/.test(call.trim()) || /,\s*appRailHref/.test(call),
+      'SPA 주소 만드는 법(`appRailHref`)을 `railItems` 에 안 넘깁니다 — 옛 `/kanban.html?project=` 가 나갑니다',
+    );
+  });
+
+  it('⭐ 홈이 **주소가 가리키는** 프로젝트를 그린다', () => {
+    const home = code('screens', 'Home.tsx');
+    ok(/homeProject\(/.test(home), '`projects[0]` 하나만 그리면 나머지로 갈 수 없습니다');
+    ok(/requestedProjectId\(/.test(home), '`?project=` 를 안 읽습니다');
+    ok(
+      /projectId=\{project\?\.project_id\}/.test(home),
+      '셸에 안 알려 주면 레일의 「지금 보는 프로젝트」 표시가 거짓말을 합니다',
+    );
+  });
+
+  it('⚠️ 앱을 통째로 새로고침하지 않는다 — 터진 화면에서 빠져나올 때만 예외', () => {
+    // 프로젝트를 만들 때마다 `navigate(0)` 였습니다. 재 보니 3.5초 동안
+    // `/app/` · `index-*.js` · `index-*.css` 를 다시 받으며 앱이 재부팅됐고,
+    // 그러고도 홈은 **방금 만든 것이 아니라** 첫 번째를 보여 줬습니다.
+    // TanStack Query 가 이미 목록을 들고 있으니 무효화 한 줄이면 됩니다.
+    //
+    // `Crashed.tsx` 의 「다시 시도」만 예외입니다 — 터진 것이 셸일 수 있어
+    // 라우터로 옮기면 같은 자리에서 또 터집니다. 거기서는 **진짜**
+    // 새로고침이 하려는 일 그 자체입니다.
+    const base = join(ROOT, '..', 'webapp', 'src');
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name) && entry.name !== 'Crashed.tsx') {
+          // ⚠️ **주석을 먼저 걷어냅니다.** 안 그러면 "예전에는 `navigate(0)`
+          //    이었습니다" 라고 **왜 안 하는지 적어 둔 주석**이 위반으로
+          //    잡힙니다. 처음 쓴 판이 그랬고, 고친 코드를 가드가 위반이라고
+          //    했습니다 — 규칙이 아니라 재는 법이 틀린 것이었습니다.
+          const code = readFileSync(full, 'utf8')
+            .replace(/\/\*[\s\S]*?\*\//g, ' ')
+            .replace(/\/\/[^\n]*/g, ' ');
+          if (/navigate\(0\)|location\.reload\(/.test(code)) {
+            offenders.push(full.slice(base.length + 1));
+          }
+        }
+      }
+    };
+    walk(base);
+    strictEqual(offenders.join(', '), '', 'TanStack Query 를 무효화하세요 — 앱을 다시 띄우지 말고');
+  });
+});

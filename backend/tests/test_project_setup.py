@@ -614,6 +614,99 @@ def test_a_member_can_open_a_meeting(client: TestClient, people: dict):
     assert [row["title"] for row in meetings] == ["1주차"]
 
 
+def test_the_home_list_carries_coverage_so_it_does_not_ask_row_by_row(
+    client: TestClient, engine, people: dict
+):
+    """⭐ 홈이 **줄마다 따로 묻지 않아도** 되게 목록이 커버리지를 싣는다.
+
+    예전에는 회의 줄마다 `GET /api/meetings/{id}/tracks` 를 따로 불렀다.
+    회의 다섯짜리 시연 데이터로 홈 한 번에 요청 7건이었고(브라우저로
+    재서 확인), 회의 서른인 팀이면 33건이다.
+
+    ⭐⭐ **못 잰 것은 `None` 이다. 0.0 이 아니다.** 이 제품의 불변식
+    셋째(docs/05)이고, 0.0 으로 채우면 화면은 "녹음이 하나도 안 됐다" 를
+    그린다 — 실제로는 아직 회의가 안 끝나서 **잰 적이 없는** 것인데.
+    """
+    from sqlalchemy.orm import Session
+
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+    opened = client.post(f"/api/projects/{project_id}/meetings", json={"title": "잰 회의"})
+    measured_id = opened.json()["meeting_id"]
+    未 = client.post(f"/api/projects/{project_id}/meetings", json={"title": "아직 안 잰 회의"})
+    unmeasured_id = 未.json()["meeting_id"]
+
+    with Session(engine) as session:
+        # 잰 회의 — 트랙 둘(사람 둘), 커버리지 0.8 과 0.6 → 평균 0.7
+        # ⚠️ 한 회의에 같은 사람의 트랙은 하나뿐입니다 (UNIQUE 제약).
+        for who, value in ((people["founder"], 0.8), (people["joiner"], 0.6)):
+            session.add(
+                m.MeetingTrack(
+                    meeting_id=measured_id,
+                    user_id=who,
+                    started_at=NOW,
+                    status="completed",
+                    coverage=value,
+                )
+            )
+        # 아직 안 잰 회의 — 트랙은 있는데 커버리지가 NULL
+        session.add(
+            m.MeetingTrack(
+                meeting_id=unmeasured_id,
+                user_id=people["founder"],
+                started_at=NOW,
+                status="recording",
+                coverage=None,
+            )
+        )
+        session.commit()
+
+    rows = {r["meeting_id"]: r for r in client.get(f"/api/projects/{project_id}/meetings").json()}
+    assert rows[measured_id]["coverage"] == pytest.approx(0.7)
+    assert rows[unmeasured_id]["coverage"] is None, "못 잰 것을 0 으로 채우면 안 됩니다"
+
+
+def test_one_unfinished_track_does_not_drag_the_average_down(
+    client: TestClient, engine, people: dict
+):
+    """⚠️ NULL 인 트랙을 0 으로 세어 평균에 넣으면 안 된다.
+
+    회의가 끝나 가는데 한 명이 아직 안 끝냈다는 이유로 커버리지가 절반이
+    되면, 화면은 "녹음이 반만 됐다" 를 그린다. 그건 측정이 아니라 착시다.
+    """
+    from sqlalchemy.orm import Session
+
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+    meeting_id = client.post(
+        f"/api/projects/{project_id}/meetings", json={"title": "한 명이 아직"}
+    ).json()["meeting_id"]
+
+    with Session(engine) as session:
+        session.add(
+            m.MeetingTrack(
+                meeting_id=meeting_id,
+                user_id=people["founder"],
+                started_at=NOW,
+                status="completed",
+                coverage=1.0,
+            )
+        )
+        session.add(
+            m.MeetingTrack(
+                meeting_id=meeting_id,
+                user_id=people["joiner"],
+                started_at=NOW,
+                status="recording",
+                coverage=None,
+            )
+        )
+        session.commit()
+
+    rows = client.get(f"/api/projects/{project_id}/meetings").json()
+    assert rows[0]["coverage"] == pytest.approx(1.0)
+
+
 def test_the_whole_first_run_works(client: TestClient, people: dict):
     """⭐ 가입 → 프로젝트 → 초대 → 참가 → 회의까지 한 번에.
 
