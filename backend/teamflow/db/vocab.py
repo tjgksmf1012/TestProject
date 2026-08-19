@@ -257,6 +257,12 @@ class MeetingEventType(StrEnum):
     INCOMPLETE_TASK = "incomplete_task"  # AI-REVIEW-004 미완성 업무
     TOPIC_DRIFT = "topic_drift"  # AI-REVIEW-003 주제 이탈
     DECISION_CONFLICT = "decision_conflict"  # AI-REVIEW-006 결정 번복
+    #: AI-REVIEW-008 동시 발언이 바탕보다 늘어난 구간.
+    #:
+    #: ⚠️ 겹침 자체는 진작 탐지하고 있었습니다(`multitrack.is_overlap`).
+    #: 없던 것은 **"늘었다" 는 판정**입니다 — 회의 내내 조금씩 겹치는 것은
+    #: 정상적인 대화이고, 특정 구간에서 갑자기 늘어난 것이 볼 만한 신호입니다.
+    OVERLAP_SURGE = "overlap_surge"
 
 
 #: 지금 **실제로 만들어지는** 값.

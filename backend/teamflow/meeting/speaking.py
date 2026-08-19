@@ -158,3 +158,143 @@ def skewed(shares_: list[Share]) -> bool:
     if len(values) < 2:
         return False
     return max(values) >= SKEW_SHARE
+
+
+# ══════════════════════════════════════════════════════════════
+# 동시 발언이 늘어난 구간 (`AI-REVIEW-008`)
+# ══════════════════════════════════════════════════════════════
+#
+# 겹침 자체는 진작 탐지하고 있었습니다(`multitrack.is_overlap`). 없던 것은
+# **"늘었다" 는 판정**입니다 — 회의 내내 조금씩 겹치는 것은 정상적인
+# 대화이고, 특정 구간에서 갑자기 늘어난 것이 볼 만한 신호입니다.
+#
+# ⚠️ **회의에 대해 말하고 사람을 지목하지 않습니다.** `skewed` 가 이름을
+# 안 돌려주는 것과 같은 원칙입니다. "누가 말을 끊었나" 를 돌려주면 부르는
+# 쪽이 그걸 화면에 적고, 그 순간 **말 끊은 사람 표시**가 됩니다.
+# 겹침은 두 사람 사이의 일이지 한 사람의 잘못이 아닙니다.
+#
+# ⚠️ **비율만 보면 안 됩니다.** 바탕이 0.5% 인 회의에서 2% 인 구간은
+# 네 배지만 아무 일도 안 일어난 것입니다. 절대량 바닥(`MIN_WINDOW_OVERLAP_MS`)
+# 을 같이 봅니다.
+
+#: 구간을 자르는 길이. 2분.
+#:
+#: ⚠️ 짧게 자르면 발화 하나가 구간 하나를 통째로 채워 "급증" 이 됩니다.
+#: 길게 자르면 실제 급증이 평균에 묻힙니다.
+WINDOW_MS = 2 * 60 * 1000
+
+#: 바탕 대비 이만큼 이상이어야 "늘었다" 고 봅니다.
+#:
+#: ⚠️ **경고가 아닙니다.** 격론이 벌어진 구간은 회의에서 제일 중요한
+#: 자리일 수 있습니다. 이 값은 "여기를 다시 들어 볼 만하다" 는 뜻입니다.
+OVERLAP_RISE = 2.0
+
+#: 구간 안 겹침이 이보다 적으면 비율이 아무리 높아도 안 셉니다. 10초.
+MIN_WINDOW_OVERLAP_MS = 10 * 1000
+
+#: 이보다 짧은 회의는 구간을 나누지 않습니다.
+MIN_MEETING_MS = 6 * 60 * 1000
+
+
+@dataclass(frozen=True, slots=True)
+class OverlapWindow:
+    """동시 발언이 바탕보다 늘어난 구간.
+
+    ⚠️ **누가 겹쳤는지는 없습니다.** 일부러 뺐습니다 (위 머리말).
+    """
+
+    start_ms: int
+    end_ms: int
+    overlap_ms: int
+    #: 이 구간에서 겹친 시간의 비율.
+    ratio: float
+    #: 회의 전체의 겹침 비율. 사람이 "얼마나 늘었나" 를 스스로 볼 수 있게
+    #: 같이 줍니다 — 배수만 주면 바탕이 얼마였는지 알 수 없습니다.
+    baseline: float
+
+
+def overlap_ms(spans: list[Span]) -> int:
+    """**서로 다른 사람**의 발화가 겹친 시간.
+
+    ⚠️ 같은 사람의 조각끼리 겹친 것은 안 셉니다 — 한 사람이 자기 말을
+    끊을 수는 없고, 그건 대개 분절이 잘게 난 것뿐입니다.
+
+    스윕 라인으로 셉니다: 시각을 따라가며 **말하고 있는 사람 수**가 둘
+    이상인 동안을 더합니다.
+    """
+    edges: list[tuple[int, int, int]] = []
+    for s in spans:
+        start, end = min(s.start_ms, s.end_ms), max(s.start_ms, s.end_ms)
+        if start == end:
+            continue
+        edges.append((start, +1, s.user_id))
+        edges.append((end, -1, s.user_id))
+    if not edges:
+        return 0
+
+    edges.sort(key=lambda e: (e[0], -e[1]))
+    live: dict[int, int] = {}
+    total = 0
+    at = edges[0][0]
+    for time, delta, user_id in edges:
+        if len(live) >= 2 and time > at:
+            total += time - at
+        at = time
+        live[user_id] = live.get(user_id, 0) + delta
+        if live[user_id] <= 0:
+            live.pop(user_id, None)
+    return total
+
+
+def overlap_windows(spans: list[Span]) -> list[OverlapWindow]:
+    """동시 발언이 **바탕보다 늘어난** 구간들 (`AI-REVIEW-008`).
+
+    잴 수 없으면 빈 목록입니다 — 모르는 것을 "안 늘었다" 로 말하지
+    않습니다. 부르는 쪽은 빈 목록을 "확인할 구간 없음" 으로 읽으면 됩니다.
+    """
+    if not spans:
+        return []
+    begin = min(min(s.start_ms, s.end_ms) for s in spans)
+    finish = max(max(s.start_ms, s.end_ms) for s in spans)
+    span_ms = finish - begin
+    if span_ms < MIN_MEETING_MS:
+        return []
+
+    baseline_ms = overlap_ms(spans)
+    baseline = baseline_ms / span_ms
+    # 바탕이 이미 높으면 "늘었다" 가 뜻을 잃습니다 — 회의 내내 겹쳤다는
+    # 것은 구간의 문제가 아니라 회의 방식의 문제이고, 여기서 할 말이
+    # 아닙니다.
+    if baseline <= 0 or baseline >= 0.5:
+        return []
+
+    out: list[OverlapWindow] = []
+    at = begin
+    while at < finish:
+        end = min(at + WINDOW_MS, finish)
+        width = end - at
+        if width <= 0:
+            break
+        clipped = [
+            Span(
+                user_id=s.user_id,
+                start_ms=max(min(s.start_ms, s.end_ms), at),
+                end_ms=min(max(s.start_ms, s.end_ms), end),
+            )
+            for s in spans
+            if min(s.start_ms, s.end_ms) < end and max(s.start_ms, s.end_ms) > at
+        ]
+        got = overlap_ms(clipped)
+        ratio = got / width
+        if got >= MIN_WINDOW_OVERLAP_MS and ratio >= baseline * OVERLAP_RISE:
+            out.append(
+                OverlapWindow(
+                    start_ms=at,
+                    end_ms=end,
+                    overlap_ms=got,
+                    ratio=ratio,
+                    baseline=baseline,
+                )
+            )
+        at = end
+    return out

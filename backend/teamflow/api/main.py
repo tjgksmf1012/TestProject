@@ -2986,6 +2986,7 @@ class SpeakingOut(BaseModel):
     skewed: bool
 
 
+
 @app.get("/api/meetings/{meeting_id}/speaking", response_model=SpeakingOut)
 def read_speaking_shares(
     meeting_id: int, session: DbSession, user: CurrentUser

@@ -62,6 +62,7 @@ const TITLE: Record<string, string> = {
   topic_drift: '주제 이탈',
   incomplete_task: '미완성 업무',
   decision_conflict: '결정 번복',
+  overlap_surge: '동시 발언',
 };
 
 /**
@@ -75,6 +76,10 @@ const WHAT: Record<string, string> = {
   topic_drift: '본줄기에서 잠깐 벗어났다가 돌아왔습니다',
   incomplete_task: '약속은 있는데 업무 후보로 이어지지 않았습니다',
   decision_conflict: '앞의 결정을 뒤집었습니다',
+  // ⚠️ "말을 끊었습니다" 라고 쓰지 않습니다 — 누가 끊었는지는 데이터에
+  //    없고(일부러 안 보냅니다), 격론이 벌어진 구간은 회의에서 제일
+  //    중요한 자리일 수 있습니다.
+  overlap_surge: '여럿이 동시에 말한 시간이 평소보다 길었습니다',
 };
 
 /** 화면에 늘어놓을 순서. ⚠️ **건수 순이 아닙니다** — 회의마다 자리가 바뀝니다. */
@@ -83,6 +88,7 @@ export const KIND_ORDER: readonly string[] = [
   'topic_drift',
   'incomplete_task',
   'decision_conflict',
+  'overlap_surge',
 ];
 
 /** `750000` → `12:30`. 음수나 0은 `null` — **시각을 지어내지 않습니다.** */
@@ -136,6 +142,16 @@ export function whyText(finding: Finding): string | null {
     const count = detail.count;
     if (typeof count !== 'number' || count <= 0) return null;
     return `약속 ${count}건이 업무 후보로 안 이어졌습니다`;
+  }
+
+  if (finding.kind === 'overlap_surge') {
+    // 배수만 말하면 바탕이 얼마였는지 알 수 없습니다 — 0.5%→1.5% 와
+    // 10%→30% 는 같은 "3배" 지만 전혀 다른 회의입니다. 둘 다 적습니다.
+    const ratio = detail.ratio;
+    const baseline = detail.baseline;
+    if (typeof ratio !== 'number' || typeof baseline !== 'number' || baseline <= 0) return null;
+    const pct = (v: number) => `${Math.round(v * 100)}%`;
+    return `이 구간 ${pct(ratio)} · 회의 평균 ${pct(baseline)}`;
   }
 
   if (finding.kind === 'decision_conflict') {
