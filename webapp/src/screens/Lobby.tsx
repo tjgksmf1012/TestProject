@@ -20,6 +20,7 @@ import {
   isRiskyForRecording,
   recordingSafety,
 } from '@lib/platform/recording.ts';
+import { Problem } from '../components/Problem.tsx';
 
 // 회의 로비 — 시그니처가 사는 곳 (지시서 기타-6 §로비).
 //
@@ -125,7 +126,7 @@ export default function Lobby() {
       projectId={meeting.data?.project_id}
       meta={room.message}
       actions={
-        <div style={{ display: 'flex', gap: 'var(--sp-4)' }}>
+        <div className="appbar__actions">
           {meeting.data?.status === 'needs_review' && (
             <Link className="btn btn--primary" to={`/meeting/${meetingId}/review`}>
               업무 후보 검토
@@ -155,7 +156,7 @@ export default function Lobby() {
             </span>
           )}
           <a
-            className={`btn btn--primary${!canGoRecord ? ' btn--disabled-link' : ''}`}
+            className={`btn btn--primary${!canGoRecord ? ' btn--unmet btn--disabled-link' : ''}`}
             href={canGoRecord ? `/index.html?meeting=${meetingId}` : undefined}
             aria-disabled={!canGoRecord}
             aria-describedby={!canGoRecord ? 'start-conds' : undefined}
@@ -290,9 +291,7 @@ export default function Lobby() {
               </button>
             </div>
             {m.consent.isError && (
-              <p className="disabled-reason">
-                동의를 남기지 못했습니다 — 잠시 뒤 다시 해 보세요.
-              </p>
+              <Problem>동의를 남기지 못했습니다 — 잠시 뒤 다시 해 보세요.</Problem>
             )}
             <Disclosure summary="무엇에 동의하는 건가요">
               <p>

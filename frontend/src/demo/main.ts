@@ -186,7 +186,12 @@ function render(): void {
     ? blockers.map((b) => `<li>${escapeHtml(b)}</li>`).join('')
     : '<li class="ok">준비됐습니다</li>';
 
-  ($('start') as HTMLButtonElement).disabled = state.phase !== 'ready';
+  // ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다. 비활성 버튼은 초점을
+  //    못 받아 **왜 시작할 수 없는지**(`#blockers` 목록)를 낭독기에 전할
+  //    방법이 없습니다 — 하필 녹음은 못 하면 그 회의를 영영 못 잽니다.
+  //    `정지` 는 그대로 둡니다: 녹음 중이 아닐 때 정지는 설명할 사유가
+  //    있는 것이 아니라 **해당 없는** 것이라 진짜 비활성이 맞습니다.
+  $('start').setAttribute('aria-disabled', String(state.phase !== 'ready'));
   ($('stop') as HTMLButtonElement).disabled = !(
     state.phase === 'recording' || state.phase === 'interrupted'
   );
@@ -301,12 +306,17 @@ $('permission').addEventListener('click', async () => {
 });
 
 $('start').addEventListener('click', async () => {
-  if (($('wakelock') as HTMLInputElement).checked) {
-    wakeLock = await keepScreenAwake();
-  }
+  // ⚠️ **잠금을 잡기 전에 막힌 국면부터 봅니다.** 순서가 반대였을 때는
+  //    시작하지 못하는데도 화면 잠금을 잡고 끝났습니다 — 버튼이
+  //    `aria-disabled` 라 눌리기 시작하면서 그 자리가 자주 지나갑니다.
   if (!client.start()) {
+    // 사유는 `#blockers` 에 이미 서 있습니다 — 거기로 데려다 줍니다.
+    $('blockers').scrollIntoView({ block: 'center' });
     alert('시작할 수 없습니다. 위 목록을 확인하세요.');
     return;
+  }
+  if (($('wakelock') as HTMLInputElement).checked) {
+    wakeLock = await keepScreenAwake();
   }
 
   // ⚠️ **여기가 데스크톱 셸에게 "지금부터 녹음" 이라고 말할 자리입니다**

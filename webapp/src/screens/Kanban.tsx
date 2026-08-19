@@ -28,6 +28,7 @@ import { assigneeText, toggled, type Person } from '@lib/kanban/assignees.ts';
 import { deleteTaskConfirm } from '@lib/project/roles.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { withJosa } from '@lib/text/josa.ts';
+import { Problem } from '../components/Problem.tsx';
 
 // 칸반 — 카드에서 버튼을 걷어내고 드래그 + ⋯ 메뉴 + 숫자 키로 (지시서 기타-6 §칸반).
 //
@@ -284,9 +285,9 @@ export default function Kanban() {
           ))}
       </div>
       {(patchTask.isError || setAssignees.isError || deleteTask.isError) && (
-        <p className="disabled-reason" role="alert" style={{ padding: '0 var(--sp-6) var(--sp-4)' }}>
-          바꾸지 못했습니다 — 새로고침한 뒤 다시 해 보세요.
-        </p>
+        <div style={{ padding: '0 var(--sp-6) var(--sp-4)' }}>
+          <Problem>바꾸지 못했습니다 — 새로고침한 뒤 다시 해 보세요.</Problem>
+        </div>
       )}
     </AppShell>
   );

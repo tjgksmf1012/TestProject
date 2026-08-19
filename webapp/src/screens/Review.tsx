@@ -35,6 +35,7 @@ import { audioNote, emptyTimelineNote, timelineRows, trackAudioUrl, type Timelin
 import { missingNote, emptyEvidenceNote, withContext } from '@lib/review/evidence.ts';
 import { agendaItems, issueViews } from '@lib/review/minutes.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
+import { Problem } from '../components/Problem.tsx';
 
 // 업무 후보 검토 — 3판 (지시서 07).
 //
@@ -197,16 +198,16 @@ export default function Review() {
       title={`${title} · 업무 후보 ${lanes.all}건`}
       projectId={meeting.data?.project_id}
       actions={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+        <div className="appbar__actions">
           {/* v2 F10 — 일괄 승인 기능은 **만들지 않습니다.** 이 버튼은
               후보를 하나씩 다 처리한 뒤에야 열리는 마무리 버튼이고,
               라벨도 그렇게 읽혀야 합니다(`3건 모두 처리하고 제출` → `검토
               끝내기`). 사람이 하나씩 승인한다는 것이 이 제품의 안전장치라,
               그걸 건너뛰는 길은 없습니다. */}
           {submitBlockedReason !== null && (
-            <span className="disabled-reason" style={{ margin: 0 }} id="submit-reason">
+            <Problem id="submit-reason" tone="incomplete" inline>
               {lanes.pending > 0 ? `${lanes.pending}건 남음` : submitBlockedReason}
-            </span>
+            </Problem>
           )}
           {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 — 카드의 `등록`
               버튼과 같은 규칙입니다. 비활성 버튼은 포커스를 못 받아 낭독기에
