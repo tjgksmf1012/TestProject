@@ -3514,3 +3514,69 @@ describe('문서 참조', () => {
     strictEqual(missing.join(', '), '', 'docs/13 에 없는 화면입니다 — 그림과 §2 표에 넣으세요');
   });
 });
+
+describe('SPA 의 「안 됩니다」 는 들려야 한다 (docs/22 · WCAG 4.1.3)', () => {
+  /** `webapp/src` 아래 화면·컴포넌트 소스 전부. */
+  const spaSources = (): { rel: string; code: string }[] => {
+    const base = join(ROOT, '..', 'webapp', 'src');
+    const out: { rel: string; code: string }[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name))
+          out.push({ rel: full.slice(base.length + 1), code: readFileSync(full, 'utf8') });
+      }
+    };
+    if (!existsSync(base)) return out;
+    walk(base);
+    return out;
+  };
+
+  it('⭐ `disabled-reason` 을 화면이 직접 그리지 않는다 — `Problem` 을 쓴다', () => {
+    // ⚠️ 이 클래스는 스무 곳 남짓에 흩어져 있었고, 그중 **둘만**
+    // `role="alert"` 였습니다. 나머지는 눈으로 보는 사람에게만 나타나고
+    // 낭독기에는 아무 일도 안 일어난 것과 같았습니다 — 저장이 실패해도,
+    // 저장소 주소가 틀려도 조용했습니다.
+    //
+    // 속성을 스무 곳에 하나씩 흩뿌리면 반드시 몇 곳이 빠집니다. 그래서
+    // 자리 자체를 `components/Problem.tsx` 한 벌로 올렸고, 이 검사가
+    // **되돌아가는 것**을 막습니다.
+    const offenders = spaSources()
+      .filter(({ rel }) => rel !== join('components', 'Problem.tsx'))
+      .filter(({ code }) => /className=(?:"|\{`)[^"`]*disabled-reason/.test(code))
+      .map(({ rel }) => rel);
+    strictEqual(
+      offenders.join(', '),
+      '',
+      '`<Problem>` 을 쓰세요 — 라이브 영역이 붙어 있어야 낭독기에 전해집니다',
+    );
+  });
+
+  it('⭐ `Problem` 은 두 톤 다 라이브 영역이다 (끼어들기 / 기다리기)', () => {
+    // ⚠️ 전부 `alert` 로 하면 안 됩니다. 저장소 주소 오류는 글자를 칠
+    // 때마다 다시 나타나는데, `alert` 는 끼어들어 읽으므로 한 글자마다
+    // 낭독기가 말을 끊습니다 — 타자를 칠 수 없게 됩니다.
+    const code = readFileSync(
+      join(ROOT, '..', 'webapp', 'src', 'components', 'Problem.tsx'),
+      'utf8',
+    );
+    ok(/role=\{tone === 'failed' \? 'alert' : 'status'\}/.test(code), '두 톤이 갈라져 있어야 합니다');
+  });
+
+  it('⭐ 칸 옆 오류는 **그 칸과 이어져** 있다 (`aria-describedby`)', () => {
+    // 낭독기는 칸에 초점이 갔을 때 `aria-describedby` 가 가리키는 것만
+    // 읽습니다. 바로 아래 적어 두기만 하면 화면에만 뜨고 아무도 안 듣습니다.
+    const settings = readFileSync(
+      join(ROOT, '..', 'webapp', 'src', 'screens', 'Settings.tsx'),
+      'utf8',
+    );
+    for (const id of ['repo-problem', 'title-problem']) {
+      ok(
+        settings.includes(`aria-describedby="${id}"`),
+        `${id} 을 가리키는 입력칸이 없습니다`,
+      );
+      ok(settings.includes(`id="${id}"`), `${id} 이라는 자리가 없습니다`);
+    }
+  });
+});

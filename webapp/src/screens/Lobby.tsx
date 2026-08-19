@@ -20,6 +20,7 @@ import {
   isRiskyForRecording,
   recordingSafety,
 } from '@lib/platform/recording.ts';
+import { Problem } from '../components/Problem.tsx';
 
 // 회의 로비 — 시그니처가 사는 곳 (지시서 기타-6 §로비).
 //
@@ -290,9 +291,7 @@ export default function Lobby() {
               </button>
             </div>
             {m.consent.isError && (
-              <p className="disabled-reason">
-                동의를 남기지 못했습니다 — 잠시 뒤 다시 해 보세요.
-              </p>
+              <Problem>동의를 남기지 못했습니다 — 잠시 뒤 다시 해 보세요.</Problem>
             )}
             <Disclosure summary="무엇에 동의하는 건가요">
               <p>

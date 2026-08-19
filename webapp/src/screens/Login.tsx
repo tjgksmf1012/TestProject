@@ -5,6 +5,7 @@ import { api, ApiError } from '../api/client.ts';
 import { EvidenceChip } from '../components/EvidenceChip.tsx';
 import { validateLogin, validateSignup, describeAuthFailure } from '@lib/auth/session.ts';
 import { pageTitle } from '@lib/shell/title.ts';
+import { Problem } from '../components/Problem.tsx';
 
 // 로그인 — 좌측 히어로가 이 제품의 주장입니다 (지시서 기타-6 §로그인):
 // 회의 발화 → 업무 → PR 사슬을 정지 화면으로 보여줍니다. 애니메이션 없음.
@@ -125,9 +126,7 @@ export default function Login() {
             {mode === 'login' ? '로그인' : '가입하고 로그인'}
           </button>
           {error !== null && (
-            <p className="disabled-reason" role="alert">
-              {error}
-            </p>
+            <Problem>{error}</Problem>
           )}
           <p className="t13 muted">
             {mode === 'login' ? (

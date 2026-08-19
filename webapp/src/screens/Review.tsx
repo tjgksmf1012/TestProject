@@ -35,6 +35,7 @@ import { audioNote, emptyTimelineNote, timelineRows, trackAudioUrl, type Timelin
 import { missingNote, emptyEvidenceNote, withContext } from '@lib/review/evidence.ts';
 import { agendaItems, issueViews } from '@lib/review/minutes.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
+import { Problem } from '../components/Problem.tsx';
 
 // 업무 후보 검토 — 3판 (지시서 07).
 //
@@ -204,9 +205,9 @@ export default function Review() {
               끝내기`). 사람이 하나씩 승인한다는 것이 이 제품의 안전장치라,
               그걸 건너뛰는 길은 없습니다. */}
           {submitBlockedReason !== null && (
-            <span className="disabled-reason" style={{ margin: 0 }} id="submit-reason">
+            <Problem id="submit-reason" tone="incomplete" inline>
               {lanes.pending > 0 ? `${lanes.pending}건 남음` : submitBlockedReason}
-            </span>
+            </Problem>
           )}
           {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 — 카드의 `등록`
               버튼과 같은 규칙입니다. 비활성 버튼은 포커스를 못 받아 낭독기에

@@ -13,6 +13,7 @@ import { api, ApiError } from '../api/client.ts';
 import type { MeetingSummary } from '../api/types.ts';
 import { hasLane, nextStepFor, orderProjects, sectionMeetings } from '@lib/home/next.ts';
 import { codeProblem, normalizeCode, titleProblem } from '@lib/project/setup.ts';
+import { Problem } from '../components/Problem.tsx';
 
 // 홈 — "다음에 뭘 해야 하는가" 에 대한 답 (지시서 기타-6 §홈).
 //
@@ -194,7 +195,7 @@ function StartDialog({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </label>
-        {error !== null && <p className="disabled-reason">{error}</p>}
+        <Problem>{error}</Problem>
         <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>
           닫기
         </button>
@@ -303,10 +304,10 @@ export default function Home() {
               </section>
             )}
             {m.openMeeting.isError && (
-              <p className="disabled-reason">
+              <Problem>
                 회의를 열지 못했습니다 —{' '}
                 {m.openMeeting.error instanceof Error ? m.openMeeting.error.message : '알 수 없는 오류'}
-              </p>
+              </Problem>
             )}
           </div>
         </section>

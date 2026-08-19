@@ -18,6 +18,7 @@ import { LEAVE_CONFIRM } from '@lib/project/roles.ts';
 import { presenceLabel, worthShowing } from '@lib/project/presence.ts';
 import { AVATAR_SIDE, MAX_BIO, PHOTO_NOTE, bioProblem, coverCrop, photoProblem } from '@lib/profile/edit.ts';
 import { ApiError } from '../api/client.ts';
+import { Problem } from '../components/Problem.tsx';
 
 // 프로젝트 설정 — **상단 탭** + 아래 판 (지시서 03, v2 F11 로 갱신).
 //
@@ -91,9 +92,9 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
         >
           저장
         </button>
-        {problem !== null && <span className="disabled-reason" style={{ margin: 0 }}>{problem}</span>}
+        <Problem tone="incomplete" inline>{problem}</Problem>
         {save.isSuccess && edited === null && <span className="status-ok" role="status">저장됐습니다</span>}
-        {save.isError && <span className="disabled-reason" style={{ margin: 0 }}>{mutationError(save.error)}</span>}
+        <Problem inline>{save.isError ? mutationError(save.error) : null}</Problem>
       </div>
       <Disclosure summary="왜 나만 바꿀 수 있나요">
         <p>{WHY_ONLY_ME}</p>
@@ -130,7 +131,7 @@ function GithubSection({ mine, save }: { mine: Member | undefined; save: ReturnT
       <p className={mine?.github_login ? 'status-ok' : 'micro muted'} style={{ marginTop: 'var(--sp-3)' }}>
         {githubLoginStatus(mine?.github_login ?? null)}
       </p>
-      {save.isError && <p className="disabled-reason">{mutationError(save.error)}</p>}
+      <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
       <Disclosure summary="왜 나만 바꿀 수 있나요">
         <p>{WHY_ONLY_ME} GitHub 아이디도 같은 이유로 본인만 바꿉니다 — 남의 아이디를 적으면 남의 활동이 내 기여도로 들어옵니다.</p>
       </Disclosure>
@@ -185,7 +186,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
             <span className="field__label">사진 — {PHOTO_NOTE}</span>
             <input type="file" accept="image/*" onChange={(e) => onFile(e.target.files?.[0])} />
           </label>
-          {photoError !== null && <p className="disabled-reason">{photoError}</p>}
+          <Problem>{photoError}</Problem>
         </div>
       </div>
       <label className="field" style={{ marginTop: 'var(--sp-5)' }}>
@@ -218,7 +219,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
         >
           저장
         </button>
-        {problem !== null && <span className="disabled-reason" style={{ margin: 0 }}>{problem}</span>}
+        <Problem tone="incomplete" inline>{problem}</Problem>
         {save.isSuccess && !dirty && <span className="status-ok" role="status">저장됐습니다</span>}
       </div>
     </div>
@@ -265,7 +266,7 @@ function MembersSection({ members, leave }: { members: Member[]; leave: ReturnTy
         >
           이 프로젝트에서 나가기
         </button>
-        {leave.isError && <p className="disabled-reason">{mutationError(leave.error)}</p>}
+        <Problem>{leave.isError ? mutationError(leave.error) : null}</Problem>
       </div>
     </div>
   );
@@ -300,11 +301,16 @@ function RepoSection({
       <h2 className="sec__title">저장소 연결</h2>
       <p className="sec__lead">이 저장소의 PR·리뷰가 팀의 기여 기록으로 들어옵니다.</p>
       <div className="sec__row">
+        {/* ⚠️ 오류가 **바로 아래 적혀 있는데 칸과 이어져 있지 않았습니다.**
+            낭독기는 칸에 초점이 갔을 때 `aria-describedby` 가 가리키는 것만
+            읽습니다 — 이어 놓지 않으면 화면에만 뜨고 아무도 안 듣습니다. */}
         <input
           id="repo-input"
           className="input input--num"
           placeholder="owner/repo"
           aria-label="GitHub 저장소"
+          aria-invalid={problem !== null}
+          aria-describedby="repo-problem"
           value={input}
           onChange={(e) => setValue(e.target.value)}
         />
@@ -329,8 +335,8 @@ function RepoSection({
           연결
         </button>
       </div>
-      {problem !== null && <p className="disabled-reason" id="repo-problem">{problem}</p>}
-      {save.isError && <p className="disabled-reason">{mutationError(save.error)}</p>}
+      <Problem id="repo-problem" tone="incomplete">{problem}</Problem>
+      <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
       {view !== null && (
         <div className={view.tone === 'ok' ? 'card' : 'notice'} style={{ marginTop: 'var(--sp-5)' }} role="note">
           <p>
@@ -383,7 +389,13 @@ function GeneralSection({
       <label className="field">
         <span className="field__label">프로젝트 이름</span>
         <div className="sec__row">
-          <input className="input" value={input} onChange={(e) => setValue(e.target.value)} />
+          <input
+            className="input"
+            aria-invalid={problem !== null && value !== null}
+            aria-describedby="title-problem"
+            value={input}
+            onChange={(e) => setValue(e.target.value)}
+          />
           <button
             type="button"
             className="btn btn--primary"
@@ -394,7 +406,7 @@ function GeneralSection({
           </button>
         </div>
       </label>
-      {problem !== null && value !== null && <p className="disabled-reason">{problem}</p>}
+      <Problem id="title-problem" tone="incomplete">{value !== null ? problem : null}</Problem>
       <h3 className="pane__title" style={{ margin: 'var(--sp-6) 0 var(--sp-3)' }}>
         팀원 초대
       </h3>
@@ -409,7 +421,7 @@ function GeneralSection({
       <Disclosure summary="코드를 새로 만들면 어떻게 되나요">
         <p>이전 코드는 그 즉시 무효가 됩니다. 이미 들어온 팀원은 그대로 남습니다.</p>
       </Disclosure>
-      {save.isError && <p className="disabled-reason">{mutationError(save.error)}</p>}
+      <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
     </div>
   );
 }
@@ -483,7 +495,7 @@ function DangerSection({ revoke }: { revoke: ReturnType<typeof useSettingsMutati
           )}
         </div>
       )}
-      {revoke.isError && <p className="disabled-reason">{mutationError(revoke.error)}</p>}
+      <Problem>{revoke.isError ? mutationError(revoke.error) : null}</Problem>
     </div>
   );
 }
@@ -586,7 +598,7 @@ export default function Settings() {
             )}
             {section === 'danger' && <DangerSection revoke={m.revokeMyData} />}
             {m.openMeeting.isError && (
-              <p className="disabled-reason">{mutationError(m.openMeeting.error)}</p>
+              <Problem>{mutationError(m.openMeeting.error)}</Problem>
             )}
           </div>
         </section>

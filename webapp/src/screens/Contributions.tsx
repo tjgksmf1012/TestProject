@@ -30,6 +30,7 @@ import {
   toPayload,
   type Draft,
 } from '@lib/contribution/final.ts';
+import { Problem } from '../components/Problem.tsx';
 
 // 기여도 — 세 사람과 확정 폼이 **한 화면에 동시에** 보인다 (지시서 09).
 //
@@ -396,19 +397,19 @@ export default function Contributions() {
               </div>
             )}
             {!allFilled && members.length > 0 && (
-              <p className="disabled-reason" id="confirm-unfilled">{unfilled}칸 남음</p>
+              <Problem id="confirm-unfilled" tone="incomplete">{unfilled}칸 남음</Problem>
             )}
             {problems.length > 0 && (
-              <p className="disabled-reason" id="confirm-problems">
+              <Problem id="confirm-problems" tone="incomplete">
                 {problems.join(' · ')} — 사유 없는 조정은 근거 없는 점수와 같습니다
-              </p>
+              </Problem>
             )}
-            {blind && <p className="disabled-reason" id="confirm-blind">{BLIND_CONFIRM}</p>}
+            {blind && <Problem id="confirm-blind">{BLIND_CONFIRM}</Problem>}
             {sumOff && (
-              <p className="disabled-reason">
+              <Problem tone="incomplete">
                 합계가 <span className="num">{effectiveSum.toFixed(1)}</span> 입니다 — 100이
                 아니어도 확정할 수 있지만, 의도한 것인지 확인하세요.
-              </p>
+              </Problem>
             )}
             {confirm.isSuccess && (
               <p className="confirmbar__notice" role="status">
@@ -416,9 +417,9 @@ export default function Contributions() {
               </p>
             )}
             {confirm.isError && (
-              <p className="disabled-reason" role="alert">
+              <Problem>
                 확정하지 못했습니다 — {confirm.error instanceof Error ? confirm.error.message : '알 수 없는 오류'}
-              </p>
+              </Problem>
             )}
           </div>
         </section>
