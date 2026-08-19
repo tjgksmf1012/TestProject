@@ -287,6 +287,8 @@ function RepoSection({
   const [value, setValue] = useState<string | null>(null);
   const input = value ?? repo ?? '';
   const problem = input.trim() === '' ? null : repoProblem(input);
+  // 아직 연결할 수 없는 경우 — 안 고쳤거나(`value === null`), 주소가 틀렸거나.
+  const connectBlocked = value === null || problem !== null;
   const view = health.data
     ? describeHealth(health.data, new Date())
     : health.isError
@@ -299,24 +301,35 @@ function RepoSection({
       <p className="sec__lead">이 저장소의 PR·리뷰가 팀의 기여 기록으로 들어옵니다.</p>
       <div className="sec__row">
         <input
+          id="repo-input"
           className="input input--num"
           placeholder="owner/repo"
           aria-label="GitHub 저장소"
           value={input}
           onChange={(e) => setValue(e.target.value)}
         />
+        {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 — 비활성 버튼은
+            초점을 못 받아 낭독기에 사유를 못 전합니다(GOV.UK). 사유(`problem`)
+            는 바로 아래 적혀 있는데, 그 자리로 닿는 길이 없었습니다.
+            누르면 저장소 칸으로 데려다 줍니다. */}
         <button
           type="button"
-          className="btn btn--primary"
-          disabled={value === null || problem !== null || save.isPending}
-          onClick={() =>
-            save.mutate({ github_repo: normalizeRepo(input) }, { onSuccess: () => setValue(null) })
-          }
+          className={`btn btn--primary${connectBlocked ? ' btn--unmet' : ''}`}
+          aria-disabled={connectBlocked || save.isPending}
+          aria-describedby={problem !== null ? 'repo-problem' : undefined}
+          onClick={() => {
+            if (save.isPending) return;
+            if (connectBlocked) {
+              document.getElementById('repo-input')?.focus();
+              return;
+            }
+            save.mutate({ github_repo: normalizeRepo(input) }, { onSuccess: () => setValue(null) });
+          }}
         >
           연결
         </button>
       </div>
-      {problem !== null && <p className="disabled-reason">{problem}</p>}
+      {problem !== null && <p className="disabled-reason" id="repo-problem">{problem}</p>}
       {save.isError && <p className="disabled-reason">{mutationError(save.error)}</p>}
       {view !== null && (
         <div className={view.tone === 'ok' ? 'card' : 'notice'} style={{ marginTop: 'var(--sp-5)' }} role="note">

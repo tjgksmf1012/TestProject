@@ -499,6 +499,8 @@ def test_the_channel_dots_are_visible_on_both_the_list_and_the_selected_row(css:
 # ══════════════════════════════════════════════════════════════════════
 
 SPA = Path(__file__).resolve().parents[2] / "webapp" / "src" / "app.css"
+#: 레거시 화면(녹음·통화·`demo/`)이 쓰는 공용 스타일.
+LEGACY_APP_CSS = Path(__file__).resolve().parents[2] / "frontend" / "public" / "app.css"
 
 #: 본문 글자로 쓰는 색.
 #:
@@ -673,19 +675,30 @@ def test_spa_a_pressable_button_is_never_dimmed_by_opacity(spa: str):
     ⚠️ 정말로 못 누르는 것은 예외입니다 — 예외의 경계는 "보기에 흐린가" 가
     아니라 **누를 수 있는가** 입니다. 그래서 같은 규칙이 `pointer-events:
     none` 을 걸었거나 선택자가 HTML `:disabled` 인 경우만 통과시킵니다.
+
+    ⚠️ **두 팔레트를 다 봅니다.** 레거시 `app.css` 도 `.btn[aria-disabled=
+    "true"]` 를 0.45 로 흐리고 있었습니다 — 같은 결함이 두 곳에 있었고,
+    SPA 만 고쳤으면 녹음·통화 화면은 그대로였습니다.
     """
-    rules = re.sub(r"/\*.*?\*/", "", spa, flags=re.S)
     dim: list[str] = []
-    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", rules):
-        selector, body = m.group(1).strip(), m.group(2)
-        if "btn" not in selector and 'role="button"' not in selector:
-            continue
-        inert = ":disabled" in selector or re.search(r"pointer-events:\s*none", body)
-        if inert:
-            continue
-        for o in re.finditer(r"(?<![-a-z])opacity:\s*([0-9.]+)", body):
-            if float(o.group(1)) < 0.8:
-                dim.append(f"{selector.splitlines()[-1].strip()} → opacity {o.group(1)}")
+    legacy = LEGACY_APP_CSS.read_text(encoding="utf-8")
+    for where, css_text in (("webapp", spa), ("frontend", legacy)):
+        rules = re.sub(r"/\*.*?\*/", "", css_text, flags=re.S)
+        for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", rules):
+            selector, body = m.group(1).strip(), m.group(2)
+            pressable = (
+                "btn" in selector
+                or 'role="button"' in selector
+                or "aria-disabled" in selector
+            )
+            if not pressable:
+                continue
+            if ":disabled" in selector or re.search(r"pointer-events:\s*none", body):
+                continue
+            for o in re.finditer(r"(?<![-a-z])opacity:\s*([0-9.]+)", body):
+                if float(o.group(1)) < 0.8:
+                    last = selector.splitlines()[-1].strip()
+                    dim.append(f"[{where}] {last} → opacity {o.group(1)}")
 
     assert dim == [], (
         "누를 수 있는 버튼이 흐려져 있습니다 — " + " | ".join(dim) + ". "
