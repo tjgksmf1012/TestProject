@@ -124,3 +124,54 @@ export function emptyEvidenceNote(asked: readonly number[]): string {
     ? '이 후보에는 근거 발화가 없습니다 — 회의에 없던 내용일 수 있습니다'
     : '근거 발화를 찾지 못했습니다 — 목록이 오래됐을 수 있습니다. 새로 고쳐 주세요';
 }
+
+/**
+ * 근거 발화 **주변**까지 고른다 (수정 지시서 v2 F5).
+ *
+ * ## 왜
+ *
+ * 근거 패널이 근거 한 건만 띄우고 있었습니다. 화면 높이 800px 에 내용이
+ * 177px, **623px 이 빈 채**였습니다. 그런데 그건 여백 문제만이 아닙니다 —
+ * *"금요일까지 만들기로 하죠"* 한 줄만 떼어 놓고 보면 그 말이 **합의인지
+ * 반문인지** 알 수 없습니다. 앞뒤가 있어야 사람이 판단할 수 있고, 판단하라고
+ * 만든 화면입니다.
+ *
+ * ## 무엇을 고르나
+ *
+ * 근거 발화마다 앞 `span` 건 · 뒤 `span` 건. 창이 겹치면 합칩니다 —
+ * 근거가 이웃해 있을 때 같은 발화를 두 번 그리지 않기 위해서입니다.
+ *
+ * ⚠️ **순서는 `all` 이 준 순서 그대로**입니다. 여기서 다시 정렬하면 시간축이
+ * 두 벌이 됩니다 (타임라인은 `timeline.ts` 가 정합니다).
+ */
+export interface ContextPick {
+  id: number;
+  /** 근거로 지목된 발화인가. 거짓이면 앞뒤 맥락으로 딸려 온 것. */
+  isEvidence: boolean;
+}
+
+export function withContext(
+  all: readonly number[],
+  evidence: readonly number[],
+  span = 2,
+): ContextPick[] {
+  if (span < 0) throw new RangeError('span에는 0 이상만 줄 수 있습니다');
+  const mark = new Set(evidence);
+  // ⚠️ `indexOf` 를 반복문 안에서 부르면 O(n²) 입니다. 회의가 길어지면
+  // 발화가 수천이라 자리를 미리 재 둡니다.
+  const at = new Map<number, number>();
+  all.forEach((id, i) => at.set(id, i));
+
+  const keep = new Set<number>();
+  for (const id of evidence) {
+    const i = at.get(id);
+    // 근거로 적힌 id 가 목록에 없을 수 있습니다 — 지워진 발화, 다른 회의.
+    // 그건 `missingNote` 가 말합니다. 여기서는 조용히 건너뜁니다.
+    if (i === undefined) continue;
+    for (let k = Math.max(0, i - span); k <= Math.min(all.length - 1, i + span); k++) {
+      const around = all[k];
+      if (around !== undefined) keep.add(around);
+    }
+  }
+  return all.filter((id) => keep.has(id)).map((id) => ({ id, isEvidence: mark.has(id) }));
+}

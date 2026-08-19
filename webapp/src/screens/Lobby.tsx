@@ -15,11 +15,19 @@ import {
   type TrackHealth,
 } from '@lib/lobby/room.ts';
 import { axisTicks, buildDiagram, describeGap, meetingWindow, type TrackInput } from '@lib/track/diagram.ts';
+import {
+  describeRecordingSafety,
+  isRiskyForRecording,
+  recordingSafety,
+} from '@lib/platform/recording.ts';
 
 // 회의 로비 — 시그니처가 사는 곳 (지시서 기타-6 §로비).
 //
-// 참가자마다 트랙 리본 LG. **빈 상태에도 축과 눈금을 그립니다** —
-// 빈 리본은 "여기에 곧 기록이 쌓인다" 고 말합니다.
+// 참가한 사람에게는 트랙 리본 LG. ⚠️ **아직 참가 안 한 사람에게는 축을
+// 그리지 않습니다** (v2 F3) — 예전에는 빈 상태에도 축과 눈금을 그렸고
+// "여기에 곧 기록이 쌓인다" 는 뜻이라고 적어 두었지만, 셋 다 대기 중이면
+// 빈 회색 막대 셋이 화면의 무게중심을 차지했습니다. 잴 게 없으면 안
+// 그리고, 그 자리는 「시작 전 확인」 이 씁니다 (v2 F5).
 
 const EMPTY_TICKS = ['0분', '7', '13', '20', '27', '33', '40분'];
 
@@ -93,6 +101,13 @@ export default function Lobby() {
   ];
   const canGoRecord = startConditions.every((c) => c.met);
 
+  // 지금 이 창이 녹음을 끝까지 붙잡을 수 있는가. 판단은 `@lib` 에 있습니다.
+  const safety = recordingSafety(window, window.matchMedia('(display-mode: standalone)').matches);
+  const risky = isRiskyForRecording(safety);
+  // 한 명이라도 참가했으면 레인 칸을 유지합니다 — 참가한 사람과 아직인
+  // 사람이 섞여 있을 때 축이 서로 어긋나면 시간을 견줄 수 없습니다.
+  const anyJoined = statuses.some((s) => s.verdict !== 'not_joined');
+
   const submitConsent = async (consented: boolean) => {
     // ②③ 을 먼저 남기고 ① 을 마지막에 — 서버는 저장된 값으로 판단합니다.
     if (consented) {
@@ -161,16 +176,24 @@ export default function Lobby() {
             {statuses.map((status) => {
               const track = trackList.find((t) => t.user_id === status.userId);
               const gapSpans = diagram.gaps.get(status.userId) ?? [];
+              const joined = status.verdict !== 'not_joined';
               return (
-                <div className="lrow" key={status.userId}>
+                <div className={`lrow${anyJoined ? '' : ' lrow--nolane'}`} key={status.userId}>
                   <span className="lrow__name">{status.name}</span>
+                  {/* ⚠️ **아직 참가 안 한 사람에게는 축을 그리지 않습니다**
+                      (v2 F3). 셋 다 대기 중이면 빈 회색 막대가 셋 서 있었고,
+                      레인이 "아는 것 / 모르는 것" 을 말하는 문법인데 잴 게
+                      없을 때 막대를 그리면 그 문법이 무너집니다. 이 사람이
+                      어떤 상태인지는 오른쪽 낱말이 말합니다. */}
                   <div className="lrow__ribbon">
-                    <TrackRibbon
-                      size="lg"
-                      segments={segmentsFor(status.userId)}
-                      ticks={ticks}
-                      label={`${status.name} — ${status.message}`}
-                    />
+                    {joined && (
+                      <TrackRibbon
+                        size="lg"
+                        segments={segmentsFor(status.userId)}
+                        ticks={ticks}
+                        label={`${status.name} — ${status.message}`}
+                      />
+                    )}
                   </div>
                   {/* 상태는 **한 낱말**, 문장은 `?` 안에.
                       예전에는 사람마다 같은 문장(`아직 참가하지 않았습니다`)이
@@ -197,6 +220,30 @@ export default function Lobby() {
                 헤더 meta 가 `room.message` 로 **같은 문장을 글자까지 똑같이**
                 말하고 있었습니다. 동의 사유도 여기 있었지만, 그 사유가 막는
                 것은 헤더의 버튼이므로 사유도 버튼 옆으로 옮겼습니다. */}
+
+            {/* 시작 전 확인 (v2 F5) — F3 로 빈 막대를 걷어내고 남은 자리.
+                채우려고 만든 글이 아닙니다: 이 제품에서 **녹음이 한 번
+                끊기면 그 구간은 영영 못 잽니다.** 브라우저 탭은 창을 내리면
+                녹음을 끊고, 그래서 이 저장소에 데스크톱 셸이 있습니다
+                (docs/21). 그 사실을 확인할 자리가 여기 말고 없었습니다.
+                두 줄 다 **이미 있는 판단**에서 옵니다 — 새 문구가 아닙니다. */}
+            {room.recording === 0 && roster.length > 0 && (
+              <div className="preflight">
+                <h3 className="preflight__title">시작 전 확인</h3>
+                <ul className="preflight__list">
+                  <li className={`preflight__item${blockers.length === 0 ? ' preflight__item--met' : ''}`}>
+                    <span aria-hidden="true">{blockers.length === 0 ? '●' : '○'}</span>
+                    <span className="preflight__label">전원 동의</span>
+                    {blockers.length > 0 && <Why about="아직 동의하지 않은 사람" lines={blockers} />}
+                  </li>
+                  <li className={`preflight__item${risky ? '' : ' preflight__item--met'}`}>
+                    <span aria-hidden="true">{risky ? '○' : '●'}</span>
+                    <span className="preflight__label">녹음이 안 끊기는 환경</span>
+                    <Why about="지금 이 창" lines={[describeRecordingSafety(safety)]} />
+                  </li>
+                </ul>
+              </div>
+            )}
           </div>
         </section>
 

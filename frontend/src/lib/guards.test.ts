@@ -1800,6 +1800,16 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
        셸이 하나 늘었으면 **찾는 자리**부터 늘려야 합니다. */
     walk(join(ROOT, 'electron'), join(ROOT));
 
+    /* ⭐ **리디자인 SPA 도 부르는 쪽입니다** (`webapp/src`, docs/22).
+       그리고 지금은 주 화면 아홉이 전부 거기 있습니다.
+
+       이 자리를 안 넣은 채로 SPA 전환을 했고, 그동안 이 가드는 **반쯤
+       눈을 감고 있었습니다** — `webapp/` 만 부르는 export 는 "테스트만
+       씀" 으로 잡히고(가짜 실패), 반대로 SPA 가 부르기를 그만둔 export
+       는 여전히 `demo/` 가 부르는 한 아무 말도 안 했습니다(진짜 놓침).
+       아홉 번째 사례입니다. */
+    walk(join(ROOT, '..', 'webapp', 'src'), join(ROOT, '..', 'webapp', 'src'));
+
     const offenders: string[] = [];
     for (const { rel, source } of files) {
       if (!rel.startsWith('lib/') || rel.endsWith('.test.ts')) continue;

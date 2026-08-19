@@ -6,8 +6,10 @@ import {
   describeProject,
   emptyProjectsMessage,
   formatMeetingTime,
+  hasLane,
   nextStepFor,
   orderProjects,
+  sectionMeetings,
   type Meeting,
   type Project,
 } from './next.ts';
@@ -186,5 +188,77 @@ describe('formatMeetingTime', () => {
 
   it('망가진 값은 그대로 보여준다 — 삼키지 않는다', () => {
     strictEqual(formatMeetingTime('어제'), '어제');
+  });
+});
+
+describe('sectionMeetings', () => {
+  it('⭐ 검토 필요만 따로 올리고 나머지는 최근 것부터 한 덩어리', () => {
+    // 상태 순으로 묶던 시절 데모 데이터의 날짜 순서가 그대로다 —
+    // 09-01(검토 필요) · 09-05(처리 중) · 09-02(실패) · 09-08(녹음 전) · 09-03(완료).
+    const list = [
+      meeting({ meeting_id: 1, status: 'needs_review', started_at: '2026-09-01T01:00:00Z' }),
+      meeting({ meeting_id: 2, status: 'processing', started_at: '2026-09-05T01:00:00Z' }),
+      meeting({ meeting_id: 3, status: 'failed', started_at: '2026-09-02T01:00:00Z' }),
+      meeting({ meeting_id: 4, status: 'pending', started_at: '2026-09-08T01:00:00Z' }),
+      meeting({ meeting_id: 5, status: 'confirmed', started_at: '2026-09-03T01:00:00Z' }),
+    ];
+    const { needsReview, rest } = sectionMeetings(list);
+    deepStrictEqual(needsReview.map((m) => m.meeting_id), [1]);
+    // 09-08 · 09-05 · 09-03 · 09-02 — 내림차순. 상태는 섞여 있어도 된다.
+    deepStrictEqual(rest.map((m) => m.meeting_id), [4, 2, 5, 3]);
+  });
+
+  it('검토 필요가 여럿이면 그 안에서도 최근 것부터', () => {
+    const list = [
+      meeting({ meeting_id: 1, status: 'needs_review', started_at: '2026-09-01T01:00:00Z' }),
+      meeting({ meeting_id: 2, status: 'needs_review', started_at: '2026-09-09T01:00:00Z' }),
+    ];
+    deepStrictEqual(sectionMeetings(list).needsReview.map((m) => m.meeting_id), [2, 1]);
+  });
+
+  it('⚠️ 날짜가 같으면 id 큰 쪽이 위 — 정렬이 흔들리면 목록이 춤춘다', () => {
+    const same = '2026-09-04T01:00:00Z';
+    const list = [
+      meeting({ meeting_id: 1, status: 'confirmed', started_at: same }),
+      meeting({ meeting_id: 9, status: 'confirmed', started_at: same }),
+      meeting({ meeting_id: 5, status: 'confirmed', started_at: same }),
+    ];
+    deepStrictEqual(sectionMeetings(list).rest.map((m) => m.meeting_id), [9, 5, 1]);
+  });
+
+  it('원본 배열을 건드리지 않는다', () => {
+    const list = [
+      meeting({ meeting_id: 1, status: 'confirmed', started_at: '2026-09-01T01:00:00Z' }),
+      meeting({ meeting_id: 2, status: 'confirmed', started_at: '2026-09-09T01:00:00Z' }),
+    ];
+    sectionMeetings(list);
+    deepStrictEqual(list.map((m) => m.meeting_id), [1, 2]);
+  });
+
+  it('빈 목록', () => {
+    const { needsReview, rest } = sectionMeetings([]);
+    deepStrictEqual(needsReview, []);
+    deepStrictEqual(rest, []);
+  });
+});
+
+describe('hasLane', () => {
+  it('⭐ 값이 없으면 레인을 그리지 않는다 — 빈 막대가 무게중심을 먹었다', () => {
+    strictEqual(hasLane(null), false);
+  });
+
+  it('0 은 값이다 — 재 봤더니 0% 인 것과 못 잰 것은 다르다', () => {
+    // 이 구분이 기여도 불변식 ③ 과 같은 것이다. `0` 을 떨어뜨리면
+    // "커버리지 0%" 인 회의가 "안 쟀음" 으로 둔갑한다.
+    strictEqual(hasLane(0), true);
+  });
+
+  it('NaN·Infinity 는 값이 아니다', () => {
+    strictEqual(hasLane(Number.NaN), false);
+    strictEqual(hasLane(Number.POSITIVE_INFINITY), false);
+  });
+
+  it('보통 값', () => {
+    strictEqual(hasLane(0.8), true);
   });
 });

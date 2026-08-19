@@ -197,3 +197,50 @@ export function formatMeetingTime(iso: string, locale = 'ko-KR'): string {
     minute: '2-digit',
   });
 }
+
+/**
+ * 홈 목록의 배치 — **사람이 할 일이 남은 것만 위로.**
+ *
+ * 예전에는 상태마다 그룹을 만들었습니다. 데모 데이터에서는 회의 다섯에
+ * 그룹이 **다섯**이었고, 그룹당 한 줄이면 그건 묶음이 아니라 머리말
+ * 다섯 개입니다 — 목록 높이의 절반을 머리말이 먹었습니다. 게다가 그룹
+ * 순서가 상태 순서라 날짜가 `09-01 → 09-05 → 09-02 → 09-08 → 09-03` 으로
+ * 뒤죽박죽이 되어 시간 감각이 사라졌습니다.
+ *
+ * 그래서 가르는 기준을 **상태**가 아니라 **사람이 할 일이 있는가**로
+ * 바꿉니다. `검토 필요` 는 지금 사람을 기다리는 유일한 상태이므로 따로
+ * 올리고, 나머지는 묶지 않고 **최근 것부터** 한 덩어리로 늘어놓습니다.
+ * 각 줄의 상태는 줄 안의 상태 칸이 말합니다.
+ */
+export interface HomeSections {
+  /** 사람을 기다리는 회의. 비어 있으면 길이 0. */
+  needsReview: Meeting[];
+  /** 나머지 — 최근 것부터. */
+  rest: Meeting[];
+}
+
+export function sectionMeetings(meetings: readonly Meeting[]): HomeSections {
+  // ⚠️ 내림차순입니다. 날짜가 같으면 id 큰 쪽(나중에 만든 것)이 위로 —
+  // 정렬이 흔들리면 목록이 새로고침마다 춤춥니다.
+  const byRecent = (a: Meeting, b: Meeting): number => {
+    const ta = Date.parse(a.started_at);
+    const tb = Date.parse(b.started_at);
+    if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return tb - ta;
+    return b.meeting_id - a.meeting_id;
+  };
+  const needsReview = meetings.filter((m) => m.status === 'needs_review').slice().sort(byRecent);
+  const rest = meetings.filter((m) => m.status !== 'needs_review').slice().sort(byRecent);
+  return { needsReview, rest };
+}
+
+/**
+ * 이 회의에 그릴 레인이 있는가.
+ *
+ * ⚠️ 레인은 "아는 것 / 모르는 것" 을 말하는 문법입니다. 잴 게 없을 때
+ * 빈 회색 막대를 그리면 그 문법이 무너집니다 — 홈에서 회의 다섯 중 넷이
+ * 빈 막대였고, **값 없는 요소가 목록의 시각적 무게중심을 차지**했습니다.
+ * 값이 없으면 레인 자리를 그냥 비우고, 상태 칸이 대신 말합니다.
+ */
+export function hasLane(coverage: number | null): boolean {
+  return coverage !== null && Number.isFinite(coverage);
+}

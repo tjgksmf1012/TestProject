@@ -19,7 +19,11 @@ import { presenceLabel, worthShowing } from '@lib/project/presence.ts';
 import { AVATAR_SIDE, MAX_BIO, PHOTO_NOTE, bioProblem, coverCrop, photoProblem } from '@lib/profile/edit.ts';
 import { ApiError } from '../api/client.ts';
 
-// 프로젝트 설정 — 좌 서브내비 + 우 판 (지시서 03).
+// 프로젝트 설정 — **상단 탭** + 아래 판 (지시서 03, v2 F11 로 갱신).
+//
+// ⚠️ 원래는 좌 서브내비 200px 이었습니다. 앱 레일 72px 옆에 세로 기둥을
+// 하나 더 세우는 꼴이라 내용 영역이 272px 깎였고, 설정은 화면 하나인데
+// 그럴 이유가 없었습니다.
 //
 // 성격이 다른 것을 같은 줄에 세우지 않습니다: 내 설정 / 프로젝트 / 위험 구역.
 // "회의 열기" 는 설정이 아니라 행동이라 헤더로 올라갔습니다.
@@ -490,9 +494,13 @@ export default function Settings() {
     <AppShell
       title={project.data?.title ?? '설정'}
       actions={
+        /* ⚠️ 여기서는 **secondary** 입니다 (v2 F9). 설정 화면에 온 사람이
+           하려는 일은 `저장`·`연결` 이고, 전역 단축 버튼이 그보다 크게
+           보이면 눈이 먼저 엉뚱한 데로 갑니다. 홈에서는 이 버튼이
+           primary 입니다 — 거기서는 그게 하려는 일이니까요. */
         <button
           type="button"
-          className="btn btn--primary"
+          className="btn btn--secondary"
           disabled={m.openMeeting.isPending}
           onClick={() =>
             m.openMeeting.mutate(undefined, {
@@ -504,27 +512,37 @@ export default function Settings() {
         </button>
       }
     >
-      <div className="panes">
-        <nav className="subnav" aria-label="설정 구역">
-          {groups.map((group) => (
-            <div key={group}>
-              <div className="subnav__group">{group}</div>
+      <div className="tabbed">
+        {/* ⚠️ **내비가 두 겹이었습니다** (v2 F11) — 앱 레일 72px + 설정
+            사이드바 200px. 설정은 화면 하나인데 세로 기둥 둘을 세우고
+            내용 영역을 272px 깎아 먹었습니다. 상단 탭으로 내리면 그 200px
+            이 내용으로 돌아옵니다.
+
+            묶음 이름(`내 설정`·`프로젝트`)은 **탭 사이 구분선**이 됩니다 —
+            탭 줄에 머리말을 넣으면 누를 수 없는 글자가 탭처럼 보입니다.
+            대신 `title` 로 남겨 낭독기와 마우스에는 전해집니다. */}
+        <nav className="tabs" aria-label="설정 구역">
+          {groups.map((group, gi) => (
+            <span className="tabs__group" key={group}>
+              {gi > 0 && <span className="tabs__sep" aria-hidden="true" />}
               {SECTIONS.filter((s) => s.group === group).map((s) => (
                 <NavLink
                   key={s.key}
                   to={`/project/${projectId}/settings/${s.key}`}
-                  className="subnav__item"
+                  className="tabs__item"
+                  title={`${group} · ${s.label}`}
                   aria-current={section === s.key ? 'page' : undefined}
                 >
                   {s.label}
                 </NavLink>
               ))}
-            </div>
+            </span>
           ))}
-          <div className="subnav__sep" />
+          {/* 위험 구역은 **오른쪽 끝**에 따로 떨어뜨립니다 — 손이 미끄러져
+              눌리는 자리에 두면 안 됩니다. */}
           <NavLink
             to={`/project/${projectId}/settings/danger`}
-            className="subnav__item subnav__item--danger"
+            className="tabs__item tabs__item--danger"
             aria-current={section === 'danger' ? 'page' : undefined}
           >
             내 녹음 지우기

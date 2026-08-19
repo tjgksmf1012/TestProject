@@ -5,6 +5,8 @@ import { Disclosure } from '../components/Disclosure.tsx';
 import { EvidenceChip } from '../components/EvidenceChip.tsx';
 import { Conditions, describeConditions, type Condition } from '../components/Conditions.tsx';
 import { Why } from '../components/Why.tsx';
+import { Picker } from '../components/Picker.tsx';
+import { DatePicker } from '../components/DatePicker.tsx';
 import {
   useCandidates,
   useMeeting,
@@ -30,7 +32,7 @@ import {
   type ReviewContext,
 } from '@lib/review/candidates.ts';
 import { audioNote, emptyTimelineNote, timelineRows, trackAudioUrl, type TimelineRow } from '@lib/review/timeline.ts';
-import { missingNote, emptyEvidenceNote } from '@lib/review/evidence.ts';
+import { missingNote, emptyEvidenceNote, withContext } from '@lib/review/evidence.ts';
 import { agendaItems, issueViews } from '@lib/review/minutes.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 
@@ -196,16 +198,39 @@ export default function Review() {
       projectId={meeting.data?.project_id}
       actions={
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+          {/* v2 F10 — 일괄 승인 기능은 **만들지 않습니다.** 이 버튼은
+              후보를 하나씩 다 처리한 뒤에야 열리는 마무리 버튼이고,
+              라벨도 그렇게 읽혀야 합니다(`3건 모두 처리하고 제출` → `검토
+              끝내기`). 사람이 하나씩 승인한다는 것이 이 제품의 안전장치라,
+              그걸 건너뛰는 길은 없습니다. */}
           {submitBlockedReason !== null && (
-            <span className="disabled-reason" style={{ margin: 0 }}>
+            <span className="disabled-reason" style={{ margin: 0 }} id="submit-reason">
               {lanes.pending > 0 ? `${lanes.pending}건 남음` : submitBlockedReason}
             </span>
           )}
+          {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 — 카드의 `등록`
+              버튼과 같은 규칙입니다. 비활성 버튼은 포커스를 못 받아 낭독기에
+              사유를 못 전합니다(GOV.UK). 누르면 아직 안 정한 첫 후보로
+              데려다 줍니다. */}
           <button
             type="button"
-            className="btn btn--primary"
-            disabled={submitBlockedReason !== null || submit.isPending}
-            onClick={onSubmit}
+            className={`btn btn--primary${submitBlockedReason !== null ? ' btn--unmet' : ''}`}
+            aria-disabled={submitBlockedReason !== null || submit.isPending}
+            aria-describedby={submitBlockedReason !== null ? 'submit-reason' : undefined}
+            onClick={() => {
+              if (submit.isPending) return;
+              if (submitBlockedReason !== null) {
+                const first = candidates.find(
+                  (c) => (drafts.get(c.id)?.decision ?? null) === null,
+                );
+                if (first !== undefined) {
+                  setSelectedId(first.id);
+                  document.getElementById(`cand-${first.id}`)?.scrollIntoView({ block: 'center' });
+                }
+                return;
+              }
+              onSubmit();
+            }}
           >
             검토 끝내기
           </button>
@@ -354,6 +379,7 @@ export default function Review() {
               return (
                 <article
                   key={candidate.id}
+                  id={`cand-${candidate.id}`}
                   className={`cand${candidate.id === selectedId ? ' cand--selected' : ''}`}
                   tabIndex={0}
                   onClick={() => select(candidate)}
@@ -404,42 +430,35 @@ export default function Review() {
                           <> — 회의에서는 “{candidate.assignee_hint}”</>
                         )}
                       </span>
-                      <select
-                        className="select"
+                      {/* v2 F8 — 네이티브 `<select>` 는 브라우저가 그려서
+                          나머지 UI 와 톤이 어긋나고, 다크에서 목록만 밝게
+                          떴습니다. 직접 만들지 않고 Radix 를 씁니다 —
+                          키보드·타이핑 검색·낭독기를 다시 만들면 대개 덜
+                          만들게 됩니다. */}
+                      <Picker
                         value={
-                          draft.assigneeOverride !== undefined
-                            ? (draft.assigneeOverride ?? '')
-                            : (candidate.assignee_id ?? '')
+                          effectiveAssignee(candidate, draft) === null
+                            ? null
+                            : String(effectiveAssignee(candidate, draft))
                         }
-                        onChange={(e) =>
+                        onChange={(next) =>
                           update(candidate.id, {
-                            assigneeOverride: e.target.value === '' ? null : Number(e.target.value),
+                            assigneeOverride: next === null ? null : Number(next),
                           })
                         }
-                      >
-                        <option value="">미지정</option>
-                        {members.map((m) => (
-                          <option key={m.user_id} value={m.user_id}>
-                            {m.name}
-                          </option>
-                        ))}
-                      </select>
+                        options={members.map((m) => ({ value: String(m.user_id), label: m.name }))}
+                        emptyLabel="미지정"
+                        ariaLabel={`${candidate.title} — 담당자`}
+                      />
                     </label>
                     <label className="field">
                       <span className="field__label">마감</span>
-                      <input
-                        type="date"
-                        className="input input--num"
-                        value={
-                          draft.deadlineOverride !== undefined
-                            ? (draft.deadlineOverride ?? '')
-                            : (candidate.deadline ?? '')
-                        }
-                        onChange={(e) =>
-                          update(candidate.id, {
-                            deadlineOverride: e.target.value === '' ? null : e.target.value,
-                          })
-                        }
+                      {/* v2 F7 — `mm/dd/yyyy` 는 `lang` 으로도 `locale` 로도
+                          못 바꿉니다. 브라우저 UI 언어를 따르기 때문입니다. */}
+                      <DatePicker
+                        value={effectiveDeadline(candidate, draft)}
+                        onChange={(next) => update(candidate.id, { deadlineOverride: next })}
+                        ariaLabel={`${candidate.title} — 마감`}
                       />
                     </label>
                   </div>
@@ -504,34 +523,47 @@ export default function Review() {
             ) : (
               (() => {
                 const asked = selected.evidence_utterance_ids;
-                const got = rows.flatMap((row) =>
-                  row.kind === 'utterance' && selectedEvidence.has(row.view.id) ? [row.view] : [],
+                // 이 회의의 발화를 화면 순서대로. 근거 창을 뜰 바탕입니다.
+                const byId = new Map(
+                  rows.flatMap((row) => (row.kind === 'utterance' ? [[row.view.id, row.view] as const] : [])),
                 );
                 const missing = missingNote(
                   asked,
-                  got.map((v) => ({ id: v.id }) as never),
+                  [...byId.keys()].filter((id) => selectedEvidence.has(id)).map((id) => ({ id }) as never),
                 );
-                if (got.length === 0) {
+                if (![...byId.keys()].some((id) => selectedEvidence.has(id))) {
                   return <div className="empty">{emptyEvidenceNote(asked)}</div>;
                 }
+                // ⚠️ **근거만 떼어 놓으면 판단할 수 없습니다** (v2 F5).
+                // "금요일까지 만들기로 하죠" 한 줄은 합의인지 반문인지
+                // 구분이 안 됩니다. 앞뒤 두 건씩을 함께 놓고, 근거인 것만
+                // 인디고로 표시합니다. 무엇을 고를지는 `@lib` 이 정합니다.
+                const picks = withContext([...byId.keys()], asked, 2);
                 return (
                   <>
-                    {got.map((view) => (
-                      <div className="evrow" key={view.id}>
-                        <div className="evrow__meta">
-                          <span className="num">발화 #{view.id}</span>
-                          {view.at !== null && <span className="num">{view.at}</span>}
-                          <span>
-                            {view.speaker}
-                            {view.type !== null && ` · ${view.type}`}
-                          </span>
+                    {picks.map((pick) => {
+                      const view = byId.get(pick.id);
+                      if (view === undefined) return null;
+                      return (
+                        <div
+                          className={`evrow${pick.isEvidence ? ' evrow--cited' : ' evrow--around'}`}
+                          key={view.id}
+                        >
+                          <div className="evrow__meta">
+                            <span className="num">발화 #{view.id}</span>
+                            {view.at !== null && <span className="num">{view.at}</span>}
+                            <span>
+                              {view.speaker}
+                              {view.type !== null && ` · ${view.type}`}
+                            </span>
+                          </div>
+                          <p className="evrow__text">“{view.text}”</p>
+                          {pick.isEvidence && view.speakerNote !== null && (
+                            <p className="evrow__note">{view.speakerNote}</p>
+                          )}
                         </div>
-                        <p className="evrow__text">“{view.text}”</p>
-                        {view.speakerNote !== null && (
-                          <p className="evrow__note">{view.speakerNote}</p>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                     {missing !== null && <p className="notice">{missing}</p>}
                   </>
                 );

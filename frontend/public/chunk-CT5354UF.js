@@ -1,0 +1,1 @@
+var o="Asia/Seoul",a=new Intl.DateTimeFormat("en-CA",{timeZone:o,year:"numeric",month:"2-digit",day:"2-digit"});function r(n){let t=new Map(a.formatToParts(n).map(e=>[e.type,e.value]));return`${t.get("year")}-${t.get("month")}-${t.get("day")}`}function i(n){let t=new Date(n);return Number.isNaN(t.getTime())?null:r(t)}function s(n=new Date){return r(n)}export{i as a,s as b};
