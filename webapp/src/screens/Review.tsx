@@ -197,7 +197,7 @@ export default function Review() {
       title={`${title} · 업무 후보 ${lanes.all}건`}
       projectId={meeting.data?.project_id}
       actions={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-4)' }}>
+        <div className="appbar__actions">
           {/* v2 F10 — 일괄 승인 기능은 **만들지 않습니다.** 이 버튼은
               후보를 하나씩 다 처리한 뒤에야 열리는 마무리 버튼이고,
               라벨도 그렇게 읽혀야 합니다(`3건 모두 처리하고 제출` → `검토

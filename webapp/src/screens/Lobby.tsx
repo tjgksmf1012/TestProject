@@ -125,7 +125,7 @@ export default function Lobby() {
       projectId={meeting.data?.project_id}
       meta={room.message}
       actions={
-        <div style={{ display: 'flex', gap: 'var(--sp-4)' }}>
+        <div className="appbar__actions">
           {meeting.data?.status === 'needs_review' && (
             <Link className="btn btn--primary" to={`/meeting/${meetingId}/review`}>
               업무 후보 검토

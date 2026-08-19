@@ -227,7 +227,7 @@ export default function Home() {
           : undefined
       }
       actions={
-        <div style={{ display: 'flex', gap: 'var(--sp-4)' }}>
+        <div className="appbar__actions">
           {/* v2 F9 — 화면당 primary 는 하나. 주된 행동은 `회의 열기` 입니다. */}
           <button type="button" className="btn btn--ghost" onClick={() => setStartOpen(true)}>
             + 새 프로젝트
