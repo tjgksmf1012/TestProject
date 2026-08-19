@@ -91,6 +91,30 @@ def test_root_serves_the_recording_screen(client: TestClient):
     assert client.get("/").status_code == 200
 
 
+def test_the_spa_home_survives_a_refresh(client: TestClient):
+    """⛔ **`/app` 에서 F5 를 누르면 앱이 죽었습니다** (결함 190).
+
+    `mount("/app", …)` 이 잡는 것은 `^/app(/.*)$` 입니다 — 끝에 슬래시가
+    없는 **정확히 `/app`** 은 안 걸리고, 그 뒤의 `mount("/", …)` 이 삼켜
+    `frontend/public/app` 을 찾다가 404 를 냅니다. 사람은 앱 대신
+    `{"detail":"Not Found"}` 라는 날 JSON 을 봅니다.
+
+    하필 그 주소가 **홈**입니다. React Router 의 `basename: "/app"` 은
+    홈 경로를 `/app`(슬래시 없이)으로 만들기 때문에, 로그인하면 주소창이
+    `/app` 이 되고 거기서 새로고침하면 죽었습니다. 프로젝트를 만든
+    직후에도 같은 자리로 갑니다(`navigate(0)` 가 통째로 새로고침합니다)
+    — 새 사용자가 **제일 먼저 하는 일**입니다.
+
+    ⚠️ 슬래시가 있는 쪽만 재면 이 결함은 영원히 안 잡힙니다. 브라우저
+    주소창에 실제로 들어가는 값(`/app`)을 재십시오.
+    """
+    for path in ("/app", "/app/", "/app/project/1/kanban"):
+        response = client.get(path)
+        assert response.status_code == 200, f"{path} 가 안 열립니다"
+        assert "text/html" in response.headers["content-type"], f"{path} 가 HTML 이 아닙니다"
+        assert "<div id=\"root\">" in response.text, f"{path} 가 SPA 껍데기가 아닙니다"
+
+
 def test_static_mount_does_not_shadow_the_api(client: TestClient, seeded: dict):
     """⭐ `/` 마운트는 앞의 모든 경로를 삼킨다.
 

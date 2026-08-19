@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as Pop from '@radix-ui/react-popover';
 import {
   WEEKDAY_LABELS,
@@ -6,6 +6,7 @@ import {
   formatTeamDate,
   monthGrid,
   monthOf,
+  moveInCalendar,
   shiftMonth,
   todayInTeamCalendar,
 } from '@lib/time/calendar.ts';
@@ -45,6 +46,42 @@ export function DatePicker({ value, onChange, ariaLabel, id }: DatePickerProps) 
   const [month, setMonth] = useState(() => monthOf(value, today));
   const shown = formatTeamDate(value);
 
+  // ⚠️ **격자 키보드 조작** (결함 196). `role="grid"` 라고 말해 놓고
+  //    화살표가 안 먹으면 키보드로 날짜를 고르려면 Tab 을 마흔 번 넘게
+  //    눌러야 합니다. 마감은 후보 등록의 필수 조건이라, 마우스를 못 쓰는
+  //    사람은 이 제품의 핵심 흐름을 끝낼 수 없었습니다.
+  //
+  //    ARIA 의 roving tabindex — 격자 전체에서 **한 칸만** 탭 정지점입니다.
+  //    나머지는 화살표로 옮겨 다닙니다.
+  const [cursor, setCursor] = useState<string>(value ?? today);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const moveTo = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const next = value ?? today;
+    setCursor(next);
+    setMonth(monthOf(next, today));
+    // ⚠️ 여기서 초점을 옮기지 않습니다 — Radix 의 자동 초점이 **뒤에**
+    //    와서 도로 뺏어 갑니다. 그 일은 `onOpenAutoFocus` 가 합니다.
+  }, [open, value, today]);
+
+  useEffect(() => {
+    const want = moveTo.current;
+    if (want === null) return;
+    moveTo.current = null;
+    gridRef.current?.querySelector<HTMLElement>(`[data-date="${want}"]`)?.focus();
+  });
+
+  const onGridKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const next = moveInCalendar(cursor, event.key);
+    if (next === null) return;
+    event.preventDefault();
+    setCursor(next);
+    setMonth(monthOf(next, today));
+    moveTo.current = next;
+  };
+
   return (
     <Pop.Root
       open={open}
@@ -67,7 +104,22 @@ export function DatePicker({ value, onChange, ariaLabel, id }: DatePickerProps) 
         </button>
       </Pop.Trigger>
       <Pop.Portal>
-        <Pop.Content className="cal" sideOffset={4} align="start">
+        <Pop.Content
+          className="cal"
+          sideOffset={4}
+          align="start"
+          // ⚠️ **Radix 가 여는 순간 첫 초점을 가져갑니다** — `‹`(이전 달)
+          //    버튼입니다. 거기서는 화살표를 눌러도 아무 일이 없어서,
+          //    "격자 키보드를 붙였는데 여전히 안 움직인다" 가 됐습니다.
+          //    (`useEffect` 로 나중에 초점을 옮겨 봤지만 Radix 의 자동
+          //    초점이 **뒤에** 와서 도로 뺏어 갑니다.)
+          //    자동 초점을 막고 **고른 날 칸**으로 직접 보냅니다.
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            const want = value ?? today;
+            gridRef.current?.querySelector<HTMLElement>(`[data-date="${want}"]`)?.focus();
+          }}
+        >
           <div className="cal__head">
             <button
               type="button"
@@ -91,7 +143,13 @@ export function DatePicker({ value, onChange, ariaLabel, id }: DatePickerProps) 
               ›
             </button>
           </div>
-          <div className="cal__grid" role="grid" aria-label={describeMonth(month)}>
+          <div
+            className="cal__grid"
+            role="grid"
+            aria-label={describeMonth(month)}
+            ref={gridRef}
+            onKeyDown={onGridKey}
+          >
             {WEEKDAY_LABELS.map((w) => (
               <span className="cal__wd" key={w} aria-hidden="true">
                 {w}
@@ -113,6 +171,10 @@ export function DatePicker({ value, onChange, ariaLabel, id }: DatePickerProps) 
                     .join(' ')}
                   aria-pressed={picked}
                   aria-label={cell.date}
+                  data-date={cell.date}
+                  // 격자에서 **한 칸만** 탭 정지점입니다 (roving tabindex).
+                  tabIndex={cell.date === cursor ? 0 : -1}
+                  onFocus={() => setCursor(cell.date)}
                   onClick={() => {
                     onChange(cell.date);
                     setOpen(false);

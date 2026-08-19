@@ -121,6 +121,65 @@ function isoDate(at: Date): string {
   return `${at.getUTCFullYear()}-${p(at.getUTCMonth() + 1)}-${p(at.getUTCDate())}`;
 }
 
+/**
+ * 달력 격자에서 **키를 눌렀을 때 갈 날짜.**
+ *
+ * ## ⚠️ `role="grid"` 라고 말해 놓고 격자 조작이 없었습니다
+ *
+ * 달력은 `<button>` 42개입니다. 화살표 이동이 없으면 키보드로 날짜를
+ * 고르려면 **Tab 을 마흔 번 넘게** 눌러야 합니다. 그리고 마감은 후보
+ * 등록의 필수 조건이라, 마우스를 못 쓰는 사람은 이 제품의 핵심 흐름을
+ * 아예 못 끝냅니다 (결함 196).
+ *
+ * ARIA 는 `role="grid"` 를 붙였으면 격자 키보드 모델을 **구현해야
+ * 한다**고 못 박습니다. 안 하면 역할을 안 붙인 것보다 나쁩니다 —
+ * 낭독기가 "격자입니다, 화살표로 이동하세요" 라고 안내하는데 안 움직입니다.
+ *
+ * ⚠️ 날짜 셈은 여기(순수 계산)에 둡니다. 화면에서 `new Date()` 로 더하면
+ * 서머타임·월말·윤년에서 갈라집니다.
+ *
+ * @param from  지금 있는 날 `YYYY-MM-DD`
+ * @param key   `ArrowLeft` `ArrowRight` `ArrowUp` `ArrowDown` `Home` `End`
+ *              `PageUp` `PageDown`
+ * @returns 갈 날짜. 다루지 않는 키면 `null`.
+ */
+export function moveInCalendar(from: string, key: string): string | null {
+  const at = Date.parse(`${from}T00:00:00Z`);
+  if (Number.isNaN(at)) return null;
+  const day = 86_400_000;
+  switch (key) {
+    case 'ArrowLeft':
+      return isoDate(new Date(at - day));
+    case 'ArrowRight':
+      return isoDate(new Date(at + day));
+    case 'ArrowUp':
+      return isoDate(new Date(at - 7 * day));
+    case 'ArrowDown':
+      return isoDate(new Date(at + 7 * day));
+    // 그 주의 일요일 / 토요일 — 격자에서 눈에 보이는 줄의 양 끝입니다.
+    case 'Home':
+      return isoDate(new Date(at - new Date(at).getUTCDay() * day));
+    case 'End':
+      return isoDate(new Date(at + (6 - new Date(at).getUTCDay()) * day));
+    // 달을 넘길 때 **날짜를 유지**합니다. 1월 31일에서 PageDown 을 누르면
+    // 2월 31일은 없으므로 그 달의 마지막 날로 붙입니다 — 넘겨 버리면
+    // 3월 3일 같은 엉뚱한 날로 튑니다.
+    case 'PageUp':
+    case 'PageDown': {
+      const d = new Date(at);
+      const delta = key === 'PageUp' ? -1 : 1;
+      const total = d.getUTCFullYear() * 12 + d.getUTCMonth() + delta;
+      const year = Math.floor(total / 12);
+      const mon = total - year * 12;
+      const last = new Date(Date.UTC(year, mon + 1, 0)).getUTCDate();
+      const dayOfMonth = Math.min(d.getUTCDate(), last);
+      return isoDate(new Date(Date.UTC(year, mon, dayOfMonth)));
+    }
+    default:
+      return null;
+  }
+}
+
 /** `YYYY-MM` 을 `delta` 달만큼 옮긴다. 연도를 알아서 넘어간다. */
 export function shiftMonth(month: string, delta: number): string {
   const m = /^(\d{4})-(\d{2})$/.exec(month);
