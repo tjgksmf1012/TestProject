@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeamFlow 리디자인 프로토타입</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.0.18/index.min.css">
+<link rel="stylesheet" href="../tokens/tokens.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  html, body { overflow: auto; height: auto; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: var(--sp-11) var(--sp-7) var(--sp-12); }
+  h1 { font-size: var(--fs-34); letter-spacing: var(--ls-34); margin-bottom: var(--sp-4); }
+  .lede { font-size: var(--fs-16); color: var(--c-ink-muted); max-width: var(--measure); margin: 0 0 var(--sp-9); }
+  .items { display: grid; gap: var(--sp-5); }
+  .item {
+    display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--sp-7);
+    padding: var(--sp-7); background: var(--c-surface);
+    border: 1px solid var(--c-line); border-radius: var(--r-md);
+    text-decoration: none; color: inherit;
+    transition: border-color var(--dur-fast) var(--ease);
+  }
+  .item:hover { border-color: var(--c-evidence-line); }
+  .item h2 { font-size: var(--fs-20); letter-spacing: var(--ls-20); margin-bottom: var(--sp-3); }
+  .item p { font-size: var(--fs-13); color: var(--c-ink-muted); margin: 0; }
+  .delta { text-align: right; white-space: nowrap; }
+  .delta__before { font-family: var(--font-mono); font-size: var(--fs-13); color: var(--c-unknown); text-decoration: line-through; }
+  .delta__after { font-family: var(--font-mono); font-size: var(--fs-26); color: var(--c-evidence); display: block; }
+  .delta__unit { font-size: var(--fs-11); color: var(--c-ink-faint); }
+  .legend { margin-top: var(--sp-10); padding-top: var(--sp-7); border-top: 1px solid var(--c-line); }
+  .swatches { display: flex; gap: var(--sp-6); flex-wrap: wrap; margin-top: var(--sp-5); }
+  .sw { display: flex; align-items: center; gap: var(--sp-4); font-size: var(--fs-12); color: var(--c-ink-muted); }
+  .sw i { width: 28px; height: 28px; border-radius: var(--r-sm); display: block; border: 1px solid var(--c-line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>TeamFlow 리디자인 프로토타입</h1>
+  <p class="lede">
+    "계측기(Instrument)" 방향으로 다시 짠 화면입니다. 셋 다 <strong>1280×800에서 페이지 스크롤이 0</strong>입니다 —
+    스크롤은 안쪽 판이 각자 담당합니다. 우측 하단 버튼으로 다크모드를 확인할 수 있습니다.
+  </p>
+
+  <div class="items">
+    <a class="item" href="review.html">
+      <div>
+        <h2>업무 후보 검토</h2>
+        <p>전사·후보·근거 3판으로 분리. 후보를 고르면 근거 판이 갱신되고 전사가 해당 발화로 이동합니다.
+           근거 없는 후보는 등록 버튼이 영구 비활성입니다.</p>
+      </div>
+      <div class="delta">
+        <span class="delta__before">2971px</span>
+        <span class="delta__after">800px</span>
+        <span class="delta__unit">3.7화면 → 1화면</span>
+      </div>
+    </a>
+
+    <a class="item" href="project-settings.html">
+      <div>
+        <h2>프로젝트 설정</h2>
+        <p>카드 9개 세로 스택을 좌측 서브내비 + 우측 판으로 분리. "회의 열기"는 헤더 주 행동으로,
+           "내 정보"는 홈에서 여기로 옮겼습니다. 위험 구역은 분리했습니다.</p>
+      </div>
+      <div class="delta">
+        <span class="delta__before">3665px</span>
+        <span class="delta__after">800px</span>
+        <span class="delta__unit">4.6화면 → 1화면</span>
+      </div>
+    </a>
+
+    <a class="item" href="contributions.html">
+      <div>
+        <h2>기여도</h2>
+        <p>세 사람과 확정 폼이 동시에 보입니다. 리본의 채워진 길이는 기여도가 아니라 확신도입니다.
+           값을 바꾸면 그 행에만 사유 입력칸이 펼쳐집니다.</p>
+      </div>
+      <div class="delta">
+        <span class="delta__before">1718px</span>
+        <span class="delta__after">800px</span>
+        <span class="delta__unit">2.1화면 → 1화면</span>
+      </div>
+    </a>
+  </div>
+
+  <div class="legend">
+    <span class="micro">색 규칙 — 색은 의미일 때만 나타납니다</span>
+    <div class="swatches">
+      <span class="sw"><i style="background:var(--c-ink)"></i> 잉크 — 사람이 말한 것</span>
+      <span class="sw"><i style="background:var(--c-evidence)"></i> 인디고 — 근거가 있다 / 실행 가능하다</span>
+      <span class="sw"><i style="background:var(--c-unknown)"></i> 황토 — 측정하지 못했다 (빨강 아님)</span>
+      <span class="sw"><i style="background:var(--c-danger)"></i> 빨강 — 되돌릴 수 없는 삭제만</span>
+    </div>
+    <p class="t12 faint" style="margin-top:var(--sp-6)">
+      측정된 값은 전부 모노스페이스 + tabular-nums입니다. 사람이 말한 문장은 Pretendard입니다.
+    </p>
+  </div>
+</div>
+
+<div class="proto-note">
+  <span>프로토타입 목록</span>
+  <button class="btn btn--ghost btn--sm" id="themeBtn">다크</button>
+</div>
+<script>
+document.getElementById('themeBtn').addEventListener('click', e => {
+  const root = document.documentElement;
+  const dark = root.getAttribute('data-theme') === 'dark';
+  root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  e.target.textContent = dark ? '다크' : '라이트';
+});
+</script>
+</body>
+</html>

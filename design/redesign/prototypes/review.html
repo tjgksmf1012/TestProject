@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>업무 후보 검토 — TeamFlow 프로토타입</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.0.18/index.min.css">
+<link rel="stylesheet" href="../tokens/tokens.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  .pane--transcript { flex: 0 0 300px; }
+  .pane--candidates { flex: 1 1 auto; background: var(--c-paper); }
+  .pane--evidence   { flex: 0 0 300px; }
+
+  /* 전사 */
+  .utt {
+    padding: var(--sp-4) var(--sp-6);
+    border-bottom: 1px solid var(--c-line);
+    cursor: pointer;
+    position: relative;
+  }
+  .utt:hover { background: var(--c-sunken); }
+  .utt.is-evidence::after {
+    content: ""; position: absolute; right: 10px; top: 16px;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--c-evidence);
+  }
+  .utt.is-target { background: var(--c-evidence-tint); }
+  .utt__meta {
+    display: flex; gap: var(--sp-4); align-items: baseline;
+    font-size: var(--fs-11); color: var(--c-ink-faint); margin-bottom: var(--sp-2);
+  }
+  .utt__time { font-family: var(--font-mono); color: var(--c-ink-muted); }
+  .utt__who { font-weight: var(--fw-semibold); color: var(--c-ink-muted); }
+  .utt__text { font-size: var(--fs-13); line-height: 1.6; }
+
+  /* 후보 카드 */
+  .cand {
+    background: var(--c-surface);
+    border: 1px solid var(--c-line);
+    border-left: 3px solid transparent;
+    border-radius: var(--r-md);
+    padding: var(--sp-6);
+    margin-bottom: var(--sp-5);
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease);
+  }
+  .cand:hover { border-color: var(--c-line-strong); }
+  .cand.is-selected { border-left-color: var(--c-evidence); border-color: var(--c-evidence-line); }
+  .cand__top { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-5); }
+  .cand__origin { font-size: var(--fs-11); letter-spacing: var(--ls-11); text-transform: uppercase; color: var(--c-ink-faint); font-weight: var(--fw-semibold); }
+  .cand__conf { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--c-ink-faint); }
+  .cand__title { font-size: var(--fs-20); font-weight: var(--fw-semibold); letter-spacing: var(--ls-20); margin: var(--sp-3) 0 var(--sp-4); }
+  .cand__chips { display: flex; gap: var(--sp-3); flex-wrap: wrap; }
+  .cand__split { border: 0; border-top: 1px dashed var(--c-line-strong); margin: var(--sp-6) 0 var(--sp-5); }
+  .cand__human { display: flex; gap: var(--sp-5); flex-wrap: wrap; margin-bottom: var(--sp-5); }
+  .cand__actions { display: flex; gap: var(--sp-4); align-items: center; }
+
+  /* 근거 판 */
+  .ev { padding: var(--sp-5) 0; border-bottom: 1px solid var(--c-line); }
+  .ev__head { display: flex; gap: var(--sp-4); align-items: baseline; margin-bottom: var(--sp-3); }
+  .ev__id { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--c-evidence); font-weight: var(--fw-semibold); }
+  .ev__quote {
+    font-size: var(--fs-13); line-height: 1.65;
+    border-left: 2px solid var(--c-evidence-line);
+    padding-left: var(--sp-5); color: var(--c-ink);
+  }
+  .ev-empty { color: var(--c-ink-faint); font-size: var(--fs-13); padding: var(--sp-8) 0; text-align: center; }
+
+  .scrollmeter {
+    font-family: var(--font-mono); font-size: var(--fs-11);
+    color: var(--c-ink-faint); text-align: center;
+    padding: var(--sp-3); border-top: 1px solid var(--c-line);
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <nav class="rail">
+    <div class="rail__brand">TF</div>
+    <a class="rail__item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 10l9-7 9 7v10a1 1 0 01-1 1h-5v-7H9v7H4a1 1 0 01-1-1z"/></svg>홈</a>
+    <a class="rail__item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="5" height="16"/><rect x="10" y="4" width="5" height="16"/><rect x="17" y="4" width="4" height="16"/></svg>칸반</a>
+    <a class="rail__item" href="contributions.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h10M4 17h13"/></svg>기여도</a>
+    <a class="rail__item" href="project-settings.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--c-surface)"/><circle cx="15" cy="12" r="2" fill="var(--c-surface)"/><circle cx="8" cy="17" r="2" fill="var(--c-surface)"/></svg>설정</a>
+  </nav>
+
+  <div class="main">
+    <header class="appbar">
+      <span class="appbar__title">업무 후보 검토</span>
+      <span class="appbar__meta">1주차 정기회의 · 후보 3건</span>
+      <span class="appbar__spacer"></span>
+      <button class="btn btn--primary" id="submitBtn" disabled>3건 모두 처리하고 제출</button>
+    </header>
+
+    <div class="panes">
+
+      <!-- 좌: 회의 내용 -->
+      <section class="pane pane--transcript" aria-label="회의 내용">
+        <div class="pane__head">
+          <span class="pane__title">회의 내용</span>
+          <span class="pane__count num">발화 20</span>
+        </div>
+        <div class="pane__body pane__body--flush">
+          <div style="padding: var(--sp-5) var(--sp-6) 0;">
+            <details class="disc">
+              <summary>요약 · 다음 안건 2 · 답 안 난 것 1</summary>
+              <div>로그인 인증 방식을 JWT로 정했고, 배포 방식은 다음 회의로 넘겼습니다.</div>
+            </details>
+            <details class="disc">
+              <summary>눈에 띈 것 2건</summary>
+              <div>반복 논의 <span class="num">0:01–26:08</span> · 주제 이탈 <span class="num">12:00–13:09</span></div>
+            </details>
+          </div>
+          <div style="height:1px;background:var(--c-line);margin:var(--sp-5) 0 0;"></div>
+
+          <article class="utt is-evidence" data-utt="1">
+            <div class="utt__meta"><span class="utt__time">0:01</span><span class="utt__who">김민수</span><span>결정</span></div>
+            <p class="utt__text">로그인 API는 민수가 금요일까지 만들기로 하죠</p>
+          </article>
+          <article class="utt is-evidence" data-utt="2">
+            <div class="utt__meta"><span class="utt__time">0:09</span><span class="utt__who">이하늘</span><span>일정 약속</span></div>
+            <p class="utt__text">네 저는 회원가입 화면을 맡을게요</p>
+          </article>
+          <article class="utt is-evidence" data-utt="3">
+            <div class="utt__meta"><span class="utt__time">0:16</span><span class="utt__who">김민수</span><span>의견</span></div>
+            <p class="utt__text">인증 방식은 JWT로 가는 게 좋겠습니다</p>
+          </article>
+          <article class="utt" data-utt="4">
+            <div class="utt__meta"><span class="utt__time">0:24</span><span class="utt__who">박지원</span><span>일정 약속</span></div>
+            <p class="utt__text">그럼 저는 DB 스키마를 다음 주 화요일까지 정리하겠습니다</p>
+          </article>
+          <article class="utt is-evidence" data-utt="5">
+            <div class="utt__meta"><span class="utt__time">0:32</span><span class="utt__who">이하늘</span><span>기타</span></div>
+            <p class="utt__text">배포는 아직 정하지 말고 다음 회의에서 다시 얘기해요</p>
+          </article>
+          <article class="utt" data-utt="6">
+            <div class="utt__meta"><span class="utt__time">0:39</span><span class="utt__who">박지원</span><span>반대 의견</span></div>
+            <p class="utt__text">금요일까지는 좀 어려울 것 같습니다. 테스트까지 하면 빠듯해요</p>
+          </article>
+          <article class="utt" data-utt="7">
+            <div class="utt__meta"><span class="utt__time">0:47</span><span class="utt__who">김민수</span><span>보완 의견</span></div>
+            <p class="utt__text">동의합니다. 다만 화면 쪽은 그대로 가도 될 것 같습니다</p>
+          </article>
+          <article class="utt" data-utt="8">
+            <div class="utt__meta"><span class="utt__time">0:55</span><span class="utt__who">이하늘</span><span>동의</span></div>
+            <p class="utt__text">저도 같은 생각입니다. 그 순서가 맞다고 봅니다</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- 중: 후보 -->
+      <section class="pane pane--candidates" aria-label="업무 후보">
+        <div class="pane__head">
+          <span class="pane__title">후보</span>
+          <span class="pane__count num">검토 필요 3</span>
+          <span class="appbar__spacer"></span>
+          <span class="t12 faint">확신 낮은 것부터</span>
+        </div>
+        <div class="pane__body">
+
+          <!-- 근거 없음 케이스 -->
+          <article class="cand" data-cand="a" data-ev="">
+            <div class="cand__top">
+              <span class="cand__origin">AI 초안</span>
+              <span class="cand__conf">확신 34%</span>
+            </div>
+            <h3 class="cand__title">배포 방식 결정</h3>
+            <div class="cand__chips">
+              <span class="chip chip--unknown">⚠ 근거 없음 — 등록할 수 없습니다</span>
+            </div>
+            <details class="disc">
+              <summary>확신하지 못한 이유 2건</summary>
+              <div>“배포는 아직 정하지 말고”는 결정이 아니라 보류입니다. 담당자를 지목한 발화가 없습니다.</div>
+            </details>
+            <hr class="cand__split">
+            <div class="cand__human">
+              <label class="field"><span class="field__label">담당자</span>
+                <select class="select" disabled><option>담당자 미지정</option></select></label>
+              <label class="field"><span class="field__label">마감</span>
+                <input class="input input--num" type="date" disabled></label>
+            </div>
+            <p class="disabled-reason">근거 발화가 없는 후보는 담당자·마감을 채워도 등록할 수 없습니다.</p>
+            <div class="cand__actions">
+              <button class="btn btn--primary" disabled>업무로 등록</button>
+              <button class="btn btn--secondary btn--sm">나중에</button>
+              <button class="btn btn--ghost btn--sm">거절</button>
+            </div>
+          </article>
+
+          <!-- 미완성 케이스 -->
+          <article class="cand" data-cand="b" data-ev="2">
+            <div class="cand__top">
+              <span class="cand__origin">AI 초안</span>
+              <span class="cand__conf">확신 71%</span>
+            </div>
+            <h3 class="cand__title">회원가입 화면 작업</h3>
+            <div class="cand__chips">
+              <button class="chip chip--evidence" data-jump="2">근거 #2</button>
+            </div>
+            <details class="disc">
+              <summary>확신하지 못한 이유 1건</summary>
+              <div>회의에서는 “저”라고 했습니다 — 명단에서 찾지 못했습니다.</div>
+            </details>
+            <hr class="cand__split">
+            <div class="cand__human">
+              <label class="field"><span class="field__label">담당자</span>
+                <select class="select"><option>담당자 미지정</option><option>김민수</option><option>박지원</option><option>이하늘</option></select></label>
+              <label class="field"><span class="field__label">마감</span>
+                <input class="input input--num" type="date"></label>
+            </div>
+            <p class="disabled-reason">담당자와 마감일을 지정해야 등록할 수 있습니다.</p>
+            <div class="cand__actions">
+              <button class="btn btn--primary" disabled>업무로 등록</button>
+              <button class="btn btn--secondary btn--sm">나중에</button>
+              <button class="btn btn--ghost btn--sm">거절</button>
+            </div>
+          </article>
+
+          <!-- 등록 가능 케이스 -->
+          <article class="cand is-selected" data-cand="c" data-ev="1,3">
+            <div class="cand__top">
+              <span class="cand__origin">AI 초안</span>
+              <span class="cand__conf">확신 92%</span>
+            </div>
+            <h3 class="cand__title">로그인 API 구현</h3>
+            <div class="cand__chips">
+              <button class="chip chip--evidence" data-jump="1">근거 #1</button>
+              <button class="chip chip--evidence" data-jump="3">근거 #3</button>
+            </div>
+            <hr class="cand__split">
+            <div class="cand__human">
+              <label class="field"><span class="field__label">담당자</span>
+                <select class="select"><option>김민수</option><option>박지원</option><option>이하늘</option></select></label>
+              <label class="field"><span class="field__label">마감</span>
+                <input class="input input--num" type="date" value="2026-09-11"></label>
+            </div>
+            <div class="cand__actions">
+              <button class="btn btn--primary">업무로 등록</button>
+              <button class="btn btn--secondary btn--sm">나중에</button>
+              <button class="btn btn--ghost btn--sm">거절</button>
+            </div>
+          </article>
+
+        </div>
+        <div class="scrollmeter">페이지 스크롤 0 · 판만 스크롤</div>
+      </section>
+
+      <!-- 우: 근거 -->
+      <aside class="pane pane--evidence" aria-label="근거">
+        <div class="pane__head">
+          <span class="pane__title">근거</span>
+          <span class="pane__count num" id="evCount">2건</span>
+        </div>
+        <div class="pane__body" id="evBody"></div>
+      </aside>
+
+    </div>
+  </div>
+</div>
+
+<div class="proto-note">
+  <span>프로토타입 · 검토 화면</span>
+  <a href="index.html">← 목록</a>
+  <button class="btn btn--ghost btn--sm" id="themeBtn">다크</button>
+</div>
+
+<script>
+const UTT = {
+  1: {t:'0:01', who:'김민수', kind:'결정',      text:'로그인 API는 민수가 금요일까지 만들기로 하죠'},
+  2: {t:'0:09', who:'이하늘', kind:'일정 약속', text:'네 저는 회원가입 화면을 맡을게요'},
+  3: {t:'0:16', who:'김민수', kind:'의견',      text:'인증 방식은 JWT로 가는 게 좋겠습니다'},
+  5: {t:'0:32', who:'이하늘', kind:'기타',      text:'배포는 아직 정하지 말고 다음 회의에서 다시 얘기해요'},
+};
+
+function renderEvidence(ids){
+  const body = document.getElementById('evBody');
+  const count = document.getElementById('evCount');
+  if(!ids.length){
+    count.textContent = '0건';
+    body.innerHTML = '<p class="ev-empty">이 후보에는 근거 발화가 없습니다.<br>그래서 등록할 수 없습니다.</p>';
+    return;
+  }
+  count.textContent = ids.length + '건';
+  body.innerHTML = ids.map(id => {
+    const u = UTT[id]; if(!u) return '';
+    return `<div class="ev">
+      <div class="ev__head"><span class="ev__id">발화 #${id}</span><span class="num t12 faint">${u.t}</span><span class="t12 muted">${u.who} · ${u.kind}</span></div>
+      <p class="ev__quote">${u.text}</p>
+    </div>`;
+  }).join('');
+}
+
+function selectCandidate(el){
+  document.querySelectorAll('.cand').forEach(c => c.classList.remove('is-selected'));
+  el.classList.add('is-selected');
+  const ids = (el.dataset.ev || '').split(',').filter(Boolean).map(Number);
+  renderEvidence(ids);
+  document.querySelectorAll('.utt').forEach(u => u.classList.remove('is-target'));
+  if(ids.length){
+    const first = document.querySelector(`.utt[data-utt="${ids[0]}"]`);
+    if(first){ first.classList.add('is-target'); first.scrollIntoView({block:'center', behavior:'smooth'}); }
+  }
+}
+
+document.querySelectorAll('.cand').forEach(c => {
+  c.addEventListener('click', e => { if(!e.target.closest('button,select,input,summary')) selectCandidate(c); });
+});
+document.querySelectorAll('.chip--evidence').forEach(chip => {
+  chip.addEventListener('click', e => {
+    e.stopPropagation();
+    selectCandidate(chip.closest('.cand'));
+    const id = chip.dataset.jump;
+    const u = document.querySelector(`.utt[data-utt="${id}"]`);
+    if(u){ document.querySelectorAll('.utt').forEach(x=>x.classList.remove('is-target')); u.classList.add('is-target'); u.scrollIntoView({block:'center', behavior:'smooth'}); }
+  });
+});
+document.querySelectorAll('.utt').forEach(u => {
+  u.addEventListener('click', () => {
+    document.querySelectorAll('.utt').forEach(x=>x.classList.remove('is-target'));
+    u.classList.add('is-target');
+  });
+});
+
+document.getElementById('themeBtn').addEventListener('click', e => {
+  const root = document.documentElement;
+  const dark = root.getAttribute('data-theme') === 'dark';
+  root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  e.target.textContent = dark ? '다크' : '라이트';
+});
+
+renderEvidence([1,3]);
+// 최초 로드 시 선택된 후보가 보이도록
+const pre = document.querySelector('.cand.is-selected');
+if (pre) pre.scrollIntoView({ block: 'nearest' });
+</script>
+</body>
+</html>

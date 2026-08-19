@@ -23,22 +23,37 @@
   /* 통화 상태 한 줄. 이 화면에서 가장 먼저 읽히는 곳이다.
      ⚠️ 이건 `lede` 가 아니라 **지금 상태**입니다 — 설명문보다 진해야
      합니다. 그래서 머리말 안이 아니라 그 아래 제 자리에 둡니다. */
-  #summary { font-size: var(--fs-label); font-weight: 600; color: var(--text);
-             margin: 0 0 var(--sp-5); }
+  #summary { font-weight: 600; color: var(--text); }
 
   /* 참가자. 얼굴이 없으므로 이름 첫 글자를 원으로 — 누가 있는지 한눈에.
      ⚠️ **줄마다 긋던 가로선을 걷었습니다** (브리프 §7). 세 사람이면
      선이 둘인데, 그 선이 이름보다 진했습니다. */
-  .peers { list-style: none; padding: 0; margin: 0; }
-  .peers li { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; }
+  /* v2 F2 — 참가자를 **타일 그리드**로. 1명이면 1칸이 넓게, 3명이면
+     3칸이 나란히. 행 목록은 참가자가 적을 때 화면 절반이 비었습니다. */
+  .peers {
+    list-style: none; padding: 0; margin: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: var(--sp-4);
+  }
+  .peers li {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: var(--sp-3);
+    min-height: 11rem;
+    padding: var(--sp-6);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+    background: var(--surface);
+    text-align: center;
+  }
   /* 머리말의 `.by .avatar` 와 **같은 재료**입니다 — 한 제품에서 사람을
      그리는 방법이 둘이면 사람은 둘을 따로 배웁니다. */
-  .face { width: var(--sp-8); height: var(--sp-8); border-radius: var(--r-round); flex: 0 0 auto;
-          display: grid; place-items: center; font-weight: 700; font-size: var(--fs-label);
+  .face { width: var(--sp-12); height: var(--sp-12); border-radius: var(--r-round); flex: 0 0 auto;
+          display: grid; place-items: center; font-weight: 700; font-size: var(--fs-title);
           background: var(--sunken); color: var(--text-muted); }
   .face.me { background: color-mix(in srgb, var(--primary) 14%, transparent);
              color: var(--primary); }
-  .who { flex: 1; min-width: 0; }
+  .who { min-width: 0; }
   .who .name { font-weight: 600; }
   .who .state { display: block; font-size: var(--fs-label); color: var(--text-subtle); }
   .who .state.ok { color: var(--ok); }
@@ -108,16 +123,40 @@
   #status.bad { color: var(--bad); }
 </style>
 </head>
-<body class="has-actionbar">
-  <header class="head">
-    <h1>통화</h1>
-    <p class="lede">
-      각자 자기 기기에서 회의합니다. 녹음은 통화와 별개로 사람마다 따로 남습니다.
-    </p>
-    <p class="by" id="sub" hidden></p>
+<body class="has-actionbar sparail-page">
+  <!-- v2 F2 — 셸은 한 종류: SPA 와 같은 레일 + 컨텍스트 바. -->
+  <nav id="sparail" class="sparail" aria-label="주 메뉴">
+    <div class="sparail__brand">TF</div>
+    <a class="sparail__item" href="/app/" aria-current="page">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3.5 9.5 L10 3.5 L16.5 9.5 V16.5 H12 V12 H8 V16.5 H3.5 Z" stroke-linejoin="round"/></svg>
+      홈
+    </a>
+    <a class="sparail__item" id="rail-kanban" href="/app/">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true"><rect x="3" y="3.5" width="4" height="13" rx="1"/><rect x="8" y="3.5" width="4" height="9" rx="1"/><rect x="13" y="3.5" width="4" height="6" rx="1"/></svg>
+      칸반
+    </a>
+    <a class="sparail__item" id="rail-contrib" href="/app/">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 5 V15 M16 5 V15" stroke-linecap="round"/><path d="M6.5 10 H13.5" stroke-linecap="round"/></svg>
+      기여도
+    </a>
+    <a class="sparail__item" id="rail-settings" href="/app/">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 6.5 H16 M4 13.5 H16" stroke-linecap="round"/><circle cx="8" cy="6.5" r="1.8" fill="var(--surface)"/><circle cx="12.5" cy="13.5" r="1.8" fill="var(--surface)"/></svg>
+      설정
+    </a>
+  </nav>
+
+  <!-- 컨텍스트 바 — 회의 제목과 통화 상태 (v2 F2). #summary 는 이
+       화면에서 가장 먼저 읽히는 상태 줄이라 제목 옆에 앉습니다. -->
+  <header class="spabar">
+    <h1 class="spabar__title" id="ctx-title">통화</h1>
+    <span class="spabar__meta" id="summary">연결하는 중…</span>
+    <span class="spabar__spacer"></span>
+    <span class="by" id="sub" hidden></span>
   </header>
 
-  <p id="summary">연결하는 중…</p>
+  <p class="note">
+    각자 자기 기기에서 회의합니다. 녹음은 통화와 별개로 사람마다 따로 남습니다.
+  </p>
 
   <section class="panel">
     <h2>참가자</h2>
@@ -128,6 +167,8 @@
   <section class="panel">
     <h2>내 마이크</h2>
     <p class="sub" id="mic" role="status">확인 중…</p>
+    <!-- 권한 대기는 오류가 아니라 상태다 — 흙빛 안내 옆에 할 일을 준다. -->
+    <button id="mic-retry" hidden type="button">마이크 권한 허용하기</button>
     <!-- ⚠️ 이게 없으면 마이크가 죽은 걸 회의가 끝난 뒤에 안다.
          그때는 그 사람의 발언이 이미 사라진 뒤다. -->
     <div class="meter"><span id="level"></span></div>
@@ -140,14 +181,15 @@
        간격(`--sp-2`)을 전부 `.actionbar .inner` 에 겁니다. 없으면 막대가
        그냥 블록이라 버튼 사이가 **마크업 공백 4px** 로 벌어지고(토큰이
        아니라 우연입니다) 두 버튼 높이도 44 / 43.5 로 어긋납니다. -->
+  <!-- v2 F2 — 하단 고정 컨트롤 바: 마이크 토글 · 녹음 · 나가기 -->
   <div class="actionbar">
     <div class="inner">
+      <button id="mic-toggle" type="button" aria-pressed="true" disabled>마이크 끄기</button>
       <button id="record" class="primary">녹음 화면으로</button>
       <button id="leave" type="button">통화 나가기</button>
     </div>
   </div>
 
-  <nav id="tabs" aria-label="주요 화면"></nav>
   <script type="module" src="/call.js"></script>
 </body>
 </html>

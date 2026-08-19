@@ -100,10 +100,18 @@ export interface NoteSlot {
  * `hidden` 을 **읽는** 코드가 남아 있을 수 있으므로 인터페이스에서는 빼지
  * 않습니다. 다만 이 함수가 쓰지는 않습니다.
  */
-export function showNote(slot: NoteSlot, text: string, tone: 'bad' | 'plain' = 'bad'): void {
+export function showNote(
+  slot: NoteSlot,
+  text: string,
+  tone: 'bad' | 'plain' | 'gap' = 'bad',
+): void {
   slot.textContent = text;
   // 마크업에 `hidden` 이 적혀 있던 자리를 되살립니다. 여기서 **끄기만**
   // 하고 다시 켜지는 않습니다 — 위 주석 참고.
   slot.hidden = false;
   slot.classList.toggle('bad', text !== '' && tone === 'bad');
+  // ⚠️ `gap` 은 실패가 아니라 **대기·결측**입니다 (design/redesign §통화).
+  // 마이크 권한을 아직 안 준 것은 순서상 당연한 상태인데 빨갛게 쓰면
+  // "고장 났다" 로 읽힙니다 — 흙빛 + 행동 버튼이 맞습니다.
+  slot.classList.toggle('gap', text !== '' && tone === 'gap');
 }

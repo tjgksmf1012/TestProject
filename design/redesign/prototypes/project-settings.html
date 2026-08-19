@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>프로젝트 설정 — TeamFlow 프로토타입</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.0.18/index.min.css">
+<link rel="stylesheet" href="../tokens/tokens.css">
+<link rel="stylesheet" href="app.css">
+<style>
+  .pane--subnav { flex: 0 0 208px; background: var(--c-surface); }
+  .pane--content { flex: 1 1 auto; background: var(--c-paper); }
+
+  .subnav { padding: var(--sp-5) var(--sp-4); }
+  .subnav__group { font-size: var(--fs-11); letter-spacing: var(--ls-11); text-transform: uppercase;
+    color: var(--c-ink-faint); font-weight: var(--fw-semibold);
+    padding: var(--sp-5) var(--sp-4) var(--sp-3); }
+  .subnav__item {
+    display: block; width: 100%; text-align: left;
+    padding: var(--sp-4) var(--sp-4);
+    border: 0; border-left: 2px solid transparent; background: none;
+    font-family: inherit; font-size: var(--fs-13); color: var(--c-ink-muted);
+    border-radius: 0 var(--r-sm) var(--r-sm) 0; cursor: pointer;
+  }
+  .subnav__item:hover { background: var(--c-sunken); color: var(--c-ink); }
+  .subnav__item.is-active {
+    background: var(--c-evidence-tint); color: var(--c-evidence);
+    border-left-color: var(--c-evidence); font-weight: var(--fw-semibold);
+  }
+  .subnav__sep { height: 1px; background: var(--c-line); margin: var(--sp-5) var(--sp-4); }
+  .subnav__item--danger { color: var(--c-danger); }
+  .subnav__item--danger.is-active { background: var(--c-danger-tint); color: var(--c-danger); border-left-color: var(--c-danger); }
+
+  .section { display: none; max-width: 640px; }
+  .section.is-active { display: block; }
+  .section__title { font-family: var(--font-display); font-size: var(--fs-20);
+    letter-spacing: var(--ls-20); margin-bottom: var(--sp-3); }
+  .section__lede { font-size: var(--fs-13); color: var(--c-ink-muted); margin: 0 0 var(--sp-7); max-width: var(--measure); }
+
+  .rolerow { display: grid; grid-template-columns: 72px 72px 1fr; align-items: center;
+    gap: var(--sp-5); padding: var(--sp-4) 0; border-bottom: 1px solid var(--c-line); }
+  .rolerow__name { font-size: var(--fs-13); }
+  .rolerow__w { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--c-ink-faint); }
+  .roletotal { display: grid; grid-template-columns: 72px 72px 1fr; gap: var(--sp-5);
+    padding: var(--sp-5) 0; font-size: var(--fs-13); }
+
+  .memberrow { display: flex; align-items: center; gap: var(--sp-5);
+    padding: var(--sp-5) 0; border-bottom: 1px solid var(--c-line); }
+  .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--c-sunken);
+    border: 1px solid var(--c-line); display: grid; place-items: center;
+    font-size: var(--fs-12); color: var(--c-ink-muted); flex: 0 0 28px; }
+  .memberrow__name { font-size: var(--fs-13); font-weight: var(--fw-medium); }
+  .memberrow__role { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--c-ink-faint); }
+
+  .row2 { display: flex; gap: var(--sp-4); align-items: flex-end; }
+  .row2 .field { flex: 1; }
+
+  .danger-zone { border: 1px solid var(--c-danger-line); background: var(--c-danger-tint);
+    border-radius: var(--r-md); padding: var(--sp-6); }
+  .kv { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-6); margin: var(--sp-5) 0; }
+  .kv h4 { font-size: var(--fs-12); color: var(--c-ink-muted); margin: 0 0 var(--sp-3); font-family: var(--font-sans); font-weight: var(--fw-semibold); }
+  .kv ul { margin: 0; padding-left: 1.1em; font-size: var(--fs-13); line-height: 1.7; color: var(--c-ink-muted); }
+
+  .invite-code { font-family: var(--font-mono); font-size: var(--fs-26);
+    letter-spacing: 0.14em; padding: var(--sp-5) var(--sp-6); background: var(--c-sunken);
+    border: 1px solid var(--c-line); border-radius: var(--r-md); display: inline-block; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <nav class="rail">
+    <div class="rail__brand">TF</div>
+    <a class="rail__item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 10l9-7 9 7v10a1 1 0 01-1 1h-5v-7H9v7H4a1 1 0 01-1-1z"/></svg>홈</a>
+    <a class="rail__item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="5" height="16"/><rect x="10" y="4" width="5" height="16"/><rect x="17" y="4" width="4" height="16"/></svg>칸반</a>
+    <a class="rail__item" href="contributions.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h10M4 17h13"/></svg>기여도</a>
+    <a class="rail__item" href="project-settings.html" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h16M4 17h16"/></svg>설정</a>
+  </nav>
+
+  <div class="main">
+    <header class="appbar">
+      <span class="appbar__title">TeamFlow 시연 프로젝트</span>
+      <span class="appbar__meta">팀원 3 · 회의 5</span>
+      <span class="appbar__spacer"></span>
+      <button class="btn btn--secondary btn--sm">초대 코드 복사</button>
+      <button class="btn btn--primary">회의 열기</button>
+    </header>
+
+    <div class="panes">
+
+      <nav class="pane pane--subnav" aria-label="설정 항목">
+        <div class="pane__body pane__body--flush">
+          <div class="subnav">
+            <div class="subnav__group">내 설정</div>
+            <button class="subnav__item is-active" data-sec="role">역할과 가중치</button>
+            <button class="subnav__item" data-sec="github">GitHub 계정</button>
+            <button class="subnav__item" data-sec="profile">내 정보</button>
+
+            <div class="subnav__group">프로젝트</div>
+            <button class="subnav__item" data-sec="members">팀원</button>
+            <button class="subnav__item" data-sec="repo">저장소 연결</button>
+            <button class="subnav__item" data-sec="general">이름과 초대</button>
+
+            <div class="subnav__sep"></div>
+            <button class="subnav__item subnav__item--danger" data-sec="danger">내 녹음 지우기</button>
+          </div>
+        </div>
+      </nav>
+
+      <section class="pane pane--content">
+        <div class="pane__body" style="padding: var(--sp-9) var(--sp-10);">
+
+          <!-- 역할 -->
+          <div class="section is-active" id="sec-role">
+            <h2 class="section__title">역할과 가중치</h2>
+            <p class="section__lede">기여도 계산에 쓰이는 값입니다. 겸직이면 둘 이상에 나눠 적으세요.</p>
+            <div class="rolerow"><span class="rolerow__name">개발</span><input class="input input--num" value="1" style="height:28px"><span class="rolerow__w">코드 35% · 업무 30%</span></div>
+            <div class="rolerow"><span class="rolerow__name">기획</span><input class="input input--num" value="0" style="height:28px"><span class="rolerow__w">문서 30% · 업무 30% · 코드 0%</span></div>
+            <div class="rolerow"><span class="rolerow__name">디자인</span><input class="input input--num" value="0" style="height:28px"><span class="rolerow__w">문서 35% · 업무 30% · 코드 0%</span></div>
+            <div class="roletotal"><span class="muted">합계</span><span class="num">1</span><span class="faint num">지금 개발 100%</span></div>
+            <button class="btn btn--primary">저장</button>
+            <details class="disc">
+              <summary>왜 나만 바꿀 수 있나요</summary>
+              <div>역할은 가중치를 바꾸고 가중치는 점수를 바꿉니다 — 남이 내 역할을 바꿀 수 있으면 그건 남의 점수를 바꾸는 일입니다. 바꾼 사실은 기록에 남습니다.</div>
+            </details>
+          </div>
+
+          <!-- GitHub -->
+          <div class="section" id="sec-github">
+            <h2 class="section__title">GitHub 계정</h2>
+            <p class="section__lede">이 아이디로 올린 PR·리뷰가 내 기여도로 들어옵니다. 안 적으면 활동이 주인을 못 찾습니다.</p>
+            <div class="row2">
+              <label class="field"><span class="field__label">아이디</span><input class="input" value="minsu-dev"></label>
+              <button class="btn btn--primary">저장</button>
+            </div>
+            <p class="t13" style="margin-top:var(--sp-5); color:var(--c-ok);">● 연결됨 · PR <span class="num">4건</span> · 마지막 <span class="num">18시간</span> 전</p>
+            <details class="disc">
+              <summary>왜 나만 바꿀 수 있나요</summary>
+              <div>한 프로젝트에서 같은 아이디를 둘이 쓸 수 없습니다 — 남의 아이디를 적으면 그 사람의 PR이 내 기여가 되기 때문입니다.</div>
+            </details>
+          </div>
+
+          <!-- 프로필 (홈에서 이동해 온 것) -->
+          <div class="section" id="sec-profile">
+            <h2 class="section__title">내 정보</h2>
+            <p class="section__lede">여기 적는 것은 팀원 목록에 보입니다.</p>
+            <div class="row2" style="align-items:center;">
+              <div class="avatar" style="width:56px;height:56px;flex:0 0 56px;font-size:var(--fs-16);">김</div>
+              <button class="btn btn--secondary">사진 고르기</button>
+            </div>
+            <p class="t12 faint" style="margin:var(--sp-4) 0 var(--sp-6);">사진은 <span class="num">96×96</span>으로 줄여 저장합니다 — 원본과 위치 정보(EXIF)는 서버로 가지 않습니다.</p>
+            <label class="field"><span class="field__label">자기소개</span>
+              <textarea class="input" rows="3" style="height:auto;padding:var(--sp-4);" placeholder="팀원에게 하는 한두 마디"></textarea></label>
+            <button class="btn btn--primary" style="margin-top:var(--sp-5)">저장</button>
+          </div>
+
+          <!-- 팀원 -->
+          <div class="section" id="sec-members">
+            <h2 class="section__title">팀원</h2>
+            <p class="section__lede">겸직은 무엇을 바꿀 수 있는가와 무관합니다. 기여도 가중치만 다릅니다.</p>
+            <div class="memberrow"><div class="avatar">김</div><span class="memberrow__name">김민수 (나)</span><span class="memberrow__role">개발 100%</span><span class="appbar__spacer"></span><span class="status status--done">● 접속 중</span></div>
+            <div class="memberrow"><div class="avatar">박</div><span class="memberrow__name">박지원</span><span class="memberrow__role">개발 60% · 디자인 40%</span></div>
+            <div class="memberrow"><div class="avatar">이</div><span class="memberrow__name">이하늘</span><span class="memberrow__role">개발 70% · 기획 30%</span></div>
+            <button class="btn btn--secondary btn--sm" style="margin-top:var(--sp-7)">이 프로젝트에서 나가기</button>
+          </div>
+
+          <!-- 저장소 -->
+          <div class="section" id="sec-repo">
+            <h2 class="section__title">저장소 연결</h2>
+            <p class="section__lede">PR과 커밋을 업무에 이어 붙입니다. PR 제목이나 본문에 <code>TASK-3</code>을 적으면 자동으로 붙습니다.</p>
+            <div class="row2">
+              <label class="field"><span class="field__label">GitHub 저장소</span><input class="input" value="tjgksmf1012/teamflow-demo"></label>
+              <button class="btn btn--secondary">연결</button>
+            </div>
+            <div class="notice" style="margin-top:var(--sp-6)">
+              <strong>배달은 오지만 서버가 GitHub API를 부를 수 없습니다</strong><br>
+              웹훅 본문만으로는 PR의 변경 파일을 알 수 없어 diff 필터를 걸 수 없습니다.
+              서버 관리자에게 <code>GITHUB_APP_ID</code>와 개인키 설정을 요청하세요.
+              <div style="margin-top:var(--sp-5);display:flex;gap:var(--sp-5);align-items:center;">
+                <span class="num t12">배달 1건 · 마지막 18시간 전</span>
+                <button class="btn btn--secondary btn--sm">지난 활동 가져오기</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 이름과 초대 -->
+          <div class="section" id="sec-general">
+            <h2 class="section__title">이름과 초대</h2>
+            <p class="section__lede">초대 코드를 팀원에게 알려주면 이 프로젝트에 들어올 수 있습니다.</p>
+            <div class="row2" style="margin-bottom:var(--sp-8)">
+              <label class="field"><span class="field__label">프로젝트 이름</span><input class="input" value="TeamFlow 시연 프로젝트"></label>
+              <button class="btn btn--secondary">저장</button>
+            </div>
+            <span class="micro">초대 코드</span>
+            <div style="margin:var(--sp-4) 0 var(--sp-5)"><span class="invite-code">KNCZ-RTC9</span></div>
+            <div style="display:flex;gap:var(--sp-4)">
+              <button class="btn btn--secondary btn--sm">코드 복사</button>
+              <button class="btn btn--ghost btn--sm">코드 새로 만들기</button>
+            </div>
+          </div>
+
+          <!-- 위험 -->
+          <div class="section" id="sec-danger">
+            <h2 class="section__title">내 녹음 지우기</h2>
+            <p class="section__lede">이 프로젝트에 남아 있는 내 목소리를 지웁니다. 개인정보 삭제 요청권(개인정보보호법 제36조)입니다.</p>
+            <div class="danger-zone">
+              <div class="kv">
+                <div><h4>지워지는 것</h4><ul><li>내 목소리가 녹음된 원본 파일</li><li>내 성문 데이터</li></ul></div>
+                <div><h4>남는 것</h4><ul><li>회의록의 발화 텍스트</li><li>칸반 업무와 GitHub 활동</li></ul></div>
+              </div>
+              <details class="disc">
+                <summary>기여도는 어떻게 되나요</summary>
+                <div>아직 처리되지 않은 회의는 발언량을 잴 수 없게 되어 내 회의 기여가 <strong>측정 불가</strong>로 표시됩니다. 0점이 되는 것이 아니라, 나머지 활동으로 기여도를 계산합니다.</div>
+              </details>
+              <button class="btn btn--danger" style="margin-top:var(--sp-6)">내 녹음과 성문 지우기</button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="proto-note">
+  <span>프로토타입 · 설정 (3665px → 1화면)</span>
+  <a href="index.html">← 목록</a>
+  <button class="btn btn--ghost btn--sm" id="themeBtn">다크</button>
+</div>
+
+<script>
+document.querySelectorAll('.subnav__item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.subnav__item').forEach(b => b.classList.remove('is-active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('is-active'));
+    btn.classList.add('is-active');
+    document.getElementById('sec-' + btn.dataset.sec).classList.add('is-active');
+  });
+});
+document.getElementById('themeBtn').addEventListener('click', e => {
+  const root = document.documentElement;
+  const dark = root.getAttribute('data-theme') === 'dark';
+  root.setAttribute('data-theme', dark ? 'light' : 'dark');
+  e.target.textContent = dark ? '다크' : '라이트';
+});
+</script>
+</body>
+</html>

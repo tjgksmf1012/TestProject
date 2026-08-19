@@ -17,6 +17,10 @@ npm --prefix frontend test
 npm --prefix frontend run typecheck
 npm --prefix frontend run build      # build:demo + build:css + 데스크톱 셸
 
+# 리디자인 SPA (webapp/, /app 마운트) — 이쪽은 설치가 필요합니다
+npm --prefix webapp run typecheck
+npm --prefix webapp run build        # dist/ 를 만들고, dist 는 커밋합니다
+
 # 데스크톱 셸 (Electron) — 서버를 먼저 띄워야 합니다
 TEAMFLOW_SERVER_URL=http://127.0.0.1:8811/home.html \
   npm --prefix frontend run desktop
@@ -181,6 +185,18 @@ bash <스크래치패드>/serve.sh          # uvicorn 8811, demo.db
   손으로 적던 시절 **두 번 어긋났고**, 어긋나도 온라인에서는 티가 안 났습니다
 - `public/chunk-*.js` — 공용 조각. 빌드 전에 **옛것을 지웁니다.** 이름에
   해시가 붙어 덮이지 않고 하나 더 생기기 때문입니다
+
+### 리디자인 「계측기」 (2026-08-18)
+
+주 화면 아홉(로그인·홈·설정·로비·검토·칸반·기여도 + 녹음·통화)의 새
+얼굴은 **`webapp/`(Vite SPA, `/app` 마운트)** 입니다. 결정 전부와 검수
+결과는 `docs/22-리디자인-계측기.md`, 지시서 원본은 `design/redesign/`.
+
+- 판단은 여전히 `frontend/src/lib` 한 벌 — webapp 은 `@lib` 별칭으로
+  같은 파일을 씁니다. **복사 금지.**
+- 녹음(`index.html`)·통화(`call.html`)는 SPA 밖 그대로입니다 (아래 참조).
+- `frontend/src/demo` 의 화면들은 레거시입니다 — 라우트만 유지하고(R8)
+  새 기능을 넣지 않습니다.
 
 ### React 로 옮긴 화면 · 안 옮기는 화면
 

@@ -1,9 +1,10 @@
-import { strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, strictEqual, throws } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
   emptyEvidenceNote,
   evidenceQuery,
+  withContext,
   evidenceView,
   missingNote,
   speakerNote,
@@ -140,5 +141,56 @@ describe('emptyEvidenceNote', () => {
     // 뜻입니다. 사람이 할 일이 다릅니다.
     strictEqual(emptyEvidenceNote([]).includes('회의에 없던 내용'), true);
     strictEqual(emptyEvidenceNote([5]).includes('새로 고쳐'), true);
+  });
+});
+
+describe('withContext', () => {
+  const all = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+  it('⭐ 근거 앞뒤 2건까지 딸려 온다 — 한 줄만 보면 합의인지 반문인지 모른다', () => {
+    const picked = withContext(all, [5]);
+    deepStrictEqual(picked.map((p) => p.id), [3, 4, 5, 6, 7]);
+    deepStrictEqual(
+      picked.filter((p) => p.isEvidence).map((p) => p.id),
+      [5],
+    );
+  });
+
+  it('⭐ 창이 겹치면 합친다 — 같은 발화를 두 번 그리지 않는다', () => {
+    // 5 와 6 이 근거면 창은 3~7 과 4~8. 합쳐서 3~8, 여섯 건.
+    const picked = withContext(all, [5, 6]);
+    deepStrictEqual(picked.map((p) => p.id), [3, 4, 5, 6, 7, 8]);
+    deepStrictEqual(
+      picked.filter((p) => p.isEvidence).map((p) => p.id),
+      [5, 6],
+    );
+  });
+
+  it('목록 순서를 그대로 지킨다 — 근거를 뒤죽박죽 줘도', () => {
+    // 시간축은 timeline.ts 가 정한다. 여기서 다시 정렬하면 두 벌이 된다.
+    deepStrictEqual(withContext(all, [6, 2]).map((p) => p.id), [1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it('가장자리에서 넘어가지 않는다', () => {
+    deepStrictEqual(withContext(all, [1]).map((p) => p.id), [1, 2, 3]);
+    deepStrictEqual(withContext(all, [10]).map((p) => p.id), [8, 9, 10]);
+  });
+
+  it('⚠️ 목록에 없는 근거 id 는 조용히 건너뛴다 — missingNote 가 말한다', () => {
+    // 지워진 발화·다른 회의의 id. 여기서 던지면 패널 전체가 빈다.
+    deepStrictEqual(withContext(all, [999]).map((p) => p.id), []);
+    deepStrictEqual(withContext(all, [999, 5]).map((p) => p.id), [3, 4, 5, 6, 7]);
+  });
+
+  it('span 0 이면 근거만', () => {
+    deepStrictEqual(withContext(all, [5], 0).map((p) => p.id), [5]);
+  });
+
+  it('span 이 음수면 던진다 — 조용히 0 으로 만들지 않는다', () => {
+    throws(() => withContext(all, [5], -1), RangeError);
+  });
+
+  it('근거가 없으면 빈 목록', () => {
+    deepStrictEqual(withContext(all, []), []);
   });
 });

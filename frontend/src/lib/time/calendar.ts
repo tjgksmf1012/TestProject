@@ -65,3 +65,95 @@ export function teamDateOf(instant: string): string | null {
 export function todayInTeamCalendar(now: Date = new Date()): string {
   return isoFrom(now);
 }
+
+/**
+ * 달력 한 장 — **날짜 고르기의 판단** (수정 지시서 v2 F7).
+ *
+ * ## 왜 직접 만드나
+ *
+ * 마감 칸이 네이티브 `<input type="date">` 였고, 한국어 서비스인데
+ * `mm/dd/yyyy` 로 떴습니다. ⚠️ **그 표기는 `lang` 이나 `locale` 로 못
+ * 바꿉니다** — 브라우저 UI 언어를 따릅니다. 이 저장소는 예전에
+ * Playwright 의 `locale` 로 이걸 재려다 헛다리를 짚은 적이 있습니다.
+ *
+ * 흔한 처방은 `react-day-picker` + `date-fns` 인데, 그러면 프런트
+ * 런타임 의존성이 둘 늘어납니다. 이 저장소의 규칙은 React·React DOM·
+ * Radix 뿐이고, 졸업작품이 끝난 뒤에도 열려야 합니다. 달력 격자는 순수
+ * 계산이라 여기서 만들고 **검사로 붙잡습니다.**
+ *
+ * ⚠️ **`Date` 산술로 날짜를 더하지 않습니다.** 로컬 시간대에서
+ * `setDate(+1)` 은 서머타임 경계에서 같은 날을 두 번 주거나 하루를
+ * 건너뜁니다. 여기서는 전부 **UTC 기준**으로 계산하고 `YYYY-MM-DD`
+ * 문자열로만 주고받습니다 — 시각이 아니라 달력 날짜이기 때문입니다.
+ */
+export interface CalendarCell {
+  /** `YYYY-MM-DD`. */
+  date: string;
+  /** 이 칸이 보고 있는 달의 날인가. 거짓이면 앞뒤 달에서 넘어온 것. */
+  inMonth: boolean;
+}
+
+/** `YYYY-MM` 을 받아 일요일 시작 6주(42칸) 격자를 만든다. */
+export function monthGrid(month: string): CalendarCell[] {
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (m === null) throw new RangeError(`YYYY-MM 형식이 아닙니다: ${month}`);
+  const year = Number(m[1]);
+  const mon = Number(m[2]);
+  if (mon < 1 || mon > 12) throw new RangeError(`달이 1~12 밖입니다: ${month}`);
+
+  const first = Date.UTC(year, mon - 1, 1);
+  // 일요일까지 되감는다. `getUTCDay()` 는 일요일이 0.
+  const start = first - new Date(first).getUTCDay() * 86_400_000;
+  const cells: CalendarCell[] = [];
+  for (let i = 0; i < 42; i++) {
+    const at = new Date(start + i * 86_400_000);
+    cells.push({
+      date: isoDate(at),
+      inMonth: at.getUTCFullYear() === year && at.getUTCMonth() === mon - 1,
+    });
+  }
+  return cells;
+}
+
+/** `Date`(UTC 기준) → `YYYY-MM-DD`. */
+function isoDate(at: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${at.getUTCFullYear()}-${p(at.getUTCMonth() + 1)}-${p(at.getUTCDate())}`;
+}
+
+/** `YYYY-MM` 을 `delta` 달만큼 옮긴다. 연도를 알아서 넘어간다. */
+export function shiftMonth(month: string, delta: number): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (m === null) throw new RangeError(`YYYY-MM 형식이 아닙니다: ${month}`);
+  const total = Number(m[1]) * 12 + (Number(m[2]) - 1) + delta;
+  const year = Math.floor(total / 12);
+  const mon = total - year * 12 + 1;
+  return `${String(year).padStart(4, '0')}-${String(mon).padStart(2, '0')}`;
+}
+
+/** `YYYY-MM-DD` → 그 날이 속한 `YYYY-MM`. 값이 없으면 `fallback` 의 달. */
+export function monthOf(date: string | null, fallback: string): string {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(date ?? '');
+  return m === null ? fallback.slice(0, 7) : `${m[1]}-${m[2]}`;
+}
+
+/**
+ * 사람에게 보이는 날짜. **`YYYY-MM-DD` 그대로**입니다.
+ *
+ * 지시서는 `2026-09-04` 또는 `9월 4일` 중 하나를 고르라고 했습니다.
+ * 앞을 골랐습니다 — 이 화면의 다른 값(회의 날짜·표식·시각)이 전부
+ * 고정폭 숫자라 표기를 섞으면 세로로 훑을 때 자릿수가 흔들립니다.
+ */
+export function formatTeamDate(date: string | null): string | null {
+  return /^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ? date : null;
+}
+
+/** 달력 머리말. `2026-09` → `2026년 9월`. */
+export function describeMonth(month: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (m === null) throw new RangeError(`YYYY-MM 형식이 아닙니다: ${month}`);
+  return `${m[1]}년 ${Number(m[2])}월`;
+}
+
+/** 요일 머리 — 일요일 시작. 격자와 순서가 어긋나면 날짜가 통째로 밀립니다. */
+export const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'] as const;

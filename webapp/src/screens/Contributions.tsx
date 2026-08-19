@@ -1,0 +1,379 @@
+import { useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { AppShell } from '../components/AppShell.tsx';
+import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
+import { Chain, type ChainLink } from '../components/Chain.tsx';
+import { Stat } from '../components/Stat.tsx';
+import { Why } from '../components/Why.tsx';
+import { useConfirmFinals, useContributions, useFinals, useMembers } from '../api/hooks.ts';
+import {
+  categoriesForDisplay,
+  describeCategory,
+  describeRange,
+  hasNoEvidence,
+  integrityNotes,
+  nameOf,
+  orderForDisplay,
+  readBeforeTheNumber,
+  roleOf,
+  teamWarnings,
+  uncertaintySpans,
+  type MemberScore,
+  type Person,
+} from '@lib/contribution/view.ts';
+import {
+  adjustmentsToRestore,
+  BLIND_CONFIRM,
+  describeFinals,
+  problemsWith,
+  sameValue,
+  toPayload,
+  type Draft,
+} from '@lib/contribution/final.ts';
+
+// 기여도 — 세 사람과 확정 폼이 **한 화면에 동시에** 보인다 (지시서 09).
+//
+// 불변식: 이름순 고정 · 구간(단일 점수 없음) · 결측은 황토 · 확정은 사람이.
+// 리본 채움은 **확신도** 비례입니다 — 기여도에 비례하면 그게 순위표입니다.
+
+/** 리본 조각: 왼쪽부터 확신(잉크) → 모르는 폭(빗금) → 빈 곳. */
+function ribbonFor(member: MemberScore, widthPoints: number): RibbonSegment[] {
+  const known = Math.min(1, Math.max(0, member.confidence));
+  const unknown = Math.min(1 - known, widthPoints / 100);
+  return [
+    { start: 0, end: known, kind: 'known' },
+    { start: known, end: known + unknown, kind: 'unknown' },
+  ];
+}
+
+/**
+ * 이 사람의 근거를 **사슬**로 — 회의 → 업무 → 코드.
+ *
+ * ⭐ 사슬이 여기서 하는 일은 이 제품의 전부입니다: **0건과 못 잼을
+ * 가릅니다.** 예전 `코드 4 · 업무 1 · 회의 6` 은 0건 카테고리를 아예
+ * 빼 버려서, "한 적 없음" 과 "못 쟀음" 이 화면에서 똑같이 사라졌습니다.
+ * 지금은 0 이면 `0` 을 적고, 못 잰 것만 **빈 고리**로 둡니다.
+ */
+function evidenceChain(member: MemberScore): ChainLink[] {
+  const gaps = new Set((member.measurement_gaps ?? []).map((g) => g.category));
+  const counts = new Map(categoriesForDisplay(member).map((c) => [c.category, c.event_count]));
+  return ['meeting', 'task', 'code'].map((category) => {
+    const label = describeCategory(category);
+    if (gaps.has(category)) {
+      return { label, value: null, hint: `${label} 기여를 측정하지 못했습니다 — 0이 아니라 모르는 값입니다` };
+    }
+    const n = counts.get(category) ?? 0;
+    return {
+      label,
+      value: String(n),
+      hint: n === 0 ? `${label} 활동 기록이 0건입니다 — 측정은 됐고, 값이 0입니다` : `${label} 근거 ${n}건`,
+    };
+  });
+}
+
+function fmtComputedAt(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+export default function Contributions() {
+  const params = useParams();
+  const projectId = Number(params['projectId']);
+  const score = useContributions(projectId);
+  const finals = useFinals(projectId);
+  const membersQuery = useMembers(projectId);
+
+  const people: Person[] = useMemo(
+    () =>
+      (membersQuery.data ?? []).map((m) => ({
+        user_id: m.user_id,
+        name: m.name,
+        role_shares: m.role_shares,
+      })),
+    [membersQuery.data],
+  );
+
+  // 입력 상태 — 칸을 안 건드리면 null(시스템 값 그대로).
+  const [values, setValues] = useState<Record<number, string>>({});
+  const [reasons, setReasons] = useState<Record<number, string>>({});
+  const [restored, setRestored] = useState(false);
+  const confirm = useConfirmFinals(projectId);
+
+  const members = useMemo(
+    () => (score.data ? orderForDisplay(score.data.members, people) : []),
+    [score.data, people],
+  );
+  const spans = useMemo(() => uncertaintySpans(members), [members]);
+
+  // 남이 조정해 둔 값을 빈칸으로 그리면 다음 확정에서 조용히 지워집니다 (결함 97).
+  if (!restored && finals.data && finals.data.finals.length > 0) {
+    const restore = adjustmentsToRestore(finals.data.finals);
+    if (restore.size > 0) {
+      const v: Record<number, string> = {};
+      const r: Record<number, string> = {};
+      for (const [id, item] of restore) {
+        v[id] = String(item.final_value);
+        r[id] = item.reason;
+      }
+      setValues(v);
+      setReasons(r);
+    }
+    setRestored(true);
+  }
+
+  const systemValues = useMemo(
+    () => new Map(members.map((m) => [m.user_id, m.share])),
+    [members],
+  );
+
+  const drafts: Draft[] = members.map((m) => {
+    const raw = values[m.user_id] ?? '';
+    return {
+      user_id: m.user_id,
+      final_value: raw.trim() === '' ? null : Number(raw),
+      reason: reasons[m.user_id] ?? '',
+    };
+  });
+  const problems = problemsWith(drafts, systemValues);
+  const changed = drafts.filter(
+    (d) =>
+      d.final_value !== null &&
+      !Number.isNaN(d.final_value) &&
+      !sameValue(d.final_value, systemValues.get(d.user_id) ?? NaN),
+  );
+
+  // 확정값은 시스템이 아니라 **팀이 적습니다** (v2 F1-4). 빈 칸은 더 이상
+  // "시스템 값 그대로"가 아니라 "아직 안 정함"이고, 다 정해야 확정이 열립니다.
+  const allFilled =
+    members.length > 0 &&
+    drafts.every((d) => d.final_value !== null && !Number.isNaN(d.final_value));
+
+  const effectiveSum = drafts.reduce(
+    (sum, d) =>
+      sum + (d.final_value !== null && !Number.isNaN(d.final_value) ? d.final_value : 0),
+    0,
+  );
+  const sumOff = allFilled && Math.abs(effectiveSum - 100) > 0.05;
+  const unfilled = drafts.filter((d) => d.final_value === null || Number.isNaN(d.final_value)).length;
+
+  // 저장된 확정을 모르는 채로 확정하면 남의 조정을 지울 수 있습니다.
+  const blind = finals.isError;
+
+  if (score.isPending || membersQuery.isPending) {
+    return (
+      <AppShell title="기여도">
+        <div className="panes">
+          <section className="pane">
+            <div className="pane__body" aria-busy="true" />
+          </section>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (score.isError || !score.data) {
+    return (
+      <AppShell title="기여도">
+        <div className="panes">
+          <section className="pane">
+            <div className="pane__body">
+              <div className="empty">
+                기여도를 불러오지 못했습니다. 네트워크를 확인한 뒤 새로고침하세요.
+              </div>
+            </div>
+          </section>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const team = score.data;
+  const warnings = teamWarnings(team, people);
+  // 맨 앞에 세울 한 줄 — 「서로 비교하지 마세요」가 이 화면에서 가장 중요한
+  // 문장입니다. 없으면(팀 신뢰도가 낮지 않으면) 첫 경고를 세웁니다.
+  const headline = warnings.find((w) => w.includes('비교하지 마세요')) ?? warnings[0];
+
+  return (
+    <AppShell
+      title="기여도"
+      meta={`${team.algo_version} · ${fmtComputedAt(team.computed_at)}`}
+    >
+      <div className="panes">
+        <section className="pane">
+          {warnings.length > 0 && (
+            /* ⭐ **경고문은 지우지 않습니다** (검수 D). 다만 셋을 한꺼번에
+               펼쳐 두면 110px 짜리 글자 벽이 되고, 늘 있는 글자는 배경이
+               되어 정작 아무도 안 읽습니다.
+               그래서 **가장 중요한 한 줄만** 세워 두고 — 서로를 비교하지
+               말라는 그 문장입니다 — 나머지는 `?` 한 번에 원문 그대로. */
+            <div className="warnband" role="note">
+              <p>
+                <strong>⚠</strong> {headline}
+              </p>
+              <Why about="이 수치를 읽기 전에" lines={warnings} />
+            </div>
+          )}
+
+          <div className="pane__body">
+            {members.length === 0 ? (
+              <div className="empty">
+                아직 기여도를 계산할 활동 기록이 없습니다. 회의를 열거나 GitHub
+                저장소를 연결하면 여기서 근거와 함께 볼 수 있습니다.
+              </div>
+            ) : (
+              members.map((member) => {
+                const span = spans.find((s) => s.userId === member.user_id);
+                const points = span?.points ?? 0;
+                const name = nameOf(member.user_id, people);
+                // 사유는 **지우지 않고 한 자리에 모읍니다** — 팝오버 안에서
+                // 원문 그대로 나옵니다. 요약하면 그게 곧 정보 손실입니다.
+                const whyLines = [
+                  `신뢰도 ${member.confidence_label} — 모르는 폭 ${Math.round(points)}%p`,
+                  ...readBeforeTheNumber(member),
+                  ...integrityNotes(member),
+                  ...(hasNoEvidence(member)
+                    ? ['근거가 하나도 없는 숫자입니다 — 활동 기록이 이 사람에게 하나도 붙지 않았습니다.']
+                    : []),
+                  ...categoriesForDisplay(member)
+                    .filter((c) => c.event_count === 0)
+                    .map(
+                      (c) =>
+                        `${describeCategory(c.category)} 활동은 기록이 0건입니다 — 안 한 것인지 측정이 안 닿은 것인지는 팀이 압니다.`,
+                    ),
+                ];
+                return (
+                  <article className="crow" key={member.user_id}>
+                    <div className="crow__id">
+                      <span className="crow__name">{name}</span>
+                      <span className="crow__role">{roleOf(member, people)}</span>
+                    </div>
+
+                    {/* 구간은 **글자가 주인공**입니다. 레인은 보조이고,
+                        카드마다 자기 눈금을 가집니다 (v2 F1 · 조사 R3-4). */}
+                    <div className="crow__range-cell">
+                      <Stat value={describeRange(member)} label="기여 구간" />
+                      <TrackRibbon
+                        size="sm"
+                        segments={ribbonFor(member, points)}
+                        ticks={['0', '25', '50', '75', '100']}
+                        label={`${name} — 확신도 ${Math.round(member.confidence * 100)}% · 모르는 폭 ${Math.round(points)}%p`}
+                      />
+                    </div>
+
+                    {/* ⚠️ 예전에는 `신뢰도 낮음 · 모르는 폭 20%p` 였습니다. 앞을
+                        떼고 수치만 남긴 이유는 **겹쳐서**가 아닙니다 — 불확실성
+                        연구가 말하는 것은 겹침이 해롭다가 아니라, "낮음" 같은
+                        **말은 사람마다 다른 확률로 번역된다**는 것입니다. 그래서
+                        화면은 잰 값(20%p)을 앞세우고, "낮음" 은 사유 팝오버에
+                        둡니다. 근거는 `design/redesign/06-텍스트-최소화-조사.md` R4. */}
+                    <Stat value={`${Math.round(points)}%p`} label="모름" tone="unknown">
+                      <Why about={`${name} — 이 숫자를 읽기 전에`} lines={whyLines} />
+                    </Stat>
+
+                    {/* 회의 → 업무 → 코드. 0 은 `0`, 못 잰 것만 빈 고리. */}
+                    <Chain links={evidenceChain(member)} />
+                  </article>
+                );
+              })
+            )}
+          </div>
+
+          <div className="confirmbar">
+            {/* 예전에는 여기 안내 한 문장(37자)과 아래 비활성 사유 한
+                문장(33자)이 **같은 말을 두 번** 하고 있었습니다. 한 줄만
+                남기고 전문은 `?` 로. */}
+            <p className="confirmbar__notice">
+              확정값은 팀이 정합니다
+              <Why
+                about="확정에 대해"
+                lines={[
+                  team.notice,
+                  ...(finals.data && finals.data.finals.length > 0
+                    ? [describeFinals(finals.data.finals, new Map(people.map((p) => [p.user_id, p.name])))]
+                    : []),
+                ]}
+              />
+            </p>
+            <div className="confirmbar__row">
+              {members.map((member) => {
+                const name = nameOf(member.user_id, people);
+                return (
+                  <label className="confirmbar__person" key={member.user_id}>
+                    <span className="t13">{name}</span>
+                    {/* 단일 점수를 미리 주지 않습니다 — placeholder 는 **구간**입니다
+                        (v2 F1-4). 값은 팀이 적고, 적어야 확정이 열립니다. */}
+                    <input
+                      className="input input--num"
+                      inputMode="decimal"
+                      placeholder={`${describeRange(member)} (시스템 추정)`}
+                      aria-label={`${name} 확정값 (%) — 시스템 추정 ${describeRange(member)}`}
+                      value={values[member.user_id] ?? ''}
+                      onChange={(e) =>
+                        setValues((prev) => ({ ...prev, [member.user_id]: e.target.value }))
+                      }
+                    />
+                  </label>
+                );
+              })}
+              <span className="appbar__spacer" />
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={!allFilled || problems.length > 0 || blind || confirm.isPending}
+                onClick={() => confirm.mutate(toPayload(drafts, systemValues))}
+              >
+                이 값으로 확정
+              </button>
+            </div>
+            {changed.length > 0 && (
+              <div className="confirmbar__reasons">
+                {changed.map((d) => {
+                  const name = nameOf(d.user_id, people);
+                  return (
+                    <label className="confirmbar__reason" key={d.user_id}>
+                      <span className="t12 muted">{name} 조정 사유</span>
+                      <input
+                        className="input"
+                        placeholder="시스템 값과 다르게 정한 이유"
+                        value={reasons[d.user_id] ?? ''}
+                        onChange={(e) =>
+                          setReasons((prev) => ({ ...prev, [d.user_id]: e.target.value }))
+                        }
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            {!allFilled && members.length > 0 && (
+              <p className="disabled-reason">{unfilled}칸 남음</p>
+            )}
+            {problems.length > 0 && (
+              <p className="disabled-reason">
+                {problems.join(' · ')} — 사유 없는 조정은 근거 없는 점수와 같습니다
+              </p>
+            )}
+            {blind && <p className="disabled-reason">{BLIND_CONFIRM}</p>}
+            {sumOff && (
+              <p className="disabled-reason">
+                합계가 <span className="num">{effectiveSum.toFixed(1)}</span> 입니다 — 100이
+                아니어도 확정할 수 있지만, 의도한 것인지 확인하세요.
+              </p>
+            )}
+            {confirm.isSuccess && (
+              <p className="confirmbar__notice" role="status">
+                확정했습니다. 시스템 값과 확정값이 함께 기록에 남습니다.
+              </p>
+            )}
+            {confirm.isError && (
+              <p className="disabled-reason" role="alert">
+                확정하지 못했습니다 — {confirm.error instanceof Error ? confirm.error.message : '알 수 없는 오류'}
+              </p>
+            )}
+          </div>
+        </section>
+      </div>
+    </AppShell>
+  );
+}

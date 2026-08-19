@@ -279,15 +279,19 @@ describe('모바일 규칙', () => {
     strictEqual(missing.join(', '), '');
   });
 
-  it('⭐ 로그인 말고는 전부 아래 탭바가 있다', () => {
-    // 전체화면 PWA·WebView 에는 주소창도 뒤로가기도 없다. 탭바가 없으면
+  it('⭐ 로그인 말고는 전부 내비게이션이 있다', () => {
+    // 전체화면 PWA·WebView 에는 주소창도 뒤로가기도 없다. 내비가 없으면
     // 그 화면은 정말 막다른 길이 된다.
     // 로그인은 아직 어느 프로젝트 사람인지도 모르고, 오프라인 화면은
-    // 연결이 없어서 어디로도 갈 수 없다 — 둘 다 탭이 죽은 링크가 된다.
+    // 연결이 없어서 어디로도 갈 수 없다 — 둘 다 링크가 죽은 링크가 된다.
+    //
+    // ⚠️ 요구는 "막다른 길 금지"이지 "#tabs 가 있을 것"이 아닙니다.
+    // 리디자인(v2 F2) 뒤 녹음·통화는 옛 탭바 대신 SPA 셸을 미러링한
+    // `#sparail`(레일 + 하단 탭바 전환)을 씁니다 — 그것도 내비입니다.
     const exempt = new Set(['login.html', 'offline.html']);
     const missing = screens()
       .filter(({ name }) => !exempt.has(name))
-      .filter(({ html }) => !html.includes('id="tabs"'))
+      .filter(({ html }) => !html.includes('id="tabs"') && !html.includes('id="sparail"'))
       .map(({ name }) => name);
     strictEqual(missing.join(', '), '');
   });
@@ -1796,6 +1800,16 @@ describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
        셸이 하나 늘었으면 **찾는 자리**부터 늘려야 합니다. */
     walk(join(ROOT, 'electron'), join(ROOT));
 
+    /* ⭐ **리디자인 SPA 도 부르는 쪽입니다** (`webapp/src`, docs/22).
+       그리고 지금은 주 화면 아홉이 전부 거기 있습니다.
+
+       이 자리를 안 넣은 채로 SPA 전환을 했고, 그동안 이 가드는 **반쯤
+       눈을 감고 있었습니다** — `webapp/` 만 부르는 export 는 "테스트만
+       씀" 으로 잡히고(가짜 실패), 반대로 SPA 가 부르기를 그만둔 export
+       는 여전히 `demo/` 가 부르는 한 아무 말도 안 했습니다(진짜 놓침).
+       아홉 번째 사례입니다. */
+    walk(join(ROOT, '..', 'webapp', 'src'), join(ROOT, '..', 'webapp', 'src'));
+
     const offenders: string[] = [];
     for (const { rel, source } of files) {
       if (!rel.startsWith('lib/') || rel.endsWith('.test.ts')) continue;
@@ -2316,7 +2330,7 @@ describe('CSS 토큰', () => {
     // 그러면 한쪽에서만 깨집니다.
     for (const name of ['--ink-900', '--ink-700', '--ink-500', '--ink-300',
                         '--ink-200', '--ink-100', '--ink-050', '--ink-000',
-                        '--teal-700', '--teal-100', '--clay-600', '--clay-100',
+                        '--indigo-700', '--indigo-100', '--clay-600', '--clay-100',
                         '--green-700', '--amber-800', '--red-700']) {
       strictEqual(darkTokens.has(name), true, `어두운 모드에 ${name} 이 없습니다`);
     }

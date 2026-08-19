@@ -46,7 +46,6 @@ import { showNote } from '../lib/ui/failure.ts';
 import { whilePressed } from '../lib/ui/pending.ts';
 import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import { escapeHtml } from '../lib/html.ts';
-import { renderNav } from './nav.ts';
 import type { SyncTransport } from '../lib/recording/client.ts';
 import type { PendingChunk, UploadTransport } from '../lib/recording/upload-queue.ts';
 import { bootApp } from './pwa.ts';
@@ -91,6 +90,10 @@ const meetingId = params.get('meeting');
 // `?track=` 은 손으로 트랙 주소를 넣는 옛 경로다. `?meeting=` 이 있으면
 // 아래 `joinMeeting()` 이 로그인한 사람의 트랙을 서버에서 받아 온다.
 let trackUrl = params.get('track');
+
+// 개발자 진단 패널 (R7) — 실험 조건·복사 한 줄은 사용자에게 하는 말이
+// 아니라서 기본 숨김이고, `?debug=1` 로만 열린다.
+if (params.get('debug') === '1') $('debug').hidden = false;
 
 const localUpload = new LocalUploadTransport();
 const httpUpload = new HttpUploadTransport('');
@@ -321,6 +324,9 @@ $('start').addEventListener('click', async () => {
   elapsedTimer = setInterval(() => {
     const sec = Math.floor((Date.now() - startedAt) / 1000);
     $('elapsed').textContent = `${Math.floor(sec / 60)}분 ${sec % 60}초`;
+    // 트랙 리본 LG — 40분 축 위에서 채움이 자란다 (design/redesign §녹음).
+    // 40분을 넘겨도 100% 에서 멈춘다 — 축 밖을 그리면 축이 거짓이 된다.
+    $('ribbon-fill').style.width = `${Math.min((sec / 2400) * 100, 100)}%`;
   }, 1000);
 });
 
@@ -535,7 +541,19 @@ $('copy').addEventListener('click', () => {
 
 render();
 
-renderNav('record');
+// v2 F2 — 컨텍스트 바와 레일을 회의로 잇는다. 제목을 알면 바에 적고,
+// 어느 프로젝트인지 알면 레일의 칸반·기여도·설정을 그 프로젝트로 보낸다.
+// 실패해도 조용히 넘어간다 — 셸이 없다고 녹음을 막을 이유는 없다.
+async function fillShellContext(id: string): Promise<void> {
+  const response = await tryGet(`${apiBase}/api/meetings/${id}`);
+  if (response === null || !response.ok) return;
+  const meeting = (await response.json()) as { title: string | null; project_id: number };
+  if (meeting.title) $('ctx-title').textContent = `녹음 — ${meeting.title}`;
+  ($('rail-kanban') as HTMLAnchorElement).href = `/app/project/${meeting.project_id}/kanban`;
+  ($('rail-contrib') as HTMLAnchorElement).href = `/app/project/${meeting.project_id}/contributions`;
+  ($('rail-settings') as HTMLAnchorElement).href = `/app/project/${meeting.project_id}/settings/role`;
+}
+if (meetingId) void fillShellContext(meetingId);
 
 // 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
 bootApp();

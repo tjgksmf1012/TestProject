@@ -27,7 +27,6 @@ import {
 import { escapeHtml } from '../lib/html.ts';
 import { tryGet, unreachableText } from '../lib/http/send.ts';
 import { showNote } from '../lib/ui/failure.ts';
-import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
 const params = new URLSearchParams(location.search);
@@ -126,14 +125,21 @@ async function openMic(): Promise<void> {
     });
   } catch {
     micReady = false;
-    // 실패는 **빨갛게** (결함 98). 이 자리는 평소 "마이크가 켜졌습니다"
-    // 를 말하는 부제라, 같은 회색으로 쓰면 통화가 안 되는 이유를 놓칩니다.
-    showNote($('mic'), '마이크를 열지 못했습니다. 브라우저 권한을 확인하세요.');
+    // ⚠️ 빨강이 아니라 **흙빛 + 행동 버튼**입니다 (design/redesign §통화).
+    // 권한을 아직 안 준 것은 잘못이 아니라 대기 상태라, 빨갛게 쓰면
+    // 사람은 통화가 고장 났다고 읽습니다. 할 일을 버튼으로 줍니다.
+    showNote($('mic'), '마이크가 아직 꺼져 있습니다 — 권한을 허용하면 켜집니다.', 'gap');
+    $('mic-retry').hidden = false;
     render();
     return;
   }
+  $('mic-retry').hidden = true;
 
   micReady = true;
+  // 마이크가 열려야 토글할 것이 생긴다 (v2 F2 — 하단 컨트롤 바).
+  ($('mic-toggle') as HTMLButtonElement).disabled = false;
+  $('mic-toggle').textContent = '마이크 끄기';
+  $('mic-toggle').setAttribute('aria-pressed', 'true');
   const track = localStream.getAudioTracks()[0];
   const settings = (track?.getSettings() ?? {}) as Record<string, unknown>;
   const problems = captureProblems(settings);
@@ -275,6 +281,19 @@ $('record').addEventListener('click', () => {
   location.href = `/index.html?meeting=${meetingId}`;
 });
 
+// 권한 대기 상태의 행동 버튼 — 다시 getUserMedia 를 시도한다.
+$('mic-retry').addEventListener('click', () => void openMic());
+
+// 마이크 토글 (v2 F2). 트랙을 닫지 않고 `enabled` 만 뒤집는다 — 닫으면
+// 다시 켤 때 권한 절차부터 다시 밟아야 하고, 통화 연결도 다시 협상한다.
+$('mic-toggle').addEventListener('click', () => {
+  const track = localStream?.getAudioTracks()[0];
+  if (!track) return;
+  track.enabled = !track.enabled;
+  $('mic-toggle').textContent = track.enabled ? '마이크 끄기' : '마이크 켜기';
+  $('mic-toggle').setAttribute('aria-pressed', String(track.enabled));
+});
+
 $('leave').addEventListener('click', () => {
   socket?.close();
   for (const pc of peers.values()) pc.close();
@@ -304,7 +323,18 @@ async function start(): Promise<void> {
 
 void start();
 
-renderNav('lobby');
+// v2 F2 — 컨텍스트 바와 레일을 회의로 잇는다 (index.html 의 짝과 같은 역할).
+async function fillShellContext(): Promise<void> {
+  if (!meetingId) return;
+  const response = await tryGet(`${apiBase}/api/meetings/${meetingId}`);
+  if (response === null || !response.ok) return;
+  const meeting = (await response.json()) as { title: string | null; project_id: number };
+  if (meeting.title) $('ctx-title').textContent = `통화 — ${meeting.title}`;
+  ($('rail-kanban') as HTMLAnchorElement).href = `/app/project/${meeting.project_id}/kanban`;
+  ($('rail-contrib') as HTMLAnchorElement).href = `/app/project/${meeting.project_id}/contributions`;
+  ($('rail-settings') as HTMLAnchorElement).href = `/app/project/${meeting.project_id}/settings/role`;
+}
+void fillShellContext();
 
 // 서비스 워커 등록 + 설치 안내. 안 부르면 sw.js 는 그냥 놓인 파일이다.
 bootApp();
