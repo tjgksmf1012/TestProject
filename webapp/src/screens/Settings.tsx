@@ -506,6 +506,7 @@ export default function Settings() {
   return (
     <AppShell
       title={project.data?.title ?? '설정'}
+      docTitle={`설정 · ${project.data?.title ?? ''}`}
       actions={
         /* ⚠️ 여기서는 **secondary** 입니다 (v2 F9). 설정 화면에 온 사람이
            하려는 일은 `저장`·`연결` 이고, 전역 단축 버튼이 그보다 크게

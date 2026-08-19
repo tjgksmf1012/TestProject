@@ -581,6 +581,28 @@ button[aria-disabled="true"],
   }
 }
 
+/* ── 본문으로 건너뛰기 (WCAG 2.4.1, 수준 A) ─────────────────
+   ⚠️ **`display: none` 으로 감추면 안 됩니다.** 그러면 초점도 못 받아
+   링크가 있으나 마나입니다. 화면 밖으로 밀어 두고 초점이 오면 데려옵니다. */
+.skip {
+  position: fixed;
+  left: 1rem;
+  top: -100%;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  background: var(--primary);
+  color: var(--primary-fg);
+  border-radius: var(--r-ctrl);
+  text-decoration: none;
+  font-weight: 600;
+  /* 이 링크도 손가락 표적 규칙을 지킵니다 — 42px 이라 가드가 잡았습니다. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+.skip:focus-visible { top: 1rem; }
+main:focus { outline: none; }
+
 /* 키보드로 옮겨 다니는 사람이 지금 어디 있는지 보여야 한다. */
 :focus-visible {
   outline: 2px solid var(--primary);

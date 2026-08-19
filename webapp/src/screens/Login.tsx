@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api/client.ts';
 import { EvidenceChip } from '../components/EvidenceChip.tsx';
 import { validateLogin, validateSignup, describeAuthFailure } from '@lib/auth/session.ts';
+import { pageTitle } from '@lib/shell/title.ts';
 
 // 로그인 — 좌측 히어로가 이 제품의 주장입니다 (지시서 기타-6 §로그인):
 // 회의 발화 → 업무 → PR 사슬을 정지 화면으로 보여줍니다. 애니메이션 없음.
@@ -17,6 +18,13 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // 이 화면은 `AppShell` 밖이라 제목을 스스로 답니다.
+  // ⚠️ 가입으로 바꾸면 제목도 따라갑니다 — 같은 주소에서 화면이 바뀌는데
+  //    제목이 그대로면 낭독기는 아무 일도 안 일어난 것으로 읽습니다.
+  useEffect(() => {
+    document.title = pageTitle(mode === 'login' ? '로그인' : '가입');
+  }, [mode]);
 
   const submit = async () => {
     const problems =
@@ -83,7 +91,10 @@ export default function Login() {
             void submit();
           }}
         >
-          <h1 className="login__brand">TeamFlow</h1>
+          {/* ⚠️ `<h1>` 이었습니다 — 한 화면에 `<h1>` 이 둘이면 낭독기 사용자에게
+              "이 페이지의 주제" 가 둘이 됩니다. 주제는 왼쪽의 문장이고,
+              이것은 상표입니다. */}
+          <p className="login__brand">TeamFlow</p>
           {mode === 'signup' && (
             <label className="field">
               <span className="field__label">이름</span>

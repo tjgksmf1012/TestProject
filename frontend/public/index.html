@@ -157,6 +157,10 @@
     </style>
   </head>
   <body class="sparail-page">
+    <!-- 키보드로 오는 사람은 화면마다 레일 다섯 칸을 지나야 본문에 닿습니다
+         (WCAG 2.4.1, 수준 A). ⚠️ `display: none` 으로 감추면 초점도 못 받아
+         아무 일도 안 합니다 — 화면 밖으로 밀어 두고 초점이 오면 데려옵니다. -->
+    <a class="skip" href="#main-content">본문으로 건너뛰기</a>
     <!-- v2 F2 — 셸은 한 종류: SPA 와 같은 레일 + 컨텍스트 바.
          레일의 프로젝트 링크는 회의를 알게 되면 main.ts 가 채웁니다. -->
     <nav id="sparail" class="sparail" aria-label="주 메뉴">
@@ -186,6 +190,12 @@
       <span class="spabar__spacer"></span>
       <span class="by" id="who" hidden></span>
     </header>
+
+    <!-- ⚠️ 랜드마크가 없었습니다 — 낭독기 사용자가 "본문으로" 라는 이동
+         수단을 잃습니다. 건너뛰기 링크가 닿을 자리이기도 합니다.
+         `tabindex="-1"` 은 링크로 왔을 때 **초점이 실제로 여기 앉게**
+         하려는 것입니다. 없으면 스크롤만 되고 초점은 링크에 남습니다. -->
+    <main id="main-content" tabindex="-1">
 
     <p class="note">
       이 기기가 내 목소리 트랙을 기록합니다. 녹음이 끊긴 구간은
@@ -305,6 +315,7 @@
       <button id="copy">표에 붙일 한 줄 복사</button>
       <p class="status" id="copy-note" role="status"></p>
     </section>
+    </main>
 
     <script type="module" src="./main.js"></script>
   
