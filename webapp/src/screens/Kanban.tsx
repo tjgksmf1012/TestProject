@@ -18,6 +18,12 @@ import {
   type Task,
 } from '@lib/kanban/board.ts';
 import { canDropOn, dragPayload, draggedTaskId, TASK_DRAG_TYPE } from '@lib/kanban/dnd.ts';
+import {
+  describePriority,
+  priorityChoices,
+  priorityTone,
+  showsBadge,
+} from '@lib/kanban/priority.ts';
 import { assigneeText, toggled, type Person } from '@lib/kanban/assignees.ts';
 import { deleteTaskConfirm } from '@lib/project/roles.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
@@ -34,6 +40,7 @@ function Card({
   people,
   onMove,
   onToggleAssignee,
+  onPriority,
   onDelete,
 }: {
   task: Task;
@@ -41,6 +48,7 @@ function Card({
   people: Person[];
   onMove: (task: Task, to: string) => void;
   onToggleAssignee: (task: Task, userId: number) => void;
+  onPriority: (task: Task, priority: number) => void;
   onDelete: (task: Task) => void;
 }) {
   const today = todayInTeamCalendar();
@@ -73,6 +81,15 @@ function Card({
     >
       <div className="kcard__top">
         <span className="kcard__title">{task.title}</span>
+        {/* 우선순위는 **표식**이라 제목 줄에 섭니다 — meta 줄에 넣었더니
+            이미 꽉 찬 줄이 접혀 카드가 한 줄 커졌습니다(렌더해서 봤습니다).
+            ⚠️ `보통` 은 안 그립니다: 넷 중 셋에 배지가 붙으면 배지가 배경이
+            되고 정작 `긴급` 이 안 보입니다. 그 판단은 `@lib` 에. */}
+        {showsBadge(task.priority) && (
+          <span className={`kprio kprio--${priorityTone(task.priority)}`}>
+            {describePriority(task.priority)}
+          </span>
+        )}
         <Menu.Root>
           <Menu.Trigger asChild>
             <button type="button" className="kcard__menu-btn" aria-label={`${task.title} 메뉴`}>
@@ -101,6 +118,20 @@ function Card({
                 >
                   {task.assignee_ids.includes(person.user_id) ? '✓ ' : ''}
                   {person.name}
+                </Menu.Item>
+              ))}
+              <div className="menu__sep" />
+              {/* 우선순위 (`TASK-007`) — 값을 **정할 자리**입니다.
+                  이 칸은 오래 DB 에만 있었고 검색 API 가 거르기까지 했는데
+                  사람이 정할 자리도 볼 자리도 없었습니다. */}
+              {priorityChoices(task.priority).map((choice) => (
+                <Menu.Item
+                  key={choice.value}
+                  className="menu__item"
+                  onSelect={() => onPriority(task, choice.value)}
+                >
+                  {choice.current ? '✓ ' : ''}
+                  {choice.label}
                 </Menu.Item>
               ))}
               <div className="menu__sep" />
@@ -178,6 +209,9 @@ export default function Kanban() {
   const toggleAssignee = (task: Task, userId: number) => {
     setAssignees.mutate({ taskId: task.id, userIds: toggled(task.assignee_ids, userId) });
   };
+  const setPriority = (task: Task, priority: number) => {
+    patchTask.mutate({ taskId: task.id, patch: { priority } });
+  };
   const remove = (task: Task) => {
     if (window.confirm(deleteTaskConfirm(task.title))) deleteTask.mutate(task.id);
   };
@@ -241,6 +275,7 @@ export default function Kanban() {
                     people={people}
                     onMove={move}
                     onToggleAssignee={toggleAssignee}
+                    onPriority={setPriority}
                     onDelete={remove}
                   />
                 ))}

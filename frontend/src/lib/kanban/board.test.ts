@@ -31,6 +31,7 @@ function task(over: Partial<Task> = {}): Task {
     title: '로그인 API 구현',
     assignee_ids: [1],
     status: 'todo',
+    priority: 2,
     deadline: '2026-09-20',
     completed_at: null,
     origin: null,

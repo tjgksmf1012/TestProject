@@ -50,6 +50,8 @@ logger = logging.getLogger(__name__)
 #    출처였고 데이터베이스에는 제약이 없었습니다 — `db/vocab.py` 의
 #    `TaskStatus` 머리말을 보십시오. 지금은 어휘에서 끌어옵니다.
 STATUSES = tuple(str(s) for s in vocab.TASK_STATUSES)
+#: 우선순위 허용값. 목록을 손으로 적지 않습니다 — `vocab.TaskPriority` 가 원본.
+PRIORITIES = tuple(int(p) for p in vocab.TASK_PRIORITIES)
 DONE = str(vocab.TaskStatus.DONE)
 
 
@@ -104,6 +106,9 @@ def list_tasks(session: Session, project_id: int) -> list[dict]:
             "title": task.title,
             "assignee_ids": who.get(task.id, []),
             "status": task.status,
+            #: 작을수록 급합니다 (`vocab.TaskPriority`). 화면은 이 값으로
+            #: 정렬하지 않습니다 — 칸반 열 안 순서는 사람이 끌어 정합니다.
+            "priority": task.priority,
             "deadline": task.deadline.date().isoformat() if task.deadline else None,
             "completed_at": (
                 _aware(task.completed_at).isoformat() if task.completed_at else None
@@ -311,12 +316,20 @@ def change_task(
     status: str | None = None,
     deadline: date | None = None,
     deadline_provided: bool = False,
+    priority: int | None = None,
     reason: str | None = None,
 ) -> m.Task:
-    """상태·마감일 변경.
+    """상태·마감일·우선순위 변경.
 
     `deadline_provided` 를 따로 받는 이유: `deadline=None` 이 "마감일을
     지운다" 인지 "마감일은 안 건드린다" 인지 구분해야 하기 때문입니다.
+    우선순위는 지울 수 있는 값이 아니라(언제나 넷 중 하나) 그 구분이
+    필요 없습니다.
+
+    ⛔ **우선순위는 기여도에 안 닿습니다.** 감사 로그도 남기지 않습니다 —
+    상태·마감일·담당자는 기여 이벤트가 누구에게 언제 가는지를 바꾸지만,
+    우선순위는 "무엇부터 볼까" 일 뿐입니다. 남기면 로그가 잡음으로
+    가득 차고, 정작 중요한 변경이 그 속에 묻힙니다.
     """
     task = session.get(m.Task, task_id)
     if task is None or task.project_id != project_id:
@@ -325,11 +338,19 @@ def change_task(
     if status is not None and status not in STATUSES:
         raise TaskError(f"알 수 없는 상태입니다: {status}")
 
+    # ⚠️ 여기서 막지 않으면 DB 의 CHECK 제약이 `IntegrityError` 로 터지고,
+    #    사용자는 500 을 봅니다. 아는 잘못은 아는 말로 돌려줍니다.
+    if priority is not None and priority not in PRIORITIES:
+        raise TaskError(f"알 수 없는 우선순위입니다: {priority}")
+
     if deadline_provided:
         _change_deadline(session, task, deadline, actor_id, reason)
 
     if status is not None and status != task.status:
         _change_status(session, task, status, actor_id)
+
+    if priority is not None:
+        task.priority = priority
 
     session.flush()
     return task

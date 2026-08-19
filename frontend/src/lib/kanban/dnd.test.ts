@@ -12,6 +12,7 @@ function task(status: string): Task {
     title: '접근성 점검',
     assignee_ids: [],
     status,
+    priority: 2,
     deadline: null,
     completed_at: null,
     origin: null,

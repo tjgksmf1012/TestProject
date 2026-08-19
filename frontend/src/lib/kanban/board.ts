@@ -46,6 +46,14 @@ export interface Task {
    */
   assignee_ids: number[];
   status: string;
+  /**
+   * 무엇부터 볼 것인가 (`TASK-007`). **작을수록 급합니다.**
+   *
+   * ⚠️ **이 값으로 카드를 정렬하지 않습니다.** 열 안 순서는 사람이 끌어
+   * 정하는 것이고, 우선순위로 자동 정렬하면 사람이 옮겨 놓은 것이 다음
+   * 새로고침에 되돌아갑니다. 뜻과 규칙은 `lib/kanban/priority.ts`.
+   */
+  priority: number;
   /** ISO 날짜 `YYYY-MM-DD`. */
   deadline: string | null;
   completed_at: string | null;

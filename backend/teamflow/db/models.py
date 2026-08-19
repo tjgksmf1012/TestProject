@@ -398,7 +398,15 @@ class Task(Base):
     #: (`db/vocab.py` 의 `TaskStatus` 머리말). 서비스를 안 거치는 경로가
     #: 하나라도 생기면 칸반에 어느 열에도 안 속하는 카드가 생깁니다.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="todo")
-    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    #: 무엇부터 볼 것인가. **작을수록 급합니다** (`vocab.TaskPriority`).
+    #:
+    #: ⚠️ 제약이 **없던** 열입니다 — `Integer` 라 `-1` 도 `99` 도 받았고,
+    #: 그런 값이 들어오면 화면이 라벨을 못 찾아 빈 칸을 그립니다
+    #: (`c8a41f7e26b3`). ⛔ 기여도에 연결하지 마십시오 — 우선순위가 점수에
+    #: 닿는 순간 드롭다운 하나가 점수 발행기가 됩니다.
+    priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=int(vocab.TASK_PRIORITY_DEFAULT)
+    )
     difficulty: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 회의에서 만들어진 업무라면 그 후보를 가리킨다
@@ -422,6 +430,13 @@ class Task(Base):
             + ",".join(f"'{v}'" for v in vocab.task_status_values())
             + ")",
             name="ck_task_status",
+        ),
+        # ⚠️ 목록을 손으로 적지 않습니다 — `vocab.TaskPriority` 가 원본.
+        CheckConstraint(
+            "priority IN ("
+            + ",".join(str(v) for v in vocab.task_priority_values())
+            + ")",
+            name="ck_task_priority",
         ),
     )
 

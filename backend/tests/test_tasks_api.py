@@ -801,3 +801,64 @@ def test_an_outsider_cannot_change_assignees(client: TestClient, board: dict):
 
 def test_unknown_task_is_404_for_assignees(client: TestClient, board: dict):
     assert put_assignees(client, board, 9999, []).status_code == 404
+
+
+# ══════════════════════════════════════════════════════════════
+# 우선순위 (`TASK-007`)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 이 칸은 **있었는데 아무도 안 읽고 있었습니다.** 검색 API 는 이 값으로
+# 거르기까지 했는데 사람이 값을 정할 자리도 볼 자리도 없었습니다.
+
+
+def test_the_board_carries_priority(client: TestClient, board: dict):
+    """⭐ 목록에 실려 나가야 화면이 그릴 수 있습니다."""
+    body = client.get(f"/api/projects/{board['project_id']}/tasks").json()
+    assert all("priority" in t for t in body["tasks"])
+    # 아무도 안 정했으면 보통(2).
+    assert {t["priority"] for t in body["tasks"]} == {2}
+
+
+def test_priority_can_be_changed(client: TestClient, board: dict):
+    got = patch(client, board, board["by_hand"], {"priority": 0})
+    assert got.status_code == 200
+    assert got.json()["priority"] == 0
+
+
+def test_unknown_priority_is_a_400_not_a_500(client: TestClient, board: dict):
+    """⚠️ 서비스에서 막지 않으면 DB 의 CHECK 가 IntegrityError 로 터집니다.
+
+    사용자는 500 을 보고, 로그에는 SQL 이 찍힙니다. 아는 잘못은 아는
+    말로 돌려줍니다.
+    """
+    for bad in (-1, 4, 99):
+        got = patch(client, board, board["by_hand"], {"priority": bad})
+        assert got.status_code == 400, bad
+        assert "우선순위" in got.json()["detail"]
+
+
+def test_changing_priority_leaves_status_and_deadline_alone(
+    client: TestClient, board: dict
+):
+    """⚠️ 우선순위만 바꾸려는 요청이 마감일을 조용히 지우면 안 됩니다."""
+    before = client.get(f"/api/projects/{board['project_id']}/tasks").json()
+    was = next(t for t in before["tasks"] if t["id"] == board["from_meeting"])
+
+    got = patch(client, board, board["from_meeting"], {"priority": 1})
+    assert got.status_code == 200
+    now = got.json()
+    assert now["status"] == was["status"]
+    assert now["deadline"] == was["deadline"]
+    assert now["priority"] == 1
+
+
+def test_priority_does_not_touch_contribution(client: TestClient, board: dict):
+    """⛔ **우선순위는 기여도에 안 닿습니다.**
+
+    닿는 순간 드롭다운 하나가 점수 발행기가 됩니다 — 아무 일도 안 하고
+    자기 업무를 `긴급` 으로 바꾸는 것만으로 점수가 오르면 안 됩니다.
+    """
+    before = len(events())
+    for p in (0, 1, 3, 2):
+        assert patch(client, board, board["by_hand"], {"priority": p}).status_code == 200
+    assert len(events()) == before, "우선순위 변경이 기여 이벤트를 만들었습니다"
