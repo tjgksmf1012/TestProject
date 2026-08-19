@@ -175,6 +175,35 @@ export class RecordingClient {
   }
 
   /**
+   * 끊겼다 이어졌을 때, 서버가 **이미 가진 seq** 를 알려 주고 중복을 지운다.
+   *
+   * 이게 없으면 재연결마다 처음부터 다시 올려 **영영 못 따라잡습니다** —
+   * 서버 쪽 엔드포인트(`GET …/chunks`)는 그 말을 주석에 적어 두고 있었고,
+   * `UploadQueue.resumeWith` 도 만들어져 있었는데 **둘을 잇는 코드가
+   * 없었습니다.** 이 저장소의 대표 실패 ①(만들어 놓고 아무도 안 부름)이고,
+   * 가드는 클래스 메서드를 안 세기 때문에 눈을 감고 있었습니다.
+   *
+   * ## ⚠️ 녹음 중일 때만 받습니다
+   *
+   * seq 는 **이 세션 안에서만** 이어집니다. 새로고침하면 0부터 다시
+   * 시작하는데, 그때 서버가 가진 `0..40` 을 건너뛰면 **새로 녹음한 소리
+   * 41개를 버립니다.** 재개가 옳은 경우는 "같은 세션이 끊겼다 이어진 것"
+   * 하나뿐이라, 그 밖에서는 조용히 무시합니다 — 부르는 쪽이 국면을
+   * 판단하게 두면 언젠가 틀린 자리에서 부릅니다.
+   *
+   * @returns 실제로 건너뛰기로 한 seq 수. 무시했으면 0.
+   */
+  resumeFrom(serverHasSeqs: readonly number[]): number {
+    if (this.#state.phase !== 'recording' && this.#state.phase !== 'interrupted') return 0;
+    // 이 세션이 아직 만들지도 않은 seq 는 남의 것입니다 — 앞선 세션이
+    // 올려 둔 것이고, 지금 큐에는 그 번호로 **다른 소리**가 들어 있습니다.
+    const mine = serverHasSeqs.filter((seq) => seq < this.#nextSeq);
+    if (mine.length === 0) return 0;
+    this.#queue.resumeWith(mine);
+    return mine.length;
+  }
+
+  /**
    * 서버와 시각을 맞춘다.
    *
    * 녹음 시작 전에 한 번, 그리고 회의 중 5분마다 다시 부르는 걸 권장한다.
