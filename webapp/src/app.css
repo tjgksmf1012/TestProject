@@ -1127,6 +1127,28 @@ details.disc > .disc__body {
 }
 .kcard .chain { margin-top: var(--sp-3); }
 
+/* 우선순위 배지 (`TASK-007`).
+   ⚠️ **`보통` 은 안 그립니다** — 넷 중 셋에 배지가 붙으면 배지가 배경이
+   되고, 정작 `긴급` 이 눈에 안 들어옵니다. 그 판단은 `lib/kanban/priority.ts`.
+   ⚠️ 넷을 네 색으로 칠하지 않습니다 — 칸반이 신호등이 되고, 이 저장소가
+   색에 쓰는 뜻(인디고 = 근거 있음 · 황토 = 못 잼)과 부딪힙니다. */
+.kprio {
+  font-size: var(--fs-11);
+  letter-spacing: var(--ls-11);
+  color: var(--c-ink-muted);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-sm);
+  padding: 0 var(--sp-3);
+  white-space: nowrap;
+}
+/* 긴급만 색을 씁니다. 빨강이 아니라 황토 — 빨강은 "네가 뭘 잘못했다"
+   로 읽히고, 급한 것은 잘못이 아닙니다. */
+.kprio--urgent {
+  color: var(--c-unknown);
+  border-color: var(--c-unknown-line);
+  background: var(--c-unknown-tint);
+}
+
 /* ==========================================================================
    화면 — 회의 로비 (참가자마다 리본 LG · 빈 상태에도 축)
    ========================================================================== */

@@ -23,7 +23,7 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 
 
 class SpeakerSource(StrEnum):
@@ -257,6 +257,12 @@ class MeetingEventType(StrEnum):
     INCOMPLETE_TASK = "incomplete_task"  # AI-REVIEW-004 미완성 업무
     TOPIC_DRIFT = "topic_drift"  # AI-REVIEW-003 주제 이탈
     DECISION_CONFLICT = "decision_conflict"  # AI-REVIEW-006 결정 번복
+    #: AI-REVIEW-008 동시 발언이 바탕보다 늘어난 구간.
+    #:
+    #: ⚠️ 겹침 자체는 진작 탐지하고 있었습니다(`multitrack.is_overlap`).
+    #: 없던 것은 **"늘었다" 는 판정**입니다 — 회의 내내 조금씩 겹치는 것은
+    #: 정상적인 대화이고, 특정 구간에서 갑자기 늘어난 것이 볼 만한 신호입니다.
+    OVERLAP_SURGE = "overlap_surge"
 
 
 #: 지금 **실제로 만들어지는** 값.
@@ -553,6 +559,61 @@ TASK_STATUS_LABEL: dict[TaskStatus, str] = {
 def task_status_values() -> tuple[str, ...]:
     """CHECK 제약에 쓸 문자열들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
     return tuple(sorted(str(s) for s in TaskStatus))
+
+
+# ══════════════════════════════════════════════════════════════
+# tasks.priority — 우선순위 (요구사항 정의서 §15 `TASK-007`)
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ **칸만 있고 아무도 안 읽고 있었습니다.** `tasks.priority` 는 정수
+# 열로 진작 있었고 검색 API 는 이 값으로 거르기까지 했는데, 사람이 값을
+# **정할 자리도 볼 자리도 없었습니다** — 있지도 않은 값으로 거를 수 있는
+# 필터였습니다. 이 저장소의 실패 ①(만들어 놓고 아무도 안 부름)과
+# ③(할 일을 알려 주고 그 일을 할 자리를 안 줌)이 겹친 자리입니다.
+#
+# ⛔ **기여도에 절대 연결하지 마십시오.** 우선순위가 점수에 닿는 순간
+# 드롭다운 하나가 점수 발행기가 됩니다. 이건 "무엇부터 볼까" 를 정하는
+# 값이지 "누가 잘했나" 가 아닙니다.
+#
+# 숫자를 그대로 쓰는 이유: 이미 `int` 열이고 정렬이 필요한 값입니다.
+# 문자열로 바꾸려면 마이그레이션이 필요하고, 얻는 게 없습니다.
+
+
+class TaskPriority(IntEnum):
+    """무엇부터 볼 것인가. **작을수록 급합니다.**
+
+    ⚠️ 방향을 헷갈리면 정렬이 조용히 뒤집힙니다. `URGENT = 0` 이고
+    `sorted()` 가 급한 것을 앞에 놓습니다 — 이름과 숫자를 같이 읽으세요.
+    """
+
+    URGENT = 0  # 긴급
+    HIGH = 1  # 높음
+    NORMAL = 2  # 보통 — `tasks.priority` 의 기본값
+    LOW = 3  # 낮음
+
+
+#: `tasks.priority` 가 받는 값 전부. **선언 순서 = 급한 순서.**
+TASK_PRIORITIES: tuple[TaskPriority, ...] = tuple(TaskPriority)
+
+#: 값을 안 정했을 때. DB 열의 `default=2` 와 **같아야 합니다.**
+TASK_PRIORITY_DEFAULT: TaskPriority = TaskPriority.NORMAL
+
+#: 사람이 읽을 이름.
+#:
+#: ⚠️ **화면의 `lib/kanban/priority.ts` 와 짝입니다** — `TASK_STATUS_LABEL`
+#: 과 같은 사정이고, `test_repo_integrity.py` 의 교차 검사가 갈라지면
+#: 터집니다.
+TASK_PRIORITY_LABEL: dict[TaskPriority, str] = {
+    TaskPriority.URGENT: "긴급",
+    TaskPriority.HIGH: "높음",
+    TaskPriority.NORMAL: "보통",
+    TaskPriority.LOW: "낮음",
+}
+
+
+def task_priority_values() -> tuple[int, ...]:
+    """CHECK 제약에 쓸 정수들. 순서를 고정해 마이그레이션 diff 를 안정시킵니다."""
+    return tuple(sorted(int(p) for p in TaskPriority))
 
 
 # ══════════════════════════════════════════════════════════════

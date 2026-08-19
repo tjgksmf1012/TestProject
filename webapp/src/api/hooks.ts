@@ -264,7 +264,11 @@ export function useTaskMutations(projectId: number | undefined) {
   };
   return {
     patchTask: useMutation({
-      mutationFn: ({ taskId, patch }: { taskId: number; patch: Record<string, string> }) =>
+      // ⚠️ 값이 문자열만은 아닙니다 — `priority` 는 숫자입니다 (`TASK-007`).
+      //    `Record<string, string>` 로 두면 화면이 `String(priority)` 를
+      //    보내게 되고, 서버는 `"0"` 을 받아 pydantic 이 강제 변환합니다.
+      //    운 좋게 돌지만 계약이 거짓말을 하게 됩니다.
+      mutationFn: ({ taskId, patch }: { taskId: number; patch: Record<string, string | number | null> }) =>
         api.patch<Task>(`/api/projects/${projectId}/tasks/${taskId}`, patch),
       onSuccess: refresh,
     }),

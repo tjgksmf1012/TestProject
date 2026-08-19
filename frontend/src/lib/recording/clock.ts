@@ -213,9 +213,30 @@ export class ClockTracker {
     return ((last.offsetMs - first.offsetMs) / span) * 1e6;
   }
 
-  /** 단조 시각을 서버 epoch 시각으로 바꾼다. */
+  /**
+   * 단조 시각을 서버 epoch 시각으로 바꾼다.
+   *
+   * ⚠️ **정수로 반올림합니다.** 오프셋은 표본 여럿의 평균이라 소수가 나오고,
+   * `performance.now()` 자체도 소수입니다. 그대로 흘리면 실기에서 이렇게
+   * 됩니다 —
+   *
+   *     X-Client-At-Ms: 1787101582540.65   → 서버 422, 청크 한 개도 안 올라감
+   *
+   * 서버는 이 헤더를 `int` 로 선언해 두었고, 소수가 오면 FastAPI 가
+   * 요청을 통째로 거절합니다. 큐는 여섯 번 재시도하고 포기하므로
+   * **회의 전체가 서버에 안 닿습니다.**
+   *
+   * 단위 테스트는 전부 통과했습니다 — 가짜 시계가 정수를 주기 때문입니다.
+   * 실제 브라우저로 올려 보고서야 나왔습니다(결함 175).
+   *
+   * 헤더에서만 반올림하지 않는 이유: 이 값은 청크 시각·시작 시각·mute
+   * 구간·공백 계산으로 다 흘러갑니다. 한 곳에서만 다듬으면 나머지가
+   * 소수를 계속 들고 다니고, 다음에 그중 하나를 서버로 보내는 순간 같은
+   * 결함이 다시 납니다. **밀리초 아래는 이 시스템에 뜻이 없습니다** —
+   * 정밀도는 왕복 지연(수십 ms)이 정합니다.
+   */
   toServerTime(monotonicMs: number): ServerTimeMs {
-    return monotonicMs + this.#offsetAt(monotonicMs);
+    return Math.round(monotonicMs + this.#offsetAt(monotonicMs));
   }
 
   /** 지금 시각을 서버 epoch 기준으로. */

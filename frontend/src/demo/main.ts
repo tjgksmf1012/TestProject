@@ -476,6 +476,35 @@ document.addEventListener('visibilitychange', () => {
   client.setHidden(document.visibilityState === 'hidden');
 });
 
+/**
+ * 끊겼다 이어지면 **서버에게 어디까지 받았는지 물어봅니다** (docs/21 Phase 4).
+ *
+ * ⚠️ 이 배선이 없어서, 서버의 `GET …/chunks` 도 `UploadQueue.resumeWith` 도
+ * 만들어만 놓고 **아무도 안 부르고 있었습니다.** 그동안 재연결하면 큐가
+ * 처음부터 다시 올렸고, 회의가 길수록 영영 못 따라잡습니다.
+ *
+ * ⚠️ **`online` 이 떴다고 서버가 살아난 것은 아닙니다** — 랜선이 꽂힌
+ * 것뿐입니다. 그래서 물어보고 실패하면 조용히 넘어갑니다. 다음 청크
+ * 업로드가 어차피 다시 시도합니다.
+ *
+ * 새로고침 뒤에는 seq 가 0부터 다시 시작하므로 그 목록을 그대로 건너뛰면
+ * **새 소리를 버립니다.** 그 가름은 `client.resumeFrom` 이 합니다 —
+ * 여기서 판단하면 판단이 두 벌이 됩니다.
+ */
+window.addEventListener('online', () => {
+  void (async () => {
+    if (trackUrl === null) return;
+    const response = await tryGet(`${trackUrl}/chunks`);
+    if (response === null || !response.ok) return;
+    const body = (await response.json().catch(() => null)) as { seqs?: number[] } | null;
+    if (body === null || !Array.isArray(body.seqs)) return;
+    const skipped = client.resumeFrom(body.seqs);
+    if (skipped > 0) {
+      showNote($('join-note'), `연결이 돌아왔습니다 — 이미 올라간 ${skipped}개는 건너뜁니다`);
+    }
+  })();
+});
+
 function showResult(result: RecordingSummary): void {
   $('result').hidden = false;
   $('verdict').textContent = describeTimeline(result.timeline);

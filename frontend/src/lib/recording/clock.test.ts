@@ -143,6 +143,37 @@ describe('ClockTracker', () => {
     assert.throws(() => tracker.now(), /동기화 전/);
   });
 
+  it('⭐ 서버 시각은 **정수**다 — 소수가 나가면 서버가 요청을 통째로 거절한다 (결함 175)', () => {
+    // 오프셋은 표본 평균이라 소수가 나오고, `performance.now()` 도 소수다.
+    // 그대로 흘렸더니 실기에서 `X-Client-At-Ms: 1787101582540.65` 가 나갔고
+    // 서버가 422 로 거절해 **청크가 한 개도 안 올라갔다.** 큐는 여섯 번
+    // 재시도하고 포기하므로 회의 전체가 서버에 안 닿는다.
+    //
+    // 단위 테스트가 못 잡은 이유: 가짜 시계가 정수를 주기 때문이다.
+    // 여기서는 일부러 소수를 넣는다.
+    const tracker = new ClockTracker(() => 5000.37);
+    tracker.push({
+      offsetMs: TRUE_OFFSET + 0.28,
+      roundTripMs: 40,
+      maxErrorMs: 20,
+      anchorMs: 1000,
+      spreadMs: 1,
+      sampleCount: 3,
+    });
+    const at = tracker.now();
+    assert.equal(Number.isInteger(at), true, `정수가 아닙니다: ${at}`);
+    assert.equal(at, Math.round(5000.37 + TRUE_OFFSET + 0.28));
+    // 헤더로 나갈 때 소수점이 안 붙는지도 같이 본다 — 실제로 나간 모양이다.
+    assert.equal(/^\d+$/.test(String(at)), true, `헤더 값이 정수 문자열이 아닙니다: ${String(at)}`);
+  });
+
+  it('보간 구간에서도 정수다 — 소수 오프셋 둘 사이', () => {
+    const tracker = new ClockTracker(() => 4000);
+    tracker.push({ offsetMs: TRUE_OFFSET + 0.1, roundTripMs: 40, maxErrorMs: 20, anchorMs: 1000, spreadMs: 1, sampleCount: 3 });
+    tracker.push({ offsetMs: TRUE_OFFSET + 60.7, roundTripMs: 40, maxErrorMs: 20, anchorMs: 7000, spreadMs: 1, sampleCount: 3 });
+    assert.equal(Number.isInteger(tracker.now()), true);
+  });
+
   it('측정이 하나면 그 오프셋을 그대로 쓴다', () => {
     const tracker = new ClockTracker(() => 5000);
     tracker.push(estimateClock([roundTrip(1000, 20, 5, 20)]));

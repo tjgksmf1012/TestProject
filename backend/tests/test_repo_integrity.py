@@ -271,6 +271,16 @@ def _screen_vocabularies():
             "frontend/src/lib/project/presence.ts",
             "PRESENCE_LABEL",
         ),
+        # 업무 우선순위 (정의서 §15 `TASK-007`). ⚠️ 이 칸은 오래 **아무도
+        # 안 읽고 있었습니다** — 검색 API 는 거르기까지 했는데 사람이 값을
+        # 정할 자리도 볼 자리도 없었습니다. 이제 양쪽에 어휘가 있으니
+        # 갈라지지 않게 붙잡습니다. 키가 숫자(0~3)라 다른 표와 다릅니다.
+        (
+            "업무 우선순위",
+            {str(int(p)) for p in vocab.TASK_PRIORITIES},
+            "frontend/src/lib/kanban/priority.ts",
+            "PRIORITY_LABEL",
+        ),
         # 승인이 막힌 이유. 서버가 `failures` 로 코드만 내보내고 화면이
         # 옮긴다. 화면이 스스로도 판정하는 코드가 일곱이라 **다 있는 줄
         # 알기 쉬운데**, 서버만 내는 둘(`unknown_candidate`·`no_reviewer`)

@@ -265,6 +265,45 @@ describe('RecordingClient — 녹음', () => {
   });
 });
 
+describe('RecordingClient — 재연결 후 재개 (Phase 4)', () => {
+  it('⭐ 서버가 이미 가진 seq 는 다시 안 올린다', async () => {
+    // 이게 없으면 재연결마다 처음부터 다시 올려 영영 못 따라잡는다.
+    const h = await prepared();
+    h.client.start();
+    for (let i = 0; i < 5; i += 1) {
+      h.clock.advance(5_000);
+      h.recorder.emit();
+    }
+    assert.equal(h.client.resumeFrom([0, 1, 2]), 3);
+  });
+
+  it('⚠️ 이 세션이 아직 안 만든 seq 는 건너뛰지 않는다 — 새 소리를 버리게 된다', async () => {
+    // 새로고침하면 seq 가 0부터 다시 시작한다. 그때 서버가 가진 0..40 을
+    // 그대로 건너뛰면 **새로 녹음한 청크 41개가 사라진다.** 앞선 세션의
+    // 것이지 지금 큐에 든 것이 아니다.
+    const h = await prepared();
+    h.client.start();
+    h.clock.advance(5_000);
+    h.recorder.emit(); // seq 0 하나만 만든 상태
+
+    assert.equal(h.client.resumeFrom([0, 1, 2, 3, 40]), 1);
+  });
+
+  it('⚠️ 녹음 중이 아니면 무시한다 — 부르는 쪽에 국면 판단을 맡기지 않는다', async () => {
+    const h = await prepared();
+    // 아직 start() 전 = 'ready'
+    assert.equal(h.client.resumeFrom([0, 1, 2]), 0);
+  });
+
+  it('빈 목록이면 아무 일도 없다', async () => {
+    const h = await prepared();
+    h.client.start();
+    h.clock.advance(5_000);
+    h.recorder.emit();
+    assert.equal(h.client.resumeFrom([]), 0);
+  });
+});
+
 describe('RecordingClient — 종료', () => {
   it('정지하면 마이크를 끄고 요약을 돌려준다', async () => {
     const h = await prepared();

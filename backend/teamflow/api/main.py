@@ -2986,6 +2986,7 @@ class SpeakingOut(BaseModel):
     skewed: bool
 
 
+
 @app.get("/api/meetings/{meeting_id}/speaking", response_model=SpeakingOut)
 def read_speaking_shares(
     meeting_id: int, session: DbSession, user: CurrentUser
@@ -3303,6 +3304,8 @@ class TaskOut(BaseModel):
     #: 없습니다.
     assignee_ids: list[int]
     status: str
+    #: 무엇부터 볼 것인가. **작을수록 급합니다** (`vocab.TaskPriority`).
+    priority: int
     deadline: date | None
     completed_at: datetime | None
     origin: TaskOriginOut | None
@@ -3376,6 +3379,9 @@ class TaskPatch(BaseModel):
     status: str | None = None
     # `deadline` 은 None 이 두 뜻이라 따로 받는다 — 아래 엔드포인트 주석 참조.
     deadline: date | None = None
+    #: `TASK-007`. 넷 중 하나(0 긴급 ~ 3 낮음). 지울 수 있는 값이 아니라
+    #: `deadline` 같은 "있었는가" 구분이 필요 없습니다.
+    priority: int | None = None
     reason: str | None = Field(default=None, max_length=300)
 
 
@@ -3429,7 +3435,7 @@ async def patch_task(
     session: DbSession,
     user: CurrentUser,
 ) -> TaskOut:
-    """상태·마감일 변경.
+    """상태·마감일·우선순위 변경.
 
     ⚠️ `deadline: null` 이 **"마감일을 지운다"** 인지 **"마감일은 안
     건드린다"** 인지 본문만으로는 알 수 없습니다. pydantic 은 둘 다 None 으로
@@ -3455,6 +3461,7 @@ async def patch_task(
             status=payload.status,
             deadline=payload.deadline,
             deadline_provided=deadline_provided,
+            priority=payload.priority,
             reason=payload.reason,
         )
     except task_service.TaskError as exc:

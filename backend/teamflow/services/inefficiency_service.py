@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from teamflow.db import models as m
 from teamflow.db import vocab
 from teamflow.meeting import inefficiency as ie
+from teamflow.meeting import speaking
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ DETECTED: tuple[str, ...] = (
     str(vocab.MeetingEventType.TOPIC_DRIFT),
     str(vocab.MeetingEventType.INCOMPLETE_TASK),
     str(vocab.MeetingEventType.DECISION_CONFLICT),
+    str(vocab.MeetingEventType.OVERLAP_SURGE),
 )
 
 
@@ -141,6 +143,55 @@ def forget(session: Session, meeting_id: int) -> int:
     return len(rows)
 
 
+def _overlap_surges(said: list[ie.Said]) -> list[ie.Finding]:
+    """동시 발언이 바탕보다 늘어난 구간 (`AI-REVIEW-008`).
+
+    판정은 `meeting/speaking.py` 가 합니다 — 구간 산술은 거기 한 벌이고,
+    발언 비중도 같은 함수(`merged_ms`)를 씁니다.
+
+    ⚠️ **누가 겹쳤는지는 `detail` 에 안 넣습니다.** 넣으면 화면이 적고,
+    그 순간 "말 끊은 사람" 표시가 됩니다 — 겹침은 두 사람 사이의 일이지
+    한 사람의 잘못이 아닙니다 (`AI-REVIEW-007` 과 같은 원칙).
+
+    ⚠️ **근거 발화는 그 구간에 걸친 것들**입니다. 없으면 사람이 "정말
+    그랬나" 를 확인할 방법이 없습니다 — 이 파일의 규칙 ②.
+    """
+    spans = [
+        speaking.Span(user_id=s.speaker_id, start_ms=s.start_ms, end_ms=s.end_ms)
+        for s in said
+        if s.speaker_id is not None
+    ]
+    out: list[ie.Finding] = []
+    for window in speaking.overlap_windows(spans):
+        evidence = [
+            s.id
+            for s in said
+            if s.speaker_id is not None
+            and s.start_ms < window.end_ms
+            and s.end_ms > window.start_ms
+        ]
+        out.append(
+            ie.Finding(
+                # ⚠️ **글자로 적습니다** — `vocab` 에서 끌어오지 않습니다.
+                #    다른 탐지기 넷도 그렇고, 그래야 "만들어진다고 적은
+                #    값에 진짜 만드는 코드가 있는가" 가드가 볼 수 있습니다.
+                #    어휘와 이 글자가 갈라지면 그 가드가 터집니다 —
+                #    **가드가 곧 둘을 잇는 끈**입니다.
+                event_type="overlap_surge",
+                start_ms=window.start_ms,
+                end_ms=window.end_ms,
+                evidence=evidence,
+                detail={
+                    "overlap_ms": window.overlap_ms,
+                    "ratio": round(window.ratio, 4),
+                    # 배수만 주면 바탕이 얼마였는지 알 수 없습니다.
+                    "baseline": round(window.baseline, 4),
+                },
+            )
+        )
+    return out
+
+
 def detect(session: Session, meeting_id: int) -> dict[str, int]:
     """회의 하나를 훑어 비효율 구간을 기록한다.
 
@@ -158,6 +209,7 @@ def detect(session: Session, meeting_id: int) -> dict[str, int]:
             said, candidate_evidence=_candidate_evidence(session, meeting_id)
         ),
         *ie.find_decision_conflicts(_decisions(session, meeting_id)),
+        *_overlap_surges(said),
     ]
 
     counts: dict[str, int] = {}
