@@ -52,9 +52,15 @@ export function Conditions({ items, id }: ConditionsProps) {
   );
 }
 
-/** 낭독기와 `title` 에 쓸 한 줄. 화면에는 칩이, 여기에는 말이. */
+/**
+ * 낭독기와 `title` 에 쓸 한 줄. 화면에는 칩이, 여기에는 말이.
+ *
+ * ⚠️ 예전에는 `…이(가) 아직 채워지지 않아` 였습니다. 칩이 **"비었다" 말고
+ * 다른 것**도 말하게 되면서 문장이 깨졌습니다 — `마감 지남이(가) 아직
+ * 채워지지 않아`. 라벨에 동사를 붙이지 말고 **그대로 나열**합니다.
+ */
 export function describeConditions(items: Condition[]): string {
   const missing = items.filter((c) => !c.met).map((c) => c.label);
   if (missing.length === 0) return '등록할 수 있습니다';
-  return `${missing.join(' · ')}이(가) 아직 채워지지 않아 등록할 수 없습니다`;
+  return `아직 안 된 것 — ${missing.join(' · ')}`;
 }

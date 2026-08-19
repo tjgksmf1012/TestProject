@@ -16,6 +16,8 @@ import {
 } from '../api/hooks.ts';
 import {
   approvalBlockers,
+  approvalConditions,
+  canUndoDecision,
   attentionReasons,
   buildReviewPayload,
   effectiveAssignee,
@@ -366,17 +368,13 @@ export default function Review() {
               const blocked = blockers.length > 0;
               // 문장 셋이 하던 말을 칩 셋이 합니다. 근거는 영구 조건이라
               // 못 채우면 이 후보는 등록될 수 없습니다 (불변식).
-              const conditions: Condition[] = [
-                {
-                  label: `근거 ${candidate.evidence_utterance_ids.length}`,
-                  met: !noEvidence,
-                },
-                { label: '담당자', met: effectiveAssignee(candidate, draft) !== null },
-                {
-                  label: '마감',
-                  met: (effectiveDeadline(candidate, draft) ?? '') !== '',
-                },
-              ];
+              //
+              // ⚠️ **칩을 여기서 따로 만들지 않습니다** (결함 193). 예전에는
+              //    "비었나" 만 봤는데 승인을 막는 쪽은 **마감이 과거인 것도**
+              //    막습니다. 그래서 지난 날짜를 고르면 칩은 전부 `●` 이고
+              //    툴팁은 "등록할 수 있습니다" 인데 버튼은 안 눌렸습니다.
+              //    막는 목록에서 파생시키면 갈라질 수 없습니다.
+              const conditions: Condition[] = approvalConditions(candidate, draft, context);
               return (
                 <article
                   key={candidate.id}
@@ -424,7 +422,7 @@ export default function Review() {
                     id={`cand-fields-${candidate.id}`}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <label className="field">
+                    <label className="field" id={`cand-assignee-${candidate.id}`}>
                       <span className="field__label">
                         담당자
                         {candidate.assignee_id === null && candidate.assignee_hint && (
@@ -452,7 +450,7 @@ export default function Review() {
                         ariaLabel={`${candidate.title} — 담당자`}
                       />
                     </label>
-                    <label className="field">
+                    <label className="field" id={`cand-deadline-${candidate.id}`}>
                       <span className="field__label">마감</span>
                       {/* v2 F7 — `mm/dd/yyyy` 는 `lang` 으로도 `locale` 로도
                           못 바꿉니다. 브라우저 UI 언어를 따르기 때문입니다. */}
@@ -475,10 +473,30 @@ export default function Review() {
                       title={blocked ? describeConditions(conditions) : undefined}
                       onClick={() => {
                         if (blocked) {
-                          (
-                            document.getElementById(`cand-fields-${candidate.id}`)
-                              ?.querySelector<HTMLElement>('select, input')
-                          )?.focus();
+                          // ⚠️ 예전에는 `cand-fields-*` 안에서 `select, input`
+                          //    을 찾았습니다. v2 F7·F8 에서 담당자를 Radix
+                          //    Select 로, 마감을 커스텀 DatePicker 로 바꾸면서
+                          //    **둘 다 `<button>` 이 됐고**, 이 줄만 안 따라
+                          //    왔습니다. 찾는 것이 0개라 **아무 데도 안
+                          //    갔습니다** — 화면은 "채우세요" 라고 하면서
+                          //    데려다 주지는 않았습니다 (결함 192).
+                          //
+                          //    그리고 첫 칸으로 보내면 안 됩니다. 담당자는
+                          //    정했고 마감만 빈 경우가 흔한데, 그때 담당자로
+                          //    데려가면 사람은 "여긴 이미 했는데?" 가 됩니다.
+                          //    **비어 있는 칸**으로 갑니다.
+                          const gap =
+                            effectiveAssignee(candidate, draft) === null
+                              ? 'assignee'
+                              : effectiveDeadline(candidate, draft) === null
+                                ? 'deadline'
+                                : null;
+                          if (gap !== null) {
+                            document
+                              .getElementById(`cand-${gap}-${candidate.id}`)
+                              ?.querySelector<HTMLElement>('button, select, input')
+                              ?.focus();
+                          }
                           return;
                         }
                         update(candidate.id, { decision: 'approve' });
@@ -486,13 +504,22 @@ export default function Review() {
                     >
                       등록
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm"
-                      onClick={() => update(candidate.id, { decision: 'pending' })}
-                    >
-                      나중에
-                    </button>
+                    {/* ⚠️ 「나중에」 였습니다. 하는 일은 `pending` 으로 되돌리는
+                        것인데, 아직 아무것도 안 정한 카드는 **이미** `pending`
+                        이라 눌러도 아무 일도 안 일어났습니다 — 그런데 이름은
+                        "미룰 수 있다" 고 약속했습니다. 미룬 채로는 검토를
+                        끝낼 수도 없습니다(모든 후보를 사람이 판단해야 열리는
+                        마무리 버튼입니다). 이름과 자리를 **실제로 하는 일**에
+                        맞춥니다 (결함 194). */}
+                    {canUndoDecision(candidate, draft) && (
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => update(candidate.id, { decision: 'pending' })}
+                      >
+                        되돌리기
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn btn--ghost btn--sm"

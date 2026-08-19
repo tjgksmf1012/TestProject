@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 
 import {
   approvalBlockers,
+  approvalConditions,
+  canUndoDecision,
   attentionReasons,
   blockerLine,
   buildReviewPayload,
@@ -622,5 +624,88 @@ describe('blockerLine (브리프 §13)', () => {
 
   it('과거 마감일은 안 채운 칸이 아니라 잘못이다', () => {
     assert.equal(line(candidate({ deadline: '2020-01-01' })).tone, 'error');
+  });
+});
+
+describe('승인 조건 칩은 막는 목록에서 나온다 (결함 193)', () => {
+  const 오늘 = '2026-08-19';
+  const ctx: ReviewContext = { memberIds: [1, 2, 3], today: 오늘 };
+  const base = (over: Partial<Candidate> = {}): Candidate => ({
+    id: 1,
+    title: '배포 방식 결정',
+    assignee_id: null,
+    assignee_hint: null,
+    deadline: null,
+    confidence: 0.34,
+    review_status: 'pending',
+    evidence_utterance_ids: [5],
+    ...over,
+  } as Candidate);
+
+  it('⭐ 마감이 **지난 날짜**면 칩이 `○` 다 — 예전에는 `●` 인데 버튼만 막혔다', () => {
+    const c = base({ assignee_id: 2, deadline: '2026-08-10' });
+    const conds = approvalConditions(c, emptyDraft(), ctx);
+    const 마감 = conds.find((x) => x.label.startsWith('마감'));
+    assert.strictEqual(마감?.met, false);
+    assert.strictEqual(마감?.label, '마감 지남', '왜 안 되는지 칩이 말해야 한다');
+  });
+
+  it('⭐ 칩이 전부 `●` 인데 막히는 상태가 **있을 수 없다**', () => {
+    // 같은 목록에서 나오므로 구조적으로 불가능합니다. 여러 모양으로 확인합니다.
+    const cases: Candidate[] = [
+      base(),
+      base({ assignee_id: 2 }),
+      base({ assignee_id: 2, deadline: '2026-08-10' }),
+      base({ assignee_id: 2, deadline: '2026-09-10' }),
+      base({ assignee_id: 99, deadline: '2026-09-10' }),
+      base({ evidence_utterance_ids: [], assignee_id: 2, deadline: '2026-09-10' }),
+      base({ assignee_id: 2, deadline: '2026-09-10', review_status: 'approved' }),
+    ];
+    for (const c of cases) {
+      const blocked = approvalBlockers(c, emptyDraft(), ctx).length > 0;
+      const allMet = approvalConditions(c, emptyDraft(), ctx).every((x) => x.met);
+      assert.strictEqual(
+        allMet,
+        !blocked,
+        `칩과 버튼이 갈라졌습니다: ${JSON.stringify(c)}`,
+      );
+    }
+  });
+
+  it('칩 셋으로 설명 안 되는 이유는 **칩을 하나 더** 단다', () => {
+    const c = base({ assignee_id: 2, deadline: '2026-09-10', review_status: 'approved' });
+    const conds = approvalConditions(c, emptyDraft(), ctx);
+    assert.strictEqual(conds.length, 4);
+    assert.strictEqual(conds[3]?.met, false);
+    assert.strictEqual(conds[3]?.label, '이미 승인된 후보입니다');
+  });
+
+  it('다 채우면 전부 `●` 다', () => {
+    const c = base({ assignee_id: 2, deadline: '2026-09-10' });
+    assert.strictEqual(approvalConditions(c, emptyDraft(), ctx).every((x) => x.met), true);
+  });
+});
+
+describe('되돌리기는 되돌릴 수 있을 때만 (결함 194)', () => {
+  const ctx: ReviewContext = { memberIds: [1, 2, 3], today: '2026-08-19' };
+  void ctx;
+  const c = (status: string): Candidate =>
+    ({
+      id: 1, title: 'x', assignee_id: null, assignee_hint: null, deadline: null,
+      confidence: 0.5, review_status: status, evidence_utterance_ids: [1],
+    }) as Candidate;
+
+  it('⭐ 아직 아무것도 안 정했으면 되돌릴 것이 없다 — 눌러도 아무 일도 안 일어났다', () => {
+    assert.strictEqual(canUndoDecision(c('pending'), emptyDraft()), false);
+  });
+
+  it('⭐ 등록·거절을 눌렀으면 되돌릴 수 있다', () => {
+    assert.strictEqual(canUndoDecision(c('pending'), { decision: 'approve' }), true);
+    assert.strictEqual(canUndoDecision(c('pending'), { decision: 'reject' }), true);
+  });
+
+  it('⚠️ 서버가 이미 정한 것은 화면에서 못 되돌린다 — 초안만 바꾸면 또 아무 일도 안 일어난다', () => {
+    assert.strictEqual(canUndoDecision(c('approved'), { decision: 'pending' }), false);
+    assert.strictEqual(canUndoDecision(c('rejected'), { decision: 'approve' }), false);
   });
 });

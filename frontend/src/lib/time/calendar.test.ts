@@ -7,6 +7,7 @@ import {
   formatTeamDate,
   monthGrid,
   monthOf,
+  moveInCalendar,
   shiftMonth,
   teamDateOf,
   todayInTeamCalendar,
@@ -130,5 +131,43 @@ describe('이미 있던 것들이 그대로인가', () => {
 
   it('todayInTeamCalendar 는 YYYY-MM-DD 를 준다', () => {
     strictEqual(/^\d{4}-\d{2}-\d{2}$/.test(todayInTeamCalendar(new Date('2026-09-04T01:00:00Z'))), true);
+  });
+});
+
+describe('moveInCalendar — 격자 키보드 (결함 196)', () => {
+  it('⭐ 좌우는 하루, 위아래는 한 주', () => {
+    strictEqual(moveInCalendar('2026-09-10', 'ArrowLeft'), '2026-09-09');
+    strictEqual(moveInCalendar('2026-09-10', 'ArrowRight'), '2026-09-11');
+    strictEqual(moveInCalendar('2026-09-10', 'ArrowUp'), '2026-09-03');
+    strictEqual(moveInCalendar('2026-09-10', 'ArrowDown'), '2026-09-17');
+  });
+
+  it('⭐ 달 경계를 알아서 넘는다 — 화면에 보이는 격자가 그렇게 생겼다', () => {
+    strictEqual(moveInCalendar('2026-09-01', 'ArrowLeft'), '2026-08-31');
+    strictEqual(moveInCalendar('2026-09-30', 'ArrowRight'), '2026-10-01');
+    strictEqual(moveInCalendar('2026-12-31', 'ArrowRight'), '2027-01-01');
+  });
+
+  it('Home·End 는 그 주의 일요일·토요일', () => {
+    // 2026-09-10 은 목요일
+    strictEqual(moveInCalendar('2026-09-10', 'Home'), '2026-09-06');
+    strictEqual(moveInCalendar('2026-09-10', 'End'), '2026-09-12');
+  });
+
+  it('⭐ PageUp/Down 은 달을 넘기되 **날짜를 유지**한다', () => {
+    strictEqual(moveInCalendar('2026-09-10', 'PageUp'), '2026-08-10');
+    strictEqual(moveInCalendar('2026-09-10', 'PageDown'), '2026-10-10');
+  });
+
+  it('⚠️ 없는 날로 튀지 않는다 — 1월 31일에서 한 달 뒤는 2월 말일이다', () => {
+    strictEqual(moveInCalendar('2026-01-31', 'PageDown'), '2026-02-28');
+    strictEqual(moveInCalendar('2028-01-31', 'PageDown'), '2028-02-29', '윤년');
+    strictEqual(moveInCalendar('2026-03-31', 'PageUp'), '2026-02-28');
+  });
+
+  it('다루지 않는 키는 `null` — 화면이 그때만 기본 동작을 막는다', () => {
+    strictEqual(moveInCalendar('2026-09-10', 'Enter'), null);
+    strictEqual(moveInCalendar('2026-09-10', 'a'), null);
+    strictEqual(moveInCalendar('말도 안 되는 값', 'ArrowLeft'), null);
   });
 });

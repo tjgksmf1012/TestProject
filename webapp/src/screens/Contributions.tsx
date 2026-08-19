@@ -10,6 +10,7 @@ import {
   categoriesForDisplay,
   describeCategory,
   describeRange,
+  nothingMeasured,
   hasNoEvidence,
   integrityNotes,
   nameOf,
@@ -60,6 +61,13 @@ function evidenceChain(member: MemberScore): ChainLink[] {
   const counts = new Map(categoriesForDisplay(member).map((c) => [c.category, c.event_count]));
   return ['meeting', 'task', 'code'].map((category) => {
     const label = describeCategory(category);
+    // ⚠️ **팀 전체에 잰 범주가 하나도 없으면 전부 빈 고리입니다** (결함 191).
+    //    `counts` 가 비어 있다고 `0` 을 적으면, 프로젝트를 막 만든 팀의
+    //    화면이 `0 회의 · 0 업무 · 0 코드` — "아무것도 안 했다" 가 됩니다.
+    //    실제로는 **아직 아무것도 안 이어졌다** 입니다.
+    if (nothingMeasured(member)) {
+      return { label, value: null, hint: `아직 ${label} 기록을 잰 적이 없습니다 — 0이 아니라 모르는 값입니다` };
+    }
     if (gaps.has(category)) {
       return { label, value: null, hint: `${label} 기여를 측정하지 못했습니다 — 0이 아니라 모르는 값입니다` };
     }

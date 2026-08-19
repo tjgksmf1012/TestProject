@@ -131,7 +131,43 @@ export function nameOf(userId: number, people: readonly Person[]): string {
  * 신뢰도가 낮을수록 구간이 넓어집니다 — 그 넓이가 "이 값을 얼마나 믿을 수
  * 있는가" 를 말해 주는 유일한 표현입니다.
  */
+/**
+ * 이 사람에 대해 **잰 것이 하나도 없는가.**
+ *
+ * ## ⛔ 이걸 안 가르면 새 팀의 첫 화면이 "너희 다 0%" 가 됩니다
+ *
+ * 서버는 **팀 전체에서 살아 있는 범주**에 대해서만 사람마다 칸을 만듭니다.
+ * 그러니 두 경우가 완전히 다릅니다.
+ *
+ * - `categories` 에 칸이 있고 `event_count` 가 0 → **쟀는데 0건.**
+ *   `0` 이라고 적는 게 맞습니다.
+ * - `categories` 가 **비어 있음** → 팀 전체에 잰 범주가 하나도 없음.
+ *   프로젝트를 막 만들었거나, 회의도 저장소도 아직 안 붙은 상태입니다.
+ *   여기서 `0%` 를 적으면 **"기여가 0"** 이라는 판정이 됩니다.
+ *
+ * ⚠️ 이건 `AGENTS.md` 의 불변식 ③(측정 불가 ≠ 0점)이 깨지는 자리이고,
+ * 하필 **새 팀이 이 제품에서 처음 보는 기여도 화면**입니다. 페르소나 QA
+ * 에서 프로젝트를 새로 만들어 보고서야 나왔습니다 — 데모 데이터가 있는
+ * 계정으로만 보면 이 화면을 **한 번도 안 봅니다** (결함 191).
+ *
+ * ⚠️ `hasNoEvidence` 와 다릅니다. 그쪽은 "모든 범주가 0건" 이라, 빈 배열도
+ * `[].every()` 규칙 때문에 참이 됩니다 — **우연히** 참인 것이지 "안 쟀다"
+ * 를 묻는 함수가 아닙니다.
+ */
+export function nothingMeasured(member: MemberScore): boolean {
+  return member.categories.length === 0;
+}
+
+/**
+ * 구간을 사람이 읽을 글자로.
+ *
+ * ⚠️ **잰 것이 없으면 숫자를 만들지 않습니다.** 서버는 그때 `share`·
+ * `range_low`·`range_high` 를 전부 0 으로 주는데(`adjustment_range` 의
+ * 폭이 `share` 에 비례해서 0 이 됩니다), 그대로 그리면 `0%` 라는 **가장
+ * 확신에 찬 단일 점수**가 됩니다 — 이 제품이 제일 하면 안 되는 일입니다.
+ */
 export function describeRange(member: MemberScore): string {
+  if (nothingMeasured(member)) return '—';
   const low = Math.round(member.range_low);
   const high = Math.round(member.range_high);
   if (low === high) return `${low}%`;
@@ -175,9 +211,20 @@ export interface UncertaintySpan {
  *
  * ⚠️ 전원이 폭 0 이면(완전히 확정된 이상적인 경우) **전부 0** 을 돌려
  * 줍니다. 그때 100 을 주면 "다 모른다" 로 보이는데 정반대입니다.
+ *
+ * ⚠️ 그 정반대의 경우도 있습니다 — **아무것도 안 잰 사람**입니다. 서버가
+ * 주는 구간은 `0~0` 이라 폭이 0 이지만, 그건 "확실히 0%" 가 아니라
+ * "잴 것이 없었다" 입니다. 그 사람의 폭은 **100** 입니다.
  */
 export function uncertaintySpans(members: readonly MemberScore[]): UncertaintySpan[] {
-  const points = members.map((m) => Math.abs(clamp(m.range_high, 0, 100) - clamp(m.range_low, 0, 100)));
+  const points = members.map((m) =>
+    // ⚠️ **잰 것이 없으면 폭이 0 이 아니라 100 입니다** (결함 191).
+    //    서버는 그때 구간을 `0~0` 으로 주는데, 그건 "0% 라고 확신한다" 는
+    //    뜻이 되어 버립니다. 우리가 아는 것은 정반대 — **아무것도 모릅니다.**
+    nothingMeasured(m)
+      ? 100
+      : Math.abs(clamp(m.range_high, 0, 100) - clamp(m.range_low, 0, 100)),
+  );
   const widest = Math.max(0, ...points);
   return members.map((member, i) => ({
     userId: member.user_id,

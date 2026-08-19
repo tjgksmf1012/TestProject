@@ -135,6 +135,69 @@ export function effectiveDeadline(candidate: Candidate, draft: Draft): string | 
   return draft.deadlineOverride !== undefined ? draft.deadlineOverride : candidate.deadline;
 }
 
+/** 승인 조건 칩 한 개. 화면의 `Conditions` 가 그대로 받습니다. */
+export interface ApprovalCondition {
+  label: string;
+  met: boolean;
+}
+
+/**
+ * 승인 조건 칩 — **막는 목록과 같은 곳에서** 만듭니다.
+ *
+ * ## ⛔ 두 벌이었고, 갈라졌습니다
+ *
+ * 화면이 칩을 따로 만들고 있었습니다 — "담당자가 비었나 · 마감이 비었나".
+ * 그런데 승인을 막는 쪽(`approvalBlockers`)은 **마감이 과거인 것도** 막습니다.
+ *
+ * 그래서 지난 날짜를 고르면 이렇게 됐습니다 (페르소나 QA 에서 나왔습니다).
+ *
+ *     조건 칩   ● 근거 1  ● 담당자  ● 마감      ← 다 됐다고 말하고
+ *     버튼 툴팁 "등록할 수 있습니다"            ← 대놓고 거짓말이고
+ *     실제      aria-disabled=true, 눌러도 무반응
+ *
+ * 사람은 버튼을 누르고, 아무 일도 안 일어나고, 화면은 다 됐다고 합니다.
+ * **고장으로 읽힙니다.** 게다가 카드 어디에도 "지난 날짜" 라는 말이
+ * 없었습니다 (결함 193).
+ *
+ * ⚠️ 그래서 칩을 **막는 이유에서 파생**시킵니다. 한 벌이면 갈라질 수
+ * 없습니다.
+ *
+ * ⚠️ 칩 셋으로 설명되지 않는 이유(이미 승인됨 · 로그인 풀림 …)가 있으면
+ * **그 문구를 칩으로 하나 더 답니다.** 없으면 "칩은 전부 ● 인데 버튼은
+ * 막힘" 이 다시 생깁니다 — 그게 이 결함의 모양입니다.
+ */
+export function approvalConditions(
+  candidate: Candidate,
+  draft: Draft,
+  context: ReviewContext,
+): ApprovalCondition[] {
+  const codes = new Set(approvalBlockers(candidate, draft, context).map((b) => b.code));
+  const conditions: ApprovalCondition[] = [
+    { label: `근거 ${candidate.evidence_utterance_ids.length}`, met: !codes.has('no_evidence') },
+    {
+      label: codes.has('unknown_assignee') ? '담당자 확인' : '담당자',
+      met: !codes.has('missing_assignee') && !codes.has('unknown_assignee'),
+    },
+    {
+      // 비어 있는 것과 **지난 것**은 할 일이 다릅니다 — 칩이 그렇게 말합니다.
+      label: codes.has('deadline_in_past') ? '마감 지남' : '마감',
+      met: !codes.has('missing_deadline') && !codes.has('deadline_in_past'),
+    },
+  ];
+  const covered = new Set<string>([
+    'no_evidence',
+    'missing_assignee',
+    'unknown_assignee',
+    'missing_deadline',
+    'deadline_in_past',
+  ]);
+  for (const code of codes) {
+    if (covered.has(code)) continue;
+    conditions.push({ label: describeBlocker(code), met: false });
+  }
+  return conditions;
+}
+
 /**
  * 승인을 막는 이유들. 빈 배열이면 승인 가능하다.
  *
@@ -341,6 +404,29 @@ export function reviewLane(candidate: Candidate, draft: Draft): Lane {
   if (candidate.review_status === 'approved') return 'approve';
   if (candidate.review_status === 'rejected') return 'reject';
   return draft.decision;
+}
+
+/**
+ * 이 카드의 결정을 **되돌릴 수 있는가.**
+ *
+ * ## ⚠️ 「나중에」 는 이름이 약속하는 일을 하지 않았습니다
+ *
+ * 버튼이 하는 일은 `decision: 'pending'` 입니다. 그런데 아직 아무것도 안
+ * 정한 카드는 **이미** `pending` 이라, 눌러도 **아무 일도 안 일어납니다** —
+ * 레인 개수도 그대로고, 카드도 그대로입니다. 페르소나 QA 에서 팀장이
+ * 후보 둘을 "나중에" 로 미루고 검토를 끝내려다 막혔습니다. 미룬 것이
+ * 아니라 **아무 일도 안 한 것**이었기 때문입니다 (결함 194).
+ *
+ * 실제로 이 버튼이 쓸모 있는 자리는 하나뿐입니다 — **잘못 누른 것을
+ * 되돌리기.** 이름과 자리를 그것에 맞춥니다.
+ *
+ * ⚠️ 서버가 이미 승인/거절한 후보는 되돌릴 수 없습니다. 화면의 초안만
+ * 바꿔 봐야 `reviewLane` 이 서버 상태를 먼저 보므로 **또 아무 일도 안
+ * 일어납니다** — 같은 결함을 다른 자리에 다시 만드는 셈입니다.
+ */
+export function canUndoDecision(candidate: Candidate, draft: Draft): boolean {
+  if (candidate.review_status !== 'pending') return false;
+  return draft.decision !== 'pending';
 }
 
 /** 탭에 적을 개수. 갈래마다 하나씩, 0 도 적는다. */

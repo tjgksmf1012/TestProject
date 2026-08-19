@@ -27,7 +27,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import event, func, select
@@ -4844,6 +4844,26 @@ def _mount_frontend(application: FastAPI) -> Path | None:
     `/` 마운트가 앞의 모든 경로를 삼키므로 `/app` 을 먼저 붙여야 한다.
     """
     if SPA_EXPECTED_AT.is_dir():
+        # ⛔ **`/app` 자체를 먼저 잡습니다** (결함 190).
+        #
+        # `mount("/app", …)` 이 잡는 것은 `^/app(/.*)$` 입니다 — 끝에 슬래시가
+        # 없는 **정확히 `/app`** 은 안 걸리고, 바로 아래 `mount("/", …)` 이
+        # 삼켜 `frontend/public/app` 을 찾다가 404 를 냅니다. 사람은 앱 대신
+        # `{"detail":"Not Found"}` 라는 날 JSON 을 봅니다.
+        #
+        # 하필 그 주소가 **홈**입니다. React Router 의 `basename: "/app"` 은
+        # 홈 경로(`/`)를 `/app`(슬래시 없이)으로 만들기 때문에, 로그인하면
+        # 주소창이 `/app` 이 되고 거기서 **F5 를 누르면 앱이 죽었습니다.**
+        # 프로젝트를 만든 직후에도 같은 자리로 갑니다(`navigate(0)` 가
+        # 통째로 새로고침합니다) — 새 사용자가 제일 먼저 하는 일입니다.
+        #
+        # ⚠️ 307 로 `/app/` 에 보내지 않습니다. 그러면 주소가 React Router 가
+        # 쓰는 것(`/app`)과 갈라져, 사람이 새로고침할 때마다 주소가 바뀝니다.
+        # 같은 자리에서 **같은 index.html** 을 주고 라우팅은 브라우저가 합니다.
+        @application.get("/app", include_in_schema=False)
+        async def _spa_root() -> FileResponse:  # pragma: no cover - 정적 파일
+            return FileResponse(SPA_EXPECTED_AT / "index.html")
+
         application.mount(
             "/app", _SpaStaticFiles(directory=SPA_EXPECTED_AT, html=True), name="spa"
         )

@@ -9,6 +9,7 @@ import {
   hasNoEvidence,
   integrityNotes,
   nameOf,
+  nothingMeasured,
   orderForDisplay,
   uncertaintyDots,
   uncertaintyDotsNote,
@@ -490,5 +491,69 @@ describe('uncertaintyDotsNote', () => {
 
   it('확정된 값에는 다른 말을 한다', () => {
     strictEqual(uncertaintyDotsNote(0).includes('확정적'), true);
+  });
+});
+
+describe('아무것도 안 잰 사람 (결함 191)', () => {
+  // 프로젝트를 막 만든 팀. 회의도 저장소도 아직 없습니다.
+  // 서버는 `categories: []` 에 `share/range_low/range_high` 를 전부 0 으로 줍니다
+  // (`adjustment_range` 의 폭이 `share` 에 비례하므로 0 에서는 0).
+  const 갓만든팀 = (userId: number): MemberScore => ({
+    user_id: userId,
+    role: 'developer',
+    share: 0,
+    range_low: 0,
+    range_high: 0,
+    confidence: 0,
+    confidence_label: '매우 낮음',
+    confidence_reasons: ['수집된 활동 데이터가 없습니다'],
+    categories: [],
+    integrity_flags: [],
+    measurement_gaps: [],
+  });
+
+  // 활동 중인 팀에서 **이 사람만** 아직 아무것도 안 한 경우.
+  // 팀에 살아 있는 범주가 있으므로 서버가 칸을 만들어 주고, 개수가 0 입니다.
+  const 아직안한사람 = (userId: number): MemberScore => ({
+    user_id: userId,
+    role: 'developer',
+    share: 0,
+    range_low: 0,
+    range_high: 0,
+    confidence: 0.4,
+    confidence_label: '낮음',
+    confidence_reasons: [],
+    categories: [
+      { category: 'code', raw: 0, team_share: 0, weight: 1, event_count: 0, evidence_ids: [] },
+    ],
+    integrity_flags: [],
+    measurement_gaps: [],
+  });
+
+  it('⭐ 잰 것이 없으면 `0%` 가 아니라 `—` 다 — 0% 는 가장 확신에 찬 단일 점수다', () => {
+    strictEqual(nothingMeasured(갓만든팀(1)), true);
+    strictEqual(describeRange(갓만든팀(1)), '—');
+  });
+
+  it('⭐ 쟀는데 0건인 것은 그대로 `0%` 다 — 이 둘을 같은 칸에 그리면 안 된다', () => {
+    strictEqual(nothingMeasured(아직안한사람(2)), false);
+    strictEqual(describeRange(아직안한사람(2)), '0%');
+  });
+
+  it('⭐ 잰 것이 없으면 모르는 폭은 0 이 아니라 **100**이다', () => {
+    const [span] = uncertaintySpans([갓만든팀(1)]);
+    strictEqual(span?.points, 100);
+  });
+
+  it('쟀는데 0건이면 폭은 서버가 준 그대로(0)다', () => {
+    const [span] = uncertaintySpans([아직안한사람(2)]);
+    strictEqual(span?.points, 0);
+  });
+
+  it('⚠️ `hasNoEvidence` 와 다르다 — 그쪽은 빈 배열도 참이라 "안 쟀다"를 못 묻는다', () => {
+    strictEqual(hasNoEvidence(갓만든팀(1)), true);
+    strictEqual(hasNoEvidence(아직안한사람(2)), true);
+    // 같은 답을 주므로, **가르는 물음은 `nothingMeasured` 뿐**입니다.
+    strictEqual(nothingMeasured(갓만든팀(1)) === nothingMeasured(아직안한사람(2)), false);
   });
 });
