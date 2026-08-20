@@ -437,7 +437,17 @@ function RepoSection({
   /* ⚠️ 관리자만 되는 일입니다 (결함 225) — 구성원에게도 눌렸고, 서버는
      403 을 주는데 화면은 아무 말도 안 했습니다. */
   const manageBlocked = manageBlockedBecause(myRole, '저장소 연결');
-  const connectBlocked = manageBlocked !== null || value === null || problem !== null;
+  /* ⛔ **안 건드린 첫 화면에서 「연결」이 막혔는데 이유가 없었습니다**
+     (결함 235). `aria-disabled` 라 초점은 받는데, `manageBlocked` 도
+     `problem` 도 `null` 이면 `aria-describedby` 가 안 붙어 **아무 말도
+     안 했습니다.** 234 를 고치면서 이 패널만 빼놨습니다 — 하필 그
+     넷의 **모범**이던 자리입니다. */
+  const connectBlocked = whyCannotSave({
+    noPermission: manageBlocked,
+    problem,
+    dirty: value !== null,
+    saving: save.isPending,
+  });
   const view = health.data
     ? describeHealth(health.data, new Date())
     : health.isError
@@ -468,14 +478,12 @@ function RepoSection({
             누르면 저장소 칸으로 데려다 줍니다. */}
         <button
           type="button"
-          className={`btn btn--primary${connectBlocked ? ' btn--unmet' : ''}`}
-          aria-disabled={connectBlocked || save.isPending}
-          aria-describedby={
-            manageBlocked !== null ? 'repo-manage' : problem !== null ? 'repo-problem' : undefined
-          }
+          className={`btn btn--primary${connectBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={connectBlocked !== null}
+          aria-describedby={connectBlocked !== null ? 'repo-blocked' : undefined}
           onClick={() => {
             if (save.isPending || manageBlocked !== null) return;
-            if (connectBlocked) {
+            if (connectBlocked !== null) {
               document.getElementById('repo-input')?.focus();
               return;
             }
@@ -485,8 +493,10 @@ function RepoSection({
           연결
         </button>
       </div>
+      {/* 칸 옆 오류는 **그 칸과** 이어져 있어야 합니다 — 입력칸이
+          `aria-describedby="repo-problem"` 으로 이 자리를 가리킵니다. */}
       <Problem id="repo-problem" tone="incomplete">{problem}</Problem>
-      <Problem id="repo-manage" tone="incomplete">{manageBlocked}</Problem>
+      <Problem id="repo-blocked" tone="incomplete">{connectBlocked}</Problem>
       <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
       {view !== null && (
         <div className={view.tone === 'ok' ? 'card' : 'notice'} style={{ marginTop: 'var(--sp-5)' }} role="note">

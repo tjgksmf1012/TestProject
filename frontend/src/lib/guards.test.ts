@@ -4177,6 +4177,66 @@ describe('⛔ 막힌 버튼은 `aria-disabled` 다 (결함 234)', () => {
   }
 });
 
+describe('⛔ 막아 놓고 **말은 하는가** (결함 235)', () => {
+  /* 234 를 고치면서 다섯째를 놓쳤습니다 — 하필 그 넷의 **모범**이던
+     「저장소 연결」입니다. 안 건드린 첫 화면에서 이랬습니다:
+
+         입력값: tjgksmf1012/teamflow-demo
+         연결:   aria-disabled=true · btn--unmet · aria-describedby 없음
+
+     초점은 받는데 **아무 말도 안 합니다.** `manageBlocked` 도 `problem`
+     도 `null` 인 국면(= 아직 안 바꿈)이 사유 없이 막혔습니다.
+
+     ⚠️ 요구는 **「막혔으면 사유가 따라온다」** 입니다. 그것을 한 곳에서
+     지키는 방법이 `whyCannotSave` 이고, 그 값 하나로 `aria-disabled` 와
+     `aria-describedby` 를 **같이** 정하면 둘이 갈라질 수 없습니다. */
+  const settings = readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Settings.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ `aria-disabled` 와 `aria-describedby` 가 **같은 값**에서 나온다', () => {
+    // 서로 다른 값에서 나오면 「막혔는데 말은 안 하는」 국면이 생깁니다.
+    const buttons = [...settings.matchAll(/aria-disabled=\{([^}]*)\}[\s\S]{0,240}?aria-describedby=\{([^}]*)\}/g)];
+    ok(buttons.length > 0, '설정에 aria-disabled 버튼이 없습니다 — 가드가 낡았습니다');
+    const offenders: string[] = [];
+    for (const m of buttons) {
+      const gate = (m[1] ?? '').match(/(\w+) !== null/)?.[1];
+      const said = (m[2] ?? '').match(/(\w+) !== null/)?.[1];
+      if (gate !== undefined && said !== undefined && gate !== said) {
+        offenders.push(`${gate} 로 막고 ${said} 로 말합니다`);
+      }
+    }
+    ok(
+      offenders.length === 0,
+      `막는 값과 말하는 값이 다릅니다 — 사유 없이 막히는 국면이 생깁니다\n    ${offenders.join('\n    ')}`,
+    );
+  });
+
+  it('⭐ 막는 버튼은 **하나도 빠짐없이** 사유를 답고 있다', () => {
+    /* ⚠️ 처음에는 「`whyCannotSave` 를 거치는가」로 썼습니다 — 그건
+       **구현**이지 요구가 아닙니다. `leaveBlocked`·`rotateBlocked` 는
+       사유가 하나뿐이라 그 함수 없이도 요구를 지키는데, 가드만 실패했습니다.
+       요구는 **「막혔으면 사유가 따라온다」** 입니다. */
+    const buttons = [...settings.matchAll(/<button[\s\S]{0,420}?>/g)].map((m) => m[0]);
+    const offenders: string[] = [];
+    for (const b of buttons) {
+      const gate = /aria-disabled=\{([^}]*)\}/.exec(b)?.[1];
+      if (gate === undefined) continue;
+      // `isPending` 만으로 막는 것은 잠깐이라 사유가 필요 없습니다.
+      const judged = gate.replace(/[\w.]*\.is(Pending|Success)/g, '').replace(/[|&!\s()]/g, '');
+      if (judged === '') continue;
+      if (!/aria-describedby=/.test(b)) {
+        offenders.push(`aria-disabled={${gate}} 인데 사유를 안 답니다`);
+      }
+    }
+    ok(
+      offenders.length === 0,
+      `막아 놓고 말을 안 합니다\n    ${offenders.join('\n    ')}`,
+    );
+  });
+});
+
 describe('⛔ `aria-describedby` 가 **있는 것**을 가리킨다 (결함 234)', () => {
   /* 가리키는 id 가 없으면 낭독기에는 **아무 말도 안 됩니다** — 사유가
      없는 것보다 나쁩니다(있다고 믿게 되니까). 실제로 결함 234 를 고치다
