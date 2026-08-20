@@ -1,7 +1,9 @@
 import { strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { describeActionFailure, describeLoadFailure } from './load.ts';
+import { describeActionFailure, describeLoadFailure,
+  sessionIsOver,
+} from './load.ts';
 
 describe('describeLoadFailure', () => {
   it('⭐ **403 과 404 를 같은 말로 덮지 않는다** — 사람이 할 일이 다르다', () => {
@@ -95,5 +97,28 @@ describe('보냈는데 안 됐을 때 (결함 218)', () => {
 
   it('모르는 상태는 숨기지 않는다', () => {
     strictEqual(describeActionFailure('확정', 418), '확정을 처리하지 못했습니다 (HTTP 418).');
+  });
+});
+
+describe('⛔ 세션이 끝났는지 (결함 227)', () => {
+  it('⭐ 401 은 세션이 끝난 것이다 — 앱이 사람을 로그인 화면으로 보내야 한다', () => {
+    // 안 보내면 「다시 로그인해 주세요」 라고 말해 놓고 로그인할 자리를
+    // 안 주는 것이 됩니다. 실제로 스무 바퀴를 돌아도 못 나갔습니다.
+    strictEqual(sessionIsOver(401), true);
+  });
+
+  it('⛔ 403 은 **아니다** — 멀쩡한 세션을 끊는 것이 된다', () => {
+    // "로그인은 됐는데 이 일은 못 한다" 입니다. 내보내면 할 수 있는 다른
+    // 일까지 같이 뺏습니다.
+    strictEqual(sessionIsOver(403), false);
+  });
+
+  it('네트워크가 끊긴 것(null·0)은 세션과 무관하다', () => {
+    strictEqual(sessionIsOver(null), false);
+    strictEqual(sessionIsOver(0), false);
+  });
+
+  it('나머지 실패도 세션을 안 끊는다', () => {
+    for (const s of [404, 409, 422, 500, 503]) strictEqual(sessionIsOver(s), false, String(s));
   });
 });

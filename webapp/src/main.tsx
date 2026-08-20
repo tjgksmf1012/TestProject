@@ -1,8 +1,15 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  MutationCache,
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query';
 import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-router-dom';
 import { useMe } from './api/hooks.ts';
+import { ApiError } from './api/client.ts';
+import { sessionIsOver } from '@lib/ui/load.ts';
 import Login from './screens/Login.tsx';
 import Home from './screens/Home.tsx';
 import Settings from './screens/Settings.tsx';
@@ -14,7 +21,39 @@ import Crashed from './screens/Crashed.tsx';
 import { watchForUncaught } from './api/diag.ts';
 import './app.css';
 
+/**
+ * ⛔ **세션이 죽으면 그 사실을 `me` 에 반영합니다** (결함 227).
+ *
+ * 안 그러면 이렇게 됩니다 — 재서 확인한 것입니다:
+ *
+ *   쿠키가 죽음 → 모든 조회가 401
+ *   → 화면은 「로그인이 풀렸습니다. 다시 로그인해 주세요.」 라고 말하는데
+ *   → 그 화면에 **로그인으로 가는 링크가 한 개도 없습니다**
+ *   → 홈·칸반·설정을 눌러도 라우터가 같은 껍데기 안에서 옮길 뿐
+ *   → **36초를 눌러 다녀도** 그대로 (60초쯤에야 `me` 가 낡아 풀립니다)
+ *
+ * `RequireAuth` 는 `useMe` 를 보는데 그쪽 `staleTime` 이 60초입니다.
+ * 그 1분 동안 사람은 **멀쩡해 보이는데 아무것도 안 되는 앱**을 누르고
+ * 다니고, 화면이 시킨 「다시 로그인」은 **할 자리가 없습니다.**
+ *
+ * 그래서 실패를 **한 자리에서** 받습니다. 화면 다섯이 각자 로그인 링크를
+ * 그리게 하면 반드시 몇 곳이 빠집니다(이 저장소의 실패 ②).
+ *
+ * ⚠️ 판단(`sessionIsOver`)은 `@lib` 에 있습니다 — 여기 `main.tsx` 에
+ *    적으면 자동 검사가 안 닿습니다.
+ * ⚠️ `useMe` 자신의 401 은 여기 안 옵니다 — 그쪽은 queryFn 이 잡아서
+ *    `null` 로 **성공**시킵니다("로그인 전" 은 오류가 아니므로).
+ */
+function endSessionIfOver(error: unknown): void {
+  const status = error instanceof ApiError ? error.status : null;
+  if (!sessionIsOver(status)) return;
+  // `RequireAuth` 가 이 값을 보고 로그인 화면으로 보냅니다.
+  queryClient.setQueryData(['me'], null);
+}
+
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: endSessionIfOver }),
+  mutationCache: new MutationCache({ onError: endSessionIfOver }),
   defaultOptions: {
     queries: {
       retry: 1,

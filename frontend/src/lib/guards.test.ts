@@ -4132,6 +4132,69 @@ describe('확정 막힘 사유는 **한 덩이로 읽혀야** 한다 (결함 215
   });
 });
 
+describe('⛔ 세션이 죽으면 사람을 로그인 화면으로 보낸다 (결함 227)', () => {
+  /* 세션이 끊긴 화면은 「로그인이 풀렸습니다. 다시 로그인해 주세요.」 라고
+     말하는데, 그 화면에 **로그인으로 가는 링크가 한 개도 없습니다.**
+     길잡이(홈·칸반·설정)를 눌러도 라우터가 같은 껍데기 안에서 옮길 뿐이라,
+     화면 넷을 36초 동안 눌러 다녀도 그대로였습니다.
+
+     이 저장소의 실패 ③ — **할 일을 알려 주고 그 일을 할 자리를 안 줌.**
+
+     ⚠️ 화면 다섯이 각자 로그인 링크를 그리게 하면 반드시 몇 곳이 빠집니다
+        (실패 ②). 실패를 **한 자리에서** 받는 것이 요구입니다. */
+  const main = readFileSync(join(ROOT, '..', 'webapp', 'src', 'main.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  /** `new X({ … })` 의 인자 안쪽만 — 옆집 것을 보고 통과하지 않게 (결함 225). */
+  function ctorArgs(source: string, ctor: string): string[] {
+    const out: string[] = [];
+    for (const m of source.matchAll(new RegExp(`new\\s+${ctor}\\(`, 'g'))) {
+      let depth = 0;
+      let i = (m.index ?? 0) + m[0].length - 1;
+      const start = i + 1;
+      for (; i < source.length; i += 1) {
+        if (source[i] === '(') depth += 1;
+        else if (source[i] === ')') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      out.push(source.slice(start, i));
+    }
+    return out;
+  }
+
+  for (const cache of ['QueryCache', 'MutationCache']) {
+    it(`⭐ ${cache} 의 실패를 받는다 — 안 받으면 그 401 은 아무 데도 안 닿는다`, () => {
+      const args = ctorArgs(main, cache);
+      ok(args.length > 0, `main.tsx 에 new ${cache}( 가 없습니다`);
+      ok(
+        args.some((a) => /onError/.test(a)),
+        `new ${cache}( 에 onError 가 없습니다 — 401 이 아무 데도 안 닿습니다`,
+      );
+    });
+  }
+
+  it('⭐ 판단은 `@lib` 에서 온다 — main.tsx 에 401 을 적지 않는다', () => {
+    // main.tsx 에는 자동 검사가 안 붙습니다. 여기서 상태 코드를 직접
+    // 비교하면 그 판단은 검증 밖으로 나갑니다.
+    ok(/sessionIsOver\(/.test(main), 'main.tsx 가 sessionIsOver 를 안 부릅니다');
+    ok(
+      !/status\s*===\s*401/.test(main),
+      'main.tsx 가 401 을 직접 비교합니다 — 판단은 @lib/ui/load.ts 한 곳',
+    );
+  });
+
+  it('⭐ 세션이 끝나면 `me` 를 지운다 — 그래야 RequireAuth 가 내보낸다', () => {
+    // 말만 하고 아무 값도 안 바꾸면 화면은 그대로 살아 있습니다.
+    ok(
+      /setQueryData\(\s*\['me'\]\s*,\s*null\s*\)/.test(main),
+      "main.tsx 가 `me` 를 null 로 안 바꿉니다 — RequireAuth 가 못 내보냅니다",
+    );
+  });
+});
+
 describe('⛔ 「잴 수 없음」을 0 으로 접지 않는다 (결함 226)', () => {
   /* 기여도 화면 둘은 `uncertaintySpans()` 가 준 폭을 그립니다. 그 폭은
      **`null` 일 수 있고**(몫이 0 이라 서버의 구간이 접힌 경우), `null` 은
