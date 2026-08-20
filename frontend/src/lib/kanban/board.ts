@@ -307,6 +307,25 @@ export interface BoardSummary {
   withPulls: number;
 }
 
+/**
+ * ⭐ **아직 못 받은 것을 `0` 이라고 말하지 않습니다.**
+ *
+ * 칸반 머리말은 `회의에서 N · PR 연결 N · 지연 N` 입니다. 그런데 화면은
+ * 목록을 `board.data?.tasks ?? []` 로 받고 있었고, 그래서 **불러오는 중에도
+ * 못 받았을 때도** 빈 배열이 되어 머리말이 `회의에서 0 · PR 연결 0 ·
+ * 지연 0` 이라고 **단언**했습니다.
+ *
+ * 이 제품의 불변식 셋째가 그것입니다 — **측정 불가 ≠ 0점.** 같은 화면의
+ * 사슬(`Chain`)은 "빈 칸을 0 으로 그리지 않습니다" 라고 적어 두고 `—` 를
+ * 그리는데, 바로 위 머리말이 반대로 말하고 있었습니다.
+ *
+ * 그래서 "몇 건인가" 와 "그걸 어떻게 말할 것인가" 를 가릅니다. 아직
+ * 모르면 `null` 을 넘기고, 여기서 `—` 를 돌려줍니다.
+ */
+export function countText(value: number | null | undefined): string {
+  return value === null || value === undefined ? '—' : String(value);
+}
+
 export function summarize(tasks: readonly Task[], today: string): BoardSummary {
   return {
     total: tasks.length,

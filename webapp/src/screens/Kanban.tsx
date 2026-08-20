@@ -14,6 +14,7 @@ import {
   taskWarnings,
   toColumns,
   describeStatus,
+  countText,
   describeLinkState,
   describePull,
   sortLinks,
@@ -224,6 +225,12 @@ export default function Kanban() {
 
   const statuses = board.data?.statuses ?? [];
   const tasks = board.data?.tasks ?? [];
+  // ⚠️ **아직 못 받은 것과 정말 0 인 것은 다릅니다.** 위의 `?? []` 때문에
+  //    불러오는 중에도 못 받았을 때도 빈 배열이 되고, 그대로 세면 머리말이
+  //    `회의에서 0 · PR 연결 0 · 지연 0` 이라고 **단언**합니다 — 바로 아래
+  //    사슬은 "빈 칸을 0 으로 그리지 않습니다" 라고 적어 두고 `—` 를
+  //    그리는데 머리말이 반대로 말하고 있었습니다(불변식 셋째).
+  const known = board.data !== undefined;
   const people: Person[] = (membersQuery.data ?? []).map((m) => ({
     user_id: m.user_id,
     name: m.name,
@@ -249,7 +256,9 @@ export default function Kanban() {
       title="칸반"
       meta={
         <>
-          회의에서 {s.fromMeetings} · PR 연결 {s.withPulls} · 지연 {s.overdue}
+          회의에서 {countText(known ? s.fromMeetings : null)} · PR 연결{' '}
+          {countText(known ? s.withPulls : null)} · 지연{' '}
+          {countText(known ? s.overdue : null)}
           {/* ⭐ 표식 규칙은 **여기서 한 번만** 말합니다. 예전에는 카드마다
               같은 안내를 적어 넉 장이면 네 번(106자) 반복됐고, 늘 있는
               글자는 배경이 되어 아무도 안 읽었습니다. */}

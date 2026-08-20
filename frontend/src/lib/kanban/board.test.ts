@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { TEAM_TIMEZONE, teamDateOf } from '../time/calendar.ts';
 
 import {
+  countText,
   daysBetween,
   describeLinkState,
   describePull,
@@ -490,5 +491,22 @@ describe('summarize — withPulls', () => {
       TODAY,
     );
     strictEqual(summary.withPulls, 2);
+  });
+});
+
+describe('countText — 못 잰 것을 0 으로 말하지 않는다 (불변식 셋째)', () => {
+  it('⭐ 아직 모르면 `—`', () => {
+    // 칸반 머리말이 불러오는 중에 `회의에서 0 · PR 연결 0 · 지연 0` 이라고
+    // **단언**하고 있었습니다. 같은 화면의 사슬은 `—` 를 그리는데.
+    strictEqual(countText(null), '—');
+    strictEqual(countText(undefined), '—');
+  });
+
+  it('⭐ **진짜 0 은 0 입니다** — 모르는 것과 없는 것은 다릅니다', () => {
+    strictEqual(countText(0), '0');
+  });
+
+  it('숫자는 그대로', () => {
+    strictEqual(countText(3), '3');
   });
 });
