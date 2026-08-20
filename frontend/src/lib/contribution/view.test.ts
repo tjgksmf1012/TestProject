@@ -11,9 +11,11 @@ import {
   nameOf,
   nothingMeasured,
   orderForDisplay,
+  describeWidth,
   uncertaintyDots,
   uncertaintyDotsNote,
   uncertaintySpans,
+  widthUnknown,
   readBeforeTheNumber,
   roleOf,
   teamWarnings,
@@ -494,24 +496,25 @@ describe('uncertaintyDotsNote', () => {
   });
 });
 
-describe('아무것도 안 잰 사람 (결함 191)', () => {
-  // 프로젝트를 막 만든 팀. 회의도 저장소도 아직 없습니다.
-  // 서버는 `categories: []` 에 `share/range_low/range_high` 를 전부 0 으로 줍니다
-  // (`adjustment_range` 의 폭이 `share` 에 비례하므로 0 에서는 0).
-  const 갓만든팀 = (userId: number): MemberScore => ({
-    user_id: userId,
-    role: 'developer',
-    share: 0,
-    range_low: 0,
-    range_high: 0,
-    confidence: 0,
-    confidence_label: '매우 낮음',
-    confidence_reasons: ['수집된 활동 데이터가 없습니다'],
-    categories: [],
-    integrity_flags: [],
-    measurement_gaps: [],
-  });
+// 프로젝트를 막 만든 팀. 회의도 저장소도 아직 없습니다.
+// 서버는 `categories: []` 에 `share/range_low/range_high` 를 전부 0 으로 줍니다
+// (`adjustment_range` 의 폭이 `share` 에 비례하므로 0 에서는 0).
+// ⚠️ 결함 226 의 검사도 이 사람을 씁니다 — describe 밖에 둡니다.
+const 갓만든팀 = (userId: number): MemberScore => ({
+  user_id: userId,
+  role: 'developer',
+  share: 0,
+  range_low: 0,
+  range_high: 0,
+  confidence: 0,
+  confidence_label: '매우 낮음',
+  confidence_reasons: ['수집된 활동 데이터가 없습니다'],
+  categories: [],
+  integrity_flags: [],
+  measurement_gaps: [],
+});
 
+describe('아무것도 안 잰 사람 (결함 191)', () => {
   // 활동 중인 팀에서 **이 사람만** 아직 아무것도 안 한 경우.
   // 팀에 살아 있는 범주가 있으므로 서버가 칸을 만들어 주고, 개수가 0 입니다.
   const 아직안한사람 = (userId: number): MemberScore => ({
@@ -545,9 +548,12 @@ describe('아무것도 안 잰 사람 (결함 191)', () => {
     strictEqual(span?.points, 100);
   });
 
-  it('쟀는데 0건이면 폭은 서버가 준 그대로(0)다', () => {
+  it('⛔ 쟀는데 0건이면 폭은 0 이 **아니라 `null`** 이다 (결함 226)', () => {
+    // 191 이 절반만 고쳐져 있었습니다. 서버의 폭은 몫에 비례해서 접히므로
+    // (`adjustment_range(0, c) == (0, 0)` — c 가 얼마든), 이 0 은 "확정"
+    // 이 아니라 **계산이 접힌 것**입니다.
     const [span] = uncertaintySpans([아직안한사람(2)]);
-    strictEqual(span?.points, 0);
+    strictEqual(span?.points, null);
   });
 
   it('⚠️ `hasNoEvidence` 와 다르다 — 그쪽은 빈 배열도 참이라 "안 쟀다"를 못 묻는다', () => {
@@ -555,6 +561,90 @@ describe('아무것도 안 잰 사람 (결함 191)', () => {
     strictEqual(hasNoEvidence(아직안한사람(2)), true);
     // 같은 답을 주므로, **가르는 물음은 `nothingMeasured` 뿐**입니다.
     strictEqual(nothingMeasured(갓만든팀(1)) === nothingMeasured(아직안한사람(2)), false);
+  });
+});
+
+describe('⛔ 신뢰도 「낮음」 옆에서 「확정적」이라고 말하던 것 (결함 226)', () => {
+  // ## 재현
+  //
+  // 초대 코드로 이번 주에 막 들어온 사람. 팀에는 회의·업무·코드가 다 있어서
+  // 서버가 칸 셋을 만들어 주고, 그 사람의 개수만 0 입니다. 서버의 폭은
+  // **몫에 비례**하므로 `0.0 ~ 0.0`, 폭 0 — 신뢰도가 0.446 「낮음」 인데도.
+  //
+  //     0%
+  //     신뢰도 낮음
+  //     구간이 없습니다 — 이 값은 확정적입니다   ← 바로 윗줄과 정반대
+  const 이번주에온사람 = (confidence: number): MemberScore => ({
+    user_id: 7,
+    role: 'developer',
+    share: 0,
+    range_low: 0,
+    range_high: 0,
+    confidence,
+    confidence_label: confidence < LOW_CONFIDENCE ? '낮음' : '높음',
+    confidence_reasons: ['GitHub 저장소가 연결되지 않았습니다'],
+    categories: [
+      { category: 'meeting', raw: 0, team_share: 0, weight: 0.4, event_count: 0, evidence_ids: [] },
+      { category: 'task', raw: 0, team_share: 0, weight: 0.3, event_count: 0, evidence_ids: [] },
+      { category: 'code', raw: 0, team_share: 0, weight: 0.3, event_count: 0, evidence_ids: [] },
+    ],
+    integrity_flags: [],
+    measurement_gaps: [],
+  });
+
+  it('⭐ 화면이 지나는 길 전부를 통과시켜도 「확정적」이 안 나온다', () => {
+    // ⚠️ 예전 검사는 `uncertaintyDotsNote(0)` 을 **직접** 불러서 통과했습니다.
+    //    화면이 실제로 지나는 길은 `spans → points → note` 이고, 결함은
+    //    그 사이에서 `null` 이 0 으로 접히는 데 있었습니다.
+    const [span] = uncertaintySpans([이번주에온사람(0.446)]);
+    // ⚠️ 검사가 `?? 0` 을 쓰면 **검사가 결함을 다시 만듭니다** — 실제로
+    //    처음 이렇게 써서 「확정적」이 나왔습니다. 화면도 안 접습니다.
+    strictEqual(span !== undefined, true);
+    const note = uncertaintyDotsNote(span!.points);
+    strictEqual(note.includes('확정'), true, note); // "확정이라는 뜻이 아닙니다"
+    strictEqual(note.includes('확정적'), false, note);
+  });
+
+  it('⭐ 신뢰도 0.0 — "데이터가 없습니다" — 에서도 폭 0 을 말하지 않는다', () => {
+    const [span] = uncertaintySpans([이번주에온사람(0)]);
+    strictEqual(span?.points, null);
+    strictEqual(describeWidth(span!.points), '?');
+  });
+
+  it('⭐ 신뢰도가 만점이면 폭 0 은 **진짜** 확정이다 — 그때는 그대로 말한다', () => {
+    const [span] = uncertaintySpans([이번주에온사람(1)]);
+    strictEqual(span?.points, 0);
+    strictEqual(uncertaintyDotsNote(span!.points).includes('이 값은 확정적입니다'), true);
+  });
+
+  it('⭐ 잴 수 없는 폭은 **남의 막대를 길게 만들지 않는다**', () => {
+    // `widest` 를 0 으로 세면 옆 사람의 ratio 가 그만큼 부풉니다.
+    const 쟀고넓은사람: MemberScore = {
+      ...이번주에온사람(0.446),
+      user_id: 8,
+      share: 30,
+      range_low: 20,
+      range_high: 40,
+      categories: [
+        { category: 'code', raw: 9, team_share: 1, weight: 1, event_count: 9, evidence_ids: [1] },
+      ],
+    };
+    const spans = uncertaintySpans([이번주에온사람(0.446), 쟀고넓은사람]);
+    strictEqual(spans[0]?.points, null);
+    strictEqual(spans[0]?.ratio, 0);
+    strictEqual(spans[1]?.points, 20);
+    strictEqual(spans[1]?.ratio, 100);
+  });
+
+  it('⚠️ `nothingMeasured` 와 다른 물음이다 — 저쪽은 폭 100, 이쪽은 잴 수 없음', () => {
+    strictEqual(widthUnknown(갓만든팀(1)), false);
+    strictEqual(widthUnknown(이번주에온사람(0.446)), true);
+    const [빈팀] = uncertaintySpans([갓만든팀(1)]);
+    strictEqual(빈팀?.points, 100);
+  });
+
+  it('점은 지어내지 않는다 — 잴 수 없으면 0 개', () => {
+    strictEqual(uncertaintyDots(null), 0);
   });
 });
 

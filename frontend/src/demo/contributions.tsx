@@ -162,7 +162,9 @@ function MemberRow({
 }) {
   const notes = readBeforeTheNumber(member);
   const flags = integrityNotes(member);
-  const points = uncertainty?.points ?? 0;
+  // ⚠️ `?? 0` 을 쓰면 **잴 수 없음(null)** 이 0 으로 접히고, 그 0 은
+  //    아래에서 "이 값은 확정적입니다" 가 됩니다 (결함 226).
+  const points = uncertainty ? uncertainty.points : 0;
   const dots = uncertaintyDots(points);
 
   return (
@@ -180,7 +182,7 @@ function MemberRow({
             폭 0 은 "완전히 확정" 이라 그릴 것이 없습니다. 0px 막대를
             그리면 사람은 그것을 "안 나왔다(고장)" 로 읽습니다. */}
         {dots === 0 ? (
-          <p className="unc-none">{uncertaintyDotsNote(0)}</p>
+          <p className="unc-none">{uncertaintyDotsNote(points)}</p>
         ) : (
           <>
             <div className="unc-dots" role="img" aria-label={uncertaintyDotsNote(points)}>

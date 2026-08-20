@@ -4132,6 +4132,59 @@ describe('확정 막힘 사유는 **한 덩이로 읽혀야** 한다 (결함 215
   });
 });
 
+describe('⛔ 「잴 수 없음」을 0 으로 접지 않는다 (결함 226)', () => {
+  /* 기여도 화면 둘은 `uncertaintySpans()` 가 준 폭을 그립니다. 그 폭은
+     **`null` 일 수 있고**(몫이 0 이라 서버의 구간이 접힌 경우), `null` 은
+     0 이 아니라 **잴 수 없음** 입니다.
+
+     `?? 0` 한 글자면 그것이 0 이 되고, 0 은 화면에서 이렇게 나옵니다:
+
+         구간이 없습니다 — 이 값은 확정적입니다
+
+     바로 윗줄에 「신뢰도 낮음」이 있는데도. 실제로 두 화면 다 `?? 0` 이었고,
+     이 검사를 쓰다가 **검사 자신도** 처음에 `?? 0` 을 썼습니다.
+
+     ⚠️ 낱말이 아니라 **요구**를 잽니다 — "폭을 span 에서 꺼내는 그 식에
+     숫자 기본값이 없는가". */
+  const SCREENS: [string, string][] = [
+    ['webapp/src/screens/Contributions.tsx', join(ROOT, '..', 'webapp', 'src', 'screens', 'Contributions.tsx')],
+    ['frontend/src/demo/contributions.tsx', join(ROOT, 'src', 'demo', 'contributions.tsx')],
+  ];
+
+  for (const [rel, path] of SCREENS) {
+    it(`⭐ ${rel} 이 폭을 숫자로 접지 않는다`, () => {
+      const code = readFileSync(path, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\/\/[^\n]*/g, ' ')
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ');
+      // 폭을 꺼내는 식 한 줄. 이름이 아니라 **`.points` 를 읽는 곳**을 찾습니다.
+      const lines = code.split('\n').filter((l) => /\.points\b/.test(l));
+      ok(lines.length > 0, `${rel}: \`.points\` 를 읽는 곳이 없습니다 — 검사가 낡았습니다`);
+      for (const line of lines) {
+        ok(
+          !/\?\?\s*0\b/.test(line),
+          `${rel}: 폭에 \`?? 0\` 이 붙어 있습니다 — 잴 수 없음이 "확정" 이 됩니다\n    ${line.trim()}`,
+        );
+      }
+    });
+  }
+
+  it('⭐ 화면이 「확정적」 문구를 **직접** 짓지 않는다 — 판단은 lib 한 곳', () => {
+    for (const [rel, path] of SCREENS) {
+      // ⚠️ **주석을 먼저 걷어냅니다.** 안 걷으면 이 결함을 설명하는 주석이
+      //    스스로 걸립니다 — 실제로 처음에 그렇게 걸렸습니다.
+      const code = readFileSync(path, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\/\/[^\n]*/g, ' ')
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ');
+      ok(
+        !/['`"][^'`"]*확정적/.test(code),
+        `${rel}: 화면이 「확정적」을 직접 적었습니다 — \`uncertaintyDotsNote\` 가 정합니다`,
+      );
+    }
+  });
+});
+
 describe('통화 화면이 **아는 것만** 말한다 (결함 216)', () => {
   const call = readFileSync(join(ROOT, 'src', 'demo', 'call.ts'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ')

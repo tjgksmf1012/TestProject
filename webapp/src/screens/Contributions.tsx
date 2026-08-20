@@ -21,6 +21,8 @@ import {
   roleOf,
   teamWarnings,
   uncertaintySpans,
+  describeWidth,
+  describeWidthNote,
   type MemberScore,
   type Person,
 } from '@lib/contribution/view.ts';
@@ -41,9 +43,12 @@ import { Problem } from '../components/Problem.tsx';
 // 리본 채움은 **확신도** 비례입니다 — 기여도에 비례하면 그게 순위표입니다.
 
 /** 리본 조각: 왼쪽부터 확신(잉크) → 모르는 폭(빗금) → 빈 곳. */
-function ribbonFor(member: MemberScore, widthPoints: number): RibbonSegment[] {
+function ribbonFor(member: MemberScore, widthPoints: number | null): RibbonSegment[] {
   const known = Math.min(1, Math.max(0, member.confidence));
-  const unknown = Math.min(1 - known, widthPoints / 100);
+  // ⚠️ 폭을 **잴 수 없으면**(결함 226) 확신한 만큼 말고는 전부 모르는 것입니다.
+  //    0 으로 접으면 리본이 "확신 45% · 모름 0" 이 되어, 나머지 55% 가
+  //    아무 말도 안 하는 빈 곳이 됩니다.
+  const unknown = widthPoints === null ? 1 - known : Math.min(1 - known, widthPoints / 100);
   return [
     { start: 0, end: known, kind: 'known' },
     { start: known, end: known + unknown, kind: 'unknown' },
@@ -287,12 +292,13 @@ export default function Contributions() {
             ) : (
               members.map((member) => {
                 const span = spans.find((s) => s.userId === member.user_id);
-                const points = span?.points ?? 0;
+                // ⚠️ `?? 0` 은 **잴 수 없음(null)** 을 0 으로 접습니다 (결함 226).
+                const points = span ? span.points : 0;
                 const name = nameOf(member.user_id, people, formerPeople);
                 // 사유는 **지우지 않고 한 자리에 모읍니다** — 팝오버 안에서
                 // 원문 그대로 나옵니다. 요약하면 그게 곧 정보 손실입니다.
                 const whyLines = [
-                  `신뢰도 ${member.confidence_label} — 모르는 폭 ${Math.round(points)}%p`,
+                  `신뢰도 ${member.confidence_label} · ${describeWidthNote(points)}`,
                   ...readBeforeTheNumber(member),
                   ...integrityNotes(member),
                   ...(hasNoEvidence(member)
@@ -320,7 +326,7 @@ export default function Contributions() {
                         size="sm"
                         segments={ribbonFor(member, points)}
                         ticks={['0', '25', '50', '75', '100']}
-                        label={`${name} — 확신도 ${Math.round(member.confidence * 100)}% · 모르는 폭 ${Math.round(points)}%p`}
+                        label={`${name} — 확신도 ${Math.round(member.confidence * 100)}% · 모르는 폭 ${describeWidth(points)}`}
                       />
                     </div>
 
@@ -330,7 +336,7 @@ export default function Contributions() {
                         **말은 사람마다 다른 확률로 번역된다**는 것입니다. 그래서
                         화면은 잰 값(20%p)을 앞세우고, "낮음" 은 사유 팝오버에
                         둡니다. 근거는 `design/redesign/06-텍스트-최소화-조사.md` R4. */}
-                    <Stat value={`${Math.round(points)}%p`} label="모름" tone="unknown">
+                    <Stat value={describeWidth(points)} label="모름" tone="unknown">
                       <Why about={`${name} — 이 숫자를 읽기 전에`} lines={whyLines} />
                     </Stat>
 

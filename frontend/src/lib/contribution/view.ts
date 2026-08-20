@@ -184,6 +184,45 @@ export function nothingMeasured(member: MemberScore): boolean {
 }
 
 /**
+ * 서버가 준 구간의 폭이 0 인데, 그게 **"확실하다" 는 뜻이 아닌** 경우.
+ *
+ * ## 결함 191 이 절반만 고쳐져 있었습니다
+ *
+ * `adjustment_range` 의 폭은 **그 사람의 몫에 비례**합니다.
+ *
+ *     spread = share × (1 − confidence) × 0.5
+ *
+ * 그래서 `share` 가 0 이면 **신뢰도가 얼마든** 폭이 0 으로 나옵니다.
+ * 신뢰도 0.0 — "수집된 활동 데이터가 없습니다" — 에서도 `0.0 ~ 0.0` 입니다.
+ *
+ *     adjustment_range(0.0, confidence=0.0) == (0.0, 0.0)
+ *
+ * 191 은 이 기제를 이미 적어 뒀지만(`describeRange` 의 주석) **`categories`
+ * 가 빈 경우만** 갈랐습니다. 팀에 살아 있는 범주가 있고 이 사람만 0건인
+ * 경우 — 이번 주에 막 들어온 사람 — 는 그대로 남았고, 화면이 이렇게 나옵니다.
+ *
+ *     0%
+ *     신뢰도 낮음
+ *     구간이 없습니다 — 이 값은 확정적입니다   ← ⛔
+ *
+ * 바로 윗줄에서 "낮음" 이라고 해 놓고 아랫줄에서 **확정**이라고 말합니다.
+ * 불변식 ②(단일 점수 금지)와 ④(시스템은 판정하지 않는다)를 한 줄에서
+ * 둘 다 어깁니다 — 하필 **가장 방어할 힘이 없는 사람**의 줄에서.
+ *
+ * ⚠️ 폭을 **지어내지 않습니다.** `nothingMeasured` 처럼 100 을 주면 그것도
+ * 주장입니다("이 사람은 아무것도 모른다") — 이 사람은 세 범주를 **쟀고**
+ * 0건이었습니다. 우리가 아는 것은 폭이 0 이 아니라는 것뿐이라, 폭은
+ * `null` — **잴 수 없음** 입니다.
+ *
+ * ⚠️ 신뢰도가 만점이면 폭 0 은 진짜 확정입니다. 그때는 참이 아닙니다.
+ */
+export function widthUnknown(member: MemberScore): boolean {
+  if (nothingMeasured(member)) return false; // 그쪽은 폭 100 으로 따로 답한다
+  const width = Math.abs(clamp(member.range_high, 0, 100) - clamp(member.range_low, 0, 100));
+  return width === 0 && member.confidence < 1;
+}
+
+/**
  * 구간을 사람이 읽을 글자로.
  *
  * ⚠️ **잰 것이 없으면 숫자를 만들지 않습니다.** 서버는 그때 `share`·
@@ -215,8 +254,13 @@ export function describeRange(member: MemberScore): string {
 /** 한 사람의 "얼마나 모르는가". */
 export interface UncertaintySpan {
   userId: number;
-  /** 구간의 폭 (%p). 클수록 덜 안다 */
-  points: number;
+  /**
+   * 구간의 폭 (%p). 클수록 덜 안다.
+   *
+   * ⚠️ `null` 은 **0 이 아니라 "잴 수 없음"** 입니다 (`widthUnknown`).
+   * 0 으로 바꿔 읽으면 화면이 "확정적" 이라고 말합니다.
+   */
+  points: number | null;
   /** 팀에서 가장 넓은 구간 대비 (0~100). 막대 길이로 쓴다 */
   ratio: number;
 }
@@ -242,20 +286,28 @@ export interface UncertaintySpan {
  * "잴 것이 없었다" 입니다. 그 사람의 폭은 **100** 입니다.
  */
 export function uncertaintySpans(members: readonly MemberScore[]): UncertaintySpan[] {
-  const points = members.map((m) =>
+  const points: (number | null)[] = members.map((m) => {
     // ⚠️ **잰 것이 없으면 폭이 0 이 아니라 100 입니다** (결함 191).
     //    서버는 그때 구간을 `0~0` 으로 주는데, 그건 "0% 라고 확신한다" 는
     //    뜻이 되어 버립니다. 우리가 아는 것은 정반대 — **아무것도 모릅니다.**
-    nothingMeasured(m)
-      ? 100
-      : Math.abs(clamp(m.range_high, 0, 100) - clamp(m.range_low, 0, 100)),
-  );
-  const widest = Math.max(0, ...points);
-  return members.map((member, i) => ({
-    userId: member.user_id,
-    points: points[i] ?? 0,
-    ratio: widest === 0 ? 0 : Math.round(((points[i] ?? 0) / widest) * 100),
-  }));
+    if (nothingMeasured(m)) return 100;
+    // ⚠️ **쟀는데 몫이 0 이면 폭을 잴 수 없습니다** (결함 226). 서버의 폭은
+    //    몫에 비례해서 접히는 것이라, 그 0 은 "확정" 이 아닙니다. 0 도
+    //    100 도 주장이므로 `null` — 모른다고 말합니다.
+    if (widthUnknown(m)) return null;
+    return Math.abs(clamp(m.range_high, 0, 100) - clamp(m.range_low, 0, 100));
+  });
+  // ⚠️ 잴 수 없는 폭은 **최댓값 계산에서 뺍니다** — 0 으로 세면 남들의
+  //    막대가 그만큼 길어 보입니다.
+  const widest = Math.max(0, ...points.filter((p): p is number => p !== null));
+  return members.map((member, i) => {
+    const p = points[i] ?? null;
+    return {
+      userId: member.user_id,
+      points: p,
+      ratio: p === null || widest === 0 ? 0 : Math.round((p / widest) * 100),
+    };
+  });
 }
 
 /**
@@ -288,8 +340,15 @@ export function uncertaintySpans(members: readonly MemberScore[]): UncertaintySp
  */
 export const POINTS_PER_DOT = 4;
 
-/** 한 줄에 그릴 점 개수. 0 이면 그릴 것이 없다는 뜻입니다. */
-export function uncertaintyDots(points: number): number {
+/**
+ * 한 줄에 그릴 점 개수. 0 이면 **그릴 것이 없다**는 뜻입니다.
+ *
+ * ⚠️ `null`(잴 수 없음)도 0 개입니다 — 지어낸 개수를 찍을 수는 없으니까요.
+ * 다만 **0 개가 곧 "확정" 은 아닙니다.** 그 말은 `uncertaintyDotsNote` 가
+ * `points` 를 직접 보고 정합니다 (결함 226).
+ */
+export function uncertaintyDots(points: number | null): number {
+  if (points === null) return 0;
   if (!Number.isFinite(points) || points <= 0) return 0;
   // ⚠️ **0 으로 내림하지 않습니다.** 폭이 1%p 라도 "모르는 게 있다" 는
   // 사실이고, 점이 0 개면 화면에서 그것이 **완전히 확정** 으로 보입니다.
@@ -299,11 +358,41 @@ export function uncertaintyDots(points: number): number {
   return Math.min(dots, Math.ceil(100 / POINTS_PER_DOT));
 }
 
-/** 점 개수를 사람 말로. 화면이 숫자를 지어내지 않게 여기서 만듭니다. */
-export function uncertaintyDotsNote(points: number): string {
+/**
+ * 점 개수를 사람 말로. 화면이 숫자를 지어내지 않게 여기서 만듭니다.
+ *
+ * ⛔ **"확정적" 은 폭이 진짜 0 일 때만** 입니다 (결함 226). 잴 수 없는
+ * 폭(`null`)에 이 말을 붙이면, 신뢰도 「낮음」 바로 아래에서 화면이
+ * 정반대를 말합니다.
+ */
+/**
+ * 「모름」 칸에 적을 글자. **두 화면이 같은 말을 하게** 여기서 만듭니다.
+ *
+ * ⚠️ `null` 을 `0%p` 로 적으면 그게 곧 "확정" 입니다 (결함 226).
+ */
+export function describeWidth(points: number | null): string {
+  return points === null ? '?' : `${Math.round(points)}%p`;
+}
+
+export function uncertaintyDotsNote(points: number | null): string {
+  const note = describeWidthNote(points);
   const dots = uncertaintyDots(points);
-  if (dots === 0) return '구간이 없습니다 — 이 값은 확정적입니다';
-  return `모르는 폭 ${Math.round(points)}%p · 점 하나가 ${POINTS_PER_DOT}%p`;
+  // ⚠️ 점 이야기는 **점을 그리는 화면에서만** 합니다. SPA 는 리본을 그리지
+  //     점을 안 찍는데 "점 하나가 4%p" 라고 적으면 없는 그림을 설명합니다.
+  return dots === 0 ? note : `${note} · 점 하나가 ${POINTS_PER_DOT}%p`;
+}
+
+/**
+ * 「모르는 폭」 한 줄 — **두 화면이 같은 말을 하게** 여기서 만듭니다.
+ *
+ * ⛔ "확정적" 은 폭이 **진짜 0** 일 때만입니다 (결함 226). 잴 수 없는
+ * 폭(`null`)에 이 말을 붙이면, 신뢰도 「낮음」 바로 옆에서 화면이 정반대를
+ * 말합니다.
+ */
+export function describeWidthNote(points: number | null): string {
+  if (points === null) return '모르는 폭을 잴 수 없습니다 — 확정이라는 뜻이 아닙니다';
+  if (!Number.isFinite(points) || points <= 0) return '구간이 없습니다 — 이 값은 확정적입니다';
+  return `모르는 폭 ${Math.round(points)}%p`;
 }
 
 function clamp(value: number, min: number, max: number): number {
