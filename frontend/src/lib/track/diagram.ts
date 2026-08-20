@@ -131,13 +131,28 @@ export function buildDiagram(tracks: readonly TrackInput[]): Diagram {
   return { durationMs: total, gaps };
 }
 
-/** 축에 찍을 눈금 문구. 회의 길이에 따라 간격을 고른다. */
+/**
+ * 1분보다 짧은 회의는 **초로** 말한다 (결함 242).
+ *
+ * 눈금이 분 하나뿐이라, 베타 참가자가 제일 먼저 하는 **30초짜리 시험
+ * 녹음**에서 축이 통째로 이랬습니다:
+ *
+ *     0분  0  0  0  0  0  0분
+ *
+ * 등간격 거짓말은 아니지만(비율은 맞습니다) 아무것도 안 말합니다.
+ * 그리고 「0분」이 여섯 개 서 있으면 사람은 **고장 났다**고 읽습니다.
+ */
+const SHORT_MEETING_MS = 60_000;
+
+/** 축에 찍을 눈금 문구. 회의 길이에 따라 단위와 간격을 고른다. */
 export function axisTicks(durationMs: number, count = 6): string[] {
   if (durationMs <= 0) return [];
-  const totalMin = durationMs / 60_000;
+  const short = durationMs < SHORT_MEETING_MS;
+  const unit = short ? '초' : '분';
+  const total = durationMs / (short ? 1_000 : 60_000);
   return Array.from({ length: count + 1 }, (_, i) => {
-    const minute = Math.round((totalMin * i) / count);
-    return i === 0 ? '0분' : i === count ? `${minute}분` : String(minute);
+    const value = Math.round((total * i) / count);
+    return i === 0 ? `0${unit}` : i === count ? `${value}${unit}` : String(value);
   });
 }
 
@@ -154,9 +169,14 @@ const REASON_TEXT: Record<string, string> = {
 };
 
 export function describeGap(span: Span, durationMs: number): string {
-  const fromMin = Math.round(((span.left / 100) * durationMs) / 60_000);
-  const toMin = Math.round((((span.left + span.width) / 100) * durationMs) / 60_000);
-  const when = fromMin === toMin ? `${fromMin}분쯤` : `${fromMin}~${toMin}분`;
+  // 축과 **같은 단위**로 말합니다 (결함 242). 짧은 회의에서 「0분쯤」은
+  // 구멍이 어디인지 하나도 안 알려 줍니다.
+  const short = durationMs < SHORT_MEETING_MS;
+  const unit = short ? '초' : '분';
+  const per = short ? 1_000 : 60_000;
+  const from = Math.round(((span.left / 100) * durationMs) / per);
+  const to = Math.round((((span.left + span.width) / 100) * durationMs) / per);
+  const when = from === to ? `${from}${unit}쯤` : `${from}~${to}${unit}`;
   const why = REASON_TEXT[span.reason] ?? '녹음이 끊겼습니다';
   return `${when} · ${why}`;
 }
