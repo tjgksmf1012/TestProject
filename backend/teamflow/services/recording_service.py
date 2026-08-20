@@ -463,6 +463,8 @@ class TrackSummary:
     stop_reason: str | None = None
     #: `MediaRecorder.start(timeslice)` 값. 서버가 배치를 다시 계산할 때 쓴다.
     timeslice_ms: int = 5_000
+    #: 소리가 **실제로** 시작된 시각 (결함 230). 옛 클라이언트는 안 보낸다.
+    started_at: datetime | None = None
 
 
 def _epoch_ms(value: datetime) -> int:
@@ -513,6 +515,26 @@ def complete_track(
     """
     track = _load_track(session, meeting_id, track_id)
     track.ended_at = summary.ended_at
+
+    # ⛔ **트랙이 열린 시각과 소리가 시작된 시각은 다르다** (결함 230).
+    #
+    # `started_at` 은 녹음 화면이 **열릴 때** POST 되고, 사람은 그 뒤에
+    # 마이크 권한을 허용하고 안내를 읽고 「녹음 시작」을 누른다. 커버리지는
+    # `[started_at, ended_at]` 창에 대해 재므로, 그 머뭇거린 시간이 통째로
+    # `recorder_stalled` 공백으로 잡혔다. 같은 12초 녹음을 재 봤다:
+    #
+    #     바로 시작    → 75.6%  · unusable
+    #     20초 뒤 시작 → 33.5%  · unusable
+    #
+    # 오디오는 똑같고 **버튼을 늦게 눌렀다는 것뿐**이다. 커버리지는
+    # 기여도(발화량)로 이어지므로, 안내를 꼼꼼히 읽은 사람이 불리해진다.
+    #
+    # ⚠️ 창만 고치지 않고 **트랙에 적어 둔다.** `build_plan` 은 재생
+    #    파이프라인(`playback_positions`)도 부르는데, 거기서도 같은 창을
+    #    쓰기 때문이다 — 한 곳에서만 고치면 두 벌이 된다.
+    # ⚠️ 옛 클라이언트는 안 보낸다. 그때는 있던 값을 그대로 둔다.
+    if summary.started_at is not None:
+        track.started_at = summary.started_at
 
     plan = build_plan(session, track, timeslice_ms=summary.timeslice_ms)
 

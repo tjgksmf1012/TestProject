@@ -34,6 +34,22 @@ import type { Timeline, TrackVerdict } from './timeline.ts';
 
 /** 서버 `TrackComplete` 와 같은 모양. 필드 이름이 어긋나면 422 다. */
 export interface TrackCompleteBody {
+  /**
+   * **소리가 시작된 시각** (결함 230).
+   *
+   * ⚠️ 트랙의 `started_at` 은 **페이지를 열 때** 만들어집니다 — 마이크
+   * 권한을 허용하고 「녹음 시작」을 누르기 **전**입니다. 서버는 커버리지를
+   * `[started_at, ended_at]` 창에 대해 재기 때문에, 그 사이에 사람이
+   * 머뭇거린 시간이 통째로 **공백**으로 잡혔습니다.
+   *
+   * 같은 12초 녹음을 재 봤습니다:
+   *
+   *     바로 시작    → 커버리지 75.6%  · 사용 불가
+   *     20초 뒤 시작 → 커버리지 33.5%  · 사용 불가
+   *
+   * 오디오는 똑같습니다. **버튼을 늦게 눌렀다는 것뿐**입니다.
+   */
+  started_at: string;
   ended_at: string;
   coverage: number;
   total_gap_ms: number;
@@ -83,6 +99,8 @@ function gapOf(gap: Gap): Record<string, unknown> {
 export function completeBody(input: CompleteInput): TrackCompleteBody {
   const { timeline } = input;
   return {
+    // ⚠️ 트랙을 만든 시각이 아니라 **소리가 시작된 시각** (결함 230).
+    started_at: isoOf(timeline.startedAtMs),
     ended_at: isoOf(timeline.endedAtMs),
     // 서버가 0~1 을 요구한다. 계산 오차로 1 을 아주 조금 넘으면 422 가
     // 나는데, 그 422 는 "녹음이 끝나지 않는다" 로 보인다.

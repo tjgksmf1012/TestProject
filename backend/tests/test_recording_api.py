@@ -512,6 +512,118 @@ def test_complete_stores_gaps_and_warnings(client: TestClient, track: dict, engi
         assert float(row.capture_confidence) == 0.7
 
 
+# ── 결함 230: 트랙이 열린 시각 ≠ 소리가 시작된 시각 ──────────────
+
+
+def test_late_start_does_not_eat_coverage(client: TestClient, track: dict, engine):
+    """⛔ **「녹음 시작」을 늦게 눌렀다고 커버리지가 깎이면 안 된다.**
+
+    트랙은 녹음 화면이 **열릴 때** 만들어진다. 사람은 그 뒤에 마이크 권한을
+    허용하고 안내를 읽고 버튼을 누른다. 커버리지를 `[started_at, ended_at]`
+    창에 대해 재면 그 머뭇거린 시간이 통째로 공백이 된다.
+
+    실제로 브라우저에서 잰 값 (같은 12초 녹음, 기다린 시간만 다름):
+
+        바로 시작    → 75.6%  · unusable
+        20초 뒤 시작 → 33.5%  · unusable
+
+    오디오는 똑같다. 커버리지는 기여도(발화량)로 이어지므로, **안내를
+    꼼꼼히 읽은 사람이 불리해진다.**
+    """
+    started = NOW + timedelta(seconds=20)  # 20초 머뭇거린 뒤 시작
+    started_ms = int(started.timestamp() * 1000)
+    for seq in range(4):
+        put_chunk(
+            client,
+            track["meeting_id"],
+            track["track_id"],
+            seq,
+            at_ms=started_ms + (seq + 1) * TIMESLICE,
+        )
+
+    body = complete(
+        client,
+        track,
+        started_at=started.isoformat(),
+        ended_at=(started + timedelta(seconds=20)).isoformat(),
+    ).json()
+
+    assert body["coverage"] == 1.0, "머뭇거린 20초가 공백으로 잡혔습니다"
+    assert body["status"] == "completed"
+    assert body["usable"] is True
+
+
+def test_late_start_still_catches_lost_uploads(client: TestClient, track: dict):
+    """⭐ 창을 고쳐도 **업로드 실패는 그대로 잡는다** — 그게 이 계산의 이유다.
+
+    230 을 고치면서 여기가 눈을 감으면, 구멍난 트랙이 100%로 기록된다.
+    """
+    started = NOW + timedelta(seconds=20)
+    started_ms = int(started.timestamp() * 1000)
+    for seq in (0, 1, 3):  # 2 는 끝내 실패
+        put_chunk(
+            client,
+            track["meeting_id"],
+            track["track_id"],
+            seq,
+            at_ms=started_ms + (seq + 1) * TIMESLICE,
+        )
+
+    body = complete(
+        client,
+        track,
+        started_at=started.isoformat(),
+        ended_at=(started + timedelta(seconds=20)).isoformat(),
+    ).json()
+
+    assert body["coverage"] == 0.75, "20초 중 5초가 비었다 (유실 1개)"
+    assert body["usable"] is False
+
+
+def test_old_client_without_started_at_still_works(client: TestClient, track: dict, engine):
+    """⚠️ 옛 클라이언트는 `started_at` 을 안 보낸다. 그때는 있던 값을 쓴다."""
+    for seq in range(4):
+        put_chunk(client, track["meeting_id"], track["track_id"], seq)
+
+    body = complete(client, track, slices=4).json()
+
+    assert body["coverage"] == 1.0
+    with Session(engine) as s:
+        row = s.get(m.MeetingTrack, track["track_id"])
+        assert row.started_at is not None, "안 보냈다고 지우면 안 된다"
+
+
+def test_started_at_is_written_to_the_track(client: TestClient, track: dict, engine):
+    """⭐ 창만 고치지 않고 **트랙에 적는다.**
+
+    `build_plan` 은 재생 파이프라인(`playback_positions`)도 부른다. 한
+    곳에서만 고치면 재생 위치가 그만큼 밀린 채로 남는다.
+    """
+    started = NOW + timedelta(seconds=20)
+    started_ms = int(started.timestamp() * 1000)
+    for seq in range(4):
+        put_chunk(
+            client,
+            track["meeting_id"],
+            track["track_id"],
+            seq,
+            at_ms=started_ms + (seq + 1) * TIMESLICE,
+        )
+    complete(
+        client,
+        track,
+        started_at=started.isoformat(),
+        ended_at=(started + timedelta(seconds=20)).isoformat(),
+    )
+
+    with Session(engine) as s:
+        row = s.get(m.MeetingTrack, track["track_id"])
+        stored = row.started_at
+        if stored.tzinfo is None:
+            stored = stored.replace(tzinfo=UTC)
+        assert stored == started, "소리가 시작된 시각이 트랙에 안 남았습니다"
+
+
 def test_low_coverage_track_is_marked_unusable(client: TestClient, track: dict):
     """⭐ 조용히 낮은 점수를 주는 대신 못 쓴다고 말한다.
 

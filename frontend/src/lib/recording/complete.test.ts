@@ -54,6 +54,7 @@ describe('completeBody', () => {
       'ended_at',
       'gaps',
       'longest_gap_ms',
+      'started_at',
       'stop_reason',
       'timeslice_ms',
       'total_gap_ms',
@@ -62,6 +63,19 @@ describe('completeBody', () => {
 
   it('⭐ 종료 시각을 ISO 문자열로 보낸다 — 숫자는 422 다', () => {
     strictEqual(completeBody(input()).ended_at, '2023-11-14T22:14:20.000Z');
+  });
+
+  it('⛔ **소리가 시작된 시각**을 보낸다 — 트랙이 열린 시각이 아니다 (결함 230)', () => {
+    // 트랙은 녹음 화면이 **열릴 때** 만들어집니다. 사람은 그 뒤에 마이크
+    // 권한을 허용하고 안내를 읽고 버튼을 누릅니다. 서버가 커버리지를
+    // `[트랙 생성, 종료]` 창에 대해 재면 그 머뭇거린 시간이 공백이 됩니다.
+    //
+    // 브라우저에서 잰 값 (같은 12초 녹음, 기다린 시간만 다름):
+    //   바로 시작 → 75.6% unusable · 20초 뒤 시작 → 33.5% unusable
+    const body = completeBody(input());
+    strictEqual(body.started_at, new Date(TIMELINE.startedAtMs).toISOString());
+    // 시작이 종료보다 뒤면 서버가 창을 못 만듭니다.
+    strictEqual(body.started_at < body.ended_at, true);
   });
 
   it('⭐ 커버리지를 반올림하거나 보정하지 않는다', () => {

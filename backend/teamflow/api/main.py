@@ -1655,6 +1655,8 @@ def list_chunks(
 
 
 class TrackComplete(BaseModel):
+    #: 소리가 시작된 시각 (결함 230). 옛 클라이언트는 안 보낸다.
+    started_at: datetime | None = None
     ended_at: datetime
     coverage: float = Field(ge=0, le=1)
     total_gap_ms: int = Field(ge=0)
@@ -1705,6 +1707,7 @@ def complete_track(
             meeting_id=meeting_id,
             track_id=track_id,
             summary=recording_service.TrackSummary(
+                started_at=payload.started_at,
                 ended_at=payload.ended_at,
                 coverage=payload.coverage,
                 total_gap_ms=payload.total_gap_ms,
