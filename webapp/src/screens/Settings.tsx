@@ -24,7 +24,7 @@ import {
 } from '@lib/project/roles.ts';
 import { presenceLabel, worthShowing } from '@lib/project/presence.ts';
 import { describeOutcome } from '@lib/privacy/deletion.ts';
-import { describeLoadFailure } from '@lib/ui/load.ts';
+import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
 import { AVATAR_SIDE, MAX_BIO, PHOTO_NOTE, bioProblem, coverCrop, photoProblem } from '@lib/profile/edit.ts';
 import { ApiError } from '../api/client.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -457,6 +457,16 @@ function RepoSection({
           ))}
           {view.activity !== '' && <p className="t12 num">{view.activity}</p>}
           {view.coverage !== '' && <p className="t12 muted">{view.coverage}</p>}
+          {/* ⚠️ **실패해도 아무 말도 안 했습니다** (결함 218). 500 을 받아도
+              화면이 그대로라 사람은 가져오는 중인 줄 알고 기다립니다. */}
+          {backfill.isError && (
+            <Problem>
+              {describeActionFailure(
+                '지난 활동 가져오기',
+                backfill.error instanceof ApiError ? backfill.error.status : null,
+              )}
+            </Problem>
+          )}
           {view.canBackfill && (
             <button
               type="button"

@@ -75,6 +75,15 @@ interface AppShellProps {
   children: ReactNode;
 }
 
+/**
+ * 막힌 레일 항목의 사유.
+ *
+ * ⚠️ 예전에는 `title` 에만 있었습니다 — **마우스를 올릴 수 있는 사람만**
+ * 볼 수 있는 자리입니다. 이제 `aria-describedby` 가 가리키는 진짜 글로
+ * 두고, `title` 은 그 글을 그대로 씁니다 (두 벌이 되지 않게).
+ */
+const RAIL_BLOCKED_WHY = '프로젝트를 만들거나 초대 코드로 참가하면 열립니다';
+
 export function AppShell({ title, docTitle, actions, meta, projectId, children }: AppShellProps) {
   const params = useParams();
   const { pathname } = useLocation();
@@ -175,12 +184,19 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
         )}
         {items.map((item) =>
           item.blocked ? (
+            /* ⚠️ **초점을 못 받고 있었습니다** (결함 219). `role="link"` 만
+               주고 `tabIndex` 를 안 주면 탭 순서에 아예 없습니다 — 40번
+               눌러도 안 닿았습니다. 그리고 이유가 `title` 에만 있어서
+               마우스를 올릴 수 있는 사람만 볼 수 있었습니다. 키보드로
+               닿게 하고, 이유는 `aria-describedby` 로 **읽히게** 합니다. */
             <span
               key={item.label}
               className="rail__item rail__item--blocked"
               role="link"
               aria-disabled="true"
-              title="프로젝트를 만들거나 초대 코드로 참가하면 열립니다"
+              tabIndex={0}
+              aria-describedby="rail-blocked-why"
+              title={RAIL_BLOCKED_WHY}
             >
               {item.icon}
               {item.label}
@@ -210,6 +226,11 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
           <IconLogout />
           로그아웃
         </button>
+        {/* 막힌 항목들이 가리키는 자리. 항목마다 같은 문장을 세 번
+            되풀이하지 않게 **한 벌**만 둡니다. */}
+        <p id="rail-blocked-why" className="visually-hidden">
+          {RAIL_BLOCKED_WHY}
+        </p>
       </nav>
       {/* ⚠️ `<div>` 였습니다. 랜드마크가 없으면 낭독기 사용자가 "본문으로"
           라는 이동 수단을 잃습니다 — 건너뛰기 링크가 닿을 자리이기도 합니다.

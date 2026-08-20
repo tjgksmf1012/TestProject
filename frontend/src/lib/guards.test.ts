@@ -4179,3 +4179,173 @@ describe('통화 화면이 **아는 것만** 말한다 (결함 216)', () => {
     );
   });
 });
+
+describe('검토하던 것을 새로고침에 잃지 않는다 (결함 217)', () => {
+  const review = readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Review.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ');
+
+  it('⭐ 되살리고 · 남기고 · 확정하면 지운다 — 셋 다 있어야 한다', () => {
+    // 재서 확인한 것: 담당자를 고르면 **나간 요청 0건**(맞습니다, 검토는
+    // 한 번에 확정하는 절차입니다)이고 새로고침하면 「미지정」으로
+    // 돌아가며 **경고도 0건**이었습니다.
+    ok(/parseDrafts\(sessionStorage\.getItem\(/.test(review), '저장된 초안을 안 읽습니다');
+    ok(
+      /sessionStorage\.setItem\(draftStorageKey\(meetingId\), serializeDrafts\(next\)\)/.test(review),
+      '초안을 안 남깁니다',
+    );
+    ok(/sessionStorage\.removeItem\(draftStorageKey\(/.test(review), '확정한 뒤에도 초안이 남습니다');
+    // ⚠️ **`clearDrafts()` 를 정의만 하고 안 부르면** 다음에 이 회의를
+    //    열었을 때 이미 처리된 결정이 되살아난 것처럼 보입니다. 호출을
+    //    봅니다 — 정의는 위에서 이미 셌습니다.
+    ok(/^\s*clearDrafts\(\);\s*$/m.test(review), '확정 성공 처리에서 초안을 안 지웁니다');
+  });
+
+  it('⚠️ **바꿀 때마다** 남긴다 — 「나갈 때 저장」 은 탭이 죽으면 안 돈다', () => {
+    // 잃으면 안 되는 순간이 바로 그 순간입니다.
+    const update = /const update = \(id: number, patch: Partial<Draft>\) => \{[\s\S]*?\n  \};/.exec(review)?.[0] ?? '';
+    ok(update !== '', '`update` 를 못 찾았습니다');
+    ok(/sessionStorage\.setItem\(/.test(update), '값을 바꿀 때 안 남깁니다');
+    ok(
+      !/beforeunload/.test(review),
+      '나갈 때만 남기고 있습니다 — 브라우저가 탭을 죽이면 그 경로는 안 돕니다',
+    );
+  });
+
+  it('⛔ `localStorage` 를 쓰지 않는다 — 몇 주 전 초안이 되살아나면 잃는 것보다 나쁘다', () => {
+    // 사람은 그게 오래된 값인 줄 모르고 그대로 확정합니다.
+    ok(!/localStorage/.test(review), '검토 초안을 영구 보관하고 있습니다');
+  });
+
+  it('⭐ **지금 있는 후보**에만 되살린다 — 그 사이에 처리된 것은 뜻이 없다', () => {
+    ok(/const liveIds = useMemo\(\(\) => candidates\.map\(/.test(review), '거를 기준을 안 만듭니다');
+    ok(
+      /useDraftMap\(meetingId, liveIds\)/.test(review),
+      '거를 기준을 안 넘깁니다 — 처리된 후보의 초안이 되살아납니다',
+    );
+  });
+});
+
+describe('보낸 것이 실패하면 **화면이 말한다** (결함 218)', () => {
+  /**
+   * ⚠️ 이 검사는 **한 곳을 고치는 것이 아니라 모양 전체를 훑습니다.**
+   *
+   * 검토 화면에서 하나를 찾고(「검토 끝내기」가 500 을 받아도 화면 글자가
+   * 한 글자도 안 바뀜) 같은 모양을 다 훑었더니 **둘이 더 있었습니다** —
+   * 로비의 「회의 강제 종료」와 설정의 「지난 활동 가져오기」. 셋 다
+   * 브라우저로 500 을 받게 해서 확인했습니다.
+   *
+   * 실패를 말하는 길은 두 가지고, **둘 중 하나만 있으면 됩니다**:
+   *   ① `mutate(…, { onError })` 로 그 자리에서 문장을 만들거나
+   *   ② `<이름>.isError` 를 그려서 화면이 알아서 나타나게 하거나
+   */
+  it('⭐ 모든 mutate 에 말할 자리가 있다', () => {
+    const base = join(ROOT, '..', 'webapp', 'src');
+    const offenders: string[] = [];
+
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!entry.name.endsWith('.tsx')) continue;
+        const code = readFileSync(full, 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, ' ')
+          .replace(/\/\/[^\n]*/g, ' ');
+
+        // `foo.mutate(` · `m.finish.mutate(` 같은 부르는 이름들.
+        const callers = new Set(
+          [...code.matchAll(/([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\.mutate(?:Async)?\(/g)].map(
+            (m) => m[1] as string,
+          ),
+        );
+        for (const caller of [...callers].sort()) {
+          const escaped = caller.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          // ⚠️ **`onError` 라는 낱말이 파일 어딘가에 있는가**로 재면, 다른
+          //    mutate 의 `onError` 하나로 전부 통과합니다. **이 호출에**
+          //    붙어 있는지를 봅니다.
+          const hasOnError = new RegExp(`${escaped}\\.mutate(?:Async)?\\([\\s\\S]{0,600}?onError`).test(code);
+          const shows = code.includes(`${caller}.isError`) || code.includes(`${caller}.error`);
+          if (!hasOnError && !shows) {
+            offenders.push(`${full.slice(base.length + 1)} — ${caller}`);
+          }
+        }
+      }
+    };
+    walk(base);
+
+    strictEqual(
+      offenders.join('\n  '),
+      '',
+      '실패해도 화면이 아무 말도 안 하는 곳입니다 — 사람은 됐다고 믿고 떠납니다',
+    );
+  });
+});
+
+describe('막힌 것에 **키보드로 닿는다** (결함 219)', () => {
+  /**
+   * 이 저장소는 「아직 안 됨」 을 `disabled` 가 아니라 `aria-disabled` 로
+   * 표시합니다 — **초점을 받고 사유를 읽히게 하려고**요(AGENTS.md). 그런데
+   * 그 사유를 가리키는 두 곳이 초점을 못 받고 있었습니다:
+   *
+   *   로비 「녹음 화면으로」  `<a>` 인데 막히면 `href` 를 안 줌
+   *                          → 탭 **60번** 눌러도 안 닿음
+   *   레일의 막힌 항목        `<span role="link">` 인데 `tabIndex` 없음
+   *                          → 탭 **40번** 눌러도 안 닿음
+   *
+   * 닿지 못하면 `aria-describedby` 가 가리키는 사유를 **낭독기가 영영 못
+   * 읽습니다.** 약속이 그 사람들에게만 거짓이었습니다.
+   */
+  it('⭐ `aria-disabled` 를 단 것은 초점을 받을 수 있어야 한다', () => {
+    const base = join(ROOT, '..', 'webapp', 'src');
+    const offenders: string[] = [];
+
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!entry.name.endsWith('.tsx')) continue;
+        // ⚠️ **주석을 먼저 걷어냅니다.** 안 걷으면 여는 태그 사이에 낀
+        //    주석의 `<a>` 같은 글자에서 `>` 를 만나 **태그가 잘립니다** —
+        //    고친 코드를 위반이라고 했습니다. 규칙이 아니라 재는 법이
+        //    틀린 것이었고, 이 저장소가 이미 여러 번 당한 자리입니다.
+        const code = readFileSync(full, 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
+        // ⚠️ `<button>` 은 기본으로 초점을 받습니다. 문제는 `<a>` 와
+        //    `<span role="…">` 처럼 **직접 줘야 하는 것**들입니다.
+        for (const m of code.matchAll(/<(a|span|div)\b[^>]*aria-disabled[^>]*>/gs)) {
+          const tag = m[0];
+          if (/tabIndex/.test(tag)) continue;
+          // `<a href="…">` 처럼 **언제나** 주소가 있으면 초점을 받습니다.
+          // 조건부(`? … : undefined`)면 막혔을 때 못 받습니다.
+          if (m[1] === 'a' && /href=["'{][^>]*/.test(tag) && !/undefined/.test(tag)) continue;
+          offenders.push(`${full.slice(base.length + 1)} — <${m[1]} aria-disabled …>`);
+        }
+      }
+    };
+    walk(base);
+
+    strictEqual(
+      offenders.join('\n  '),
+      '',
+      '막혔는데 탭으로 닿을 수 없습니다 — 사유가 있어도 낭독기가 못 읽습니다',
+    );
+  });
+
+  it('⚠️ 사유가 `title` **에만** 있지 않다 — 마우스를 올릴 수 있는 사람만 본다', () => {
+    const shell = readFileSync(join(ROOT, '..', 'webapp', 'src', 'components', 'AppShell.tsx'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const blocked = /<span[\s\S]*?rail__item--blocked[\s\S]*?>/.exec(shell)?.[0] ?? '';
+    ok(blocked !== '', '막힌 레일 항목을 못 찾았습니다');
+    ok(/aria-describedby=/.test(blocked), '사유를 낭독기가 읽을 길이 없습니다');
+    ok(
+      /id="rail-blocked-why"/.test(shell),
+      '가리키는 자리가 실제로 없습니다 — 가리키기만 하면 아무 말도 안 읽힙니다',
+    );
+  });
+});

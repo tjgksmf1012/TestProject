@@ -24,6 +24,8 @@ import {
 } from '@lib/platform/recording.ts';
 import { Problem } from '../components/Problem.tsx';
 import { describeMeetingStatus } from '@lib/home/next.ts';
+import { describeActionFailure } from '@lib/ui/load.ts';
+import { ApiError } from '../api/client.ts';
 
 // 회의 로비 — 시그니처가 사는 곳 (지시서 기타-6 §로비).
 //
@@ -151,6 +153,18 @@ export default function Lobby() {
               {phase.go.label}
             </Link>
           )}
+          {/* ⚠️ **실패해도 아무 말도 안 했습니다** (결함 218). 500 을 받아도
+              화면 글자가 한 글자도 안 바뀌었고, 사람은 회의가 종료된 줄
+              알고 떠납니다. 그 회의는 영영 처리되지 않습니다 — 강제 종료가
+              있는 이유가 바로 그것을 푸는 것인데요. */}
+          {m.finish.isError && (
+            <Problem>
+              {describeActionFailure(
+                '회의 강제 종료',
+                m.finish.error instanceof ApiError ? m.finish.error.status : null,
+              )}
+            </Problem>
+          )}
           {room.needsForceFinish && (
             <button
               type="button"
@@ -178,6 +192,13 @@ export default function Lobby() {
             className={`btn btn--primary${!canGoRecord ? ' btn--unmet btn--disabled-link' : ''}`}
             href={canGoRecord ? `/index.html?meeting=${meetingId}` : undefined}
             aria-disabled={!canGoRecord}
+            /* ⚠️ **`href` 없는 `<a>` 는 초점을 못 받습니다** (결함 219).
+               막혔을 때 `href` 를 안 주므로, 탭을 60번 눌러도 이 버튼에
+               닿지 않았습니다 — 즉 `aria-describedby` 가 가리키는 사유를
+               **낭독기가 영영 못 읽습니다.** 이 저장소가 "비활성 버튼은
+               `aria-disabled` 라 초점도 받는다" 고 적어 둔 그 약속이
+               여기서만 거짓이었습니다. 초점은 직접 줍니다. */
+            tabIndex={0}
             /* 막힌 이유가 둘입니다 — 아직 동의가 안 찼거나(조건 칩),
                이미 끝난 회의이거나(국면 설명). 가리키는 곳이 다릅니다. */
             aria-describedby={

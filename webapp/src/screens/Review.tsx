@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { Disclosure } from '../components/Disclosure.tsx';
@@ -38,6 +38,9 @@ import { missingNote, emptyEvidenceNote, withContext } from '@lib/review/evidenc
 import { agendaItems, issueViews } from '@lib/review/minutes.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { Problem } from '../components/Problem.tsx';
+import { draftStorageKey, parseDrafts, serializeDrafts } from '@lib/review/drafts.ts';
+import { describeActionFailure } from '@lib/ui/load.ts';
+import { ApiError } from '../api/client.ts';
 
 // 업무 후보 검토 — 3판 (지시서 07).
 //
@@ -45,16 +48,58 @@ import { Problem } from '../components/Problem.tsx';
 // 근거를 확인할 때 참조하는 것이라 옆에 둡니다 — 위에 쌓지 않습니다.
 // AI 가 만든 것(점선 위)과 사람이 정하는 것(점선 아래)을 형태로 가릅니다.
 
-function useDraftMap() {
+/**
+ * 검토하던 것.
+ *
+ * ⚠️ **새로고침 한 번에 전부 날아갔습니다** (결함 217). 재서 확인한 것 —
+ * 담당자를 고르면 화면은 바뀌는데 **나간 요청이 0건**이고(그게 맞습니다,
+ * 검토는 한 번에 확정하는 절차니까요), 새로고침하면 「미지정」으로
+ * 돌아가며 **경고 대화상자도 0건**이었습니다. 후보가 열셋인 회의에서
+ * 담당자와 마감일을 다 채운 뒤 실수로 새로고침하면 그 몇 분이 통째로
+ * 사라집니다.
+ *
+ * 판단(무엇을 남기고 무엇을 버릴지)은 `@lib/review/drafts.ts` 에 있습니다.
+ * 여기서는 읽고 쓰기만 합니다.
+ */
+function useDraftMap(meetingId: number, liveIds: readonly number[]) {
   const [drafts, setDrafts] = useState<ReadonlyMap<number, Draft>>(new Map());
+  // 되살리기는 **후보 목록이 온 뒤에** 한 번만. 그 전에는 무엇이 아직
+  // 살아 있는 후보인지 알 수 없어 거를 수가 없습니다.
+  const restored = useRef(false);
+
+  useEffect(() => {
+    if (restored.current || liveIds.length === 0) return;
+    restored.current = true;
+    const saved = parseDrafts(sessionStorage.getItem(draftStorageKey(meetingId)), liveIds);
+    if (saved.size > 0) setDrafts(saved);
+  }, [meetingId, liveIds]);
+
   const update = (id: number, patch: Partial<Draft>) => {
     setDrafts((prev) => {
       const next = new Map(prev);
       next.set(id, { ...(prev.get(id) ?? emptyDraft()), ...patch });
+      // ⚠️ **바꿀 때마다 씁니다.** "나갈 때 저장" 은 브라우저가 탭을
+      //    죽이면 안 돌고, 그때가 바로 잃으면 안 되는 순간입니다.
+      try {
+        sessionStorage.setItem(draftStorageKey(meetingId), serializeDrafts(next));
+      } catch {
+        // 저장이 안 되는 브라우저(사생활 모드 등)에서도 검토는 되어야
+        // 합니다. 못 남기는 것이 못 쓰는 것보다 낫습니다.
+      }
       return next;
     });
   };
-  return { drafts, update };
+
+  /** 확정에 성공했으면 초안은 이미 뜻이 없습니다. */
+  const clear = () => {
+    try {
+      sessionStorage.removeItem(draftStorageKey(meetingId));
+    } catch {
+      /* 위와 같은 이유 */
+    }
+  };
+
+  return { drafts, update, clear };
 }
 
 export default function Review() {
@@ -66,18 +111,21 @@ export default function Review() {
   const membersQuery = useMeetingMembers(meetingId);
   const submit = useSubmitReview(meetingId);
 
-  const { drafts, update } = useDraftMap();
+  const candidates = useMemo(
+    () => sortForReview(candidatesQuery.data ?? []),
+    [candidatesQuery.data],
+  );
+  /* 되살릴 초안을 거를 기준 — **지금 화면에 있는 후보**입니다. 그 사이에
+     누가 처리해 버린 후보의 초안은 이미 뜻이 없습니다 (결함 217). */
+  const liveIds = useMemo(() => candidates.map((c) => c.id), [candidates]);
+
+  const { drafts, update, clear: clearDrafts } = useDraftMap(meetingId, liveIds);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [submitNote, setSubmitNote] = useState<string | null>(null);
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
   const listRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playingId, setPlayingId] = useState<number | null>(null);
-
-  const candidates = useMemo(
-    () => sortForReview(candidatesQuery.data ?? []),
-    [candidatesQuery.data],
-  );
   const members = membersQuery.data ?? [];
   const context: ReviewContext = useMemo(
     () => ({ memberIds: members.map((m) => m.user_id), today: todayInTeamCalendar() }),
@@ -182,9 +230,24 @@ export default function Review() {
     try {
       const payload = buildReviewPayload(candidates, drafts, context);
       submit.mutate(payload, {
+        /* ⚠️ **`onError` 가 없었습니다** (결함 218). 서버가 500 을 줘도
+           화면 글자가 **한 글자도 안 바뀌었고** 버튼은 다시 눌리는 상태로
+           돌아갔습니다 — 사람은 확정된 줄 알고 떠납니다. 감싼 `try/catch`
+           는 payload 를 만드는 동안만 봅니다. 비동기 실패는 그 밖입니다. */
+        onError: (error) => {
+          setSubmitNote(
+            describeActionFailure(
+              '검토 확정',
+              error instanceof ApiError ? error.status : null,
+            ),
+          );
+        },
         onSuccess: (result) => {
           setSubmitNote(describeSubmitResult(result.approved_count, result.approved_task_ids));
           setSelectedId(null);
+          // 확정했으면 초안은 뜻이 없습니다 — 남겨 두면 다음에 이 회의를
+          // 열었을 때 이미 처리된 결정이 되살아난 것처럼 보입니다.
+          clearDrafts();
         },
       });
     } catch (e) {
