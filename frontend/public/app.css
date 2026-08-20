@@ -530,12 +530,8 @@ button:active,
 }
 
 /* 정말로 못 누르는 것 — HTML `disabled` 는 초점도 못 받고 클릭도 안
-   먹습니다. 비활성 컨트롤이라 대비 하한 예외에 걸립니다(WCAG 1.4.3). */
-button:disabled {
-  opacity: 0.45;
-  cursor: default;
-  transform: none;
-}
+   먹습니다. 모양은 아래 `aria-disabled` 와 **같이** 정합니다 (결함 236) —
+   위치가 `button.primary` 뒤여야 하기 때문입니다. */
 
 .btn-primary,
 button.primary {
@@ -556,8 +552,20 @@ button.primary {
    두면 **뒤에 오는 `button.primary` 가 이깁니다.** 실제로 위에 뒀다가
    `녹음 시작` 이 꽉 찬 파란 버튼으로 그려졌습니다 — 못 누르는데 눌러도
    되는 것처럼 보였습니다. 렌더해서 봤습니다. */
+/* ⛔ **`:disabled` 도 여기 같이 둡니다** (결함 236).
+   예전에는 위에서 `opacity: 0.45` 로 흐렸습니다. "비활성이라 WCAG 1.4.3
+   예외" 라는 주석이 붙어 있었지만, 이 저장소는 그 예외를 **안 쓰기로**
+   이미 정했습니다(`webapp/src/app.css` 의 `.btn--disabled-link` 주석) —
+   같은 앱 안에서 「안 됨」이 두 가지 얼굴을 가지면 안 되기 때문입니다.
+
+   재 봤습니다. 통화 화면의 「마이크 끄기」(마이크 권한을 거절한 사람)가
+   **밝음 2.91:1 · 어두움 3.98:1** 이었습니다. ⚠️ `getComputedStyle` 로는
+   **17.16:1** 로 보입니다 — `opacity` 는 합성이라 색 토큰이 그대로입니다
+   (AGENTS.md, 결함 180). 픽셀로 합성해야 보입니다. */
 button[aria-disabled="true"],
-.btn[aria-disabled="true"] {
+.btn[aria-disabled="true"],
+button:disabled,
+.btn:disabled {
   background: var(--primary-tint);
   color: var(--primary);
   border-color: var(--line-strong);

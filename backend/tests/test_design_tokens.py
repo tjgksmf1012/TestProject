@@ -852,3 +852,43 @@ def test_spa_the_claims_written_next_to_the_derived_colours_are_true(spa: str):
         f"주장을 {checked} 개밖에 못 읽었습니다. 주석 모양이 바뀌면 이 검사는 "
         "아무것도 안 재면서 통과합니다 — 정규식을 고치세요."
     )
+
+
+def test_no_button_is_dimmed_with_opacity(spa: str):
+    """⛔ **버튼을 `opacity` 로 흐리게 하지 않습니다** (결함 236).
+
+    `opacity` 는 글자와 채움을 **같이** 끌어당깁니다. 그래서 색 토큰은
+    그대로인데 실제로 읽히는 대비만 무너집니다 — `getComputedStyle` 을
+    읽는 감사는 **구조적으로 못 봅니다**(결함 180 에서 이미 당했습니다).
+
+    재 봤습니다. 통화 화면에서 마이크 권한을 거절한 사람의
+    「마이크 끄기」가 이랬습니다.
+
+        합성 전 (색 토큰)  17.16:1   ← 감사가 보던 값
+        합성 후 (사람이 봄) 2.91:1   ← 밝은 모드
+                            3.98:1   ← 어두운 모드
+
+    ⚠️ `disabled` 는 WCAG 1.4.3 의 비활성 예외에 걸리지만, 이 저장소는
+    그 예외를 **안 쓰기로 이미 정했습니다** — 같은 앱 안에서 「안 됨」이
+    두 가지 얼굴(흐림 · 덜 채운 모양)을 가지면 안 되기 때문입니다
+    (`webapp/src/app.css` 의 `.btn--disabled-link` 주석).
+
+    흐림 대신 **모양**으로 말합니다.
+    """
+    legacy = LEGACY_APP_CSS.read_text(encoding="utf-8")
+    bad: list[str] = []
+    for name, css in (("webapp/src/app.css", spa), ("frontend/public/app.css", legacy)):
+        # 주석을 걷어냅니다 — 이 결함을 **설명하는 주석**이 스스로 걸립니다.
+        body = re.sub(r"/\*.*?\*/", " ", css, flags=re.S)
+        for block in re.finditer(r"([^{}]+)\{([^{}]*)\}", body):
+            selector, decls = block.group(1).strip(), block.group(2)
+            if not re.search(r"\bbutton\b|\.btn\b", selector):
+                continue
+            # 깜빡임(`@keyframes`)은 상태가 아니라 움직임이라 예외입니다.
+            m = re.search(r"(?<![-\w])opacity\s*:\s*([0-9.]+)", decls)
+            if m and float(m.group(1)) < 1:
+                bad.append(f"{name}: `{selector}` 에 opacity {m.group(1)}")
+    assert not bad, (
+        "버튼을 흐리게 하고 있습니다 — 글자와 채움이 같이 내려가 색 토큰만 "
+        "보는 감사는 못 잡습니다. 모양으로 말하세요:\n  " + "\n  ".join(bad)
+    )
