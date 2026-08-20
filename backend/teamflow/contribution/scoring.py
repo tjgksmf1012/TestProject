@@ -28,7 +28,7 @@ from teamflow.contribution.confidence import (
     compute_confidence,
 )
 from teamflow.contribution.events import Category, ContributionEvent, EventType, deduplicate
-from teamflow.contribution.profiles import ScoringProfile
+from teamflow.contribution.profiles import DEFAULT_PROFILES, Role, ScoringProfile
 
 ALGO_VERSION = "scoring-v1"
 
@@ -278,6 +278,16 @@ class TeamScoreResult:
     algo_version: str
     members: dict[int, MemberScore]
     skipped_categories: list[Category] = field(default_factory=list)
+    #: 기여 기록은 있는데 **지금 이 프로젝트의 구성원이 아닌** 사람들.
+    #:
+    #: ⚠️ **계산에서 빼지 않습니다.** 빼면 남은 사람들의 몫이 조용히
+    #: 부풀고, 그건 `remove_member` 가 행을 안 지우는 이유 그 자체입니다
+    #: ("나갔다고 해서 그 사람이 한 일이 없던 일이 되면, 남은 팀의 기여도
+    #: 비율이 조용히 부풀고 회의록에 구멍이 납니다").
+    #:
+    #: 여기 남기는 것은 **화면이 그 줄을 이름 없이 그리지 않게** 하기
+    #: 위해서입니다 — 안 알려 주면 「사용자 #3」 이 뜹니다 (결함 222).
+    former_members: list[int] = field(default_factory=list)
 
     def ranked_ids(self) -> list[int]:
         """⚠️ 내부 검증·테스트 전용.
@@ -396,6 +406,18 @@ def score_team(
     """
     gaps: dict[int, list[MeasurementGap]] = unmeasurable or {}
     users = sorted(events_by_user)
+    # ⚠️ **프로파일이 없는 사람에서 터졌습니다** (결함 222). 예전에는
+    #    `profiles[uid]` 를 그냥 찾다 `KeyError` 가 났고, 그건 곧 **기여도
+    #    API 가 500** 이라는 뜻이었습니다 — 팀원 한 명을 내보내면 그
+    #    프로젝트의 기여도는 보는 것도 확정하는 것도 영영 안 됐습니다.
+    #
+    # ⛔ **계산에서 빼는 것으로 고치지 않습니다.** 빼면 남은 사람들의 몫이
+    #    조용히 부풀고, 그건 `remove_member` 가 그 사람의 기록을 일부러
+    #    남겨 두는 이유와 정면으로 어긋납니다. 기본 프로파일로 **계속
+    #    셉니다** — 그 사람이 한 일은 실제로 있었습니다.
+    former = sorted(uid for uid in users if uid not in profiles)
+    if former:
+        profiles = {**profiles, **{uid: DEFAULT_PROFILES[Role.DEVELOPER] for uid in former}}
     clean: dict[int, list[ContributionEvent]] = {
         uid: deduplicate(events_by_user[uid]) for uid in users
     }
@@ -475,4 +497,5 @@ def score_team(
         algo_version=ALGO_VERSION,
         members=members,
         skipped_categories=skipped,
+        former_members=former,
     )

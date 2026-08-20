@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from teamflow.config import Settings, get_settings
-from teamflow.db import assignees
+from teamflow.db import assignees, vocab
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
@@ -1313,6 +1313,58 @@ def test_confirming_leaves_an_audit_trail(client: TestClient, seeded):
         assert log.actor_id is not None
         assert log.after["final_value"] == 55.0
         assert log.after["reason"] == "합의"
+
+
+def test_removing_a_member_does_not_break_contributions(client: TestClient, seeded):
+    """⭐ 팀원을 내보내도 기여도는 **계속 보여야** 한다 (결함 222).
+
+    베타에서 「내보내기」를 한 번 누른 뒤로 기여도가 **영영 500** 이었습니다.
+    보는 것도 확정하는 것도 안 됐습니다 — 이 제품의 한가운데가 버튼 하나로
+    죽은 것입니다.
+
+    원인은 `score_team` 이 **기여 기록이 있는 모든 사람**을 돌면서
+    `profiles[uid]` 를 무조건 찾은 것입니다. 내보낸 사람은 기록은 남고
+    (「그 사람이 한 일은 그대로 남습니다」 — 내보내기 확인 문구)
+    프로파일만 사라지므로 `KeyError` 가 났습니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+    add_contribution_events(seeded["project_id"], users[2], 2)
+
+    before = client.get(f"/api/projects/{seeded['project_id']}/contributions")
+    assert before.status_code == 200
+    assert len(before.json()["members"]) == 3
+
+    # 내보내려면 권한이 있어야 합니다 — 첫 사람을 소유자로 올립니다.
+    with db_session.session_scope() as s:
+        me = s.scalars(
+            select(m.Member).where(
+                m.Member.project_id == seeded["project_id"],
+                m.Member.user_id == users[0],
+            )
+        ).one()
+        me.project_role = vocab.ProjectRole.OWNER
+
+    removed = client.delete(f"/api/projects/{seeded['project_id']}/members/{users[2]}")
+    assert removed.status_code == 204, removed.text
+
+    after = client.get(f"/api/projects/{seeded['project_id']}/contributions")
+    assert after.status_code == 200, after.text
+    body = after.json()
+    # ⛔ **계산에서 빠지지 않습니다.** 빼면 남은 사람들의 몫이 조용히
+    #    부풀고, 그건 `remove_member` 가 기록을 남겨 두는 이유와 정면으로
+    #    어긋납니다 — 그 엔드포인트 주석이 그렇게 적어 두고 있습니다.
+    assert [mm["user_id"] for mm in body["members"]] == sorted(users)
+    # 다만 **누가 나갔는지는 알려 줘야** 화면이 「사용자 #3」 을 안 띄웁니다.
+    assert [f["user_id"] for f in body["former_members"]] == [users[2]]
+    assert body["former_members"][0]["name"], "이름 없이 보내면 화면이 번호로 부릅니다"
+
+    # 확정도 되어야 합니다 — 여기도 같은 계산을 부릅니다.
+    confirmed = client.post(
+        _final_url(seeded), json={"finals": [{"user_id": u} for u in users[:2]]}
+    )
+    assert confirmed.status_code == 201, confirmed.text
 
 
 def test_an_outsider_cannot_confirm(client: TestClient, seeded):

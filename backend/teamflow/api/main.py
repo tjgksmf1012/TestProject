@@ -2334,6 +2334,16 @@ def _presence_of(session: Session, user_ids: list[int]) -> dict[int, str]:
     }
 
 
+def _display_name(session: Session, user_id: int) -> str:
+    """이름을 부른다. 못 찾으면 **번호로 부르지 않고** 그렇게 말한다.
+
+    ⚠️ 화면이 `사용자 #3` 을 띄우면 사람은 그게 누구인지 모릅니다. 기여도는
+    사람 이름 옆에 붙는 값이라 더욱 그렇습니다 (결함 222).
+    """
+    name = session.scalar(select(m.User.name).where(m.User.id == user_id))
+    return name or "이름을 알 수 없는 사람"
+
+
 def _project_members(session: Session, project_id: int) -> list[MemberOut]:
     rows = session.execute(
         select(m.Member, m.User)
@@ -3713,6 +3723,12 @@ class ScoreOut(BaseModel):
     computed_at: datetime
     members: list[MemberScoreOut]
     skipped_categories: list[str]
+    # ⚠️ 기여 기록은 있는데 **지금 구성원이 아닌** 사람들 (결함 222).
+    #    계산에는 **그대로 들어갑니다** — 빼면 남은 사람들의 몫이 조용히
+    #    부풀고, 그건 `remove_member` 가 기록을 남겨 두는 이유와 어긋납니다.
+    #    여기 이름까지 실어 보내는 것은 화면이 그 줄을 「사용자 #3」 으로
+    #    그리지 않게 하기 위해서입니다.
+    former_members: list[dict[str, Any]] = Field(default_factory=list)
     # ⚠️ 순위는 의도적으로 제공하지 않는다. docs/07 E2
     notice: str = (
         "이 수치는 활동 기록에 기반한 참고값입니다. 최종 기여도는 팀이 합의하여 확정합니다."
@@ -3982,6 +3998,10 @@ def contributions(
             for ms in result.members.values()
         ],
         skipped_categories=[c.value for c in result.skipped_categories],
+        former_members=[
+            {"user_id": uid, "name": _display_name(session, uid)}
+            for uid in result.former_members
+        ],
     )
 
 

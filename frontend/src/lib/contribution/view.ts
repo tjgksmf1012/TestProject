@@ -58,6 +58,17 @@ export interface TeamScore {
   computed_at: string;
   members: MemberScore[];
   skipped_categories: string[];
+  /**
+   * 기여 기록은 있는데 **지금 구성원이 아닌** 사람들 (결함 222).
+   *
+   * ⚠️ 계산에는 **그대로 들어갑니다** — 빼면 남은 사람들의 몫이 조용히
+   * 부풀고, 그건 서버가 나간 사람의 기록을 일부러 남겨 두는 이유와
+   * 어긋납니다. 이 목록은 화면이 그 줄을 **이름으로** 부르고 「나간 사람」
+   * 이라고 표시하기 위한 것입니다.
+   *
+   * ⚠️ 옛 서버는 이 칸을 안 보냅니다. 없으면 아무 표시도 안 합니다.
+   */
+  former_members?: Person[];
   notice: string;
 }
 
@@ -120,8 +131,22 @@ export function orderForDisplay(
   });
 }
 
-export function nameOf(userId: number, people: readonly Person[]): string {
-  return people.find((p) => p.user_id === userId)?.name ?? `사용자 #${userId}`;
+/**
+ * 이름을 부른다.
+ *
+ * ⚠️ **나간 사람도 이름으로 불러야 합니다** (결함 222). `people` 은 지금
+ * 구성원 목록이라 나간 사람이 없고, 그러면 기여도 줄에 「사용자 #3」 이
+ * 뜹니다 — 기여도는 사람 이름 옆에 붙는 값이라 더욱 그렇습니다. 서버가
+ * `former_members` 로 이름을 같이 보내므로 **두 명단을 합쳐** 찾습니다.
+ */
+export function nameOf(
+  userId: number,
+  people: readonly Person[],
+  former: readonly Person[] = [],
+): string {
+  const found =
+    people.find((p) => p.user_id === userId) ?? former.find((p) => p.user_id === userId);
+  return found?.name ?? `사용자 #${userId}`;
 }
 
 /**
@@ -337,8 +362,11 @@ export function teamWarnings(score: TeamScore, people: readonly Person[]): strin
   }
 
   const unmeasured = score.members.filter((m) => (m.measurement_gaps ?? []).length > 0);
+  // ⚠️ 아래 두 곳에서 씁니다 — **먼저** 만들어 둡니다 (TDZ).
+  const former = score.former_members ?? [];
+
   if (unmeasured.length > 0) {
-    const names = unmeasured.map((m) => nameOf(m.user_id, people)).join(', ');
+    const names = unmeasured.map((m) => nameOf(m.user_id, people, former)).join(', ');
     warnings.push(
       `${names} 님은 일부 활동을 측정하지 못했습니다. ` +
         '그 영역은 0이 아니라 나머지 활동으로 추정한 값입니다.',
@@ -356,6 +384,18 @@ export function teamWarnings(score: TeamScore, people: readonly Person[]): strin
   if (score.skipped_categories.length > 0) {
     const skipped = score.skipped_categories.map(describeCategory).join(', ');
     warnings.push(`${skipped} 활동은 이번 계산에서 빠졌습니다.`);
+  }
+
+  /* ⚠️ **나간 사람의 기록은 계산에 그대로 들어갑니다** (결함 222). 빼면
+     남은 사람들의 몫이 조용히 부풀기 때문입니다. 다만 목록에 이름이 있는
+     이유는 말해 줘야 합니다 — 안 그러면 "왜 나간 사람이 여기 있지" 가
+     됩니다. */
+  if (former.length > 0) {
+    const names = former.map((p) => p.name).join(', ');
+    warnings.push(
+      `${names} 님은 이 프로젝트를 떠났지만 그때 한 일은 계산에 그대로 ` +
+        '들어 있습니다. 빼면 남은 사람들의 몫이 실제보다 커집니다.',
+    );
   }
 
   return warnings;

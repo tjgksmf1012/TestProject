@@ -4424,3 +4424,29 @@ describe('마이크가 없어도 **협상은 된다** (결함 221)', () => {
     ok(/내 발언이 하나도 기록되지 않습니다/.test(mesh), '경고 문구가 바뀌었습니다');
   });
 });
+
+describe('나간 사람의 기여 기록 (결함 222)', () => {
+  it('⭐ 기여도 화면이 **나간 사람도 이름으로** 부른다', () => {
+    // 팀원을 내보내면 그 사람의 기록은 남지만(`remove_member` 의 결정)
+    // 지금 구성원 목록에는 없습니다. 합치지 않으면 「사용자 #3」 이 뜹니다.
+    const contrib = readFileSync(
+      join(ROOT, '..', 'webapp', 'src', 'screens', 'Contributions.tsx'),
+      'utf8',
+    )
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+    ok(/former_members/.test(contrib), '나간 사람 명단을 안 읽습니다');
+    ok(
+      /orderForDisplay\(score\.data\.members, everyone\)/.test(contrib),
+      '줄을 그릴 때 나간 사람 이름을 못 찾습니다',
+    );
+    ok(/teamWarnings\(team, everyone\)/.test(contrib), '경고문에서 이름을 못 찾습니다');
+    // ⚠️ **낱말이 아니라 넘기는지**를 봅니다 — 이름 찾기에 안 넘기면
+    //    화면 어딘가는 여전히 번호로 부릅니다.
+    const 안넘긴곳 = (contrib.match(/nameOf\([^)]*\)/g) ?? []).filter(
+      (call) => !call.includes('formerPeople') && !call.includes('everyone'),
+    );
+    strictEqual(안넘긴곳.join(', '), '', '나간 사람을 번호로 부르는 자리가 남아 있습니다');
+  });
+});

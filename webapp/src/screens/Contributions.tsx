@@ -111,9 +111,15 @@ export default function Contributions() {
   const [restored, setRestored] = useState(false);
   const confirm = useConfirmFinals(projectId);
 
+  /* ⚠️ **나간 사람은 `people` 에 없습니다** (결함 222). 그 사람의 기록은
+     계산에 그대로 들어가므로 줄은 그려지는데, 이름을 못 찾아 「사용자 #3」
+     이 뜹니다. 서버가 이름을 같이 보내 주므로 합쳐서 씁니다. */
+  const formerPeople = useMemo(() => score.data?.former_members ?? [], [score.data]);
+  const everyone = useMemo(() => [...people, ...formerPeople], [people, formerPeople]);
+
   const members = useMemo(
-    () => (score.data ? orderForDisplay(score.data.members, people) : []),
-    [score.data, people],
+    () => (score.data ? orderForDisplay(score.data.members, everyone) : []),
+    [score.data, everyone],
   );
   const spans = useMemo(() => uncertaintySpans(members), [members]);
 
@@ -244,7 +250,9 @@ export default function Contributions() {
   }
 
   const team = score.data;
-  const warnings = teamWarnings(team, people);
+  // ⚠️ **나간 사람 이름도 찾을 수 있어야** 합니다 — 「측정 불가」 줄이
+  //    그 사람을 부를 수 있습니다 (결함 222).
+  const warnings = teamWarnings(team, everyone);
   // 맨 앞에 세울 한 줄 — 「서로 비교하지 마세요」가 이 화면에서 가장 중요한
   // 문장입니다. 없으면(팀 신뢰도가 낮지 않으면) 첫 경고를 세웁니다.
   const headline = warnings.find((w) => w.includes('비교하지 마세요')) ?? warnings[0];
@@ -280,7 +288,7 @@ export default function Contributions() {
               members.map((member) => {
                 const span = spans.find((s) => s.userId === member.user_id);
                 const points = span?.points ?? 0;
-                const name = nameOf(member.user_id, people);
+                const name = nameOf(member.user_id, people, formerPeople);
                 // 사유는 **지우지 않고 한 자리에 모읍니다** — 팝오버 안에서
                 // 원문 그대로 나옵니다. 요약하면 그게 곧 정보 손실입니다.
                 const whyLines = [
@@ -352,7 +360,7 @@ export default function Contributions() {
             </p>
             <div className="confirmbar__row">
               {members.map((member) => {
-                const name = nameOf(member.user_id, people);
+                const name = nameOf(member.user_id, people, formerPeople);
                 return (
                   <label className="confirmbar__person" key={member.user_id}>
                     <span className="t13">{name}</span>
@@ -400,7 +408,7 @@ export default function Contributions() {
             {changed.length > 0 && (
               <div className="confirmbar__reasons">
                 {changed.map((d) => {
-                  const name = nameOf(d.user_id, people);
+                  const name = nameOf(d.user_id, people, formerPeople);
                   return (
                     <label className="confirmbar__reason" key={d.user_id}>
                       <span className="t12 muted">{name} 조정 사유</span>

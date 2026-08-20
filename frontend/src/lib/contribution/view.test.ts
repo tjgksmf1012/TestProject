@@ -557,3 +557,33 @@ describe('아무것도 안 잰 사람 (결함 191)', () => {
     strictEqual(nothingMeasured(갓만든팀(1)) === nothingMeasured(아직안한사람(2)), false);
   });
 });
+
+describe('떠난 사람의 기록 (결함 222)', () => {
+  const GONE: Person[] = [{ user_id: 9, name: '박지원', role_shares: { developer: 100 } }];
+
+  it('⭐ 나간 사람이 목록에 있는 **이유를 말한다**', () => {
+    // 그 사람의 기록은 계산에 그대로 들어갑니다 — 빼면 남은 사람들의 몫이
+    // 조용히 부풀기 때문입니다. 말해 주지 않으면 "왜 나간 사람이 여기
+    // 있지" 가 됩니다.
+    const notes = teamWarnings(team({ former_members: GONE }), PEOPLE);
+    const line = notes.find((n) => n.includes('떠났지만'));
+    strictEqual(line !== undefined, true, '아무 말도 안 합니다');
+    strictEqual(/박지원/.test(line as string), true, '이름을 안 부릅니다');
+    strictEqual(/실제보다 커집니다/.test(line as string), true);
+  });
+
+  it('⛔ 옛 서버(칸이 없음)에서는 아무 말도 안 한다', () => {
+    strictEqual(teamWarnings(team({}), PEOPLE).some((n) => n.includes('떠났지만')), false);
+  });
+
+  it('⭐ 나간 사람도 **이름으로** 부른다 — 「사용자 #9」 가 뜨면 안 된다', () => {
+    // `people` 은 지금 구성원이라 나간 사람이 없습니다. 서버가 이름을
+    // 같이 보내므로 두 명단을 합쳐 찾습니다.
+    strictEqual(nameOf(9, PEOPLE), '사용자 #9');
+    strictEqual(nameOf(9, PEOPLE, GONE), '박지원');
+  });
+
+  it('아무 데도 없는 번호는 숨기지 않는다 — 번호라도 보여야 제보할 수 있다', () => {
+    strictEqual(nameOf(404, PEOPLE, GONE), '사용자 #404');
+  });
+});
