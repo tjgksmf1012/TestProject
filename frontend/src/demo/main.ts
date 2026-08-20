@@ -38,6 +38,7 @@ import {
   consentStateFrom,
   consentStep,
   describeJoinFailure,
+  describeResume,
   describeSoloEntry,
   describeStopReason,
   trackRefused,
@@ -619,10 +620,10 @@ window.addEventListener('online', () => {
     if (response === null || !response.ok) return;
     const body = (await response.json().catch(() => null)) as { seqs?: number[] } | null;
     if (body === null || !Array.isArray(body.seqs)) return;
-    const skipped = client.resumeFrom(body.seqs);
-    if (skipped > 0) {
-      showNote($('join-note'), `연결이 돌아왔습니다 — 이미 올라간 ${skipped}개는 건너뜁니다`);
-    }
+    // ⚠️ 색조를 **반드시** 넘깁니다. `showNote` 의 기본값은 `bad` 라,
+    //    안 넘기면 「연결이 돌아왔습니다」가 실패 빨강으로 뜹니다 (결함 243).
+    const resumed = describeResume(client.resumeFrom(body.seqs));
+    if (resumed !== null) showNote($('join-note'), resumed.text, resumed.tone);
   })();
 });
 

@@ -4408,6 +4408,24 @@ describe('⛔ 녹음이 **혼자 멈췄을 때**도 끝까지 간다 (결함 240
     );
   });
 
+  it('⭐ 「연결이 돌아왔습니다」를 **빨강으로 말하지 않는다** (결함 243)', () => {
+    const code = main();
+    // 문구도 색조도 `@lib` 이 정합니다 — 화면은 넘기기만 합니다.
+    ok(
+      !/연결이 돌아왔습니다/.test(code),
+      '화면이 재개 문구를 직접 짓고 있습니다 — 판단은 `@lib` 입니다',
+    );
+    ok(/describeResume\(/.test(code), '`describeResume` 를 안 부릅니다');
+    /* ⚠️ `showNote` 의 기본값은 `bad` 입니다. 색조를 안 넘기면 좋은 소식이
+       실패 빨강으로 뜹니다 — 줄 단위로 봅니다(괄호 안의 `)` 때문에
+       정규식이 먼저 멈추는 함정을 결함 237 에서 겪었습니다). */
+    const line = code
+      .split('\n')
+      .find((l) => l.includes('resumed.text'));
+    ok(line !== undefined, '재개 알림을 안 띄웁니다');
+    ok(/resumed\.tone/.test(line ?? ''), `색조를 안 넘깁니다: ${line?.trim()}`);
+  });
+
   it('⭐ 공백 목록이 **내부 이름**을 안 띄운다 (결함 241)', () => {
     const code = main();
     // 어휘표는 `timeline.ts` 에 있었는데 한 줄 요약만 쓰고 목록은

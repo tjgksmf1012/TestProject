@@ -208,7 +208,14 @@ export function blockers(state: SessionState): string[] {
  */
 export interface JoinNote {
   text: string;
-  tone: 'bad' | 'gap';
+  /**
+   * `bad` 실패 · `gap` 대기·결측 · `plain` 그냥 알림.
+   *
+   * ⛔ `plain` 이 늦게 붙었습니다. `showNote` 의 기본값이 `bad` 라, 색조를
+   * 안 넘긴 알림은 **전부 빨강**이 됩니다 — 「연결이 돌아왔습니다」라는
+   * **좋은 소식**이 실패 빨강(`[176,46,46]`)으로 떠 있었습니다(결함 243).
+   */
+  tone: 'bad' | 'gap' | 'plain';
 }
 
 export function describeJoinFailure(
@@ -302,6 +309,24 @@ export function describeSoloEntry(): JoinNote {
  */
 export function trackRefused(status: number | null | undefined): boolean {
   return status === 403;
+}
+
+/**
+ * 끊겼다 이어졌을 때의 알림 (결함 243).
+ *
+ * ⚠️ **회복은 실패가 아닙니다.** 이 문장이 실패 빨강으로 떠 있었습니다 —
+ * 결함 237 의 거울상입니다(저기는 순서상 당연한 것을 빨갛게, 여기는
+ * 좋은 소식을 빨갛게).
+ *
+ * 건너뛴 것이 없으면 **아무 말도 안 합니다** — 아무 일도 안 일어났는데
+ * 한 줄이 뜨면 그것대로 놀랍니다.
+ */
+export function describeResume(skipped: number): JoinNote | null {
+  if (!Number.isFinite(skipped) || skipped <= 0) return null;
+  return {
+    text: `연결이 돌아왔습니다 — 이미 올라간 ${skipped}개는 건너뜁니다`,
+    tone: 'plain',
+  };
 }
 
 /**

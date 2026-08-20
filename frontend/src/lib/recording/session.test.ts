@@ -15,6 +15,7 @@ import {
   consentStateFrom,
   consentStep,
   describeJoinFailure,
+  describeResume,
   describeSoloEntry,
   describeStopReason,
   trackRefused,
@@ -592,5 +593,22 @@ describe('서버가 트랙을 거절했을 때 (결함 240)', () => {
     // 아무 일도 없었는데 한 줄이 뜨면 그것대로 놀랍니다.
     assert.equal(describeStopReason('user'), null);
     assert.equal(describeStopReason(null), null);
+  });
+});
+
+describe('끊겼다 이어졌을 때 (결함 243)', () => {
+  it('⛔ **회복은 실패가 아니다** — 빨강으로 말하지 않는다', () => {
+    // 실제로 실패 빨강 `[176,46,46]` 으로 떠 있었습니다. 결함 237 의
+    // 거울상입니다 — 저기는 당연한 것을 빨갛게, 여기는 좋은 소식을 빨갛게.
+    const note = describeResume(3);
+    assert.notEqual(note, null);
+    assert.notEqual(note?.tone, 'bad');
+    assert.equal(note?.text.includes('3개'), true, String(note?.text));
+  });
+
+  it('건너뛴 것이 없으면 **아무 말도 안 한다**', () => {
+    for (const n of [0, -1, Number.NaN]) {
+      assert.equal(describeResume(n), null, String(n));
+    }
   });
 });
