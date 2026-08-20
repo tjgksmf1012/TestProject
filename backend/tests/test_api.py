@@ -1367,6 +1367,31 @@ def test_removing_a_member_does_not_break_contributions(client: TestClient, seed
     assert confirmed.status_code == 201, confirmed.text
 
 
+def test_leaving_a_project_does_not_break_contributions(client: TestClient, seeded):
+    """⭐ **스스로 나간 경우도 같습니다** (결함 222).
+
+    내보내기는 권한이 있어야 하지만 **나가기는 아무나 할 수 있습니다.**
+    같은 자리에서 같은 `KeyError` 가 났으므로, 터지는 문은 하나가 아니라
+    둘이었습니다. 훑기에서는 내보내기만 눌렸고, 나가기는 이 검사로
+    확인했습니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+
+    login_as(client, users[1])
+    left = client.post(f"/api/projects/{seeded['project_id']}/members/me/leave")
+    assert left.status_code == 204, left.text
+
+    login_as(client, users[0])
+    after = client.get(f"/api/projects/{seeded['project_id']}/contributions")
+    assert after.status_code == 200, after.text
+    body = after.json()
+    # 나간 사람의 기록도 **그대로 셉니다** — 빼면 남은 사람 몫이 부풉니다.
+    assert users[1] in [mm["user_id"] for mm in body["members"]]
+    assert [f["user_id"] for f in body["former_members"]] == [users[1]]
+
+
 def test_an_outsider_cannot_confirm(client: TestClient, seeded):
     """기여도는 성적에 반영될 수 있는 값이다. 남의 팀 것을 확정할 이유가 없다."""
     add_contribution_events(seeded["project_id"], seeded["user_ids"][0], 5)
