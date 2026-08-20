@@ -24,7 +24,7 @@ import {
 } from '@lib/platform/recording.ts';
 import { Problem } from '../components/Problem.tsx';
 import { describeMeetingStatus } from '@lib/home/next.ts';
-import { describeActionFailure } from '@lib/ui/load.ts';
+import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
 import { ApiError } from '../api/client.ts';
 
 // 회의 로비 — 시그니처가 사는 곳 (지시서 기타-6 §로비).
@@ -99,6 +99,17 @@ export default function Lobby() {
   // ⚠️ **이 화면은 오래도록 회의 상태를 안 봤습니다** (결함 214). 다섯
   //    상태에서 화면이 글자까지 같았고, 검토까지 끝난 회의에서도
   //    「녹음 화면으로」가 멀쩡히 눌렸습니다. 판단은 `@lib` 에 있습니다.
+  /* ⚠️ **못 받았는데 「아직 아무도 참가하지 않았습니다」 라고 했습니다**
+     (결함 224). 새로 가입한 사람이 남의 회의 주소를 열면 서버는 403 인데,
+     화면은 참가자 0명짜리 빈 로비를 그렸습니다 — 「아무도 아직 안 들어온
+     회의」 와 구별이 안 됩니다. 설정·기여도는 결함 211 에서 고쳤고,
+     여기가 빠져 있었습니다. */
+  const loadError = meeting.error ?? consent.error;
+  const cannotLoad =
+    loadError == null
+      ? null
+      : describeLoadFailure('회의', loadError instanceof ApiError ? loadError.status : null);
+
   const phase = lobbyPhase(meeting.data?.status);
   const canGoRecord = phase.canStart && startConditions.every((c) => c.met);
 
@@ -131,12 +142,18 @@ export default function Lobby() {
          소식입니다. 낱말은 홈의 상태 칩과 같은 곳(`describeMeetingStatus`)
          에서 옵니다 — 두 화면이 갈라지지 않게. */
       meta={
-        phase.canStart
-          ? room.message
-          : describeMeetingStatus(meeting.data?.status ?? '')
+        /* ⚠️ 못 받았으면 방 상태를 말하지 않습니다 (결함 224) — 「아직
+           아무도 참가하지 않았습니다」 는 볼 권한이 없는 사람에게 거짓입니다. */
+        cannotLoad !== null
+          ? ''
+          : phase.canStart
+            ? room.message
+            : describeMeetingStatus(meeting.data?.status ?? '')
       }
       actions={
         <div className="appbar__actions">
+          {cannotLoad !== null ? null : (
+          <>
           {/* ⚠️ **막았으면 갈 곳을 줍니다.** 예전에는 `needs_review` 만
               보고 「업무 후보 검토」를 그렸고, 검토가 끝난 회의(`confirmed`)
               에서는 나가는 문이 「통화 열기」뿐이었습니다. 어디로 보낼지는
@@ -212,10 +229,20 @@ export default function Lobby() {
           >
             녹음 화면으로
           </a>
+          </>
+          )}
         </div>
       }
     >
       <div className="panes">
+        {cannotLoad !== null ? (
+          <section className="pane">
+            <div className="pane__body">
+              <div className="empty">{cannotLoad}</div>
+            </div>
+          </section>
+        ) : (
+        <>
         <section className="pane" aria-label="참가자 상태">
           <div className="pane__head">
             <h2 className="pane__title">참가자 상태</h2>
@@ -367,6 +394,8 @@ export default function Lobby() {
             </Disclosure>
           </div>
         </section>
+        </>
+        )}
       </div>
     </AppShell>
   );

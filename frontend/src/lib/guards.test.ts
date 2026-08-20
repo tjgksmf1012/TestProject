@@ -4476,3 +4476,48 @@ describe('근거 칩은 **자기** 원문으로 간다 (결함 223)', () => {
     );
   });
 });
+
+describe('못 받은 화면은 **빈 사실을 단언하지 않는다** — 남은 세 곳 (결함 224)', () => {
+  /**
+   * 결함 211 에서 설정·기여도를 고쳤는데 **칸반·로비·검토가 남아
+   * 있었습니다.** 새로 가입한 사람이 남의 프로젝트/회의 주소를 열면 서버는
+   * 403 인데 화면은 이렇게 말했습니다:
+   *
+   *   칸반  「회의에서 — · PR 연결 —」 + 텅 빈 판     (권한 이야기 없음)
+   *   로비  「아직 아무도 참가하지 않았습니다 · 0명」
+   *   검토  「업무 후보 0건 · **이 회의에는 기록된 발화가 없습니다 —
+   *         녹음이 아직 처리되지 않았거나, 녹음 없이 열린 회의입니다**」
+   *
+   * 검토가 가장 나쁩니다 — 0 을 단언하는 데서 그치지 않고 **틀린 이유**를
+   * 지어냈습니다.
+   */
+  const code = (name: string) =>
+    readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', name), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ 세 화면 모두 못 받은 이유를 말한다', () => {
+    for (const name of ['Kanban.tsx', 'Lobby.tsx', 'Review.tsx']) {
+      const src = code(name);
+      ok(/describeLoadFailure\(/.test(src), `${name} 이 실패 사유를 안 가립니다`);
+      ok(/const cannotLoad =/.test(src), `${name} 에 문지기가 없습니다`);
+      // ⚠️ **계산만 하고 안 쓰면** 화면은 그대로 거짓말을 합니다.
+      ok(/cannotLoad !== null/.test(src), `${name} 이 문지기를 안 씁니다`);
+    }
+  });
+
+  it('⚠️ **머리줄도** 숫자를 단언하지 않는다 — 판만 가리면 무색하다', () => {
+    // 판을 가려도 머리줄에 「업무 후보 0건」 이 남아 있으면 같은 거짓말입니다.
+    const review = code('Review.tsx');
+    ok(
+      /title=\{cannotLoad === null \? `\$\{title\} · 업무 후보 \$\{lanes\.all\}건` : title\}/.test(review),
+      '검토 머리줄이 못 받았는데도 후보 수를 답니다',
+    );
+    const lobby = code('Lobby.tsx');
+    ok(
+      /cannotLoad !== null\s*\?\s*''/.test(lobby),
+      '로비 머리줄이 못 받았는데도 방 상태를 말합니다',
+    );
+  });
+});

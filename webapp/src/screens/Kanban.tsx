@@ -29,6 +29,8 @@ import {
 } from '@lib/kanban/priority.ts';
 import { assigneeText, toggled, type Person } from '@lib/kanban/assignees.ts';
 import { deleteTaskConfirm } from '@lib/project/roles.ts';
+import { describeLoadFailure } from '@lib/ui/load.ts';
+import { ApiError } from '../api/client.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { withJosa } from '@lib/text/josa.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -219,6 +221,12 @@ export default function Kanban() {
   const params = useParams();
   const projectId = Number(params['projectId']);
   const board = useTasks(projectId);
+  /* 못 불러왔으면 **무슨 일이 있었는지** 말합니다. 문구는 한 벌
+     (`describeLoadFailure`)에서 옵니다 — 화면마다 지으면 갈라집니다. */
+  const cannotLoad =
+    board.error == null
+      ? null
+      : describeLoadFailure('칸반', board.error instanceof ApiError ? board.error.status : null);
   const membersQuery = useMembers(projectId);
   const { patchTask, setAssignees, deleteTask } = useTaskMutations(projectId);
   const [overCol, setOverCol] = useState<string | null>(null);
@@ -273,12 +281,23 @@ export default function Kanban() {
       }
     >
       <div className="board">
-        {board.isSuccess && tasks.length === 0 && (
+        {/* ⚠️ **못 받았는데 빈 칸반을 그리고 있었습니다** (결함 224). 새로
+            가입한 사람이 남의 프로젝트 주소를 열면 서버는 403 을 주는데,
+            화면은 아무 말 없이 텅 빈 판을 보여 줬습니다 — 「업무가 없는
+            팀」 과 구별이 안 됩니다. 설정·기여도는 결함 211 에서 이미
+            고쳤고, 여기가 빠져 있었습니다. */}
+        {cannotLoad !== null && (
+          <div className="empty" style={{ alignSelf: 'flex-start', flex: 1 }}>
+            {cannotLoad}
+          </div>
+        )}
+        {cannotLoad === null && board.isSuccess && tasks.length === 0 && (
           <div className="empty" style={{ alignSelf: 'flex-start', flex: 1 }}>
             아직 업무가 없습니다 — 회의 검토에서 후보를 승인하면 여기 올라옵니다.
           </div>
         )}
-        {tasks.length > 0 &&
+        {cannotLoad === null &&
+          tasks.length > 0 &&
           columns.map((column) => (
             <section
               key={column.status}

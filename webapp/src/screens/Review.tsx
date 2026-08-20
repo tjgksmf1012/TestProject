@@ -39,7 +39,7 @@ import { agendaItems, issueViews } from '@lib/review/minutes.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { Problem } from '../components/Problem.tsx';
 import { draftStorageKey, parseDrafts, serializeDrafts } from '@lib/review/drafts.ts';
-import { describeActionFailure } from '@lib/ui/load.ts';
+import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
 import { ApiError } from '../api/client.ts';
 
 // 업무 후보 검토 — 3판 (지시서 07).
@@ -118,6 +118,18 @@ export default function Review() {
   /* 되살릴 초안을 거를 기준 — **지금 화면에 있는 후보**입니다. 그 사이에
      누가 처리해 버린 후보의 초안은 이미 뜻이 없습니다 (결함 217). */
   const liveIds = useMemo(() => candidates.map((c) => c.id), [candidates]);
+
+  /* ⚠️ **못 받았는데 「업무 후보 0건 · 기록된 발화가 없습니다」 라고
+     했습니다** (결함 224). 새로 가입한 사람이 남의 회의 주소를 열면 서버는
+     403 인데, 화면은 빈 검토 화면을 그리고 **왜 비었는지 이유까지 지어
+     냈습니다** — "녹음이 아직 처리되지 않았거나, 녹음 없이 열린
+     회의입니다". 그건 사실이 아닙니다. 셋 중 가장 나쁜 자리입니다:
+     0 을 단언하는 데서 그치지 않고 **틀린 설명**을 붙였습니다. */
+  const loadError = meeting.error ?? candidatesQuery.error ?? timeline.error;
+  const cannotLoad =
+    loadError == null
+      ? null
+      : describeLoadFailure('회의', loadError instanceof ApiError ? loadError.status : null);
 
   const { drafts, update, clear: clearDrafts } = useDraftMap(meetingId, liveIds);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -260,10 +272,14 @@ export default function Review() {
 
   return (
     <AppShell
-      title={`${title} · 업무 후보 ${lanes.all}건`}
+      /* ⚠️ 머리줄도 **숫자를 단언하면 안 됩니다** (결함 224). 못 받았는데
+         「업무 후보 0건」 이라고 적으면 판을 가려 놓은 것이 무색합니다. */
+      title={cannotLoad === null ? `${title} · 업무 후보 ${lanes.all}건` : title}
       projectId={meeting.data?.project_id}
       actions={
         <div className="appbar__actions">
+          {cannotLoad !== null ? null : (
+          <>
           {/* v2 F10 — 일괄 승인 기능은 **만들지 않습니다.** 이 버튼은
               후보를 하나씩 다 처리한 뒤에야 열리는 마무리 버튼이고,
               라벨도 그렇게 읽혀야 합니다(`3건 모두 처리하고 제출` → `검토
@@ -300,11 +316,21 @@ export default function Review() {
           >
             검토 끝내기
           </button>
+          </>
+          )}
         </div>
       }
     >
       <audio ref={audioRef} hidden />
       <div className="panes">
+        {cannotLoad !== null ? (
+          <section className="pane">
+            <div className="pane__body">
+              <div className="empty">{cannotLoad}</div>
+            </div>
+          </section>
+        ) : (
+        <>
         {/* 좌 — 회의 내용. 통계·요약은 접고 전사가 주인공. */}
         <section className="pane pane--transcript" aria-label="회의 내용">
           <div className="pane__head">
@@ -724,6 +750,8 @@ export default function Review() {
             )}
           </div>
         </section>
+        </>
+        )}
       </div>
     </AppShell>
   );
