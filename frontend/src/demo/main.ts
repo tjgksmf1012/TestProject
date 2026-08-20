@@ -22,6 +22,7 @@ import {
   HttpSyncTransport,
   HttpUploadTransport,
   keepScreenAwake,
+  UploadFailed,
 } from '../lib/recording/browser-adapter.ts';
 import { RecordingClient, type RecordingSummary } from '../lib/recording/client.ts';
 import {
@@ -38,6 +39,8 @@ import {
   consentStep,
   describeJoinFailure,
   describeSoloEntry,
+  describeStopReason,
+  trackRefused,
 } from '../lib/recording/session.ts';
 import {
   describeRecordingSafety,
@@ -46,7 +49,7 @@ import {
 } from '../lib/platform/recording.ts';
 import { awakeBridge, shouldHoldAwake } from '../lib/platform/awake.ts';
 import { describeGiveUp, openChunkStore } from '../lib/platform/chunk-store.ts';
-import { describeTimeline } from '../lib/recording/timeline.ts';
+import { describeGapReason, describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
@@ -151,7 +154,20 @@ const client = new RecordingClient({
   upload: {
     async send(chunk) {
       if (!trackUrl) return localUpload.send(chunk);
-      return httpUpload.send(chunk);
+      try {
+        return await httpUpload.send(chunk);
+      } catch (error) {
+        /* ⛔ **거절을 끊김으로 읽고 있었습니다** (결함 240). 서버는 청크마다
+           동의를 다시 보므로, 회의 도중 누가 철회하면 그 순간부터 전부
+           403 입니다. 큐는 여섯 번 다시 걸고 조용히 포기했고, 화면은 그
+           동안 계속 「녹음 중」이었습니다.
+           ⚠️ 여기서 화면이 「철회됐다」고 **단정하지 않습니다** — 서버
+           명부를 다시 읽습니다(결함 229). 판단은 `@lib`. */
+        if (meetingId !== null && error instanceof UploadFailed && trackRefused(error.status)) {
+          void refreshConsent(meetingId);
+        }
+        throw error;
+      }
     },
   },
   uploadOptions: {
@@ -165,6 +181,11 @@ const client = new RecordingClient({
   onStateChange: (state) => {
     syncAwake(state.phase);
     render();
+    // 스스로 멈춘 경우(동의 철회·백프레셔)에도 마무리까지 갑니다 —
+    // 「정지」가 이미 비활성이라 사람이 누를 것이 없습니다 (결함 240).
+    if (state.phase === 'stopping' && state.stopReason !== null && state.stopReason !== 'user') {
+      void finishRecording();
+    }
   },
 });
 
@@ -201,6 +222,10 @@ function render(): void {
   //    방법이 없습니다 — 하필 녹음은 못 하면 그 회의를 영영 못 잽니다.
   //    `정지` 는 그대로 둡니다: 녹음 중이 아닐 때 정지는 설명할 사유가
   //    있는 것이 아니라 **해당 없는** 것이라 진짜 비활성이 맞습니다.
+  // 왜 멈췄는지. 사람이 스스로 멈춘 것은 아무 말도 안 합니다 (결함 240).
+  const stopped = describeStopReason(state.stopReason);
+  showNote($('stop-note'), stopped ?? '', 'bad');
+
   $('start').setAttribute('aria-disabled', String(state.phase !== 'ready'));
   ($('stop') as HTMLButtonElement).disabled = !(
     state.phase === 'recording' || state.phase === 'interrupted'
@@ -471,7 +496,24 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
   }
 }
 
-$('stop').addEventListener('click', async () => {
+/**
+ * 정지 뒤 마무리 — 큐를 닫고, 판정을 만들고, 서버에 끝났다고 말한다.
+ *
+ * ⛔ **버튼에만 매달려 있었습니다** (결함 240). 동의 철회·백프레셔로
+ * 세션이 **스스로** 멈추면 `#halt()` 는 마이크만 끄고 큐는 안 닫습니다.
+ * 그때 「정지」는 이미 비활성(국면이 `recording` 이 아니므로)이라 사람이
+ * 누를 것이 없고, 화면은 **영영 「마무리 중」** 에 머뭅니다 — 결과도,
+ * 커버리지도, "여기까지 저장됐다" 도 안 나옵니다. 대표 실패 ③ 입니다.
+ *
+ * ⚠️ 두 번 불려도 한 번만 먹습니다. `client.stop()` 자체는 멱등이지만
+ * (레코더는 inactive 를 알아서 넘깁니다) 서버 왕복까지 두 번 할 이유가
+ * 없습니다.
+ */
+let finishing = false;
+async function finishRecording(): Promise<void> {
+  if (finishing) return;
+  finishing = true;
+
   if (resyncTimer) clearInterval(resyncTimer);
   if (elapsedTimer) clearInterval(elapsedTimer);
   wakeLock?.release();
@@ -484,6 +526,10 @@ $('stop').addEventListener('click', async () => {
 
   showResult(summary);
   await tellServerWeAreDone(summary);
+}
+
+$('stop').addEventListener('click', () => {
+  void finishRecording();
 });
 
 $('finish-retry').addEventListener('click', () => {
@@ -618,7 +664,7 @@ function showResult(result: RecordingSummary): void {
     ? result.timeline.gaps
         .map(
           (g) =>
-            `<li><code>${g.reason}</code> ${(g.durationMs / 1000).toFixed(1)}초 ` +
+            `<li>${escapeHtml(describeGapReason(g.reason))} ${(g.durationMs / 1000).toFixed(1)}초 ` +
             `(${((g.startMs - result.timeline.startedAtMs) / 1000).toFixed(0)}초 지점)</li>`,
         )
         .join('')

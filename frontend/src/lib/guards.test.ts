@@ -4366,6 +4366,60 @@ describe('⛔ 막아 놓고 **말은 하는가** (결함 235)', () => {
   });
 });
 
+describe('⛔ 녹음이 **혼자 멈췄을 때**도 끝까지 간다 (결함 240·241)', () => {
+  /* 회의 도중 누가 동의를 철회하면 서버는 청크마다 403 을 줍니다
+     (`recording_service.store_chunk` 가 청크마다 동의를 다시 봅니다).
+     그런데 화면은 그 거절을 **끊김으로 읽고** 계속 「녹음 중」이라고
+     말했습니다 — 사람은 아무것도 안 담기는 회의를 끝까지 합니다.
+
+     판단은 이미 다 있었습니다. `reduce` 의 `CONSENT/refused` 는
+     `stopping` + `consent_revoked` 로 가고, `client.setConsent` 는 그때
+     마이크를 끕니다. **아무도 안 불렀을 뿐입니다** — 대표 실패 ①. */
+  const main = (): string =>
+    codeOf(readFileSync(join(ROOT, 'src', 'demo', 'main.ts'), 'utf8'));
+
+  it('⭐ 업로드가 **거절**당하면 서버 명부를 다시 읽는다', () => {
+    const code = main();
+    ok(/trackRefused\(/.test(code), '거절과 끊김을 안 가르고 있습니다');
+    // ⚠️ 화면이 「철회됐다」고 **단정하면** 결함 229 로 돌아갑니다.
+    //    거절을 보면 서버에 다시 물어야 합니다.
+    const near = /trackRefused\([\s\S]{0,200}?refreshConsent\(/.test(code);
+    ok(near, '거절을 보고도 명부를 다시 안 읽습니다 (또는 화면이 스스로 단정합니다)');
+    ok(
+      !/setConsent\(\s*'refused'/.test(code),
+      '화면이 「철회됐다」를 스스로 넣고 있습니다 — 명부는 서버가 줍니다 (결함 229)',
+    );
+  });
+
+  it('⭐ 마무리가 **「정지」 버튼 밖에서도** 불린다', () => {
+    /* 스스로 멈춘 국면에서는 「정지」가 이미 비활성입니다(국면이
+       `recording` 이 아니므로). 마무리가 그 버튼에만 매달려 있으면
+       화면은 영영 「마무리 중」이고 결과도 커버리지도 안 나옵니다. */
+    const code = main();
+    /* ⚠️ 처음에는 `/finishRecording\(\)/` 를 셌습니다 — 그 조각은 **선언
+       자체**(`async function finishRecording(): …`)에도 들어 있어서, 부르는
+       곳을 통째로 지워도 2가 나왔습니다. 심어 보고 알았습니다. 부르는
+       자리만 셉니다. */
+    const calls = [...code.matchAll(/void\s+finishRecording\(\)/g)].length;
+    ok(calls >= 2, `마무리를 부르는 곳이 ${calls}곳입니다 — 버튼 하나뿐이면 갇힙니다`);
+    ok(
+      /stopReason !== 'user'/.test(code),
+      '스스로 멈춘 것과 사람이 멈춘 것을 안 가르고 있습니다',
+    );
+  });
+
+  it('⭐ 공백 목록이 **내부 이름**을 안 띄운다 (결함 241)', () => {
+    const code = main();
+    // 어휘표는 `timeline.ts` 에 있었는데 한 줄 요약만 쓰고 목록은
+    // `<code>chunk_lost</code>` 를 그대로 띄웠습니다.
+    ok(
+      !/\$\{g\.reason\}/.test(code),
+      '공백의 까닭을 날것(`chunk_lost`)으로 띄웁니다 — `describeGapReason` 이 있습니다',
+    );
+    ok(/describeGapReason\(/.test(code), '어휘표를 안 부릅니다');
+  });
+});
+
 describe('⛔ `aria-describedby` 가 **있는 것**을 가리킨다 (결함 234)', () => {
   /* 가리키는 id 가 없으면 낭독기에는 **아무 말도 안 됩니다** — 사유가
      없는 것보다 나쁩니다(있다고 믿게 되니까). 실제로 결함 234 를 고치다

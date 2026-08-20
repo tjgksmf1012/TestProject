@@ -16,6 +16,8 @@ import {
   consentStep,
   describeJoinFailure,
   describeSoloEntry,
+  describeStopReason,
+  trackRefused,
 } from './session.ts';
 
 const T0 = 1_700_000_000_000;
@@ -557,5 +559,38 @@ describe('회의 없이 연 녹음 화면 (실험 5 모드 · 결함 238)', () =
     const note = describeSoloEntry();
     assert.equal(note.tone, 'gap');
     assert.equal(note.text.includes('올라가지 않습니다'), true, note.text);
+  });
+});
+
+describe('서버가 트랙을 거절했을 때 (결함 240)', () => {
+  it('403 만 **거절**이다 — 끊김·서버 오류는 다시 걸면 된다', () => {
+    assert.equal(trackRefused(403), true);
+    for (const status of [200, 201, 401, 404, 409, 500, 503, null, undefined]) {
+      assert.equal(trackRefused(status), false, String(status));
+    }
+  });
+
+  it('⭐ 녹음 중에 동의가 철회되면 **그 자리에서** 멈춘다', () => {
+    // 서버는 청크마다 동의를 다시 봅니다. 화면이 이걸 안 읽으면 사람은
+    // 아무것도 안 담기는 회의를 끝까지 합니다.
+    const live = reduce(ready(), { type: 'START', atMs: T0 });
+    assert.equal(live.phase, 'recording');
+    const revoked = reduce(live, { type: 'CONSENT', state: 'refused' });
+    assert.equal(revoked.phase, 'stopping');
+    assert.equal(revoked.stopReason, 'consent_revoked');
+  });
+
+  it('멈춘 까닭을 **사람의 말로** 말한다 — 내부 enum 을 안 띄운다', () => {
+    const said = describeStopReason('consent_revoked');
+    assert.equal(said?.includes('철회'), true, String(said));
+    assert.equal(said?.includes('consent'), false, String(said));
+    assert.equal(describeStopReason('backpressure')?.includes('_'), false);
+    assert.equal(describeStopReason('error')?.includes('_'), false);
+  });
+
+  it('사람이 스스로 멈춘 것은 **설명하지 않는다**', () => {
+    // 아무 일도 없었는데 한 줄이 뜨면 그것대로 놀랍니다.
+    assert.equal(describeStopReason('user'), null);
+    assert.equal(describeStopReason(null), null);
   });
 });

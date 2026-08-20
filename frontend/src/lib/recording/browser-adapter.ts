@@ -133,6 +133,27 @@ export class HttpSyncTransport implements SyncTransport {
   }
 }
 
+/**
+ * 업로드가 **왜** 실패했는지 붙여 던진다.
+ *
+ * ⛔ 예전에는 `new Error('업로드 실패 (HTTP 403)')` 였습니다. 상태 코드가
+ * 글자 속으로 들어가 버려서, 부르는 쪽이 「서버가 이 트랙을 거절했다」와
+ * 「잠깐 안 닿았다」를 **가를 수 없었습니다.** 그래서 회의 도중 누가
+ * 동의를 철회해 서버가 403 을 주기 시작해도 화면은 계속 「녹음 중」
+ * 이었습니다 (결함 240).
+ *
+ * 글월은 그대로 둡니다 — 이미 그 글자를 띄우는 자리가 있습니다.
+ */
+export class UploadFailed extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`업로드 실패 (HTTP ${status})`);
+    this.name = 'UploadFailed';
+    this.status = status;
+  }
+}
+
 /** 청크 하나를 seq 주소로 올린다. 멱등이므로 재시도해도 안전하다. */
 export class HttpUploadTransport implements UploadTransport {
   #trackUrl: string;
@@ -171,7 +192,7 @@ export class HttpUploadTransport implements UploadTransport {
       // 다른 주소를 붙였을 때 조용히 401 이 나는 걸 막는다.
       credentials: 'same-origin',
     });
-    if (!response.ok) throw new Error(`업로드 실패 (HTTP ${response.status})`);
+    if (!response.ok) throw new UploadFailed(response.status);
   }
 }
 

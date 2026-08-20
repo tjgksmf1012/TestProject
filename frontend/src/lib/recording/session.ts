@@ -280,6 +280,54 @@ export function describeSoloEntry(): JoinNote {
   };
 }
 
+/**
+ * 서버가 **이 트랙을 더는 안 받겠다**고 답한 것인가 (결함 240).
+ *
+ * ## 왜 「잠깐 안 닿았다」와 갈라야 하나
+ *
+ * 청크 업로드의 실패는 두 종류입니다.
+ *
+ *     끊김·500·타임아웃  →  다시 걸면 됩니다. 큐가 알아서 재시도합니다
+ *     403               →  서버가 **판단**해서 거절한 것입니다
+ *
+ * 뒤쪽은 재시도해도 영영 안 됩니다. 서버는 청크마다 동의를 다시 보므로
+ * (`recording_service.store_chunk`), 회의 도중 누가 철회하면 그 순간부터
+ * 전부 403 입니다. 그걸 「잠깐 안 닿았다」로 읽으면 화면은 계속
+ * 「녹음 중」이라고 말하고, 사람은 **아무것도 안 담기는 회의**를 끝까지
+ * 합니다. 그 구간은 영영 못 잽니다.
+ *
+ * ⚠️ 403 의 뜻은 하나가 아닙니다(철회 · 구성원 아님). 그래서 이 함수는
+ * 「거절당했다」까지만 말하고, **무엇이 바뀌었는지는 서버 명부를 다시
+ * 읽어** 정합니다 — 화면이 지어내지 않습니다 (결함 229).
+ */
+export function trackRefused(status: number | null | undefined): boolean {
+  return status === 403;
+}
+
+/**
+ * 녹음이 **왜 멈췄는지** 사람의 말로.
+ *
+ * ⚠️ `stopReason` 은 내부 enum 입니다. 그대로 띄우면 결함 78·86 이
+ * 반복됩니다 — `guards.test.ts` 의 어휘 면제표가 "한국어 어휘가 필요하다"
+ * 고 적어 둔 자리가 여기입니다.
+ *
+ * 사람이 스스로 멈춘 것은 설명할 것이 없어 `null` 입니다 — 아무 일도
+ * 없었는데 한 줄을 띄우면 그것대로 놀랍니다.
+ */
+export function describeStopReason(reason: StopReason | null): string | null {
+  switch (reason) {
+    case 'consent_revoked':
+      return '참여자가 동의를 철회해 녹음을 멈췄습니다 — 여기까지는 저장됐습니다';
+    case 'backpressure':
+      return '올리지 못한 조각이 쌓여 녹음을 멈췄습니다 — 연결을 확인해 주세요';
+    case 'error':
+      return '오류로 녹음을 멈췄습니다';
+    case 'user':
+    case null:
+      return null;
+  }
+}
+
 export function canStart(state: SessionState): boolean {
   return blockers(state).length === 0;
 }
