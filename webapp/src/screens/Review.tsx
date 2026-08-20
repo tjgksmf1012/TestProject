@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
+import { describeReviewDone, reviewPhase } from '@lib/review/phase.ts';
 import { Disclosure } from '../components/Disclosure.tsx';
 import { EvidenceChip } from '../components/EvidenceChip.tsx';
 import { Conditions, describeConditions, type Condition } from '../components/Conditions.tsx';
@@ -227,6 +228,10 @@ export default function Review() {
     setPlayingId(utteranceId);
   };
 
+  /* ⛔ **화면이 회의 상태를 안 봤습니다** (결함 232). 후보가 0건이면
+     끝난 회의에도 「회의 처리가 끝나면 AI 초안이 여기 올라옵니다」라고
+     했습니다 — 방금 업무 셋을 확정한 사람에게. 판단은 `@lib` 에. */
+  const phase = reviewPhase(meeting.data?.status);
   const lanes = laneCounts(candidates, drafts);
   const summary = summarize(candidates, drafts, context);
   const submitBlockedReason =
@@ -235,7 +240,8 @@ export default function Review() {
       : !canSubmit(summary)
         ? summary.blocked > 0
           ? '승인 표시된 후보 중 조건이 안 채워진 것이 있습니다'
-          : '결정한 후보가 없습니다'
+          // 끝난 회의에서는 **막힌 게 아니라 끝난** 것입니다 (결함 232).
+          : (describeReviewDone(meeting.data?.status) ?? '결정한 후보가 없습니다')
         : null;
 
   const onSubmit = () => {
@@ -478,7 +484,24 @@ export default function Review() {
             )}
             {candidates.length === 0 && !candidatesQuery.isPending && (
               <div className="empty">
-                검토할 후보가 없습니다 — 회의 처리가 끝나면 AI 초안이 여기 올라옵니다.
+                {phase.emptyNote}
+                {/* ⚠️ **간 곳을 알려 줍니다** (결함 232). 업무 셋이 칸반으로
+                    갔는데 이 화면 어디에도 그 말이 없었습니다 — 실패 ③. */}
+                {phase.go !== null && meeting.data !== undefined && (
+                  <>
+                    {' '}
+                    <Link
+                      className="empty__go"
+                      to={
+                        phase.go.screen === 'kanban'
+                          ? `/project/${meeting.data.project_id}/kanban`
+                          : `/meeting/${meetingId}/lobby`
+                      }
+                    >
+                      {phase.go.label}
+                    </Link>
+                  </>
+                )}
               </div>
             )}
             {candidates.map((candidate) => {

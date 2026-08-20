@@ -949,6 +949,16 @@ details.disc > .disc__body {
   gap: var(--sp-5);
 }
 
+/* 빈 상태에서 **갈 곳**을 가리키는 링크 (결함 232). 설명과 같은 줄에
+   둡니다 — 떨어뜨리면 설명만 읽고 떠납니다. */
+.empty__go {
+  color: var(--c-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+
 /* ==========================================================================
    메뉴 (Radix dropdown)
    ========================================================================== */
