@@ -26,6 +26,7 @@ import {
 import { RecordingClient, type RecordingSummary } from '../lib/recording/client.ts';
 import {
   completeBody,
+  completionView,
   describeCompletion,
   describeCompletionFailure,
   type TrackCompleteResult,
@@ -164,6 +165,8 @@ let wakeLock: { release: () => void } | null = null;
 let resyncTimer: ReturnType<typeof setInterval> | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 let summary: RecordingSummary | null = null;
+/** 서버가 마지막으로 준 판정. 다시 올린 뒤에도 **이 값이 주인**입니다. */
+let serverVerdict: TrackCompleteResult | null = null;
 
 // ── 화면 ────────────────────────────────────────────────────
 
@@ -401,6 +404,12 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
   const done = (await response.json()) as TrackCompleteResult;
   showNote($('finish-state'), describeCompletion(done), 'plain');
   $('finish-retry').hidden = true;
+  // ⭐ **결과 칸을 서버 값으로 다시 그립니다** (결함 220). 이 기기가 잰
+  //    값만 보여주면, 서버가 「사용 불가 · 51.5%」 라고 답한 옆에서 칸은
+  //    「사용 가능 · 100.0%」 라고 초록으로 서 있습니다. 사람은 크고
+  //    초록인 쪽을 믿고 나갑니다.
+  serverVerdict = done;
+  applyServerVerdict(done, result);
 
   // 로비로 돌아갈 길을 만들어 준다. 여기가 끝이 아니라 다음이 있다는
   // 걸 화면이 말해 주지 않으면 사람은 여기서 멈춘다.
@@ -479,6 +488,10 @@ $('reupload').addEventListener('click', () => {
 
     done.parked = still;
     showResult(done);
+    // ⚠️ `showResult` 는 **이 기기가 잰 값**으로 칸을 다시 씁니다. 서버
+    //    판정을 안 덮어 주면 다시 올린 순간 「사용 가능 · 100%」 로
+    //    되돌아갑니다 — 고친 것이 이 한 줄 때문에 풀립니다 (결함 220).
+    if (serverVerdict !== null) applyServerVerdict(serverVerdict, done, true);
   });
 });
 
@@ -514,6 +527,30 @@ window.addEventListener('online', () => {
     }
   })();
 });
+
+/**
+ * 서버가 답한 뒤, **결과 칸의 주인을 서버로 바꿉니다** (결함 220).
+ *
+ * ⚠️ 판단은 `@lib/recording/complete.ts` 의 `completionView` 가 합니다 —
+ *    여기서는 붙이기만 합니다.
+ */
+function applyServerVerdict(
+  done: TrackCompleteResult,
+  local: RecordingSummary,
+  reuploaded = false,
+): void {
+  const view = completionView(
+    done,
+    { coverage: local.timeline.coverage, headline: describeTimeline(local.timeline) },
+    reuploaded,
+  );
+  $('verdict').textContent = view.headline;
+  $('verdict').className = view.tone;
+  $('coverage').textContent = view.coverageText;
+  $('usable').textContent = view.usableText;
+  $('disagree').textContent = view.disagreement ?? '';
+  $('disagree').hidden = view.disagreement === null;
+}
 
 function showResult(result: RecordingSummary): void {
   $('result').hidden = false;

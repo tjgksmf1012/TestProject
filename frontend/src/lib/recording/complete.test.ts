@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   completeBody,
+  completionView,
   describeCompletion,
   describeCompletionFailure,
   type CompleteInput,
@@ -170,5 +171,62 @@ describe('describeCompletionFailure', () => {
 
   it('모르는 상태 코드도 삼키지 않는다', () => {
     strictEqual(describeCompletionFailure(418).includes('418'), true);
+  });
+});
+
+describe('결과 칸의 주인은 **서버**입니다 (결함 220)', () => {
+  const server = (over: Partial<TrackCompleteResult> = {}): TrackCompleteResult => ({
+    track_id: 1,
+    status: 'completed',
+    coverage: 0.98,
+    usable: true,
+    message: '',
+    meeting_queued: false,
+    meeting_status: '',
+    ...over,
+  });
+  const local = { coverage: 1, headline: '녹음이 끊김 없이 완료됐습니다 (7초)' };
+
+  it('⭐ 서버가 못 쓴다고 하면 칸도 그렇게 말한다', () => {
+    // 실제로 이랬습니다 — 서버 `usable=false · coverage=0.515` 옆에서
+    // 칸은 「사용 가능 · 100.0%」 를 **초록으로** 띄우고 있었습니다.
+    const view = completionView(
+      server({ usable: false, coverage: 0.515, status: 'unusable', message: '커버리지 52% — 쓸 수 없습니다' }),
+      local,
+    );
+    strictEqual(view.usableText, '사용 불가');
+    strictEqual(view.coverageText, '51.5%');
+    strictEqual(view.tone, 'bad');
+    strictEqual(view.headline, '커버리지 52% — 쓸 수 없습니다');
+  });
+
+  it('⭐ 서버가 괜찮다고 하면 이 기기가 본 문장을 그대로 쓴다', () => {
+    const view = completionView(server({ coverage: 0.98 }), local);
+    strictEqual(view.headline, local.headline);
+    strictEqual(view.tone, 'ok');
+    strictEqual(view.coverageText, '98.0%');
+    strictEqual(view.usableText, '사용 가능');
+  });
+
+  it('⭐ 차이는 **고장이 아니라 정보**다 — 아직 안 올라간 조각이 있다는 뜻', () => {
+    const view = completionView(server({ coverage: 0.45, usable: false }), local);
+    strictEqual(/100\.0%를 녹음했는데/.test(view.disagreement ?? ''), true);
+    strictEqual(/45\.0%만 도착/.test(view.disagreement ?? ''), true);
+  });
+
+  it('⚠️ 반올림 차이로 매번 뜨지 않는다 — 그러면 아무도 안 읽는다', () => {
+    strictEqual(completionView(server({ coverage: 0.995 }), local).disagreement, null);
+    strictEqual(completionView(server({ coverage: 1 }), local).disagreement, null);
+    // 서버가 더 높게 잡은 경우도 말할 것이 없습니다.
+    strictEqual(completionView(server({ coverage: 1 }), { ...local, coverage: 0.9 }).disagreement, null);
+  });
+
+  it('⛔ 다시 올린 뒤에 「안 올라간 조각이 있다」 고 말하지 않는다', () => {
+    // 커버리지는 `complete_track` 에서만 계산됩니다 — 늦게 올라온 조각은
+    // 그 값에 안 들어갑니다. 그런데도 같은 문장을 띄우면 **방금 올린
+    // 사람에게 안 올렸다고** 말하는 것입니다.
+    const view = completionView(server({ coverage: 0.45, usable: false }), local, true);
+    strictEqual(/안 올라간 조각이 있습니다/.test(view.disagreement ?? ''), false);
+    strictEqual(/아직 반영되지 않았습니다/.test(view.disagreement ?? ''), true);
   });
 });

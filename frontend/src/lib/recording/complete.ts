@@ -146,3 +146,80 @@ export function describeCompletionFailure(status: number, detail?: string): stri
   if (status === 0) return `서버에 연결하지 못했습니다. ${suffix}`;
   return `${detail || `종료하지 못했습니다 (HTTP ${status})`}. ${suffix}`;
 }
+
+/**
+ * 종료한 뒤 **결과 칸이 보여줄 값**.
+ *
+ * ## 무슨 일이 있었나 (결함 220)
+ *
+ * 결과 칸은 끝까지 **이 기기가 잰 값**을 보여줬습니다. 서버가 실제로 받은
+ * 청크로 다시 계산한 값은 바로 위 한 문장에만 들어갔고요. 실제로 이렇게
+ * 나왔습니다 (가짜 마이크로 7초 녹음, 서버 응답 그대로):
+ *
+ *     서버:  status=unusable · coverage=0.515 · usable=false
+ *     화면:  「녹음을 마쳤습니다 (서버 기준 커버리지 45.0%)」   ← 문장
+ *            「녹음이 끊김 없이 완료됐습니다 (7초)」 (초록)     ← 판정
+ *            커버리지 100.0% · 판정 **사용 가능**               ← 칸
+ *
+ * 한 화면에 45% 와 100% 가 여덟 줄 사이로 같이 있었고, **크고 초록인
+ * 쪽이 틀린 값**이었습니다. 사람은 큰 쪽을 믿고 나갑니다.
+ *
+ * 그 차이는 고장이 아니라 **정보**입니다 — 마이크는 안 끊겼는데 서버에
+ * 절반만 도착했다는 것은 **아직 안 올라간 조각이 있다**는 뜻입니다. 그걸
+ * 말해 줘야 사람이 「다시 올리기」를 누릅니다.
+ *
+ * ⚠️ 이 파일은 이미 "**서버가 준 커버리지를 씁니다. 다를 때는 서버 쪽이
+ * 맞습니다**" 라고 적어 두고 있었습니다. 문장 하나에만 적용돼 있었을
+ * 뿐입니다 — 규칙은 있었고 **닿는 자리가 좁았습니다.**
+ */
+export interface CompletionView {
+  /** 결과 칸의 커버리지. **서버 값**입니다. */
+  coverageText: string;
+  /** 「사용 가능」/「사용 불가」. **서버 값**입니다. */
+  usableText: string;
+  /** 머리 문장. 서버가 못 쓴다고 하면 서버가 준 이유를 그대로 씁니다. */
+  headline: string;
+  /** `ok` 는 초록, `bad` 는 경고색. 서버 판정을 따릅니다. */
+  tone: 'ok' | 'bad';
+  /**
+   * 기기 값과 서버 값이 **눈에 띄게 다를 때** 그 사실. 아니면 `null`.
+   *
+   * ⚠️ 반올림 차이로 매번 뜨면 아무도 안 읽습니다. 1%p 넘게 벌어질 때만.
+   */
+  disagreement: string | null;
+}
+
+/** 이만큼 벌어지면 사람에게 말합니다. 그 아래는 반올림입니다. */
+const COVERAGE_GAP_TO_TELL = 0.01;
+
+export function completionView(
+  result: TrackCompleteResult,
+  local: { coverage: number; headline: string },
+  /**
+   * 종료한 **뒤에** 남은 조각을 다시 올렸는가.
+   *
+   * ⚠️ 그랬다면 위의 서버 값은 **낡았습니다** — 커버리지는 `complete_track`
+   * 에서만 계산되고, 늦게 올라온 조각은 그 계산에 안 들어갑니다. 그런데도
+   * 「아직 안 올라간 조각이 있습니다」 를 계속 띄우면, 방금 올린 사람에게
+   * 안 올렸다고 말하는 것입니다. 모르는 것은 모른다고 합니다.
+   */
+  reuploaded = false,
+): CompletionView {
+  const serverPercent = (result.coverage * 100).toFixed(1);
+  const gap = local.coverage - result.coverage;
+
+  return {
+    coverageText: `${serverPercent}%`,
+    usableText: result.usable ? '사용 가능' : '사용 불가',
+    // 서버가 못 쓴다고 하면 **왜**까지 서버가 말합니다. 화면이 다시 짓지
+    // 않습니다 — 지으면 같은 사실에 두 문장이 생깁니다.
+    headline: result.usable ? local.headline : result.message || local.headline,
+    tone: result.usable ? 'ok' : 'bad',
+    disagreement: reuploaded
+      ? '방금 올린 조각은 위 서버 값에 아직 반영되지 않았습니다 — 그 값은 종료할 때 계산된 것입니다.'
+      : gap > COVERAGE_GAP_TO_TELL
+        ? `이 기기는 ${(local.coverage * 100).toFixed(1)}%를 녹음했는데 서버에는 ` +
+          `${serverPercent}%만 도착했습니다 — 아직 안 올라간 조각이 있습니다.`
+        : null,
+  };
+}

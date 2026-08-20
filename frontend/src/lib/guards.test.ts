@@ -4349,3 +4349,47 @@ describe('막힌 것에 **키보드로 닿는다** (결함 219)', () => {
     );
   });
 });
+
+describe('녹음 결과 칸의 주인은 **서버**다 (결함 220)', () => {
+  const main = readFileSync(join(ROOT, 'src', 'demo', 'main.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ 서버가 답한 뒤 칸을 **다시 그린다**', () => {
+    // 실제로 이랬습니다 (가짜 마이크로 7초, 가로채기 없이):
+    //   서버   status=unusable · coverage=0.515 · usable=false
+    //   화면   커버리지 100.0% · 판정 「사용 가능」 (초록)
+    //          바로 위 문장만 "서버 기준 커버리지 45.0%"
+    // 한 화면에 두 숫자가 여덟 줄 사이로 있었고 큰 쪽이 틀렸습니다.
+    ok(/completionView\(/.test(main), '서버 판정을 칸에 안 씁니다');
+    const apply = /function applyServerVerdict\([\s\S]*?\n}/.exec(main)?.[0] ?? '';
+    ok(apply !== '', '`applyServerVerdict` 가 없습니다');
+    for (const slot of ['verdict', 'coverage', 'usable', 'disagree']) {
+      ok(new RegExp(`\\$\\('${slot}'\\)`).test(apply), `\`${slot}\` 칸을 안 고칩니다`);
+    }
+    // ⚠️ **정의만 하고 안 부르면** 아무 일도 안 일어납니다 — 이 저장소가
+    //    `dropBootShell` 에서 이미 당한 자리입니다. 호출 꼴을 봅니다.
+    ok(
+      /^\s*applyServerVerdict\(done, result\);\s*$/m.test(main),
+      '종료 응답을 받은 자리에서 안 부릅니다',
+    );
+  });
+
+  it('⚠️ 다시 올린 뒤 **되돌아가지 않는다** — `showResult` 는 기기 값으로 다시 쓴다', () => {
+    // 재업로드 처리기가 `showResult(done)` 로 칸을 다시 그립니다. 서버
+    // 판정을 안 덮으면 고친 것이 그 한 줄 때문에 풀립니다.
+    const handler = /\$\('reupload'\)\.addEventListener\([\s\S]*?\n\}\);/.exec(main)?.[0] ?? '';
+    ok(handler !== '', '재업로드 처리기를 못 찾았습니다');
+    ok(
+      /applyServerVerdict\(serverVerdict, done, true\)/.test(handler),
+      '다시 올리면 「사용 가능 · 100%」 로 되돌아갑니다',
+    );
+  });
+
+  it('⭐ 차이를 말할 자리가 마크업에 **있다**', () => {
+    // 만들어 놓고 붙일 자리가 없으면 아무 데도 안 나타납니다.
+    const html = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8');
+    ok(/id="disagree"/.test(html), '`#disagree` 자리가 없습니다');
+    ok(/id="disagree"[^>]*role="status"/.test(html), '낭독기가 이 변화를 못 듣습니다');
+  });
+});
