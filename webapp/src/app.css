@@ -312,6 +312,33 @@ a { color: var(--c-evidence); }
 }
 .rail__item svg { width: 20px; height: 20px; stroke-width: 1.6; }
 .rail__spacer { flex: 1; }
+/* 관찰의 근거 한 줄 — 제목 아래, 낮은 무게. */
+.tlrow__why {
+  display: block;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-12);
+  color: var(--c-ink-muted);
+}
+/* 레일의 버튼(로그아웃)이 링크들과 같은 모양이어야 합니다 — 브라우저
+   기본 버튼 상자가 그대로 보이면 그 자리만 다른 물건처럼 읽힙니다. */
+button.rail__item {
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  font: inherit;
+  font-size: var(--fs-11);
+  cursor: pointer;
+  width: 100%;
+}
+/* ⚠️ 갈 곳이 없는 칸. **지우지 않고** 흐리게 두고 이유를 `title` 로 답니다.
+   ⛔ `opacity` 를 안 씁니다 — 이 저장소의 규칙(누를 수 있는 것을 opacity
+   로 흐리게 하면 WCAG 1.4.3 의 비활성 예외를 못 씁니다). 색 토큰으로
+   낮춥니다. */
+.rail__item--blocked {
+  color: var(--c-ink-faint);
+  cursor: not-allowed;
+}
+.rail__item--blocked:hover { background: none; color: var(--c-ink-faint); }
 
 /* ── 프로젝트 레일 — 둘 이상일 때만 그립니다 (`railIsWorthIt`).
  *
@@ -1193,6 +1220,29 @@ details.disc > .disc__body {
   border-bottom: 1px dashed var(--c-line);
 }
 .member-row:last-of-type { border-bottom: 0; }
+/* 등급은 **글자**입니다 — 색이나 막대로 줄 세우지 않습니다(불변식 1).
+   이름 옆 작은 라벨로 붙여, 이름과 한 덩어리로 읽히게 합니다. */
+.member-row__rank {
+  margin-left: var(--sp-4);
+  font-size: var(--fs-11);
+  letter-spacing: var(--ls-11);
+  color: var(--c-ink-muted);
+  font-weight: var(--fw-normal);
+}
+/* 등급 바꾸기·내보내기는 줄 오른쪽 끝. 앞의 요소들이 늘어나므로
+   `margin-left: auto` 는 첫 번째 것에만 붙입니다. */
+.member-row__act { margin-left: auto; }
+.member-row > .btn { margin-left: var(--sp-4); }
+.input--sm { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-12); min-height: var(--tap); }
+/* 눈에는 안 보이고 낭독기에는 읽히는 이름표. `display: none` 으로 감추면
+   낭독기도 못 읽습니다. */
+.vh {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .member-row__avatar {
   width: 32px; height: 32px; border-radius: 50%;
   object-fit: cover; background: var(--c-sunken);

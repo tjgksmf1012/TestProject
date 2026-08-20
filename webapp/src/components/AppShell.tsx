@@ -1,10 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useProjects } from '../api/hooks.ts';
 import { pageTitle } from '@lib/shell/title.ts';
 import { appScreenOf } from '@lib/nav/links.ts';
 import { appRailHref, railAriaLabel, railIsWorthIt, railItems } from '@lib/nav/rail.ts';
+import { describeLogoutFailure, logoutOutcome } from '@lib/auth/session.ts';
+import { api, ApiError } from '../api/client.ts';
+import { Problem } from './Problem.tsx';
 
 // 앱 셸 — 레일 72px + 헤더 56px + 판. R1: body 는 스크롤하지 않습니다.
 // 레일은 넷뿐입니다 (R8): 홈 · 칸반 · 기여도 · 설정. 레거시 화면은 여기 없습니다.
@@ -31,6 +34,14 @@ function IconContrib() {
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true">
       <path d="M4 5 V15 M16 5 V15" strokeLinecap="round" />
       <path d="M6.5 10 H13.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconLogout() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M12.5 6.5V4.5H3.5v11h9v-2" strokeLinejoin="round" />
+      <path d="M8.5 10h8M14 7.5 16.5 10 14 12.5" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }
@@ -87,11 +98,17 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
     ? railItems(projects ?? [], appScreenOf(pathname), pid ?? null, appRailHref)
     : [];
 
+  // ⚠️ **프로젝트가 없으면 이 셋은 갈 곳이 없습니다.** 예전에는 그때도
+  //    `/` 로 링크를 걸어 뒀는데, 갓 가입한 사람이 「칸반」을 누르면
+  //    같은 화면에 그대로 있었습니다 — 눌리는데 아무 일도 안 일어나는
+  //    것은 이 저장소가 결함으로 세는 모양입니다(빈 `<a>` · 갈 곳 없는
+  //    버튼). 링크를 지우지 않고 **이유를 답니다.**
+  const noProject = pid === undefined;
   const items = [
-    { label: '홈', to: '/', active: pathname === '/' || pathname.startsWith('/meeting/'), icon: <IconHome /> },
-    { label: '칸반', to: pid !== undefined ? `/project/${pid}/kanban` : '/', active: pathname.includes('/kanban'), icon: <IconKanban /> },
-    { label: '기여도', to: pid !== undefined ? `/project/${pid}/contributions` : '/', active: pathname.includes('/contributions'), icon: <IconContrib /> },
-    { label: '설정', to: pid !== undefined ? `/project/${pid}/settings/role` : '/', active: pathname.includes('/settings'), icon: <IconSettings /> },
+    { label: '홈', to: '/', active: pathname === '/' || pathname.startsWith('/meeting/'), icon: <IconHome />, blocked: false },
+    { label: '칸반', to: noProject ? '/' : `/project/${pid}/kanban`, active: pathname.includes('/kanban'), icon: <IconKanban />, blocked: noProject },
+    { label: '기여도', to: noProject ? '/' : `/project/${pid}/contributions`, active: pathname.includes('/contributions'), icon: <IconContrib />, blocked: noProject },
+    { label: '설정', to: noProject ? '/' : `/project/${pid}/settings/role`, active: pathname.includes('/settings'), icon: <IconSettings />, blocked: noProject },
   ];
 
   // ⚠️ SPA 는 페이지가 새로 뜨지 않으므로 **제목을 우리가 갈아 끼워야**
@@ -100,6 +117,29 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
   useEffect(() => {
     document.title = pageTitle(docTitle ?? title);
   }, [title, docTitle]);
+
+  const [busy, setBusy] = useState(false);
+  const [logoutProblem, setLogoutProblem] = useState<string | null>(null);
+  const doLogout = async () => {
+    setBusy(true);
+    setLogoutProblem(null);
+    let status: number | null = null;
+    try {
+      await api.post<void>('/api/auth/logout');
+      status = 200;
+    } catch (e) {
+      // ⚠️ 네트워크가 끊기면 `ApiError(0)` 입니다 — 판단은 `null` 로 받습니다.
+      status = e instanceof ApiError ? (e.status === 0 ? null : e.status) : null;
+    }
+    setBusy(false);
+    if (logoutOutcome(status) === 'done') {
+      // ⚠️ 라우터가 아니라 주소를 갈아 끼웁니다 — 캐시에 남은 남의 데이터가
+      //    다음 사람 화면에 잠깐 비치지 않게 합니다.
+      window.location.href = '/app/login';
+      return;
+    }
+    setLogoutProblem(describeLogoutFailure(status));
+  };
 
   return (
     <div className="app">
@@ -133,24 +173,52 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
             ))}
           </div>
         )}
-        {items.map((item) => (
-          <Link
-            key={item.label}
-            to={item.to}
-            className="rail__item"
-            aria-current={item.active ? 'page' : undefined}
-          >
-            {item.icon}
-            {item.label}
-          </Link>
-        ))}
+        {items.map((item) =>
+          item.blocked ? (
+            <span
+              key={item.label}
+              className="rail__item rail__item--blocked"
+              role="link"
+              aria-disabled="true"
+              title="프로젝트를 만들거나 초대 코드로 참가하면 열립니다"
+            >
+              {item.icon}
+              {item.label}
+            </span>
+          ) : (
+            <Link
+              key={item.label}
+              to={item.to}
+              className="rail__item"
+              aria-current={item.active ? 'page' : undefined}
+            >
+              {item.icon}
+              {item.label}
+            </Link>
+          ),
+        )}
         <div className="rail__spacer" />
+        {/* ⭐ **로그아웃이 `/app` 어디에도 없었습니다.** 한 번 들어오면
+            나갈 길도, 다른 계정으로 바꿀 길도 없었습니다. 레거시에는
+            `demo/logout.ts` 가 있었고 판단(`logoutOutcome` ·
+            `describeLogoutFailure`)도 `@lib` 에 있었는데 SPA 만 안
+            불렀습니다 — 결함 197 과 같은 모양입니다.
+
+            ⚠️ **상태를 보고 나서 옮깁니다.** 실패해도 로그인 화면으로
+            보내면 세션이 살아 있는데 나간 줄 압니다(결함 82). */}
+        <button type="button" className="rail__item" disabled={busy} onClick={() => void doLogout()}>
+          <IconLogout />
+          로그아웃
+        </button>
       </nav>
       {/* ⚠️ `<div>` 였습니다. 랜드마크가 없으면 낭독기 사용자가 "본문으로"
           라는 이동 수단을 잃습니다 — 건너뛰기 링크가 닿을 자리이기도 합니다.
           `tabIndex={-1}` 은 링크로 왔을 때 **초점이 실제로 여기 앉게** 하려는
           것입니다. 없으면 스크롤만 되고 초점은 링크에 남습니다. */}
       <main className="main" id="main-content" tabIndex={-1}>
+        {/* 로그아웃이 실패하면 **레일이 아니라 본문 위**에 말합니다 —
+            72px 열에는 문장이 세로로 쪼개집니다. */}
+        <Problem>{logoutProblem}</Problem>
         <header className="appbar">
           <h1 className="appbar__title">{title}</h1>
           {meta !== undefined && <span className="appbar__meta">{meta}</span>}

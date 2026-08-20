@@ -296,6 +296,38 @@ export default function Review() {
                       {row.view.title}
                       {row.view.what !== null && ` — ${row.view.what}`}
                     </span>
+                    {/* ⭐ **근거 없는 지적은 잔소리입니다.**
+                        `findings.ts` 머리말이 "근거 없는 지적은 반박할 수
+                        없고, 반박할 수 없으면 잔소리입니다" 라고 적어
+                        뒀는데, 화면은 제목과 한 줄 설명만 그리고 있었습니다
+                        — 어떤 낱말이 겹쳤는지, 몇 분 만에 다시 나왔는지,
+                        어느 발화가 근거인지가 다 빠져 있었습니다.
+
+                        `whyText` 와 `findingView().evidence` 는 처음부터
+                        `@lib` 에 있었고 레거시 화면만 부르고 있었습니다.
+
+                        ⚠️ `why` 는 만들 수 없으면 `null` 입니다 —
+                        "알 수 없는 이유로 걸렸습니다" 를 적지 않는 것이
+                        그 함수의 규칙이고, 여기서도 그때는 안 그립니다. */}
+                    {row.view.why !== null && (
+                      <span className="tlrow__why">{row.view.why}</span>
+                    )}
+                    {row.view.evidence.length > 0 && (
+                      <span className="cand__chips">
+                        {row.view.evidence.map((id) => (
+                          <EvidenceChip
+                            key={id}
+                            id={`#${id}`}
+                            onOpen={() => {
+                              rowRefs.current.get(id)?.scrollIntoView({
+                                behavior: reduceMotion ? 'auto' : 'smooth',
+                                block: 'center',
+                              });
+                            }}
+                          />
+                        ))}
+                      </span>
+                    )}
                   </div>
                   <span />
                 </div>

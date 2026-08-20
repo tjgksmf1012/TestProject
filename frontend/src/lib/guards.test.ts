@@ -3781,3 +3781,106 @@ describe('둘이 같이 쓸 때 (베타 QA)', () => {
     );
   });
 });
+
+
+// ══════════════════════════════════════════════════════════════
+// 리디자인에서 조용히 떨어져 나간 판단들 (docs/24 · 결함 204~209)
+//
+// ⚠️ 전부 **같은 모양**입니다 — 판단은 `lib/` 에 있고, 레거시 화면이
+//    부르고 있어서 "아무도 안 쓰는 export" 가드는 통과하는데, 정작
+//    사람이 쓰는 SPA 만 안 부르는 것. 결함 197 로 처음 잡았고 그 뒤로
+//    여섯 번 더 나왔습니다. 그래서 **부르는지를 화면별로** 못 박습니다.
+// ══════════════════════════════════════════════════════════════
+
+describe('SPA 가 lib 의 판단을 실제로 부르는가 (결함 197 계열)', () => {
+  const code = (...parts: string[]) =>
+    readFileSync(join(ROOT, '..', 'webapp', 'src', ...parts), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ 로그아웃이 있고, **상태를 보고 나서** 옮긴다', () => {
+    // `/app` 어디에도 로그아웃이 없었습니다. 한 번 들어오면 나갈 길도,
+    // 다른 계정으로 바꿀 길도 없었습니다. 레거시에는 `demo/logout.ts` 가
+    // 있었고 판단도 `@lib/auth/session.ts` 에 있었습니다.
+    const shell = code('components', 'AppShell.tsx');
+    ok(/로그아웃/.test(shell), '`/app` 에 로그아웃이 없습니다 — 들어오면 못 나갑니다');
+    ok(
+      /logoutOutcome\(/.test(shell),
+      '상태를 안 보고 옮기면 세션이 살아 있는데 나간 줄 압니다 (결함 82)',
+    );
+    ok(/describeLogoutFailure\(/.test(shell), '못 끊었을 때 이유를 말하지 않습니다');
+  });
+
+  it('⭐ 프로젝트가 없으면 레일이 **갈 곳 없는 링크**를 만들지 않는다', () => {
+    // 갓 가입한 사람의 칸반·기여도·설정이 전부 `/` 를 가리켰습니다.
+    // 눌러도 같은 화면에 그대로 — 이 저장소가 결함으로 세는 모양입니다.
+    const shell = code('components', 'AppShell.tsx');
+    ok(/rail__item--blocked/.test(shell), '갈 곳이 없을 때 표시가 없습니다');
+    ok(
+      /aria-disabled="true"/.test(shell),
+      '링크를 지우면 "고장 났다" 로 읽힙니다 — 두고 이유를 다세요',
+    );
+  });
+
+  it('⭐ 팀원 화면이 권한 3단계를 그린다 (`PROJECT-003`·`PROJECT-004`)', () => {
+    const settings = code('screens', 'Settings.tsx');
+    for (const fn of ['roleLabel', 'canChangeRoleOf', 'canRemove', 'assignableRoles']) {
+      ok(new RegExp(`${fn}\\(`).test(settings), `\`${fn}\` 을 안 부릅니다 — 등급을 다룰 수 없습니다`);
+    }
+    // ⚠️ **부르는가가 아니라 그리는가**를 봅니다. `roleLabel` 은
+    //    `<option>` 목록에서도 불리므로, 이름 옆 등급 표시를 통째로
+    //    지워도 낱말은 파일에 남습니다 — 심어 보고 알았습니다.
+    ok(
+      /member-row__rank/.test(settings),
+      '이름 옆에 등급을 안 적습니다 — 누가 소유자인지 화면에서 알 수 없습니다',
+    );
+    ok(
+      /leaveBlockedBecause\(/.test(settings),
+      '나가기가 막히는 이유를 **누르기 전에** 말해야 합니다 — 안 그러면 서버 409 로만 압니다',
+    );
+  });
+
+  it('⭐ 지우기 결과 문구를 화면이 짓지 않는다 — `describeOutcome` 이 짓는다', () => {
+    // 화면이 직접 찍던 시절, 0건에도 "원본 0건 · 성문 0건을 지웠습니다"
+    // 였습니다. 개인정보보호법 제36조 삭제 요청의 결과 보고입니다.
+    const settings = code('screens', 'Settings.tsx');
+    ok(/describeOutcome\(/.test(settings), '`describeOutcome` 을 안 부릅니다');
+    ok(
+      !/건을 지웠습니다/.test(settings),
+      '결과 문구를 화면에서 짓고 있습니다 — 0건과 성공이 같은 말이 됩니다',
+    );
+  });
+
+  it('⭐ `RevokeResult` 를 두 벌로 선언하지 않는다', () => {
+    // 두 벌이던 시절 SPA 복사본이 서버의 `message` 칸을 빠뜨렸습니다.
+    const types = code('api', 'types.ts');
+    ok(
+      !/interface RevokeResult/.test(types),
+      '`@lib/privacy/deletion.ts` 의 것을 다시 내보내세요 — 두 벌은 반드시 갈라집니다',
+    );
+  });
+
+  it('⭐ 칸반이 붙은 PR 을 **개수 말고** 보여 준다', () => {
+    const kanban = code('screens', 'Kanban.tsx');
+    ok(/describePull\(/.test(kanban), '어느 PR 인지 못 봅니다 — 숫자 하나로 줄어듭니다');
+    ok(
+      /sortLinks\(/.test(kanban),
+      '확정을 위로 올려야 합니다 — 추정이 위에 있으면 그게 사실로 보입니다',
+    );
+  });
+
+  it('⭐ 검토 화면이 관찰의 **사유와 근거**를 그린다', () => {
+    // "근거 없는 지적은 반박할 수 없고, 반박할 수 없으면 잔소리입니다"
+    // (`lib/review/findings.ts` 머리말).
+    const review = code('screens', 'Review.tsx');
+    // ⚠️ 여기도 **그리는가**입니다. `{false && (…)}` 로 막아도 낱말은
+    //    남습니다 — 심어 보고 알았습니다.
+    ok(/\{row\.view\.why !== null && \(/.test(review), '왜 걸렸는지를 안 그립니다');
+    ok(
+      /\{row\.view\.evidence\.length > 0 && \(/.test(review) &&
+        /row\.view\.evidence\.map\(/.test(review),
+      '어느 발화가 근거인지 못 봅니다 — 근거 없는 지적은 반박할 수 없습니다',
+    );
+  });
+});

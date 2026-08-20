@@ -190,6 +190,26 @@ export function useSettingsMutations(projectId: number | undefined) {
     leave: useMutation({
       mutationFn: () => api.post<void>(`/api/projects/${projectId}/members/me/leave`),
     }),
+    /**
+     * 팀원 등급 바꾸기 (`PROJECT-003`·`PROJECT-004`).
+     *
+     * ⚠️ 서버에는 처음부터 있었고 판단(`@lib/project/roles.ts`)도 있었는데
+     *    **리디자인 SPA 만 안 부르고 있었습니다.** 레거시 화면이 부르고
+     *    있어서 "아무도 안 쓰는 export" 가드도 통과했습니다 — 결함 197 과
+     *    똑같은 모양입니다.
+     */
+    changeRole: useMutation({
+      mutationFn: ({ userId, role }: { userId: number; role: string }) =>
+        api.patch<Member>(`/api/projects/${projectId}/members/${userId}/role`, {
+          project_role: role,
+        }),
+      onSuccess: refreshMembers,
+    }),
+    removeMember: useMutation({
+      mutationFn: (userId: number) =>
+        api.del<void>(`/api/projects/${projectId}/members/${userId}`),
+      onSuccess: refreshMembers,
+    }),
     revokeMyData: useMutation({
       mutationFn: () => api.post<RevokeResult>(`/api/projects/${projectId}/me/data`),
     }),

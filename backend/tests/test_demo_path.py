@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
 from teamflow.config import Settings, get_settings
 from teamflow.db import models as m
@@ -998,3 +999,30 @@ def test_seeding_twice_does_not_double_the_links(client: TestClient, seeded):
     for task in board["tasks"]:
         numbers = [link["event_id"] for link in task["github"]]
         assert len(numbers) == len(set(numbers))
+
+
+def test_the_demo_project_has_an_owner(engine, seeded) -> None:
+    """⭐ 시연 프로젝트에 **소유자가 있는가.**
+
+    없던 동안 세 사람이 전부 `member` 였고, 그래서 **아무도 팀원을 다룰 수
+    없었습니다** — 등급 변경도, 내보내기도, 프로젝트 이름·저장소 저장도
+    관리자 이상이라 셋 다 영영 막혀 있었습니다.
+
+    ⚠️ 제품은 그 상태를 만들 수 없습니다. `POST /api/projects` 는 만든
+    사람을 소유자로 넣고, 그 주석에 "소유자가 0명이면 아무도 못 고치는
+    프로젝트가 된다" 고 적혀 있습니다. **시드가 제품이 만들 수 없는 상태를
+    만들고 있었고, 그 상태로 화면을 재 왔습니다** — 초대 코드 때(결함 71)
+    겪은 것과 같은 종류입니다.
+    """
+    with Session(engine) as session:
+        roles = list(
+            session.scalars(
+                select(m.Member.project_role).where(
+                    m.Member.project_id == seeded["project_id"]
+                )
+            )
+        )
+    assert roles, "시연 프로젝트에 팀원이 없습니다"
+    assert roles.count("owner") == 1, f"소유자가 {roles.count('owner')}명입니다 — {roles}"
+    # 나머지는 팀원. 관리자를 시드가 만들 이유는 없습니다.
+    assert set(roles) == {"owner", "member"}, roles

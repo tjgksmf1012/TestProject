@@ -14,8 +14,16 @@ import { ROLE_OPTIONS, problemWith, roleSummary, sumOf, toPayload } from '@lib/c
 import { describeRoles } from '@lib/contribution/roles.ts';
 import { describeHealth, describeHealthFailure } from '@lib/github/health.ts';
 import { githubLoginStatus, repoProblem, titleProblem, normalizeRepo } from '@lib/project/setup.ts';
-import { LEAVE_CONFIRM } from '@lib/project/roles.ts';
+import {
+  LEAVE_CONFIRM,
+  assignableRoles,
+  canChangeRoleOf,
+  canRemove,
+  leaveBlockedBecause,
+  roleLabel,
+} from '@lib/project/roles.ts';
 import { presenceLabel, worthShowing } from '@lib/project/presence.ts';
+import { describeOutcome } from '@lib/privacy/deletion.ts';
 import { AVATAR_SIDE, MAX_BIO, PHOTO_NOTE, bioProblem, coverCrop, photoProblem } from '@lib/profile/edit.ts';
 import { ApiError } from '../api/client.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -227,38 +235,132 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
 }
 
 // ── 프로젝트 > 팀원 ─────────────────────────────────────────────
-function MembersSection({ members, leave }: { members: Member[]; leave: ReturnType<typeof useSettingsMutations>['leave'] }) {
+/**
+ * 팀원 — 등급 보기 · 바꾸기 · 내보내기 (`PROJECT-003`·`PROJECT-004`).
+ *
+ * ## ⚠️ 판단은 처음부터 있었는데 이 화면만 안 불렀습니다
+ *
+ * `@lib/project/roles.ts` 에 `roleLabel`·`canChangeRoleOf`·
+ * `assignableRoles`·`canRemove`·`leaveBlockedBecause` 가 전부 있고 검사도
+ * 붙어 있습니다. 레거시 화면(`demo/project.tsx`)은 그걸 부르고 등급
+ * `<select>` 와 내보내기 버튼을 그렸는데, **리디자인 SPA 는 이름과 기여도
+ * 가중치만 그렸습니다.** 레거시가 부르고 있어서 "아무도 안 쓰는 export"
+ * 가드도 조용히 통과했습니다 — 결함 197 과 똑같은 모양이고, 이번이 네
+ * 번째입니다.
+ *
+ * 그 동안 소유자·관리자가 SPA 안에서 할 수 없던 것:
+ * 누가 어떤 등급인지 보기 · 팀원을 올리고 내리기 · 팀원 내보내기.
+ *
+ * ⚠️ **막는 것은 지우지 않고 이유를 말합니다.** 없어진 버튼은 "이 화면은
+ *    그걸 못 한다" 가 아니라 "고장 났다" 로 읽힙니다.
+ */
+function MembersSection({
+  members,
+  myUserId,
+  leave,
+  changeRole,
+  removeMember,
+}: {
+  members: Member[];
+  myUserId: number | undefined;
+  leave: ReturnType<typeof useSettingsMutations>['leave'];
+  changeRole: ReturnType<typeof useSettingsMutations>['changeRole'];
+  removeMember: ReturnType<typeof useSettingsMutations>['removeMember'];
+}) {
   const navigate = useNavigate();
   // ⭐ 이름순 고정 — 점수 관련 정보는 여기 없습니다.
   const ordered = [...members].sort(
     (a, b) => a.name.localeCompare(b.name, 'ko') || a.user_id - b.user_id,
   );
+  const myRole = members.find((x) => x.user_id === myUserId)?.project_role;
+  const canGive = assignableRoles(myRole);
+  // ⚠️ 나가기가 막히는 이유는 **누르기 전에** 말합니다. 예전에는 누른 뒤
+  //    서버 409 로만 나왔습니다.
+  const leaveBlocked = leaveBlockedBecause(myRole, members.map((x) => x.project_role));
+
   return (
     <div className="sec">
       <h2 className="sec__title">팀원 {members.length}명</h2>
-      {ordered.map((member) => (
-        <div className="member-row" key={member.user_id}>
-          {member.avatar !== null ? (
-            <img className="member-row__avatar" src={member.avatar} alt="" />
-          ) : (
-            <span className="member-row__avatar" aria-hidden="true" />
-          )}
-          <div>
-            <div className="member-row__name">{member.name}</div>
-            <div className="member-row__roles">{describeRoles(member.role_shares)}</div>
-            {member.bio !== null && member.bio !== '' && <div className="t12 muted">{member.bio}</div>}
+      {ordered.map((member) => {
+        const isMe = member.user_id === myUserId;
+        const mayChange = canChangeRoleOf(myRole, member.project_role, { isMe });
+        const mayRemove = canRemove(myRole, member.project_role, { isMe });
+        return (
+          <div className="member-row" key={member.user_id}>
+            {member.avatar !== null ? (
+              <img className="member-row__avatar" src={member.avatar} alt="" />
+            ) : (
+              <span className="member-row__avatar" aria-hidden="true" />
+            )}
+            <div>
+              <div className="member-row__name">
+                {member.name}
+                {/* 등급은 **글자**입니다. 색이나 길이로 줄 세우지 않습니다. */}
+                <span className="member-row__rank">{roleLabel(member.project_role)}</span>
+              </div>
+              <div className="member-row__roles">{describeRoles(member.role_shares)}</div>
+              {member.bio !== null && member.bio !== '' && <div className="t12 muted">{member.bio}</div>}
+            </div>
+            {worthShowing(member.presence) && (
+              <span className="presence">● {presenceLabel(member.presence)}</span>
+            )}
+            {mayChange && canGive.length > 0 && (
+              <label className="member-row__act">
+                <span className="vh">{member.name} 등급</span>
+                <select
+                  className="input input--sm"
+                  value={member.project_role}
+                  disabled={changeRole.isPending}
+                  onChange={(e) =>
+                    changeRole.mutate({ userId: member.user_id, role: e.target.value })
+                  }
+                >
+                  {/* 지금 등급이 내가 줄 수 있는 목록 밖일 수 있습니다
+                      (소유자를 관리자가 볼 때) — 그때도 값이 비지 않게 둡니다. */}
+                  {!canGive.includes(member.project_role as (typeof canGive)[number]) && (
+                    <option value={member.project_role}>{roleLabel(member.project_role)}</option>
+                  )}
+                  {canGive.map((r) => (
+                    <option key={r} value={r}>
+                      {roleLabel(r)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {mayRemove && (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={removeMember.isPending}
+                onClick={() => {
+                  if (window.confirm(`${member.name} 님을 이 프로젝트에서 내보냅니다. 그 사람이 한 일(업무·발화·기여 기록)은 그대로 남습니다.`)) {
+                    removeMember.mutate(member.user_id);
+                  }
+                }}
+              >
+                내보내기
+              </button>
+            )}
           </div>
-          {worthShowing(member.presence) && (
-            <span className="presence">● {presenceLabel(member.presence)}</span>
-          )}
-        </div>
-      ))}
+        );
+      })}
+      <Problem>
+        {changeRole.isError
+          ? mutationError(changeRole.error)
+          : removeMember.isError
+            ? mutationError(removeMember.error)
+            : null}
+      </Problem>
       <div style={{ marginTop: 'var(--sp-6)' }}>
         <button
           type="button"
-          className="btn btn--secondary"
-          disabled={leave.isPending}
+          className={`btn btn--secondary${leaveBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={leaveBlocked !== null}
+          aria-describedby={leaveBlocked !== null ? 'leave-why' : undefined}
           onClick={() => {
+            if (leaveBlocked !== null) return;
+            if (leave.isPending) return;
             if (window.confirm(LEAVE_CONFIRM)) {
               leave.mutate(undefined, { onSuccess: () => navigate('/') });
             }
@@ -266,6 +368,9 @@ function MembersSection({ members, leave }: { members: Member[]; leave: ReturnTy
         >
           이 프로젝트에서 나가기
         </button>
+        <Problem id="leave-why" tone="incomplete">
+          {leaveBlocked}
+        </Problem>
         <Problem>{leave.isError ? mutationError(leave.error) : null}</Problem>
       </div>
     </div>
@@ -476,25 +581,30 @@ function DangerSection({ revoke }: { revoke: ReturnType<typeof useSettingsMutati
           내 녹음과 성문 지우기
         </button>
       </div>
-      {revoke.isSuccess && (
-        <div className="notice" style={{ marginTop: 'var(--sp-5)' }} role="status">
-          <p>
-            원본 <span className="num">{revoke.data.deleted_assets}</span>건 · 성문{' '}
-            <span className="num">{revoke.data.revoked_voiceprints}</span>건을 지웠습니다.
-          </p>
-          {revoke.data.kept.map((k) => (
-            <p className="t12" key={k}>
-              {k}
-            </p>
-          ))}
-          {Object.keys(revoke.data.failed).length > 0 && (
-            <p className="t12">
-              지우지 못한 것이 {Object.keys(revoke.data.failed).length}건 있습니다 — 다시
-              요청해 주세요.
-            </p>
-          )}
-        </div>
-      )}
+      {/* ⚠️ **결과 문구를 여기서 짓지 않습니다.**
+          예전에는 이 자리에서 손으로 "원본 N건 · 성문 N건을 지웠습니다" 를
+          찍었고, 그래서 **0건일 때도 "지웠습니다"** 라고 했습니다. 지울
+          음성 자료가 애초에 없던 사람이 지워진 줄 알게 되는 것입니다 —
+          개인정보보호법 제36조 삭제 요청의 결과 보고인데.
+
+          판단(`describeOutcome`)은 처음부터 `@lib/privacy/deletion.ts` 에
+          있었고 "0건을 성공으로만 답하지 않습니다" 라고 못까지 박아
+          뒀는데, 레거시 화면만 그걸 부르고 있었습니다 — 결함 197 과 같은
+          모양이고 이번이 다섯 번째입니다. */}
+      {revoke.isSuccess &&
+        (() => {
+          const outcome = describeOutcome(revoke.data);
+          return (
+            <div className="notice" style={{ marginTop: 'var(--sp-5)' }} role="status">
+              <p>{outcome.text}</p>
+              {revoke.data.kept.map((k) => (
+                <p className="t12" key={k}>
+                  {k}
+                </p>
+              ))}
+            </div>
+          );
+        })()}
       <Problem>{revoke.isError ? mutationError(revoke.error) : null}</Problem>
     </div>
   );
@@ -579,7 +689,15 @@ export default function Settings() {
             {section === 'role' && <RoleSection mine={mine} save={m.saveRole} />}
             {section === 'github' && <GithubSection mine={mine} save={m.saveGithubLogin} />}
             {section === 'profile' && <ProfileSection save={m.saveProfile} />}
-            {section === 'members' && <MembersSection members={members} leave={m.leave} />}
+            {section === 'members' && (
+              <MembersSection
+                members={members}
+                myUserId={me?.user_id}
+                leave={m.leave}
+                changeRole={m.changeRole}
+                removeMember={m.removeMember}
+              />
+            )}
             {section === 'repo' && (
               <RepoSection
                 projectId={projectId}

@@ -83,11 +83,16 @@ export interface ProjectDetail {
   member_count: number;
 }
 
-/** 서버 `RevokeOut` 과 같은 모양. */
-export interface RevokeResult {
-  deleted_assets: number;
-  revoked_voiceprints: number;
-  freed_bytes: number;
-  failed: Record<number, string>;
-  kept: string[];
-}
+/**
+ * 서버 `RevokeOut` 과 같은 모양.
+ *
+ * ⚠️ **여기서 다시 선언하지 않습니다.** 예전에는 이 파일에 같은 모양을
+ * 손으로 한 벌 더 적어 뒀는데, 그러다 서버가 보내는 `message` 칸을
+ * 빠뜨렸습니다. 그 칸이 "지울 녹음이 없습니다" 와 "지웠습니다" 를 가르는
+ * 자리였고, 없는 채로 화면은 0건에도 **"원본 0건 · 성문 0건을
+ * 지웠습니다"** 라고 답했습니다 — 개인정보보호법 제36조 삭제 요청의
+ * 결과 보고인데 아무 일도 안 일어났다는 사실이 사라진 것입니다.
+ *
+ * 두 벌이 있으면 한쪽만 고쳐집니다(이 저장소의 반복 실패 ②).
+ */
+export type { RevokeResult } from '@lib/privacy/deletion.ts';

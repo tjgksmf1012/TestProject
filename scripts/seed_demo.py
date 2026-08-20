@@ -44,7 +44,7 @@ from sqlalchemy import create_engine, func, or_, select
 from teamflow.auth import passwords
 from teamflow.config import get_settings
 from teamflow.contribution.events import CATEGORY_OF, EventType
-from teamflow.db import assignees
+from teamflow.db import assignees, vocab
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 from teamflow.projects import invites
@@ -213,13 +213,30 @@ def seed(*, reset: bool) -> dict:
         s.add(project)
         s.flush()
 
-        for user, (_n, _e, login, roles) in zip(users, MEMBERS, strict=True):
+        # ⚠️ **첫 팀원을 소유자로 넣습니다.**
+        #
+        # 이게 없던 동안 시연 프로젝트의 세 사람이 전부 `member` 였고,
+        # 그래서 **아무도 팀원을 다룰 수 없었습니다** — 등급을 바꾸거나
+        # 내보내는 것도, 프로젝트 이름·저장소를 저장하는 것도 관리자
+        # 이상이라 셋 다 영영 막혀 있었습니다.
+        #
+        # 제품은 그런 상태를 만들 수 없습니다. `POST /api/projects` 는
+        # 만든 사람을 소유자로 넣고, 그 주석에 "소유자가 0명이면 아무도
+        # 못 고치는 프로젝트가 된다" 고 적혀 있습니다. **시드가 제품이
+        # 만들 수 없는 상태를 만들고 있었고, 그 상태로 화면을 재 왔습니다**
+        # — 초대 코드 때(결함 71) 겪은 것과 같은 종류입니다.
+        for index, (user, (_n, _e, login, roles)) in enumerate(
+            zip(users, MEMBERS, strict=True)
+        ):
             s.add(
                 m.Member(
                     project_id=project.id,
                     user_id=user.id,
                     role_shares=roles,
                     github_login=login,
+                    project_role=str(
+                        vocab.ProjectRole.OWNER if index == 0 else vocab.ProjectRole.MEMBER
+                    ),
                 )
             )
 

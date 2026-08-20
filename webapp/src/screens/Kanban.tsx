@@ -15,6 +15,8 @@ import {
   toColumns,
   describeStatus,
   describeLinkState,
+  describePull,
+  sortLinks,
   type Task,
 } from '@lib/kanban/board.ts';
 import { canDropOn, dragPayload, draggedTaskId, TASK_DRAG_TYPE } from '@lib/kanban/dnd.ts';
@@ -183,6 +185,31 @@ function Card({
           },
         ]}
       />
+      {/* ⭐ **개수만 보여 주고 끝내지 않습니다.**
+          서버는 저장소·PR 번호·제목·병합 시각·확정 여부를 전부 주는데
+          카드는 `1` 이라는 숫자 하나만 그리고 있었습니다. 어느 PR 인지,
+          확정으로 붙은 것인지 추정인지, 열어 볼 방법이 없었습니다 —
+          docs/08 §5.1 필수 경로의 마지막 눈에 보이는 칸이 숫자 하나로
+          줄어 있던 것입니다.
+
+          판단은 처음부터 `@lib/kanban/board.ts` 에 있었습니다
+          (`sortLinks` 는 **확정을 위로** 올립니다 — 추정이 위에 있으면
+          그게 사실로 보입니다). 레거시 화면만 그걸 부르고 있었습니다.
+
+          ⚠️ 목록을 늘 펼쳐 두지 않습니다. v2 는 카드에서 글자를 걷어낸
+          화면이고, 여기서 줄을 다시 깔면 그 결정을 되돌리는 것입니다.
+          **필요할 때 여는** `Why` 자리를 씁니다. */}
+      {(task.github ?? []).length > 0 && (
+        <Why
+          about={`${task.title}에 붙은 PR`}
+          countsAs="건"
+          lines={sortLinks(task.github).map(
+            (link) =>
+              `${link.confirmed ? '확정' : '추정'} · ${describePull(link)}` +
+              (link.why ? ` — ${link.why}` : ''),
+          )}
+        />
+      )}
     </article>
   );
 }
