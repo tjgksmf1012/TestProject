@@ -742,19 +742,75 @@ def test_complete_on_unknown_track_is_404(client: TestClient, track: dict):
     assert response.status_code == 404
 
 
-def test_chunks_are_refused_after_completion(client: TestClient, track: dict):
+def test_late_chunks_are_taken_after_completion(client: TestClient, track: dict):
+    """⭐ **끝난 트랙에도 늦은 조각은 받는다** (결함 244).
+
+    데스크톱 셸은 못 올린 조각을 디스크에 붙잡아 두고 화면에 이렇게 적는다:
+
+        4개가 이 컴퓨터에 남아 있습니다 — 서버가 돌아오면 다시 올립니다.
+
+    그 「다시 올리기」 단추는 **정지한 뒤에만** 나타나고, 정지하면 트랙은
+    `completed` 다. 예전 규칙(`recording` 만 허용)에서는 그 단추를 누르면
+    서버가 전부 404 로 거절했다 — 약속이 구조적으로 지켜질 수 없었다.
+    실제로 데스크톱 셸에서 재현했다(조각 1·2·3·4 가 전부 404).
+
+    ⚠️ 그리고 **다시 계산된다.** 서버는 자기가 가진 조각으로 커버리지를
+    다시 재므로, 늦게 올린 뒤 다시 `complete` 하면 판정이 고쳐진다.
+    """
+    for seq in (0, 1, 2, 3, 5, 6, 7, 8, 9):  # 4번만 못 올린 상태
+        put_chunk(client, track["meeting_id"], track["track_id"], seq)
+    first = complete(client, track, slices=10, coverage=0.9).json()
+    assert first["coverage"] < 1.0
+
+    late = put_chunk(client, track["meeting_id"], track["track_id"], 4)
+    assert late.status_code == 200, late.json()
+
+    again = complete(client, track, slices=10, coverage=1.0).json()
+    assert again["coverage"] == 1.0
+
+
+def test_late_chunks_are_refused_once_the_meeting_is_processed(
+    client: TestClient, track: dict, engine
+):
+    """⛔ 처리에 들어간 뒤에는 거절한다 (결함 244의 반대편).
+
+    그때는 소리가 **이미 글로 옮겨졌다.** 늦게 온 조각을 받으면 회의록과
+    오디오가 갈라진다 — 그건 못 받는 것보다 나쁘다.
+    """
     put_chunk(client, track["meeting_id"], track["track_id"], 0)
     complete(client, track)
+
+    with Session(engine) as s:
+        meeting = s.get(m.Meeting, track["meeting_id"])
+        meeting.status = "processing"
+        s.commit()
 
     response = put_chunk(client, track["meeting_id"], track["track_id"], 1)
     assert response.status_code == 404
     detail = response.json()["detail"]
-    # 무슨 일이 있었는지 + **더 보낼 수 없다**는 것까지 말한다.
-    assert "이미 끝났습니다" in detail
-    assert "더 이상 녹음을 보낼 수 없습니다" in detail
+    assert "처리에 들어가" in detail
     # ⚠️ 내부 상태 이름을 사람에게 보여주지 않는다 (결함 78).
     assert "status=" not in detail
-    assert "completed" not in detail
+    assert "processing" not in detail
+
+
+def test_chunks_are_refused_after_the_track_is_aborted(
+    client: TestClient, track: dict, engine
+):
+    """강제 종료한 트랙은 그대로 거절한다 — 더 받을 이유가 없다."""
+    put_chunk(client, track["meeting_id"], track["track_id"], 0)
+    with Session(engine) as s:
+        row = s.get(m.MeetingTrack, track["track_id"])
+        row.status = "aborted"
+        s.commit()
+
+    response = put_chunk(client, track["meeting_id"], track["track_id"], 1)
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert "강제 종료" in detail
+    assert "더 이상 녹음을 보낼 수 없습니다" in detail
+    assert "status=" not in detail
+    assert "aborted" not in detail
 
 
 def test_rejoining_a_completed_track_conflicts(

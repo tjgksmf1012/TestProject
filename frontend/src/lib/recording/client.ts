@@ -108,6 +108,42 @@ export interface RecordingSummary {
   timesliceMs: number;
 }
 
+/**
+ * 뒤늦게 올라간 조각을 반영해 **판정을 다시 만든다** (결함 244).
+ *
+ * ## 왜 필요한가
+ *
+ * 「남은 청크 다시 올리기」로 잃었던 조각을 되찾아도, 화면이 들고 있는
+ * 요약은 **정지하던 순간의 것**입니다. 그대로 서버에 다시 보내면 서버는
+ * 「클라이언트가 더 비관적이면 그쪽을 존중한다」는 규칙에 따라 **옛
+ * 비관을 그대로 저장**합니다 — 소리는 다 돌아왔는데 회의 기록은 계속
+ * 「사용 불가 57%」 입니다. 그 판정은 기여도로 이어집니다.
+ *
+ * ⚠️ 되찾지 못한 것은 **그대로 잃은 것**으로 둡니다. 이 함수는 실제로
+ * 올라간 seq 만 지웁니다 — 못 담은 것을 담았다고 하지 않습니다.
+ */
+export function recomputeAfterRecovery(
+  summary: RecordingSummary,
+  recovered: readonly number[],
+): RecordingSummary {
+  const back = new Set(recovered);
+  const stillLost = summary.state.lostSeqs.filter((seq) => !back.has(seq));
+  if (stillLost.length === summary.state.lostSeqs.length) return summary;
+
+  const state: SessionState = { ...summary.state, lostSeqs: stillLost };
+  const timeline = buildTimeline(state.chunks, {
+    ...toTimelineInput(state),
+    timesliceMs: summary.timesliceMs,
+  });
+  return {
+    ...summary,
+    state,
+    timeline,
+    verdict: judgeTrack(timeline),
+    parked: summary.parked.filter((seq) => !back.has(seq)),
+  };
+}
+
 // ══════════════════════════════════════════════════════════════
 
 export class RecordingClient {

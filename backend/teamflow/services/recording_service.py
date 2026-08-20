@@ -79,6 +79,28 @@ _TRACK_STATE_MESSAGE: dict[str, str] = {
     "aborted": "이 트랙은 강제 종료됐습니다",
 }
 
+#: **늦게 도착한 조각**을 아직 받아 줄 수 있는 트랙 상태 (결함 244).
+#
+# ⛔ 예전에는 `recording` 하나뿐이었습니다. 그런데 데스크톱 셸은 못 올린
+#    조각을 디스크에 붙잡아 두고 화면에 이렇게 적습니다:
+#
+#        4개가 이 컴퓨터에 남아 있습니다 — 서버가 돌아오면 다시 올립니다.
+#
+#    그 「다시 올리기」 단추는 **정지한 뒤에만** 나타나고, 정지하면 트랙은
+#    `completed` 가 됩니다. 즉 그 단추를 누르면 서버가 전부 404 로
+#    거절했습니다 — 약속이 구조적으로 지켜질 수 없었습니다. 재현했습니다
+#    (조각 1·2·3·4 가 전부 404, 화면은 아무 말도 없음).
+#
+# ⚠️ `aborted` 는 그대로 거절합니다. 그건 회의를 **강제로 끝낸** 것이라
+#    더 받을 이유가 없습니다.
+_TRACK_ACCEPTS_LATE_CHUNKS = frozenset({"recording", "completed", "unusable"})
+
+#: 이 상태를 지나면 소리가 이미 **글로 옮겨졌습니다.** 늦게 온 조각을 받으면
+#: 회의록과 오디오가 갈라집니다 — 그건 못 받는 것보다 나쁩니다.
+_MEETING_AUDIO_FROZEN = frozenset(
+    {"queued", "processing", "needs_review", "confirmed", "failed"}
+)
+
 
 def describe_track_state(status: str) -> str:
     """트랙 상태 → 사람이 읽을 한 줄. 모르는 값은 **그대로** 돌려준다."""
@@ -408,10 +430,19 @@ def store_chunk(
     파일이 남을 뿐인데, 그건 재개 조회가 파일시스템을 보므로 스스로 복구된다.
     """
     track = _load_track(session, meeting_id, track_id)
-    if track.status != "recording":
+    if track.status not in _TRACK_ACCEPTS_LATE_CHUNKS:
         raise TrackError(
             f"{describe_track_state(track.status)} — 더 이상 녹음을 보낼 수 없습니다."
         )
+    # 끝난 트랙에도 **늦은 조각**은 받습니다 (결함 244) — 다만 회의가 처리에
+    # 들어간 뒤는 아닙니다. 그때는 소리가 이미 글이 돼 있습니다.
+    if track.status != "recording":
+        meeting = session.get(m.Meeting, meeting_id)
+        if meeting is not None and meeting.status in _MEETING_AUDIO_FROZEN:
+            raise TrackError(
+                "이 회의는 이미 처리에 들어가 늦은 조각을 받을 수 없습니다 — "
+                "처리 전에 올려야 합니다."
+            )
 
     # 매 청크마다 확인한다. 회의 도중에 철회할 수 있기 때문이다.
     # 본인 동의를 먼저 본다 — 혼자 철회한 경우 전체 검사만으로는 막히지 않는다

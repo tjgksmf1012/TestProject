@@ -49,7 +49,7 @@ import {
   recordingSafety,
 } from '../lib/platform/recording.ts';
 import { awakeBridge, shouldHoldAwake } from '../lib/platform/awake.ts';
-import { describeGiveUp, openChunkStore } from '../lib/platform/chunk-store.ts';
+import { describeGiveUp, describeReupload, openChunkStore } from '../lib/platform/chunk-store.ts';
 import { describeGapReason, describeTimeline } from '../lib/recording/timeline.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
@@ -58,7 +58,7 @@ import { showNote } from '../lib/ui/failure.ts';
 import { whilePressed } from '../lib/ui/pending.ts';
 import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import { escapeHtml } from '../lib/html.ts';
-import type { SyncTransport } from '../lib/recording/client.ts';
+import { recomputeAfterRecovery, type SyncTransport } from '../lib/recording/client.ts';
 import type { PendingChunk, UploadTransport } from '../lib/recording/upload-queue.ts';
 import { bootApp } from './pwa.ts';
 
@@ -585,12 +585,30 @@ $('reupload').addEventListener('click', () => {
       }
     }
 
-    done.parked = still;
-    showResult(done);
+    const sent = parked.size - still.length;
+    /* ⛔ 되찾은 조각을 반영해 **판정을 다시 만듭니다** (결함 244). 안 그러면
+       화면이 들고 있는 정지 순간의 비관이 그대로 서버로 다시 가고, 서버는
+       「클라이언트가 더 비관적이면 그쪽을 존중한다」는 규칙에 따라 그 값을
+       저장합니다 — 소리는 다 돌아왔는데 기록은 계속 「사용 불가」입니다.
+       판단은 `@lib` 의 `recomputeAfterRecovery`. */
+    const recovered = [...parked].filter((seq) => !still.includes(seq));
+    summary = recomputeAfterRecovery(done, recovered);
+    const fixed = summary;
+    fixed.parked = still;
+    showResult(fixed);
     // ⚠️ `showResult` 는 **이 기기가 잰 값**으로 칸을 다시 씁니다. 서버
     //    판정을 안 덮어 주면 다시 올린 순간 「사용 가능 · 100%」 로
     //    되돌아갑니다 — 고친 것이 이 한 줄 때문에 풀립니다 (결함 220).
-    if (serverVerdict !== null) applyServerVerdict(serverVerdict, done, true);
+    if (serverVerdict !== null) applyServerVerdict(serverVerdict, fixed, true);
+
+    // ⛔ **눌러도 아무 말이 없었습니다** (결함 245). 실패한 seq 를 조용히
+    //    목록에 도로 넣기만 해서, 화면이 그대로였습니다.
+    showNote($('parked-note'), describeReupload(sent, still.length), still.length > 0 ? 'bad' : 'plain');
+
+    // ⛔ 다시 올렸으면 **판정도 다시 받아야 합니다** (결함 244). 서버는
+    //    자기가 가진 조각으로 커버리지를 다시 계산합니다 — 안 물어보면
+    //    되찾은 소리가 화면에서는 여전히 「사용 불가」입니다.
+    if (sent > 0) await tellServerWeAreDone(fixed);
   });
 });
 

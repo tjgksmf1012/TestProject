@@ -4408,6 +4408,29 @@ describe('⛔ 녹음이 **혼자 멈췄을 때**도 끝까지 간다 (결함 240
     );
   });
 
+  it('⭐ 다시 올렸으면 **판정을 다시 만들고 서버에 다시 알린다** (결함 244)', () => {
+    /* 되찾은 조각을 반영 안 하면, 화면이 들고 있는 정지 순간의 비관이
+       그대로 서버로 다시 가고 서버는 「클라이언트가 더 비관적이면 그쪽을
+       존중한다」는 규칙에 따라 그 값을 저장합니다 — 소리는 다 돌아왔는데
+       기록은 계속 「사용 불가」입니다. 실제로 그랬습니다(56.7% → 57.1%). */
+    const code = main();
+    const handler = /\$\('reupload'\)\.addEventListener\([\s\S]*?\n\}\);/.exec(code)?.[0] ?? '';
+    ok(handler !== '', '재업로드 처리기를 못 찾았습니다');
+    ok(/recomputeAfterRecovery\(/.test(handler), '되찾은 조각을 판정에 반영하지 않습니다');
+    ok(/tellServerWeAreDone\(/.test(handler), '다시 올려 놓고 서버에 다시 안 알립니다');
+  });
+
+  it('⭐ 다시 올리기를 누르면 **무슨 일이 일어났는지 말한다** (결함 245)', () => {
+    // 예전에는 실패한 seq 를 조용히 목록에 도로 넣기만 했습니다 — 화면이
+    // 그대로라 사람은 "눌러도 아무 일도 안 일어난다" 고 읽습니다.
+    const code = main();
+    const handler = /\$\('reupload'\)\.addEventListener\([\s\S]*?\n\}\);/.exec(code)?.[0] ?? '';
+    ok(/describeReupload\(/.test(handler), '누른 뒤 아무 말도 안 합니다');
+    const html = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8');
+    ok(/id="parked-note"/.test(html), '말할 자리가 마크업에 없습니다');
+    ok(/id="parked-note"[^>]*role="status"/.test(html), '낭독기가 이 변화를 못 듣습니다');
+  });
+
   it('⭐ 「연결이 돌아왔습니다」를 **빨강으로 말하지 않는다** (결함 243)', () => {
     const code = main();
     // 문구도 색조도 `@lib` 이 정합니다 — 화면은 넘기기만 합니다.
@@ -5094,9 +5117,15 @@ describe('녹음 결과 칸의 주인은 **서버**다 (결함 220)', () => {
     // 판정을 안 덮으면 고친 것이 그 한 줄 때문에 풀립니다.
     const handler = /\$\('reupload'\)\.addEventListener\([\s\S]*?\n\}\);/.exec(main)?.[0] ?? '';
     ok(handler !== '', '재업로드 처리기를 못 찾았습니다');
+    /* ⚠️ 처음에는 `applyServerVerdict(serverVerdict, done, true)` 라는
+       **글자 그대로**를 요구했습니다. 결함 244 에서 되찾은 조각을 반영한
+       새 요약(`fixed`)을 그리게 되자, 요구는 그대로인데 가드만 실패했습니다.
+       요구는 **「그린 것과 같은 요약을 서버 판정으로 덮는다」** 입니다. */
+    const drawn = /showResult\((\w+)\)/.exec(handler)?.[1];
+    ok(drawn !== undefined, '재업로드 뒤 칸을 다시 안 그립니다');
     ok(
-      /applyServerVerdict\(serverVerdict, done, true\)/.test(handler),
-      '다시 올리면 「사용 가능 · 100%」 로 되돌아갑니다',
+      new RegExp(`applyServerVerdict\\(serverVerdict,\\s*${drawn},\\s*true\\)`).test(handler),
+      `다시 올리면 「사용 가능 · 100%」 로 되돌아갑니다 (그린 것: ${drawn})`,
     );
   });
 

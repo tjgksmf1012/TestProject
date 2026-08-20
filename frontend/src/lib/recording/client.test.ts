@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  recomputeAfterRecovery,
   RecordingClient,
   type AudioTrackHandle,
   type MediaAdapter,
   type RecorderHandle,
   type SyncTransport,
 } from './client.ts';
+import { initialState } from './session.ts';
 import type { AppliedAudioSettings } from './capture.ts';
 import type { PendingChunk, UploadTransport } from './upload-queue.ts';
 
@@ -518,5 +520,48 @@ describe('RecordingClient — 상태 알림', () => {
       uploadOptions: { sleep: async () => {} },
     });
     assert.equal(client.state.secureContext, h.media.isSecureContext());
+  });
+});
+
+describe('뒤늦게 올라간 조각을 반영해 판정을 다시 만든다 (결함 244)', () => {
+  const summaryWith = (lost: number[], parked: number[]) =>
+    ({
+      state: {
+        ...initialState(),
+        phase: 'completed' as const,
+        startedAtMs: 1_700_000_000_000 as never,
+        endedAtMs: 1_700_000_050_000 as never,
+        chunks: Array.from({ length: 10 }, (_, i) => ({
+          seq: i,
+          atMs: (1_700_000_000_000 + (i + 1) * 5_000) as never,
+          byteLength: 20_000,
+        })),
+        lostSeqs: lost,
+      },
+      timeline: { coverage: 0, totalGapMs: 0, longestGapMs: 0, gaps: [], startedAtMs: 0, durationMs: 0 },
+      verdict: { usable: false, reason: '' },
+      captureConfidence: 1,
+      warnings: [],
+      parked,
+      timesliceMs: 5_000,
+    }) as never;
+
+  it('⭐ 되찾은 것만 지운다 — 못 찾은 것은 **그대로 잃은 것**', () => {
+    const after = recomputeAfterRecovery(summaryWith([1, 2, 3], [1, 2, 3]), [1, 3]);
+    assert.deepEqual(after.state.lostSeqs, [2]);
+    assert.deepEqual(after.parked, [2]);
+  });
+
+  it('전부 되찾으면 공백이 사라지고 판정이 다시 선다', () => {
+    const after = recomputeAfterRecovery(summaryWith([4, 5], [4, 5]), [4, 5]);
+    assert.deepEqual(after.state.lostSeqs, []);
+    assert.equal(after.timeline.coverage > 0.99, true, String(after.timeline.coverage));
+    assert.equal(after.verdict.usable, true);
+  });
+
+  it('되찾은 것이 없으면 **같은 요약을 그대로** 돌려준다', () => {
+    const before = summaryWith([1], [1]);
+    assert.equal(recomputeAfterRecovery(before, []), before);
+    assert.equal(recomputeAfterRecovery(before, [7]), before);
   });
 });
