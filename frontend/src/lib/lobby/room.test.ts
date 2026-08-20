@@ -9,11 +9,13 @@ import {
   consentStateOf,
   describeConsent,
   isSilentTooLong,
+  lobbyPhase,
   memberStatuses,
   roomStatus,
   savedExtraConsents,
   startBlockers,
   summarizeConsent,
+  verdictView,
   type MemberStatus,
   type RosterEntry,
   type TrackHealth,
@@ -420,5 +422,86 @@ describe('저장된 ②③ 선택 (결함 94)', () => {
       rawAudio: null,
       voiceprint: null,
     });
+  });
+});
+
+describe('회의 국면 — 로비가 「시작 전」을 그릴지 「끝난 뒤」를 그릴지 (결함 214)', () => {
+  it('⭐ 녹음 전에는 아무 말도 덧붙이지 않는다', () => {
+    // `pending` 은 "녹음 전 · 녹음 중" 둘 다입니다. 그때는 화면에 이미
+    // 「시작 전 확인」이 있고, 거기에 문장을 하나 더 얹으면 같은 말을
+    // 두 번 하게 됩니다.
+    deepStrictEqual(lobbyPhase('pending'), { canStart: true, note: null, go: null });
+  });
+
+  it('⭐ 끝난 회의에서는 녹음을 시작할 수 없다 — 넷 전부', () => {
+    // 이 넷 전부에서 「녹음 화면으로」가 멀쩡히 눌렸습니다. 검토까지 끝난
+    // 회의를 다시 녹음하러 갈 수 있었다는 뜻입니다.
+    for (const status of ['queued', 'processing', 'needs_review', 'confirmed', 'failed']) {
+      strictEqual(lobbyPhase(status).canStart, false, `${status} 에서 아직 시작할 수 있습니다`);
+    }
+  });
+
+  it('⭐ 실패한 회의는 **실패라고 말한다** — 홈이 보낸 말을 이어받는다', () => {
+    // 홈: "처리에 실패했습니다 — 트랙이 온전한지 확인하세요"
+    // → 도착한 화면에 「실패」라는 낱말이 **한 번도 없었습니다.**
+    const note = lobbyPhase('failed').note ?? '';
+    strictEqual(/실패/.test(note), true, '실패를 말하지 않습니다');
+    strictEqual(/트랙/.test(note), true, '무엇을 확인하라는 것인지 안 말합니다');
+  });
+
+  it('⚠️ 막았으면 **갈 곳을 준다** — 실패만 예외이고 그건 확인할 것이 이 화면에 있어서다', () => {
+    strictEqual(lobbyPhase('needs_review').go?.screen, 'review');
+    strictEqual(lobbyPhase('confirmed').go?.screen, 'kanban');
+    strictEqual(lobbyPhase('failed').go, null);
+    // 처리 중은 사람이 할 일이 없습니다 — 기다리는 것뿐입니다.
+    strictEqual(lobbyPhase('processing').go, null);
+  });
+
+  it('⛔ 모르는 상태는 **막지 않는다** — 녹음이 끊기면 그 구간은 영영 못 잰다', () => {
+    // 반대로 하면 상태가 하나 늘 때마다 그 회의는 녹음을 못 하게 됩니다.
+    for (const status of ['scheduled', '', 'ARCHIVED', null, undefined]) {
+      strictEqual(lobbyPhase(status).canStart, true, `${String(status)} 에서 녹음을 막고 있습니다`);
+      strictEqual(lobbyPhase(status).note, null);
+    }
+  });
+});
+
+describe('참가자 낱말 — 끝난 회의의 「대기」는 거짓말이다 (결함 214)', () => {
+  const status = (verdict: MemberStatus['verdict'], message: string): MemberStatus => ({
+    userId: 1,
+    name: '김민수',
+    consent: 'granted',
+    verdict,
+    coverage: null,
+    message,
+  });
+
+  it('⭐ 녹음 전에는 「대기」 — 곧 들어올 사람이다', () => {
+    const view = verdictView(status('not_joined', '아직 참가하지 않았습니다'), true);
+    strictEqual(view.word, '대기');
+    strictEqual(view.message, '아직 참가하지 않았습니다');
+  });
+
+  it('⭐ 끝난 회의에서는 「미참가」 — 아무도 기다리고 있지 않다', () => {
+    // 실패한 회의의 로비에서 세 사람이 나란히 「대기 · 아직 참가하지
+    // 않았습니다」 였습니다. 그 화면은 "트랙이 온전한지 확인하세요" 라고
+    // 보낸 곳이고, **아무도 참가 안 한 것이 바로 그 답**입니다.
+    const view = verdictView(status('not_joined', '아직 참가하지 않았습니다'), false);
+    strictEqual(view.word, '미참가');
+    strictEqual(/아직/.test(view.message), false, '아직이라고 말하면 곧 들어온다는 뜻입니다');
+    strictEqual(/녹음은 없습니다/.test(view.message), true);
+  });
+
+  it('참가한 사람의 낱말과 문장은 국면과 무관하게 그대로다', () => {
+    for (const canStart of [true, false]) {
+      strictEqual(verdictView(status('finished', '녹음 종료 (커버리지 92%)'), canStart).word, '종료');
+      strictEqual(
+        verdictView(status('finished', '녹음 종료 (커버리지 92%)'), canStart).message,
+        '녹음 종료 (커버리지 92%)',
+      );
+      strictEqual(verdictView(status('broken', '못 씀'), canStart).word, '못 씀');
+      strictEqual(verdictView(status('at_risk', '끊김'), canStart).word, '끊김');
+      strictEqual(verdictView(status('healthy', '녹음 중'), canStart).word, '녹음 중');
+    }
   });
 });

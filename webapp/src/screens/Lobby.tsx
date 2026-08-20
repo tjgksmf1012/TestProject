@@ -8,10 +8,12 @@ import { Conditions, describeConditions, type Condition } from '../components/Co
 import { useConsent, useLobbyMutations, useMe, useMeeting, useTracks } from '../api/hooks.ts';
 import {
   captureAlerts,
+  lobbyPhase,
   memberStatuses,
   roomStatus,
   savedExtraConsents,
   startBlockers,
+  verdictView,
   type TrackHealth,
 } from '@lib/lobby/room.ts';
 import { axisTicks, buildDiagram, describeGap, meetingWindow, type TrackInput } from '@lib/track/diagram.ts';
@@ -21,6 +23,7 @@ import {
   recordingSafety,
 } from '@lib/platform/recording.ts';
 import { Problem } from '../components/Problem.tsx';
+import { describeMeetingStatus } from '@lib/home/next.ts';
 
 // 회의 로비 — 시그니처가 사는 곳 (지시서 기타-6 §로비).
 //
@@ -31,15 +34,6 @@ import { Problem } from '../components/Problem.tsx';
 // 그리고, 그 자리는 「시작 전 확인」 이 씁니다 (v2 F5).
 
 const EMPTY_TICKS = ['0분', '7', '13', '20', '27', '33', '40분'];
-
-/** 상태를 한 낱말로. 문장은 `Why` 안에서 원문 그대로 나옵니다. */
-const VERDICT_WORD: Record<string, string> = {
-  not_joined: '대기',
-  healthy: '녹음 중',
-  at_risk: '끊김',
-  broken: '못 씀',
-  finished: '종료',
-};
 
 export default function Lobby() {
   const params = useParams();
@@ -100,7 +94,11 @@ export default function Lobby() {
     { label: '내 동의', met: iAgreed },
     { label: '전원 동의', met: blockers.length === 0 },
   ];
-  const canGoRecord = startConditions.every((c) => c.met);
+  // ⚠️ **이 화면은 오래도록 회의 상태를 안 봤습니다** (결함 214). 다섯
+  //    상태에서 화면이 글자까지 같았고, 검토까지 끝난 회의에서도
+  //    「녹음 화면으로」가 멀쩡히 눌렸습니다. 판단은 `@lib` 에 있습니다.
+  const phase = lobbyPhase(meeting.data?.status);
+  const canGoRecord = phase.canStart && startConditions.every((c) => c.met);
 
   // 지금 이 창이 녹음을 끝까지 붙잡을 수 있는가. 판단은 `@lib` 에 있습니다.
   const safety = recordingSafety(window, window.matchMedia('(display-mode: standalone)').matches);
@@ -124,12 +122,33 @@ export default function Lobby() {
     <AppShell
       title={title}
       projectId={meeting.data?.project_id}
-      meta={room.message}
+      /* ⚠️ **머리줄이 아래 설명과 반대되는 말을 하고 있었습니다** (결함 214).
+         실패한 회의에서 「아직 아무도 참가하지 않았습니다」 — 「아직」 은
+         곧 들어온다는 뜻인데, 그 회의는 이미 끝났습니다. 방 상태는 녹음
+         국면에서만 소식이고, 끝난 뒤에는 **회의가 어느 상태인가**가
+         소식입니다. 낱말은 홈의 상태 칩과 같은 곳(`describeMeetingStatus`)
+         에서 옵니다 — 두 화면이 갈라지지 않게. */
+      meta={
+        phase.canStart
+          ? room.message
+          : describeMeetingStatus(meeting.data?.status ?? '')
+      }
       actions={
         <div className="appbar__actions">
-          {meeting.data?.status === 'needs_review' && (
-            <Link className="btn btn--primary" to={`/meeting/${meetingId}/review`}>
-              업무 후보 검토
+          {/* ⚠️ **막았으면 갈 곳을 줍니다.** 예전에는 `needs_review` 만
+              보고 「업무 후보 검토」를 그렸고, 검토가 끝난 회의(`confirmed`)
+              에서는 나가는 문이 「통화 열기」뿐이었습니다. 어디로 보낼지는
+              `lobbyPhase` 가 정합니다 — 화면은 그리기만 합니다. */}
+          {phase.go !== null && (
+            <Link
+              className="btn btn--primary"
+              to={
+                phase.go.screen === 'review'
+                  ? `/meeting/${meetingId}/review`
+                  : `/project/${meeting.data?.project_id ?? ''}/kanban`
+              }
+            >
+              {phase.go.label}
             </Link>
           )}
           {room.needsForceFinish && (
@@ -149,7 +168,7 @@ export default function Lobby() {
               예전에는 이 사유가 왼쪽 판 한가운데 문장으로 앉아 있었고,
               헤더가 이미 같은 말을 하고 있어 한 화면에서 방 상태를 **네 번**
               말했습니다 — 그중 둘은 글자까지 같았습니다. */}
-          {startConditions.some((c) => !c.met) && (
+          {phase.canStart && startConditions.some((c) => !c.met) && (
             <span className="conds-slot">
               <Conditions items={startConditions} id="start-conds" />
               {blockers.length > 0 && <Why about="녹음 시작 조건" lines={blockers} />}
@@ -159,8 +178,16 @@ export default function Lobby() {
             className={`btn btn--primary${!canGoRecord ? ' btn--unmet btn--disabled-link' : ''}`}
             href={canGoRecord ? `/index.html?meeting=${meetingId}` : undefined}
             aria-disabled={!canGoRecord}
-            aria-describedby={!canGoRecord ? 'start-conds' : undefined}
-            title={!canGoRecord ? describeConditions(startConditions) : undefined}
+            /* 막힌 이유가 둘입니다 — 아직 동의가 안 찼거나(조건 칩),
+               이미 끝난 회의이거나(국면 설명). 가리키는 곳이 다릅니다. */
+            aria-describedby={
+              canGoRecord ? undefined : phase.canStart ? 'start-conds' : 'phase-note'
+            }
+            title={
+              !canGoRecord
+                ? (phase.note ?? describeConditions(startConditions))
+                : undefined
+            }
           >
             녹음 화면으로
           </a>
@@ -174,10 +201,27 @@ export default function Lobby() {
             <span className="pane__count">{roster.length}명</span>
           </div>
           <div className="pane__body">
+            {/* ⚠️ **홈이 한 말이 여기서 사라지고 있었습니다** (결함 214).
+                홈은 "처리에 실패했습니다 — 트랙이 온전한지 확인하세요"
+                라고 보내는데, 도착한 화면에는 「실패」라는 낱말이 **한 번도**
+                안 나왔습니다. 대신 「시작 전 확인」과 「녹음 화면으로」가
+                떠 있어, 이미 지나간 일을 준비하라고 말하고 있었습니다.
+
+                `id` 는 막힌 「녹음 화면으로」가 `aria-describedby` 로
+                가리킵니다 — 눈으로 보는 사람과 낭독기가 같은 문장을
+                받습니다. */}
+            {phase.note !== null && (
+              <p className="phase-note" id="phase-note">
+                {phase.note}
+              </p>
+            )}
             {statuses.map((status) => {
               const track = trackList.find((t) => t.user_id === status.userId);
               const gapSpans = diagram.gaps.get(status.userId) ?? [];
               const joined = status.verdict !== 'not_joined';
+              // 같은 판정이라도 **국면이 바뀌면 뜻이 달라집니다** — 끝난
+              // 회의의 「대기」는 「미참가」입니다 (결함 214).
+              const view = verdictView(status, phase.canStart);
               return (
                 <div className={`lrow${anyJoined ? '' : ' lrow--nolane'}`} key={status.userId}>
                   <span className="lrow__name">{status.name}</span>
@@ -201,11 +245,11 @@ export default function Lobby() {
                       그대로 붙어 셋이면 세 번 반복됐고, 끊긴 트랙의 진짜
                       경고가 그 반복 속에 묻혔습니다. */}
                   <span className="lrow__status">
-                    <span className="lrow__word">{VERDICT_WORD[status.verdict]}</span>
+                    <span className="lrow__word">{view.word}</span>
                     <Why
                       about={`${status.name} — 트랙 상태`}
                       lines={[
-                        status.message,
+                        view.message,
                         ...gapSpans.map((span) => describeGap(span, diagram.durationMs)),
                         ...captureAlerts(track),
                       ]}
@@ -228,7 +272,7 @@ export default function Lobby() {
                 녹음을 끊고, 그래서 이 저장소에 데스크톱 셸이 있습니다
                 (docs/21). 그 사실을 확인할 자리가 여기 말고 없었습니다.
                 두 줄 다 **이미 있는 판단**에서 옵니다 — 새 문구가 아닙니다. */}
-            {room.recording === 0 && roster.length > 0 && (
+            {phase.canStart && room.recording === 0 && roster.length > 0 && (
               <div className="preflight">
                 <h3 className="preflight__title">시작 전 확인</h3>
                 <ul className="preflight__list">

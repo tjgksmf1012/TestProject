@@ -1243,6 +1243,59 @@ def test_changing_the_number_without_a_reason_is_refused(client: TestClient, see
     assert "이유" in response.json()["detail"]
 
 
+def test_a_share_outside_zero_to_hundred_is_refused(client: TestClient, seeded):
+    """⭐ 있을 수 없는 값은 확정되지 않는다 (결함 215).
+
+    베타에서 `-5 · -894 · 999` 를 넣었더니 **201** 이 나왔습니다. 셋의
+    합이 정확히 100 이라 화면의 합계 경고도 조용했고, 그 값이 그대로
+    확정 기록이 됐습니다.
+
+    ⛔ 이것은 불변식 넷째("시스템은 판정하지 않습니다")의 예외가 **아닙니다.**
+    팀이 시스템 값과 다르게 정하는 것은 얼마든지 되고(사유로 남습니다),
+    여기서 막는 것은 다른 의견이 아니라 **몫이 될 수 없는 값**입니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+
+    for bad in (-5.0, -894.0, 999.0, 100.001):
+        response = client.post(
+            _final_url(seeded),
+            json={"finals": [{"user_id": users[0], "final_value": bad, "reason": "실험"}]},
+        )
+        assert response.status_code == 400, f"{bad} 이 통과했습니다: {response.text}"
+        assert "0~100" in response.json()["detail"]
+
+    # 경계는 **막지 않습니다** — 한 사람이 전부 한 경우가 실제로 있습니다.
+    for ok_value in (0.0, 100.0):
+        response = client.post(
+            _final_url(seeded),
+            json={"finals": [{"user_id": users[0], "final_value": ok_value, "reason": "실험"}]},
+        )
+        assert response.status_code == 201, f"{ok_value} 가 막혔습니다: {response.text}"
+
+
+def test_a_sum_other_than_hundred_is_still_allowed(client: TestClient, seeded):
+    """⚠️ 합계 100 은 **강제하지 않습니다.**
+
+    팀 일부만 확정하는 경우가 있습니다. 위 범위 검사를 넣으면서 여기까지
+    막으면, 두 사람만 확정하려던 팀이 갑자기 못 하게 됩니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+
+    response = client.post(
+        _final_url(seeded),
+        json={
+            "finals": [
+                {"user_id": users[0], "final_value": 10.0, "reason": "일부만 확정"},
+                {"user_id": users[1], "final_value": 20.0, "reason": "일부만 확정"},
+            ]
+        },
+    )
+    assert response.status_code == 201, response.text
+
+
 def test_confirming_leaves_an_audit_trail(client: TestClient, seeded):
     """조정은 판단이다. 판단에는 **주체**가 있어야 이의를 제기할 상대가 생긴다."""
     users = seeded["user_ids"]

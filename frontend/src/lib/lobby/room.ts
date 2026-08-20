@@ -405,3 +405,120 @@ export function savedExtraConsents(
     voiceprint: mine?.voiceprint_storage ?? null,
   };
 }
+
+/* ══════════════════════════════════════════════════════════════
+   회의 국면 — 이 로비가 「시작 전」인가 「끝난 뒤」인가
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * 로비가 지금 무엇을 그려야 하는가.
+ *
+ * ⚠️ **로비는 오래도록 회의 상태를 아예 안 봤습니다** (결함 214). 재서
+ * 확인한 것 — 다섯 상태 전부에서 화면이 **글자까지 같았습니다**:
+ *
+ *     회의 1 (needs_review) 「시작 전 확인」 있음 · 「녹음 화면으로」 안 막힘
+ *     회의 4 (confirmed)    「시작 전 확인」 있음
+ *     회의 5 (failed)       「시작 전 확인」 있음 · 화면에 「실패」 0회
+ *
+ * 세 가지가 한꺼번에 잘못돼 있었습니다:
+ *
+ *   1. **끝난 회의를 다시 녹음하러 갈 수 있었습니다.** 검토까지 끝난
+ *      회의에서 「녹음 화면으로」가 멀쩡히 눌렸습니다.
+ *   2. **홈이 한 말이 도착지에서 사라졌습니다.** 홈은 "처리에
+ *      실패했습니다 — 트랙이 온전한지 확인하세요" 라고 보내는데, 그
+ *      화면에는 실패라는 낱말이 한 번도 안 나옵니다. AGENTS.md 의
+ *      "할 일을 알려 주고 그 일을 할 자리를 안 줌" 그 자리입니다.
+ *   3. **끝난 회의에 「시작 전 확인」이 떴습니다.** 이미 지나간 일을
+ *      준비하라고 말하는 화면입니다.
+ *
+ * ⚠️ **모르는 상태는 「시작 전」으로 둡니다.** 반대로 하면 새 상태가
+ * 하나 생길 때마다 그 회의는 녹음을 **못 하게** 됩니다. 이 제품에서
+ * 녹음이 한 번 끊기면 그 구간은 영영 못 잽니다 — 막는 쪽이 더 비쌉니다.
+ */
+export interface LobbyPhase {
+  /** 지금 녹음을 시작할 수 있는 국면인가. */
+  canStart: boolean;
+  /**
+   * 끝난 회의라면 **무슨 일이 있었고 여기서 무엇을 볼 수 있는가**.
+   * 시작 전이면 `null` — 그때는 「시작 전 확인」이 할 말을 합니다.
+   */
+  note: string | null;
+  /**
+   * 로비 말고 갈 곳. 여기서 할 일이면 `null`.
+   *
+   * ⚠️ 「녹음 화면으로」를 막으면서 갈 곳을 안 주면 막다른 길입니다.
+   * 실패한 회의만 `null` 인데, 그건 **확인할 것이 이 화면에** 있기
+   * 때문입니다.
+   */
+  go: { label: string; screen: 'review' | 'kanban' } | null;
+}
+
+export function lobbyPhase(status: string | null | undefined): LobbyPhase {
+  switch (status) {
+    case 'queued':
+    case 'processing':
+      return {
+        canStart: false,
+        note: '녹음이 끝나 처리 중입니다. 끝나면 업무 후보가 나옵니다.',
+        go: null,
+      };
+    case 'needs_review':
+      return {
+        canStart: false,
+        note: '녹음이 끝났습니다. 업무 후보를 검토할 차례입니다.',
+        go: { label: '업무 후보 검토', screen: 'review' },
+      };
+    case 'confirmed':
+      return {
+        canStart: false,
+        note: '검토까지 끝난 회의입니다. 아래는 그때 남은 트랙 기록입니다.',
+        go: { label: '칸반 보기', screen: 'kanban' },
+      };
+    case 'failed':
+      return {
+        canStart: false,
+        // 홈이 "트랙이 온전한지 확인하세요" 라고 보낸 그 말을 **여기서**
+        // 이어받습니다. 확인할 것은 바로 아래 참가자 상태입니다.
+        note: '처리에 실패했습니다. 아래 트랙이 온전한지 확인하세요 — 트랙이 짧거나 끊겼으면 그게 원인일 수 있습니다.',
+        go: null,
+      };
+    default:
+      // 모르는 상태도 여기로 옵니다 — 위 주석의 이유로 **막지 않습니다.**
+      return { canStart: true, note: null, go: null };
+  }
+}
+
+/**
+ * 참가자 한 줄이 쓸 낱말과 문장.
+ *
+ * ⚠️ **국면이 바뀌면 같은 판정이 다른 뜻이 됩니다.** `not_joined` 는 녹음
+ * 전이면 「대기」(곧 들어올 사람)이지만, 이미 끝난 회의에서는 「미참가」
+ * (영영 안 들어온 사람)입니다. 실패한 회의의 로비에서 세 사람이 나란히
+ * 「대기 · 아직 참가하지 않았습니다」 라고 서 있었습니다 — 아무도 기다리고
+ * 있지 않은데요. 그리고 그 화면은 "트랙이 온전한지 확인하세요" 라고 보낸
+ * 곳이었습니다. **아무도 참가 안 한 것이 바로 그 답**인데, 화면은 그것을
+ * 「아직」 이라는 말로 덮고 있었습니다 (결함 214).
+ *
+ * ⚠️ 낱말 표를 화면에 두지 않습니다. `Lobby.tsx` 안에 `VERDICT_WORD` 상수로
+ * 있었고, 화면 코드에는 자동 테스트가 없으니 이 판단은 검증 밖이었습니다.
+ */
+export interface VerdictView {
+  /** 한 낱말. 문장은 `?` 안에서 원문 그대로 나옵니다. */
+  word: string;
+  /** 그 낱말의 근거 한 줄. */
+  message: string;
+}
+
+export function verdictView(status: MemberStatus, canStart: boolean): VerdictView {
+  if (status.verdict === 'not_joined' && !canStart) {
+    return { word: '미참가', message: '이 회의에 참가하지 않았습니다 — 이 사람의 녹음은 없습니다' };
+  }
+  const WORD: Record<TrackVerdict, string> = {
+    not_joined: '대기',
+    healthy: '녹음 중',
+    at_risk: '끊김',
+    broken: '못 씀',
+    finished: '종료',
+  };
+  return { word: WORD[status.verdict], message: status.message };
+}

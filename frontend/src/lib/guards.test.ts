@@ -3932,3 +3932,202 @@ describe('SPA 가 lib 의 판단을 실제로 부르는가 (결함 197 계열)',
     );
   });
 });
+
+// ══════════════════════════════════════════════════════════════
+// 베타 체험 QA — 창을 반으로 줄였을 때 (docs/24)
+// ══════════════════════════════════════════════════════════════
+
+describe('좁은 폭에서 홈의 회의 줄 (`.mrow`)', () => {
+  const css = readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
+
+  /**
+   * `@media (…) { … }` 를 **전부** 뜯는다.
+   *
+   * ⚠️ 이 저장소의 CSS 가드가 **첫 미디어 쿼리만 보고** 통과한 적이
+   *    있습니다(AGENTS.md). 정규식으로 `@media[^}]*}` 를 잡으면 중첩
+   *    중괄호에서 끊깁니다 — 중괄호를 세서 짝을 찾습니다.
+   */
+  function mediaBlocks(source: string): { cond: string; body: string }[] {
+    const out: { cond: string; body: string }[] = [];
+    let at = source.indexOf('@media');
+    while (at !== -1) {
+      const open = source.indexOf('{', at);
+      if (open === -1) break;
+      let depth = 0;
+      let i = open;
+      for (; i < source.length; i += 1) {
+        if (source[i] === '{') depth += 1;
+        else if (source[i] === '}') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      out.push({ cond: source.slice(at + 6, open).trim(), body: source.slice(open + 1, i) });
+      at = source.indexOf('@media', i);
+    }
+    return out;
+  }
+
+  /** 선택자 하나의 선언부. 없으면 `null`. */
+  function ruleFor(source: string, selector: string): string | null {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m = new RegExp(`(?:^|[,}])\\s*${escaped}\\s*\\{([^}]*)\\}`, 'm').exec(source);
+    return m === null ? null : m[1] ?? null;
+  }
+
+  /**
+   * `grid-template-columns` 에서 **못 박힌 폭의 합**(rem).
+   *
+   * `minmax(0, 1fr)` · `auto` · `1fr` 은 줄어들 수 있으므로 0 입니다.
+   * 이 합이 창보다 크면 남은 칸이 0 이 되고, 그다음에는 내용이 화면
+   * 밖으로 나갑니다.
+   */
+  function fixedRem(decls: string): number {
+    const value = /grid-template-columns\s*:\s*([^;]+)/.exec(decls)?.[1] ?? '';
+    let total = 0;
+    for (const m of value.matchAll(/(\d+(?:\.\d+)?)(rem|px)\b/g)) {
+      total += Number(m[1]) / (m[2] === 'px' ? 16 : 1);
+    }
+    return total;
+  }
+
+  it('⭐ 좁아지면 한 줄을 접는다 — 제목이 0px 이 되고 버튼이 화면 밖으로 나갔다 (결함 213)', () => {
+    // 재서 확인한 것(1280px→800px→400px, 실제 브라우저):
+    //
+    //     [1280px] 제목폭 416 · 액션 화면밖 0개
+    //     [ 800px] 제목폭   8 · 액션 화면밖 0개
+    //     [ 400px] 제목폭   0 · 액션 화면밖 **5개** · 행 넘침 392px
+    //
+    // 400px 에서 버튼 오른쪽 끝이 776px 이었습니다. `.main` 이
+    // `overflow: hidden` 이라 스크롤도 안 됩니다 — 「업무 후보 검토」를
+    // 누를 방법이 **아예 없었습니다.** 결함 186 과 같은 종류입니다.
+    const base = ruleFor(css, '.mrow');
+    ok(base !== null, 'app.css 에 `.mrow` 규칙이 없습니다');
+
+    const narrow = mediaBlocks(css)
+      .filter((b) => /max-width/.test(b.cond))
+      .map((b) => ({ cond: b.cond, decls: ruleFor(b.body, '.mrow') }))
+      .filter((b): b is { cond: string; decls: string } => b.decls !== null)
+      .filter((b) => /grid-template-columns/.test(b.decls));
+    ok(
+      narrow.length > 0,
+      '좁은 폭에서 `.mrow` 의 칸 배치를 다시 정하는 곳이 없습니다 — ' +
+        `고정 폭 ${fixedRem(base as string)}rem 이 그대로 남아 제목 칸이 0 이 됩니다`,
+    );
+
+    // 320px = 20rem 까지 살아야 합니다 (WCAG 1.4.10). 상태 칩·버튼이
+    // 들어갈 자리를 빼면 못 박힌 폭은 **12rem 아래**여야 합니다.
+    for (const { cond, decls } of narrow) {
+      ok(
+        fixedRem(decls) <= 12,
+        `${cond} 안의 \`.mrow\` 가 아직 ${fixedRem(decls)}rem 을 못 박고 있습니다`,
+      );
+    }
+  });
+
+  it('⚠️ 칸 이름을 쓰면 **여섯 칸 전부** 자리를 준다 — 하나만 빠져도 딴 줄로 튄다', () => {
+    // `grid-template-areas` 를 쓰면서 자식에게 `grid-area` 를 안 주면
+    // 그 자식은 **자동 배치**돼 아무 빈칸에나 들어갑니다. 리본 하나가
+    // 제목 자리로 올라가면 줄이 통째로 어긋납니다.
+    for (const { cond, body } of mediaBlocks(css).filter((b) => /max-width/.test(b.cond))) {
+      const decls = ruleFor(body, '.mrow');
+      if (decls === null || !/grid-template-areas/.test(decls)) continue;
+      const 빠진것 = ['status', 'title', 'date', 'ribbon', 'cov', 'action'].filter(
+        (part) => !new RegExp(`\\.mrow__${part}\\s*\\{[^}]*grid-area`).test(body),
+      );
+      strictEqual(빠진것.join(', '), '', `${cond} 안에서 자리를 못 받은 칸이 있습니다`);
+    }
+  });
+});
+
+describe('로비가 회의 국면을 본다 (결함 214)', () => {
+  const code = (...parts: string[]) =>
+    readFileSync(join(ROOT, '..', 'webapp', 'src', ...parts), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+  const lobby = code('screens', 'Lobby.tsx');
+
+  it('⭐ 끝난 회의에서 「녹음 화면으로」가 막힌다', () => {
+    // 재서 확인한 것 — 다섯 상태에서 화면이 **글자까지 같았습니다.**
+    // 검토까지 끝난 회의(`needs_review`)에서 이 버튼이 멀쩡히 눌렸습니다.
+    //
+    // ⚠️ `lobbyPhase(` 라는 낱말이 있는가로 재면 `import` 줄 하나로
+    //    통과합니다. **막는 값이 실제로 섞이는가**를 봅니다.
+    ok(/lobbyPhase\(meeting\.data\?\.status\)/.test(lobby), '회의 상태를 국면 판단에 안 넘깁니다');
+    const gate = /const canGoRecord\s*=\s*([^;]+);/.exec(lobby)?.[1] ?? '';
+    ok(gate !== '', '`canGoRecord` 가 없습니다');
+    ok(
+      /phase\.canStart/.test(gate),
+      `「녹음 화면으로」가 동의 조건만 봅니다 (\`${gate.trim()}\`) — 끝난 회의도 눌립니다`,
+    );
+  });
+
+  it('⭐ 홈이 보낸 말을 **그려서** 이어받는다 — 계산만 하면 화면에는 없다', () => {
+    // 홈: "처리에 실패했습니다 — 트랙이 온전한지 확인하세요"
+    // → 도착 화면에 「실패」라는 낱말이 **한 번도** 없었습니다.
+    ok(
+      /\{phase\.note !== null && \(/.test(lobby),
+      '국면 설명을 그리는 자리가 없습니다',
+    );
+    ok(/id="phase-note"/.test(lobby), '막힌 버튼이 가리킬 `id` 가 없습니다');
+    // 막았으면 **왜 막혔는지** 낭독기도 들어야 합니다 (AGENTS.md 「아직 안 됨」).
+    ok(
+      /aria-describedby=\{[^}]*phase\.canStart \? 'start-conds' : 'phase-note'/.test(lobby),
+      '막힌 이유가 국면일 때 가리키는 곳이 여전히 조건 칩입니다',
+    );
+  });
+
+  it('⭐ 끝난 회의에는 「시작 전 확인」을 안 그린다 — 지나간 일을 준비하라는 말이었다', () => {
+    ok(
+      /\{phase\.canStart && room\.recording === 0/.test(lobby),
+      '끝난 회의에도 「시작 전 확인」이 뜹니다',
+    );
+  });
+
+  it('⚠️ 상태 낱말 표가 화면이 아니라 `@lib` 에 있다 — 화면 코드에는 자동 테스트가 없다', () => {
+    // `Lobby.tsx` 안에 `VERDICT_WORD` 상수로 있었습니다. 그래서 "끝난
+    // 회의의 `not_joined` 는 「대기」가 아니다" 라는 판단을 넣을 자리가
+    // 검증 밖이었습니다.
+    ok(!/VERDICT_WORD/.test(lobby), '낱말 표가 아직 화면에 있습니다');
+    ok(
+      /verdictView\(status, phase\.canStart\)/.test(lobby),
+      '국면을 안 넘기면 끝난 회의에서도 「대기」라고 씁니다 — 아무도 안 기다리는데',
+    );
+  });
+
+  it('⚠️ 머리줄이 아래 설명과 **반대되는 말**을 하지 않는다', () => {
+    // 실패한 회의에서 머리줄은 「아직 아무도 참가하지 않았습니다」였습니다.
+    // 「아직」 은 곧 들어온다는 뜻입니다.
+    const meta = /meta=\{([\s\S]*?)\n      \}/.exec(lobby)?.[1] ?? '';
+    ok(
+      /phase\.canStart/.test(meta) && /describeMeetingStatus\(/.test(meta),
+      `머리줄이 국면과 무관하게 방 상태만 말합니다 (\`${meta.trim().slice(0, 60)}\`)`,
+    );
+  });
+});
+
+describe('확정 막힘 사유는 **한 덩이로 읽혀야** 한다 (결함 215)', () => {
+  it('⚠️ 화면이 목록 뒤에 꼬리를 붙이지 않는다 — 문제가 둘 이상이면 엉뚱한 말이 붙는다', () => {
+    // 실제로 이렇게 나왔습니다:
+    //
+    //   기여도는 0~100 사이여야 합니다 — 음수나 100 초과는 몫이 될 수
+    //   없습니다 — 사유 없는 조정은 근거 없는 점수와 같습니다
+    //
+    // 뒤 절반은 범위와 아무 상관이 없습니다. 문장은 **문제를 만드는 곳**에
+    // 함께 두어야 문제마다 자기 설명을 갖습니다.
+    const contrib = readFileSync(
+      join(ROOT, '..', 'webapp', 'src', 'screens', 'Contributions.tsx'),
+      'utf8',
+    )
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ');
+    const rendered = /\{problems\.join\(' · '\)\}([^<]*)</.exec(contrib)?.[1] ?? null;
+    ok(rendered !== null, '문제 목록을 그리는 자리를 못 찾았습니다');
+    strictEqual(
+      (rendered as string).trim(),
+      '',
+      '목록 뒤에 고정 문구가 붙어 있습니다 — 문제마다 다른 설명이 필요합니다',
+    );
+  });
+});

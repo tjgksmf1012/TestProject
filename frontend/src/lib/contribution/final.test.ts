@@ -52,6 +52,41 @@ describe('보내기 전 검사', () => {
     deepStrictEqual(problemsWith([draft({ final_value: 42.5 })], SYSTEM), []);
   });
 
+  it('⭐ 몫이 될 수 없는 값은 막는다 — 음수도 100 초과도 (결함 215)', () => {
+    // 베타에서 `-5 · -894 · 999` 를 넣었는데 **아무 경고가 없었습니다.**
+    // 셋의 합이 정확히 100 이라 합계 경고까지 조용했습니다.
+    for (const bad of [-5, -894, 999, 100.001]) {
+      const problems = problemsWith([draft({ final_value: bad, reason: '실험' })], SYSTEM);
+      strictEqual(problems.length, 1, `${bad} 이 통과했습니다`);
+      strictEqual(problems[0]?.includes('0~100'), true);
+    }
+  });
+
+  it('⚠️ 경계는 막지 않는다 — 한 사람이 전부 한 경우가 실제로 있다', () => {
+    for (const okValue of [0, 100]) {
+      deepStrictEqual(
+        problemsWith([draft({ final_value: okValue, reason: '합의' })], SYSTEM),
+        [],
+        `${okValue} 가 막혔습니다`,
+      );
+    }
+  });
+
+  it('⛔ 합계가 100 이 아닌 것은 **여기서 막지 않는다** — 팀 일부만 확정할 수 있다', () => {
+    // 범위 검사를 넣으면서 합계까지 막으면, 두 사람만 확정하려던 팀이
+    // 갑자기 못 하게 됩니다. 합계는 화면이 경고만 합니다.
+    deepStrictEqual(
+      problemsWith(
+        [
+          draft({ final_value: 10, reason: '일부만' }),
+          draft({ user_id: 2, final_value: 20, reason: '일부만' }),
+        ],
+        SYSTEM,
+      ),
+      [],
+    );
+  });
+
   it('같은 문제를 여러 번 쌓지 않는다 — 사람이 읽을 목록이다', () => {
     const problems = problemsWith(
       [draft({ final_value: 50 }), draft({ user_id: 2, final_value: 10 })],

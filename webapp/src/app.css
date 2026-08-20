@@ -1308,6 +1308,36 @@ details.disc > .disc__body {
 .mrow__none { font-family: var(--font-mono); color: var(--c-ink-faint); }
 .mrow__action .btn { text-decoration: none; }
 
+/* ⚠️ **좁은 폭에서 이 줄이 통째로 무너졌습니다** (결함 213). 위 6칸은
+   47.5rem(=760px)이 **고정**이라, 창을 반으로 줄이면 `minmax(0, 1fr)` 인
+   제목 칸이 먼저 0 이 되고 — 800px 에서 제목이 8px, 640px 아래로는 0px —
+   그다음에는 액션 버튼이 화면 밖으로 밀려났습니다. 400px 에서 버튼
+   오른쪽 끝이 776px, 즉 **누를 방법이 아예 없었습니다.** `.main` 이
+   `overflow: hidden` 이라 스크롤도 안 됩니다. 결함 186 과 같은 자리에서
+   같은 일이 다시 났습니다 (WCAG 1.4.10).
+
+   ⚠️ 폭을 줄여서 맞추지 않습니다 — 칸 폭을 못 박은 것은 세로로 훑을 때
+   우측 끝이 흔들리지 않게 하려던 v2 F6 의 결정이고, 그 결정은 **넓은
+   창에서** 옳습니다. 좁아지면 한 줄을 두 줄로 접습니다: 위는 사람이 먼저
+   찾는 것(상태·제목·행동), 아래는 값(날짜·리본·%). 우측 정렬은 두 줄
+   모두에서 유지되므로 세로 스캔도 살아 있습니다. */
+@media (max-width: 1023.5px) {
+  .mrow {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "status title  action"
+      "date   ribbon cov";
+    column-gap: var(--sp-5);
+    row-gap: var(--sp-4);
+  }
+  .mrow__status { grid-area: status; }
+  .mrow__title  { grid-area: title; }
+  .mrow__action { grid-area: action; }
+  .mrow__date   { grid-area: date; }
+  .mrow__ribbon { grid-area: ribbon; min-width: 0; }
+  .mrow__cov    { grid-area: cov; text-align: right; }
+}
+
 /* 대화 상자 — 시작하기 (홈 헤더) */
 .dialog-backdrop {
   position: fixed;
@@ -1719,6 +1749,21 @@ a.chain__link:hover { border-color: var(--c-evidence); }
 
 /* 시작 전 확인 (로비) — v2 F5 로 F3 이 비운 자리를 씁니다.
    조건 칩과 같은 문법(`●` 채움 / `○` 빔)이라 새로 배울 게 없습니다. */
+/* 회의 국면 설명 (결함 214) — "이 회의는 이미 끝났습니다".
+   ⚠️ **빨강이 아닙니다.** 실패한 회의도 사용자가 뭘 잘못한 게 아니고,
+   빨강은 "네가 잘못했다" 로 읽힙니다 (기여도 불변식 셋째와 같은 이유).
+   가라앉은 바탕에 잉크 색 글자로, 왼쪽에 굵은 선 하나만 둡니다. */
+.phase-note {
+  margin: 0 0 var(--sp-6);
+  padding: var(--sp-5) var(--sp-6);
+  background: var(--c-sunken);
+  border-left: 3px solid var(--c-line-strong);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--c-ink);
+}
+
 .preflight {
   margin-top: var(--sp-8);
   padding-top: var(--sp-6);

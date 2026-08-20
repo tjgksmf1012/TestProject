@@ -421,9 +421,14 @@ export default function Contributions() {
             {!allFilled && members.length > 0 && (
               <Problem id="confirm-unfilled" tone="incomplete">{unfilled}칸 남음</Problem>
             )}
+            {/* ⚠️ **꼬리를 여기 붙이지 마십시오.** 여기에 「— 사유 없는
+                조정은 …」 이 박혀 있었고, 문제가 하나뿐인 동안은 읽혔습니다.
+                범위 문제(결함 215)가 생기자 상관없는 꼬리가 그 뒤에
+                붙었습니다. 문장은 문제를 만드는 곳(`problemsWith`)에
+                함께 둡니다. */}
             {problems.length > 0 && (
               <Problem id="confirm-problems" tone="incomplete">
-                {problems.join(' · ')} — 사유 없는 조정은 근거 없는 점수와 같습니다
+                {problems.join(' · ')}
               </Problem>
             )}
             {blind && <Problem id="confirm-blind">{BLIND_CONFIRM}</Problem>}

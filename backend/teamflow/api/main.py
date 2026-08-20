@@ -3858,6 +3858,25 @@ def confirm_contributions(
         system_value = round(score.share, 3) if score else 0.0
         final_value = system_value if item.final_value is None else item.final_value
 
+        # ⚠️ **-5% · 999% 가 아무 검사 없이 201 이었습니다** (결함 215).
+        #    `-5 · -894 · 999` 로 넣으면 합이 정확히 100 이라 화면의 합계
+        #    경고도 조용했고, 그 값이 확정 기록으로 남았습니다.
+        #
+        #    ⛔ 이것은 불변식 넷째("시스템은 판정하지 않습니다")의 예외가
+        #    아닙니다. 팀이 시스템 값과 **다르게** 정하는 것은 얼마든지
+        #    되고(그건 사유로 남깁니다), 여기서 막는 것은 다른 의견이
+        #    아니라 **있을 수 없는 값**입니다 — 기여도는 전체에 대한 몫이라
+        #    음수도 100 초과도 뜻이 없습니다.
+        #
+        #    ⚠️ 합계가 100 이 아닌 것은 막지 않습니다. 팀 일부만 확정하는
+        #    경우가 있어 그건 화면이 경고만 하기로 정해져 있습니다.
+        if not 0.0 <= final_value <= 100.0:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"기여도는 0~100 사이여야 합니다 (user_id={item.user_id}, "
+                f"받은 값={final_value})",
+            )
+
         if abs(final_value - system_value) > 1e-9 and not (item.reason or "").strip():
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
