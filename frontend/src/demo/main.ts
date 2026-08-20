@@ -31,7 +31,7 @@ import {
   describeCompletionFailure,
   type TrackCompleteResult,
 } from '../lib/recording/complete.ts';
-import { blockers as sessionBlockers } from '../lib/recording/session.ts';
+import { blockers as sessionBlockers, consentStateFrom } from '../lib/recording/session.ts';
 import {
   describeRecordingSafety,
   isRiskyForRecording,
@@ -224,11 +224,26 @@ const PHASE_LABEL: Record<string, string> = {
 
 // ── 동작 ────────────────────────────────────────────────────
 
-$('consent').addEventListener('click', () => {
-  // 실험용이므로 로컬에서 동의를 확정한다.
-  // 실제 서비스에서는 서버가 참여자 전원의 동의를 확인해야 한다 (docs/07 §1).
-  client.setConsent('all_confirmed');
-});
+/**
+ * 동의 명부를 **서버에서 읽어** 세션에 넣는다.
+ *
+ * ⛔ 예전에는 `#consent` 를 누르면 화면이 스스로 `all_confirmed` 를
+ * 넣었습니다 (결함 229). 서버에 명부가 이미 있는데 안 물어본 것입니다 —
+ * 그래서 (a) 로비에서 진짜로 동의해도 이 화면은 「녹음 동의가
+ * 필요합니다」였고, (b) **아무도 동의 안 한 회의**에서 혼자 그 단추를
+ * 누르면 「준비됐습니다」가 되어 녹음이 실제로 돌았습니다.
+ *
+ * 판단은 `@lib` 의 `consentStateFrom` 이 합니다. 여기서는 **묻고 넣기만**.
+ */
+/** 지금 로그인한 사람. 동의 명부에서 **내 줄**을 찾는 데 씁니다. */
+let myUserId: number | null = null;
+
+async function refreshConsent(id: string): Promise<void> {
+  const response = await tryGet(`${apiBase}/api/meetings/${id}/consent`);
+  // ⚠️ 못 물어봤으면 **모르는 것**입니다. 모르는 것을 동의로 읽지 않습니다.
+  if (response === null || !response.ok) return;
+  client.setConsent(consentStateFrom(await response.json(), myUserId));
+}
 
 /**
  * 회의에 트랙으로 참가한다.
@@ -249,7 +264,12 @@ async function joinMeeting(id: string): Promise<void> {
     location.href = loginUrlFor(location.pathname + location.search);
     return;
   }
-  $('who').textContent = `${((await me.json()) as Me).name} 님의 트랙으로 녹음합니다`;
+  const who = (await me.json()) as Me;
+  myUserId = who.user_id;
+  $('who').textContent = `${who.name} 님의 트랙으로 녹음합니다`;
+  // ⚠️ **트랙 참가보다 먼저** 동의를 읽습니다 (결함 229). 참가가 403 으로
+  //    막혀도 그 이유가 화면의 막는 목록에 서 있어야 합니다.
+  await refreshConsent(id);
   // 다시 들어올 때 지난 실패가 남아 있으면 안 된다.
   showNote($('join-note'), '');
 
@@ -300,7 +320,15 @@ async function joinMeeting(id: string): Promise<void> {
   render();
 }
 
-if (meetingId) void joinMeeting(meetingId);
+if (meetingId) {
+  // 「동의하러 로비로」 — 말만 하고 갈 자리를 안 주면 안 됩니다.
+  ($('consent') as HTMLAnchorElement).href = `/app/meeting/${meetingId}/lobby`;
+  void joinMeeting(meetingId);
+  // 로비에서 동의하고 **돌아왔을 때** 다시 묻습니다.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refreshConsent(meetingId);
+  });
+}
 
 $('permission').addEventListener('click', async () => {
   await client.requestMicrophone();

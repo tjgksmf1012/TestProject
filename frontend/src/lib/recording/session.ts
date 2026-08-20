@@ -25,6 +25,7 @@
  * 추측으로 데이터를 만들면 그게 또 다른 오답이 된다.
  */
 
+import { consentStateOf, type RosterEntry } from '../lobby/room.ts';
 import type { ChunkMeta, Interval, ServerTimeMs } from './types.ts';
 
 export type Phase =
@@ -314,4 +315,60 @@ export function toTimelineInput(state: SessionState): TimelineInputFromSession {
     mutedIntervals: state.mutedIntervals,
     lostSeqs: state.lostSeqs,
   };
+}
+
+/**
+ * 서버의 동의 명부를 이 화면의 동의 상태로.
+ *
+ * ## ⛔ 녹음 화면이 **자기 스스로 「전원 동의」를 선언**하고 있었습니다 (결함 229)
+ *
+ * `index.html` 의 「녹음에 동의」 단추가 이랬습니다.
+ *
+ *     $('consent').addEventListener('click', () => {
+ *       // 실험용이므로 로컬에서 동의를 확정한다.
+ *       client.setConsent('all_confirmed');
+ *     });
+ *
+ * 서버에는 동의 명부가 **이미 있고**(`GET /api/meetings/{id}/consent`),
+ * 로비가 그걸 씁니다. 녹음 화면만 안 불렀습니다 — 이 저장소의 실패 ①
+ * (만들어 놓고 아무도 안 부름) 이 하필 가장 민감한 자리에서 났습니다.
+ *
+ * 재현한 것:
+ *
+ *   1. 로비에서 셋이 다 동의했는데도 녹음 화면은 「녹음 동의가 필요합니다」
+ *      — 진짜 동의가 화면에 **한 번도 안 닿습니다.**
+ *   2. **아무도 동의하지 않은** 회의에서 혼자 그 단추를 누르면 막는 이유가
+ *      전부 사라지고 「준비됐습니다」가 되며, 녹음이 실제로 돕니다
+ *      (청크 1개, 마이크 켜짐). 서버는 트랙 참가를 403 으로 막지만
+ *      그 말은 화면 **다른 줄**에 있고, 같은 화면이 동시에
+ *      「녹음 중」이라고 말합니다.
+ *
+ * `docs/07` §1 은 제3자 녹음을 형사처벌 대상으로 적어 두었고, 바로 위
+ * `blockers` 에도 그 갈래가 있습니다. **판단은 멀쩡했고 화면이 그 판단에
+ * 값을 안 물어본 것**입니다.
+ *
+ * ⚠️ 거부가 먼저입니다. 한 명이라도 거부하면 내가 동의했는지와 무관하게
+ * 이 회의는 녹음할 수 없습니다.
+ *
+ * ⚠️ **응답 본문을 통째로 받습니다.** 화면이 `body.roster ?? []` 를 쓰면
+ * "명부를 못 받았다" 를 다루는 규칙이 화면으로 새고, 화면에는 자동 검사가
+ * 없습니다. 덤으로 화면이 `RosterEntry` 를 이름으로 부를 일이 없어집니다 —
+ * 결함 93 가드가 타입 이름으로 훑을 파일을 고르기 때문에, 이름을 부르면
+ * 녹음 화면의 **다른** `track_id` 가 로비 것으로 잘못 세어집니다.
+ */
+export function consentStateFrom(
+  body: { roster?: readonly RosterEntry[] } | null | undefined,
+  myUserId: number | null,
+): ConsentState {
+  // 명부를 못 받았으면 **모르는 것**입니다. 모르는 것을 동의로 읽지 않습니다.
+  const roster = body?.roster ?? [];
+  if (roster.length === 0) return 'pending';
+
+  const states = roster.map((entry) => ({ entry, state: consentStateOf(entry) }));
+  if (states.some(({ state }) => state === 'refused')) return 'refused';
+
+  const mine = myUserId === null ? undefined : states.find(({ entry }) => entry.user_id === myUserId);
+  if (mine === undefined || mine.state !== 'granted') return 'pending';
+
+  return states.every(({ state }) => state === 'granted') ? 'all_confirmed' : 'self_granted';
 }

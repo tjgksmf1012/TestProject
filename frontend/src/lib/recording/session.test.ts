@@ -11,6 +11,7 @@ import {
   toTimelineInput,
   type SessionEvent,
   type SessionState,
+  consentStateFrom,
 } from './session.ts';
 
 const T0 = 1_700_000_000_000;
@@ -397,5 +398,67 @@ describe('타임라인 연결', () => {
     assert.equal(timeline.gaps.length, 1);
     assert.equal(timeline.gaps[0]!.reason, 'track_muted');
     assert.equal(timeline.gaps[0]!.durationMs, 10_000);
+  });
+});
+
+describe('⛔ 녹음 화면이 스스로 「전원 동의」를 선언하던 것 (결함 229)', () => {
+  const who = (user_id: number, name: string, recording: boolean | null) => ({
+    user_id,
+    name,
+    recording,
+    raw_audio_retention: recording,
+    voiceprint_storage: recording,
+  });
+
+  it('⭐ 전원이 동의해야 `all_confirmed` 다', () => {
+    const roster = [who(1, '김민수', true), who(2, '이하늘', true), who(3, '박지원', true)];
+    assert.strictEqual(consentStateFrom({ roster }, 1), 'all_confirmed');
+  });
+
+  it('⭐ 나만 동의했으면 `self_granted` — 남을 기다린다', () => {
+    const roster = [who(1, '김민수', true), who(2, '이하늘', null), who(3, '박지원', true)];
+    assert.strictEqual(consentStateFrom({ roster }, 1), 'self_granted');
+  });
+
+  it('⛔ 내가 아직이면 `pending` — 남이 다 했어도 내 동의가 먼저다', () => {
+    const roster = [who(1, '김민수', null), who(2, '이하늘', true), who(3, '박지원', true)];
+    assert.strictEqual(consentStateFrom({ roster }, 1), 'pending');
+  });
+
+  it('⛔ **한 명이라도 거부하면 `refused`** — 내가 동의했는지와 무관하다', () => {
+    // 제3자 녹음은 형사처벌 대상입니다(docs/07 §1). 거부가 가장 센 답입니다.
+    const roster = [who(1, '김민수', true), who(2, '이하늘', false), who(3, '박지원', true)];
+    assert.strictEqual(consentStateFrom({ roster }, 1), 'refused');
+  });
+
+  it('⛔ 명부를 못 받았으면 `pending` — **모르는 것을 동의로 읽지 않는다**', () => {
+    assert.strictEqual(consentStateFrom({ roster: [] }, 1), 'pending');
+    // 서버가 닿지 않았거나 모양이 다른 답을 준 경우도 같습니다.
+    assert.strictEqual(consentStateFrom(null, 1), 'pending');
+    assert.strictEqual(consentStateFrom(undefined, 1), 'pending');
+    assert.strictEqual(consentStateFrom({}, 1), 'pending');
+  });
+
+  it('⛔ 내가 명부에 없으면 `pending` — 남의 회의에서 시작할 수 없다', () => {
+    const roster = [who(2, '이하늘', true), who(3, '박지원', true)];
+    assert.strictEqual(consentStateFrom({ roster }, 9), 'pending');
+    assert.strictEqual(consentStateFrom({ roster }, null), 'pending');
+  });
+
+  it('⭐ 그래서 `blockers` 가 실제로 막는다 — 판단과 화면이 같은 값을 본다', () => {
+    // 아무도 동의 안 한 회의. 예전에는 화면이 `all_confirmed` 를 스스로
+    // 넣어서 이 갈래를 **건너뛰었습니다.**
+    const 아무도 = [who(1, '김민수', null), who(2, '이하늘', null)];
+    const state = consentStateFrom({ roster: 아무도 }, 1);
+    assert.strictEqual(state, 'pending');
+    const reasons = blockers({
+      secureContext: true,
+      permission: 'granted',
+      consent: state,
+      clock: 'ok',
+      phase: 'idle',
+      stopReason: null,
+    } as never);
+    assert.strictEqual(reasons.includes('녹음 동의가 필요합니다'), true, JSON.stringify(reasons));
   });
 });

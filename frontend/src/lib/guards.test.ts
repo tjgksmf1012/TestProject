@@ -4132,6 +4132,56 @@ describe('확정 막힘 사유는 **한 덩이로 읽혀야** 한다 (결함 215
   });
 });
 
+describe('⛔ 녹음 화면이 동의를 **스스로 선언하지 않는다** (결함 229)', () => {
+  /* `docs/07` §1: 제3자 녹음은 형사처벌 대상입니다. 그래서
+     `session.blockers` 에 「녹음 동의가 필요합니다」 갈래가 있고 검사도
+     붙어 있습니다.
+
+     그런데 녹음 화면이 그 갈래를 **건너뛰고 있었습니다.**
+
+         $('consent').addEventListener('click', () => {
+           client.setConsent('all_confirmed');   // ← 화면이 스스로
+         });
+
+     서버에는 동의 명부가 이미 있고(`GET /api/meetings/{id}/consent`)
+     로비가 그걸 씁니다. 녹음 화면만 안 물어봤습니다 — 실패 ①.
+
+     재현: 아무도 동의 안 한 회의에서 혼자 그 단추를 누르면 막는 이유가
+     전부 사라지고 「준비됐습니다」가 되며, 녹음이 실제로 돌았습니다
+     (청크 1개). 서버는 403 으로 막지만 그 말은 화면 다른 줄에 있습니다. */
+  const main = readFileSync(join(ROOT, 'src', 'demo', 'main.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⛔ 화면이 동의 상태를 **글자로** 넣지 않는다', () => {
+    ok(
+      !/setConsent\(\s*['"`]/.test(main),
+      '녹음 화면이 동의 상태를 글자로 넣습니다 — 서버 명부를 읽어야 합니다',
+    );
+  });
+
+  it('⭐ 판단은 `@lib` 의 `consentStateFrom` 이 한다', () => {
+    ok(/consentStateFrom\(/.test(main), 'main.ts 가 consentStateFrom 을 안 부릅니다');
+  });
+
+  it('⭐ 서버의 동의 명부를 **실제로 읽는다**', () => {
+    ok(
+      /\/consent(`|'|")/.test(main),
+      'main.ts 가 동의 명부(/consent)를 안 읽습니다 — 만들어 놓고 아무도 안 부르는 것',
+    );
+  });
+
+  it('⭐ 동의가 없으면 **동의할 자리로 보낸다** — 말만 하지 않는다', () => {
+    const html = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8')
+      .replace(/<!--[\s\S]*?-->/g, ' ');
+    ok(
+      /<a[^>]*id="consent"/.test(html),
+      '동의할 자리가 링크가 아닙니다 — 눌러도 갈 데가 없으면 실패 ③ 입니다',
+    );
+    ok(/lobby/.test(main), 'main.ts 가 로비 주소를 안 만듭니다');
+  });
+});
+
 describe('⛔ 세션이 죽으면 사람을 로그인 화면으로 보낸다 (결함 227)', () => {
   /* 세션이 끊긴 화면은 「로그인이 풀렸습니다. 다시 로그인해 주세요.」 라고
      말하는데, 그 화면에 **로그인으로 가는 링크가 한 개도 없습니다.**
