@@ -4450,3 +4450,29 @@ describe('나간 사람의 기여 기록 (결함 222)', () => {
     strictEqual(안넘긴곳.join(', '), '', '나간 사람을 번호로 부르는 자리가 남아 있습니다');
   });
 });
+
+describe('근거 칩은 **자기** 원문으로 간다 (결함 223)', () => {
+  const review = readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Review.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ 후보 카드의 칩이 **누른 칩의** 발화로 간다', () => {
+    // 칩 이름은 「근거 #14 원문 보기」인데 `select(candidate)` 만 부르면
+    // 언제나 **첫** 근거(#1)로 갔습니다. 근거를 #1·#14 로 벌려 놓고 재서
+    // 확인했습니다 — 고치기 전 두 칩 모두 scrollTop 57.
+    const block = /candidate\.evidence_utterance_ids\.map\([\s\S]*?\n {22}\/>/.exec(review)?.[0] ?? '';
+    ok(block !== '', '후보 카드의 근거 칩을 못 찾았습니다');
+    ok(
+      /rowRefs\.current\.get\(id\)\?\.scrollIntoView/.test(block),
+      '누른 칩의 발화로 안 갑니다 — 첫 근거로만 갑니다',
+    );
+    // ⚠️ **다음 프레임으로 미뤄야 먹습니다.** `select` 가 먼저 시작한
+    //    스크롤이 같은 task 안의 두 번째 호출을 삼킵니다 — 처음 쓴 고침이
+    //    그래서 아무 일도 안 했습니다.
+    ok(
+      /requestAnimationFrame\(\(\) => \{[\s\S]*?rowRefs\.current\.get\(id\)/.test(block),
+      '같은 task 에서 부르면 `select` 의 스크롤에 삼켜집니다',
+    );
+  });
+});

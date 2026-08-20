@@ -501,11 +501,41 @@ export default function Review() {
                     {noEvidence ? (
                       <span className="chip chip--unknown">⚠ 근거 없음 — 등록할 수 없습니다</span>
                     ) : (
+                      /* ⚠️ **어느 칩을 눌러도 첫 근거로 갔습니다** (결함 223).
+                         `select(candidate)` 는 `evidence_utterance_ids[0]`
+                         으로 스크롤합니다 — 근거가 #1·#3 인 후보에서
+                         「근거 #3 원문 보기」 를 누르면 #1 로 갔습니다.
+                         재서 확인했습니다 — 근거를 #1·#14 로 벌려 놓고
+                         쟀더니 두 칩 모두 scrollTop 57 이었습니다. 가까운
+                         근거로 재면 두 동작이 **같은 결과**를 내서 아무것도
+                         못 잽니다(#1·#3 으로는 못 잡았습니다).
+
+                         칩의 이름이 「근거 #3 **원문 보기**」 인데 다른 것을
+                         보여 주면, 이 저장소가 실패 ③ 으로 적어 둔 "근거
+                         번호만 주고 볼 자리를 안 준 것" 과 같은 종류입니다
+                         — 자리는 있는데 **틀린 자리**로 갑니다.
+
+                         아래 관찰 줄의 칩은 처음부터 자기 발화로 갔습니다.
+                         같은 화면 안에서 둘이 달랐던 것입니다. */
                       candidate.evidence_utterance_ids.map((id) => (
                         <EvidenceChip
                           key={id}
                           id={`#${id}`}
-                          onOpen={() => select(candidate)}
+                          onOpen={() => {
+                            select(candidate);
+                            /* ⚠️ **다음 프레임에 해야 먹습니다.** `select` 가
+                               먼저 자기 스크롤(첫 근거)을 시작하는데, 같은
+                               task 안에서 두 번째 `scrollIntoView` 를 부르면
+                               삼켜집니다 — 재서 확인했습니다. 처음 쓴 고침이
+                               바로 이래서 **아무 일도 안 했고**, 화면을 재
+                               보지 않았으면 고쳤다고 적을 뻔했습니다. */
+                            requestAnimationFrame(() => {
+                              rowRefs.current.get(id)?.scrollIntoView({
+                                behavior: reduceMotion ? 'auto' : 'smooth',
+                                block: 'center',
+                              });
+                            });
+                          }}
                         />
                       ))
                     )}
