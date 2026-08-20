@@ -3888,6 +3888,36 @@ describe('SPA 가 lib 의 판단을 실제로 부르는가 (결함 197 계열)',
     );
   });
 
+  it('⭐ 못 불러온 것을 **빈 값으로 그리지 않는다** (설정·기여도)', () => {
+    // 서버가 **404** 를 준 프로젝트에서 설정 화면이 멀쩡히 그려지며
+    // 「팀원 0명」 이라고 단언했습니다. 없는 프로젝트와 빈 팀을 사람이
+    // 구별할 수 없었습니다. 기여도는 무슨 일이 있었든 "네트워크를 확인한
+    // 뒤 새로고침하세요" 라고 했고요 — 네트워크는 멀쩡한데.
+    const settings = code('screens', 'Settings.tsx');
+    ok(/describeLoadFailure\(/.test(settings), '설정이 실패 사유를 안 가립니다');
+    // ⚠️ **한 구역이라도 새면 안 됩니다.** "어딘가에 `cannotLoad` 가
+    //    있는가" 로 재면 구역 하나만 되돌려도 통과합니다 — 심어 보고
+    //    알았습니다. 그리는 자리를 **전부** 셉니다.
+    //
+    //    `general` 만 예외입니다. 그 구역은 `project.data &&` 로 이미
+    //    막혀 있어(데이터가 없으면 아예 안 그림) 두 번 막을 필요가
+    //    없습니다.
+    const 새는곳 = (settings.match(/\{(?:cannotLoad === null && )?section === '[a-z]+' &&[^\n]*/g) ?? [])
+      .filter((line) => !line.includes('cannotLoad === null &&'))
+      .filter((line) => !line.includes('project.data'));
+    strictEqual(
+      새는곳.join('\n'),
+      '',
+      '못 불러왔는데 그리는 구역이 있습니다 — 빈 값들이 사실처럼 보입니다',
+    );
+    const contrib = code('screens', 'Contributions.tsx');
+    ok(/describeLoadFailure\(/.test(contrib), '기여도가 실패 사유를 안 가립니다');
+    ok(
+      !/네트워크를 확인한 뒤 새로고침/.test(contrib),
+      '무슨 일이 있었든 네트워크 탓을 하고 있습니다',
+    );
+  });
+
   it('⭐ 검토 화면이 관찰의 **사유와 근거**를 그린다', () => {
     // "근거 없는 지적은 반박할 수 없고, 반박할 수 없으면 잔소리입니다"
     // (`lib/review/findings.ts` 머리말).

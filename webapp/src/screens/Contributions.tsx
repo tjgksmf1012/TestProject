@@ -6,6 +6,8 @@ import { Chain, type ChainLink } from '../components/Chain.tsx';
 import { Stat } from '../components/Stat.tsx';
 import { Why } from '../components/Why.tsx';
 import { useConfirmFinals, useContributions, useFinals, useMembers } from '../api/hooks.ts';
+import { ApiError } from '../api/client.ts';
+import { describeLoadFailure } from '@lib/ui/load.ts';
 import {
   categoriesForDisplay,
   describeCategory,
@@ -219,8 +221,20 @@ export default function Contributions() {
         <div className="panes">
           <section className="pane">
             <div className="pane__body">
+              {/* ⚠️ 예전에는 무슨 일이 있었든 **"네트워크를 확인한 뒤
+                  새로고침하세요"** 였습니다. 없는 프로젝트를 열어도 그렇게
+                  말했고, 네트워크는 멀쩡한데 사람은 와이파이를 껐다 켰습니다.
+                  무엇이 일어났는지에 따라 **할 일이 다릅니다.** */}
               <div className="empty">
-                기여도를 불러오지 못했습니다. 네트워크를 확인한 뒤 새로고침하세요.
+                {describeLoadFailure(
+                  /* ⚠️ 404 일 때 없는 것은 **기여도가 아니라 프로젝트**
+                     입니다 — `/api/projects/{id}/contributions` 가 404 를
+                     주는 경우가 그것입니다. "이 기여도를 찾을 수
+                     없습니다" 는 사람에게 무엇을 고치라는 말인지 안
+                     알려 줍니다. */
+                  '프로젝트',
+                  score.error instanceof ApiError ? score.error.status : null,
+                )}
               </div>
             </div>
           </section>

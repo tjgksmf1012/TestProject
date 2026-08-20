@@ -24,6 +24,7 @@ import {
 } from '@lib/project/roles.ts';
 import { presenceLabel, worthShowing } from '@lib/project/presence.ts';
 import { describeOutcome } from '@lib/privacy/deletion.ts';
+import { describeLoadFailure } from '@lib/ui/load.ts';
 import { AVATAR_SIDE, MAX_BIO, PHOTO_NOTE, bioProblem, coverCrop, photoProblem } from '@lib/profile/edit.ts';
 import { ApiError } from '../api/client.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -623,6 +624,23 @@ export default function Settings() {
   const members = useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
   const mine = members.find((member) => member.user_id === me?.user_id);
 
+  /**
+   * ⚠️ **못 불러온 것을 「0명」 이라고 단언하지 않습니다.**
+   *
+   * 서버가 404 를 준 프로젝트에서도 이 화면은 멀쩡한 설정 화면을 그리고
+   * **「팀원 0명」** 이라고 말했습니다. 없는 프로젝트와 빈 팀을 사람이
+   * 구별할 수 없었고, 위의 `?? []` 가 그 둘을 같은 값으로 만들고
+   * 있었습니다(불변식 셋째 — 측정 불가 ≠ 0점).
+   */
+  const loadError = project.error ?? membersQuery.error;
+  const cannotLoad =
+    loadError == null
+      ? null
+      : describeLoadFailure(
+          '프로젝트',
+          loadError instanceof ApiError ? loadError.status : null,
+        );
+
   const groups = [...new Set(SECTIONS.map((s) => s.group))];
 
   return (
@@ -686,10 +704,13 @@ export default function Settings() {
         </nav>
         <section className="pane">
           <div className="pane__body">
-            {section === 'role' && <RoleSection mine={mine} save={m.saveRole} />}
-            {section === 'github' && <GithubSection mine={mine} save={m.saveGithubLogin} />}
-            {section === 'profile' && <ProfileSection save={m.saveProfile} />}
-            {section === 'members' && (
+            {/* 못 불러왔으면 **여기서 멈춥니다.** 아래를 그리면 빈 값들이
+                사실처럼 보입니다. */}
+            {cannotLoad !== null && <Problem>{cannotLoad}</Problem>}
+            {cannotLoad === null && section === 'role' && <RoleSection mine={mine} save={m.saveRole} />}
+            {cannotLoad === null && section === 'github' && <GithubSection mine={mine} save={m.saveGithubLogin} />}
+            {cannotLoad === null && section === 'profile' && <ProfileSection save={m.saveProfile} />}
+            {cannotLoad === null && section === 'members' && (
               <MembersSection
                 members={members}
                 myUserId={me?.user_id}
@@ -698,7 +719,7 @@ export default function Settings() {
                 removeMember={m.removeMember}
               />
             )}
-            {section === 'repo' && (
+            {cannotLoad === null && section === 'repo' && (
               <RepoSection
                 projectId={projectId}
                 repo={project.data?.github_repo ?? null}
@@ -714,7 +735,7 @@ export default function Settings() {
                 rotate={m.rotateInvite}
               />
             )}
-            {section === 'danger' && <DangerSection revoke={m.revokeMyData} />}
+            {cannotLoad === null && section === 'danger' && <DangerSection revoke={m.revokeMyData} />}
             {m.openMeeting.isError && (
               <Problem>{mutationError(m.openMeeting.error)}</Problem>
             )}
