@@ -4132,6 +4132,77 @@ describe('확정 막힘 사유는 **한 덩이로 읽혀야** 한다 (결함 215
   });
 });
 
+describe('⛔ 막힌 버튼은 `aria-disabled` 다 (결함 234)', () => {
+  /* 이 저장소의 비활성 버튼은 `aria-disabled` 입니다 — 초점을 받고,
+     눌리고, **사유를 말합니다.** `disabled` 는 초점을 못 받으므로
+     키보드·낭독기 사용자가 그 자리에 닿지 못합니다.
+
+     설정의 「저장」 넷(role · github · profile · general)이 `disabled`
+     였습니다. 역할 비중의 합을 0.5 로 만들면 사유가 멀쩡히 적히는데
+
+         합이 1 이어야 합니다 (지금 0.5)
+
+     Tab 은 `기획 비중 → 디자인 비중 → 「왜 나만 바꿀 수 있나요」` 로
+     **버튼을 건너뛰고** 패널 밖으로 나갔습니다.
+
+     ⚠️ **`isPending` 만 막는 것은 예외입니다** — 보내는 동안 두 번
+     눌리는 것을 막는 표준 방법이고, 곧 풀립니다. 판단(값·권한)으로
+     막는 버튼이 규칙의 대상입니다. */
+  const SCREENS = ['Settings.tsx', 'Review.tsx', 'Kanban.tsx', 'Contributions.tsx', 'Lobby.tsx', 'Home.tsx'];
+
+  for (const name of SCREENS) {
+    it(`⭐ ${name} — 판단으로 막는 버튼에 \`disabled\` 를 안 쓴다`, () => {
+      const code = readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', name), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\/\/[^\n]*/g, ' ');
+      const offenders: string[] = [];
+      for (const m of code.matchAll(/(?<!aria-)disabled=\{([^}]*)\}/g)) {
+        const expr = (m[1] ?? '').trim();
+        /* **잠깐인 상태는 면제입니다** — 보내는 동안 두 번 눌리는 것을
+           막는 표준 방법이고, 곧 스스로 풀립니다. 사람이 고쳐야 할
+           것이 없으니 사유를 말할 것도 없습니다.
+           ⚠️ 이름으로 가르는 것이 마음에 안 들지만, "곧 풀리는가" 는
+              정적으로 잴 방법이 이것뿐입니다. */
+        const rest = expr
+          .replace(/[\w.]*\.is(Pending|Success)/g, '')
+          .replace(/\b(busy|saving|pending|submitting|loading)\b/gi, '')
+          .replace(/[|&!\s()]/g, '');
+        if (rest !== '') offenders.push(expr);
+      }
+      ok(
+        offenders.length === 0,
+        `${name}: 판단으로 막는데 \`disabled\` 입니다 — 초점을 못 받아 사유에 닿을 수 없습니다\n    ${offenders.join('\n    ')}`,
+      );
+    });
+  }
+});
+
+describe('⛔ `aria-describedby` 가 **있는 것**을 가리킨다 (결함 234)', () => {
+  /* 가리키는 id 가 없으면 낭독기에는 **아무 말도 안 됩니다** — 사유가
+     없는 것보다 나쁩니다(있다고 믿게 되니까). 실제로 결함 234 를 고치다
+     `profile-problem` 을 가리켜 놓고 그 자리를 안 만들었고, 화면에서
+     사유가 `undefined` 로 나왔습니다. */
+  const FILES = ['screens/Settings.tsx', 'screens/Review.tsx', 'screens/Kanban.tsx',
+    'screens/Contributions.tsx', 'screens/Lobby.tsx', 'screens/Home.tsx'];
+
+  for (const rel of FILES) {
+    it(`⭐ ${rel} — 가리키는 id 가 다 있다`, () => {
+      const code = readFileSync(join(ROOT, '..', 'webapp', 'src', ...rel.split('/')), 'utf8');
+      // 문자열로 박힌 id 만 봅니다 — 변수로 만든 것은 여기서 못 봅니다.
+      const pointed = new Set<string>();
+      for (const m of code.matchAll(/aria-describedby=\{?['"]([\w-]+)['"]/g)) pointed.add(m[1] ?? '');
+      for (const m of code.matchAll(/aria-describedby=\{[^}]*\?\s*['"]([\w-]+)['"]/g)) pointed.add(m[1] ?? '');
+      for (const m of code.matchAll(/:\s*['"]([\w-]+)['"]\s*:\s*undefined/g)) pointed.add(m[1] ?? '');
+      const defined = new Set([...code.matchAll(/\bid=['"]([\w-]+)['"]/g)].map((m) => m[1] ?? ''));
+      const missing = [...pointed].filter((id) => id !== '' && !defined.has(id));
+      ok(
+        missing.length === 0,
+        `${rel}: 없는 자리를 가리킵니다 — 낭독기에 아무 말도 안 됩니다: ${missing.join(', ')}`,
+      );
+    });
+  }
+});
+
 describe('⛔ 검토 확정의 **답을 읽는다** (결함 233)', () => {
   /* 둘이 같은 회의를 검토하면 뒤에 누른 사람이 `approved_count: 0` 을
      받습니다(서버가 멱등이라). 그런데 화면이 그 숫자를 안 읽어서, 전부
@@ -4871,25 +4942,59 @@ describe('관리자만 되는 일을 **구성원에게 열어 두지 않는다**
     // 말도 안 했습니다. `canManage` 는 처음부터 `@lib` 에 있었고 이 화면만
     // 안 불렀습니다 — "만들어 놓고 아무도 안 부름" 그 자리입니다.
     ok(/manageBlockedBecause\(/.test(settings), '관리자 판단을 안 씁니다');
-    for (const [name, id] of [
-      ['프로젝트 이름 바꾸기', 'rename-blocked'],
-      ['초대 코드 새로 만들기', 'rotate-blocked'],
-      ['저장소 연결', 'repo-manage'],
-    ]) {
-      ok(
-        new RegExp(`manageBlockedBecause\\(myRole, '${name}'\\)`).test(settings),
-        `「${name}」 을 안 막습니다`,
-      );
-      ok(new RegExp(`id="${id}"`).test(settings), `「${name}」 의 사유를 그릴 자리가 없습니다`);
+    /* ⚠️ **이름이 아니라 흐름을 잽니다.** 예전에는 `id="rename-blocked"`
+       라는 **글자**를 찾았는데, 결함 234 에서 사유 자리를 하나로 합치자
+       요구는 그대로인데 가드만 깨졌습니다 (평범한 구성원으로 재 보니
+       셋 다 막히고 사유도 뜨고 요청도 안 나갔습니다).
+
+       요구는 이것입니다: **권한 판단의 값이 버튼의 막힘 판단으로
+       흘러가고, 그 막힘이 사유로 이어진다.** */
+    for (const name of ['프로젝트 이름 바꾸기', '초대 코드 새로 만들기', '저장소 연결']) {
+      const assign = new RegExp(
+        `const (\\w+) = manageBlockedBecause\\(myRole, '${name}'\\)`,
+      ).exec(settings);
+      ok(assign !== null, `「${name}」 을 안 막습니다`);
+      const v = assign?.[1] ?? '';
+      // 그 값이 **막힘 판단**으로 흘러가는가 — 직접이든 `whyCannotSave` 를 거치든.
+      const flows =
+        new RegExp(`noPermission:\\s*${v}\\b`).test(settings) ||
+        new RegExp(`aria-disabled=\\{[^}]*${v}\\b`).test(settings) ||
+        new RegExp(`<Problem[^>]*>\\{${v}\\}`).test(settings);
+      ok(flows, `「${name}」 의 사유가 버튼까지 안 갑니다 — 막아 놓고 말을 안 합니다`);
     }
   });
 
   it('⚠️ 막았으면 **눌러도 요청이 안 나가야** 한다', () => {
     // `aria-disabled` 는 눌립니다(이 저장소가 일부러 그렇게 씁니다).
     // 손잡이에서 막지 않으면 403 이 그대로 나갑니다.
-    ok(/if \(renameBlocked !== null\) return;/.test(settings), '이름 저장이 그냥 나갑니다');
-    ok(/if \(rotateBlocked !== null\) return;/.test(settings), '코드 재발급이 그냥 나갑니다');
-    ok(/manageBlocked !== null\) return;/.test(settings), '저장소 연결이 그냥 나갑니다');
+    //
+    // ⚠️ 여기도 **이름이 아니라 요구**입니다: 세 손잡이가 각자 `!== null`
+    //    로 일찍 돌아서는가. 변수 이름은 바뀔 수 있습니다.
+    /* ⚠️ 처음에는 **개수만** 셌습니다(`>= 3`). 손잡이가 여섯이라
+       하나를 지워도 다섯이 남아 **통과했습니다.** 개수가 아니라
+       **그 값이 막는가**를 물어야 합니다. */
+    const guarded = new Set(
+      /* ⚠️ 손잡이 모양이 한 가지가 아닙니다 — `return;` 앞에 초점
+         옮기기가 있기도 하고, 조건이 `save.isPending || X !== null` 처럼
+         **복합**이기도 합니다. 조건 **안**에 `X !== null` 이 있는가를
+         봅니다. */
+      [...settings.matchAll(/if \(([^)]*(?:\([^)]*\)[^)]*)*)\)[\s\S]{0,160}?return;/g)].flatMap((m) =>
+        [...(m[1] ?? '').matchAll(/(\w+) !== null/g)].map((x) => x[1] ?? ''),
+      ),
+    );
+    for (const name of ['프로젝트 이름 바꾸기', '초대 코드 새로 만들기', '저장소 연결']) {
+      const v =
+        new RegExp(`const (\\w+) = manageBlockedBecause\\(myRole, '${name}'\\)`).exec(settings)?.[1] ??
+        '';
+      // 직접 막든, `whyCannotSave` 가 만든 값이 막든 — **둘 중 하나는** 있어야 합니다.
+      const via = new RegExp(`const (\\w+) = whyCannotSave\\(\\{[^}]*noPermission:\\s*${v}\\b`).exec(
+        settings,
+      )?.[1];
+      ok(
+        guarded.has(v) || (via !== undefined && guarded.has(via)),
+        `「${name}」 이 그냥 나갑니다 — 손잡이가 막지 않습니다`,
+      );
+    }
   });
 
   it('⚠️ 권한을 **넘겨줘야** 판단이 돕니다', () => {

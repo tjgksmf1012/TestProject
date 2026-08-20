@@ -414,11 +414,18 @@ export default function Lobby() {
               목소리 특징 저장 — 다음 회의에서 화자를 더 잘 알아봅니다
             </label>
             <div className="sec__row">
+              {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 (결함 234).
+                  이미 동의한 사람의 버튼이 `disabled` 면 **Tab 이 건너뛰어**
+                  「동의했습니다」라는 그 말 자체에 닿지 못합니다. 눌러도
+                  다시 안 보냅니다. */}
               <button
                 type="button"
-                className="btn btn--primary"
-                disabled={m.consent.isPending || iAgreed}
-                onClick={() => void submitConsent(true)}
+                className={`btn btn--primary${iAgreed ? ' btn--unmet' : ''}`}
+                aria-disabled={m.consent.isPending || iAgreed}
+                onClick={() => {
+                  if (m.consent.isPending || iAgreed) return;
+                  void submitConsent(true);
+                }}
               >
                 {iAgreed ? '동의했습니다' : '동의합니다'}
               </button>

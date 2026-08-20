@@ -26,6 +26,7 @@ import {
 import { presenceLabel, worthShowing } from '@lib/project/presence.ts';
 import { describeOutcome } from '@lib/privacy/deletion.ts';
 import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
+import { whyCannotSave } from '@lib/ui/save.ts';
 import { AVATAR_SIDE, MAX_BIO, PHOTO_NOTE, bioProblem, coverCrop, photoProblem } from '@lib/profile/edit.ts';
 import { ApiError } from '../api/client.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -69,6 +70,7 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
     Object.entries(current).map(([k, v]) => [k, v.trim() === '' ? 0 : Number(v)]),
   );
   const problem = problemWith(shares);
+  const roleBlocked = whyCannotSave({ problem, saving: save.isPending });
   const sum = sumOf(shares);
 
   return (
@@ -81,6 +83,7 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
           <input
             className="input input--num"
             inputMode="decimal"
+            id={option.key === ROLE_OPTIONS[0]?.key ? 'role-first' : undefined}
             aria-label={`${option.label} 비중`}
             value={current[option.key] ?? '0'}
             onChange={(e) => setEdited({ ...current, [option.key]: e.target.value })}
@@ -94,15 +97,27 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
         <span className="rolerow__hint">지금 {roleSummary(mine?.role_shares) ?? '미정'}</span>
       </div>
       <div className="sec__row" style={{ marginTop: 'var(--sp-5)' }}>
+        {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 (결함 234).
+            `disabled` 는 초점을 못 받아 **Tab 이 건너뜁니다** — 바로 옆에
+            적힌 사유로 닿는 길이 없었습니다. 누르면 첫 비중 칸으로
+            데려다 줍니다. */}
         <button
           type="button"
-          className="btn btn--primary"
-          disabled={problem !== null || save.isPending}
-          onClick={() => save.mutate(toPayload(shares), { onSuccess: () => setEdited(null) })}
+          className={`btn btn--primary${roleBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={roleBlocked !== null}
+          aria-describedby={roleBlocked !== null ? 'role-problem' : undefined}
+          onClick={() => {
+            if (save.isPending) return;
+            if (roleBlocked !== null) {
+              document.getElementById('role-first')?.focus();
+              return;
+            }
+            save.mutate(toPayload(shares), { onSuccess: () => setEdited(null) });
+          }}
         >
           저장
         </button>
-        <Problem tone="incomplete" inline>{problem}</Problem>
+        <Problem id="role-problem" tone="incomplete" inline>{roleBlocked}</Problem>
         {save.isSuccess && edited === null && <span className="status-ok" role="status">저장됐습니다</span>}
         <Problem inline>{save.isError ? mutationError(save.error) : null}</Problem>
       </div>
@@ -117,6 +132,7 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
 function GithubSection({ mine, save }: { mine: Member | undefined; save: ReturnType<typeof useSettingsMutations>['saveGithubLogin'] }) {
   const [value, setValue] = useState<string | null>(null);
   const login = value ?? mine?.github_login ?? '';
+  const ghBlocked = whyCannotSave({ dirty: value !== null, saving: save.isPending });
   return (
     <div className="sec">
       <h2 className="sec__title">GitHub 계정</h2>
@@ -124,20 +140,31 @@ function GithubSection({ mine, save }: { mine: Member | undefined; save: ReturnT
       <div className="sec__row">
         <input
           className="input input--num"
+          id="gh-input"
           placeholder="github-id"
           aria-label="GitHub 아이디"
           value={login}
           onChange={(e) => setValue(e.target.value)}
         />
+        {/* 결함 234 — `disabled` 는 초점을 못 받습니다. */}
         <button
           type="button"
-          className="btn btn--primary"
-          disabled={save.isPending || value === null}
-          onClick={() => save.mutate(login.trim(), { onSuccess: () => setValue(null) })}
+          className={`btn btn--primary${ghBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={ghBlocked !== null}
+          aria-describedby={ghBlocked !== null ? 'gh-problem' : undefined}
+          onClick={() => {
+            if (save.isPending) return;
+            if (ghBlocked !== null) {
+              document.getElementById('gh-input')?.focus();
+              return;
+            }
+            save.mutate(login.trim(), { onSuccess: () => setValue(null) });
+          }}
         >
           저장
         </button>
       </div>
+      <Problem id="gh-problem" tone="incomplete">{ghBlocked}</Problem>
       <p className={mine?.github_login ? 'status-ok' : 'micro muted'} style={{ marginTop: 'var(--sp-3)' }}>
         {githubLoginStatus(mine?.github_login ?? null)}
       </p>
@@ -159,6 +186,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
   const avatarValue = avatar ?? me?.avatar ?? null;
   const problem = bioProblem(bioValue);
   const dirty = bio !== null || avatar !== null;
+  const profileBlocked = whyCannotSave({ problem, dirty, saving: save.isPending });
 
   const onFile = (file: File | undefined) => {
     if (!file) return;
@@ -211,11 +239,15 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
         />
       </label>
       <div className="sec__row">
+        {/* 결함 234 — `disabled` 는 초점을 못 받습니다. */}
         <button
           type="button"
-          className="btn btn--primary"
-          disabled={!dirty || problem !== null || save.isPending}
+          className={`btn btn--primary${profileBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={profileBlocked !== null}
+          aria-describedby={profileBlocked !== null ? 'profile-problem' : undefined}
           onClick={() => {
+            if (save.isPending) return;
+            if (profileBlocked !== null) return;
             const payload: { bio?: string; avatar?: string } = {};
             if (bio !== null) payload.bio = bio;
             if (avatar !== null) payload.avatar = avatar;
@@ -229,7 +261,10 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
         >
           저장
         </button>
-        <Problem tone="incomplete" inline>{problem}</Problem>
+        {/* ⚠️ `aria-describedby` 가 **없는 id 를 가리키면** 낭독기에는
+            아무 말도 안 됩니다 — 사유가 없는 것보다 나쁩니다. 처음에
+            이 자리를 안 만들어 놓고 가리켰습니다 (결함 234). */}
+        <Problem id="profile-problem" tone="incomplete" inline>{profileBlocked}</Problem>
         {save.isSuccess && !dirty && <span className="status-ok" role="status">저장됐습니다</span>}
       </div>
     </div>
@@ -515,6 +550,12 @@ function GeneralSection({
   /* ⚠️ 관리자만 되는 일 — 판단은 `@lib/project/roles.ts` 에 처음부터
      있었고 이 화면만 안 불렀습니다 (결함 225). */
   const renameBlocked = manageBlockedBecause(myRole, '프로젝트 이름 바꾸기');
+  const titleBlocked = whyCannotSave({
+    noPermission: renameBlocked,
+    problem: value !== null ? problem : null,
+    dirty: value !== null,
+    saving: save.isPending,
+  });
   const rotateBlocked = manageBlockedBecause(myRole, '초대 코드 새로 만들기');
   return (
     <div className="sec">
@@ -524,6 +565,7 @@ function GeneralSection({
         <div className="sec__row">
           <input
             className="input"
+            id="title-input"
             aria-invalid={problem !== null && value !== null}
             aria-describedby="title-problem"
             value={input}
@@ -534,12 +576,18 @@ function GeneralSection({
               `@lib` 에 있었고 이 화면만 안 불렀습니다. */}
           <button
             type="button"
-            className={`btn btn--primary${renameBlocked !== null ? ' btn--unmet' : ''}`}
-            disabled={value === null || problem !== null || save.isPending}
-            aria-disabled={renameBlocked !== null}
-            aria-describedby={renameBlocked !== null ? 'rename-blocked' : undefined}
+            /* ⚠️ 권한(`renameBlocked`)은 `aria-disabled` 였는데 값 문제는
+               `disabled` 였습니다 (결함 234) — 소유자가 이름을 비우면
+               버튼이 **초점 밖으로** 사라졌습니다. */
+            className={`btn btn--primary${titleBlocked !== null ? ' btn--unmet' : ''}`}
+            aria-disabled={titleBlocked !== null}
+            aria-describedby={titleBlocked !== null ? 'title-problem' : undefined}
             onClick={() => {
-              if (renameBlocked !== null) return;
+              if (save.isPending) return;
+              if (titleBlocked !== null) {
+                document.getElementById('title-input')?.focus();
+                return;
+              }
               save.mutate({ title: input.trim() }, { onSuccess: () => setValue(null) });
             }}
           >
@@ -547,8 +595,7 @@ function GeneralSection({
           </button>
         </div>
       </label>
-      <Problem id="title-problem" tone="incomplete">{value !== null ? problem : null}</Problem>
-      <Problem id="rename-blocked" tone="incomplete">{renameBlocked}</Problem>
+      <Problem id="title-problem" tone="incomplete">{titleBlocked}</Problem>
       <h3 className="pane__title" style={{ margin: 'var(--sp-6) 0 var(--sp-3)' }}>
         팀원 초대
       </h3>
