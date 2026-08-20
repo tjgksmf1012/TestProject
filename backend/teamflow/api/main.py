@@ -3614,8 +3614,17 @@ async def patch_task(
         )
         raise HTTPException(code, str(exc)) from exc
 
+    # ⚠️ **`next()` 에 기본값을 줍니다.**
+    #
+    # 없으면 `StopIteration` 이 나는데, 이 함수는 `async` 라 파이썬이
+    # 그것을 `RuntimeError: coroutine raised StopIteration` 으로 바꿉니다 —
+    # 즉 사람이 보는 것은 **500** 이고 로그에는 트레이스백입니다. 위에서
+    # 지운 업무를 막았으니 지금은 날 일이 없지만, 이 자리는 "못 찾으면
+    # 조용히 터진다" 라서 다시 같은 사고가 날 수 있습니다.
     rows = task_service.list_tasks(session, project_id)
-    updated = next(row for row in rows if row["id"] == task.id)
+    updated = next((row for row in rows if row["id"] == task.id), None)
+    if updated is None:  # pragma: no cover - 위 검사가 막고 있습니다
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "업무를 찾을 수 없습니다")
     return TaskOut(**updated)
 
 

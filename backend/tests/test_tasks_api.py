@@ -862,3 +862,71 @@ def test_priority_does_not_touch_contribution(client: TestClient, board: dict):
     for p in (0, 1, 3, 2):
         assert patch(client, board, board["by_hand"], {"priority": p}).status_code == 200
     assert len(events()) == before, "우선순위 변경이 기여 이벤트를 만들었습니다"
+
+
+# ══════════════════════════════════════════════════════════════
+# 지운 업무를 다시 만지면 (베타 QA — 결함 212)
+# ══════════════════════════════════════════════════════════════
+#
+# 베타에서 흔한 모양입니다: 둘이 같은 칸반을 보다 한 명이 카드를 지우고,
+# 다른 한 명이 (아직 옛 화면을 보고 있어서) 그 카드를 옮기는 것.
+
+
+def test_changing_a_deleted_task_is_404_not_500(client: TestClient, board: dict):
+    """⭐ **지운 업무를 옮기면 500 이 났습니다.**
+
+    행은 남기 때문에(`delete_task` — 기여 이벤트·PR 연결이 이 업무를
+    가리킵니다) `session.get` 은 지운 것도 돌려줍니다. 바로 옆
+    `set_assignees` 는 `deleted_at` 을 같이 보는데 `change_task` 만 안
+    봤고, 그래서 **지운 업무의 상태가 실제로 바뀌었습니다.**
+
+    그러고 나면 화면에 돌려줄 줄을 목록에서 못 찾아(`list_tasks` 는 지운
+    것을 거릅니다) `next()` 가 `StopIteration` 을 냈고, 이 함수가 `async`
+    라 파이썬이 그것을 `RuntimeError` 로 바꿉니다 — 사람은 **500** 을 보고
+    서버 로그에는 트레이스백이 남았습니다.
+    """
+    login_as(client, board["member"])
+    task_id = board["by_hand"]
+    assert (
+        client.delete(f"/api/projects/{board['project_id']}/tasks/{task_id}").status_code
+        == 204
+    )
+
+    response = client.patch(
+        f"/api/projects/{board['project_id']}/tasks/{task_id}",
+        json={"status": "done"},
+    )
+    assert response.status_code == 404, response.text
+    assert "찾을 수 없습니다" in response.json()["detail"]
+
+
+def test_a_deleted_task_answers_the_same_way_everywhere(client: TestClient, board: dict):
+    """⚠️ **같은 상황에 같은 답.**
+
+    담당자 API 는 404, 상태 API 는 500 이었습니다. 같은 일(지운 업무를
+    만지는 것)에 서버가 두 가지로 답하면, 화면은 둘 중 하나만 다루게 되고
+    나머지는 "알 수 없는 오류" 로 떨어집니다.
+    """
+    login_as(client, board["member"])
+    task_id = board["by_hand"]
+    client.delete(f"/api/projects/{board['project_id']}/tasks/{task_id}")
+
+    codes = {
+        "상태": client.patch(
+            f"/api/projects/{board['project_id']}/tasks/{task_id}", json={"status": "done"}
+        ).status_code,
+        "담당자": put_assignees(client, board, task_id, []).status_code,
+    }
+    assert set(codes.values()) == {404}, codes
+
+
+def test_deleting_twice_is_still_fine(client: TestClient, board: dict):
+    """⚠️ 두 번 지우는 것은 오류가 아닙니다 — 이미 지워진 게 원하던 결과입니다.
+
+    위를 고치면서 이것까지 막아 버리면, 둘이 동시에 지웠을 때 뒤에 누른
+    사람이 오류를 봅니다.
+    """
+    login_as(client, board["member"])
+    url = f"/api/projects/{board['project_id']}/tasks/{board['by_hand']}"
+    assert client.delete(url).status_code == 204
+    assert client.delete(url).status_code == 204

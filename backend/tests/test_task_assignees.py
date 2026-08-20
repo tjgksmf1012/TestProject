@@ -395,3 +395,45 @@ def test_the_list_comes_back_by_name(team: dict):
 
 def test_the_same_person_twice_is_one_person():
     assert assignees.normalize([3, 1, 3, 1]) == [3, 1]
+
+
+# ══════════════════════════════════════════════════════════════
+# 지운 업무는 못 바꾼다 (베타 QA — 결함 212)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_a_deleted_task_cannot_be_changed(team: dict):
+    """⭐ **`change_task` 가 지운 업무를 막는가.**
+
+    행은 남습니다(`delete_task` — 기여 이벤트·PR 연결이 이 업무를
+    가리킵니다). 그래서 `session.get` 은 지운 것도 돌려주고, 바로 옆
+    `set_assignees` 는 `deleted_at` 을 같이 보는데 `change_task` 만 안
+    봤습니다.
+
+    ⚠️ **API 로는 이 결함을 못 잽니다.** 엔드포인트가 뒤이어 404 를 내며
+    세션을 되감기 때문에 겉으로는 결과가 같습니다 — 심어 보고 알았습니다.
+    바뀌는 것은 **서비스를 직접 부르는 다른 코드**(태스크·잡·앞으로 생길
+    화면)이고, 상태 변경은 기여 이벤트가 누구에게 언제 가는지를 바꿉니다.
+    지운 업무로 기여가 움직이면 그건 조작 통로입니다.
+    """
+    task_id = _task(team)
+    with db_session.session_scope() as s:
+        task_service.delete_task(
+            s, project_id=team["project_id"], task_id=task_id, actor_id=team["people"][0]
+        )
+
+    with (
+        pytest.raises(task_service.TaskError, match="찾을 수 없습니다"),
+        db_session.session_scope() as s,
+    ):
+        task_service.change_task(
+            s,
+            project_id=team["project_id"],
+            task_id=task_id,
+            actor_id=team["people"][0],
+            status="done",
+        )
+
+    # 그리고 **정말로 안 바뀌었는지** 봅니다.
+    with db_session.session_scope() as s:
+        assert s.get(m.Task, task_id).status != "done"
