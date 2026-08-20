@@ -12,6 +12,7 @@ import {
   type SessionEvent,
   type SessionState,
   consentStateFrom,
+  describeJoinFailure,
 } from './session.ts';
 
 const T0 = 1_700_000_000_000;
@@ -460,5 +461,45 @@ describe('⛔ 녹음 화면이 스스로 「전원 동의」를 선언하던 것
       stopReason: null,
     } as never);
     assert.strictEqual(reasons.includes('녹음 동의가 필요합니다'), true, JSON.stringify(reasons));
+  });
+});
+
+describe('⛔ 아직 동의 안 한 사람에게 빨간 오류를 보여 준 것 (결함 237)', () => {
+  it('⭐ 동의가 아직이면 **흙빛**이다 — 순서지 고장이 아니다', () => {
+    // 녹음 화면을 처음 여는 사람은 언제나 이 상태입니다. 빨강은
+    // "네가 뭘 잘못했다" 로 읽힙니다 (불변식 ③ 의 색 규칙).
+    for (const consent of ['pending', 'self_granted', 'refused'] as const) {
+      const note = describeJoinFailure(403, '녹음에 동의하지 않았습니다', consent);
+      assert.equal(note.tone, 'gap', consent);
+      assert.equal(note.text.includes('아직'), true, note.text);
+    }
+  });
+
+  it('⛔ 같은 사실을 **두 번 말하지 않는다** — 무엇이 모자란지는 목록이 말한다', () => {
+    // 예전에는 위에 빨강으로 「녹음에 동의하지 않았습니다」, 아래 회색
+    // 불릿으로 「녹음 동의가 필요합니다」 — 같은 사실이 두 색으로 두 번.
+    const note = describeJoinFailure(403, '녹음에 동의하지 않았습니다', 'pending');
+    assert.equal(note.text.includes('동의'), false, note.text);
+  });
+
+  it('⭐ 동의가 **확인됐는데도** 403 이면 진짜 문제다 — 빨강', () => {
+    // 이 엔드포인트의 403 은 두 가지입니다. 동의가 끝났는데 막히면
+    // 「이 프로젝트의 구성원이 아닙니다」 쪽입니다.
+    const note = describeJoinFailure(403, '이 프로젝트의 구성원이 아닙니다', 'all_confirmed');
+    assert.equal(note.tone, 'bad');
+    assert.equal(note.text.includes('구성원이 아닙니다'), true, note.text);
+  });
+
+  it('⭐ 다른 실패는 그대로 빨강이고 **서버가 한 말을 지우지 않는다**', () => {
+    for (const status of [409, 500, 503]) {
+      const note = describeJoinFailure(status, `HTTP ${status}`, 'all_confirmed');
+      assert.equal(note.tone, 'bad', String(status));
+      assert.equal(note.text.includes(String(status)), true, note.text);
+    }
+  });
+
+  it('⚠️ 상태를 모르면(null) 빨강 — 모르는 것을 「아직」으로 읽지 않는다', () => {
+    const note = describeJoinFailure(null, '서버에 닿지 못했습니다', 'pending');
+    assert.equal(note.tone, 'bad');
   });
 });

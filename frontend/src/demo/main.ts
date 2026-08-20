@@ -31,7 +31,11 @@ import {
   describeCompletionFailure,
   type TrackCompleteResult,
 } from '../lib/recording/complete.ts';
-import { blockers as sessionBlockers, consentStateFrom } from '../lib/recording/session.ts';
+import {
+  blockers as sessionBlockers,
+  consentStateFrom,
+  describeJoinFailure,
+} from '../lib/recording/session.ts';
 import {
   describeRecordingSafety,
   isRiskyForRecording,
@@ -307,10 +311,14 @@ async function joinMeeting(id: string): Promise<void> {
     // 붙은 `as { detail?: string }` 를 찾았고, 여기는 `.text()` 라 안 걸렸습니다.
     // **같은 파일 아래쪽(`finish`)은 이미 `detailText` 를 쓰고 있었습니다.**
     const body = await response.json().catch(() => null);
-    showNote(
-      $('join-note'),
-      `트랙에 참가하지 못했습니다: ${detailText(body, `HTTP ${response.status}`)}`,
+    /* ⛔ **모든 실패를 빨강으로 말했습니다** (결함 237). 아직 동의하지
+       않은 사람의 403 은 고장이 아니라 **순서**입니다 — 판단은 `@lib`. */
+    const note = describeJoinFailure(
+      response.status,
+      detailText(body, `HTTP ${response.status}`),
+      client.state.consent,
     );
+    showNote($('join-note'), note.text, note.tone);
     return;
   }
 
