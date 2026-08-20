@@ -4240,6 +4240,30 @@ describe('보낸 것이 실패하면 **화면이 말한다** (결함 218)', () =
    *   ① `mutate(…, { onError })` 로 그 자리에서 문장을 만들거나
    *   ② `<이름>.isError` 를 그려서 화면이 알아서 나타나게 하거나
    */
+  /**
+   * `<이름>.mutate(…)` 의 **인자 문자열들**. 괄호를 세서 짝을 찾습니다 —
+   * 글자 수로 자르면 옆 호출까지 삼킵니다 (결함 225 가 그렇게 샜습니다).
+   */
+  function callArgsOf(source: string, caller: string): string[] {
+    const escaped = caller.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const opener = new RegExp(`${escaped}\\.mutate(?:Async)?\\(`, 'g');
+    const out: string[] = [];
+    for (const m of source.matchAll(opener)) {
+      let depth = 0;
+      let i = (m.index ?? 0) + m[0].length - 1;
+      const start = i + 1;
+      for (; i < source.length; i += 1) {
+        if (source[i] === '(') depth += 1;
+        else if (source[i] === ')') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      out.push(source.slice(start, i));
+    }
+    return out;
+  }
+
   it('⭐ 모든 mutate 에 말할 자리가 있다', () => {
     const base = join(ROOT, '..', 'webapp', 'src');
     const offenders: string[] = [];
@@ -4263,11 +4287,15 @@ describe('보낸 것이 실패하면 **화면이 말한다** (결함 218)', () =
           ),
         );
         for (const caller of [...callers].sort()) {
-          const escaped = caller.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           // ⚠️ **`onError` 라는 낱말이 파일 어딘가에 있는가**로 재면, 다른
           //    mutate 의 `onError` 하나로 전부 통과합니다. **이 호출에**
           //    붙어 있는지를 봅니다.
-          const hasOnError = new RegExp(`${escaped}\\.mutate(?:Async)?\\([\\s\\S]{0,600}?onError`).test(code);
+          //
+          // ⚠️⚠️ 처음에는 "호출 뒤 600자 안" 으로 쟀는데, 그것도
+          //    **옆 호출의 `onError` 를 봤습니다** — 설정 화면의 `rotate`
+          //    가 실패를 말할 자리가 없는데도 통과했습니다(결함 225).
+          //    괄호를 세서 **그 호출의 인자 안**만 봅니다.
+          const hasOnError = callArgsOf(code, caller).some((args) => /onError/.test(args));
           const shows = code.includes(`${caller}.isError`) || code.includes(`${caller}.error`);
           if (!hasOnError && !shows) {
             offenders.push(`${full.slice(base.length + 1)} — ${caller}`);
@@ -4519,5 +4547,47 @@ describe('못 받은 화면은 **빈 사실을 단언하지 않는다** — 남�
       /cannotLoad !== null\s*\?\s*''/.test(lobby),
       '로비 머리줄이 못 받았는데도 방 상태를 말합니다',
     );
+  });
+});
+
+describe('관리자만 되는 일을 **구성원에게 열어 두지 않는다** (결함 225)', () => {
+  const settings = readFileSync(
+    join(ROOT, '..', 'webapp', 'src', 'screens', 'Settings.tsx'),
+    'utf8',
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ 셋 다 막고 **왜 막혔는지** 말한다', () => {
+    // 평범한 구성원에게 「프로젝트 이름 저장」·「코드 새로 만들기」·「저장소
+    // 연결」이 멀쩡히 눌렸고, 누르면 서버가 403 을 주는데 화면은 아무
+    // 말도 안 했습니다. `canManage` 는 처음부터 `@lib` 에 있었고 이 화면만
+    // 안 불렀습니다 — "만들어 놓고 아무도 안 부름" 그 자리입니다.
+    ok(/manageBlockedBecause\(/.test(settings), '관리자 판단을 안 씁니다');
+    for (const [name, id] of [
+      ['프로젝트 이름 바꾸기', 'rename-blocked'],
+      ['초대 코드 새로 만들기', 'rotate-blocked'],
+      ['저장소 연결', 'repo-manage'],
+    ]) {
+      ok(
+        new RegExp(`manageBlockedBecause\\(myRole, '${name}'\\)`).test(settings),
+        `「${name}」 을 안 막습니다`,
+      );
+      ok(new RegExp(`id="${id}"`).test(settings), `「${name}」 의 사유를 그릴 자리가 없습니다`);
+    }
+  });
+
+  it('⚠️ 막았으면 **눌러도 요청이 안 나가야** 한다', () => {
+    // `aria-disabled` 는 눌립니다(이 저장소가 일부러 그렇게 씁니다).
+    // 손잡이에서 막지 않으면 403 이 그대로 나갑니다.
+    ok(/if \(renameBlocked !== null\) return;/.test(settings), '이름 저장이 그냥 나갑니다');
+    ok(/if \(rotateBlocked !== null\) return;/.test(settings), '코드 재발급이 그냥 나갑니다');
+    ok(/manageBlocked !== null\) return;/.test(settings), '저장소 연결이 그냥 나갑니다');
+  });
+
+  it('⚠️ 권한을 **넘겨줘야** 판단이 돕니다', () => {
+    const passes = (settings.match(/myRole=\{mine\?\.project_role\}/g) ?? []).length;
+    ok(passes >= 2, `권한을 넘기는 곳이 ${passes}곳뿐입니다 — 안 넘기면 판단이 undefined 로 돕니다`);
   });
 });

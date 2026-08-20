@@ -20,6 +20,7 @@ import {
   canChangeRoleOf,
   canRemove,
   leaveBlockedBecause,
+  manageBlockedBecause,
   roleLabel,
 } from '@lib/project/roles.ts';
 import { presenceLabel, worthShowing } from '@lib/project/presence.ts';
@@ -384,9 +385,12 @@ function RepoSection({
   repo,
   save,
   backfill,
+  myRole,
 }: {
   projectId: number;
   repo: string | null;
+  /** 내 권한 — 저장소 연결은 관리자만 (결함 225). */
+  myRole: string | null | undefined;
   save: ReturnType<typeof useSettingsMutations>['saveProject'];
   backfill: ReturnType<typeof useSettingsMutations>['backfill'];
 }) {
@@ -395,7 +399,10 @@ function RepoSection({
   const input = value ?? repo ?? '';
   const problem = input.trim() === '' ? null : repoProblem(input);
   // 아직 연결할 수 없는 경우 — 안 고쳤거나(`value === null`), 주소가 틀렸거나.
-  const connectBlocked = value === null || problem !== null;
+  /* ⚠️ 관리자만 되는 일입니다 (결함 225) — 구성원에게도 눌렸고, 서버는
+     403 을 주는데 화면은 아무 말도 안 했습니다. */
+  const manageBlocked = manageBlockedBecause(myRole, '저장소 연결');
+  const connectBlocked = manageBlocked !== null || value === null || problem !== null;
   const view = health.data
     ? describeHealth(health.data, new Date())
     : health.isError
@@ -428,9 +435,11 @@ function RepoSection({
           type="button"
           className={`btn btn--primary${connectBlocked ? ' btn--unmet' : ''}`}
           aria-disabled={connectBlocked || save.isPending}
-          aria-describedby={problem !== null ? 'repo-problem' : undefined}
+          aria-describedby={
+            manageBlocked !== null ? 'repo-manage' : problem !== null ? 'repo-problem' : undefined
+          }
           onClick={() => {
-            if (save.isPending) return;
+            if (save.isPending || manageBlocked !== null) return;
             if (connectBlocked) {
               document.getElementById('repo-input')?.focus();
               return;
@@ -442,6 +451,7 @@ function RepoSection({
         </button>
       </div>
       <Problem id="repo-problem" tone="incomplete">{problem}</Problem>
+      <Problem id="repo-manage" tone="incomplete">{manageBlocked}</Problem>
       <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
       {view !== null && (
         <div className={view.tone === 'ok' ? 'card' : 'notice'} style={{ marginTop: 'var(--sp-5)' }} role="note">
@@ -490,15 +500,22 @@ function GeneralSection({
   inviteCode,
   save,
   rotate,
+  myRole,
 }: {
   title: string;
   inviteCode: string;
+  /** 내 권한. **관리자만 되는 일**을 막을 때 씁니다 (결함 225). */
+  myRole: string | null | undefined;
   save: ReturnType<typeof useSettingsMutations>['saveProject'];
   rotate: ReturnType<typeof useSettingsMutations>['rotateInvite'];
 }) {
   const [value, setValue] = useState<string | null>(null);
   const input = value ?? title;
   const problem = titleProblem(input);
+  /* ⚠️ 관리자만 되는 일 — 판단은 `@lib/project/roles.ts` 에 처음부터
+     있었고 이 화면만 안 불렀습니다 (결함 225). */
+  const renameBlocked = manageBlockedBecause(myRole, '프로젝트 이름 바꾸기');
+  const rotateBlocked = manageBlockedBecause(myRole, '초대 코드 새로 만들기');
   return (
     <div className="sec">
       <h2 className="sec__title">이름과 초대</h2>
@@ -512,17 +529,26 @@ function GeneralSection({
             value={input}
             onChange={(e) => setValue(e.target.value)}
           />
+          {/* ⚠️ **구성원에게도 멀쩡히 눌렸습니다** (결함 225). 서버는 403
+              을 주는데 화면은 아무 말도 안 했습니다. `canManage` 는 처음부터
+              `@lib` 에 있었고 이 화면만 안 불렀습니다. */}
           <button
             type="button"
-            className="btn btn--primary"
+            className={`btn btn--primary${renameBlocked !== null ? ' btn--unmet' : ''}`}
             disabled={value === null || problem !== null || save.isPending}
-            onClick={() => save.mutate({ title: input.trim() }, { onSuccess: () => setValue(null) })}
+            aria-disabled={renameBlocked !== null}
+            aria-describedby={renameBlocked !== null ? 'rename-blocked' : undefined}
+            onClick={() => {
+              if (renameBlocked !== null) return;
+              save.mutate({ title: input.trim() }, { onSuccess: () => setValue(null) });
+            }}
           >
             저장
           </button>
         </div>
       </label>
       <Problem id="title-problem" tone="incomplete">{value !== null ? problem : null}</Problem>
+      <Problem id="rename-blocked" tone="incomplete">{renameBlocked}</Problem>
       <h3 className="pane__title" style={{ margin: 'var(--sp-6) 0 var(--sp-3)' }}>
         팀원 초대
       </h3>
@@ -530,13 +556,28 @@ function GeneralSection({
         <span className="invite-code">{inviteCode === '' ? '(없음)' : inviteCode}</span>
       </div>
       <div className="sec__row">
-        <button type="button" className="btn btn--secondary" disabled={rotate.isPending} onClick={() => rotate.mutate()}>
+        <button
+          type="button"
+          className={`btn btn--secondary${rotateBlocked !== null ? ' btn--unmet' : ''}`}
+          disabled={rotate.isPending}
+          aria-disabled={rotateBlocked !== null}
+          aria-describedby={rotateBlocked !== null ? 'rotate-blocked' : undefined}
+          onClick={() => {
+            if (rotateBlocked !== null) return;
+            rotate.mutate();
+          }}
+        >
           코드 새로 만들기
         </button>
       </div>
       <Disclosure summary="코드를 새로 만들면 어떻게 되나요">
         <p>이전 코드는 그 즉시 무효가 됩니다. 이미 들어온 팀원은 그대로 남습니다.</p>
       </Disclosure>
+      <Problem id="rotate-blocked" tone="incomplete">{rotateBlocked}</Problem>
+      {/* ⚠️ **`rotate` 만 실패를 말할 자리가 없었습니다** (결함 225). 결함
+          218 의 훑기 가드가 이걸 놓쳤는데, 그 가드가 **다음 600자 안의 다른
+          mutate 의 `onError`** 를 보고 통과시켰기 때문입니다. */}
+      <Problem>{rotate.isError ? mutationError(rotate.error) : null}</Problem>
       <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
     </div>
   );
@@ -731,6 +772,7 @@ export default function Settings() {
             )}
             {cannotLoad === null && section === 'repo' && (
               <RepoSection
+                  myRole={mine?.project_role}
                 projectId={projectId}
                 repo={project.data?.github_repo ?? null}
                 save={m.saveProject}
@@ -739,6 +781,7 @@ export default function Settings() {
             )}
             {section === 'general' && project.data && (
               <GeneralSection
+                  myRole={mine?.project_role}
                 title={project.data.title}
                 inviteCode={project.data.invite_code}
                 save={m.saveProject}
