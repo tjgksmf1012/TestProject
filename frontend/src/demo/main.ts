@@ -33,8 +33,11 @@ import {
 } from '../lib/recording/complete.ts';
 import {
   blockers as sessionBlockers,
+  consentForEntry,
   consentStateFrom,
+  consentStep,
   describeJoinFailure,
+  describeSoloEntry,
 } from '../lib/recording/session.ts';
 import {
   describeRecordingSafety,
@@ -328,14 +331,27 @@ async function joinMeeting(id: string): Promise<void> {
   render();
 }
 
+// 준비 단계 ① — 말만 하고 갈 자리를 안 주면 안 됩니다.
+// ⛔ 예전에는 이 두 줄이 `if (meetingId)` **안에** 있었습니다. 회의 없이
+//    열면 `<a id="consent">` 가 href 없이 남아, 눈에는 단추인데 탭으로
+//    닿지도 눌리지도 않았습니다 (결함 238).
+const entryStep = consentStep(meetingId);
+($('consent') as HTMLAnchorElement).href = entryStep.href;
+$('consent').textContent = entryStep.label;
+
+// 회의가 없으면 동의를 물을 상대도 없습니다 — 판단은 `@lib`, 여기서는 넣기만.
+client.setConsent(consentForEntry(meetingId));
+
 if (meetingId) {
-  // 「동의하러 로비로」 — 말만 하고 갈 자리를 안 주면 안 됩니다.
-  ($('consent') as HTMLAnchorElement).href = `/app/meeting/${meetingId}/lobby`;
   void joinMeeting(meetingId);
   // 로비에서 동의하고 **돌아왔을 때** 다시 묻습니다.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void refreshConsent(meetingId);
   });
+} else {
+  // 한 시간을 녹음하고 나서 "팀에 아무것도 안 올라갔다" 를 알면 늦습니다.
+  const solo = describeSoloEntry();
+  showNote($('join-note'), solo.text, solo.tone);
 }
 
 $('permission').addEventListener('click', async () => {

@@ -207,10 +207,21 @@ console.log('안전 배너  :', banner.slice(0, 44), banner.includes('화면을 
 //    와 `keepsAwake` 가 참말인지는 설정이 아니라 **이 숫자**가 말합니다.
 //    ?meeting= 없이 열었으므로 서버 없이 도는 로컬 모드입니다 — 업로드는
 //    로컬 카운터로 가고, 청크는 디스크 보관소를 스쳐 갑니다(Phase 1).
-await page.click('#consent');
+// ⛔ 예전에는 여기서 `#consent` 를 **눌렀습니다.** 그때는 단추였고,
+//    누르면 화면이 스스로 「전원 동의」를 넣었습니다 — 결함 229 가 그걸
+//    걷어내고 `<a>` 링크로 바꿨습니다. 그 뒤로 이 줄은 **로비로 나가
+//    버리는** 줄이었고, 아래 생존율 측정은 한 번도 안 돌았습니다 (결함 238).
+//    회의 없이 연 화면은 동의를 물을 상대가 없어 `solo` 입니다.
 await page.click('#permission');
-// requestMicrophone(getUserMedia)이 끝나야 시작 버튼이 열립니다.
-await page.waitForFunction(() => !document.getElementById('start').disabled, null, { timeout: 10_000 });
+// ⚠️ `disabled` 가 아니라 **`aria-disabled`** 입니다. 이 버튼은 초점을
+//    받아야 해서 진짜 비활성이 아닙니다 — `.disabled` 로 기다리면 그 값은
+//    **언제나 false** 라 기다림이 통째로 헛돕니다(그래서 다음 줄의 클릭이
+//    30초 타임아웃으로 죽었습니다).
+await page.waitForFunction(
+  () => document.getElementById('start').getAttribute('aria-disabled') === 'false',
+  null,
+  { timeout: 10_000 },
+);
 await page.click('#start');
 await page.waitForTimeout(6_500); // 타임슬라이스 5초 → 첫 청크가 앉을 시간
 const chunksShown = Number(await page.locator('#chunks').innerText());

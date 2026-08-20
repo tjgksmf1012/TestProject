@@ -1740,6 +1740,72 @@ describe('데스크톱 셸 (Electron)', () => {
       ok(/^['"`]/.test(arg), `채널이 글자가 아닙니다: ${arg}`);
     }
   });
+
+  /* ─────────────────────────────────────────────────────────────
+     smoke.mjs 는 `npm test` 에 없습니다 (서버·디스플레이가 필요합니다).
+     그래서 **화면이 바뀌어도 조용히 낡습니다** — 실제로 결함 229 가
+     `#consent` 를 단추에서 링크로 바꾼 뒤, smoke 의 녹음 생존율 측정은
+     **한 번도 안 돌고** 있었습니다(결함 238). 그동안 AGENTS.md 와
+     docs/21 은 "생존율도 smoke 가 잽니다" 라고 적혀 있었습니다.
+
+     아래 둘은 **서버 없이 잴 수 있는 만큼**만 잽니다 — smoke 가 무엇을
+     누르는지와, 무엇으로 기다리는지가 화면과 어긋나지 않았는가.
+     ───────────────────────────────────────────────────────────── */
+  const smokeSource = (): string => readFileSync(join(ROOT, 'electron', 'smoke.mjs'), 'utf8');
+  /**
+   * ⚠️ **HTML 주석을 먼저 걷습니다.** 이 저장소의 마크업은 "예전에는 이랬고
+   * 왜 바꿨다" 를 주석에 나쁜 예와 함께 적어 둡니다. 안 걷으면
+   * `<!-- 예전에는 <button id="consent"> 였고… -->` 가 **진짜 태그보다
+   * 먼저** 걸려, `<a>` 를 `<button>` 이라고 답합니다 — 심어 놓고 「0건」이
+   * 나온 자리가 정확히 여기였습니다.
+   */
+  const recordingMarkup = (): string =>
+    readFileSync(join(ROOT, 'public', 'index.html'), 'utf8').replace(
+      /<!--[\s\S]*?-->/g,
+      '',
+    );
+
+  it('⭐ smoke 가 누르는 것이 녹음 화면에 **단추로** 있다 (결함 238)', () => {
+    const clicked = [...codeOf(smokeSource()).matchAll(/page\.click\('#([\w-]+)'\)/g)].map(
+      (m) => m[1] as string,
+    );
+    ok(clicked.length > 0, 'smoke 가 아무것도 안 누릅니다 — 검사가 헛돕니다');
+
+    const markup = recordingMarkup();
+    for (const id of clicked) {
+      // 로그인 화면 등 다른 화면의 것은 여기서 안 봅니다.
+      if (!new RegExp(`id="${id}"`).test(markup)) continue;
+      const tag = new RegExp(`<(\\w+)([^>]*\\s)?id="${id}"`).exec(markup)?.[1];
+      // ⚠️ `<a>` 를 누르면 **화면 밖으로 나갑니다.** 그러면 그 뒤의 측정은
+      //    다른 화면을 재고, 아무 말 없이 통과하거나 엉뚱하게 죽습니다.
+      strictEqual(tag, 'button', `smoke 가 #${id}(<${tag}>)를 누릅니다 — 단추가 아닙니다`);
+    }
+  });
+
+  it('⭐ smoke 가 기다리는 축이 화면이 그리는 축과 같다 (결함 238)', () => {
+    const smoke = codeOf(smokeSource());
+    const main = codeOf(readFileSync(join(ROOT, 'src', 'demo', 'main.ts'), 'utf8'));
+
+    // 화면이 `aria-disabled` 로 그리는 id 들 (초점을 받아야 하는 것들)
+    const ariaDriven = new Set(
+      [...main.matchAll(/\$\('([\w-]+)'\)\.setAttribute\('aria-disabled'/g)].map(
+        (m) => m[1] as string,
+      ),
+    );
+    ok(ariaDriven.size > 0, '`aria-disabled` 로 그리는 버튼이 하나도 없습니다 — 검사가 헛돕니다');
+
+    // ⚠️ `.disabled` 는 그런 버튼에서 **언제나 false** 입니다. 그것으로
+    //    기다리면 기다림이 즉시 참이 되고, 다음 줄이 30초 뒤에 죽습니다.
+    for (const id of ariaDriven) {
+      const waitsOnDisabled = new RegExp(
+        `getElementById\\('${id}'\\)\\.disabled`,
+      ).test(smoke);
+      ok(
+        !waitsOnDisabled,
+        `smoke 가 #${id} 를 \`.disabled\` 로 기다립니다 — 화면은 \`aria-disabled\` 로 그립니다`,
+      );
+    }
+  });
 });
 
 describe('만들어 놓고 아무도 안 쓰는 것 (결함 75)', () => {
@@ -4783,6 +4849,54 @@ describe('보낸 것이 실패하면 **화면이 말한다** (결함 218)', () =
       '',
       '실패해도 화면이 아무 말도 안 하는 곳입니다 — 사람은 됐다고 믿고 떠납니다',
     );
+  });
+});
+
+describe('레거시 화면의 `<a class="btn">` 도 **언제나** 주소가 있다 (결함 238)', () => {
+  /**
+   * 결함 219 의 가드는 `webapp/src/**\/*.tsx` 만 걷습니다. 녹음 화면은
+   * `public/index.html` + `src/demo/main.ts` 라 **그 빗자루가 안 닿는
+   * 자리**였고, 거기 `<a id="consent" class="btn">동의하러 로비로</a>` 가
+   * href 없이 서 있었습니다 — 눈에는 단추, 탭으로는 없는 것, 눌러도
+   * 아무 일도 안 일어나는 것.
+   *
+   * 요구는 같습니다: **주소가 조건부면 막혔을 때 닿지 못한다.**
+   */
+  it('⭐ 마크업에 href 가 없으면 화면 코드가 **조건 없이** 넣는다', () => {
+    const screens = readdirSync(join(ROOT, 'public'))
+      .filter((f) => f.endsWith('.html'))
+      .map((f) => f.replace(/\.html$/, ''));
+
+    let checked = 0;
+    for (const screen of screens) {
+      // ⚠️ 주석을 먼저 걷습니다 — 주석 속 나쁜 예가 진짜 태그 행세를 합니다.
+      const html = readFileSync(join(ROOT, 'public', `${screen}.html`), 'utf8').replace(
+        /<!--[\s\S]*?-->/g,
+        '',
+      );
+      // 녹음 화면만 파일 이름이 다릅니다 (`index` → `main.ts`).
+      const script = join(ROOT, 'src', 'demo', screen === 'index' ? 'main.ts' : `${screen}.ts`);
+      if (!existsSync(script)) continue;
+      const code = codeOf(readFileSync(script, 'utf8'));
+
+      for (const m of html.matchAll(/<a\b([^>]*)>/g)) {
+        const attrs = m[1] ?? '';
+        if (/\bhref=/.test(attrs)) continue;
+        const id = /\bid="([\w-]+)"/.exec(attrs)?.[1];
+        if (id === undefined) continue;
+
+        // 이 id 의 href 를 넣는 자리
+        const at = new RegExp(`\\$\\('${id}'\\)[^\\n]*\\)\\.href\\s*=`).exec(code);
+        ok(at !== null, `${screen}.html #${id} — href 를 넣는 곳이 없습니다`);
+        // ⚠️ **중괄호 깊이 0** 이어야 조건 없이 도는 자리입니다. 결함 238
+        //    에서는 이 줄이 `if (meetingId) {` 안에 있었습니다.
+        const before = code.slice(0, at.index);
+        const depth = (before.match(/\{/g) ?? []).length - (before.match(/\}/g) ?? []).length;
+        strictEqual(depth, 0, `${screen}.html #${id} — href 가 조건부입니다 (깊이 ${depth})`);
+        checked += 1;
+      }
+    }
+    ok(checked > 0, 'href 없는 `<a id>` 를 하나도 안 봤습니다 — 검사가 헛돕니다');
   });
 });
 

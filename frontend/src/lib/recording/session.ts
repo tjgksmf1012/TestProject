@@ -50,7 +50,18 @@ export type ConsentState =
   | 'self_granted'
   /** 서버가 참여자 전원의 동의를 확인했다 */
   | 'all_confirmed'
-  | 'refused';
+  | 'refused'
+  /**
+   * 회의에 붙지 않은 세션 — **동의를 물을 상대가 없다** (실험 5 모드).
+   *
+   * ⚠️ `all_confirmed` 와 **다른 값**입니다. 저기는 "전원이 동의했다"
+   * 이고 여기는 "해당 없음" 입니다. 측정 불가를 0점으로 읽지 않는 것과
+   * 같은 이유로, 해당 없음을 동의로도 미동의로도 읽지 않습니다.
+   *
+   * ⛔ 이 값을 넣는 문은 `consentForEntry` **하나뿐**이고, 그 함수는
+   * 회의 id 가 있으면 절대 이 값을 돌려주지 않습니다 (결함 229).
+   */
+  | 'solo';
 
 export type ClockState = 'unsynced' | 'ok' | 'poor';
 
@@ -144,6 +155,11 @@ export function blockers(state: SessionState): string[] {
       break;
     case 'all_confirmed':
       break;
+    // 회의에 안 붙은 세션. 내 목소리만, 이 기기에만 기록되므로 물을
+    // 상대가 없다 — 여기서 동의를 요구하면 **아무도 못 푸는 조건**이 되고,
+    // 실제로 결함 238 이 그랬다 (「서버 없이도 끝까지 돈다」가 거짓말이 됨).
+    case 'solo':
+      break;
   }
 
   if (state.clock === 'unsynced') {
@@ -206,6 +222,62 @@ export function describeJoinFailure(
     return { text: '아직 트랙이 열리지 않았습니다 — 아래 조건이 차면 열립니다', tone: 'gap' };
   }
   return { text: `트랙에 참가하지 못했습니다: ${detail}`, tone: 'bad' };
+}
+
+/**
+ * 이 화면이 **회의에 붙었는가**로 동의 축의 출발값을 정한다 (결함 238).
+ *
+ * ## 왜 함수인가 — 화면이 못 정하게 하려고
+ *
+ * 결함 229 는 화면이 「전원 동의」를 **스스로 선언**한 것이었습니다.
+ * 그래서 이 문은 하나만 두고, **회의 id 가 있으면 절대 열리지 않게**
+ * 합니다 — 회의가 있으면 언제나 `pending` 이고, 명부는 서버가 줍니다.
+ *
+ * 회의가 없을 때만 `solo` 입니다. 그때는 올릴 트랙도, 남의 목소리도,
+ * 물을 상대도 없습니다 (`?meeting=` 없이 연 실험 5 모드 —
+ * `docs/13-화면-구조.md` §98).
+ */
+export function consentForEntry(meetingId: string | null | undefined): ConsentState {
+  return meetingId === null || meetingId === undefined || meetingId === ''
+    ? 'solo'
+    : 'pending';
+}
+
+/** 준비 단계 ①이 **어디로 보내는가.** 회의가 없으면 로비도 없습니다. */
+export interface ConsentStep {
+  label: string;
+  href: string;
+  /** 이 단계가 지금 사람에게 요구하는 것이 있는가 */
+  required: boolean;
+}
+
+/**
+ * ⛔ 회의가 없을 때 이 자리는 오래도록 **href 없는 `<a>`** 였습니다
+ * (결함 238). 눈에는 단추인데 탭으로 닿지도, 눌러도 아무 일도 안
+ * 일어나던 자리입니다 — 이 저장소가 세 번째로 적어 둔 실패
+ * (「할 일을 알려 주고 그 일을 할 자리를 안 줌」) 그대로였습니다.
+ */
+export function consentStep(meetingId: string | null | undefined): ConsentStep {
+  if (meetingId === null || meetingId === undefined || meetingId === '') {
+    return { label: '회의 고르러 가기', href: '/app/', required: false };
+  }
+  return { label: '동의하러 로비로', href: `/app/meeting/${meetingId}/lobby`, required: true };
+}
+
+/**
+ * 회의 없이 연 화면이 **어디로 남는지** 미리 말한다.
+ *
+ * 여기서 침묵하면 사람은 한 시간을 녹음하고 나서야 팀에 아무것도 안
+ * 올라갔다는 것을 압니다. 그 회의는 다시 못 합니다.
+ *
+ * ⚠️ 실패가 아니라 **모드**라 흙빛(`gap`)입니다 — 빨강은 "네가 뭘
+ * 잘못했다" 로 읽힙니다.
+ */
+export function describeSoloEntry(): JoinNote {
+  return {
+    text: '회의를 고르지 않았습니다 — 이 기기에만 기록되고 팀으로 올라가지 않습니다',
+    tone: 'gap',
+  };
 }
 
 export function canStart(state: SessionState): boolean {

@@ -11,8 +11,11 @@ import {
   toTimelineInput,
   type SessionEvent,
   type SessionState,
+  consentForEntry,
   consentStateFrom,
+  consentStep,
   describeJoinFailure,
+  describeSoloEntry,
 } from './session.ts';
 
 const T0 = 1_700_000_000_000;
@@ -501,5 +504,58 @@ describe('⛔ 아직 동의 안 한 사람에게 빨간 오류를 보여 준 것
   it('⚠️ 상태를 모르면(null) 빨강 — 모르는 것을 「아직」으로 읽지 않는다', () => {
     const note = describeJoinFailure(null, '서버에 닿지 못했습니다', 'pending');
     assert.equal(note.tone, 'bad');
+  });
+});
+
+describe('회의 없이 연 녹음 화면 (실험 5 모드 · 결함 238)', () => {
+  it('회의가 없으면 동의를 **물을 상대가 없다** — 막지 않는다', () => {
+    const state = reduceAll(initialState(), [
+      { type: 'SECURE_CONTEXT', secure: true },
+      { type: 'PERMISSION', state: 'granted' },
+      { type: 'CONSENT', state: consentForEntry(null) },
+      { type: 'CLOCK', state: 'ok' },
+    ]);
+    // 결함 238: 여기가 `pending` 이라 「녹음 동의가 필요합니다」가 서고,
+    // 그 조건을 풀 자리가 화면에 **없었습니다**.
+    assert.equal(state.consent, 'solo');
+    assert.deepEqual(blockers(state), []);
+    assert.equal(canStart(state), true);
+    assert.equal(state.phase, 'ready');
+  });
+
+  it('⛔ 회의가 있으면 `solo` 로 열리지 않는다 (결함 229 로 돌아가지 않게)', () => {
+    for (const id of ['1', '42', 'abc']) {
+      assert.equal(consentForEntry(id), 'pending', id);
+    }
+    // 화면이 「전원 동의」를 스스로 선언할 문은 이 함수에 **없습니다**.
+    assert.notEqual(consentForEntry('1'), 'all_confirmed');
+  });
+
+  it('`solo` 는 `all_confirmed` 와 **다른 값**이다 — 해당 없음이지 확인이 아니다', () => {
+    assert.notEqual(consentForEntry(null), 'all_confirmed');
+  });
+
+  it('준비 단계 ①이 **언제나 갈 자리를 준다**', () => {
+    // 결함 238: 회의가 없으면 `<a>` 에 href 가 안 붙어, 눈에는 단추인데
+    // 탭으로 닿지도 눌리지도 않았습니다.
+    const solo = consentStep(null);
+    assert.equal(solo.href.length > 0, true);
+    assert.equal(solo.required, false);
+    assert.equal(solo.label.includes('로비'), false, solo.label);
+
+    const withMeeting = consentStep('7');
+    assert.equal(withMeeting.href, '/app/meeting/7/lobby');
+    assert.equal(withMeeting.required, true);
+  });
+
+  it('빈 문자열도 회의가 없는 것으로 읽는다 (`?meeting=` 만 적힌 주소)', () => {
+    assert.equal(consentForEntry(''), 'solo');
+    assert.equal(consentStep('').href, '/app/');
+  });
+
+  it('어디로 남는지 **미리** 말하고, 그것은 실패가 아니다', () => {
+    const note = describeSoloEntry();
+    assert.equal(note.tone, 'gap');
+    assert.equal(note.text.includes('올라가지 않습니다'), true, note.text);
   });
 });
