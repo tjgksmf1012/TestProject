@@ -8,6 +8,7 @@ import {
   captureAlerts,
   consentStateOf,
   describeConsent,
+  whyConsentBlocked,
   isSilentTooLong,
   lobbyPhase,
   memberStatuses,
@@ -502,6 +503,39 @@ describe('참가자 낱말 — 끝난 회의의 「대기」는 거짓말이다 
       strictEqual(verdictView(status('broken', '못 씀'), canStart).word, '못 씀');
       strictEqual(verdictView(status('at_risk', '끊김'), canStart).word, '끊김');
       strictEqual(verdictView(status('healthy', '녹음 중'), canStart).word, '녹음 중');
+    }
+  });
+});
+
+describe('막아 놓고 말은 하는가 — 동의 단추 (결함 239)', () => {
+  it('안 막혔으면 `null`', () => {
+    strictEqual(whyConsentBlocked({ sending: false, alreadyAgreed: false }), null);
+  });
+
+  it('보내는 중이면 **그것이** 지금의 사실이다', () => {
+    // 동의 한 번은 요청 셋입니다 — 느린 연결에서는 그 사이가 깁니다.
+    const said = whyConsentBlocked({ sending: true, alreadyAgreed: false });
+    strictEqual(said?.includes('남기는 중'), true, String(said));
+    // 이미 동의한 사람이 다시 눌러도 「보내는 중」이 먼저입니다.
+    strictEqual(whyConsentBlocked({ sending: true, alreadyAgreed: true }), said);
+  });
+
+  it('⭐ 이미 동의했으면 **되돌리는 법**까지 말한다', () => {
+    // 되돌리는 단추 이름이 「거부합니다」입니다 — 그 말을 「취소」로
+    // 알아볼 이유가 없습니다 (실패 ③: 할 일을 알려 주고 자리를 안 줌).
+    const said = whyConsentBlocked({ sending: false, alreadyAgreed: true });
+    strictEqual(said?.includes('거부합니다'), true, String(said));
+  });
+
+  it('막는 국면마다 **말이 있다** — 빈 문자열도 아니다', () => {
+    for (const gate of [
+      { sending: true, alreadyAgreed: false },
+      { sending: false, alreadyAgreed: true },
+      { sending: true, alreadyAgreed: true },
+    ]) {
+      const said = whyConsentBlocked(gate);
+      strictEqual(typeof said, 'string', JSON.stringify(gate));
+      strictEqual((said ?? '').length > 0, true, JSON.stringify(gate));
     }
   });
 });

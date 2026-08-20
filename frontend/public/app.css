@@ -578,13 +578,19 @@ button:disabled,
   width: 100%;
 }
 
-/* 마우스가 있는 환경에서만 hover 를 준다. */
+/* 마우스가 있는 환경에서만 hover 를 준다.
+   ⛔ **막힌 것은 비켜 갑니다** (결함 239). `:not(:disabled)` 만으로는
+   `aria-disabled` 버튼을 못 막습니다 — 이 저장소의 「아직 안 됨」은
+   대부분 그쪽입니다. 「녹음 시작」에 마우스를 올리면 채움만 primary 로
+   돌아와 밝은 모드 1.16:1 · 어두운 모드 1.27:1 이었습니다.
+   ⚠️ `.btn:hover` 에는 방패가 **아예 없었습니다** — 막힌 `<a class="btn">`
+   도 같이 걸립니다. */
 @media (hover: hover) {
-  button:hover:not(:disabled),
-  .btn:hover {
+  button:hover:not(:disabled):not([aria-disabled='true']),
+  .btn:hover:not([aria-disabled='true']) {
     background: color-mix(in srgb, var(--text) 6%, var(--bg));
   }
-  button.primary:hover:not(:disabled) {
+  button.primary:hover:not(:disabled):not([aria-disabled='true']) {
     background: color-mix(in srgb, var(--primary) 88%, black);
   }
 }

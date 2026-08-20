@@ -4315,23 +4315,50 @@ describe('⛔ 막아 놓고 **말은 하는가** (결함 235)', () => {
     );
   });
 
-  it('⭐ 막는 버튼은 **하나도 빠짐없이** 사유를 답고 있다', () => {
+  it('⭐ 막는 버튼은 **하나도 빠짐없이** 사유를 답고 있다 (SPA 전 화면)', () => {
     /* ⚠️ 처음에는 「`whyCannotSave` 를 거치는가」로 썼습니다 — 그건
        **구현**이지 요구가 아닙니다. `leaveBlocked`·`rotateBlocked` 는
        사유가 하나뿐이라 그 함수 없이도 요구를 지키는데, 가드만 실패했습니다.
-       요구는 **「막혔으면 사유가 따라온다」** 입니다. */
-    const buttons = [...settings.matchAll(/<button[\s\S]{0,420}?>/g)].map((m) => m[0]);
+       요구는 **「막혔으면 사유가 따라온다」** 입니다.
+
+       ⚠️⚠️ 그리고 이 가드는 **설정 화면만** 보고 있었습니다. 같은 요구가
+       로비에서 깨져 있었는데(「동의했습니다」가 `aria-describedby` 없이
+       막혀 있었습니다 — 결함 239) 이 가드는 조용히 통과했습니다.
+       `AGENTS.md` 가 적어 둔 그대로 — **요구가 아니라 찾는 자리가
+       낡았습니다.** 이제 SPA 화면을 전부 걷습니다. */
+    const base = join(ROOT, '..', 'webapp', 'src');
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.tsx')) files.push(full);
+      }
+    };
+    walk(base);
+    ok(files.length > 0, 'SPA 화면 파일을 하나도 못 찾았습니다 — 가드가 헛돕니다');
+
     const offenders: string[] = [];
-    for (const b of buttons) {
-      const gate = /aria-disabled=\{([^}]*)\}/.exec(b)?.[1];
-      if (gate === undefined) continue;
-      // `isPending` 만으로 막는 것은 잠깐이라 사유가 필요 없습니다.
-      const judged = gate.replace(/[\w.]*\.is(Pending|Success)/g, '').replace(/[|&!\s()]/g, '');
-      if (judged === '') continue;
-      if (!/aria-describedby=/.test(b)) {
-        offenders.push(`aria-disabled={${gate}} 인데 사유를 안 답니다`);
+    let seen = 0;
+    for (const file of files) {
+      const code = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+        .replace(/\/\/[^\n]*/g, ' ');
+      for (const m of code.matchAll(/<button[\s\S]{0,420}?>/g)) {
+        const b = m[0];
+        const gate = /aria-disabled=\{([^}]*)\}/.exec(b)?.[1];
+        if (gate === undefined) continue;
+        seen += 1;
+        // `isPending` 만으로 막는 것은 잠깐이라 사유가 필요 없습니다.
+        const judged = gate.replace(/[\w.]*\.is(Pending|Success)/g, '').replace(/[|&!\s()]/g, '');
+        if (judged === '') continue;
+        if (!/aria-describedby=/.test(b)) {
+          offenders.push(`${file.slice(base.length + 1)}: aria-disabled={${gate}} 인데 사유를 안 답니다`);
+        }
       }
     }
+    ok(seen > 0, '`aria-disabled` 버튼을 하나도 안 봤습니다 — 가드가 헛돕니다');
     ok(
       offenders.length === 0,
       `막아 놓고 말을 안 합니다\n    ${offenders.join('\n    ')}`,

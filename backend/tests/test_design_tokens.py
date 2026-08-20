@@ -892,3 +892,57 @@ def test_no_button_is_dimmed_with_opacity(spa: str):
         "버튼을 흐리게 하고 있습니다 — 글자와 채움이 같이 내려가 색 토큰만 "
         "보는 감사는 못 잡습니다. 모양으로 말하세요:\n  " + "\n  ".join(bad)
     )
+
+
+def test_hover_steps_around_blocked_buttons(spa: str):
+    """⛔ **hover 는 막힌 것을 비켜 간다** (결함 239).
+
+    막힌 버튼은 「덜 채운 모양」(`btn--unmet` · `:disabled` 규칙)으로
+    말합니다. 그런데 hover 규칙이 채움만 되돌려 놓으면 글자는 잉크색으로
+    남아 **사라집니다.** 재 봤습니다 — 마우스를 올린 채로:
+
+        SPA  「검토 끝내기」·「등록」·「이 값으로 확정」·「동의했습니다」
+             밝은 1.23:1  ·  어두운 1.25:1
+        레거시 「녹음 시작」
+             밝은 1.16:1  ·  어두운 1.27:1
+
+    막던 것은 `:not(:disabled)` 하나였습니다. 그건 `disabled` 를 쓰던
+    시절의 방패인데, 결함 234·235 에서 막힌 버튼을 전부 `aria-disabled`
+    로 옮기면서 **아무것도 안 막게 됐습니다.** 요구가 아니라 방패가
+    낡은 것이고, `AGENTS.md` 가 경고하는 바로 그 부류입니다.
+
+    ⚠️ 결함 236 의 사촌입니다. 저기는 `opacity`, 여기는 `:hover` — 둘 다
+    **쉬고 있는 상태만 재는 감사**가 구조적으로 못 보는 자리입니다.
+    """
+    legacy = LEGACY_APP_CSS.read_text(encoding="utf-8")
+    bad: list[str] = []
+    checked = 0
+    for name, css in (("webapp/src/app.css", spa), ("frontend/public/app.css", legacy)):
+        # 주석을 걷어냅니다 — 이 결함을 **설명하는 주석**이 스스로 걸립니다.
+        body = re.sub(r"/\*.*?\*/", " ", css, flags=re.S)
+        for block in re.finditer(r"([^{}]+)\{([^{}]*)\}", body):
+            selector, decls = block.group(1).strip(), block.group(2)
+            if ":hover" not in selector:
+                continue
+            if not re.search(r"\bbutton\b|\.btn\b", selector):
+                continue
+            # 색을 바꾸지 않는 hover(밑줄·그림자)는 모양을 안 무릅니다.
+            if not re.search(r"(?<![-\w])(background|color)\s*:", decls):
+                continue
+            checked += 1
+            # ⚠️ 셀렉터가 여럿이면 **하나하나** 봅니다 — 콤마로 묶어 두면
+            #    한쪽만 막아 놓고 통과합니다(레거시가 실제로 그랬습니다:
+            #    `button:hover:not(:disabled), .btn:hover` — 뒤쪽은 맨몸).
+            for one in selector.split(","):
+                one = one.strip()
+                if ":hover" not in one:
+                    continue
+                if not re.search(r"\bbutton\b|\.btn\b", one):
+                    continue
+                if "[aria-disabled" not in one:
+                    bad.append(f"{name}: `{one}`")
+    assert checked > 0, "hover 규칙을 하나도 안 봤습니다 — 검사가 헛돕니다"
+    assert not bad, (
+        "막힌 버튼 위에서 hover 가 채움을 되돌립니다 — 글자가 사라집니다. "
+        "`:not([aria-disabled='true'])` 를 붙이세요:\n  " + "\n  ".join(bad)
+    )

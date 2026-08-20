@@ -100,6 +100,39 @@ export function describeConsent(state: ConsentState): string {
   }
 }
 
+/** 동의 단추를 지금 못 누르는 까닭. 없으면 `null`. */
+export interface ConsentGate {
+  /** 서버에 남기는 중 */
+  sending: boolean;
+  /** 이미 내 동의가 명부에 있다 */
+  alreadyAgreed: boolean;
+}
+
+/**
+ * **막았으면 왜 막혔는지 말한다** (결함 235 의 규칙을 로비에도 · 결함 239).
+ *
+ * ## 왜 「보내는 중」이 그냥 도는 표시가 아닌가
+ *
+ * 동의 한 번은 요청 **셋**입니다 — 원본 보관 · 목소리 특징 · 녹음.
+ * 느린 연결에서는 그 사이가 길고, 그동안 단추는 눌러도 안 먹습니다.
+ * 아무 말이 없으면 사람은 **고장 났다고 읽고** 새로고침합니다.
+ *
+ * ## 왜 「이미 동의했습니다」에 되돌리는 법을 붙이나
+ *
+ * 되돌리는 단추 이름이 「거부합니다」입니다. 이미 동의한 사람이 그 말을
+ * 「취소」로 알아볼 이유가 없습니다 — 이 저장소가 세 번째로 적어 둔 실패
+ * (「할 일을 알려 주고 그 일을 할 자리를 안 줌」)를 피하려면 **여기서**
+ * 말해야 합니다.
+ */
+export function whyConsentBlocked(gate: ConsentGate): string | null {
+  // 순서가 있습니다 — 보내는 중이면 그것이 지금의 사실입니다.
+  if (gate.sending) return '동의를 남기는 중입니다 — 셋을 차례로 보냅니다';
+  if (gate.alreadyAgreed) {
+    return '이미 동의했습니다. 되돌리려면 「거부합니다」를 누르세요';
+  }
+  return null;
+}
+
 export interface ConsentSummary {
   total: number;
   granted: number;

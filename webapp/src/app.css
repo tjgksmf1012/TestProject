@@ -587,12 +587,30 @@ button.rail__item {
   text-decoration: none;
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
+/* ⛔ hover 는 **막힌 것을 비켜 가야 합니다** (결함 239).
+   `:not(:disabled)` 만 걸려 있었습니다. 그건 `disabled` 를 쓰던 시절의
+   방패인데, 234·235 에서 SPA 의 막힌 버튼을 전부 `aria-disabled` 로
+   옮기면서 **그 방패가 아무것도 안 막게 됐습니다.**
+
+   그래서 마우스를 올리면 `.btn--unmet` 의 채움만 primary 로 되돌아오고
+   글자는 잉크색 그대로 남습니다 — 재 봤습니다:
+
+       「검토 끝내기」·「등록」·「이 값으로 확정」·「동의했습니다」
+       밝은 모드 1.23:1  ·  어두운 모드 1.25:1   (글자가 사라집니다)
+
+   결함 236 의 사촌입니다. 저기는 `opacity`, 여기는 `:hover` — 둘 다
+   **쉬고 있는 상태만 재는 감사**가 구조적으로 못 보는 자리입니다. */
 .btn--primary { background: var(--c-evidence); color: var(--c-ink-inverse); }
-.btn--primary:hover:not(:disabled) { background: var(--c-evidence-hover); }
+.btn--primary:hover:not(:disabled):not([aria-disabled='true']) {
+  background: var(--c-evidence-hover);
+}
 .btn--secondary { background: var(--c-surface); border-color: var(--c-line-strong); }
-.btn--secondary:hover:not(:disabled) { background: var(--c-sunken); }
+.btn--secondary:hover:not(:disabled):not([aria-disabled='true']) { background: var(--c-sunken); }
 .btn--ghost { color: var(--c-ink-muted); }
-.btn--ghost:hover:not(:disabled) { color: var(--c-ink); background: var(--c-sunken); }
+.btn--ghost:hover:not(:disabled):not([aria-disabled='true']) {
+  color: var(--c-ink);
+  background: var(--c-sunken);
+}
 /* ⚠️ 여기 `color: #fff` 가 박혀 있었습니다. 어두운 모드에서는 채움
    (`--c-danger`)이 **밝게 뒤집히는데** 글자만 흰색으로 남아 3.26:1 이
    됐습니다 — 하필 "내 녹음과 성문 지우기", 되돌릴 수 없는 버튼입니다.

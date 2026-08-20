@@ -22,6 +22,7 @@ import {
   savedExtraConsents,
   startBlockers,
   verdictView,
+  whyConsentBlocked,
   type TrackHealth,
   REPROCESS_CONFIRM,
 } from '@lib/lobby/room.ts';
@@ -131,6 +132,12 @@ export default function Lobby() {
   // 한 명이라도 참가했으면 레인 칸을 유지합니다 — 참가한 사람과 아직인
   // 사람이 섞여 있을 때 축이 서로 어긋나면 시간을 견줄 수 없습니다.
   const anyJoined = statuses.some((s) => s.verdict !== 'not_joined');
+
+  /** 동의 단추를 지금 못 누르는 까닭 (결함 239). 판단은 `@lib`. */
+  const consentBlocked = whyConsentBlocked({
+    sending: m.consent.isPending,
+    alreadyAgreed: iAgreed,
+  });
 
   const submitConsent = async (consented: boolean) => {
     // ②③ 을 먼저 남기고 ① 을 마지막에 — 서버는 저장된 값으로 판단합니다.
@@ -417,27 +424,43 @@ export default function Lobby() {
               {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 (결함 234).
                   이미 동의한 사람의 버튼이 `disabled` 면 **Tab 이 건너뛰어**
                   「동의했습니다」라는 그 말 자체에 닿지 못합니다. 눌러도
-                  다시 안 보냅니다. */}
+                  다시 안 보냅니다.
+                  ⛔ 그런데 **왜 막혔는지는 말하지 않았습니다** (결함 239) —
+                  `aria-describedby` 가 없었습니다. 동의 한 번은 요청 셋이라
+                  느린 연결에서는 십수 초 동안 눌러도 안 먹는데 화면이 조용
+                  했습니다. 판단은 `@lib` 의 `whyConsentBlocked`. */}
               <button
                 type="button"
-                className={`btn btn--primary${iAgreed ? ' btn--unmet' : ''}`}
-                aria-disabled={m.consent.isPending || iAgreed}
+                className={`btn btn--primary${consentBlocked !== null ? ' btn--unmet' : ''}`}
+                aria-disabled={consentBlocked !== null}
+                aria-describedby={consentBlocked !== null ? 'consent-why' : undefined}
                 onClick={() => {
-                  if (m.consent.isPending || iAgreed) return;
+                  if (consentBlocked !== null) return;
                   void submitConsent(true);
                 }}
               >
                 {iAgreed ? '동의했습니다' : '동의합니다'}
               </button>
+              {/* 되돌리는 쪽도 보내는 동안은 막힙니다 — 같은 사유를 가리킵니다. */}
               <button
                 type="button"
-                className="btn btn--ghost"
-                disabled={m.consent.isPending}
-                onClick={() => void submitConsent(false)}
+                className={`btn btn--ghost${m.consent.isPending ? ' btn--unmet' : ''}`}
+                aria-disabled={m.consent.isPending}
+                aria-describedby={m.consent.isPending ? 'consent-why' : undefined}
+                onClick={() => {
+                  if (m.consent.isPending) return;
+                  void submitConsent(false);
+                }}
               >
                 거부합니다
               </button>
             </div>
+            {/* 눈으로 보는 사람과 낭독기가 **같은 문장**을 받습니다. */}
+            {consentBlocked !== null && (
+              <p className="t13 phase-note" id="consent-why">
+                {consentBlocked}
+              </p>
+            )}
             {m.consent.isError && (
               <Problem>동의를 남기지 못했습니다 — 잠시 뒤 다시 해 보세요.</Problem>
             )}
