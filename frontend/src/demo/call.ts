@@ -17,6 +17,8 @@ import {
   callWarnings,
   captureProblems,
   describeCall,
+  describeMic,
+  describeMyCapture,
   describePeer,
   planPeers,
   type PeerState,
@@ -47,6 +49,12 @@ let me = 0;
 let roster: RosterPeer[] = [];
 let serverWarnings: string[] = [];
 let micReady = false;
+/** 내가 껐는가. `micReady` 와 **다른 값**입니다 — 켰는데 끈 상태가 있습니다. */
+let micMuted = false;
+/** 내 트랙의 서버 상태. `undefined` 는 "아직 녹음 안 함" 입니다 (결함 216). */
+let myTrackStatus: string | undefined;
+/** 마이크 설정이 권장과 다른 것들. 토글할 때 다시 계산하지 않게 들고 있습니다. */
+let micProblems: string[] = [];
 let socket: WebSocket | null = null;
 let localStream: MediaStream | null = null;
 
@@ -93,10 +101,18 @@ function render(): void {
   const mine = roster.find((p) => p.user_id === me);
   const rows = [
     mine
-      ? `<li><span class="face me">${escapeHtml(mine.name.slice(0, 1))}</span>
+      ? (() => {
+          /* ⚠️ 여기 「이 기기에서 녹음됩니다」 가 **조건 없이** 박혀
+             있었습니다 (결함 216). 통화에 있는 것과 녹음이 도는 것은 다른
+             일이고, 아무것도 안 남는데 남는다고 말하고 있었습니다. */
+          const capture = describeMyCapture(
+            myTrackStatus === undefined ? undefined : { status: myTrackStatus },
+          );
+          return `<li><span class="face me">${escapeHtml(mine.name.slice(0, 1))}</span>
            <span class="who"><span class="name">${escapeHtml(mine.name)} (나)</span>
-           <span class="state ok">이 기기에서 녹음됩니다</span></span>
-           ${mine.headphones ? '' : '<span class="badge">헤드폰 없음</span>'}</li>`
+           <span class="state ${capture.tone}">${escapeHtml(capture.label)}</span></span>
+           ${mine.headphones ? '' : '<span class="badge">헤드폰 없음</span>'}</li>`;
+        })()
       : '',
     ...views.map(
       (p) => `<li><span class="face">${escapeHtml(p.name.slice(0, 1))}</span>
@@ -125,10 +141,11 @@ async function openMic(): Promise<void> {
     });
   } catch {
     micReady = false;
+    micMuted = false;
     // ⚠️ 빨강이 아니라 **흙빛 + 행동 버튼**입니다 (design/redesign §통화).
     // 권한을 아직 안 준 것은 잘못이 아니라 대기 상태라, 빨갛게 쓰면
     // 사람은 통화가 고장 났다고 읽습니다. 할 일을 버튼으로 줍니다.
-    showNote($('mic'), '마이크가 아직 꺼져 있습니다 — 권한을 허용하면 켜집니다.', 'gap');
+    paintMic();
     $('mic-retry').hidden = false;
     render();
     return;
@@ -136,21 +153,30 @@ async function openMic(): Promise<void> {
   $('mic-retry').hidden = true;
 
   micReady = true;
+  micMuted = false;
   // 마이크가 열려야 토글할 것이 생긴다 (v2 F2 — 하단 컨트롤 바).
   ($('mic-toggle') as HTMLButtonElement).disabled = false;
-  $('mic-toggle').textContent = '마이크 끄기';
-  $('mic-toggle').setAttribute('aria-pressed', 'true');
   const track = localStream.getAudioTracks()[0];
-  const settings = (track?.getSettings() ?? {}) as Record<string, unknown>;
-  const problems = captureProblems(settings);
-  showNote(
-    $('mic'),
-    problems.length ? problems.join(' ') : '마이크가 켜졌습니다 (에코 제거 켬 · 자동 게인 끔).',
-    problems.length ? 'bad' : 'plain',
-  );
+  micProblems = captureProblems((track?.getSettings() ?? {}) as Record<string, unknown>);
+  paintMic();
 
   meterFrom(localStream);
   render();
+}
+
+/**
+ * 마이크 칸과 토글 버튼을 **한 곳에서** 다시 그린다.
+ *
+ * ⚠️ 예전에는 상태줄을 `openMic()` 이 한 번 쓰고, 토글은 버튼 글자만
+ * 바꿨습니다. 그래서 껐는데도 상태줄이 「마이크가 켜졌습니다」였습니다
+ * (결함 216). 같은 사실을 두 곳에서 쓰면 반드시 갈라집니다.
+ */
+function paintMic(): void {
+  const state = !micReady ? 'off' : micMuted ? 'muted' : 'on';
+  const note = describeMic(state, micProblems);
+  showNote($('mic'), note.text, note.tone);
+  $('mic-toggle').textContent = micMuted ? '마이크 켜기' : '마이크 끄기';
+  $('mic-toggle').setAttribute('aria-pressed', String(!micMuted));
 }
 
 /** ⚠️ 이게 없으면 마이크가 죽은 걸 회의가 끝난 뒤에 안다. */
@@ -290,8 +316,9 @@ $('mic-toggle').addEventListener('click', () => {
   const track = localStream?.getAudioTracks()[0];
   if (!track) return;
   track.enabled = !track.enabled;
-  $('mic-toggle').textContent = track.enabled ? '마이크 끄기' : '마이크 켜기';
-  $('mic-toggle').setAttribute('aria-pressed', String(track.enabled));
+  micMuted = !track.enabled;
+  // ⚠️ 버튼 글자만 바꾸지 않습니다 — 위 상태줄도 같은 사실을 말합니다.
+  paintMic();
 });
 
 $('leave').addEventListener('click', () => {
@@ -319,9 +346,36 @@ async function start(): Promise<void> {
 
   await openMic();
   openSocket();
+  // 5초를 기다리지 않고 **처음부터** 사실을 말합니다.
+  await pollMyTrack();
 }
 
 void start();
+
+/**
+ * 내 트랙이 서버에 있는가 — **물어봐야 압니다** (결함 216).
+ *
+ * ⚠️ 예전에는 안 묻고 「이 기기에서 녹음됩니다」 라고 단언했습니다. 통화에
+ * 있는 것과 녹음이 도는 것은 다른 일이고, 녹음은 다른 화면에서 시작합니다.
+ *
+ * ⚠️ 로비와 같은 주기(5초)입니다 — 새 숫자를 지어내지 않습니다. 실패하면
+ * **값을 안 바꿉니다**: 한 번 못 물어봤다고 「아직 녹음 안 함」 으로
+ * 뒤집으면, 녹음 중인 사람에게 안 되고 있다고 말하게 됩니다.
+ */
+async function pollMyTrack(): Promise<void> {
+  if (!meetingId || !me) return;
+  const response = await tryGet(`${apiBase}/api/meetings/${meetingId}/tracks`);
+  if (response === null || !response.ok) return;
+  const body = (await response.json()) as { tracks?: { user_id: number; status: string }[] };
+  const mine = (body.tracks ?? []).find((t) => t.user_id === me);
+  const next = mine?.status;
+  if (next === myTrackStatus) return;
+  myTrackStatus = next;
+  render();
+}
+
+// ⚠️ `me` 가 정해진 뒤에야 뜻이 있습니다. `start()` 가 채웁니다.
+setInterval(() => void pollMyTrack(), 5000);
 
 // v2 F2 — 컨텍스트 바와 레일을 회의로 잇는다 (index.html 의 짝과 같은 역할).
 async function fillShellContext(): Promise<void> {

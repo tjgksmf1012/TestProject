@@ -1,11 +1,16 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   CALL_AUDIO_CONSTRAINTS,
   callWarnings,
   captureProblems,
   describeCall,
+  describeMic,
+  describeMyCapture,
   describePeer,
   planPeers,
   shouldInitiate,
@@ -13,6 +18,9 @@ import {
   type PeerView,
   type RosterPeer,
 } from './mesh.ts';
+
+/** `frontend/` — 이 파일은 `frontend/src/lib/call/` 에 있습니다. */
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 function peer(user_id: number, over: Partial<RosterPeer> = {}): RosterPeer {
   return {
@@ -186,5 +194,82 @@ describe('통화 모드 캡처 설정 (docs/15 §2.2)', () => {
       captureProblems({ autoGainControl: false, echoCancellation: true, noiseSuppression: true }),
       [],
     );
+  });
+});
+
+describe('내 마이크 — 껐으면 껐다고 말한다 (결함 216)', () => {
+  it('⭐ 끄면 문장이 바뀐다 — 예전에는 「마이크가 켜졌습니다」가 그대로 남았다', () => {
+    // 가짜 마이크로 재서 확인한 것:
+    //   끈 뒤: 상태줄 "마이크가 켜졌습니다" · 버튼 "마이크 켜기"  ← 어긋남
+    const on = describeMic('on', []);
+    const muted = describeMic('muted', []);
+    strictEqual(on.text.includes('켜졌습니다'), true);
+    strictEqual(muted.text.includes('켜졌습니다'), false, '껐는데 켜졌다고 말합니다');
+    strictEqual(muted.text.includes('껐습니다'), true);
+  });
+
+  it('⛔ 껐다고 빨강으로 쓰지 않는다 — 끈 것은 그 사람의 선택이다', () => {
+    strictEqual(describeMic('muted', []).tone, 'gap');
+    strictEqual(describeMic('off', []).tone, 'gap');
+  });
+
+  it('⛔ 통화 마이크를 껐다고 **녹음까지** 단언하지 않는다', () => {
+    // 녹음은 녹음 화면이 자기 스트림으로 따로 잡습니다. 여기서 녹음을
+    // 단언하면 고치려던 거짓말을 다른 자리에 다시 만드는 것입니다.
+    strictEqual(/녹음/.test(describeMic('muted', []).text), false);
+  });
+
+  it('설정이 권장과 다르면 그것을 먼저 말한다 — 켜져 있을 때만', () => {
+    const problems = ['에코 제거가 꺼져 있습니다.'];
+    strictEqual(describeMic('on', problems).text, '에코 제거가 꺼져 있습니다.');
+    strictEqual(describeMic('on', problems).tone, 'bad');
+    // 껐으면 설정 이야기는 지금 할 말이 아닙니다.
+    strictEqual(describeMic('muted', problems).text.includes('에코'), false);
+  });
+});
+
+describe('내 타일의 녹음 상태 — 안 묻고 단언하던 것 (결함 216)', () => {
+  it('⭐ 트랙이 없으면 「녹음 중」이라고 말하지 않는다', () => {
+    // 여기 「이 기기에서 녹음됩니다」 가 **조건 없이** 박혀 있었습니다.
+    // 아무것도 안 남는데 남는다고 말했고, 이 제품에서 녹음이 한 번
+    // 끊기면 그 구간은 영영 못 잽니다.
+    const none = describeMyCapture(undefined);
+    strictEqual(none.label, '아직 녹음 중이 아닙니다');
+    strictEqual(none.tone, 'warn');
+  });
+
+  it('⭐ 녹음 중일 때만 「녹음 중」', () => {
+    strictEqual(describeMyCapture({ status: 'recording' }).label, '녹음 중입니다');
+    strictEqual(describeMyCapture({ status: 'completed' }).label, '녹음이 끝났습니다');
+  });
+
+  it('⚠️ 못 쓰는 트랙은 「0」 이 아니라 「못 씀」', () => {
+    for (const status of ['unusable', 'aborted']) {
+      strictEqual(describeMyCapture({ status }).label, '녹음을 쓸 수 없습니다');
+      strictEqual(describeMyCapture({ status }).tone, 'warn');
+    }
+  });
+
+  it('⛔ 「이 기기에서」 라고 말하지 않는다 — 서버는 어느 기기인지 안 알려 준다', () => {
+    for (const track of [undefined, { status: 'recording' }, { status: 'completed' }]) {
+      strictEqual(/이 기기/.test(describeMyCapture(track).label), false);
+    }
+  });
+
+  it('⛔ 낱말이 `call.html` 의 규칙에 **실제로 있는** 것이어야 한다', () => {
+    // 처음에 `gap` 이라고 적었는데 그 클래스는 아무 데도 없습니다
+    // (`.state.warn` 이 흙빛입니다). 오류가 안 나고 **색만 안 칠해집니다.**
+    const css = readFileSync(join(ROOT, 'public', 'call.html'), 'utf8');
+    const tones = new Set(
+      [undefined, { status: 'recording' }, { status: 'completed' }, { status: 'unusable' }].map(
+        (t) => describeMyCapture(t).tone,
+      ),
+    );
+    for (const tone of tones) {
+      ok(
+        new RegExp(`\\.state\\.${tone}\\s*\\{`).test(css),
+        `call.html 에 \`.state.${tone}\` 규칙이 없습니다 — 색이 안 칠해집니다`,
+      );
+    }
   });
 });

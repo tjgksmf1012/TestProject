@@ -4131,3 +4131,51 @@ describe('확정 막힘 사유는 **한 덩이로 읽혀야** 한다 (결함 215
     );
   });
 });
+
+describe('통화 화면이 **아는 것만** 말한다 (결함 216)', () => {
+  const call = readFileSync(join(ROOT, 'src', 'demo', 'call.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ 녹음 여부를 **박아 두지 않는다** — 통화에 있는 것과 녹음이 도는 것은 다르다', () => {
+    // 내 타일에 `<span class="state ok">이 기기에서 녹음됩니다</span>` 가
+    // **조건 없이** 있었습니다. 아무것도 안 남는데 남는다고 말했고, 이
+    // 제품에서 녹음이 한 번 끊기면 그 구간은 영영 못 잽니다.
+    ok(!/이 기기에서 녹음됩니다/.test(call), '녹음 문구가 아직 화면에 박혀 있습니다');
+    ok(/describeMyCapture\(/.test(call), '녹음 상태 판단을 안 씁니다');
+    // ⚠️ **묻는 곳이 있어야 압니다.** 판단을 불러도 값이 언제나
+    //    `undefined` 면 "아직 녹음 안 함" 을 단언하는 것이고, 그건 반대
+    //    방향의 같은 거짓말입니다.
+    ok(
+      /\/tracks`\)/.test(call) || /\/tracks'\)/.test(call),
+      '트랙을 물어보는 곳이 없습니다 — 안 묻고는 알 수 없습니다',
+    );
+    ok(/setInterval\(\(\) => void pollMyTrack\(\)/.test(call), '한 번만 묻고 말면 도중에 시작한 녹음을 못 봅니다');
+  });
+
+  it('⚠️ 못 물어봤을 때 「아직 녹음 안 함」 으로 뒤집지 않는다', () => {
+    // 한 번 실패했다고 값을 지우면, **녹음 중인 사람에게 안 되고 있다고**
+    // 말하게 됩니다. 이 저장소의 "측정 불가 ≠ 0" 과 같은 자리입니다.
+    const poll = /async function pollMyTrack\(\)[\s\S]*?\n}/.exec(call)?.[0] ?? '';
+    ok(poll !== '', '`pollMyTrack` 이 없습니다');
+    ok(
+      /if \(response === null \|\| !response\.ok\) return;/.test(poll),
+      '요청이 실패해도 값을 건드립니다',
+    );
+  });
+
+  it('⭐ 마이크 상태를 **한 곳에서** 그린다 — 두 곳이면 갈라진다', () => {
+    // 상태줄은 `openMic()` 이 한 번 쓰고, 토글은 버튼 글자만 바꿨습니다.
+    // 그래서 껐는데 상태줄이 「마이크가 켜졌습니다」였습니다.
+    ok(/function paintMic\(\)/.test(call), '마이크를 그리는 자리가 한 곳이 아닙니다');
+    ok(/describeMic\(/.test(call), '마이크 문장 판단을 안 씁니다');
+    // 토글이 **그 자리를 부르는가** — 낱말이 아니라 호출을 봅니다.
+    const toggle = /\$\('mic-toggle'\)\.addEventListener\('click'[\s\S]*?\n\}\);/.exec(call)?.[0] ?? '';
+    ok(toggle !== '', '토글 처리기를 못 찾았습니다');
+    ok(/paintMic\(\);/.test(toggle), '토글이 상태줄을 다시 안 그립니다 — 껐는데 켜졌다고 말합니다');
+    ok(
+      !/\$\('mic'\)/.test(toggle),
+      '토글이 상태줄을 직접 씁니다 — 같은 사실을 두 곳에서 쓰면 갈라집니다',
+    );
+  });
+});
