@@ -12,6 +12,7 @@ import {
   describeMic,
   describeMyCapture,
   describePeer,
+  needsRecvOnlyAudio,
   planPeers,
   shouldInitiate,
   type PeerState,
@@ -271,5 +272,27 @@ describe('내 타일의 녹음 상태 — 안 묻고 단언하던 것 (결함 21
         `call.html 에 \`.state.${tone}\` 규칙이 없습니다 — 색이 안 칠해집니다`,
       );
     }
+  });
+});
+
+describe('마이크가 없어도 **듣기는 해야 한다** (결함 221)', () => {
+  it('⭐ 보낼 트랙이 없으면 받는 자리를 연다', () => {
+    // 트랙 없이 만든 offer 는 미디어 줄 0개·ICE 후보 0개였습니다
+    // (대조군: 트랙 있으면 1개·2개). 후보가 0개면 영영 안 붙습니다.
+    strictEqual(needsRecvOnlyAudio(0), true);
+  });
+
+  it('보낼 것이 있으면 따로 열지 않는다 — 빈 줄이 하나 더 생길 뿐이다', () => {
+    strictEqual(needsRecvOnlyAudio(1), false);
+    strictEqual(needsRecvOnlyAudio(2), false);
+  });
+
+  it('⚠️ 이 화면이 이미 하던 약속과 짝이 맞는다', () => {
+    // `callWarnings` 는 "마이크가 켜지지 않았습니다 — 이 상태로는 내
+    // 발언이 하나도 기록되지 않습니다" 라고 합니다. **내 발언만**
+    // 이라고 말하므로, 남의 목소리는 들려야 그 문장이 참입니다.
+    const warning = callWarnings([], [], false).join(' ');
+    strictEqual(/내 발언이 하나도 기록되지 않습니다/.test(warning), true);
+    strictEqual(/아무 소리도/.test(warning), false, '못 듣는다고는 안 적혀 있습니다');
   });
 });

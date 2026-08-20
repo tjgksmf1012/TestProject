@@ -4393,3 +4393,34 @@ describe('녹음 결과 칸의 주인은 **서버**다 (결함 220)', () => {
     ok(/id="disagree"[^>]*role="status"/.test(html), '낭독기가 이 변화를 못 듣습니다');
   });
 });
+
+describe('마이크가 없어도 **협상은 된다** (결함 221)', () => {
+  const call = readFileSync(join(ROOT, 'src', 'demo', 'call.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ 보낼 트랙이 없으면 **받는 자리**를 연다', () => {
+    // 브라우저로 쟀습니다 (대조군 포함):
+    //   트랙 없음        m= 줄 0개 · ICE 후보 0개  ← 영영 안 붙습니다
+    //   트랙 있음        m= 줄 1개 · ICE 후보 2개
+    //   recvonly 트랜시버 m= 줄 1개 · ICE 후보 2개 · a=recvonly
+    //
+    // ⚠️ 누가 거는지에 따라 갈립니다 — `shouldInitiate` 는 `me < other`
+    //    라, 마이크 없는 사람의 번호가 작으면 그 사람이 **빈 offer** 를
+    //    보내고 그 짝이 죽습니다. 번호로 운이 갈리는 것입니다.
+    const setup = /function connectionFor\([\s\S]*?\n}/.exec(call)?.[0] ?? '';
+    ok(setup !== '', '`connectionFor` 를 못 찾았습니다');
+    ok(/needsRecvOnlyAudio\(/.test(setup), '보낼 것이 없는 경우를 안 가립니다');
+    ok(
+      /addTransceiver\('audio',\s*\{\s*direction:\s*'recvonly'\s*\}\)/.test(setup),
+      '받는 자리를 안 엽니다 — 마이크 없는 사람은 아무 소리도 못 듣습니다',
+    );
+  });
+
+  it('⚠️ 화면의 경고와 **짝이 맞는다** — "내 발언만" 안 된다고 말하고 있다', () => {
+    // `callWarnings` 는 "이 상태로는 **내 발언이** 하나도 기록되지
+    // 않습니다" 라고 합니다. 남의 목소리는 들려야 그 문장이 참입니다.
+    const mesh = readFileSync(join(ROOT, 'src', 'lib', 'call', 'mesh.ts'), 'utf8');
+    ok(/내 발언이 하나도 기록되지 않습니다/.test(mesh), '경고 문구가 바뀌었습니다');
+  });
+});

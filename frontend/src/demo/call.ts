@@ -20,6 +20,7 @@ import {
   describeMic,
   describeMyCapture,
   describePeer,
+  needsRecvOnlyAudio,
   planPeers,
   type PeerState,
   type PeerView,
@@ -210,8 +211,16 @@ function connectionFor(userId: number, initiate: boolean): RTCPeerConnection {
   peers.set(String(userId), pc);
   states.set(userId, 'connecting');
 
-  for (const track of localStream?.getAudioTracks() ?? []) {
+  const localTracks = localStream?.getAudioTracks() ?? [];
+  for (const track of localTracks) {
     pc.addTrack(track, localStream as MediaStream);
+  }
+  // ⚠️ **보낼 것이 없으면 협상 자체가 안 됩니다** (결함 221). 트랙 없이
+  //    만든 offer 는 미디어 줄이 0개고 ICE 후보도 0개라 연결이 영영 안
+  //    붙습니다 — 재서 확인했습니다(트랙 있으면 1개·2개). 받는 자리라도
+  //    열어야 마이크 없는 사람이 **듣기는** 합니다.
+  if (needsRecvOnlyAudio(localTracks.length)) {
+    pc.addTransceiver('audio', { direction: 'recvonly' });
   }
 
   pc.onicecandidate = (event) => {
