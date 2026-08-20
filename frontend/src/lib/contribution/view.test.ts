@@ -648,6 +648,65 @@ describe('⛔ 신뢰도 「낮음」 옆에서 「확정적」이라고 말하�
   });
 });
 
+describe('⛔ 새 팀의 첫 화면이 「서로를 비교하지 마세요」라고 하던 것 (결함 228)', () => {
+  // 프로젝트를 막 만들고 기여도를 열어 본 사람. 화면은 이랬습니다:
+  //
+  //   ⚠ 팀 전원의 신뢰도가 낮습니다. 이 수치로 서로를 비교하지 마세요
+  //   김민수 · 개발 · — · 100%p 모름 · — 회의 · — 업무 · — 코드
+  //
+  // 비교할 「이 수치」가 한 개도 없고(전부 `—`), 혼자 만든 프로젝트에는
+  // 「서로」도 없습니다.
+  const 쟀고낮은사람 = (userId: number): MemberScore => ({
+    ...갓만든팀(userId),
+    confidence: 0.3,
+    confidence_label: '낮음',
+    categories: [
+      { category: 'code', raw: 3, team_share: 1, weight: 1, event_count: 3, evidence_ids: [7] },
+    ],
+  });
+  const team228 = (members: MemberScore[]): TeamScore => ({
+    algo_version: 'v1',
+    computed_at: '',
+    members,
+    skipped_categories: [],
+    notice: '',
+  });
+
+  it('⭐ 아무도 안 재였으면 **원인**을 말한다 — 신뢰도는 그 그림자다', () => {
+    const [line] = teamWarnings(team228([갓만든팀(1)]), PEOPLE);
+    strictEqual(line?.includes('아직 이 팀에서 잰 활동이 없습니다'), true, String(line));
+    // 있지도 않은 수치를 가리키지 않습니다.
+    strictEqual(line?.includes('이 수치'), false, String(line));
+    strictEqual(line?.includes('서로를 비교'), false, String(line));
+  });
+
+  it('⭐ 사람이 여럿이어도 같다 — 아무것도 안 이어진 팀은 비교할 게 없다', () => {
+    const notes = teamWarnings(team228([갓만든팀(1), 갓만든팀(2), 갓만든팀(3)]), PEOPLE);
+    strictEqual(notes.some((n) => n.includes('서로를 비교')), false, JSON.stringify(notes));
+  });
+
+  it('⛔ 혼자인데 신뢰도가 낮으면 「서로」라고 하지 않는다', () => {
+    const [line] = teamWarnings(team228([쟀고낮은사람(1)]), PEOPLE);
+    strictEqual(line?.includes('신뢰도가 낮습니다'), true, String(line));
+    strictEqual(line?.includes('서로를 비교'), false, String(line));
+  });
+
+  it('⭐ 둘 이상이고 잰 것이 있으면 **예전 문장 그대로** — 그때는 맞는 말이다', () => {
+    const notes = teamWarnings(team228([쟀고낮은사람(1), 쟀고낮은사람(2)]), PEOPLE);
+    strictEqual(
+      notes.some((n) => n.includes('팀 전원의 신뢰도가 낮습니다') && n.includes('서로를 비교하지 마세요')),
+      true,
+      JSON.stringify(notes),
+    );
+  });
+
+  it('한 사람만 낮으면 아무 말도 안 한다 — 전원일 때만 팀의 문제다', () => {
+    const 높은사람: MemberScore = { ...쟀고낮은사람(2), confidence: 0.9, confidence_label: '높음' };
+    const notes = teamWarnings(team228([쟀고낮은사람(1), 높은사람]), PEOPLE);
+    strictEqual(notes.some((n) => n.includes('신뢰도가 낮습니다')), false, JSON.stringify(notes));
+  });
+});
+
 describe('떠난 사람의 기록 (결함 222)', () => {
   const GONE: Person[] = [{ user_id: 9, name: '박지원', role_shares: { developer: 100 } }];
 
