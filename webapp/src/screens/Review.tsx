@@ -261,7 +261,16 @@ export default function Review() {
           );
         },
         onSuccess: (result) => {
-          setSubmitNote(describeSubmitResult(result.approved_count, result.approved_task_ids));
+          /* ⛔ **서버가 준 답을 읽습니다** (결함 233). `approved_count: 0` 은
+             「전부 거절함」일 수도 「이미 남이 처리함」일 수도 있는데,
+             가르는 것은 **내가 몇 건을 승인 표시했는가** 뿐입니다. */
+          setSubmitNote(
+            describeSubmitResult(
+              result.approved_count,
+              result.approved_task_ids,
+              payload.items.filter((i) => i.approve).length,
+            ),
+          );
           setSelectedId(null);
           // 확정했으면 초안은 뜻이 없습니다 — 남겨 두면 다음에 이 회의를
           // 열었을 때 이미 처리된 결정이 되살아난 것처럼 보입니다.

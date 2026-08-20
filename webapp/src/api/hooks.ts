@@ -311,6 +311,11 @@ export function useSubmitReview(meetingId: number | undefined) {
       api.post<ReviewResult>(`/api/meetings/${meetingId}/candidates/review`, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['meetings', meetingId, 'candidates'] });
+      /* ⛔ **회의도 다시 읽습니다** (결함 233). 확정하면 회의 상태가
+         `confirmed` 로 바뀌는데, 안 읽으면 화면이 옛 상태를 들고
+         「결정한 후보가 없습니다」라고 합니다 — 새로고침해야 「검토를
+         마쳤습니다」가 나왔습니다. */
+      void queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] });
     },
   });
 }

@@ -4132,6 +4132,42 @@ describe('확정 막힘 사유는 **한 덩이로 읽혀야** 한다 (결함 215
   });
 });
 
+describe('⛔ 검토 확정의 **답을 읽는다** (결함 233)', () => {
+  /* 둘이 같은 회의를 검토하면 뒤에 누른 사람이 `approved_count: 0` 을
+     받습니다(서버가 멱등이라). 그런데 화면이 그 숫자를 안 읽어서, 전부
+     거절한 사람과 **글자 하나 다르지 않은** 문장을 봤습니다.
+
+     그리고 확정 뒤 회의 상태를 다시 안 읽어서, 새로고침해야 「검토를
+     마쳤습니다」가 나왔습니다. */
+  const strip = (t: string): string =>
+    t.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
+  const review = strip(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Review.tsx'), 'utf8'))
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ');
+  const hooks = strip(readFileSync(join(ROOT, '..', 'webapp', 'src', 'api', 'hooks.ts'), 'utf8'));
+
+  it('⭐ 「내가 몇 건을 승인 표시했는가」를 같이 넘긴다', () => {
+    // 이것 없이는 `approved_count: 0` 의 뜻을 가를 수 없습니다.
+    const call = /describeSubmitResult\(([\s\S]{0,220}?)\)\s*[,)]/.exec(review)?.[1] ?? '';
+    ok(call.length > 0, 'describeSubmitResult 를 안 부릅니다');
+    /* ⚠️ `/approve/` 로 쓰면 **`result.approved_count` 가 통과시킵니다** —
+       그 낱말이 이미 인자 안에 있으니까요. 처음 이렇게 썼고, 인자를 지워도
+       가드가 조용했습니다. `.approve` **필드**를 읽는지 봅니다. */
+    ok(
+      /\.approve\b/.test(call),
+      'describeSubmitResult 에 승인 표시 건수를 안 넘깁니다 — 거절과 구별이 안 됩니다',
+    );
+  });
+
+  it('⭐ 확정하면 **회의도 다시 읽는다** — 안 읽으면 옛 상태로 말한다', () => {
+    const body = /candidates\/review[\s\S]{0,700}?\n  \}\)/.exec(hooks)?.[0] ?? '';
+    ok(body.length > 0, '검토 확정 훅을 못 찾았습니다 — 가드가 낡았습니다');
+    ok(
+      /invalidateQueries\(\{\s*queryKey:\s*\['meetings',\s*meetingId\]\s*\}\)/.test(body),
+      '확정 뒤 회의를 다시 안 읽습니다 — 화면이 옛 상태로 말합니다',
+    );
+  });
+});
+
 describe('⛔ 검토 화면이 **회의 상태를 본다** (결함 232)', () => {
   /* 후보를 셋 다 확정하고 「검토 끝내기」를 누른 직후의 화면이 이랬습니다:
 

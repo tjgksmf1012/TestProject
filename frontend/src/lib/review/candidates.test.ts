@@ -709,3 +709,43 @@ describe('되돌리기는 되돌릴 수 있을 때만 (결함 194)', () => {
     assert.strictEqual(canUndoDecision(c('rejected'), { decision: 'approve' }), false);
   });
 });
+
+describe('⛔ 둘이 동시에 검토하면 뒤에 누른 사람이 속았습니다 (결함 233)', () => {
+  // ## 재현
+  //
+  // 브라우저 둘로 같은 회의의 검토 화면을 열었습니다.
+  //   A 가 후보 셋을 승인 표시하고 「검토 끝내기」 → 200, approved_count 3
+  //   B 는 낡은 화면 그대로. 같은 셋을 표시하고 「검토 끝내기」
+  //     → 200 {"approved_task_ids":[],"approved_count":0}
+  //
+  // 서버는 멱등이라 정직하게 0건이라고 답했는데, B 의 화면은 A 와
+  // **글자 하나 다르지 않았습니다.**
+  it('⛔ 승인을 표시했는데 0건이면 **그렇게 말한다** — 거절과 같은 말을 하지 않는다', () => {
+    const 남이먼저 = describeSubmitResult(0, [], 3);
+    const 전부거절 = describeSubmitResult(0, [], 0);
+    assert.equal(남이먼저 === 전부거절, false, '두 결과가 같은 문장입니다');
+    assert.equal(남이먼저.includes('3건'), true, 남이먼저);
+    assert.equal(남이먼저.includes('새로고침'), true, 남이먼저);
+  });
+
+  it('⭐ 전부 거절해서 0건인 것은 **실패가 아니다** — 그대로 둔다', () => {
+    assert.equal(describeSubmitResult(0, [], 0), '검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다');
+  });
+
+  it('⭐ 일부만 들어간 것도 말한다 — 표시한 3건 중 1건만 등록', () => {
+    const note = describeSubmitResult(1, [5], 3);
+    assert.equal(note.includes('1건이 칸반에'), true, note);
+    assert.equal(note.includes('2건은 등록되지 않았습니다'), true, note);
+  });
+
+  it('⭐ 표시한 만큼 다 들어갔으면 **군말을 안 붙인다**', () => {
+    const note = describeSubmitResult(3, [5, 6, 7], 3);
+    assert.equal(note.includes('등록되지 않았습니다'), false, note);
+    assert.equal(note.includes('3건이 칸반에 등록됐습니다'), true, note);
+  });
+
+  it('⚠️ 표시 건수를 안 주면 **예전과 같이** 답한다 — 옛 호출을 안 깨뜨린다', () => {
+    assert.equal(describeSubmitResult(0, []), '검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다');
+    assert.equal(describeSubmitResult(2, [1, 2]).includes('2건이 칸반에 등록됐습니다'), true);
+  });
+});

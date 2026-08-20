@@ -562,10 +562,43 @@ export function canSubmit(summary: ReviewSummary): boolean {
  * 후보 셋을 읽고 셋 다 거절한 참입니다. 등록이 0건인 것은 결과이지
  * 아무 일도 안 일어난 것이 아닙니다.
  */
-export function describeSubmitResult(approvedCount: number, taskIds: number[]): string {
+export function describeSubmitResult(
+  approvedCount: number,
+  taskIds: number[],
+  /**
+   * 내가 **승인 표시한** 건수. 서버의 답만으로는 「0건」의 뜻을 못 가릅니다.
+   *
+   * ⛔ 이것 없이는 **정반대 두 결과가 같은 문장**을 받습니다 (결함 233):
+   *
+   *   - 전부 거절해서 0건 → 「칸반에 등록된 업무는 없습니다」 (맞는 말)
+   *   - 셋을 승인했는데 0건 → **같은 문장** ⛔
+   *
+   * 둘이 동시에 검토하면 뒤에 누른 사람이 그렇게 됩니다 — 서버는 멱등이라
+   * 조용히 `approved_count: 0` 을 주고, 그 사람은 자기 승인 셋이 반영된
+   * 줄 압니다. 재현했습니다: 둘이 같은 회의를 열고 A 가 먼저 끝내니
+   * B 는 `{"approved_task_ids":[],"approved_count":0}` 을 받고도
+   * A 와 **글자 하나 다르지 않은** 화면을 봤습니다.
+   */
+  requestedCount = 0,
+): string {
+  if (requestedCount > 0 && approvedCount === 0) {
+    // ⚠️ "다른 사람이 먼저 했다" 고 **단정하지 않습니다.** 우리가 아는
+    //    것은 "표시한 것이 안 들어갔다" 뿐입니다.
+    return (
+      `승인 표시한 ${requestedCount}건 중 새로 등록된 것이 없습니다 — ` +
+      '이미 처리된 회의입니다. 새로고침해 지금 상태를 보세요'
+    );
+  }
   if (approvedCount === 0) {
     // ⚠️ 여기서 "실패" 라고 하지 않습니다. 거절은 정상적인 결정입니다.
     return '검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다';
+  }
+  if (requestedCount > approvedCount) {
+    const missed = requestedCount - approvedCount;
+    return (
+      `${approvedCount}건이 칸반에 등록됐습니다 — 표시한 ${requestedCount}건 중 ` +
+      `${missed}건은 등록되지 않았습니다. 새로고침해 확인하세요`
+    );
   }
   // 번호가 안 왔으면 지어내지 않고 건수만 말합니다.
   const numbers = taskIds.filter((id) => Number.isFinite(id));
