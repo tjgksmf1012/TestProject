@@ -522,3 +522,18 @@ export function verdictView(status: MemberStatus, canStart: boolean): VerdictVie
   };
   return { word: WORD[status.verdict], message: status.message };
 }
+
+/**
+ * 「다시 처리하기」를 누르기 **전에** 묻는 말 (결함 114 · 231).
+ *
+ * ⚠️ 되돌릴 수 없습니다 — 앞판의 발화·후보·결정이 지워지고 새로
+ * 만들어집니다. 그래서 묻습니다.
+ *
+ * ⚠️ **두 화면이 같은 말을 해야 합니다.** 레거시 로비에 이 문장이
+ * 인라인으로 있었고, SPA 로비에는 버튼 자체가 없었습니다(결함 231).
+ * 옮기면서 각자 짓게 두면 "지워진다" 는 경고가 한쪽에서만 뜹니다.
+ */
+export const REPROCESS_CONFIRM =
+  '이 회의를 처음부터 다시 처리합니다.\n' +
+  '앞서 만들어진 발화·업무 후보·결정은 지워지고 새로 만들어집니다.\n' +
+  '계속할까요?';

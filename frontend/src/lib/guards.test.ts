@@ -4132,6 +4132,69 @@ describe('확정 막힘 사유는 **한 덩이로 읽혀야** 한다 (결함 215
   });
 });
 
+describe('⛔ 처리에 실패한 회의에서 나갈 자리 (결함 231)', () => {
+  /* 결함 114 가 `failed` 라는 막다른 길을 열었습니다 — 서버에
+     `/reprocess` 가 생기고, `progress` 가 `can_reprocess` 로 **언제 다시
+     할 수 있는지**를 답합니다.
+
+     그런데 로비가 SPA 로 옮겨질 때 **버튼이 안 따라왔습니다.**
+
+         레거시 lobby.html : 「다시 처리하기」 있음
+         SPA  /app/…/lobby : 없음  ← 사람이 실제로 쓰는 화면
+
+     그 화면은 「처리에 실패했습니다. 아래 트랙이 온전한지 확인하세요」
+     라고 **시켜 놓고**, 확인한 사람에게 누를 것을 안 줬습니다 — 이
+     저장소의 실패 ③ 이 결함 114 를 고친 자리에서 다시 났습니다. */
+  const lobby = readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ');
+
+  it('⭐ SPA 로비가 다시 처리할 자리를 주고, 그 자리가 **실제로 부른다**', () => {
+    ok(/useReprocess\(/.test(lobby), 'SPA 로비가 다시 처리를 안 부릅니다 — 막다른 길입니다');
+    ok(/다시 처리하기/.test(lobby), '누를 것이 없습니다');
+    /* ⚠️ **버튼이 있는지만 보면 안 됩니다.** 처음 이 가드는 `useReprocess`
+       와 낱말만 봤고, 그래서 `reprocess.mutate()` 를 지워도 통과했습니다 —
+       "만들어 놓고 아무도 안 부름" 을 가드가 그대로 허용한 것입니다.
+       심어서 확인했습니다. */
+    ok(
+      /reprocess\.mutate\(/.test(lobby),
+      '버튼은 있는데 아무것도 안 부릅니다 — 눌러도 아무 일이 안 일어납니다',
+    );
+  });
+
+  it('⭐ **언제** 할 수 있는지는 서버가 정한다 — 화면이 상태로 정하지 않는다', () => {
+    // 화면이 `status` 를 보고 스스로 정하면 규칙이 두 곳에 생기고
+    // 한쪽만 고쳐집니다 (API 의 `can_reprocess` 주석이 적어 둔 이유).
+    ok(/can_reprocess/.test(lobby), 'SPA 로비가 can_reprocess 를 안 봅니다');
+    ok(
+      !/status\s*===\s*['"`]failed/.test(lobby),
+      '화면이 status 로 다시 처리 가능 여부를 정합니다 — 판단은 서버 한 곳',
+    );
+  });
+
+  it('⛔ 되돌릴 수 없는 일이라 **묻는다** — 두 로비가 같은 말로', () => {
+    // 앞판의 발화·후보·결정이 지워집니다. 각자 짓게 두면 한쪽에서만
+    // 경고가 뜹니다 (실패 ②).
+    const legacy = readFileSync(join(ROOT, 'src', 'demo', 'lobby.tsx'), 'utf8');
+    for (const [rel, code] of [
+      ['webapp Lobby.tsx', lobby],
+      ['demo/lobby.tsx', legacy],
+    ] as [string, string][]) {
+      ok(/REPROCESS_CONFIRM/.test(code), `${rel}: 확인 문구를 @lib 에서 안 가져옵니다`);
+      /* ⚠️ **`confirm(` 전부를 막으면 안 됩니다.** 레거시 로비에는
+         `forceFinish`(참가 안 한 사람을 두고 끝내기)라는 **다른** 확인이
+         있고, 그건 여기서 묻는 것과 아무 상관이 없습니다. 처음에 넓게
+         잡았다가 그 확인을 잡았습니다 — 요구는 "다시 처리 문구가 두
+         벌이 아닌가" 입니다. */
+      ok(
+        !/이 회의를 처음부터 다시 처리합니다/.test(code),
+        `${rel}: 다시 처리 문구를 화면이 직접 적었습니다 — 두 벌이 됩니다`,
+      );
+    }
+  });
+});
+
 describe('⛔ 녹음 화면이 동의를 **스스로 선언하지 않는다** (결함 229)', () => {
   /* `docs/07` §1: 제3자 녹음은 형사처벌 대상입니다. 그래서
      `session.blockers` 에 「녹음 동의가 필요합니다」 갈래가 있고 검사도

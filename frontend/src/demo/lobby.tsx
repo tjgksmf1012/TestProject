@@ -26,6 +26,7 @@ import {
   startBlockers,
   type RosterEntry,
   type TrackHealth,
+  REPROCESS_CONFIRM,
 } from '../lib/lobby/room.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { axisTicks, buildDiagram, describeGap } from '../lib/track/diagram.ts';
@@ -344,11 +345,7 @@ function Lobby() {
    * 발화·후보·결정이 지워지고 새로 만들어집니다.
    */
   const reprocess = (): void => {
-    const ok = window.confirm(
-      '이 회의를 처음부터 다시 처리합니다.\n' +
-        '앞서 만들어진 발화·업무 후보·결정은 지워지고 새로 만들어집니다.\n' +
-        '계속할까요?',
-    );
+    const ok = window.confirm(REPROCESS_CONFIRM);
     if (!ok) return;
     void (async () => {
       setBusy(true);

@@ -5,7 +5,15 @@ import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
 import { Disclosure } from '../components/Disclosure.tsx';
 import { Why } from '../components/Why.tsx';
 import { Conditions, describeConditions, type Condition } from '../components/Conditions.tsx';
-import { useConsent, useLobbyMutations, useMe, useMeeting, useTracks } from '../api/hooks.ts';
+import {
+  useConsent,
+  useLobbyMutations,
+  useMe,
+  useMeeting,
+  useMeetingProgress,
+  useReprocess,
+  useTracks,
+} from '../api/hooks.ts';
 import {
   captureAlerts,
   lobbyPhase,
@@ -15,6 +23,7 @@ import {
   startBlockers,
   verdictView,
   type TrackHealth,
+  REPROCESS_CONFIRM,
 } from '@lib/lobby/room.ts';
 import { axisTicks, buildDiagram, describeGap, meetingWindow, type TrackInput } from '@lib/track/diagram.ts';
 import {
@@ -111,6 +120,9 @@ export default function Lobby() {
       : describeLoadFailure('회의', loadError instanceof ApiError ? loadError.status : null);
 
   const phase = lobbyPhase(meeting.data?.status);
+  // 「다시 처리할 수 있는가」는 **서버가** 정합니다 (결함 231).
+  const progress = useMeetingProgress(meetingId);
+  const reprocess = useReprocess(meetingId);
   const canGoRecord = phase.canStart && startConditions.every((c) => c.met);
 
   // 지금 이 창이 녹음을 끝까지 붙잡을 수 있는가. 판단은 `@lib` 에 있습니다.
@@ -261,6 +273,43 @@ export default function Lobby() {
             {phase.note !== null && (
               <p className="phase-note" id="phase-note">
                 {phase.note}
+              </p>
+            )}
+            {/* ⛔ **여기가 막다른 길이었습니다** (결함 231).
+                화면은 「처리에 실패했습니다. 아래 트랙이 온전한지
+                확인하세요」 라고 시켜 놓고, 확인한 사람에게 **누를 것을
+                안 줬습니다.** 서버에는 `/reprocess` 가 있고 `progress` 가
+                `can_reprocess: true` 라고 답하는데 SPA 로비는 그걸 한 번도
+                안 물어봤습니다 — 레거시 로비(`lobby.html`)에는 있었고
+                화면을 옮기면서 **버튼만 남겨졌습니다.**
+
+                ⚠️ 언제 다시 처리할 수 있는지는 **서버가 정합니다.**
+                화면이 `status` 로 스스로 정하면 규칙이 두 곳에 생깁니다. */}
+            {progress.data?.can_reprocess === true && (
+              <p className="phase-act">
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={reprocess.isPending}
+                  onClick={() => {
+                    // ⚠️ 되돌릴 수 없습니다 — 묻고 나서 합니다. 문구는
+                    //    `@lib` 한 곳에 있습니다(레거시와 같은 말).
+                    if (!window.confirm(REPROCESS_CONFIRM)) return;
+                    reprocess.mutate();
+                  }}
+                >
+                  {reprocess.isPending ? '다시 처리하는 중…' : '다시 처리하기'}
+                </button>
+                <Problem>
+                  {reprocess.isError
+                    ? describeActionFailure(
+                        '다시 처리',
+                        reprocess.error instanceof ApiError ? reprocess.error.status : null,
+                      )
+                    : reprocess.isSuccess
+                      ? (reprocess.data?.message ?? '')
+                      : null}
+                </Problem>
               </p>
             )}
             {statuses.map((status) => {

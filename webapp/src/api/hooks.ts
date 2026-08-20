@@ -128,6 +128,52 @@ export function useConfirmFinals(projectId: number | undefined) {
   });
 }
 
+/** 서버 `ProgressOut` 과 같은 모양. */
+export interface MeetingProgress {
+  stage: string | null;
+  percent: number | null;
+  detail: string;
+  /** 화면에 그대로 쓸 한 줄. 서버와 화면이 **같은 문장**을 씁니다. */
+  message: string;
+  /**
+   * 지금 다시 처리할 수 있는가 (결함 114).
+   *
+   * ⚠️ **판단은 서버가 합니다.** 화면이 `status` 를 보고 스스로 정하면
+   * "언제 다시 처리할 수 있는가" 규칙이 두 곳에 생깁니다.
+   */
+  can_reprocess: boolean;
+}
+
+/**
+ * 회의 처리 진행 상황.
+ *
+ * ⛔ SPA 로비는 이걸 **한 번도 안 물어봤습니다** (결함 231). 그래서
+ * `can_reprocess` 가 화면에 닿지 않았고, 처리에 실패한 회의가
+ * 「아래 트랙이 온전한지 확인하세요」 라고만 하고 **누를 것을 안 줬습니다.**
+ */
+export function useMeetingProgress(meetingId: number | undefined) {
+  return useQuery({
+    queryKey: ['meetings', meetingId, 'progress'],
+    queryFn: () => api.get<MeetingProgress>(`/api/meetings/${meetingId}/progress`),
+    enabled: meetingId !== undefined,
+  });
+}
+
+/** 실패했거나 큐에 걸린 회의를 다시 처리합니다 (결함 114 · 231). */
+export function useReprocess(meetingId: number | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ meeting_id: number; status: string; message: string }>(
+        `/api/meetings/${meetingId}/reprocess`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] });
+      void queryClient.invalidateQueries({ queryKey: ['meetings', meetingId, 'progress'] });
+    },
+  });
+}
+
 export function useProject(projectId: number | undefined) {
   return useQuery({
     queryKey: ['projects', projectId, 'detail'],
