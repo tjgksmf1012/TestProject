@@ -24,7 +24,7 @@ import {
   describeMeetingStatus,
   describeProject,
   emptyProjectsMessage,
-  formatMeetingTime,
+  describeMeetingWhen,
   nextStepFor,
   orderProjects,
   type Meeting,
@@ -95,7 +95,7 @@ function MeetingRow({ meeting }: { meeting: Meeting }) {
       <div className="head">
         <span className="dot" data-state={channelState(meeting.status)} />
         <span className="name">{meetingLabel(meeting.title, meeting.meeting_id)}</span>
-        <span className="when">{formatMeetingTime(meeting.started_at)}</span>
+        <span className="when">{describeMeetingWhen(meeting)}</span>
         {/* ⚠️ **화면 폭짜리 버튼을 다섯 개 쌓지 않습니다** (docs/19 §20).
             예전에는 회의마다 900px 짜리 초록 덩어리가 깔려서, 화면이
             "무엇을 할 차례인가" 가 아니라 **버튼 밭**이었습니다. 줄

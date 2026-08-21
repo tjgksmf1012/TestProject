@@ -1,6 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMemo, useRef, useState, type MouseEvent } from 'react';
-import { shortTeamDate } from '@lib/time/calendar.ts';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
@@ -21,6 +20,7 @@ import {
   nextStepFor,
   requestedProjectId,
   sectionMeetings,
+  describeMeetingWhen,
 } from '@lib/home/next.ts';
 import { codeProblem, normalizeCode, titleProblem } from '@lib/project/setup.ts';
 import { describeActionFailure } from '@lib/ui/load.ts';
@@ -48,9 +48,10 @@ function spaHref(href: string, projectId: number): string {
    달력**입니다. 같은 회의를 서울 사람은 09-02 로, 뉴욕 사람은 09-01 로
    봅니다. 마감일·달력은 팀 달력이라 한 화면에 달력이 둘이었습니다
    (결함 246). 판단은 `@lib`. */
-function fmtDate(iso: string): string {
-  return shortTeamDate(iso) ?? '—';
-}
+/* ⚠️ 예전에는 `shortTeamDate(meeting.started_at)` 이었습니다 (결함 287).
+   잡아만 둔 회의는 `started_at` 이 없어 「—」가 떴고, 레거시 홈은 아예
+   **브라우저 달력**으로 다른 날을 그렸습니다. 「이 회의는 언제인가」는
+   `@lib` 한 벌(`describeMeetingWhen`)이 답합니다. */
 
 /**
  * 회의 한 줄.
@@ -93,7 +94,7 @@ function MeetingRow({
     <div className="mrow">
       <span className="mrow__status">{!waiting && <StatusChip status={meeting.status} />}</span>
       <span className="mrow__title">{meetingLabel(meeting.title, meeting.meeting_id)}</span>
-      <span className="mrow__date num">{fmtDate(meeting.started_at)}</span>
+      <span className="mrow__date num">{describeMeetingWhen(meeting)}</span>
       {/* ⚠️ **잴 게 없으면 레인을 안 그립니다** (v2 F3). 예전에는 회의
           다섯 중 넷이 빈 회색 막대였고, 값 없는 요소가 목록의 시각적
           무게중심을 차지했습니다. 레인은 "아는 것 / 모르는 것" 을 말하는

@@ -18,6 +18,7 @@ function meeting(over: Partial<Meeting> = {}): Meeting {
     title: '1주차 정기회의',
     status: 'needs_review',
     started_at: '2026-09-01T01:00:00Z',
+    scheduled_at: null,
     pending_candidates: 3,
     ...over,
   };

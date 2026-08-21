@@ -22,6 +22,7 @@ import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contri
 import { attentionAbout } from './review/candidates.ts';
 import { describeMissingSummary } from './review/phase.ts';
 import { meetingLabel } from './ui/naming.ts';
+import { describeMeetingWhen, meetingWhen } from './home/next.ts';
 import { memberStatuses } from './lobby/room.ts';
 import {
   blockers,
@@ -6748,5 +6749,96 @@ describe('⛔ 회의를 **한 이름으로** 부른다 (결함 285)', () => {
     /* 낱말만 맞추고 번호를 안 붙이면, 탭 둘이 다시 똑같아집니다. */
     strictEqual(meetingLabel(null, 4) === meetingLabel(null, 5), false);
     ok(meetingLabel(null, 4).includes('4'), '번호가 이름에 없습니다');
+  });
+});
+
+describe('⛔ 「이 회의는 언제인가」는 **한 벌**이다 (결함 287)', () => {
+  /* 재현: 달력에서 「회의 일정 잡기」를 **한 번** 눌렀더니
+
+         GET /api/projects/1/meetings   → 500
+         GET /api/meetings/6            → 500
+
+     이 됐습니다. `MeetingSummary.started_at` 이 비어 있을 수 없게 잡혀
+     있는데 잡아만 둔 회의는 그 값이 없기 때문입니다. 화면은 그 500 을
+     이렇게 그렸습니다 —
+
+         레거시 홈:  「회의 6개」  …  「회의를 열면 여기에 나옵니다」
+         SPA 홈:     「회의 6」   …  (줄이 하나도 없음)
+
+     **한 화면이 자기 머리말과 반대되는 말을 합니다.** 회의 다섯이 멀쩡히
+     있는 팀에서 다섯이 전부 사라졌고, 사람은 데이터가 날아갔다고 읽습니다.
+     씨앗에 예정 회의가 하나도 없어서 여태 안 들켰습니다.
+
+     ⚠️ 고치면서 **둘째 병**이 드러났습니다. 두 셸이 「언제인가」를 각자
+     짓고 있었고 답이 달랐습니다 — SPA 는 팀 달력(`shortTeamDate`), 레거시는
+     `toLocaleString` 을 시간대 없이 부르는 **브라우저 달력**. 씨앗 회의가
+     전부 `10:00Z` 라 어느 시간대에서도 날짜가 안 넘어가서, 이것도 자정을
+     넘는 회의를 심고서야 나왔습니다. */
+  const homes = (): { name: string; code: string }[] => [
+    {
+      name: 'webapp/Home.tsx',
+      code: codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Home.tsx'), 'utf8')),
+    },
+    { name: 'demo/home.tsx', code: codeOf(readFileSync(join(DEMO, 'home.tsx'), 'utf8')) },
+  ];
+
+  it('⭐ 홈이 `started_at` 을 **직접 그리지 않는다**', () => {
+    /* ⚠️ 낱말(`describeMeetingWhen`)이 파일에 있는지 세면 안 됩니다 —
+       한 줄만 고치고 다른 줄이 옛 값을 그려도 통과합니다. **그리는
+       자리**를 봅니다: JSX 안에서 `started_at` 을 쓰는 곳. */
+    const guilty: string[] = [];
+    for (const { name, code } of homes()) {
+      for (const m of code.matchAll(/\{[^{}]*\bmeeting\.started_at\b[^{}]*\}/g)) {
+        guilty.push(`${name}: ${m[0].slice(0, 44)}`);
+      }
+    }
+    strictEqual(
+      guilty.join(' · '),
+      '',
+      '홈이 `started_at` 을 직접 그립니다 — 잡아만 둔 회의는 그 값이 없습니다. `describeMeetingWhen` 한 벌을 쓰세요',
+    );
+  });
+
+  it('⭐ 두 셸이 **같은 값**을 그린다', () => {
+    for (const { name, code } of homes()) {
+      ok(
+        /describeMeetingWhen\(/.test(code),
+        `${name}: 「언제인가」를 한 벌에서 안 받습니다`,
+      );
+    }
+  });
+
+  it('⭐ 잡아만 둔 회의에도 **시각을 지어내지 않는다**', () => {
+    deepStrictEqual(meetingWhen({ started_at: null, scheduled_at: null }), {
+      at: null,
+      planned: true,
+    });
+    strictEqual(describeMeetingWhen({ started_at: null, scheduled_at: null }), '—');
+  });
+
+  it('⭐ 잡아 둔 시각은 **팀 달력**으로 그린다 — 자정을 넘겨서 잰다', () => {
+    /* `16:30Z` 는 서울에서 **다음 날 01:30** 입니다. 브라우저 달력이면
+       검사를 돌리는 기계의 시간대에 따라 답이 흔들립니다. */
+    strictEqual(
+      describeMeetingWhen({ started_at: null, scheduled_at: '2026-08-25T16:30:00Z' }),
+      '예정 08-26 01:30',
+    );
+  });
+
+  it('⭐ 서버 응답 타입이 **비어 있을 수 있다고** 적혀 있다', () => {
+    /* 타입이 `string` 이면 화면은 `null` 을 못 보고, 그 500 이 다시
+       돌아옵니다. 타입도 사실을 말해야 합니다. */
+    for (const rel of [
+      join('webapp', 'src', 'api', 'types.ts'),
+      join('webapp', 'src', 'api', 'hooks.ts'),
+    ]) {
+      const code = codeOf(readFileSync(join(ROOT, '..', rel), 'utf8'));
+      const decl = /\bstarted_at:\s*([^;\n]+)/.exec(code);
+      ok(decl !== null, `${rel}: started_at 을 못 찾았습니다 — 가드가 낡았습니다`);
+      ok(
+        /\bnull\b/.test(decl?.[1] ?? ''),
+        `${rel}: started_at 이 비어 있을 수 없다고 적혀 있습니다 — ${decl?.[1]}`,
+      );
+    }
   });
 });

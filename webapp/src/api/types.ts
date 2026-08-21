@@ -23,7 +23,10 @@ export interface MeetingSummary {
   meeting_id: number;
   title: string | null;
   status: string;
-  started_at: string;
+  /** **잡아만 둔 회의는 `null`** (결함 287) — 서버가 시각을 지어내지 않습니다. */
+  started_at: string | null;
+  /** 잡아 둔 시각. 이미 연 회의는 `null`. */
+  scheduled_at: string | null;
   pending_candidates: number;
   /**
    * 트랙 커버리지 평균. **`null` 은 0 이 아니라 「못 쟀다」** 입니다

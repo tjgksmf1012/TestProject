@@ -6,7 +6,9 @@ import {
   emphasisFor,
   describeProject,
   emptyProjectsMessage,
+  describeMeetingWhen,
   formatMeetingTime,
+  meetingWhen,
   hasLane,
   homeProject,
   nextStepFor,
@@ -23,6 +25,7 @@ function meeting(over: Partial<Meeting> = {}): Meeting {
     title: '1주차 정기회의',
     status: 'needs_review',
     started_at: '2026-09-01T01:00:00Z',
+    scheduled_at: null,
     pending_candidates: 3,
     ...over,
   };
@@ -179,18 +182,74 @@ describe('emptyProjectsMessage', () => {
 // ══════════════════════════════════════════════════════════════
 
 describe('formatMeetingTime', () => {
-  it('⭐ 로컬 시간대로 보여준다', () => {
-    // 서버는 UTC 로 준다. 그대로 쓰면 한국에서 9시간 어긋나 오전 회의가
-    // 전날로 보인다. 이 테스트는 시간대가 무엇이든 "UTC 문자열 그대로가
-    // 아니다" 만 확인한다 — CI 시간대에 흔들리면 안 된다.
-    const shown = formatMeetingTime('2026-09-01T01:00:00Z');
+  /* ⚠️ 예전 검사는 「`T` 도 `Z` 도 없고 길이가 0 이 아니다」만 봤습니다.
+     CI 시간대에 안 흔들리게 하려던 것인데, 그 자는 **브라우저 달력이든
+     팀 달력이든 똑같이 통과**합니다 — 실제로 이 함수는 오래도록
+     `toLocaleString` 을 시간대 없이 부르고 있었고 검사는 초록이었습니다.
+
+     그래서 **자정을 넘는 순간**으로 잽니다. `16:30Z` 는 서울에서 **다음
+     날 01:30** 이라 팀 달력과 UTC 가 날짜부터 갈립니다 — 검사를 돌리는
+     기계의 시간대가 무엇이든 답이 하나입니다. */
+  it('⭐ 팀 달력(`Asia/Seoul`)으로 보여준다 — 자정을 넘겨서 잰다', () => {
+    strictEqual(formatMeetingTime('2026-08-25T16:30:00Z'), '08-26 01:30');
+  });
+
+  it('⭐ 브라우저 달력이면 나올 값이 **안 나온다**', () => {
+    const shown = formatMeetingTime('2026-08-25T16:30:00Z');
+    strictEqual(shown.startsWith('08-25'), false);
     strictEqual(shown.includes('T'), false);
     strictEqual(shown.includes('Z'), false);
-    strictEqual(shown.length > 0, true);
   });
 
   it('망가진 값은 그대로 보여준다 — 삼키지 않는다', () => {
     strictEqual(formatMeetingTime('어제'), '어제');
+  });
+});
+
+describe('meetingWhen · describeMeetingWhen — 이 회의는 언제인가 (결함 287)', () => {
+  /* 달력에서 「회의 일정 잡기」로 잡은 회의는 `started_at` 이 없습니다.
+     서버 스키마가 그 칸을 비어 있을 수 없게 잡아 두어, 일정을 **하나**
+     잡는 순간 회의 목록 전체가 500 이 되고 홈이 「회의를 열면 여기에
+     나옵니다」로 바뀌었습니다 — 회의 다섯이 멀쩡히 있는 팀에서. */
+  it('⭐ 연 회의는 연 시각', () => {
+    const w = meetingWhen({ started_at: '2026-08-25T16:30:00Z', scheduled_at: null });
+    deepStrictEqual(w, { at: '2026-08-25T16:30:00Z', planned: false });
+  });
+
+  it('⭐ 안 연 회의는 **잡아 둔 시각**이고 「예정」이다', () => {
+    const w = meetingWhen({ started_at: null, scheduled_at: '2026-08-25T16:30:00Z' });
+    deepStrictEqual(w, { at: '2026-08-25T16:30:00Z', planned: true });
+    strictEqual(describeMeetingWhen({ started_at: null, scheduled_at: '2026-08-25T16:30:00Z' }),
+      '예정 08-26 01:30');
+  });
+
+  it('⭐ 둘 다 없으면 **시각을 지어내지 않는다**', () => {
+    deepStrictEqual(meetingWhen({ started_at: null, scheduled_at: null }), { at: null, planned: true });
+    strictEqual(describeMeetingWhen({ started_at: null, scheduled_at: null }), '—');
+  });
+
+  it('연 회의에는 「예정」이 안 붙는다', () => {
+    strictEqual(describeMeetingWhen({ started_at: '2026-08-25T16:30:00Z', scheduled_at: null }),
+      '08-26 01:30');
+  });
+
+  it('⭐ 잡아만 둔 회의는 **지금 할 일이 아니다**', () => {
+    /* `pending` 이라고 「동의를 받고 녹음을 시작합니다」라고 하면
+       아직 오지 않은 날의 일을 지금 하라는 말이 됩니다. */
+    const step = nextStepFor(meeting({
+      status: 'pending', started_at: null, scheduled_at: '2026-09-30T01:00:00Z',
+    }));
+    strictEqual(step.actionable, false);
+    strictEqual(step.label, '회의 열기');
+    strictEqual(step.reason.includes('잡아 둔'), true);
+  });
+
+  it('연 `pending` 회의는 지금 할 일이 맞다', () => {
+    const step = nextStepFor(meeting({
+      status: 'pending', started_at: '2026-09-01T01:00:00Z', scheduled_at: null,
+    }));
+    strictEqual(step.actionable, true);
+    strictEqual(step.label, '회의 로비로');
   });
 });
 

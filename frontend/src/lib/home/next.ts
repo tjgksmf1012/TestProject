@@ -11,6 +11,8 @@
  * 것뿐인데도.
  */
 
+import { teamDateTime } from '../time/calendar.ts';
+
 export interface Project {
   project_id: number;
   title: string;
@@ -23,9 +25,45 @@ export interface Meeting {
   meeting_id: number;
   title: string | null;
   status: string;
-  /** ISO8601. 서버가 UTC 로 준다. */
-  started_at: string;
+  /**
+   * 회의를 **연** 시각. ISO8601, 서버가 UTC 로 준다.
+   *
+   * ⚠️ **아직 안 연 회의는 `null`** 입니다 (결함 287). 달력에서 일정을
+   * 잡으면 그런 회의가 생깁니다. 예전에는 서버 스키마가 이 칸을 비어 있을
+   * 수 없게 잡아 두어, 일정을 하나 잡는 순간 회의 목록이 통째로 **500**
+   * 이 되고 홈이 「회의를 열면 여기에 나옵니다」로 바뀌었습니다.
+   */
+  started_at: string | null;
+  /** 잡아 둔 시각. 이미 연 회의는 `null`. */
+  scheduled_at: string | null;
   pending_candidates: number;
+}
+
+/**
+ * **이 회의는 언제인가** — 한 벌.
+ *
+ * 연 회의는 연 시각, 안 연 회의는 잡아 둔 시각입니다. 둘 다 없으면
+ * `null` 이고, 그때는 **시각을 지어내지 않습니다.**
+ *
+ * ⚠️ 화면마다 `started_at ?? scheduled_at` 을 적으면 한쪽만 고쳐집니다.
+ * 정렬도 같은 값을 봐야 목록 순서와 표시가 안 어긋납니다.
+ */
+export interface MeetingWhen {
+  /** ISO8601 또는 `null`. */
+  at: string | null;
+  /** 아직 안 연 회의인가. 참이면 「예정」입니다. */
+  planned: boolean;
+}
+
+export function meetingWhen(meeting: {
+  started_at: string | null;
+  scheduled_at: string | null;
+}): MeetingWhen {
+  if (meeting.started_at !== null && meeting.started_at !== '') {
+    return { at: meeting.started_at, planned: false };
+  }
+  const at = meeting.scheduled_at;
+  return { at: at !== null && at !== '' ? at : null, planned: true };
 }
 
 export interface NextStep {
@@ -84,6 +122,18 @@ export function nextStepFor(meeting: Meeting): NextStep {
 
   switch (meeting.status) {
     case 'pending':
+      /* ⚠️ `pending` 은 이제 **세 국면**입니다 (결함 287) — 잡아만 둔 것 ·
+         녹음 전 · 녹음 중. 앞의 둘은 `started_at` 이 있는지로 갈립니다.
+         잡아만 둔 회의에 「녹음을 시작합니다」라고 하면 아직 오지 않은
+         날의 일을 지금 하라는 말이 됩니다. */
+      if (meetingWhen(meeting).planned) {
+        return {
+          href: `/lobby.html?meeting=${id}`,
+          label: '회의 열기',
+          reason: '잡아 둔 회의입니다 — 로비에서 동의를 받고 시작합니다',
+          actionable: false,
+        };
+      }
       return {
         href: `/lobby.html?meeting=${id}`,
         label: '회의 로비로',
@@ -254,20 +304,35 @@ export function emptyProjectsMessage(): string {
 }
 
 /**
- * 회의 시각. **로컬 시간대로** 보여줍니다.
+ * 회의 시각. **팀 달력(`Asia/Seoul`)으로** 보여줍니다.
  *
- * 서버는 UTC 로 주고, 화면이 그대로 쓰면 한국에서 9시간 어긋납니다 —
- * 오전 회의가 전날로 보입니다.
+ * ⚠️ 예전에는 `toLocaleString` 을 시간대 없이 불렀습니다 — 그건
+ * **브라우저 달력**이라 같은 회의를 팀원마다 다른 날로 봅니다(결함 246).
+ * 씨앗 회의가 전부 `10:00Z` 라 어느 시간대에서도 날짜가 안 넘어갔고,
+ * 그래서 이 자리는 오래도록 안 들켰습니다 — 자정을 넘는 회의를 심고서야
+ * 나왔습니다(결함 287).
+ *
+ * ⚠️ 못 읽는 값이면 **지어내지 않고** 받은 글자를 그대로 돌려줍니다.
  */
-export function formatMeetingTime(iso: string, locale = 'ko-KR'): string {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return iso;
-  return at.toLocaleString(locale, {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+export function formatMeetingTime(iso: string): string {
+  return teamDateTime(iso) ?? iso;
+}
+
+/**
+ * 이 회의가 **언제인지** 한 줄로. 아직 안 연 회의는 「예정」이 붙습니다.
+ *
+ * ⚠️ 두 셸이 각자 지으면 갈라집니다 — SPA 는 팀 달력(`shortTeamDate`)을
+ * 쓰고 레거시는 브라우저 달력을 쓰고 있었습니다. 한 벌에서 옵니다.
+ */
+export function describeMeetingWhen(meeting: {
+  started_at: string | null;
+  scheduled_at: string | null;
+}): string {
+  const when = meetingWhen(meeting);
+  // ⛔ 모르면 시각을 지어내지 않습니다 (측정 불가 ≠ 0).
+  if (when.at === null) return '—';
+  const shown = formatMeetingTime(when.at);
+  return when.planned ? `예정 ${shown}` : shown;
 }
 
 /**
@@ -295,8 +360,10 @@ export function sectionMeetings(meetings: readonly Meeting[]): HomeSections {
   // ⚠️ 내림차순입니다. 날짜가 같으면 id 큰 쪽(나중에 만든 것)이 위로 —
   // 정렬이 흔들리면 목록이 새로고침마다 춤춥니다.
   const byRecent = (a: Meeting, b: Meeting): number => {
-    const ta = Date.parse(a.started_at);
-    const tb = Date.parse(b.started_at);
+    // ⚠️ 안 연 회의는 `started_at` 이 없습니다 (결함 287) — 「언제인가」를
+    //    한 벌(`meetingWhen`)에서 받아야 표시와 순서가 안 어긋납니다.
+    const ta = Date.parse(meetingWhen(a).at ?? '');
+    const tb = Date.parse(meetingWhen(b).at ?? '');
     if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return tb - ta;
     return b.meeting_id - a.meeting_id;
   };

@@ -1981,7 +1981,18 @@ class MeetingSummary(BaseModel):
     meeting_id: int
     title: str | None
     status: str
-    started_at: UtcDatetime
+    #: **아직 안 연 회의는 비어 있습니다** (결함 287).
+    #:
+    #: ⚠️ 예전에는 `UtcDatetime` 이라 비어 있을 수 없었습니다. 그런데
+    #: 달력에서 「회의 일정 잡기」로 잡은 회의는 `started_at` 이 없습니다 —
+    #: 일정을 하나 잡는 순간 이 목록 전체가 **500** 이 됐고, 회의 다섯이
+    #: 있는 팀의 홈이 「회의를 열면 여기에 나옵니다」로 바뀌었습니다.
+    #:
+    #: 시작하지 않은 회의에 시각을 지어 넣지 않습니다. 이 제품의 불변식
+    #: (**측정 불가 ≠ 0점**)이 시각에도 그대로 걸립니다.
+    started_at: UtcDatetime | None
+    #: 잡아 둔 시각. 이미 연 회의는 비어 있습니다.
+    scheduled_at: UtcDatetime | None
     #: 이 회의에서 사람이 아직 결정하지 않은 업무 후보 수
     pending_candidates: int
     #: 트랙 커버리지의 평균. **못 잰 것은 `None`** 이고 0.0 이 아니다.
@@ -2009,10 +2020,14 @@ def list_project_meetings(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
 
+    # ⚠️ 안 연 회의는 `started_at` 이 없습니다 (결함 287). 그것만으로
+    #    줄을 세우면 예정 회의가 NULL 자리에 몰려 시간 감각이 깨집니다 —
+    #    **그 회의가 언제인가**는 「연 시각 아니면 잡아 둔 시각」입니다.
+    when = func.coalesce(m.Meeting.started_at, m.Meeting.scheduled_at)
     meetings = session.scalars(
         select(m.Meeting)
         .where(m.Meeting.project_id == project_id)
-        .order_by(m.Meeting.started_at.desc(), m.Meeting.id.desc())
+        .order_by(when.desc(), m.Meeting.id.desc())
     ).all()
     if not meetings:
         return []
@@ -2049,6 +2064,7 @@ def list_project_meetings(
             title=meeting.title,
             status=meeting.status,
             started_at=meeting.started_at,
+            scheduled_at=meeting.scheduled_at,
             pending_candidates=pending.get(meeting.id, 0),
             coverage=(
                 float(coverage[meeting.id]) if coverage.get(meeting.id) is not None else None
@@ -2099,7 +2115,11 @@ class MeetingDetail(BaseModel):
     project_id: int
     title: str | None
     status: str
-    started_at: UtcDatetime
+    #: 아직 안 연 회의는 비어 있습니다 (결함 287) — `MeetingSummary` 참조.
+    #: 예정 회의의 로비를 열면 여기서 **500** 이 났습니다.
+    started_at: UtcDatetime | None
+    #: 잡아 둔 시각. 이미 연 회의는 비어 있습니다.
+    scheduled_at: UtcDatetime | None
     capture_mode: str
     # 처리가 끝나기 전에는 None. 실패한 회의도 None 이다 —
     # 빈 문자열로 내려보내면 화면이 "요약이 없는 회의" 로 그린다.
@@ -2161,6 +2181,7 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
         title=meeting.title,
         status=meeting.status,
         started_at=meeting.started_at,
+        scheduled_at=meeting.scheduled_at,
         capture_mode=meeting.capture_mode,
         summary=meeting.summary,
         next_agenda=list(meeting.next_agenda or []),

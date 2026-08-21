@@ -227,3 +227,77 @@ def test_cancelling_only_works_before_it_is_opened(client: TestClient, seeded):
 
     assert client.delete(f"/api/scheduled-meetings/{meeting_id}").status_code == 204
     assert client.delete(f"/api/scheduled-meetings/{seeded['meeting_id']}").status_code == 400
+
+
+# ══════════════════════════════════════════════════════════════
+# 일정을 잡아도 회의 목록이 살아 있어야 한다 (결함 287)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_scheduling_a_meeting_does_not_break_the_meeting_list(
+    client: TestClient, seeded
+):
+    """⭐ 일정을 **하나** 잡았다고 회의 목록이 통째로 죽으면 안 된다.
+
+    ``MeetingSummary.started_at`` 이 비어 있을 수 없게 잡혀 있어서, 달력에서
+    「회의 일정 잡기」를 한 번 누르는 순간 이 목록이 **500** 이 됐습니다.
+    화면은 그 500 을 「회의를 열면 여기에 나옵니다」로 그렸습니다 — 회의
+    다섯이 멀쩡히 있는 팀에서 다섯이 전부 사라진 것입니다.
+
+    ⚠️ 씨앗 데이터에는 예정 회의가 **하나도 없어서** 여태 안 들켰습니다.
+    """
+    project_id = seeded["project_id"]
+    before = client.get(f"/api/projects/{project_id}/meetings")
+    assert before.status_code == 200
+    held = len(before.json())
+    assert held > 0, "씨앗에 회의가 없으면 이 검사는 아무것도 안 잽니다"
+
+    made = client.post(
+        f"/api/projects/{project_id}/scheduled-meetings",
+        json={"title": "앞으로 할 회의", "at": (NOW + timedelta(days=7)).isoformat()},
+    )
+    assert made.status_code == 201
+
+    after = client.get(f"/api/projects/{project_id}/meetings")
+    assert after.status_code == 200, "일정을 잡았더니 회의 목록이 죽었습니다"
+    rows = after.json()
+    assert len(rows) == held + 1, "예정 회의가 목록에서 사라졌습니다"
+
+    planned = next(r for r in rows if r["title"] == "앞으로 할 회의")
+    # ⛔ 시작하지 않은 회의에 시각을 **지어 넣지 않습니다**.
+    assert planned["started_at"] is None
+    assert planned["scheduled_at"] is not None
+    # 이미 연 회의는 그 반대입니다 — 두 칸이 서로를 배타로 말합니다.
+    opened = next(r for r in rows if r["title"] != "앞으로 할 회의")
+    assert opened["started_at"] is not None
+
+
+def test_the_lobby_of_a_planned_meeting_opens(client: TestClient, seeded):
+    """⭐ 잡아 둔 회의의 로비가 **열려야** 한다.
+
+    달력이 그 회의를 로비로 이어 주는데, ``MeetingDetail.started_at`` 도
+    비어 있을 수 없게 잡혀 있어 여기서도 500 이 났습니다.
+    """
+    made = client.post(
+        f"/api/projects/{seeded['project_id']}/scheduled-meetings",
+        json={"title": "앞으로 할 회의", "at": (NOW + timedelta(days=7)).isoformat()},
+    ).json()
+    got = client.get(f"/api/meetings/{made['meeting_id']}")
+    assert got.status_code == 200, "잡아 둔 회의의 로비가 500 입니다"
+    assert got.json()["started_at"] is None
+    assert got.json()["scheduled_at"] is not None
+
+
+def test_planned_and_held_meetings_share_one_timeline(client: TestClient, seeded):
+    """⚠️ 안 연 회의는 `started_at` 이 없으니 **잡아 둔 시각**으로 줄을 선다.
+
+    그것만으로 정렬하면 예정 회의가 NULL 자리에 몰려 시간 감각이 깨집니다.
+    """
+    project_id = seeded["project_id"]
+    client.post(
+        f"/api/projects/{project_id}/scheduled-meetings",
+        json={"title": "아주 나중 회의", "at": (NOW + timedelta(days=365)).isoformat()},
+    )
+    rows = client.get(f"/api/projects/{project_id}/meetings").json()
+    # 제일 나중 것이 맨 위 (최근 것부터).
+    assert rows[0]["title"] == "아주 나중 회의"

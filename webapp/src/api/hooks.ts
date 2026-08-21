@@ -32,7 +32,10 @@ export interface MeetingDetail {
   project_id: number;
   title: string | null;
   status: string;
-  started_at: string;
+  /** 잡아만 둔 회의는 `null` (결함 287). */
+  started_at: string | null;
+  /** 잡아 둔 시각. 이미 연 회의는 `null`. */
+  scheduled_at: string | null;
   capture_mode: string;
   summary: string | null;
   next_agenda: string[];
