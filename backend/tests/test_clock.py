@@ -84,3 +84,36 @@ def test_a_late_night_meeting_does_not_shift_its_own_deadlines():
 
     # 되돌리면 이렇게 된다 — 마감이 **회의 당일**로 잡힌다.
     assert resolve_deadline("다음 주 월요일까지", utc_day).value == date(2026, 9, 7)
+
+
+# ══════════════════════════════════════════════════════════════
+# 시각도 팀 달력으로 (결함 290)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_local_time_moves_the_clock_not_just_the_date() -> None:
+    """⭐ **자정을 넘는 순간**으로 잰다.
+
+    `10:00Z` 같은 값으로 재면 날짜가 안 넘어가서, 팀 달력이든 UTC 든
+    날짜가 같습니다. `16:30Z` 는 서울에서 **다음 날 01:30** 이라
+    시·날짜가 둘 다 갈립니다.
+    """
+    from datetime import UTC, datetime
+
+    from teamflow.clock import local_time
+
+    at = datetime(2026, 8, 25, 16, 30, tzinfo=UTC)
+    got = local_time(at)
+    assert f"{got:%Y-%m-%d %H:%M}" == "2026-08-26 01:30"
+    # UTC 를 그대로 찍으면 나올 값이 **안** 나와야 합니다.
+    assert f"{got:%Y-%m-%d %H:%M}" != "2026-08-25 16:30"
+
+
+def test_local_time_treats_a_naive_value_as_utc() -> None:
+    """⚠️ SQLite 는 tzinfo 를 잃고 돌려줍니다 — `as_utc` 와 같은 가정입니다."""
+    from datetime import datetime
+
+    from teamflow.clock import local_time
+
+    naive = datetime(2026, 8, 25, 16, 30)
+    assert f"{local_time(naive):%Y-%m-%d %H:%M}" == "2026-08-26 01:30"

@@ -532,3 +532,66 @@ def test_the_processing_line_keeps_its_sentence():
     processing = next(f for f in facts if f["label"] == "처리")
     assert processing["gap"] is False
     assert processing["value"] == "처리하다 실패했습니다 — 다시 처리해야 합니다"
+
+
+# ══════════════════════════════════════════════════════════════
+# 문서의 시각도 팀 달력이다 (결함 290)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_the_minutes_print_the_team_calendar_not_utc():
+    """⭐ 밖으로 나가는 문서가 화면과 **다른 시각**을 적으면 안 된다.
+
+    같은 회의를 홈 화면은 `09-08 19:00`, 회의록은 `2026-09-08 10:00` 이라고
+    했습니다 — 서버가 들고 있는 UTC 를 그대로 찍었기 때문입니다. 아홉
+    시간이 어긋난 쪽이 **제출물**이었습니다.
+
+    ⚠️ **자정을 넘는 순간**으로 잽니다. `10:00Z` 로 재면 날짜가 안 넘어가
+    UTC 든 팀 달력이든 날짜가 같아, 그 자는 아무것도 안 가릅니다.
+    """
+    from datetime import UTC, datetime
+
+    content = minutes.build(
+        minutes.MinutesInput(
+            meeting_title="자정 넘는 회의",
+            status="needs_review",
+            capture_mode="multitrack",
+            started_at=datetime(2026, 8, 25, 16, 30, tzinfo=UTC),
+        )
+    )
+    flat = json.dumps(content, ensure_ascii=False)
+    assert "2026-08-26 01:30" in flat, flat
+    assert "2026-08-25 16:30" not in flat, "UTC 를 그대로 찍었습니다"
+
+
+def test_no_report_module_formats_a_datetime_by_hand():
+    """⚠️ 시각을 손으로 찍으면 그 자리는 **팀 달력 밖**입니다 (결함 290).
+
+    `f"{...:%Y-%m-%d ...}"` 는 datetime 을 그대로 찍습니다. 서버가 들고
+    있는 값은 UTC 이므로, `clock.local_time`·`clock.local_date` 를 거치지
+    않은 자리는 전부 아홉 시간 어긋납니다.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "teamflow" / "reports"
+    bad: list[str] = []
+    for path in root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        code = re.sub(r'"""[\s\S]*?"""', "", source)
+        code = re.sub(r"^\s*#.*$", "", code, flags=re.M)
+        for m in re.finditer(r"\{([^{}]*?):%[YmdHM][^{}]*\}", code):
+            inner = m.group(1)
+            if "clock.local_time" in inner or "clock.local_date" in inner:
+                continue
+            # 사람이 읽는 글자가 아니라 **열쇠**인 자리 하나만 예외입니다.
+            # 열쇠는 시간대를 타면 안 됩니다 — 표시는 `period.py` 가 따로
+            # 만듭니다. 예외는 그 줄에 `# teamtz-ok` 로 적어 둡니다.
+            line = code[: m.start()].count("\n")
+            if "teamtz-ok" in code.splitlines()[line]:
+                continue
+            bad.append(f"{path.name}: {m.group(0)}")
+    assert not bad, (
+        "보고서가 시각을 손으로 찍습니다 — `clock.local_time`/`local_date` 를 "
+        "거치세요:\n  " + "\n  ".join(bad)
+    )

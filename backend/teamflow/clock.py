@@ -68,6 +68,20 @@ def as_utc(at: datetime) -> datetime:
     return at if at.tzinfo is not None else at.replace(tzinfo=UTC)
 
 
+def local_time(at: datetime) -> datetime:
+    """이 순간을 **팀 달력의 시계**로 옮긴다.
+
+    ⚠️ 보고서가 `f"{started_at:%Y-%m-%d %H:%M}"` 로 **UTC 를 그대로** 찍고
+    있었습니다 (결함 290). 같은 회의를 홈 화면은 `09-08 19:00`, 회의록은
+    `2026-09-08 10:00` 이라고 했습니다 — 아홉 시간이 어긋난 쪽이 **밖으로
+    나가는 문서**였습니다.
+
+    `local_date` 가 날짜만 답하므로 시각을 물을 자리가 없었고, 그래서
+    보고서는 물어보지 않고 직접 찍었습니다.
+    """
+    return as_utc(at).astimezone(team_zone())
+
+
 def local_date(at: datetime) -> date:
     """이 순간이 팀 달력에서 며칠인가.
 

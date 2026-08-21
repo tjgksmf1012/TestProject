@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from teamflow import clock
 from teamflow.db.vocab import ReportType
 from teamflow.reports import SCHEMA_VERSION, blocks
 
@@ -69,7 +70,12 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
         raise ValueError(f"이 생성기가 만들 수 있는 종류가 아닙니다: {report_type}")
 
     if report_type is ReportType.WEEKLY:
-        span = f"{data.period_start:%Y-%m-%d} ~ {data.period_end:%Y-%m-%d}"
+        # ⛔ 여기도 UTC 를 그대로 찍고 있었습니다 (결함 290). 주간 보고서의
+        #    기간이 팀 달력과 하루 어긋날 수 있습니다.
+        span = (
+            f"{clock.local_date(data.period_start):%Y-%m-%d}"
+            f" ~ {clock.local_date(data.period_end):%Y-%m-%d}"
+        )
         title = f"주간 보고서 — {span}"
     else:
         title = f"최종 보고서 — {data.project_name}"

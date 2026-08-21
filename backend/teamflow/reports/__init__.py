@@ -87,6 +87,12 @@ def scope_key(
             )
         if period_end < period_start:
             raise ValueError("기간의 끝이 시작보다 앞섭니다")
-        return f"{period_start:%Y-%m-%d}..{period_end:%Y-%m-%d}"
+        # ⚠️ 여기만 **UTC 로 찍습니다.** 이 글자는 사람이 읽는 것이 아니라
+        #    `uq_report_scope` 가 쓰는 **열쇠**입니다 (결함 290). 열쇠는
+        #    시간대를 안 타야 합니다 — 팀 달력으로 찍으면 설정이 바뀌는
+        #    순간 같은 보고서가 다른 열쇠를 갖고, 유일 제약이 아무것도 안
+        #    막습니다. 사람에게 보이는 기간은 `period.py` 가 팀 달력으로
+        #    따로 만듭니다. (표시가 아니라 열쇠 — `teamtz-ok`)
+        return f"{period_start:%Y-%m-%d}..{period_end:%Y-%m-%d}"  # teamtz-ok
 
     return "project"

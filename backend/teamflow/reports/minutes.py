@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from teamflow import clock
 from teamflow.db.vocab import ReportType
 from teamflow.reports import SCHEMA_VERSION, blocks
 
@@ -122,7 +123,10 @@ def build(data: MinutesInput) -> dict[str, Any]:
     state = state_of(data.status)
     unprocessed = state == "unprocessed"
 
-    when = f"{data.started_at:%Y-%m-%d %H:%M}" if data.started_at else None
+    # ⛔ 예전에는 `f"{data.started_at:%Y-%m-%d %H:%M}"` 였습니다 (결함 290).
+    #    서버가 들고 있는 값은 UTC 라, 같은 회의를 화면은 19:00 · 문서는
+    #    10:00 이라고 했습니다. 밖으로 나가는 쪽이 틀린 것이 더 나쁩니다.
+    when = f"{clock.local_time(data.started_at):%Y-%m-%d %H:%M}" if data.started_at else None
     body: list[dict[str, Any]] = [
         blocks.facts(
             [
