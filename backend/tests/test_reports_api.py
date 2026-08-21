@@ -90,7 +90,12 @@ def seeded(engine, client: TestClient) -> dict:
             title="9월 1일 정기회의",
             started_at=NOW,
             duration_sec=1800,
-            status="done",
+            # ⚠️ 예전에는 `status="done"` 이었습니다 (결함 288). `"done"` 은
+            #    **업무** 상태이지 회의 상태가 아닙니다. 실기가 절대 만들지
+            #    않는 값을 검사 데이터가 만들고 있었고, 그래서 보고서의
+            #    「처리된 회의」가 언제나 0 인데도 검사는 초록이었습니다 —
+            #    **통과는 넣은 값에 대해서만 참입니다.**
+            status=m.MeetingStatus.NEEDS_REVIEW.value,
             started_by=users[0].id,
             summary="배포 일정을 다음 회의로 미뤘습니다",
             next_agenda=["배포 일정 재논의"],
@@ -366,3 +371,109 @@ def test_a_single_report_can_be_read_back(client: TestClient, seeded):
     created = client.post(f"/api/meetings/{seeded['meeting_id']}/minutes").json()
     fetched = client.get(f"/api/reports/{created['id']}").json()
     assert fetched["content"] == created["content"]
+
+
+# ══════════════════════════════════════════════════════════════
+# 「처리된 회의」가 사실이어야 한다 (결함 288)
+# ══════════════════════════════════════════════════════════════
+
+
+def _facts(content: dict) -> dict[str, str]:
+    for block in content["blocks"]:
+        if block["kind"] == "facts":
+            return {i["label"]: i["value"] for i in block["items"]}
+    raise AssertionError("보고서에 사실 칸이 없습니다 — 검사가 낡았습니다")
+
+
+def _note(content: dict, label: str) -> str:
+    for block in content["blocks"]:
+        if block["kind"] == "facts":
+            for i in block["items"]:
+                if i["label"] == label:
+                    return i.get("note", "")
+    return ""
+
+
+def test_processed_meetings_are_actually_counted(client: TestClient, seeded):
+    """⭐ 「처리된 회의」가 **언제나 0** 이었습니다.
+
+    `x.status == "done"` 으로 세고 있었는데 `"done"` 은 **업무** 상태라
+    어느 회의도 해당하지 않습니다. 씨앗에는 전사가 끝난 회의가 둘 있습니다
+    (`needs_review` 하나 · `confirmed` 하나).
+
+    그리고 그 0 은 조용하지 않았습니다 — 옆의 설명이 「N건은 아직 처리
+    전이라 그 회의의 발언은 기여도에 안 들어갔습니다」로 나갔고, 같은 제품의
+    기여도 화면은 그 사람의 회의 근거를 세고 있었습니다. **팀이 제출하는
+    문서가 제품 자신의 데이터와 반대되는 말을 한 것**입니다.
+    """
+    project_id = seeded["project_id"]
+    made = client.post(
+        f"/api/projects/{project_id}/reports", json={"report_type": "final"}
+    )
+    assert made.status_code == 201, made.text
+    facts = _facts(made.json()["content"])
+
+    assert facts["처리된 회의"] != "0건", (
+        "전사가 끝난 회의가 있는데 「처리된 회의 0건」입니다 — "
+        f"회의 {facts['회의']}"
+    )
+    # 이 파일의 씨앗은 회의 **하나**(`needs_review`)입니다. 전부 처리됐으니
+    # 「회의」와 「처리된 회의」가 같아야 합니다.
+    assert facts["처리된 회의"] == "1건"
+    assert facts["회의"] == facts["처리된 회의"]
+
+
+def test_a_meeting_that_has_not_happened_is_not_counted_as_having_happened(
+    client: TestClient, seeded
+):
+    """⭐ 머리말이 「이 기간에 **일어난** 일」입니다.
+
+    잡아만 두고 아직 안 연 회의는 일어나지 않았습니다 (결함 287). 최종
+    보고서는 기간을 안 받으므로 아무것도 안 걸러 주고, 예정 회의가 그대로
+    「회의 N건」에 섞여 들어갔습니다.
+    """
+    project_id = seeded["project_id"]
+    before = _facts(
+        client.post(
+            f"/api/projects/{project_id}/reports", json={"report_type": "final"}
+        ).json()["content"]
+    )["회의"]
+
+    made = client.post(
+        f"/api/projects/{project_id}/scheduled-meetings",
+        json={"title": "앞으로 할 회의", "at": "2027-01-05T02:00:00Z"},
+    )
+    assert made.status_code == 201, made.text
+
+    after = _facts(
+        client.post(
+            f"/api/projects/{project_id}/reports", json={"report_type": "final"}
+        ).json()["content"]
+    )["회의"]
+    assert after == before, (
+        f"일정을 잡았더니 「일어난 일」의 회의가 {before} → {after} 로 늘었습니다"
+    )
+
+
+def test_the_note_only_appears_when_something_really_is_unprocessed(
+    client: TestClient, seeded
+):
+    """⚠️ 설명이 **숫자와 같은 것**을 말해야 한다.
+
+    처리 안 된 회의가 0 이면 그 문장은 아예 안 나옵니다.
+    """
+    project_id = seeded["project_id"]
+    content = client.post(
+        f"/api/projects/{project_id}/reports", json={"report_type": "final"}
+    ).json()["content"]
+    facts = _facts(content)
+    note = _note(content, "처리된 회의")
+
+    total = int(facts["회의"].removesuffix("건"))
+    processed = int(facts["처리된 회의"].removesuffix("건"))
+    if total == processed:
+        assert note == "", "다 처리했는데 「아직 처리 전」이라고 합니다"
+    else:
+        assert f"{total - processed}건" in note, (
+            f"설명의 숫자가 사실과 다릅니다 — {total}−{processed} 인데 「{note}」"
+        )

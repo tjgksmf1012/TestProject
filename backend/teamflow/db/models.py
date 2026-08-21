@@ -599,6 +599,22 @@ class MeetingStatus(StrEnum):
     FAILED = "failed"
 
 
+#: 전사가 끝나 **그 회의의 발언이 기여도에 들어간** 상태.
+#:
+#: ⚠️ 보고서가 이걸 `status == "done"` 으로 세고 있었습니다 (결함 288).
+#: `"done"` 은 **업무** 상태(`vocab.TaskStatus.DONE`)이지 회의 상태가
+#: 아니라서, 「처리된 회의」가 **어느 프로젝트에서든 언제나 0건**이었고,
+#: 최종 보고서가 그 0 을 근거로 이렇게 적었습니다 —
+#:
+#:     6건은 아직 처리 전이라 그 회의의 발언은 기여도에 안 들어갔습니다
+#:
+#: 같은 화면의 기여도는 그 사람의 회의 근거를 11건이라고 세고 있었습니다.
+#: **팀이 제출하는 문서가 제품 자신의 데이터와 반대되는 말을 한 것**입니다.
+PROCESSED_MEETING_STATUSES: frozenset[MeetingStatus] = frozenset(
+    {MeetingStatus.NEEDS_REVIEW, MeetingStatus.CONFIRMED}
+)
+
+
 class Meeting(Base):
     __tablename__ = "meetings"
 

@@ -222,9 +222,16 @@ def _counts(
             stmt = stmt.where(column <= end)
         return stmt
 
+    # ⚠️ 머리말이 「이 기간에 **일어난** 일」입니다. 잡아만 두고 아직 안
+    #    연 회의는 일어나지 않았습니다 (결함 287·288) — 최종 보고서는
+    #    기간을 안 받으므로 `_window` 가 아무것도 안 걸러 주고, 예정 회의가
+    #    「회의 6건」에 섞여 들어갔습니다.
     meetings = session.scalars(
         _window(
-            select(m.Meeting).where(m.Meeting.project_id == project_id),
+            select(m.Meeting).where(
+                m.Meeting.project_id == project_id,
+                m.Meeting.started_at.is_not(None),
+            ),
             m.Meeting.started_at,
         )
     ).all()
@@ -255,7 +262,12 @@ def _counts(
 
     return {
         "meetings_total": len(meetings),
-        "meetings_processed": sum(1 for x in meetings if x.status == "done"),
+        # ⛔ 예전에는 `x.status == "done"` 이었습니다 (결함 288). `"done"` 은
+        #    **업무** 상태라 어느 회의도 해당하지 않고, 이 값은 언제나 0
+        #    이었습니다. 상태 어휘의 유일한 출처는 `MeetingStatus` 입니다.
+        "meetings_processed": sum(
+            1 for x in meetings if x.status in m.PROCESSED_MEETING_STATUSES
+        ),
         "tasks_done": int(tasks_done or 0),
         "tasks_open": int(tasks_open or 0),
         "github_events": int(github or 0),

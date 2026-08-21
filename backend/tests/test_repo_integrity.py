@@ -2467,3 +2467,66 @@ def test_api_times_say_which_calendar_they_are_in():
     )
     assert "UtcDatetime" in code, "`UtcDatetime` 이 없습니다 — 검사가 헛돕니다"
 
+
+
+# ══════════════════════════════════════════════════════════════
+# 회의 상태를 **손으로 적지 않는다** (결함 288)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_no_module_compares_a_meeting_status_that_does_not_exist() -> None:
+    """⭐ `meeting.status == "..."` 의 오른쪽은 **실재하는 상태**여야 한다.
+
+    보고서가 `x.status == "done"` 으로 「처리된 회의」를 세고 있었습니다.
+    `"done"` 은 **업무** 상태(`vocab.TaskStatus.DONE`)이지 회의 상태가
+    아니라서, 이 값은 어느 프로젝트에서든 **언제나 0** 이었습니다.
+
+    그리고 0 은 조용하지 않았습니다 — 그 옆의 설명이 이렇게 나갔습니다.
+
+        6건은 아직 처리 전이라 그 회의의 발언은 기여도에 안 들어갔습니다
+
+    같은 제품의 기여도 화면은 그 사람의 회의 근거를 11건이라고 세고
+    있었습니다. **팀이 제출하는 문서가 제품 자신의 데이터와 반대되는 말을
+    한 것**이고, 오류도 안 나고 테스트도 통과했습니다.
+
+    `MeetingStatus` 는 스스로 「여기가 유일한 출처다」라고 적어 두고
+    있었는데, 그 출처를 **안 보고 글자를 적어도** 아무도 안 막았습니다.
+    """
+    import re
+
+    from teamflow.db.models import MeetingStatus
+
+    known = {s.value for s in MeetingStatus}
+    # 이 저장소가 회의 상태 칸에 실제로 쓰는 예외들 — 뜻이 있는 값입니다.
+    allowed = known | {"superseded"}
+
+    bad: list[str] = []
+    roots = [REPO_ROOT / "backend" / "teamflow", REPO_ROOT / "backend" / "tests"]
+    for root in roots:
+      for path in root.rglob("*.py"):
+          source = path.read_text(encoding="utf-8")
+          # 주석·문서문자열의 「나쁜 예」를 물지 않게 걷어냅니다 (AGENTS.md).
+          code = re.sub(r'"""[\s\S]*?"""', "", source)
+          code = re.sub(r"^\s*#.*$", "", code, flags=re.M)
+          for m2 in re.finditer(
+              r'\b(?:meeting|x|row|item)\.status\s*(?:==|!=)\s*"([^"]+)"', code
+          ):
+              if m2.group(1) not in allowed:
+                  bad.append(f"{path.relative_to(REPO_ROOT)}: {m2.group(0)}")
+          for m2 in re.finditer(
+              r'\b(?:meeting|x|row|item)\.status\s+in\s+\{([^}]*)\}', code
+          ):
+              for lit in re.findall(r'"([^"]+)"', m2.group(1)):
+                  if lit not in allowed:
+                      bad.append(f"{path.relative_to(REPO_ROOT)}: {lit}")
+          # ⚠️ **검사 데이터가 실기와 다른 값을 만들면** 그 검사는 아무것도
+          #    안 잽니다. `m.Meeting(... status="done")` 이 바로 그것이었고,
+          #    그래서 보고서의 「처리된 회의」가 언제나 0 인데도 초록이었습니다.
+          for m2 in re.finditer(r'm\.Meeting\([^)]*?status=("([^"]+)")', code, re.S):
+              if m2.group(2) not in allowed:
+                  bad.append(f"{path.relative_to(REPO_ROOT)}: m.Meeting(status={m2.group(1)})")
+
+    assert not bad, (
+        "회의 상태로 **없는 값**을 비교합니다 — 그 가지는 영원히 안 탑니다:\n  "
+        + "\n  ".join(bad)
+    )
