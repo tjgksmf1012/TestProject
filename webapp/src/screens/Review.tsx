@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
-import { describeReviewDone, reviewPhase } from '@lib/review/phase.ts';
+import { describeMissingSummary, describeReviewDone, reviewPhase } from '@lib/review/phase.ts';
 import { Disclosure } from '../components/Disclosure.tsx';
 import { EvidenceChip } from '../components/EvidenceChip.tsx';
 import { Conditions, describeConditions, type Condition } from '../components/Conditions.tsx';
@@ -395,7 +395,12 @@ export default function Review() {
                 <Disclosure
                   summary={`요약 · 다음 안건 ${agendaItems(meeting.data.next_agenda).length} · 답 안 난 것 ${issueViews(meeting.data.unresolved_issues).length}`}
                 >
-                  <p>{meeting.data.summary ?? '요약이 아직 없습니다 — 처리가 끝나면 여기 담깁니다.'}</p>
+                  {/* ⛔ 예전에는 여기 한 문장이 박혀 있었습니다 (결함 284) —
+                      「처리가 끝나면 여기 담깁니다」. 검토까지 끝난 회의와
+                      처리에 **실패한** 회의에도 그렇게 말했습니다. 바로 옆
+                      후보 칸은 이 병을 이미 고쳤는데(`reviewPhase`) 요약
+                      칸만 남아 있었습니다. 판단은 `@lib`. */}
+                  <p>{meeting.data.summary ?? describeMissingSummary(meeting.data.status)}</p>
                   {agendaItems(meeting.data.next_agenda).map((item) => (
                     <p key={item}>다음 안건 — {item}</p>
                   ))}

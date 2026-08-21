@@ -83,3 +83,26 @@ export function reviewPhase(status: string | null | undefined): ReviewPhase {
 export function describeReviewDone(status: string | null | undefined): string | null {
   return status === 'confirmed' ? '검토를 마쳤습니다' : null;
 }
+
+/**
+ * 요약이 **왜** 없는지.
+ *
+ * ⚠️ 예전에는 화면이 「요약이 아직 없습니다 — 처리가 끝나면 여기
+ * 담깁니다」 한 문장을 들고 있었습니다 (결함 284). 검토까지 끝난
+ * `confirmed` 에게도, 처리에 **실패한** `failed` 에게도 "기다리세요" 라고
+ * 했습니다. 바로 옆 후보 칸은 같은 병을 이미 고쳐 뒀는데(`reviewPhase`)
+ * 요약 칸만 남아 있던 것입니다.
+ */
+export function describeMissingSummary(status: string | null | undefined): string {
+  switch (status) {
+    case 'pending':
+      return '아직 녹음하지 않은 회의입니다 — 녹음을 마치면 요약이 만들어집니다.';
+    case 'needs_review':
+    case 'confirmed':
+      return '처리는 끝났는데 요약이 만들어지지 않았습니다 — 소리가 짧거나 알아듣지 못했을 수 있습니다.';
+    case 'failed':
+      return '회의 처리에 실패해 요약이 없습니다. 로비에서 다시 처리할 수 있습니다.';
+    default:
+      return '요약이 아직 없습니다 — 처리가 끝나면 여기 담깁니다.';
+  }
+}

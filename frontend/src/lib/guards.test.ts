@@ -20,6 +20,7 @@ import { describe, it } from 'node:test';
 import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
 import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contribution/ribbon.ts';
 import { attentionAbout } from './review/candidates.ts';
+import { describeMissingSummary } from './review/phase.ts';
 import { memberStatuses } from './lobby/room.ts';
 import {
   blockers,
@@ -6578,6 +6579,59 @@ describe('⛔ 실패는 **한 어휘**로 말한다 (결함 283)', () => {
       dead.join(' · '),
       '',
       '상태 코드 자리에 죽은 값이 있습니다 — 어휘가 갈래를 못 타고 한 문장만 나옵니다',
+    );
+  });
+});
+
+describe('⛔ 요약이 없을 때 **왜 없는지**를 말한다 (결함 284)', () => {
+  /* 재현: 씨앗 회의 다섯을 나란히 열었습니다. 회의 4 는 검토까지 끝난
+     `confirmed`, 회의 5 는 `failed` 인데 둘 다 요약이 없습니다. 검토
+     화면은 둘 모두에게
+
+         요약이 아직 없습니다 — 처리가 끝나면 여기 담깁니다.
+
+     라고 했습니다. 하나는 **이미 끝났고** 하나는 **실패**해서 다시
+     처리해야 하는데, 화면은 "기다리세요" 한 마디로 덮었습니다. 바로 옆
+     후보 칸은 같은 병을 이미 고쳐 뒀습니다(`reviewPhase` — 결함 232) —
+     요약 칸만 남은 것이니 실패 ②(두 벌이 있으면 한쪽만 고쳐진다)입니다. */
+  const reviewCode = (): string =>
+    codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Review.tsx'), 'utf8'));
+
+  it('⭐ 요약 자리의 대타가 **상태를 받는다**', () => {
+    /* ⚠️ 낱말(`describeMissingSummary`)이 파일 어딘가에 있는지 세면 안
+       됩니다 — import 줄에도 있습니다. `summary ??` **바로 뒤에 오는
+       식**을 떼어 와서, 그것이 상태를 받는 호출인지 봅니다. */
+    const fallback = /\bsummary\s*\?\?\s*([^\n}]+)/.exec(reviewCode());
+    ok(fallback !== null, '요약 자리에 대타가 없습니다 — 가드가 낡았습니다');
+    const expr = (fallback?.[1] ?? '').trim();
+    ok(
+      !/^['"`]/.test(expr),
+      `요약이 없을 때 문장이 화면에 박혀 있습니다 (${expr.slice(0, 40)}) — 상태를 봐야 합니다`,
+    );
+    ok(
+      /\bstatus\b/.test(expr),
+      `대타가 상태를 안 받습니다 (${expr.slice(0, 40)}) — 네 상태에 같은 말을 하게 됩니다`,
+    );
+  });
+
+  it('⭐ 상태마다 **다른 말**이 나온다', () => {
+    /* 받아만 놓고 안 쓰면 결과는 같습니다. 실제로 불러 봅니다. */
+    const said = new Map<string, string>();
+    for (const status of ['pending', 'processing', 'needs_review', 'confirmed', 'failed']) {
+      said.set(status, describeMissingSummary(status));
+    }
+    ok(
+      new Set(said.values()).size >= 3,
+      `다섯 상태가 ${new Set(said.values()).size}가지로만 말합니다 — 갈래가 죽었습니다`,
+    );
+    /* 제일 크게 갈라져야 하는 둘 — 아직 안 한 것과 실패한 것. */
+    ok(
+      said.get('pending') !== said.get('failed'),
+      '녹음 전과 처리 실패에 같은 말을 합니다 — 할 일이 다릅니다',
+    );
+    ok(
+      said.get('confirmed') !== said.get('pending'),
+      '끝난 회의에게 "기다리세요" 라고 합니다',
     );
   });
 });

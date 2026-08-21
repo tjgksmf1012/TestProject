@@ -1,7 +1,7 @@
 import { strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { describeReviewDone, reviewPhase } from './phase.ts';
+import { describeMissingSummary, describeReviewDone, reviewPhase } from './phase.ts';
 
 describe('⛔ 검토를 끝낸 회의가 「아직 아무것도 없다」고 말하던 것 (결함 232)', () => {
   it('⭐ 끝난 회의는 **끝났다고** 말하고, 업무가 간 곳을 가리킨다', () => {
@@ -46,5 +46,47 @@ describe('⛔ 검토를 끝낸 회의가 「아직 아무것도 없다」고 말
   it('⭐ 끝난 회의에서 「검토 끝내기」는 **막힌 게 아니라 끝난** 것이다', () => {
     strictEqual(describeReviewDone('confirmed'), '검토를 마쳤습니다');
     strictEqual(describeReviewDone('needs_review'), null);
+  });
+});
+
+describe('describeMissingSummary — 요약이 왜 없는가 (결함 284)', () => {
+  it('⛔ **끝난 회의에 「기다리면 온다」고 하지 않는다**', () => {
+    /* 다섯 회의를 나란히 놓고 읽다가 잡았습니다. `confirmed`(검토까지
+       끝남)와 `failed`(처리 실패)에도 「처리가 끝나면 여기 담깁니다」가
+       떠 있었습니다 — 기다려도 아무것도 안 옵니다. */
+    for (const status of ['confirmed', 'needs_review', 'failed']) {
+      const text = describeMissingSummary(status);
+      strictEqual(
+        /처리가 끝나면/.test(text),
+        false,
+        `${status} 에게 기다리라고 합니다: ${text}`,
+      );
+    }
+  });
+
+  it('처리 실패는 **다시 할 자리**를 알려 준다', () => {
+    strictEqual(/다시 처리/.test(describeMissingSummary('failed')), true);
+  });
+
+  it('아직 녹음도 안 한 회의에 「처리」 이야기를 하지 않는다', () => {
+    const text = describeMissingSummary('pending');
+    strictEqual(/녹음/.test(text), true, text);
+  });
+
+  it('⚠️ 모르는 상태는 「아직 올 것이 남았다」로 둔다', () => {
+    // 새 상태가 생겼을 때 「다 끝났다」고 하면 사람이 일찍 떠납니다.
+    for (const status of ['processing', 'queued', undefined, null, '새상태']) {
+      strictEqual(/처리가 끝나면/.test(describeMissingSummary(status)), true, String(status));
+    }
+  });
+
+  it('⛔ 「요약할 것이 없었다」고 단언하지 않는다 — 못 만든 것이지 없는 것이 아니다', () => {
+    for (const status of ['confirmed', 'needs_review', 'failed', 'pending', 'processing']) {
+      strictEqual(
+        /없었습니다|없는 회의/.test(describeMissingSummary(status)),
+        false,
+        describeMissingSummary(status),
+      );
+    }
   });
 });
