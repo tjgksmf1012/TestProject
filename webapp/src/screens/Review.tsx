@@ -21,6 +21,7 @@ import {
   canUndoDecision,
   attentionAbout,
   attentionReasons,
+  decisionPressed,
   buildReviewPayload,
   effectiveAssignee,
   effectiveDeadline,
@@ -720,6 +721,12 @@ export default function Review() {
                         }
                         update(candidate.id, { decision: 'approve' });
                       }}
+                      /* ⛔ **이미 고른 뒤에도 살아 있었습니다** (결함 267).
+                         다시 눌러도 요청이 안 나가고 화면도 안 바뀌어,
+                         고장인지 이미 된 것인지 알 수 없었습니다. 지우면
+                         「거절 → 다시 등록」이 막히므로, **고른 것으로
+                         보이게** 합니다. 판단은 `@lib`. */
+                      aria-pressed={decisionPressed(draft, 'approve')}
                     >
                       등록
                     </button>
@@ -743,6 +750,7 @@ export default function Review() {
                       type="button"
                       className="btn btn--ghost btn--sm"
                       onClick={() => update(candidate.id, { decision: 'reject' })}
+                      aria-pressed={decisionPressed(draft, 'reject')}
                     >
                       거절
                     </button>

@@ -6,6 +6,7 @@ import {
   approvalConditions,
   canUndoDecision,
   attentionReasons,
+  decisionPressed,
   blockerLine,
   buildReviewPayload,
   canApprove,
@@ -747,5 +748,20 @@ describe('⛔ 둘이 동시에 검토하면 뒤에 누른 사람이 속았습니
   it('⚠️ 표시 건수를 안 주면 **예전과 같이** 답한다 — 옛 호출을 안 깨뜨린다', () => {
     assert.equal(describeSubmitResult(0, []), '검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다');
     assert.equal(describeSubmitResult(2, [1, 2]).includes('2건이 칸반에 등록됐습니다'), true);
+  });
+});
+
+
+describe('decisionPressed (결함 267)', () => {
+  it('⭐ 지금 고른 것만 **눌린 것**이다', () => {
+    assert.equal(decisionPressed({ decision: 'approve' }, 'approve'), true);
+    assert.equal(decisionPressed({ decision: 'approve' }, 'reject'), false);
+    assert.equal(decisionPressed({ decision: 'reject' }, 'reject'), true);
+  });
+
+  it('아직 아무것도 안 골랐으면 **둘 다 아니다**', () => {
+    assert.equal(decisionPressed({ decision: 'pending' }, 'approve'), false);
+    assert.equal(decisionPressed(undefined, 'approve'), false);
+    assert.equal(decisionPressed({}, 'reject'), false);
   });
 });

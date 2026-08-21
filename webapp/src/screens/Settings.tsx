@@ -15,13 +15,17 @@ import { describeRoles } from '@lib/contribution/roles.ts';
 import { plainText } from '@lib/ui/plain.ts';
 import { describeHealth, describeHealthFailure } from '@lib/github/health.ts';
 import {
+  codeToCopy,
   disconnectConfirm,
   githubLoginStatus,
   isDisconnect,
   normalizeRepo,
   repoProblem,
   titleProblem,
+  unknownSectionNote,
+  whyCannotCopyCode,
 } from '@lib/project/setup.ts';
+import { copySucceeded, copyText, describeCopy } from '@lib/ui/copy.ts';
 import {
   LEAVE_CONFIRM,
   assignableRoles,
@@ -35,7 +39,15 @@ import { presenceLabel, worthShowing } from '@lib/project/presence.ts';
 import { describeOutcome } from '@lib/privacy/deletion.ts';
 import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
 import { whyCannotSave } from '@lib/ui/save.ts';
-import { AVATAR_SIDE, MAX_BIO, PHOTO_NOTE, bioProblem, coverCrop, photoProblem } from '@lib/profile/edit.ts';
+import {
+  AVATAR_SIDE,
+  MAX_BIO,
+  PHOTO_NOTE,
+  avatarToShow,
+  bioProblem,
+  coverCrop,
+  photoProblem,
+} from '@lib/profile/edit.ts';
 import { ApiError } from '../api/client.ts';
 import { Problem } from '../components/Problem.tsx';
 
@@ -56,6 +68,9 @@ const SECTIONS = [
   { group: '프로젝트', key: 'repo', label: '저장소 연결' },
   { group: '프로젝트', key: 'general', label: '이름과 초대' },
 ] as const;
+
+/** 아는 구역 — 탭에 선 것들과 위험 구역. **한 벌**입니다 (결함 266). */
+const KNOWN_SECTIONS: readonly string[] = [...SECTIONS.map((s) => s.key), 'danger'];
 
 const WHY_ONLY_ME =
   '남이 내 역할을 바꿀 수 있으면 그건 남의 점수를 바꾸는 일입니다. 역할 비중은 기여도 가중치라서, 본인만 고치고 고친 기록이 남습니다.';
@@ -191,7 +206,8 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
   const [avatar, setAvatar] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const bioValue = bio ?? me?.bio ?? '';
-  const avatarValue = avatar ?? me?.avatar ?? null;
+  // 빈 글은 「지움」입니다 — 판단은 `@lib` (결함 265).
+  const avatarValue = avatarToShow(avatar, me?.avatar ?? null);
   const problem = bioProblem(bioValue);
   const dirty = bio !== null || avatar !== null;
   const profileBlocked = whyCannotSave({ problem, dirty, saving: save.isPending });
@@ -232,6 +248,25 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
             <span className="field__label">사진 — {PHOTO_NOTE}</span>
             <input type="file" accept="image/*" onChange={(e) => onFile(e.target.files?.[0])} />
           </label>
+          {/* ⛔ **올린 사진을 지울 자리가 없었습니다** (결함 265). 서버는
+              길을 만들어 뒀고(`clean_avatar("")` → `None`) 레거시 화면에는
+              「사진 지우기」가 있었는데, SPA 로 옮기며 빠졌습니다. 올릴 수는
+              있고 내릴 수는 없는 상태였습니다 — 얼굴은 지우고 싶을 때가
+              있습니다.
+              ⚠️ 지우는 것도 **저장을 눌러야** 적용됩니다. 여기서 바로
+              보내면 「저장」의 뜻이 칸마다 달라집니다. */}
+          {avatarValue !== null && (
+            <button
+              type="button"
+              className="btn btn--danger-quiet btn--sm"
+              onClick={() => {
+                setPhotoError(null);
+                setAvatar('');
+              }}
+            >
+              사진 지우기
+            </button>
+          )}
           <Problem>{photoError}</Problem>
         </div>
       </div>
@@ -593,6 +628,12 @@ function GeneralSection({
     saving: save.isPending,
   });
   const rotateBlocked = manageBlockedBecause(myRole, '초대 코드 새로 만들기');
+  // 표시용 글자가 아니라 **데이터**에서 만듭니다 (결함 71).
+  const copyTarget = codeToCopy(inviteCode);
+  // 막는 것은 `aria-disabled` 라 **사유가 있어야** 합니다 (결함 234).
+  const copyBlocked = whyCannotCopyCode(inviteCode);
+  const [copyLabel, setCopyLabel] = useState('코드 복사');
+  const [copyNote, setCopyNote] = useState<string | null>(null);
   return (
     <div className="sec">
       <h2 className="sec__title">이름과 초대</h2>
@@ -639,6 +680,34 @@ function GeneralSection({
         <span className="invite-code">{inviteCode === '' ? '(없음)' : inviteCode}</span>
       </div>
       <div className="sec__row">
+        {/* ⛔ **복사 단추가 없었습니다** (결함 264). 이 패널이 하는 일은
+            코드를 **남에게 보내는 것**인데, 손으로 옮겨 적어야 했습니다.
+            `@lib/ui/copy.ts` 와 `codeToCopy` 는 진작 있었고 레거시 화면은
+            부르고 있었습니다 — SPA 로 옮기며 빠진 자리입니다.
+            ⚠️ 안 됐을 때 그렇다고 말합니다(결함 81): `http://` 로 열면
+            `navigator.clipboard` 가 아예 없습니다. */}
+        <button
+          type="button"
+          className={`btn btn--secondary${copyBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={copyBlocked !== null}
+          aria-describedby={copyBlocked !== null ? 'copy-blocked' : undefined}
+          onClick={() => {
+            if (copyTarget === null) return;
+            void copyText(copyTarget, navigator.clipboard).then((outcome) => {
+              if (copySucceeded(outcome)) {
+                setCopyNote(null);
+                setCopyLabel(describeCopy(outcome, '코드'));
+                window.setTimeout(() => setCopyLabel('코드 복사'), 1500);
+                return;
+              }
+              // 실패 이유는 버튼이 아니라 아래 줄에 적습니다 — 버튼 글자를
+              // 길게 만들면 옆의 「코드 새로 만들기」와 겹칩니다 (결함 77).
+              setCopyNote(describeCopy(outcome, '코드'));
+            });
+          }}
+        >
+          {copyLabel}
+        </button>
         <button
           type="button"
           className={`btn btn--secondary${rotateBlocked !== null ? ' btn--unmet' : ''}`}
@@ -656,6 +725,8 @@ function GeneralSection({
       <Disclosure summary="코드를 새로 만들면 어떻게 되나요">
         <p>이전 코드는 그 즉시 무효가 됩니다. 이미 들어온 팀원은 그대로 남습니다.</p>
       </Disclosure>
+      <Problem id="copy-blocked" tone="incomplete">{copyBlocked}</Problem>
+      <Problem>{copyNote}</Problem>
       <Problem id="rotate-blocked" tone="incomplete">{rotateBlocked}</Problem>
       {/* ⚠️ **`rotate` 만 실패를 말할 자리가 없었습니다** (결함 225). 결함
           218 의 훑기 가드가 이걸 놓쳤는데, 그 가드가 **다음 600자 안의 다른
@@ -884,6 +955,15 @@ export default function Settings() {
               />
             )}
             {cannotLoad === null && section === 'danger' && <DangerSection revoke={m.revokeMyData} />}
+            {/* ⛔ **없는 구역 주소가 백지였습니다** (결함 266). 탭 줄만
+                나오고 본문이 통째로 비어, 고장인지 잘못 온 것인지 알 수
+                없었습니다. 아는 구역 목록은 **여기 한 벌**(`SECTIONS`)만
+                있고 판단은 `@lib` 이 합니다. */}
+            {cannotLoad === null && (
+              <Problem tone="incomplete">
+                {unknownSectionNote(section, KNOWN_SECTIONS)}
+              </Problem>
+            )}
             {m.openMeeting.isError && (
               <Problem>{mutationError(m.openMeeting.error)}</Problem>
             )}

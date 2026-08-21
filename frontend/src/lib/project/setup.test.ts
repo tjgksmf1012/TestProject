@@ -8,6 +8,7 @@ import {
   codeToCopy,
   disconnectConfirm,
   isDisconnect,
+  unknownSectionNote,
   formatCode,
   nextStepAfterCreate,
   normalizeCode,
@@ -216,5 +217,20 @@ describe('결함 256 — 확인 없이 끊기던 저장소 연결', () => {
     // 되돌릴 수 있는 것과 없는 것을 **둘 다** 말합니다.
     strictEqual(said.includes('남지만'), true, said);
     strictEqual(said.includes('연결 전'), true, said);
+  });
+});
+
+
+describe('결함 266 — 없는 설정 구역이 백지였다', () => {
+  const KNOWN = ['role', 'members', 'danger'];
+
+  it('⭐ 모르는 주소에는 **말을 한다**', () => {
+    const said = unknownSectionNote('zzz', KNOWN);
+    strictEqual(said !== null, true);
+    strictEqual(said?.includes('없는 구역'), true, said ?? '');
+  });
+
+  it('⚠️ **아는 구역에는 아무 말도 안 한다** — 안 그러면 모든 화면에 뜹니다', () => {
+    for (const k of KNOWN) strictEqual(unknownSectionNote(k, KNOWN), null, k);
   });
 });

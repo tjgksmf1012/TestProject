@@ -391,6 +391,18 @@ export function useLobbyMutations(meetingId: number | undefined) {
       mutationFn: () => api.post<unknown>(`/api/meetings/${meetingId}/finish`),
       onSuccess: refresh,
     }),
+    /* ⛔ **회의에 이름을 붙일 자리가 화면에 없었습니다** (결함 268).
+       서버에는 길이 있었고 이미 연 회의도 제목만은 고치게 허용합니다 —
+       부르는 화면이 0곳이었습니다. */
+    rename: useMutation({
+      mutationFn: (title: string) =>
+        api.patch<unknown>(`/api/scheduled-meetings/${meetingId}`, { title }),
+      onSuccess: () => {
+        refresh();
+        void queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] });
+        void queryClient.invalidateQueries({ queryKey: ['meetings'] });
+      },
+    }),
   };
 }
 

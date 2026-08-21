@@ -11,6 +11,7 @@ import {
   whyConsentBlocked,
   isSilentTooLong,
   lobbyPhase,
+  meetingTitleProblem,
   memberStatuses,
   roomStatus,
   savedExtraConsents,
@@ -587,5 +588,22 @@ describe('결함 255 — 트랙을 못 받은 것을 「미참가」로 단언�
     const [first] = memberStatuses(roster, null);
     strictEqual(verdictView(first as MemberStatus, true).word, '모름');
     strictEqual(verdictView(first as MemberStatus, false).word, '모름');
+  });
+});
+
+
+describe('meetingTitleProblem (결함 268)', () => {
+  it('⭐ 빈 이름은 거절한다 — **서버와 같은 규칙**', () => {
+    strictEqual(meetingTitleProblem('') !== null, true);
+    strictEqual(meetingTitleProblem('   ') !== null, true);
+  });
+
+  it('200자까지', () => {
+    strictEqual(meetingTitleProblem('가'.repeat(200)), null);
+    strictEqual(meetingTitleProblem('가'.repeat(201)) !== null, true);
+  });
+
+  it('평범한 이름은 통과', () => {
+    strictEqual(meetingTitleProblem('3차 스프린트 회고'), null);
   });
 });

@@ -93,6 +93,27 @@ export function repoProblem(raw: string): string | null {
   return null;
 }
 
+/** 복사할 코드가 없을 때 할 말 (결함 264). 막는 것은 `aria-disabled` 라 **사유가 있어야** 합니다. */
+export function whyCannotCopyCode(inviteCode: string | null | undefined): string | null {
+  return codeToCopy(inviteCode) === null ? '복사할 초대 코드가 없습니다' : null;
+}
+
+/**
+ * 주소에 적힌 설정 구역이 **있는 것인가** (결함 266).
+ *
+ * `/settings/zzz` 를 열면 탭 줄만 나오고 **본문이 통째로 비었습니다.**
+ * 오류도 안 나고 안내도 없어서, 사람은 화면이 고장 났는지 자기가 잘못
+ * 왔는지 알 방법이 없었습니다. 오타 한 글자, 낡은 즐겨찾기, 바뀐 링크로
+ * 흔히 닿는 자리입니다.
+ *
+ * ⚠️ 아는 구역 목록은 **화면이 줍니다.** 여기에 목록을 또 두면 탭이 하나
+ * 늘 때 두 곳을 고쳐야 하고, 그러면 반드시 한쪽만 고쳐집니다.
+ */
+export function unknownSectionNote(section: string, known: readonly string[]): string | null {
+  if (known.includes(section)) return null;
+  return '설정에 없는 구역입니다 — 위 탭에서 골라 주세요.';
+}
+
 /**
  * 이 저장이 **연결을 끊는 것인가** (결함 256).
  *

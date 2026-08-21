@@ -646,6 +646,15 @@ button.rail__item {
    제일 위험한 행동이 됩니다 — 재 보니 `--text-muted` 에 테두리도 없었고,
    같은 화면의 「내 녹음 지우기」만 빨강이었습니다.
    그래서 **색은 위험, 무게는 조용**으로 갑니다. */
+/* 고른 것 — 「지금 이 상태입니다」 (결함 267). 색이 아니라 **채움과
+   테두리**로 말합니다: 이 저장소는 색을 「근거 있음/모름」에만 씁니다. */
+.btn[aria-pressed="true"] {
+  background: var(--c-sunken);
+  border-color: var(--c-line-strong);
+  color: var(--c-ink);
+  font-weight: var(--fw-semibold);
+}
+
 .btn--danger-quiet {
   background: transparent;
   color: var(--c-danger);

@@ -44,6 +44,23 @@ export function photoProblem(file: { type: string; size: number }): string | nul
   return null;
 }
 
+/**
+ * 지금 보여 줄 사진 (결함 265).
+ *
+ * ⚠️ **빈 글은 「지움」입니다.** 서버도 같은 규약입니다
+ * (`users/profile.py` 의 `clean_avatar("")` → `None`). 화면에서 `?? ` 로만
+ * 이으면 빈 글이 「안 고침」과 섞여, 지우기를 누른 뒤에도 옛 사진이 그대로
+ * 남습니다.
+ *
+ * - `pending === null` — 아직 안 건드림 → 저장된 것
+ * - `pending === ''`   — 지우기를 눌렀음 → 없음
+ * - 그 밖         — 새로 고른 사진
+ */
+export function avatarToShow(pending: string | null, saved: string | null | undefined): string | null {
+  if (pending === '') return null;
+  return pending ?? saved ?? null;
+}
+
 /** 자기소개의 문제. 없으면 `null`. 빈 글은 문제가 아니라 "지움" 입니다. */
 export function bioProblem(text: string): string | null {
   const length = text.trim().length;

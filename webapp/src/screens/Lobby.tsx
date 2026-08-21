@@ -17,6 +17,7 @@ import {
 import {
   captureAlerts,
   lobbyPhase,
+  meetingTitleProblem,
   memberStatuses,
   roomStatus,
   savedExtraConsents,
@@ -60,6 +61,10 @@ export default function Lobby() {
      0명」과 「아직 아무도 참가하지 않았습니다」를 **단언**했습니다 —
      아무것도 모르는 채로요. 세는 것과 말하는 것은 명단이 온 뒤에. */
   const rosterKnown = consent.data !== undefined;
+  // 회의 이름 고치기 (결함 268). 판단(빈 글·길이)은 `@lib`.
+  const [renaming, setRenaming] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const titleProblem = meetingTitleProblem(titleDraft);
   const roster = consent.data?.roster ?? [];
   /* ⛔ **`?? []` 가 「못 받음」을 「아무도 참가 안 함」으로 접었습니다**
      (결함 255). `/tracks` 를 500 으로 막고 이미 녹음이 끝난 회의를 열면
@@ -275,7 +280,68 @@ export default function Lobby() {
           <div className="pane__head">
             <h2 className="pane__title">참가자 상태</h2>
             <span className="pane__count">{rosterKnown ? `${roster.length}명` : '—'}</span>
+            {/* ⛔ **회의에 이름을 붙일 자리가 없었습니다** (결함 268).
+                「회의 열기」는 제목을 안 묻고, 그래서 홈 목록에 「제목 없는
+                회의」가 쌓입니다. 서버에는 길이 있었는데(이미 연 회의도
+                제목만은 고칩니다) 부르는 화면이 0곳이었습니다.
+                ⚠️ 「열 때 물어볼 것인가」는 사람이 정할 일이라 안 건드립니다
+                — 여기서는 **언제든 되돌릴 수 있는 쪽**만 만듭니다. */}
+            <span className="pane__hint">
+              {renaming ? (
+                <>
+                  <input
+                    className="input input--sm"
+                    id="meeting-title-input"
+                    aria-label="회의 이름"
+                    aria-invalid={titleProblem !== null}
+                    aria-describedby="meeting-title-problem"
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={`btn btn--secondary btn--sm${titleProblem !== null ? ' btn--unmet' : ''}`}
+                    aria-disabled={titleProblem !== null}
+                    aria-describedby={titleProblem !== null ? 'meeting-title-problem' : undefined}
+                    onClick={() => {
+                      if (m.rename.isPending) return;
+                      if (titleProblem !== null) {
+                        document.getElementById('meeting-title-input')?.focus();
+                        return;
+                      }
+                      m.rename.mutate(titleDraft.trim(), { onSuccess: () => setRenaming(false) });
+                    }}
+                  >
+                    저장
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    onClick={() => setRenaming(false)}
+                  >
+                    취소
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={() => {
+                    setTitleDraft(meeting.data?.title ?? '');
+                    setRenaming(true);
+                  }}
+                >
+                  이름 고치기
+                </button>
+              )}
+            </span>
           </div>
+          {/* ⚠️ `aria-describedby` 가 가리키는 자리는 **실제로 있어야**
+              합니다 (결함 234). */}
+          <Problem id="meeting-title-problem" tone="incomplete">
+            {renaming ? titleProblem : null}
+          </Problem>
+          <Problem>{m.rename.isError ? describeActionFailure('회의 이름 고치기', m.rename.error instanceof ApiError ? m.rename.error.status : null) : null}</Problem>
           <div className="pane__body">
             {/* ⚠️ **홈이 한 말이 여기서 사라지고 있었습니다** (결함 214).
                 홈은 "처리에 실패했습니다 — 트랙이 온전한지 확인하세요"

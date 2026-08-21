@@ -595,6 +595,30 @@ export function verdictView(status: MemberStatus, canStart: boolean): VerdictVie
 }
 
 /**
+ * 회의에 붙일 이름의 문제. 없으면 `null` (결함 268).
+ *
+ * ## ⛔ 회의에 이름을 붙일 자리가 화면에 없었습니다
+ *
+ * 「회의 열기」는 제목을 안 묻습니다. 그래서 홈 목록에 **「제목 없는
+ * 회의」** 가 쌓입니다 — 재현했습니다(회의 4번). 서버에는 길이 있었고
+ * (`PATCH /api/scheduled-meetings/{id}`), 이미 연 회의도 **제목만은**
+ * 고치게 허용합니다(`calendar_service.reschedule_meeting` — 막는 것은
+ * 시각뿐입니다). 그런데 그 길을 부르는 화면이 **0곳**이었습니다.
+ *
+ * ⚠️ 「열 때 물어볼 것인가」는 아직 정하지 않았습니다. 그건 되돌릴 수
+ * 없는 결정(누르는 걸음이 하나 늘어납니다)이라 사람에게 물어야 합니다.
+ * 여기서는 **되돌릴 수 있는 쪽**만 만듭니다 — 로비에서 언제든 고치기.
+ *
+ * 규칙은 서버와 같아야 합니다(빈 글 거절 · 200자).
+ */
+export function meetingTitleProblem(raw: string): string | null {
+  const title = raw.trim();
+  if (title.length === 0) return '회의 이름을 입력하세요';
+  if (title.length > 200) return '회의 이름은 200자까지입니다';
+  return null;
+}
+
+/**
  * 「다시 처리하기」를 누르기 **전에** 묻는 말 (결함 114 · 231).
  *
  * ⚠️ 되돌릴 수 없습니다 — 앞판의 발화·후보·결정이 지워지고 새로

@@ -4852,6 +4852,78 @@ describe('⛔ 글자가 있는 그대로 보여야 한다 (결함 259·261·262�
   });
 });
 
+describe('⛔ 만들어 둔 길을 **화면이 부른다** (결함 264~268)', () => {
+  const settings = (): string =>
+    codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Settings.tsx'), 'utf8'));
+
+  it('⭐ 초대 코드에 **복사 단추**가 있다 (결함 264)', () => {
+    /* 이 패널이 하는 일은 코드를 **남에게 보내는 것**인데 손으로 옮겨
+       적어야 했습니다. `@lib/ui/copy.ts` 와 `codeToCopy` 는 진작 있었고
+       레거시 화면은 부르고 있었습니다 — SPA 로 옮기며 빠진 자리입니다. */
+    const code = settings();
+    ok(/codeToCopy\(/.test(code), '표시용 글자를 복사하려 합니다 — 데이터에서 만드세요 (결함 71)');
+    ok(/copyText\(/.test(code), '초대 코드 복사 단추가 없습니다');
+    // ⚠️ **안 됐을 때 말하는가** (결함 81). `http://` 로 열면 클립보드가 없습니다.
+    ok(/describeCopy\(/.test(code), '복사가 안 됐을 때 아무 말도 안 합니다');
+  });
+
+  it('⭐ 올린 **사진을 지울 자리**가 있다 (결함 265)', () => {
+    const code = settings();
+    ok(/avatarToShow\(/.test(code), '「지움」과 「안 고침」을 안 가릅니다');
+    ok(
+      /setAvatar\(''\)/.test(code),
+      '사진을 지울 자리가 없습니다 — 올릴 수는 있고 내릴 수는 없는 상태입니다',
+    );
+  });
+
+  it('⭐ **없는 구역 주소**에 말을 한다 (결함 266)', () => {
+    ok(
+      /unknownSectionNote\(/.test(settings()),
+      '없는 구역이 백지입니다 — 고장인지 잘못 온 것인지 알 수 없습니다',
+    );
+  });
+
+  it('⭐ 이미 고른 결정이 **고른 것으로 보인다** (결함 267)', () => {
+    /* 「등록 표시됨」 뒤에도 「등록」 단추가 살아 있었고, 다시 눌러도
+       요청이 안 나가고 화면도 안 바뀌었습니다. */
+    const code = codeOf(
+      readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Review.tsx'), 'utf8'),
+    );
+    const buttons = [...code.matchAll(/<button[\s\S]*?<\/button>/g)].map((m) => m[0]);
+    for (const target of ['approve', 'reject']) {
+      const decided = buttons.filter((btn) =>
+        new RegExp(`decision:\\s*'${target}'`).test(btn),
+      );
+      ok(decided.length > 0, `「${target}」 단추를 못 찾았습니다 — 가드가 헛돕니다`);
+      for (const btn of decided) {
+        ok(
+          /aria-pressed=/.test(btn),
+          `이미 고른 뒤에도 그냥 살아 있습니다 (${target}) — 눌러도 아무 일이 안 일어납니다`,
+        );
+      }
+    }
+  });
+
+  it('⭐ 회의에 **이름을 붙일 자리**가 있다 (결함 268)', () => {
+    /* 「회의 열기」는 제목을 안 묻습니다. 서버에는 길이 있고 이미 연
+       회의도 제목만은 고치게 허용하는데, 부르는 화면이 0곳이었습니다 —
+       그래서 홈 목록에 「제목 없는 회의」가 쌓였습니다.
+
+       ⚠️ 「열 때 물어볼 것인가」는 사람이 정할 일이라 여기서 재지
+       않습니다. 재는 것은 **고칠 자리가 있는가**뿐입니다. */
+    const lobby = codeOf(
+      readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx'), 'utf8'),
+    );
+    ok(/meetingTitleProblem\(/.test(lobby), '빈 이름을 그대로 보냅니다 — 서버가 400 을 줍니다');
+    ok(/rename\.mutate\(/.test(lobby), '회의에 이름을 붙일 자리가 없습니다');
+    const hooks = codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'api', 'hooks.ts'), 'utf8'));
+    ok(
+      /scheduled-meetings\/\$\{meetingId\}/.test(hooks),
+      '이름 고치기가 서버까지 안 갑니다',
+    );
+  });
+});
+
 describe('⛔ 녹음이 **혼자 멈췄을 때**도 끝까지 간다 (결함 240·241)', () => {
   /* 회의 도중 누가 동의를 철회하면 서버는 청크마다 403 을 줍니다
      (`recording_service.store_chunk` 가 청크마다 동의를 다시 봅니다).

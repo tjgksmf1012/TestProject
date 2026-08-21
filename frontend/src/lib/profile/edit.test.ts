@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { bioProblem, coverCrop, MAX_BIO, PHOTO_NOTE, photoProblem } from './edit.ts';
+import { avatarToShow, bioProblem, coverCrop, MAX_BIO, PHOTO_NOTE, photoProblem } from './edit.ts';
 
 describe('프로필 이미지·자기소개 (USER-004)', () => {
   it('이미지가 아닌 파일을 캔버스에 올리기 전에 잡는다', () => {
@@ -30,5 +30,22 @@ describe('프로필 이미지·자기소개 (USER-004)', () => {
   it('원본이 서버로 가지 않는 것을 화면이 말한다', () => {
     assert.match(PHOTO_NOTE, /EXIF/);
     assert.match(PHOTO_NOTE, /서버로 가지 않습니다/);
+  });
+});
+
+
+describe('avatarToShow (결함 265)', () => {
+  it('⭐ **빈 글은 「지움」이다** — 「안 고침」과 다르다', () => {
+    assert.equal(avatarToShow('', 'data:image/png;base64,AAA'), null);
+    assert.equal(avatarToShow(null, 'data:image/png;base64,AAA'), 'data:image/png;base64,AAA');
+  });
+
+  it('새로 고른 사진이 이긴다', () => {
+    assert.equal(avatarToShow('data:image/png;base64,BBB', 'data:image/png;base64,AAA'), 'data:image/png;base64,BBB');
+  });
+
+  it('둘 다 없으면 없음', () => {
+    assert.equal(avatarToShow(null, null), null);
+    assert.equal(avatarToShow(null, undefined), null);
   });
 });
