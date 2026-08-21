@@ -143,6 +143,44 @@ class ConsentStatus:
         return f"{self.pending}명이 아직 동의하지 않았습니다"
 
 
+def describe_consent(status: ConsentStatus, meeting_status: str) -> str:
+    """동의 현황을 **회의 국면과 함께** 한 줄로.
+
+    ## ⛔ 이 함수가 생긴 이유 (결함 251)
+
+    예전에는 API 가 이렇게 지었다.
+
+        "전원 동의했습니다. 녹음을 시작할 수 있습니다" if all_confirmed
+        else status.describe()
+
+    **회의가 어느 국면인지 안 봤다.** 렌더해서 확인했다 — 녹음이 이미 끝나고
+    검토를 기다리는 회의(`needs_review`)의 로비에서 이랬다.
+
+        동의 칸   : 전원 동의했습니다. 녹음을 시작할 수 있습니다
+        참가자 칸 : 전원 종료했습니다. 회의 처리가 …
+
+    **한 화면이 스스로 모순됐다.** 처리에 실패한 회의(`failed`)와 검토를
+    끝낸 회의(`confirmed`)는 「2명이 아직 동의하지 않았습니다」였다 — 이미
+    지나간 회의에 대고 동의를 재촉한 것이다.
+
+    ⚠️ 늦은 동의 제출 자체는 **막지 않는다** (`submit_consent` 참조).
+    기록으로서 의미가 있고, 보관·성문 동의는 회의가 끝난 뒤에 정하는 것이
+    오히려 자연스럽다. 여기서 고치는 것은 **말**이다.
+    """
+    if meeting_status in _MEETING_AUDIO_FROZEN:
+        # 녹음이 끝난 회의. 무엇을 하라고 재촉하지 않고 **지나간 사실**로 적는다.
+        if status.total == 0:
+            return "이 프로젝트에 구성원이 없습니다"
+        if status.refused:
+            return f"이 회의의 녹음은 끝났습니다 — {status.refused}명은 동의하지 않은 채였습니다"
+        if status.pending:
+            return f"이 회의의 녹음은 끝났습니다 — {status.pending}명은 응답하지 않은 채였습니다"
+        return "이 회의의 녹음은 끝났습니다 — 전원 동의한 상태로 진행됐습니다"
+    if status.all_confirmed:
+        return "전원 동의했습니다. 녹음을 시작할 수 있습니다"
+    return status.describe()
+
+
 def consent_status(session: Session, meeting_id: int) -> ConsentStatus:
     """이 회의의 녹음 동의(①단계) 현황.
 

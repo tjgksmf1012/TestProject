@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   describeMeetingStatus,
+  emphasisFor,
   describeProject,
   emptyProjectsMessage,
   formatMeetingTime,
@@ -322,5 +323,35 @@ describe('requestedProjectId', () => {
     strictEqual(requestedProjectId('?project=1.5'), null);
     strictEqual(requestedProjectId('?project=0'), null);
     strictEqual(requestedProjectId('?project=-3'), null);
+  });
+});
+
+
+describe('결함 252 — 화면이 `actionable` 을 뒤집던 자리', () => {
+  it('⭐ 검토할 후보가 **0건**이면 「검토 필요」 덩어리에 안 넣는다', () => {
+    // 이 함수의 머리말은 「가르는 기준은 상태가 아니라 사람이 할 일이
+    // 있는가」인데, 코드는 상태만 봤습니다. 그래서 머리말이 「검토 필요 2」
+    // 라고 세면서 한 건은 검토할 것이 없었습니다.
+    const list = [
+      meeting({ meeting_id: 1, status: 'needs_review', pending_candidates: 3 }),
+      meeting({ meeting_id: 2, status: 'needs_review', pending_candidates: 0 }),
+    ];
+    const { needsReview, rest } = sectionMeetings(list);
+    deepStrictEqual(needsReview.map((m) => m.meeting_id), [1]);
+    deepStrictEqual(rest.map((m) => m.meeting_id), [2]);
+  });
+
+  it('⭐ **`actionable` 이 아니면 강조하지 않는다** — 덩어리 안이어도', () => {
+    const nothing = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 0 }));
+    strictEqual(nothing.actionable, false);
+    strictEqual(emphasisFor(nothing, true), 'ghost');
+    strictEqual(emphasisFor(nothing, false), 'ghost');
+  });
+
+  it('primary 는 **검토 필요 덩어리 안의 할 일**에만', () => {
+    const todo = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 3 }));
+    strictEqual(emphasisFor(todo, true), 'primary');
+    // 덩어리 밖의 갈 수 있는 줄은 테두리 버튼입니다 (v2 F9).
+    strictEqual(emphasisFor(nextStepFor(meeting({ status: 'pending' })), false), 'secondary');
   });
 });

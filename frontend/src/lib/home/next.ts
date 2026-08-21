@@ -288,9 +288,46 @@ export function sectionMeetings(meetings: readonly Meeting[]): HomeSections {
     if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return tb - ta;
     return b.meeting_id - a.meeting_id;
   };
-  const needsReview = meetings.filter((m) => m.status === 'needs_review').slice().sort(byRecent);
-  const rest = meetings.filter((m) => m.status !== 'needs_review').slice().sort(byRecent);
+  /* ⛔ **상태만 보면 안 됩니다** (결함 252). 이 함수의 머리말이 스스로
+     「가르는 기준은 상태가 아니라 **사람이 할 일이 있는가**」라고 적어
+     두고, 정작 코드는 `status === 'needs_review'` 하나만 봤습니다.
+
+     후보가 0건인 `needs_review` 회의(사람이 셋 다 검토했는데 서버가
+     `confirmed` 를 못 넣은 경우 · 회의에서 업무가 안 나온 경우)가 그
+     덩어리에 들어가, 머리말이 「검토 필요 **2**」라고 세고 있었습니다.
+     한 건은 검토할 것이 없는데요. `nextStepFor` 는 그 회의에 대해 이미
+     `actionable: false` 라고 답하고 있었습니다 — **판단이 있는데 안 물어본
+     것**입니다. */
+  const waitingForPeople = (m: Meeting): boolean =>
+    m.status === 'needs_review' && nextStepFor(m).actionable;
+  const needsReview = meetings.filter(waitingForPeople).slice().sort(byRecent);
+  const rest = meetings.filter((m) => !waitingForPeople(m)).slice().sort(byRecent);
   return { needsReview, rest };
+}
+
+/**
+ * 이 줄의 버튼을 **얼마나 세게** 그릴 것인가.
+ *
+ * ## ⛔ 화면이 `actionable` 을 뒤집고 있었습니다 (결함 252)
+ *
+ * 홈은 「검토 필요」 덩어리의 줄을 전부 `btn--primary` 로 그렸습니다.
+ * 렌더해서 재 보니 이랬습니다.
+ *
+ *     칸반 보기          btn--primary   검토할 업무 후보가 없습니다 …
+ *     업무 후보 3건 검토  btn--primary   승인해야 칸반에 등록됩니다 …
+ *
+ * 화면에서 **제일 센 버튼**이 「여기엔 할 일이 없습니다」를 가리키고 있었고,
+ * 그 줄이 진짜 할 일보다 **위**에 있었습니다. `lib` 은 그 회의에 대해
+ * `actionable: false` 라고 답했는데 화면이 뒤집은 것입니다.
+ *
+ * ⚠️ 「primary 는 검토 필요 줄에만」(v2 F9)은 그대로입니다 — 다만 그 앞에
+ * **할 일이 있을 때만**이 붙습니다.
+ */
+export type StepEmphasis = 'primary' | 'secondary' | 'ghost';
+
+export function emphasisFor(step: NextStep, waiting: boolean): StepEmphasis {
+  if (!step.actionable) return 'ghost';
+  return waiting ? 'primary' : 'secondary';
 }
 
 /**

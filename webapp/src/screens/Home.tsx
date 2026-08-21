@@ -13,6 +13,7 @@ import {
 import { api, ApiError } from '../api/client.ts';
 import type { MeetingSummary } from '../api/types.ts';
 import {
+  emphasisFor,
   hasLane,
   homeProject,
   nextStepFor,
@@ -113,13 +114,13 @@ function MeetingRow({
         {step.href !== null ? (
           /* ⚠️ **primary 는 「검토 필요」 줄에만** (v2 F9). 예전에는
              `actionable` 인 줄이 전부 인디고라 한 화면에 primary 가 셋이었고,
-             셋이 다 강조면 아무것도 강조가 아닙니다. 나머지 줄도 `actionable`
-             여부는 살립니다 — 갈 수 있는 곳은 테두리 버튼, 그냥 보러 가는
-             곳은 ghost. lib 이 준 판단을 버리지 않습니다. */
+             셋이 다 강조면 아무것도 강조가 아닙니다.
+
+             ⛔ 그런데 그 규칙을 화면이 직접 적었더니 `waiting` 이 `actionable`
+             **위로 올라갔습니다** — 후보 0건인 회의의 「칸반 보기」가 화면에서
+             제일 센 버튼이었습니다 (결함 252). 이제 `@lib` 이 정합니다. */
           <Link
-            className={`btn btn--sm ${
-              waiting ? 'btn--primary' : step.actionable ? 'btn--secondary' : 'btn--ghost'
-            }`}
+            className={`btn btn--sm btn--${emphasisFor(step, waiting)}`}
             to={spaHref(step.href, projectId)}
             title={step.reason}
           >

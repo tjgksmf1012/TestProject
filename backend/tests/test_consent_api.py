@@ -437,3 +437,80 @@ def test_real_project_contributions_still_works(client: TestClient, meeting: dic
     response = client.get(f"/api/projects/{meeting['project_id']}/contributions")
     assert response.status_code == 200
     assert len(response.json()["members"]) == 3
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 251 — 끝난 회의에 「녹음을 시작할 수 있습니다」
+# ══════════════════════════════════════════════════════════════
+
+
+def test_the_consent_panel_does_not_tell_a_finished_meeting_to_start(
+    client: TestClient, meeting: dict, engine
+):
+    """⭐ **녹음이 끝난 회의에 시작하라고 하지 않는다.**
+
+    렌더해서 잡았습니다 — 검토를 기다리는 회의(`needs_review`)의 로비에서
+    동의 칸은 「전원 동의했습니다. 녹음을 시작할 수 있습니다」였고, 바로
+    아래 참가자 칸은 「전원 종료했습니다」였습니다. 한 화면이 스스로
+    모순됐습니다.
+    """
+    for user_id in meeting["members"]:
+        consent(client, meeting["meeting_id"], user_id)
+
+    login_as(client, meeting["members"][0])
+    before = client.get(f"/api/meetings/{meeting['meeting_id']}/consent").json()
+    assert before["message"] == "전원 동의했습니다. 녹음을 시작할 수 있습니다"
+
+    with db_session.session_scope() as s:
+        s.get(m.Meeting, meeting["meeting_id"]).status = "needs_review"
+
+    after = client.get(f"/api/meetings/{meeting['meeting_id']}/consent").json()
+    assert after["all_confirmed"] is True
+    assert "녹음을 시작할 수 있습니다" not in after["message"], after["message"]
+    assert "끝났습니다" in after["message"], after["message"]
+
+
+def test_a_processed_meeting_does_not_nag_people_to_consent(
+    client: TestClient, meeting: dict, engine
+):
+    """⭐ 이미 지나간 회의에 대고 **동의를 재촉하지 않는다.**
+
+    처리에 실패한 회의(`failed`)와 검토를 끝낸 회의(`confirmed`)가
+    「2명이 아직 동의하지 않았습니다」였습니다.
+    """
+    consent(client, meeting["meeting_id"], meeting["members"][0])
+    login_as(client, meeting["members"][0])
+
+    for status in ("failed", "confirmed", "processing", "queued"):
+        with db_session.session_scope() as s:
+            s.get(m.Meeting, meeting["meeting_id"]).status = status
+        body = client.get(f"/api/meetings/{meeting['meeting_id']}/consent").json()
+        assert "아직 동의하지 않았습니다" not in body["message"], (status, body["message"])
+        assert "끝났습니다" in body["message"], (status, body["message"])
+
+
+def test_a_meeting_that_has_not_started_still_asks_for_consent(
+    client: TestClient, meeting: dict
+):
+    """⚠️ **반대 방향도 봅니다.** 아직 안 한 회의는 그대로 재촉해야 합니다 —
+    이걸 안 보면 「전부 끝났습니다」로 덮어도 검사가 통과합니다."""
+    login_as(client, meeting["members"][0])
+    body = client.get(f"/api/meetings/{meeting['meeting_id']}/consent").json()
+    assert body["message"] == "3명이 아직 동의하지 않았습니다", body["message"]
+
+
+def test_late_consent_is_still_accepted_on_purpose(client: TestClient, meeting: dict):
+    """⚠️ 늦은 동의 제출은 **일부러 막지 않습니다** (`submit_consent` 참조).
+
+    보관·성문 동의는 회의가 끝난 뒤에 정하는 것이 오히려 자연스럽고, 늦게
+    낸 기록도 기록입니다. 251 에서 고친 것은 **말**이지 이 문이 아닙니다 —
+    이 검사가 그 결정을 붙잡아 둡니다.
+    """
+    with db_session.session_scope() as s:
+        s.get(m.Meeting, meeting["meeting_id"]).status = "confirmed"
+    login_as(client, meeting["members"][0])
+    response = client.post(
+        f"/api/meetings/{meeting['meeting_id']}/consent",
+        json={"consent_type": "recording", "consented": True},
+    )
+    assert response.status_code == 200, response.text

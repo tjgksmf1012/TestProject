@@ -824,16 +824,35 @@ def list_my_projects(session: DbSession, user: CurrentUser) -> list[ProjectSumma
         ).all()
     )
     meeting_rows = session.execute(
-        select(m.Meeting.project_id, m.Meeting.status).where(
+        select(m.Meeting.project_id, m.Meeting.status, m.Meeting.id).where(
             m.Meeting.project_id.in_(project_ids)
         )
     ).all()
 
+    # ⛔ **「검토할 회의」는 상태가 아니라 남은 후보로 셉니다** (결함 252).
+    #
+    #    상태만 세면 후보를 사람이 **전부 검토한** 회의(서버가 `confirmed`
+    #    를 못 넣은 경우 · 회의에서 업무가 안 나온 경우)도 들어갑니다.
+    #    홈 머리말이 「검토할 회의 2」인데 바로 아래 덩어리는 「검토 필요
+    #    1」이라 두 숫자가 한 화면에서 어긋났습니다.
+    meeting_ids = [meeting_id for _, _, meeting_id in meeting_rows]
+    with_pending = {
+        meeting_id
+        for (meeting_id,) in session.execute(
+            select(m.MeetingTaskCandidate.meeting_id)
+            .where(
+                m.MeetingTaskCandidate.meeting_id.in_(meeting_ids),
+                m.MeetingTaskCandidate.review_status == "pending",
+            )
+            .distinct()
+        ).all()
+    }
+
     totals: dict[int, int] = {}
     reviews: dict[int, int] = {}
-    for project_id, meeting_status in meeting_rows:
+    for project_id, meeting_status, meeting_id in meeting_rows:
         totals[project_id] = totals.get(project_id, 0) + 1
-        if meeting_status == "needs_review":
+        if meeting_status == "needs_review" and meeting_id in with_pending:
             reviews[project_id] = reviews.get(project_id, 0) + 1
 
     return [
@@ -1486,7 +1505,7 @@ def submit_consent(
     **철회는 소급하지 않는다.** `consented=false` 는 이후 청크만 막고,
     이미 받은 오디오는 보존기간까지 남는다. 삭제는 별도 절차다 (docs/07 P6).
     """
-    _load_meeting_for(session, meeting_id, user)
+    meeting = _load_meeting_for(session, meeting_id, user)
     try:
         recording_service.submit_consent(
             session,
@@ -1501,14 +1520,14 @@ def submit_consent(
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
+    # ⛔ **말은 회의 국면을 보고 짓는다** (결함 251). 여기서 조건문을
+    #    쓰면 「녹음이 끝난 회의에 녹음을 시작하라」가 다시 나옵니다.
     status_ = recording_service.consent_status(session, meeting_id)
     return ConsentOut(
         meeting_id=meeting_id,
         roster=recording_service.consent_roster(session, meeting_id),
         all_confirmed=status_.all_confirmed,
-        message="전원 동의했습니다. 녹음을 시작할 수 있습니다"
-        if status_.all_confirmed
-        else status_.describe(),
+        message=recording_service.describe_consent(status_, meeting.status),
     )
 
 
@@ -1518,15 +1537,13 @@ def read_consent(meeting_id: int, session: DbSession, user: CurrentUser) -> Cons
 
     동의 행이 있는 사람만 보여주면 기다려야 할 대상이 화면에서 사라진다.
     """
-    _load_meeting_for(session, meeting_id, user)
+    meeting = _load_meeting_for(session, meeting_id, user)
     status_ = recording_service.consent_status(session, meeting_id)
     return ConsentOut(
         meeting_id=meeting_id,
         roster=recording_service.consent_roster(session, meeting_id),
         all_confirmed=status_.all_confirmed,
-        message="전원 동의했습니다. 녹음을 시작할 수 있습니다"
-        if status_.all_confirmed
-        else status_.describe(),
+        message=recording_service.describe_consent(status_, meeting.status),
     )
 
 

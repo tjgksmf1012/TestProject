@@ -1650,3 +1650,38 @@ def test_utterances_are_capped(client: TestClient, seeded):
 def test_utterances_with_no_ids_returns_empty(client: TestClient, seeded):
     """`ids` 없이 부르면 회의 전체 대본이 나오지 않는다."""
     assert client.get(f"/api/meetings/{seeded['meeting_id']}/utterances").json() == []
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 252 — 「검토할 회의」를 상태로만 세던 것
+# ══════════════════════════════════════════════════════════════
+
+
+def test_the_project_summary_counts_meetings_that_still_have_candidates(
+    client: TestClient, seeded, engine
+):
+    """⭐ **「검토할 회의」는 남은 후보로 셉니다.**
+
+    상태만 세면 사람이 후보를 **전부 검토한** 회의도 들어갑니다. 홈
+    머리말이 「검토할 회의 2」인데 바로 아래 덩어리는 「검토 필요 1」이라
+    한 화면에서 두 숫자가 어긋났습니다 (렌더해서 잡았습니다).
+    """
+    set_status(seeded["meeting_id"], "needs_review")
+    summary = client.get("/api/projects").json()[0]
+    assert summary["needs_review"] == 1, summary
+
+    # 후보를 전부 처리하면 — 상태는 그대로 `needs_review` 인 채로 —
+    # 검토할 것이 없어집니다.
+    with db_session.session_scope() as s:
+        for row in s.scalars(
+            select(m.MeetingTaskCandidate).where(
+                m.MeetingTaskCandidate.meeting_id == seeded["meeting_id"]
+            )
+        ).all():
+            row.review_status = "approved"
+
+    after = client.get("/api/projects").json()[0]
+    assert after["needs_review"] == 0, after
+    # ⚠️ 회의 수는 그대로여야 합니다 — 세는 곳을 고치다 분모를 건드리면
+    #    「회의 5개」가 조용히 줄어듭니다.
+    assert after["meeting_count"] == summary["meeting_count"]
