@@ -381,6 +381,11 @@ export default function Review() {
           <div className="pane__head">
             <h2 className="pane__title">회의 내용</h2>
             <span className="pane__count">{rows.length}</span>
+            {/* ⚠️ 왼쪽 시각(`0:01`·`12:00`)은 **회의 시작 후**입니다. 단위가
+                없으면 `12:00` 이 낮 열두 시로 읽힙니다 — 줄마다 단위를
+                붙이면 글자가 스무 배로 늘어나므로 **머리말에서 한 번**
+                말합니다 (UI 패스 v3). */}
+            <span className="pane__hint">시작 후 분:초</span>
           </div>
           <div className="pane__body">
             {meeting.data && (

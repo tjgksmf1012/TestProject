@@ -515,6 +515,14 @@ button.rail__item {
   color: var(--c-ink-muted);
 }
 .pane__count { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--c-ink-faint); }
+/* 판 머리말의 **단위 한 마디** — 줄마다 붙이면 글자가 스무 배로 늘어납니다.
+   오른쪽 끝에 붙여 제목·개수와 시선을 나눕니다 (UI 패스 v3). */
+.pane__hint {
+  margin-left: auto;
+  font-size: var(--fs-11);
+  color: var(--c-ink-faint);
+  white-space: nowrap;
+}
 .pane__body { flex: 1; overflow-y: auto; padding: var(--sp-5) var(--sp-6); min-height: 0; }
 .pane__body--flush { padding: 0; }
 

@@ -49,7 +49,14 @@ export interface NextStep {
 }
 
 export const MEETING_STATUS_LABEL: Record<string, string> = {
-  pending: '녹음 전 · 녹음 중',
+  /* ⛔ 예전에는 `'녹음 전 · 녹음 중'` 이었습니다 (UI 패스 v3). 서버의
+     `pending` 이 두 국면을 함께 뜻해서 **둘 다 적은** 것인데, 상태 칸에
+     낱말 둘이 서면 읽는 사람은 **어느 쪽인지 모릅니다.** 옆 칸의 형제들
+     (「처리 중」·「검토 필요」)은 전부 **국면 이름 하나**라 이 줄만 혼자
+     문장처럼 길었습니다.
+     회의가 흐름의 어디에 있는지만 말합니다 — 무엇을 할 수 있는지는 오른쪽
+     행동 버튼이 이미 말합니다. */
+  pending: '녹음 단계',
   queued: '처리 대기',
   processing: '처리 중',
   needs_review: '검토 필요',
