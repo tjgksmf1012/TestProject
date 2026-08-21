@@ -172,6 +172,14 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
                 to={item.href}
                 className="prail__item"
                 aria-label={railAriaLabel(item)}
+                /* ⚠️ **마우스 쓰는 사람에게도 이름을 줍니다** (결함 271).
+                   네모 안은 한 글자뿐이라 낭독기는 `aria-label` 로 전체
+                   이름을 듣는데, 눈으로 보는 사람은 「신」 하나만 봅니다 —
+                   같은 글자로 시작하는 프로젝트가 둘이면 구별이 안 됩니다.
+                   ⚠️ `RailItem.label` 의 주석이 **「툴팁·낭독기에 쓸 전체
+                   이름」**이라고 적혀 있었습니다 — 툴팁 쪽이 배선되지 않은
+                   채였습니다(실패 ①). */
+                title={item.label}
                 aria-current={item.current ? 'true' : undefined}
               >
                 {/* 네모 안은 한 글자뿐이라 낭독기에는 `aria-label` 이

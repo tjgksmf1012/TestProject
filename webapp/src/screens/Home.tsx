@@ -14,6 +14,7 @@ import { api, ApiError } from '../api/client.ts';
 import type { MeetingSummary } from '../api/types.ts';
 import {
   emphasisFor,
+  emptyProjectsMessage,
   hasLane,
   homeProject,
   nextStepFor,
@@ -141,7 +142,7 @@ function MeetingRow({
 }
 
 /** 프로젝트 만들기/참가 — 상시 노출할 이유가 없어 헤더 뒤 대화 상자로. */
-function StartDialog({ onClose }: { onClose: () => void }) {
+function StartDialog({ focus, onClose }: { focus: 'create' | 'join'; onClose: () => void }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
@@ -206,7 +207,12 @@ function StartDialog({ onClose }: { onClose: () => void }) {
         <label className="field">
           <span className="field__label">새 프로젝트 이름</span>
           <div className="sec__row">
-            <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input
+              className="input"
+              autoFocus={focus === 'create'}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
             <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void create()}>
               만들기
             </button>
@@ -218,6 +224,7 @@ function StartDialog({ onClose }: { onClose: () => void }) {
             <input
               className="input input--num"
               placeholder="ABCD-EFGH"
+              autoFocus={focus === 'join'}
               value={code}
               onChange={(e) => setCode(e.target.value)}
             />
@@ -248,7 +255,9 @@ export default function Home() {
   );
   const meetings = useMeetings(project?.project_id);
   const m = useSettingsMutations(project?.project_id);
-  const [startOpen, setStartOpen] = useState(false);
+  /* 어느 손잡이로 열었는가 (결함 270). 참가하러 온 사람은 **참가 칸에
+     초점이 앉은 채** 시작해야 합니다 — 문이 하나뿐이라 이름만 다릅니다. */
+  const [starting, setStarting] = useState<'create' | 'join' | null>(null);
 
   // 가르는 판단은 `@lib` 에 있습니다 — 화면은 그리기만.
   const sections = useMemo(() => sectionMeetings(meetings.data ?? []), [meetings.data]);
@@ -269,7 +278,7 @@ export default function Home() {
       actions={
         <div className="appbar__actions">
           {/* v2 F9 — 화면당 primary 는 하나. 주된 행동은 `회의 열기` 입니다. */}
-          <button type="button" className="btn btn--ghost" onClick={() => setStartOpen(true)}>
+          <button type="button" className="btn btn--ghost" onClick={() => setStarting('create')}>
             + 새 프로젝트
           </button>
           {project !== undefined && (
@@ -297,10 +306,32 @@ export default function Home() {
       <div className="panes">
         <section className="pane">
           <div className="pane__body">
+            {/* ⛔ **참가하러 온 사람에게 참가할 자리를 안 줬습니다**
+                (결함 270). 초대 코드로 막 들어온 사람이 되어 보니, 가입
+                직후 이 화면에서 누를 수 있는 것이 넷이고 **입력칸은
+                0개**였습니다. 참가 칸은 「+ 새 프로젝트」 **안**에 있는데
+                그 단추 이름은 만드는 쪽만 말합니다.
+                문구는 `@lib` 한 벌을 쓰고(예전에는 여기 따로 적혀
+                있었습니다 — 실패 ②), 참가라는 **이름의 손잡이**를 답니다. */}
             {projectsQuery.isSuccess && project === undefined && (
               <div className="empty">
-                아직 프로젝트가 없습니다. 오른쪽 위 “+ 새 프로젝트”로 만들거나 초대
-                코드로 참가하세요.
+                <p style={{ margin: 0 }}>{emptyProjectsMessage()}</p>
+                <div className="sec__row" style={{ justifyContent: 'center', marginTop: 'var(--sp-5)' }}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => setStarting('create')}
+                  >
+                    새 프로젝트 만들기
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => setStarting('join')}
+                  >
+                    초대 코드로 참가
+                  </button>
+                </div>
               </div>
             )}
             {meetings.isSuccess && (meetings.data?.length ?? 0) === 0 && (
@@ -351,7 +382,7 @@ export default function Home() {
           </div>
         </section>
       </div>
-      {startOpen && <StartDialog onClose={() => setStartOpen(false)} />}
+      {starting !== null && <StartDialog focus={starting} onClose={() => setStarting(null)} />}
     </AppShell>
   );
 }
