@@ -4444,6 +4444,61 @@ describe('⛔ 달력은 **한 벌**이다 (결함 246)', () => {
   });
 });
 
+describe('⛔ 서버가 준 순간을 **글자로 잘라** 날짜를 만들지 않는다 (결함 295)', () => {
+  /* 결함 246 은 `new Date(iso).getMonth()` 를 막았습니다. 그런데 달력을
+     갈라놓는 **세 번째 길**이 남아 있었습니다 — `instant.slice(0, 10)`.
+     그건 UTC 달력일이고, `time/calendar.ts` 는 진작 「쓰지 마세요」라고
+     적어 두었는데 `reports/view.ts` 만 그걸 하고 있었습니다.
+
+     드러난 모양: 같은 보고서 한 줄이 **두 주**를 말했습니다.
+
+         주간 보고서   2026-08-16 ~ 2026-08-22   ← 서버가 지은 제목(팀 달력)
+                      2026-08-15 ~ 2026-08-21   ← 목록 칸(UTC 로 자름)
+
+     ⚠️ 있던 검사들이 못 본 이유가 중요합니다 — 씨앗이 전부 `T00:00:00Z`
+     라 서울에서도 **같은 날**이었습니다. 두 달력이 갈라지지 않는 데이터로
+     재고 있었던 것입니다. */
+  it('⭐ `_at`·`_start`·`_end` 를 `slice(0, 10)` 으로 자르지 않는다', () => {
+    const roots = [
+      { label: 'webapp', base: join(ROOT, '..', 'webapp', 'src') },
+      { label: 'demo', base: DEMO },
+      { label: 'lib', base: LIB },
+    ];
+    const files: { label: string; rel: string; full: string }[] = [];
+    const walk = (label: string, base: string, dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(label, base, full);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.includes('.test.')) {
+          files.push({ label, rel: full.slice(base.length + 1), full });
+        }
+      }
+    };
+    for (const { label, base } of roots) walk(label, base, base);
+
+    const offenders: string[] = [];
+    for (const { label, rel, full } of files) {
+      if (rel.replace(/\\/g, '/') === 'time/calendar.ts') continue;
+      const code = codeOf(readFileSync(full, 'utf8'));
+      for (const m of code.matchAll(/([A-Za-z_$][\w$]*(?:_at|_start|_end)|\.at)\s*\.\s*slice\(\s*0\s*,\s*10\s*\)/g)) {
+        offenders.push(`${label}/${rel}: ${m[0]}`);
+      }
+    }
+    ok(files.length > 0, '화면 파일을 하나도 못 찾았습니다 — 가드가 헛돕니다');
+    /* 뿌리마다 한 파일이라도 걸렸는지 따로 잽니다 (결함 286). */
+    for (const { label } of roots) {
+      ok(
+        files.some((f) => f.label === label),
+        `${label} 을 한 파일도 못 걷었습니다 — 가드가 그 구역에 눈을 감습니다`,
+      );
+    }
+    ok(
+      offenders.length === 0,
+      `서버가 준 순간을 UTC 로 자르고 있습니다 — \`teamDateOf\` 를 쓰세요\n    ${offenders.join('\n    ')}`,
+    );
+  });
+});
+
 describe('⛔ 기여도 리본은 **순위를 안 그린다** (결함 247)', () => {
   /* 이 저장소의 제일 무거운 불변식(①: 순위·리더보드 금지)이 걸린 자리인데
      **가드가 한 번도 안 울렸습니다.** 조각을 만드는 코드가 `@lib` 이 아니라

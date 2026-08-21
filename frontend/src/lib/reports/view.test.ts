@@ -229,6 +229,75 @@ describe('⭐ 목록에서 같은 말이 두 번 나오지 않는다', () => {
   it('머리말이 없으면 제목을 그대로 둔다 — 지우지 않는다', () => {
     strictEqual(subjectOf(row({ title: '옛 형식 제목' })), '옛 형식 제목');
   });
+
+  // ⚠️ 위의 검사들은 전부 `T00:00:00Z` 입니다 — 서울에서는 **같은 날 09시**라
+  //    UTC 로 잘라도 팀 달력으로 잘라도 답이 같습니다. 그래서 결함 295 를
+  //    한 번도 못 봤습니다. 여기서는 **자정을 넘는** 시각을 씁니다.
+  const CROSSES = {
+    // 2026-08-15T17:25Z = 팀 달력 2026-08-16 02:25
+    period_start: '2026-08-15T17:25:00Z',
+    // 2026-08-21T17:25Z = 팀 달력 2026-08-22 02:25
+    period_end: '2026-08-21T17:25:00Z',
+  };
+
+  it('⭐ 서버가 지은 제목과 옆 칸이 **같은 글자**를 낸다 (결함 295)', () => {
+    // 서버(`reports/period.py`)가 팀 달력으로 짓는 바로 그 제목입니다.
+    const weekly = row({
+      report_type: 'weekly',
+      title: '주간 보고서 — 2026-08-16 ~ 2026-08-22',
+      ...CROSSES,
+    });
+    strictEqual(describeWhen(weekly), '2026-08-16 ~ 2026-08-22');
+    // 같은 말이 두 번 나오지 않습니다 — 갈라지면 이것부터 조용히 깨집니다.
+    strictEqual(subjectOf(weekly), '');
+  });
+});
+
+describe('목록의 때도 팀 달력이다 (결함 295)', () => {
+  it('⭐ 기간을 UTC 로 자르지 않는다', () => {
+    strictEqual(
+      describeWhen({
+        id: 1,
+        report_type: 'weekly',
+        title: '',
+        meeting_id: null,
+        period_start: '2026-08-15T17:25:00Z',
+        period_end: '2026-08-21T17:25:00Z',
+        generated_at: '2026-08-21T17:25:00Z',
+      }),
+      '2026-08-16 ~ 2026-08-22',
+    );
+  });
+
+  it('⭐ 만든 날도 팀 달력이다', () => {
+    strictEqual(
+      describeWhen({
+        id: 1,
+        report_type: 'final',
+        title: '',
+        meeting_id: null,
+        period_start: null,
+        period_end: null,
+        generated_at: '2026-08-21T17:25:00Z',
+      }),
+      '2026-08-22 만듦',
+    );
+  });
+
+  it('⚠️ 못 읽은 시각을 그럴듯한 날짜로 지어내지 않는다', () => {
+    strictEqual(
+      describeWhen({
+        id: 1,
+        report_type: 'final',
+        title: '',
+        meeting_id: null,
+        period_start: null,
+        period_end: null,
+        generated_at: '언제였더라',
+      }),
+      '언제 만든 것인지 모릅니다',
+    );
+  });
 });
 
 describe('⭐ 글자로 옮길 때 문장을 잃지 않는다', () => {

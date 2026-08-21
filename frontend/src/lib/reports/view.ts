@@ -21,6 +21,8 @@
  * 씁니다 — 그리고 `guards` 가 "화면이 정렬하지 않는가" 를 봅니다.
  */
 
+import { teamDateOf } from '../time/calendar.ts';
+
 /** 서버가 준 블록. 구조는 `backend/teamflow/reports/__init__.py` 머리말. */
 export type Block =
   | { kind: 'heading'; text: string }
@@ -160,12 +162,33 @@ export function subjectOf(row: ReportSummary): string {
   return rest.trim() === describeWhen(row).trim() ? '' : rest.trim();
 }
 
-/** 목록 한 줄에 붙는 때. `2026-08-03 ~ 2026-08-09` 또는 생성 시각. */
+/**
+ * 목록 한 줄에 붙는 때. `2026-08-03 ~ 2026-08-09` 또는 생성 시각.
+ *
+ * ⛔ **`instant.slice(0, 10)` 로 자르지 않습니다 — 그건 UTC 달력일입니다**
+ * (`time/calendar.ts` 가 그렇게 적어 두었는데 여기만 어기고 있었습니다).
+ *
+ * 서버는 보고서 **제목**을 팀 달력으로 짓습니다(`reports/period.py`,
+ * 결함 290 에서 고쳤습니다). 그런데 이 줄만 UTC 로 잘라서, 같은 보고서
+ * 한 줄이 두 주를 말했습니다 (결함 295):
+ *
+ *     주간 보고서   2026-08-16 ~ 2026-08-22   ← 제목에서 남은 것
+ *                  2026-08-15 ~ 2026-08-21   ← 여기
+ *
+ * ⚠️ 게다가 아래 `subjectOf` 는 **이 값과 제목이 같으면 비우는** 것으로
+ * 중복을 막고 있었습니다. 달력이 갈라지면서 그 비교가 조용히 안 맞게
+ * 됐고, 그래서 날짜가 두 번 나온 것입니다 — 한 벌이 갈라지면 그것에
+ * 기대던 것까지 같이 무너집니다.
+ */
 export function describeWhen(row: ReportSummary): string {
   if (row.period_start !== null && row.period_end !== null) {
-    return `${row.period_start.slice(0, 10)} ~ ${row.period_end.slice(0, 10)}`;
+    const from = teamDateOf(row.period_start);
+    const to = teamDateOf(row.period_end);
+    if (from !== null && to !== null) return `${from} ~ ${to}`;
   }
-  return `${row.generated_at.slice(0, 10)} 만듦`;
+  const made = teamDateOf(row.generated_at);
+  // ⚠️ 못 읽은 시각을 그럴듯한 날짜로 지어내지 않습니다.
+  return made === null ? '언제 만든 것인지 모릅니다' : `${made} 만듦`;
 }
 
 // ══════════════════════════════════════════════════════════════
