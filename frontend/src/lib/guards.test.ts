@@ -6454,3 +6454,61 @@ describe('⛔ 탭바 높이가 프로젝트 수를 따라가지 않는다 (결�
     ok(/flex-direction:\s*column/.test(base), '넓은 폭에서도 칩이 가로로 눕습니다');
   });
 });
+
+describe('⛔ 못 물어본 것을 「로그아웃」이라고 하지 않는다 (결함 282)', () => {
+  /* 연결을 끊고 `/app/` 을 다시 열어 재현했습니다. 세션 쿠키는 멀쩡한데
+     화면이 **로그인 화면**으로 갔습니다 — 거기서 아이디와 비밀번호를
+     쳐도 같은 네트워크라 또 실패합니다. 사람은 「로그아웃됐나」 또는
+     「앱이 고장났나」로 읽고, 정작 할 일(연결을 되살리는 것)은 아무도
+     안 알려 줍니다.
+
+     원인은 한 줄입니다 —
+
+         if (me === null || me === undefined) return <Navigate to="/login" />;
+
+     그 둘은 **다른 사실**이고 이 앱은 이미 가르고 있습니다:
+     `null` 은 서버가 401 로 **답한** 것, `undefined` 는 **못 물어본**
+     것입니다. 불변식 셋째(측정 불가 ≠ 0점)가 인증에도 그대로입니다. */
+  const main = (): string =>
+    codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'main.tsx'), 'utf8'));
+
+  it('⭐ 문지기가 **네 갈래**를 가른다 — 판단은 `@lib`', () => {
+    const code = main();
+    ok(/authGate\(/.test(code), '문 앞의 판단을 아무 데서도 안 묻습니다');
+    ok(/'unreachable'/.test(code), '못 닿은 갈래가 없습니다');
+    /* ⛔ 두 값을 다시 묶으면 결함이 그대로 돌아옵니다. */
+    ok(
+      !/me === null \|\| me === undefined/.test(code),
+      '못 물어본 것과 로그아웃을 다시 한 줄로 묶었습니다',
+    );
+  });
+
+  it('⭐ 못 닿았을 때 **할 수 있는 일**을 준다 — 말만 하고 끝내지 않는다', () => {
+    const code = main();
+    const box = /function Unreachable\(([\s\S]*?)\n}/.exec(code)?.[1] ?? '';
+    ok(box !== '', '못 닿았을 때 보여 줄 화면이 없습니다');
+    /* ⚠️ 처음에는 `refetch|onRetry` 라는 **낱말**을 찾았습니다. 배선을
+       `onRetry={() => {}}` 로 심었더니 낱말은 그대로라 통과했습니다 —
+       단추는 있는데 눌러도 아무 일이 없는 상태입니다. 넘겨주는 값이
+       **실제로 다시 묻는가**를 봅니다. */
+    const passed = /<Unreachable[^>]*onRetry=\{([^}]*(?:\{[^}]*\})?[^}]*)\}/.exec(code)?.[1] ?? '';
+    ok(passed !== '', '못 닿은 화면에 다시 시도를 안 넘깁니다');
+    ok(
+      /refetch\(/.test(passed),
+      `다시 시도가 아무것도 안 합니다: ${passed.trim()}`,
+    );
+    /* ⛔ 로그인 화면을 보여 주면 안 됩니다 — 거기서 비밀번호를 쳐도
+       같은 네트워크라 또 실패합니다 (결함 227 과 짝: 그때는 말만 하고
+       갈 자리를 안 준 것이고, 여기는 **엉뚱한 자리**로 보낸 것입니다).
+
+       ⚠️ 처음에는 `Navigate to="/login"` 과 `unreachable` 이 **가까이
+       있는가**를 봤습니다. 옳게 고친 코드도 그 둘이 나란한 줄이라
+       (`out` 갈래 바로 아래가 `unreachable` 갈래) 그대로 걸렸습니다.
+       거리가 아니라 **그 갈래가 무엇을 돌려주는가**를 봅니다. */
+    const branch = /gate === 'unreachable'\)\s*return([^;]*);/.exec(code)?.[1] ?? '';
+    ok(branch !== '', '못 닿은 갈래를 못 찾았습니다 — 가드가 낡았습니다');
+    ok(!/login/.test(branch), `못 닿았는데 로그인 화면으로 보냅니다: ${branch.trim()}`);
+    // 문구도 한 벌입니다.
+    ok(/describeLoadFailure\(/.test(code), '문구를 화면이 따로 짓습니다');
+  });
+});

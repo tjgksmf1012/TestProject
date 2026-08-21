@@ -9,7 +9,7 @@ import {
 import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-router-dom';
 import { useMe } from './api/hooks.ts';
 import { ApiError } from './api/client.ts';
-import { sessionIsOver } from '@lib/ui/load.ts';
+import { authGate, describeLoadFailure, sessionIsOver } from '@lib/ui/load.ts';
 import Login from './screens/Login.tsx';
 import Home from './screens/Home.tsx';
 import Settings from './screens/Settings.tsx';
@@ -91,10 +91,40 @@ const queryClient = new QueryClient({
 
 // 로그인 전이면 /login 으로. 판별이 끝나기 전에는 빈 셸만 그립니다 —
 // 화면이 먼저 떴다가 튕기면 "쫓겨났다"로 읽힙니다.
+/**
+ * 못 닿았을 때 **보여 줄 화면.**
+ *
+ * ⚠️ 로그인 화면을 보여 주면 안 됩니다 (결함 282) — 세션은 멀쩡하고
+ *    네트워크가 없는 것이라, 거기서 비밀번호를 쳐도 똑같이 실패합니다.
+ *    할 수 있는 일(다시 시도)을 주고, 무엇이 일어났는지 말합니다.
+ *    문구도 판단도 `@lib` 한 벌입니다.
+ */
+function Unreachable({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="crash">
+      <div className="crash__box">
+        <h1 className="crash__title">연결하지 못했습니다</h1>
+        <p className="crash__body">{describeLoadFailure('화면', null)}</p>
+        <div className="crash__actions">
+          <button type="button" className="btn btn--primary" onClick={onRetry}>
+            다시 시도
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RequireAuth() {
-  const { data: me, isPending } = useMe();
-  if (isPending) return null;
-  if (me === null || me === undefined) return <Navigate to="/login" replace />;
+  const { data: me, isPending, isError, refetch } = useMe();
+  /* ⛔ **`null` 과 `undefined` 를 같이 묶으면 안 됩니다** (결함 282).
+     앞은 서버가 401 로 답한 것(정말 로그인 전)이고, 뒤는 **못 물어본**
+     것입니다. 묶었더니 연결이 끊긴 사람이 로그인 화면으로 밀려났습니다 —
+     세션 쿠키는 멀쩡한 채로. 판단은 `@lib`. */
+  const gate = authGate(isPending, me, isError);
+  if (gate === 'checking') return null;
+  if (gate === 'out') return <Navigate to="/login" replace />;
+  if (gate === 'unreachable') return <Unreachable onRetry={() => void refetch()} />;
   return <Outlet />;
 }
 

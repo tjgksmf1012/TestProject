@@ -111,3 +111,49 @@ export function describeActionFailure(what: string, status: number | null): stri
 export function sessionIsOver(status: number | null): boolean {
   return status === 401;
 }
+
+/**
+ * 문 앞에서 내리는 판단 — **들여보낼까, 로그인으로 보낼까, 못 물어봤다고 할까.**
+ *
+ * ## ⛔ 못 물어본 것을 「로그아웃」이라고 단언했습니다 (결함 282)
+ *
+ * `RequireAuth` 가 이랬습니다.
+ *
+ *     if (me === null || me === undefined) return <Navigate to="/login" />;
+ *
+ * 그런데 그 둘은 **다른 사실**이고, 이 앱은 이미 그 둘을 가르고 있습니다.
+ *
+ *     null       서버가 401 로 답했다 — **정말 로그인 전**
+ *     undefined  물어봤는데 **답을 못 받았다** (끊김·500)
+ *
+ * 지하철에서 재 봤습니다(연결을 끊고 `/app/` 을 다시 열기) — 세션 쿠키는
+ * 멀쩡한데 화면이 **로그인 화면**으로 갑니다. 거기서 아이디와 비밀번호를
+ * 치면 그것도 실패합니다(같은 네트워크). 사람은 「로그아웃됐나 보다」
+ * 또는 「앱이 고장났다」로 읽고, 정작 할 일(연결을 되살리는 것)은 아무도
+ * 안 알려 줍니다.
+ *
+ * 이 저장소의 불변식 셋째(**측정 불가 ≠ 0점**)가 인증에도 그대로
+ * 적용됩니다 — **못 잰 것은 「없음」이 아닙니다.**
+ *
+ * ⚠️ `'checking'` 과 `'unreachable'` 을 가르는 것은 **실패했는가**입니다.
+ * 아직 도는 중인 것을 「못 닿았다」고 하면, 느린 회선에서 멀쩡한 앱이
+ * 오류 화면부터 보여 줍니다.
+ */
+export type AuthGate =
+  /** 아직 묻는 중 */
+  | 'checking'
+  /** 들여보낸다 */
+  | 'in'
+  /** 서버가 401 로 답했다 — 로그인 화면으로 */
+  | 'out'
+  /** 물어봤는데 답을 못 받았다 — **로그아웃이 아니다** */
+  | 'unreachable';
+
+export function authGate(pending: boolean, me: unknown, failed: boolean): AuthGate {
+  if (pending) return 'checking';
+  // 서버가 「로그인 전」이라고 **답한** 것. `useMe` 가 401 을 여기로 접습니다.
+  if (me === null) return 'out';
+  if (me !== undefined) return 'in';
+  // 답이 없다. 실패로 끝났으면 못 닿은 것이고, 아니면 아직 도는 중입니다.
+  return failed ? 'unreachable' : 'checking';
+}

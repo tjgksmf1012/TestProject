@@ -1,7 +1,7 @@
 import { strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { describeActionFailure, describeLoadFailure,
+import { authGate, describeActionFailure, describeLoadFailure,
   sessionIsOver,
 } from './load.ts';
 
@@ -120,5 +120,37 @@ describe('⛔ 세션이 끝났는지 (결함 227)', () => {
 
   it('나머지 실패도 세션을 안 끊는다', () => {
     for (const s of [404, 409, 422, 500, 503]) strictEqual(sessionIsOver(s), false, String(s));
+  });
+});
+
+describe('authGate — 못 물어본 것과 로그아웃을 가른다 (결함 282)', () => {
+  it('⭐ **못 닿은 것을 「로그아웃」이라고 하지 않는다**', () => {
+    /* 연결을 끊고 `/app/` 을 다시 열어 재현했습니다 — 세션 쿠키는
+       멀쩡한데 화면이 로그인으로 갔습니다. 거기서 비밀번호를 쳐도
+       같은 네트워크라 또 실패합니다. */
+    strictEqual(authGate(false, undefined, true), 'unreachable');
+  });
+
+  it('서버가 401 로 **답한** 것은 정말 로그아웃이다', () => {
+    // `useMe` 가 401 을 `null` 로 접습니다 — 「로그인 전」은 오류가 아닙니다.
+    strictEqual(authGate(false, null, false), 'out');
+  });
+
+  it('사람이 있으면 들여보낸다', () => {
+    strictEqual(authGate(false, { user_id: 1 }, false), 'in');
+  });
+
+  it('⚠️ 아직 도는 중인 것을 「못 닿았다」로 읽지 않는다', () => {
+    // 느린 회선에서 멀쩡한 앱이 오류 화면부터 보여 주면 안 됩니다.
+    strictEqual(authGate(true, undefined, false), 'checking');
+    strictEqual(authGate(true, undefined, true), 'checking');
+    // 실패로 끝나지 **않았는데** 값이 없는 잠깐도 아직 확인 중입니다.
+    strictEqual(authGate(false, undefined, false), 'checking');
+  });
+
+  it('⛔ 못 닿은 것과 로그아웃은 **다른 값**이다 — 한 값으로 묶으면 결함 282 다', () => {
+    const 끊김 = authGate(false, undefined, true);
+    const 로그아웃 = authGate(false, null, false);
+    strictEqual(끊김 === 로그아웃, false);
   });
 });
