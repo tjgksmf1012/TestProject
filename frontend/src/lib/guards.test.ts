@@ -4974,10 +4974,12 @@ describe('⛔ 시킨 일을 **할 자리**가 있다 (결함 270·271)', () => {
       /emptyProjectsMessage\(\)/.test(home),
       '빈 홈 문구를 화면이 따로 적습니다 — `@lib` 한 벌을 쓰세요',
     );
-    ok(
-      /setStarting\('join'\)/.test(home),
-      '참가하러 온 사람에게 참가라는 이름의 손잡이가 없습니다',
-    );
+    /* ⚠️ 처음에는 `setStarting('join')` 이라는 **이름**을 셌습니다. 손잡이
+       배선을 `start('join')` 으로 바꿨더니(초점 되돌리기 때문에 — 결함
+       280) 아무것도 안 없앴는데 이 가드가 깨졌습니다. 이름이 아니라
+       **요구**를 잽니다: 「참가」라고 적힌 단추가 참가 쪽으로 연다. */
+    const joinDoor = /<button[^>]*onClick=\{[^}]*'join'[^}]*\}[\s\S]{0,240}?참가/;
+    ok(joinDoor.test(home), '참가하러 온 사람에게 참가라는 이름의 손잡이가 없습니다');
     // ⚠️ 손잡이만 있고 **초점이 안 가면** 코드 칸을 또 찾아야 합니다.
     ok(/autoFocus=\{focus === 'join'\}/.test(home), '참가로 열었는데 코드 칸에 초점이 안 갑니다');
   });
@@ -6326,6 +6328,68 @@ describe('⛔ 문장을 데이터 폰트 자리에 넣지 않는다 (결함 278)
     ok(
       !/font-family:\s*var\(--font-data\)/.test(note),
       '문장 칸도 데이터 폰트입니다 — 클래스만 둘이고 얼굴은 하나입니다',
+    );
+  });
+});
+
+describe('⛔ 모달은 손으로 짓지 않는다 (결함 280)', () => {
+  /* 키보드만 쓰는 사람이 되어 봤습니다. 홈의 「프로젝트 시작하기」는
+     `<div role="dialog" aria-modal="true">` 를 **손으로** 지은 것이었고,
+
+       · Escape 를 눌러도 **안 닫혔습니다** (듣는 곳이 없었습니다)
+       · 안에서 Tab 을 누르면 **뒤쪽 화면**으로 새어 나갔고, 그 자리는
+         덮개에 가려져 눈에 안 보입니다. 거기서 Enter 를 눌렀더니
+         `/app/meeting/6/lobby` 로 **가 버렸습니다**
+       · 닫은 뒤 초점이 `body` 에 떨어져 Tab 을 처음부터 다시 밟아야 했습니다
+
+     `aria-modal="true"` 는 낭독기에게 하는 **말**이고, 키보드는 그 말을
+     안 듣습니다. `@radix-ui/react-dialog` 는 **이미 의존성에 있었고 아무도
+     안 쓰고 있었습니다** — 대표 실패 ①. */
+  const files = (): string[] =>
+    readdirSync(join(ROOT, '..', 'webapp', 'src', 'screens'))
+      .filter((f) => f.endsWith('.tsx'))
+      .map((f) => join(ROOT, '..', 'webapp', 'src', 'screens', f));
+
+  it('⭐ `role="dialog"` 를 손으로 적은 화면이 없다', () => {
+    const guilty = files().filter((f) => /role="dialog"/.test(codeOf(readFileSync(f, 'utf8'))));
+    strictEqual(
+      guilty.map((f) => f.split('/').pop()).join(', '),
+      '',
+      '모달을 손으로 짓고 있습니다 — Radix 가 초점 가두기·Escape·되돌리기를 이미 합니다',
+    );
+  });
+
+  it('⭐ 만든 모달이 **Radix 로** 서 있다', () => {
+    const home = readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Home.tsx'), 'utf8');
+    ok(/@radix-ui\/react-dialog/.test(home), '모달을 안 씁니다 — 가드가 낡았습니다');
+    const code = codeOf(home);
+    ok(/Dialog\.Overlay/.test(code) && /Dialog\.Content/.test(code), '덮개나 상자가 없습니다');
+    /* ⚠️ 닫혔다고 컴포넌트를 **떼면** Radix 가 초점을 되돌리다 말고,
+       사람은 `body` 에 떨어집니다. 여는 것은 `open` 하나로만 말합니다. */
+    ok(
+      !/\{starting !== null && <StartDialog/.test(code),
+      '닫힐 때 컴포넌트를 통째로 떼고 있습니다 — 초점이 돌아갈 곳을 잃습니다',
+    );
+    ok(/onCloseAutoFocus/.test(code), '닫은 뒤 초점을 어디로 보낼지 안 정합니다');
+  });
+
+  it('⭐ 덮개와 상자가 **형제**라 상자가 스스로 서야 한다', () => {
+    /* Radix 는 `Overlay` 와 `Content` 를 포털에 **나란히** 붙입니다.
+       예전 CSS 는 덮개가 상자를 감싸서 가운데로 보냈는데, 그대로 두니
+       상자가 `(0, 678)` 에 앉고 덮개가 그 **위를** 덮어 「만들기」가
+       마우스로 안 눌렸습니다 — 렌더해서 눌러 보고 잡았습니다. */
+    const css = readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
+    const rule = (sel: string): string =>
+      new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
+    const back = rule('.dialog-backdrop');
+    const box = rule('.dialog');
+    ok(back !== '' && box !== '', '대화상자 규칙을 못 찾았습니다 — 가드가 낡았습니다');
+    const z = (body: string): number => Number(/z-index:\s*(\d+)/.exec(body)?.[1] ?? 0);
+    ok(z(box) > z(back), `상자(${z(box)})가 덮개(${z(back)}) 아래라 눌리지 않습니다`);
+    ok(/position:\s*fixed/.test(box), '상자가 스스로 서지 않습니다 — 덮개가 감싸 주지 않습니다');
+    ok(
+      !/place-items:\s*center/.test(back),
+      '덮개가 아직 감싸서 가운데로 보내려 합니다 — 이제 형제입니다',
     );
   });
 });

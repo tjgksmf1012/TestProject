@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
+import { useMemo, useRef, useState, type MouseEvent } from 'react';
 import { shortTeamDate } from '@lib/time/calendar.ts';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -142,7 +143,20 @@ function MeetingRow({
 }
 
 /** 프로젝트 만들기/참가 — 상시 노출할 이유가 없어 헤더 뒤 대화 상자로. */
-function StartDialog({ focus, onClose }: { focus: 'create' | 'join'; onClose: () => void }) {
+function StartDialog({
+  focus,
+  onClose,
+  onClosed,
+}: {
+  /** `null` 이면 닫힌 상태. ⚠️ **닫혔다고 이 컴포넌트를 떼지 마십시오** —
+      Radix 가 닫을 때 「열기 전에 초점이 있던 곳」으로 되돌리는데, 같은
+      순간에 통째로 떼면 그 일이 못 끝나고 초점이 `body` 로 떨어집니다
+      (결함 280). 여는 것과 닫는 것은 `open` 하나로만 말합니다. */
+  focus: 'create' | 'join' | null;
+  onClose: () => void;
+  /** 닫히고 나서 초점을 어디로 돌려놓을 것인가. */
+  onClosed: () => void;
+}) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
@@ -200,10 +214,40 @@ function StartDialog({ focus, onClose }: { focus: 'create' | 'join'; onClose: ()
     }
   };
 
+  /* ⛔ **손으로 만든 `role="dialog"` 였습니다** (결함 280).
+     `aria-modal="true"` 라고 적어 두면 낭독기는 뒤쪽을 안 읽지만,
+     **키보드는 그 말을 안 듣습니다.** 재현했습니다 —
+
+       · Escape 를 눌러도 **안 닫혔습니다** (듣는 곳이 없었습니다)
+       · 안에서 Tab 을 누르면 **뒤쪽 화면**으로 새어 나갔고, 그 자리는
+         `dialog-backdrop` 에 **가려져 눈에 안 보입니다.** 거기서 Enter 를
+         눌렀더니 `/app/meeting/6/lobby` 로 **가 버렸습니다** — 사람은
+         왜 회의 로비에 와 있는지 모릅니다
+
+     `@radix-ui/react-dialog` 는 **이미 의존성에 있었고 아무도 안 썼습니다**
+     (대표 실패 ①). 초점 가두기·Escape·닫은 뒤 초점 되돌리기가 전부 거기
+     들어 있습니다. 손으로 다시 짜지 않습니다. */
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="프로젝트 시작하기">
-      <div className="dialog">
-        <h2 className="sec__title">프로젝트 시작하기</h2>
+    <Dialog.Root
+      open={focus !== null}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-backdrop" />
+        <Dialog.Content
+          className="dialog"
+          aria-label="프로젝트 시작하기"
+          /* ⚠️ Radix 의 기본 되돌리기는 이 화면에서 `body` 로 떨어졌습니다 —
+             손잡이가 `Dialog.Trigger` 가 아니라 따로 선 단추 셋이라서.
+             어디로 돌아갈지 **부르는 쪽이** 압니다. */
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            onClosed();
+          }}
+        >
+        <Dialog.Title className="sec__title">프로젝트 시작하기</Dialog.Title>
         <label className="field">
           <span className="field__label">새 프로젝트 이름</span>
           <div className="sec__row">
@@ -234,11 +278,14 @@ function StartDialog({ focus, onClose }: { focus: 'create' | 'join'; onClose: ()
           </div>
         </label>
         <Problem>{error}</Problem>
-        <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>
-          닫기
-        </button>
-      </div>
-    </div>
+        <Dialog.Close asChild>
+          <button type="button" className="btn btn--ghost btn--sm">
+            닫기
+          </button>
+        </Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -258,6 +305,15 @@ export default function Home() {
   /* 어느 손잡이로 열었는가 (결함 270). 참가하러 온 사람은 **참가 칸에
      초점이 앉은 채** 시작해야 합니다 — 문이 하나뿐이라 이름만 다릅니다. */
   const [starting, setStarting] = useState<'create' | 'join' | null>(null);
+  /* 닫은 뒤 초점을 **열었던 단추로** 돌려놓습니다 (결함 280). 안 그러면
+     Escape 를 누른 사람이 `body` 에 떨어져, Tab 을 처음부터 다시 밟아야
+     합니다. 손잡이가 셋이라 어느 것으로 열었는지 기억해 둡니다. */
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const start =
+    (which: 'create' | 'join') => (event: MouseEvent<HTMLButtonElement>) => {
+      openerRef.current = event.currentTarget;
+      setStarting(which);
+    };
 
   // 가르는 판단은 `@lib` 에 있습니다 — 화면은 그리기만.
   const sections = useMemo(() => sectionMeetings(meetings.data ?? []), [meetings.data]);
@@ -278,7 +334,7 @@ export default function Home() {
       actions={
         <div className="appbar__actions">
           {/* v2 F9 — 화면당 primary 는 하나. 주된 행동은 `회의 열기` 입니다. */}
-          <button type="button" className="btn btn--ghost" onClick={() => setStarting('create')}>
+          <button type="button" className="btn btn--ghost" onClick={start('create')}>
             + 새 프로젝트
           </button>
           {project !== undefined && (
@@ -320,14 +376,14 @@ export default function Home() {
                   <button
                     type="button"
                     className="btn btn--primary"
-                    onClick={() => setStarting('create')}
+                    onClick={start('create')}
                   >
                     새 프로젝트 만들기
                   </button>
                   <button
                     type="button"
                     className="btn btn--secondary"
-                    onClick={() => setStarting('join')}
+                    onClick={start('join')}
                   >
                     초대 코드로 참가
                   </button>
@@ -382,7 +438,11 @@ export default function Home() {
           </div>
         </section>
       </div>
-      {starting !== null && <StartDialog focus={starting} onClose={() => setStarting(null)} />}
+      <StartDialog
+        focus={starting}
+        onClose={() => setStarting(null)}
+        onClosed={() => openerRef.current?.focus()}
+      />
     </AppShell>
   );
 }
