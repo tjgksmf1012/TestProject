@@ -13,7 +13,14 @@ import type { Member } from '../api/types.ts';
 import { ROLE_OPTIONS, problemWith, roleSummary, sumOf, toPayload } from '@lib/contribution/roles.ts';
 import { describeRoles } from '@lib/contribution/roles.ts';
 import { describeHealth, describeHealthFailure } from '@lib/github/health.ts';
-import { githubLoginStatus, repoProblem, titleProblem, normalizeRepo } from '@lib/project/setup.ts';
+import {
+  disconnectConfirm,
+  githubLoginStatus,
+  isDisconnect,
+  normalizeRepo,
+  repoProblem,
+  titleProblem,
+} from '@lib/project/setup.ts';
 import {
   LEAVE_CONFIRM,
   assignableRoles,
@@ -368,9 +375,13 @@ function MembersSection({
               </label>
             )}
             {mayRemove && (
+              /* ⛔ **화면에서 제일 약한 것이 제일 위험한 행동이었습니다**
+                 (결함 257). 재 보니 `--text-muted`(본문 글자와 같은 색)에
+                 테두리도 배경도 없었고, 같은 화면의 「내 녹음 지우기」만
+                 빨강이었습니다. 색은 위험, 무게는 조용으로 갑니다. */
               <button
                 type="button"
-                className="btn btn--ghost btn--sm"
+                className="btn btn--danger-quiet btn--sm"
                 disabled={removeMember.isPending}
                 onClick={() => {
                   if (window.confirm(`${member.name} 님을 이 프로젝트에서 내보냅니다. 그 사람이 한 일(업무·발화·기여 기록)은 그대로 남습니다.`)) {
@@ -435,6 +446,8 @@ function RepoSection({
   const [value, setValue] = useState<string | null>(null);
   const input = value ?? repo ?? '';
   const problem = input.trim() === '' ? null : repoProblem(input);
+  // 낱말이 **하는 일과 같아야** 합니다 (결함 256).
+  const disconnecting = isDisconnect(repo, input);
   // 아직 연결할 수 없는 경우 — 안 고쳤거나(`value === null`), 주소가 틀렸거나.
   /* ⚠️ 관리자만 되는 일입니다 (결함 225) — 구성원에게도 눌렸고, 서버는
      403 을 주는데 화면은 아무 말도 안 했습니다. */
@@ -478,6 +491,10 @@ function RepoSection({
             초점을 못 받아 낭독기에 사유를 못 전합니다(GOV.UK). 사유(`problem`)
             는 바로 아래 적혀 있는데, 그 자리로 닿는 길이 없었습니다.
             누르면 저장소 칸으로 데려다 줍니다. */}
+        {/* ⛔ **칸을 비우고 누르면 연결이 끊겼습니다** — 확인도, 알림도,
+            되돌릴 실마리도 없이 (결함 256). 게다가 버튼에는 「연결」이라고
+            적혀 있었습니다. 낱말이 하는 일과 달랐던 것입니다.
+            판단(`isDisconnect`·`disconnectConfirm`)은 `@lib`. */}
         <button
           type="button"
           className={`btn btn--primary${connectBlocked !== null ? ' btn--unmet' : ''}`}
@@ -489,10 +506,11 @@ function RepoSection({
               document.getElementById('repo-input')?.focus();
               return;
             }
+            if (disconnecting && !window.confirm(disconnectConfirm(repo ?? ''))) return;
             save.mutate({ github_repo: normalizeRepo(input) }, { onSuccess: () => setValue(null) });
           }}
         >
-          연결
+          {disconnecting ? '연결 해제' : '연결'}
         </button>
       </div>
       {/* 칸 옆 오류는 **그 칸과** 이어져 있어야 합니다 — 입력칸이

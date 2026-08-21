@@ -464,6 +464,18 @@ button.rail__item {
   }
   .rail__brand, .rail__spacer { display: none; }
   .rail__item { border-left: 0; border-top: 2px solid transparent; min-width: 64px; }
+  /* ⛔ **로그아웃의 클릭 상자가 탭바의 절반을 넘었습니다** (결함 258).
+     세로 레일에서는 `button.rail__item { width: 100% }` 가 72px 열을
+     채우는 옳은 규칙인데, 가로 탭바에서는 그 100% 가 **탭바 전체**를
+     기준으로 잡힙니다. 재 봤습니다 —
+
+         390px  로그아웃 126px  (다른 항목은 64px)
+         700px  로그아웃 436px  = 탭바의 62%
+
+     탭바 오른쪽 **빈 자리를 눌러도 로그아웃**이 됐고, 창이 넓을수록 그
+     구역이 커졌습니다. 이 앱은 회의를 녹음합니다 — 잘못 눌러 나가면
+     그 구간은 다시 못 잽니다. */
+  button.rail__item { width: auto; }
   .rail__item[aria-current="page"] { border-top-color: var(--c-evidence); }
 
   /* ⚠️ **좁은 폭에서 머리줄이 잘려 나갔습니다** (결함 186). 높이가 못
@@ -625,6 +637,17 @@ button.rail__item {
    레거시가 결함 60 으로 겪은 것과 같은 모양이고, `--c-ink-inverse` 는
    바로 이걸 막으려고 있는 토큰입니다. */
 .btn--danger { background: var(--c-danger); color: var(--c-ink-inverse); }
+/* ⚠️ **위험한데 조용해야 하는 것** (결함 257). 줄마다 서는 「내보내기」는
+   채운 빨강으로 두면 목록에서 제일 큰 소리가 되어 실수로 눌립니다. 반대로
+   `btn--ghost` 로 두면 본문 글자와 **똑같아서** 화면에서 제일 약한 것이
+   제일 위험한 행동이 됩니다 — 재 보니 `--text-muted` 에 테두리도 없었고,
+   같은 화면의 「내 녹음 지우기」만 빨강이었습니다.
+   그래서 **색은 위험, 무게는 조용**으로 갑니다. */
+.btn--danger-quiet {
+  background: transparent;
+  color: var(--c-danger);
+  border-color: var(--c-danger-line);
+}
 .btn--sm { padding: 0 var(--sp-4); font-size: var(--fs-12); }
 /* ⛔ `opacity: .45` 였습니다 (결함 236). 정말로 못 누르니 WCAG 1.4.3
    예외에는 걸리지만, 이 저장소는 그 예외를 **안 쓰기로** 이미 정했습니다

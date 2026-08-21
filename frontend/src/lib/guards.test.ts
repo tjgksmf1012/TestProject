@@ -4682,6 +4682,75 @@ describe('⛔ 못 받은 목록을 **빈 목록으로 접지 않는다** (결함
   });
 });
 
+describe('⛔ 되돌릴 수 없는 것은 **묻고, 보이고, 좁아야** 한다 (결함 256·257·258)', () => {
+  const settings = (): string =>
+    codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Settings.tsx'), 'utf8'));
+  const css = (): string => readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
+
+  it('⭐ 저장소 **연결 해제**는 묻고 나서 한다 (결함 256)', () => {
+    /* 칸을 비우고 「연결」을 누르면 `PATCH {github_repo: ""}` 가 그냥
+       나갔습니다 — 확인도, 알림도, 되돌릴 실마리도 없이. 게다가 버튼에는
+       「연결」이라고 적혀 있어 **낱말이 하는 일과 달랐습니다.** */
+    const code = settings();
+    ok(/isDisconnect\(/.test(code), '연결 해제를 가려내지 않습니다');
+    ok(/disconnectConfirm\(/.test(code), '연결을 끊기 전에 묻지 않습니다');
+    // 물어본 답이 **막는가** — `window.confirm(...)` 이 `return` 으로 이어지는가.
+    ok(
+      /!window\.confirm\(disconnectConfirm\([^)]*\)\)\s*\)?\s*return/.test(code),
+      '물어만 보고 그대로 보냅니다 — 아니라고 답해도 나갑니다',
+    );
+  });
+
+  it('⭐ 위험한 것이 화면에서 **제일 약하지 않다** (결함 257)', () => {
+    /* 남을 프로젝트에서 내보내는 버튼이 `btn--ghost` 였습니다 — 재 보니
+       글자색이 `--text-muted`(본문과 같은 색)에 테두리도 배경도 없었고,
+       같은 화면의 「내 녹음 지우기」만 빨강이었습니다. */
+    const code = settings();
+    const buttons = [...code.matchAll(/<button[\s\S]*?<\/button>/g)].map((m) => m[0]);
+    const removers = buttons.filter((b) => /removeMember\.mutate\(/.test(b));
+    ok(removers.length > 0, '내보내기 버튼을 못 찾았습니다 — 가드가 헛돕니다');
+    for (const b of removers) {
+      const cls = /className="([^"]*)"/.exec(b)?.[1] ?? '';
+      ok(
+        /danger/.test(cls),
+        `되돌릴 수 없는 일이 조용한 버튼입니다: ${cls || '(클래스 없음)'}`,
+      );
+    }
+  });
+
+  it('⭐ 로그아웃 표적이 **탭바를 먹지 않는다** (결함 258)', () => {
+    /* 세로 레일에서는 `width: 100%` 가 72px 열을 채우는 옳은 규칙인데,
+       가로 탭바에서는 그 100% 가 **탭바 전체**를 기준으로 잡힙니다.
+       700px 에서 로그아웃 상자가 436px(62%)였고, 오른쪽 빈 자리를 눌러도
+       로그아웃이었습니다.
+
+       ⚠️ **미디어 쿼리 안을 봅니다.** 이 저장소는 「CSS 가드가 첫 미디어
+       쿼리만 본 것」에 한 번 당했습니다 — 좁은 폭 규칙을 이름이 아니라
+       **범위**로 찾습니다. */
+    const sheet = css();
+    const stretches = /button\.rail__item\s*\{[^}]*width:\s*100%/.test(sheet);
+    if (!stretches) return; // 아예 안 늘리면 이 결함이 생길 수 없습니다.
+    const narrow = [...sheet.matchAll(/@media\s*\(max-width:[^)]*\)\s*\{/g)].map((m) => {
+      // 중괄호를 세어 이 미디어 쿼리의 끝을 찾습니다.
+      let depth = 1;
+      let i = (m.index ?? 0) + m[0].length;
+      while (i < sheet.length && depth > 0) {
+        if (sheet[i] === '{') depth += 1;
+        else if (sheet[i] === '}') depth -= 1;
+        i += 1;
+      }
+      return sheet.slice((m.index ?? 0), i);
+    });
+    const reset = narrow.some((blockText) =>
+      /button\.rail__item\s*\{[^}]*width:\s*auto/.test(blockText),
+    );
+    ok(
+      reset,
+      '가로 탭바에서 로그아웃이 남은 폭을 다 먹습니다 — 빈 자리를 눌러도 로그아웃됩니다',
+    );
+  });
+});
+
 describe('⛔ 녹음이 **혼자 멈췄을 때**도 끝까지 간다 (결함 240·241)', () => {
   /* 회의 도중 누가 동의를 철회하면 서버는 청크마다 403 을 줍니다
      (`recording_service.store_chunk` 가 청크마다 동의를 다시 봅니다).

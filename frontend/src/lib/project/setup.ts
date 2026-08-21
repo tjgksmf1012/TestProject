@@ -94,6 +94,34 @@ export function repoProblem(raw: string): string | null {
 }
 
 /**
+ * 이 저장이 **연결을 끊는 것인가** (결함 256).
+ *
+ * 저장소 칸을 비우고 「연결」을 누르면 `PATCH {github_repo: ""}` 가 나갑니다.
+ * 재현했습니다 — 확인도, 알림도, 되돌리기도 없이 연결이 끊겼고, 원래 이름은
+ * 화면에서 사라져 **무엇이었는지 볼 방법조차** 없었습니다.
+ *
+ * 가벼운 일이 아닙니다. 서버는 `github_repo` 만 지우는 것이 아니라
+ * `github_connected_at`·`github_verified_at`·`github_installation_id` 를 **전부**
+ * 비웁니다. 즉 다시 연결해도 (a) 설치 확인을 처음부터 다시 받아야 하고,
+ * (b) 「연결한 순간부터」의 기준 시각이 새로 잡혀 **그 사이의 활동은 연결 전**이
+ * 됩니다. GitHub 은 기여도의 세 다리 중 하나입니다.
+ */
+export function isDisconnect(current: string | null | undefined, next: string): boolean {
+  const now = (current ?? '').trim();
+  return now !== '' && normalizeRepo(next) === '';
+}
+
+/** 끊기 전에 물을 말. **무엇이 사라지는지** 적습니다. */
+export function disconnectConfirm(repo: string): string {
+  return (
+    `${repo} 연결을 끊습니다.\n` +
+    '지금까지 들어온 기여 기록은 남지만, 앞으로의 PR·리뷰는 들어오지 않습니다.\n' +
+    '다시 연결하면 설치 확인부터 새로 하고, 끊겨 있던 동안의 활동은 「연결 전」으로 남습니다.\n' +
+    '계속할까요?'
+  );
+}
+
+/**
  * 만들고 나서 무엇을 하라고 할 것인가.
  *
  * ⭐ 프로젝트를 만들면 **혼자입니다.** 그 상태에서 "회의 열기" 만 보여주면
