@@ -37,6 +37,9 @@ import {
   consentForEntry,
   consentStateFrom,
   consentStep,
+  consentStepLabel,
+  permissionStepLabel,
+  stepsDone,
   describeJoinFailure,
   describeResume,
   describeSoloEntry,
@@ -99,6 +102,9 @@ const params = new URLSearchParams(location.search);
 // 무시하고, 로컬 화면에서 로컬 서버일 때만 통과시킨다.
 const apiBase = safeApiBase(params.get('api'), location.origin);
 const meetingId = params.get('meeting');
+
+/** 준비 단계 ①이 어디로 데려가는가. `render` 가 말을 바꿔 다는 자리 (결함 274). */
+const entryStep = consentStep(meetingId);
 
 // `?track=` 은 손으로 트랙 주소를 넣는 옛 경로다. `?meeting=` 이 있으면
 // 아래 `joinMeeting()` 이 로그인한 사람의 트랙을 서버에서 받아 온다.
@@ -243,6 +249,13 @@ function render(): void {
   //    그 목록은 마이크를 얻은 뒤에야 채워집니다 — 거부당하면 빈 채로
   //    남고, 그때 초록 글씨는 **아무것도 안 재고 만점을 준 것**입니다.
   //    무엇을 말해도 되는지는 `@lib` 의 `describeCaptureCheck` 가 정합니다.
+  // 끝난 단계를 **끝난 것으로** 그린다 (결함 274). 판단은 `@lib`.
+  const done = stepsDone(state);
+  $('step-consent').dataset.done = String(done.consent);
+  $('step-permission').dataset.done = String(done.permission);
+  $('consent').textContent = consentStepLabel(entryStep, done.consent);
+  $('permission').textContent = permissionStepLabel(done.permission);
+
   const warnings = client.warnings;
   const note = describeCaptureCheck(client.appliedSettings, warnings);
   $('warnings').innerHTML = warnings.length
@@ -382,7 +395,6 @@ async function joinMeeting(id: string): Promise<void> {
 // ⛔ 예전에는 이 두 줄이 `if (meetingId)` **안에** 있었습니다. 회의 없이
 //    열면 `<a id="consent">` 가 href 없이 남아, 눈에는 단추인데 탭으로
 //    닿지도 눌리지도 않았습니다 (결함 238).
-const entryStep = consentStep(meetingId);
 ($('consent') as HTMLAnchorElement).href = entryStep.href;
 $('consent').textContent = entryStep.label;
 

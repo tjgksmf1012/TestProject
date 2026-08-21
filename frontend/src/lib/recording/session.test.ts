@@ -5,6 +5,9 @@ import { buildTimeline, judgeTrack } from './timeline.ts';
 import {
   blockers,
   canStart,
+  consentStepLabel,
+  permissionStepLabel,
+  stepsDone,
   initialState,
   reduce,
   reduceAll,
@@ -108,6 +111,47 @@ describe('사전 조건', () => {
   it('권한이 거부되면 ready 에서 idle 로 돌아간다', () => {
     const state = reduce(ready(), { type: 'PERMISSION', state: 'denied' });
     assert.equal(state.phase, 'idle');
+  });
+});
+
+describe('끝난 준비 단계 (결함 274)', () => {
+  it('⭐ 동의와 마이크가 끝나면 단계도 끝난 것으로 표시된다', () => {
+    const state = ready();
+    assert.deepEqual(stepsDone(state), { consent: true, permission: true });
+  });
+
+  it('처음에는 둘 다 안 끝났다', () => {
+    assert.deepEqual(stepsDone(initialState()), { consent: false, permission: false });
+  });
+
+  it('⭐ 나만 동의했어도 **내 단계는** 끝났다 — 남은 것은 막는 목록이 말한다', () => {
+    const mine = reduce(ready(), { type: 'CONSENT', state: 'self_granted' });
+    assert.equal(stepsDone(mine).consent, true);
+    assert.ok(blockers(mine).some((r) => r.includes('아직 동의하지 않은 참여자')));
+  });
+
+  it('⭐ solo 는 「해당 없음」이라 끝난 것으로 그린다 — 안 한 일로 보이면 안 된다', () => {
+    const solo = reduce(ready(), { type: 'CONSENT', state: 'solo' });
+    assert.equal(stepsDone(solo).consent, true);
+  });
+
+  it('동의를 거절하면 단계가 다시 열린다', () => {
+    const refused = reduce(ready(), { type: 'CONSENT', state: 'refused' });
+    assert.equal(stepsDone(refused).consent, false);
+  });
+
+  it('끝난 뒤에는 시키지 않고 길만 남긴다', () => {
+    const step = consentStep('7');
+    assert.equal(consentStepLabel(step, false), '동의하러 로비로');
+    assert.equal(consentStepLabel(step, true), '로비 보기');
+    // 회의를 안 고른 세션은 단계 자체가 다른 뜻입니다 — 말을 안 바꿉니다.
+    const none = consentStep(null);
+    assert.equal(consentStepLabel(none, true), none.label);
+  });
+
+  it('마이크 단계는 끝난 뒤에도 **하는 일이 있다** — 감추지 않고 말만 바꾼다', () => {
+    assert.equal(permissionStepLabel(false), '마이크 권한 허용');
+    assert.equal(permissionStepLabel(true), '마이크 다시 고르기');
   });
 });
 

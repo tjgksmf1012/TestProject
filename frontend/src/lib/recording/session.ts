@@ -307,6 +307,50 @@ export function consentStep(meetingId: string | null | undefined): ConsentStep {
 }
 
 /**
+ * 준비 단계 ①②가 **끝났는가.**
+ *
+ * ⚠️ 번호 붙은 단계가 끝나도 안 끝난 것처럼 서 있었습니다 (결함 274).
+ * 셋이 동의를 마치고 마이크도 허용한 뒤에도 ①은 「동의하러 로비로」,
+ * ②는 「마이크 권한 허용」이라는 **시키는 말** 그대로였습니다. 왼쪽의
+ * 막는 목록은 「준비됐습니다」인데 오른쪽은 아직 둘을 시키고 있어,
+ * 같은 사실을 **두 곳이 다르게** 말했습니다.
+ *
+ * ⛔ 끝난 단계도 **누를 수는 있어야** 합니다 — 명부를 다시 보거나
+ * 마이크를 바꿔 꽂을 수 있어야 하니까. 끝났다고 막지 않고, **시키지만
+ * 않습니다.**
+ */
+export function stepsDone(state: SessionState): { consent: boolean; permission: boolean } {
+  return {
+    // `self_granted` 도 **내 단계는** 끝난 것입니다 — 남은 것은 남의 몫이고,
+    // 그건 막는 목록이 따로 말합니다. `solo` 는 물을 상대가 없는 모드라
+    // 해당 없음이고, 해당 없는 것을 「안 했다」로 그리지 않습니다.
+    consent:
+      state.consent === 'all_confirmed' ||
+      state.consent === 'self_granted' ||
+      state.consent === 'solo',
+    permission: state.permission === 'granted',
+  };
+}
+
+/**
+ * 단계 ①의 단추에 적을 말. 끝난 뒤에는 **길만 남기고 시키지 않습니다.**
+ */
+export function consentStepLabel(step: ConsentStep, done: boolean): string {
+  if (!step.required) return step.label;
+  return done ? '로비 보기' : step.label;
+}
+
+/**
+ * 단계 ②의 단추에 적을 말.
+ *
+ * 끝난 뒤에도 이 단추는 **하는 일이 있습니다** — 헤드셋을 바꿔 꽂은 사람이
+ * 다시 잡을 자리입니다. 그래서 감추지 않고 말만 바꿉니다.
+ */
+export function permissionStepLabel(done: boolean): string {
+  return done ? '마이크 다시 고르기' : '마이크 권한 허용';
+}
+
+/**
  * 회의 없이 연 화면이 **어디로 남는지** 미리 말한다.
  *
  * 여기서 침묵하면 사람은 한 시간을 녹음하고 나서야 팀에 아무것도 안

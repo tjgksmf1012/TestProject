@@ -6079,3 +6079,67 @@ describe('⛔ 올릴 자리가 없는 녹음을 받아 주지 않는다 (결함 
     );
   });
 });
+
+describe('⛔ 끝난 단계를 끝난 것으로 그린다 (결함 273·274)', () => {
+  /* 렌더해서 잡았습니다. 셋이 동의하고 마이크까지 허용한 뒤에도 준비
+     단계 ①은 「동의하러 로비로」, ②는 「마이크 권한 허용」이라는 **시키는
+     말** 그대로였고, 동그라미도 번호 그대로였습니다. 왼쪽 막는 목록은
+     「준비됐습니다」인데 오른쪽은 아직 둘을 시키고 있어, **같은 사실을 두
+     곳이 다르게** 말했습니다 (사용자가 지적한 「글씨가 너무 많다」의 한
+     갈래이기도 합니다 — 이미 끝난 일을 계속 읽게 만듭니다). */
+  const main = (): string => codeOf(readFileSync(join(ROOT, 'src', 'demo', 'main.ts'), 'utf8'));
+  const rec = (): string => readFileSync(join(ROOT, 'public', 'index.html'), 'utf8');
+
+  it('⭐ 단계의 끝남을 화면이 스스로 정하지 않는다 — 판단은 `@lib`', () => {
+    const code = main();
+    ok(/stepsDone\(/.test(code), '끝남을 아무 데서도 안 묻습니다');
+    ok(
+      /consentStepLabel\(/.test(code) && /permissionStepLabel\(/.test(code),
+      '단계의 말을 화면이 직접 지어내고 있습니다',
+    );
+    /* 화면이 조건문을 복제하면 결함 229 로 돌아갑니다 — 그때는 녹음
+       화면이 동의를 **스스로 선언**했습니다. */
+    ok(
+      !/consent\s*===\s*'all_confirmed'/.test(code),
+      '화면이 동의 상태를 스스로 판정하고 있습니다',
+    );
+  });
+
+  it('⭐ 표시할 자리가 실제로 있다 — 두 단계에 이름이 붙어 있는가', () => {
+    const markup = rec().replace(/<!--[\s\S]*?-->/g, '');
+    for (const id of ['step-consent', 'step-permission']) {
+      ok(new RegExp(`<li id="${id}"`).test(markup), `${id} 가 마크업에 없습니다`);
+      ok(new RegExp(`\\$\\('${id}'\\)`).test(main()), `${id} 를 아무도 안 칠합니다`);
+    }
+    // 끝남을 **모양**으로 말합니다. 흐림은 안 씁니다 (누를 수 있는 것들입니다).
+    const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(rec())?.[1] ?? '';
+    ok(
+      /li\[data-done="true"\]::before/.test(style),
+      '끝난 단계를 그리는 규칙이 없습니다 — 값만 붙이고 아무 일도 안 일어납니다',
+    );
+    ok(
+      !/li\[data-done="true"\][^{]*\{[^}]*opacity/.test(style),
+      '끝난 단계를 흐리게 하고 있습니다 — 여기 단추들은 끝난 뒤에도 눌립니다',
+    );
+  });
+
+  it('⭐ 화면 맨 위의 `.note` 가 **아무것도 안 나누는 선**을 긋지 않는다 (결함 273)', () => {
+    /* `.note` 는 절을 닫고 붙이는 각주라 위에 선을 긋습니다. 녹음·통화는
+       그 문단이 `<main>` 의 첫 자식이라, 머리줄 바로 아래에 선이 하나 더
+       그어지고 두 선 사이 56px 이 텅 비었습니다. 픽셀을 읽어 잡았습니다. */
+    const css = readFileSync(join(ROOT, 'public', 'app.css'), 'utf8');
+    const first = readdirSync(join(ROOT, 'public'))
+      .filter((f) => f.endsWith('.html'))
+      .filter((f) => {
+        const body = readFileSync(join(ROOT, 'public', f), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+        return /<main\b[^>]*>\s*<p class="note"/.test(body);
+      });
+    if (first.length === 0) return; // 아무 화면도 그러지 않으면 볼 것이 없습니다
+    const rule = /main\s*>\s*\.note:first-child\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    ok(
+      /border-top:\s*0/.test(rule),
+      `${first.join('·')} 가 맨 위에 각주 선을 긋습니다 — 위에 나눌 절이 없습니다`,
+    );
+    ok(/margin-top:\s*0/.test(rule), '맨 위 각주의 위 여백이 그대로라 빈 띠가 남습니다');
+  });
+});
