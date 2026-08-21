@@ -294,12 +294,15 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
 function MembersSection({
   members,
   myUserId,
+  myRole,
   leave,
   changeRole,
   removeMember,
 }: {
   members: Member[];
   myUserId: number | undefined;
+  /** 내 권한. **한 벌만** 만듭니다 — 두 곳에서 각자 구하면 한쪽만 고쳐집니다. */
+  myRole: string | null | undefined;
   leave: ReturnType<typeof useSettingsMutations>['leave'];
   changeRole: ReturnType<typeof useSettingsMutations>['changeRole'];
   removeMember: ReturnType<typeof useSettingsMutations>['removeMember'];
@@ -309,7 +312,6 @@ function MembersSection({
   const ordered = [...members].sort(
     (a, b) => a.name.localeCompare(b.name, 'ko') || a.user_id - b.user_id,
   );
-  const myRole = members.find((x) => x.user_id === myUserId)?.project_role;
   const canGive = assignableRoles(myRole);
   // ⚠️ 나가기가 막히는 이유는 **누르기 전에** 말합니다. 예전에는 누른 뒤
   //    서버 409 로만 나왔습니다.
@@ -731,6 +733,17 @@ export default function Settings() {
 
   const members = useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
   const mine = members.find((member) => member.user_id === me?.user_id);
+  /**
+   * 내 권한 — **모르는 것과 없는 것을 가릅니다** (결함 254).
+   *
+   * `undefined` 는 「아직 모름」, `null` 은 「명단에 확실히 없음」입니다.
+   * 예전에는 둘 다 `undefined` 라, 명단이 오기 전 몇 초 동안 **소유자에게**
+   * 「팀의 관리자에게 요청하세요」라고 말했습니다. 재현했습니다 —
+   * `/members` 를 4초 늦추고 여니 그 문장이 떠 있었고, 명단이 오자
+   * 사라졌습니다. 잠그는 것은 그대로입니다(모르면 잠급니다). 고친 것은
+   * **말**입니다.
+   */
+  const myRole = membersQuery.isSuccess ? (mine?.project_role ?? null) : undefined;
 
   /**
    * ⚠️ **못 불러온 것을 「0명」 이라고 단언하지 않습니다.**
@@ -821,6 +834,7 @@ export default function Settings() {
             {cannotLoad === null && section === 'members' && (
               <MembersSection
                 members={members}
+                myRole={myRole}
                 myUserId={me?.user_id}
                 leave={m.leave}
                 changeRole={m.changeRole}
@@ -829,7 +843,7 @@ export default function Settings() {
             )}
             {cannotLoad === null && section === 'repo' && (
               <RepoSection
-                  myRole={mine?.project_role}
+                  myRole={myRole}
                 projectId={projectId}
                 repo={project.data?.github_repo ?? null}
                 save={m.saveProject}
@@ -838,7 +852,7 @@ export default function Settings() {
             )}
             {section === 'general' && project.data && (
               <GeneralSection
-                  myRole={mine?.project_role}
+                  myRole={myRole}
                 title={project.data.title}
                 inviteCode={project.data.invite_code}
                 save={m.saveProject}

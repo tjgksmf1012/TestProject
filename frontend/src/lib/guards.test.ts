@@ -19,6 +19,7 @@ import { describe, it } from 'node:test';
 
 import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
 import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contribution/ribbon.ts';
+import { attentionAbout } from './review/candidates.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
@@ -4597,6 +4598,42 @@ describe('⛔ 안 잰 것을 **만점으로 읽지 않는다** (결함 249·250)
   });
 });
 
+describe('⛔ 사유 제목이 **줄들과 같은 것**을 말한다 (결함 253)', () => {
+  /* 검토 화면의 사유 팝오버 제목이 「확신이 낮은 이유」였습니다. 두 군데가
+     틀렸습니다.
+
+     ① 줄들이 확신도 얘기가 아닙니다 — 대개 서버 경고입니다
+        (「담당자 미확정 — '저' 는 명단의 누구와도 맞지 않습니다」).
+     ② 확신이 낮지도 않습니다 — 재 보니 **확신 71%** 후보에 그 제목이
+        붙어 있었습니다. 저확신 기준은 `LOW_CONFIDENCE = 0.7` 입니다.
+
+     `attentionReasons` 의 머리말이 이미 답을 적어 두고 있었습니다 —
+     「사람이 이 후보를 **왜 들여다봐야 하는지**」. */
+  it('⭐ 화면이 사유 제목을 **직접 짓지 않는다**', () => {
+    const code = codeOf(
+      readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Review.tsx'), 'utf8'),
+    );
+    ok(/attentionAbout\(/.test(code), '사유 제목을 `@lib` 에서 안 가져옵니다');
+    ok(
+      !code.includes('확신이 낮은 이유'),
+      '화면이 사유를 확신도 탓으로 적습니다 — 줄들은 대개 서버 경고입니다',
+    );
+  });
+
+  it('⭐ 제목이 **확신도를 단정하지 않는다**', () => {
+    const said = attentionAbout({
+      id: 1,
+      title: '회원가입 화면 작업',
+      confidence: 0.71,
+      evidence_utterance_ids: [],
+      review_status: 'pending',
+      warnings: ["담당자 미확정 — '저' 는 명단의 누구와도 맞지 않습니다"],
+    } as unknown as Parameters<typeof attentionAbout>[0]);
+    ok(!said.includes('낮은'), `71% 를 낮다고 단정합니다: ${said}`);
+    ok(said.includes('회원가입 화면 작업'), said);
+  });
+});
+
 describe('⛔ 녹음이 **혼자 멈췄을 때**도 끝까지 간다 (결함 240·241)', () => {
   /* 회의 도중 누가 동의를 철회하면 서버는 청크마다 403 을 줍니다
      (`recording_service.store_chunk` 가 청크마다 동의를 다시 봅니다).
@@ -5567,7 +5604,36 @@ describe('관리자만 되는 일을 **구성원에게 열어 두지 않는다**
   });
 
   it('⚠️ 권한을 **넘겨줘야** 판단이 돕니다', () => {
-    const passes = (settings.match(/myRole=\{mine\?\.project_role\}/g) ?? []).length;
-    ok(passes >= 2, `권한을 넘기는 곳이 ${passes}곳뿐입니다 — 안 넘기면 판단이 undefined 로 돕니다`);
+    /* ⚠️ 예전에는 `myRole={mine?.project_role}` 이라는 **글자**를 셌습니다.
+       결함 254 에서 그 값을 「아직 모름 / 명단에 없음」으로 가르는 변수로
+       바꾸자, 요구는 그대로인데 가드만 깨졌습니다 — 이 저장소가 아홉 번
+       당한 자리입니다. 이름이 아니라 **요구**를 잽니다: 두 곳 이상에
+       넘기고, 넘기는 값이 **명단에서 온 것**인가. */
+    const passes = [...settings.matchAll(/myRole=\{([^}]+)\}/g)].map((m) => (m[1] ?? '').trim());
+    ok(
+      passes.length >= 2,
+      `권한을 넘기는 곳이 ${passes.length}곳뿐입니다 — 안 넘기면 판단이 undefined 로 돕니다`,
+    );
+    for (const expr of passes) {
+      const fromRoster =
+        /project_role/.test(expr) ||
+        new RegExp(`const ${expr}\\s*=[^;]*project_role`).test(settings);
+      ok(fromRoster, `넘기는 값이 명단에서 온 것이 아닙니다: ${expr}`);
+    }
+  });
+
+  it('⭐ 명단이 **아직 안 왔을 때**를 「권한 없음」과 가른다 (결함 254)', () => {
+    /* 명단이 오기 전 몇 초 동안 **소유자에게** 「팀의 관리자에게 요청
+       하세요」라고 말했습니다. 재현했습니다 — `/members` 를 4초 늦추고
+       설정 화면을 여니 그 문장이 떠 있었고, 명단이 오자 사라졌습니다.
+       잠그는 것은 그대로입니다. 가르는 것은 **말**입니다. */
+    const passes = [...settings.matchAll(/myRole=\{([^}]+)\}/g)].map((m) => (m[1] ?? '').trim());
+    for (const expr of passes) {
+      const decl = new RegExp(`const ${expr}\\s*=([^;]*);`).exec(settings)?.[1] ?? expr;
+      ok(
+        /isSuccess|isPending|isLoading|isFetched|status ===/.test(decl),
+        `명단이 왔는지 안 보고 권한을 정합니다 — 모르는 것을 「없음」으로 단언하게 됩니다: ${expr}`,
+      );
+    }
   });
 });

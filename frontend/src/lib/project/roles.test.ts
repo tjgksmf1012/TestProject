@@ -5,6 +5,7 @@ import {
   assignableRoles,
   canChangeRoleOf,
   canManage,
+  manageBlockedBecause,
   canRemove,
   deleteTaskConfirm,
   LEAVE_CONFIRM,
@@ -111,5 +112,34 @@ describe('업무 삭제 확인', () => {
     strictEqual(deleteTaskConfirm('문서 정리').startsWith('문서 정리를 '), true);
     strictEqual(deleteTaskConfirm('로그인 화면').startsWith('로그인 화면을 '), true);
     strictEqual(deleteTaskConfirm('배포').includes('(를)'), false);
+  });
+});
+
+
+describe('결함 254 — 모르는 것을 「권한 없음」이라고 단언하던 자리', () => {
+  it('⭐ **아직 모르면** 없다고 하지 않는다', () => {
+    // 명단이 오기 전 몇 초 동안 **소유자에게** 「팀의 관리자에게 요청
+    // 하세요」라고 말했습니다. 재현했습니다 — `/members` 를 4초 늦추고
+    // 설정 화면을 여니 그 문장이 떠 있었습니다.
+    const said = manageBlockedBecause(undefined, '저장소 연결');
+    strictEqual(said?.includes('관리자에게 요청'), false, said ?? '');
+    strictEqual(said?.includes('아직'), true, said ?? '');
+  });
+
+  it('⭐ **명단에 없는 것이 확실하면** 그대로 말한다', () => {
+    // 반대 방향입니다. 이걸 안 보면 전부 「확인하는 중」으로 덮어도
+    // 검사가 통과합니다.
+    const said = manageBlockedBecause(null, '저장소 연결');
+    strictEqual(said?.includes('관리자에게 요청'), true, said ?? '');
+    strictEqual(manageBlockedBecause('member', '저장소 연결')?.includes('관리자에게 요청'), true);
+  });
+
+  it('⚠️ 말이 바뀌어도 **잠그는 것은 그대로** — 모르면 잠급니다', () => {
+    strictEqual(canManage(undefined), false);
+    strictEqual(canManage(null), false);
+    strictEqual(manageBlockedBecause(undefined, '저장소 연결') === null, false);
+    // 관리자·소유자는 그대로 열립니다.
+    strictEqual(manageBlockedBecause('owner', '저장소 연결'), null);
+    strictEqual(manageBlockedBecause('admin', '저장소 연결'), null);
   });
 });

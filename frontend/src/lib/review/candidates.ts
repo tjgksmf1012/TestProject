@@ -248,6 +248,24 @@ export function approvalBlockers(
  * 그때도 빈손으로 두지 않는다 — 화면에 아무 설명 없이 빨간 표시만 뜨면
  * 사람은 그냥 무시하게 된다.
  */
+/**
+ * 그 이유 목록에 붙일 **정직한 제목** (결함 253).
+ *
+ * 화면은 이 팝오버를 「확신이 낮은 이유」라고 불렀습니다. 두 군데가
+ * 틀렸습니다.
+ *
+ * 1. **줄들이 확신도 얘기가 아닙니다.** 대부분 서버 경고입니다 —
+ *    「담당자 미확정 — '저' 는 명단의 누구와도 맞지 않습니다」.
+ * 2. **확신이 낮지도 않습니다.** 재 보니 확신 71% 후보에 그 제목이 붙어
+ *    있었습니다. 이 파일의 저확신 기준은 `LOW_CONFIDENCE = 0.7` 입니다.
+ *
+ * 이 함수의 머리말이 이미 답을 적어 두고 있었습니다 — 「사람이 이 후보를
+ * **왜 들여다봐야 하는지**」. 제목도 그렇게 답니다.
+ */
+export function attentionAbout(candidate: Candidate): string {
+  return `${candidate.title} — 살펴봐야 하는 이유`;
+}
+
 export function attentionReasons(candidate: Candidate): string[] {
   const reasons = [...(candidate.warnings ?? [])];
   if (reasons.length === 0 && candidate.confidence < LOW_CONFIDENCE) {

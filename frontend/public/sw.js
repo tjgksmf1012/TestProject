@@ -62,7 +62,7 @@ const SHELL = [
   '/chat.js',
   '/chunk-4EUAFZWM.js',
   '/chunk-6ODHTQ4B.js',
-  '/chunk-7YPTQMPI.js',
+  '/chunk-CG2VQL3Z.js',
   '/chunk-CXXHYBBB.js',
   '/chunk-FLPN24SJ.js',
   '/chunk-FQYHRUCO.js',

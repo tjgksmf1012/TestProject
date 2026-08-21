@@ -19,6 +19,7 @@ import {
   approvalBlockers,
   approvalConditions,
   canUndoDecision,
+  attentionAbout,
   attentionReasons,
   buildReviewPayload,
   effectiveAssignee,
@@ -574,12 +575,17 @@ export default function Review() {
                     {lane === 'reject' && <span className="cand__state cand__state--reject">거절 표시됨</span>}
                     <span className="cand__conf">
                       확신 {Math.round(candidate.confidence * 100)}%
-                      {/* "왜 확신이 낮은가" 는 **지우지 않습니다** — 원문 그대로
-                          한 번의 동작으로 닿습니다. 카드마다 같은 문장을
-                          펼쳐 두면 셋이면 186자가 되고, 늘 있는 글자는
-                          배경이 되어 아무도 안 읽습니다. */}
+                      {/* 사유는 **지우지 않습니다** — 원문 그대로 한 번의
+                          동작으로 닿습니다. 카드마다 같은 문장을 펼쳐 두면
+                          셋이면 186자가 되고, 늘 있는 글자는 배경이 되어
+                          아무도 안 읽습니다.
+
+                          ⛔ 제목이 「확신이 낮은 이유」였습니다 (결함 253).
+                          줄들은 대개 서버 경고(담당자 미확정)이고, 확신
+                          71% 후보에도 그 제목이 붙어 있었습니다 — 저확신
+                          기준은 0.7 입니다. 제목도 `@lib` 이 답니다. */}
                       <Why
-                        about={`${candidate.title} — 확신이 낮은 이유`}
+                        about={attentionAbout(candidate)}
                         lines={attentionReasons(candidate)}
                       />
                     </span>
