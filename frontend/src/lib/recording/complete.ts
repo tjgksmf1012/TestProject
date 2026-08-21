@@ -138,15 +138,18 @@ export interface TrackCompleteResult {
  * 화면 값을 계속 보여주면 사람은 "괜찮다고 했는데 왜 안 되지" 가 됩니다.
  */
 export function describeCompletion(result: TrackCompleteResult): string {
-  const percent = `${(result.coverage * 100).toFixed(1)}%`;
-
+  /* ⚠️ 예전에는 이 문장이 `(서버 기준 커버리지 100.0%)` 를 달고 있었습니다.
+     결함 220 전에는 **여기에만** 서버 값이 있었기 때문입니다. 이제는 바로
+     아래 칸이 서버 값을 라벨과 함께 말하므로(`coverageLabel`), 같은 숫자를
+     두 번 읽힐 이유가 없습니다. 값의 주인은 칸이 말하고, 문장은 **다음에
+     무슨 일이 있는지**를 말합니다. */
   if (result.meeting_queued) {
-    return `녹음을 마쳤습니다 (서버 기준 커버리지 ${percent}). 전원이 끝나 회의 처리를 시작합니다.`;
+    return '녹음을 마쳤습니다. 전원이 끝나 회의 처리를 시작합니다.';
   }
   if (result.meeting_status) {
-    return `녹음을 마쳤습니다 (서버 기준 커버리지 ${percent}). ${result.meeting_status}`;
+    return `녹음을 마쳤습니다. ${result.meeting_status}`;
   }
-  return `녹음을 마쳤습니다 (서버 기준 커버리지 ${percent}).`;
+  return '녹음을 마쳤습니다.';
 }
 
 /**
@@ -190,6 +193,32 @@ export function describeCompletionFailure(status: number, detail?: string): stri
  * 맞습니다**" 라고 적어 두고 있었습니다. 문장 하나에만 적용돼 있었을
  * 뿐입니다 — 규칙은 있었고 **닿는 자리가 좁았습니다.**
  */
+/**
+ * 결과 칸의 커버리지가 **누가 잰 값인지** (결함 275).
+ *
+ * 종료 요청이 서버에 못 닿으면 `applyServerVerdict` 가 안 돌고, 칸에는
+ * **이 기기가 잰 값**이 서버 값과 **똑같은 얼굴로** 남습니다. 재현했습니다 —
+ * 「서버에 연결하지 못했습니다」 바로 아래에 「커버리지 100.0% · 판정
+ * 사용 가능」이 초록으로 서 있었습니다. 결함 220 과 같은 병인데, 그때는
+ * 서버가 **답한** 갈래만 고쳤습니다.
+ */
+export function coverageLabel(source: 'device' | 'server'): string {
+  return source === 'server' ? '커버리지(서버)' : '커버리지(이 기기)';
+}
+
+/**
+ * 판정 칸의 값.
+ *
+ * ⛔ **기기는 「사용 가능」을 말할 수 없습니다.** 쓸 수 있는지는 서버에
+ * 무엇이 도착했는가로 정해지고, 그건 이 기기가 모르는 값입니다. 못 잰
+ * 것을 만점으로 읽지 않는 것과 같은 규칙입니다 — `null` 은 **모름**이고,
+ * 모름은 「사용 불가」도 아닙니다.
+ */
+export function usableText(usable: boolean | null): string {
+  if (usable === null) return '서버 확인 전';
+  return usable ? '사용 가능' : '사용 불가';
+}
+
 export interface CompletionView {
   /** 결과 칸의 커버리지. **서버 값**입니다. */
   coverageText: string;
@@ -228,7 +257,7 @@ export function completionView(
 
   return {
     coverageText: `${serverPercent}%`,
-    usableText: result.usable ? '사용 가능' : '사용 불가',
+    usableText: usableText(result.usable),
     // 서버가 못 쓴다고 하면 **왜**까지 서버가 말합니다. 화면이 다시 짓지
     // 않습니다 — 지으면 같은 사실에 두 문장이 생깁니다.
     headline: result.usable ? local.headline : result.message || local.headline,

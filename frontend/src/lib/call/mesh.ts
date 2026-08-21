@@ -309,6 +309,47 @@ export function describeMic(state: MicState, problems: readonly string[]): MicNo
   return { text: '마이크가 켜졌습니다 (에코 제거 켬 · 자동 게인 끔).', tone: 'plain' };
 }
 
+/**
+ * 마이크 토글이 **무엇이라고 말해야 하는가** (결함 277).
+ *
+ * ⚠️ `describeMic` 은 국면을 셋(`off`·`muted`·`on`)으로 아는데, 버튼은
+ * **둘로만** 그려지고 있었습니다 — 껐는가 아닌가. 그래서 권한을 거부한
+ * 사람의 화면에서 상태줄은 「마이크가 아직 꺼져 있습니다」인데 버튼은
+ * 「마이크 끄기」에 **`aria-pressed="true"`** 였습니다. 눈으로 보는
+ * 사람에게는 흐린 버튼이지만, 낭독기는 **「눌림」 = 켜져 있음**이라고
+ * 읽습니다.
+ *
+ * `paintMic` 바로 위에 「같은 사실을 두 곳에서 쓰면 반드시 갈라집니다」
+ * (결함 216)라고 적혀 있었는데, 그 함수 **안에서** 다시 갈라져 있었습니다.
+ */
+export function micToggleLabel(state: MicState): string {
+  return state === 'on' ? '마이크 끄기' : '마이크 켜기';
+}
+
+/**
+ * 토글이 「눌림」인가 — **켜져 있는가**와 같은 말이어야 합니다.
+ *
+ * ⛔ `off` 를 `true` 로 읽지 않습니다. 안 열린 것은 켜진 것이 아닙니다.
+ */
+export function micTogglePressed(state: MicState): boolean {
+  return state === 'on';
+}
+
+/**
+ * 마이크가 **열려 있는가** — 토글과 레벨 막대를 그릴 것인가.
+ *
+ * 안 열렸으면 토글할 것도, 잴 것도 없습니다. 그 자리에는 실제로 할 수
+ * 있는 일(`마이크 권한 허용하기`)이 대신 섭니다 — 값 없는 레인은 안
+ * 그린다는 v2 F3 과 같은 규칙입니다. 권한을 거부한 화면에는 **한 칸도
+ * 안 찬 레벨 막대**가 가로로 누워 있었습니다.
+ *
+ * ⚠️ `muted` 는 **그립니다.** 그때 막대가 0인 것은 못 잰 것이 아니라
+ * **나가는 소리가 없다**는 잰 결과입니다 (측정 불가 ≠ 0 의 반대편).
+ */
+export function micOpen(state: MicState): boolean {
+  return state !== 'off';
+}
+
 /** 내 타일이 **녹음에 대해** 할 말. */
 export interface CaptureNote {
   label: string;

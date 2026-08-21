@@ -10,6 +10,9 @@ import {
   captureProblems,
   describeCall,
   describeMic,
+  micToggleLabel,
+  micTogglePressed,
+  micOpen,
   describeMyCapture,
   describePeer,
   needsRecvOnlyAudio,
@@ -207,6 +210,29 @@ describe('내 마이크 — 껐으면 껐다고 말한다 (결함 216)', () => {
     strictEqual(on.text.includes('켜졌습니다'), true);
     strictEqual(muted.text.includes('켜졌습니다'), false, '껐는데 켜졌다고 말합니다');
     strictEqual(muted.text.includes('껐습니다'), true);
+  });
+
+  it('⭐ 토글이 상태줄과 **같은 말을** 한다 (결함 277)', () => {
+    /* 권한을 거부한 사람의 화면에서 상태줄은 「마이크가 아직 꺼져
+       있습니다」인데 버튼은 「마이크 끄기」에 `aria-pressed="true"`
+       였습니다. 국면은 셋인데 버튼을 **둘로만** 그렸기 때문입니다. */
+    strictEqual(micToggleLabel('on'), '마이크 끄기');
+    strictEqual(micToggleLabel('muted'), '마이크 켜기');
+    strictEqual(micToggleLabel('off'), '마이크 켜기', '안 열린 마이크를 끄라고 합니다');
+  });
+
+  it('⛔ 「눌림」은 **켜져 있음**과 같은 말이어야 한다', () => {
+    strictEqual(micTogglePressed('on'), true);
+    strictEqual(micTogglePressed('muted'), false);
+    strictEqual(micTogglePressed('off'), false, '안 열린 마이크를 켜졌다고 읽습니다');
+  });
+
+  it('마이크가 안 열렸으면 토글도 막대도 그릴 것이 없다 — 그 자리는 「권한 허용하기」가 쓴다', () => {
+    strictEqual(micOpen('off'), false);
+    // ⚠️ 껐을 때는 **그립니다.** 막대가 0인 것은 못 잰 것이 아니라
+    //    나가는 소리가 없다는 잰 결과입니다.
+    strictEqual(micOpen('muted'), true);
+    strictEqual(micOpen('on'), true);
   });
 
   it('⛔ 껐다고 빨강으로 쓰지 않는다 — 끈 것은 그 사람의 선택이다', () => {

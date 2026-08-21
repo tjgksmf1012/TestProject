@@ -18,6 +18,9 @@ import {
   captureProblems,
   describeCall,
   describeMic,
+  micToggleLabel,
+  micTogglePressed,
+  micOpen,
   describeMyCapture,
   describePeer,
   needsRecvOnlyAudio,
@@ -157,7 +160,9 @@ async function openMic(): Promise<void> {
   micReady = true;
   micMuted = false;
   // 마이크가 열려야 토글할 것이 생긴다 (v2 F2 — 하단 컨트롤 바).
-  ($('mic-toggle') as HTMLButtonElement).disabled = false;
+  // ⚠️ 드러내고 감추는 것은 이제 `paintMic` 한 곳입니다 (결함 277) —
+  //    `disabled` 로 남겨 두면 안 열린 마이크에 「마이크 끄기 · 눌림」이
+  //    붙은 채 흐려질 뿐입니다.
   const track = localStream.getAudioTracks()[0];
   micProblems = captureProblems((track?.getSettings() ?? {}) as Record<string, unknown>);
   paintMic();
@@ -177,8 +182,14 @@ function paintMic(): void {
   const state = !micReady ? 'off' : micMuted ? 'muted' : 'on';
   const note = describeMic(state, micProblems);
   showNote($('mic'), note.text, note.tone);
-  $('mic-toggle').textContent = micMuted ? '마이크 켜기' : '마이크 끄기';
-  $('mic-toggle').setAttribute('aria-pressed', String(!micMuted));
+  // ⛔ **여기서 `micMuted` 만 보면 안 됩니다** (결함 277). 국면은 셋인데
+  //    버튼을 둘로 그리면, 안 열린 마이크가 「마이크 끄기 · 눌림」이 됩니다 —
+  //    바로 위 상태줄은 「아직 꺼져 있습니다」라고 말하는데. 판단은 `@lib`.
+  $('mic-toggle').textContent = micToggleLabel(state);
+  $('mic-toggle').setAttribute('aria-pressed', String(micTogglePressed(state)));
+  $('mic-toggle').hidden = !micOpen(state);
+  // 안 열린 마이크에 **한 칸도 안 찬 레벨 막대**가 누워 있었습니다.
+  ($('level').parentElement as HTMLElement).hidden = !micOpen(state);
 }
 
 /** ⚠️ 이게 없으면 마이크가 죽은 걸 회의가 끝난 뒤에 안다. */

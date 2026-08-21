@@ -31,6 +31,8 @@ import {
   describeCompletion,
   describeCompletionFailure,
   type TrackCompleteResult,
+  coverageLabel,
+  usableText,
 } from '../lib/recording/complete.ts';
 import {
   blockers as sessionBlockers,
@@ -696,8 +698,10 @@ function applyServerVerdict(
   );
   $('verdict').textContent = view.headline;
   $('verdict').className = view.tone;
+  $('coverage-label').textContent = coverageLabel('server');
   $('coverage').textContent = view.coverageText;
   $('usable').textContent = view.usableText;
+  delete $('usable').dataset.tone;
   $('disagree').textContent = view.disagreement ?? '';
   $('disagree').hidden = view.disagreement === null;
 }
@@ -707,10 +711,17 @@ function showResult(result: RecordingSummary): void {
   $('verdict').textContent = describeTimeline(result.timeline);
   $('verdict').className = result.verdict.usable ? 'ok' : 'bad';
 
+  // ⛔ **이 칸의 주인은 아직 이 기기입니다** (결함 275). 종료 요청이 서버에
+  //    못 닿으면 `applyServerVerdict` 가 안 돌고 이 값들이 그대로 남습니다 —
+  //    예전에는 그때도 서버 값과 **똑같은 얼굴**로 「판정 사용 가능」이라고
+  //    적혀 있었습니다. 쓸 수 있는지는 서버에 무엇이 도착했는가로 정해지고,
+  //    그건 이 기기가 모르는 값입니다. 판단은 `@lib`.
+  $('coverage-label').textContent = coverageLabel('device');
   $('coverage').textContent = `${(result.timeline.coverage * 100).toFixed(1)}%`;
   $('totalgap').textContent = `${(result.timeline.totalGapMs / 1000).toFixed(1)}초`;
   $('longestgap').textContent = `${(result.timeline.longestGapMs / 1000).toFixed(1)}초`;
-  $('usable').textContent = result.verdict.usable ? '사용 가능' : '사용 불가';
+  $('usable').textContent = usableText(null);
+  $('usable').dataset.tone = 'gap';
 
   $('gaps').innerHTML = result.timeline.gaps.length
     ? result.timeline.gaps

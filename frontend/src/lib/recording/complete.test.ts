@@ -4,8 +4,10 @@ import { describe, it } from 'node:test';
 import {
   completeBody,
   completionView,
+  coverageLabel,
   describeCompletion,
   describeCompletionFailure,
+  usableText,
   type CompleteInput,
   type TrackCompleteResult,
 } from './complete.ts';
@@ -142,10 +144,26 @@ function result(over: Partial<TrackCompleteResult> = {}): TrackCompleteResult {
 }
 
 describe('describeCompletion', () => {
-  it('⭐ **서버가 준** 커버리지를 보여준다', () => {
-    // 화면이 계산한 값과 다를 수 있고, 다를 때는 서버 쪽이 맞다 —
-    // 서버는 실제로 받은 청크를 센다.
-    strictEqual(describeCompletion(result()).includes('83.0%'), true);
+  it('⭐ 커버리지 **숫자는 문장에 없다** — 바로 아래 칸이 라벨과 함께 말한다', () => {
+    /* 결함 220 전에는 서버 값이 **이 문장에만** 있었습니다. 이제는
+       `completionView` 가 칸을 서버 값으로 바꾸고 라벨이 주인을 밝히므로,
+       같은 숫자를 두 번 읽힐 이유가 없습니다 (결함 275). */
+    strictEqual(describeCompletion(result()).includes('83.0%'), false);
+    strictEqual(describeCompletion(result()).includes('녹음을 마쳤습니다'), true);
+  });
+
+  it('⭐ 값의 주인은 **라벨**이 말한다', () => {
+    strictEqual(coverageLabel('server'), '커버리지(서버)');
+    strictEqual(coverageLabel('device'), '커버리지(이 기기)');
+  });
+
+  it('⛔ 기기는 「사용 가능」을 말할 수 없다 — 모름은 모름이다', () => {
+    /* 종료 요청이 서버에 못 닿으면 칸에는 이 기기가 잰 값이 남습니다.
+       예전에는 그때도 「판정 사용 가능」이 초록으로 서 있었습니다 —
+       「서버에 연결하지 못했습니다」 바로 아래에서. */
+    strictEqual(usableText(null), '서버 확인 전');
+    strictEqual(usableText(true), '사용 가능');
+    strictEqual(usableText(false), '사용 불가');
   });
 
   it('전원이 끝났으면 처리가 시작된다고 말한다', () => {

@@ -6143,3 +6143,189 @@ describe('⛔ 끝난 단계를 끝난 것으로 그린다 (결함 273·274)', ()
     ok(/margin-top:\s*0/.test(rule), '맨 위 각주의 위 여백이 그대로라 빈 띠가 남습니다');
   });
 });
+
+describe('⛔ 서버가 확인하기 전의 결과 칸 (결함 275)', () => {
+  /* 재현: 8초를 녹음하고 정지 직전에 종료 요청(`/complete`)만 끊었습니다 (청크는
+     그대로 올라갑니다). 화면은 이렇게 답했습니다 —
+
+         서버에 연결하지 못했습니다. 다시 시도를 눌러 주세요…
+         녹음이 끊김 없이 완료됐습니다 (8초)          ← 초록
+         커버리지 100.0% · 총 공백 0.0초 · 판정 **사용 가능**
+
+     아래 셋은 **이 기기가 잰 값**인데 서버가 확인해 준 값과 **똑같은
+     얼굴**입니다. 결함 220 과 같은 병인데 그때는 서버가 **답한** 갈래만
+     고쳤습니다. 쓸 수 있는지는 서버에 무엇이 도착했는가로 정해지고,
+     그건 이 기기가 모르는 값입니다. */
+  const main = (): string => codeOf(readFileSync(join(ROOT, 'src', 'demo', 'main.ts'), 'utf8'));
+
+  it('⭐ 기기만 그린 칸이 「사용 가능」을 말하지 않는다', () => {
+    const code = main();
+    const local = /function showResult\(([\s\S]*?)\n}/.exec(code)?.[1] ?? '';
+    ok(local.length > 0, 'showResult 를 못 찾았습니다 — 가드가 낡았습니다');
+    ok(
+      !/'사용 가능'/.test(local),
+      '기기만 아는 값으로 「사용 가능」을 단언하고 있습니다',
+    );
+    ok(/usableText\(null\)/.test(local), '「모름」을 아무 데서도 안 말합니다');
+    // 모름은 실패가 아닙니다 — 빨강이 아니라 흙빛입니다.
+    ok(/'gap'/.test(local), '「모름」을 흙빛으로 안 말합니다');
+  });
+
+  it('⭐ 커버리지 칸이 **누가 잰 값인지** 라벨로 말한다', () => {
+    const code = main();
+    const local = /function showResult\(([\s\S]*?)\n}/.exec(code)?.[1] ?? '';
+    const server = /function applyServerVerdict\(([\s\S]*?)\n}/.exec(code)?.[1] ?? '';
+    ok(server.length > 0, 'applyServerVerdict 를 못 찾았습니다 — 가드가 낡았습니다');
+    ok(/coverageLabel\('device'\)/.test(local), '기기 값에 주인을 안 밝힙니다');
+    ok(/coverageLabel\('server'\)/.test(server), '서버 값에 주인을 안 밝힙니다');
+    // 라벨을 바꿀 자리가 마크업에 실제로 있는가.
+    const markup = readFileSync(join(ROOT, 'public', 'index.html'), 'utf8')
+      .replace(/<!--[\s\S]*?-->/g, '');
+    ok(/id="coverage-label"/.test(markup), '라벨을 바꿀 자리가 마크업에 없습니다');
+  });
+
+  it('⭐ 같은 숫자를 두 번 읽히지 않는다', () => {
+    /* 문장과 칸이 **같은 서버 값**을 나란히 말하고 있었습니다 (결함 220
+       이후로는 둘 다 서버 값입니다). 사용자가 지적한 「글씨가 너무 많다」
+       의 한 갈래입니다. */
+    const complete = readFileSync(join(ROOT, 'src', 'lib', 'recording', 'complete.ts'), 'utf8');
+    const fn = /export function describeCompletion\(([\s\S]*?)\n}/.exec(complete)?.[1] ?? '';
+    ok(fn.length > 0, 'describeCompletion 을 못 찾았습니다 — 가드가 낡았습니다');
+    ok(
+      !/coverage \* 100/.test(fn),
+      '문장이 커버리지 숫자를 다시 말합니다 — 바로 아래 칸이 이미 말합니다',
+    );
+  });
+});
+
+describe('⛔ 결과 칸의 읽는 순서 (결함 276)', () => {
+  /* 렌더해서 봤습니다. 「회의 로비로 돌아가기」가 결과의 **두 문장 사이**에
+     끼어 있었습니다 —
+
+         녹음을 마쳤습니다. 2명이 아직 참가하지 않았습니다
+         회의 로비로 돌아가기            ← 나가는 문
+         녹음이 끊김 없이 완료됐습니다 (9초)
+         커버리지(서버) 100.0% · … · 판정 사용 가능
+         · 공백 없음
+         (아직 안 올라간 조각이 있으면 여기 「다시 올리기」)
+
+     결과를 읽다가 한 문장 만에 나가는 문을 만나고, 정작 **손봐야 할 것**은
+     그 아래에 있습니다. 읽는 순서는 무슨 일이 있었나 → 값 → 남은 문제 →
+     다음 걸음입니다. */
+  const markup = (): string =>
+    readFileSync(join(ROOT, 'public', 'index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+
+  it('⭐ 다음 걸음이 값과 남은 문제 **뒤에** 있다', () => {
+    const html = markup();
+    const at = (needle: string): number => {
+      const i = html.indexOf(needle);
+      ok(i >= 0, `${needle} 가 없습니다 — 가드가 낡았습니다`);
+      return i;
+    };
+    const next = at('id="finish-next"');
+    for (const before of ['id="verdict"', 'id="coverage"', 'id="gaps"', 'id="reupload"']) {
+      ok(at(before) < next, `${before} 가 「다음 걸음」보다 아래에 있습니다`);
+    }
+  });
+
+  it('⭐ 다음 걸음이 **할 일처럼** 보인다 — 본문 링크가 아니다', () => {
+    const tag = /<a id="finish-next"[^>]*>/.exec(markup())?.[0] ?? '';
+    ok(tag !== '', '「다음 걸음」을 못 찾았습니다 — 가드가 낡았습니다');
+    ok(/class="[^"]*\bbtn\b/.test(tag), '본문 링크로 서 있습니다');
+    // ⚠️ `href` 가 없으면 눈에는 단추인데 탭으로 닿지 않습니다 (결함 238).
+    ok(/href=/.test(tag), 'href 가 없습니다 — 눈에만 단추입니다');
+  });
+});
+
+describe('⛔ 마이크 토글이 상태줄과 같은 말을 한다 (결함 277)', () => {
+  /* 마이크를 **거부한 채** 통화 화면을 열어 재현했습니다. 상태줄은
+     「마이크가 아직 꺼져 있습니다 — 권한을 허용하면 켜집니다」인데,
+     바로 아래 토글은 「마이크 끄기」에 `aria-pressed="true"` 였습니다.
+     눈으로 보는 사람에게는 흐린 버튼이지만 낭독기는 **「눌림」 = 켜져
+     있음**이라고 읽습니다.
+
+     `paintMic` 바로 위에 「같은 사실을 두 곳에서 쓰면 반드시
+     갈라집니다」(결함 216)라고 적혀 있는데, 그 함수 **안에서** 다시
+     갈라져 있었습니다 — 국면은 셋(`off`·`muted`·`on`)인데 버튼만 둘로. */
+  const call = (): string => codeOf(readFileSync(join(ROOT, 'src', 'demo', 'call.ts'), 'utf8'));
+
+  it('⭐ 토글을 국면 **셋**으로 그린다 — `micMuted` 만 보지 않는다', () => {
+    const code = call();
+    const paint = /function paintMic\(([\s\S]*?)\n}/.exec(code)?.[1] ?? '';
+    ok(paint.length > 0, 'paintMic 을 못 찾았습니다 — 가드가 낡았습니다');
+    ok(/micToggleLabel\(state\)/.test(paint), '버튼 글자를 국면에서 안 정합니다');
+    ok(/micTogglePressed\(state\)/.test(paint), '「눌림」을 국면에서 안 정합니다');
+    // 안 열린 마이크에는 잴 것이 없습니다 — 빈 레벨 막대를 안 그립니다.
+    ok(
+      [...paint.matchAll(/micOpen\(state\)/g)].length >= 2,
+      '토글이나 레벨 막대 중 하나가 안 열린 마이크에도 서 있습니다',
+    );
+    ok(
+      !/micMuted \? '마이크/.test(paint),
+      '아직 `micMuted` 만 보고 버튼을 그립니다 — 국면은 셋입니다',
+    );
+  });
+
+  it('⭐ 마크업의 **처음 상태**도 참이다 — `paintMic` 이 돌기 전이 있다', () => {
+    const tag =
+      /<button id="mic-toggle"[^>]*>/.exec(
+        readFileSync(join(ROOT, 'public', 'call.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, ''),
+      )?.[0] ?? '';
+    ok(tag !== '', '마이크 토글을 못 찾았습니다 — 가드가 낡았습니다');
+    ok(/aria-pressed="false"/.test(tag), '열리기도 전에 「눌림」으로 시작합니다');
+    ok(/\bhidden\b/.test(tag), '토글할 것이 없는데 서 있습니다');
+    // ⛔ 이 저장소는 누를 수 있는 것을 `disabled` 로 막지 않기로 했습니다
+    //    (결함 234·236). 여기는 아예 **감춥니다** — 감출 것이 없어지면
+    //    `paintMic` 이 드러냅니다.
+    ok(!/\bdisabled\b/.test(tag), 'disabled 로 남아 있습니다');
+  });
+});
+
+describe('⛔ 문장을 데이터 폰트 자리에 넣지 않는다 (결함 278)', () => {
+  /* 렌더해서 보고 재서 잡았습니다. 통화 머리줄의
+
+         혼자 있습니다. 다른 팀원이 들어오면 자동으로 연결됩니다.
+
+     이 낱말 사이가 유난히 성겼습니다. `getComputedStyle` 로 재니
+     `font-family` 가 **모노**(`--font-data`)였습니다 — 그 자리
+     (`.spabar__meta`)는 녹음 화면의 `준비 중 0분 9초` 처럼 **숫자와 상태
+     낱말**을 tabular 로 세우려고 만든 칸인데, 통화는 거기에 한글 문장을
+     넣고 있었습니다. 모노는 글자 폭이 같아서 한글 문장이 성깁니다.
+
+     ⚠️ 마크업만 봐서는 안 보입니다 — 거기 적힌 정적 글자는
+     「연결하는 중…」이고, 문장은 `call.ts` 가 실행 중에 넣습니다. */
+  const markup = (): string =>
+    readFileSync(join(ROOT, 'public', 'call.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  const css = (): string => readFileSync(join(ROOT, 'public', 'app.css'), 'utf8');
+
+  it('⭐ 문장이 들어가는 칸은 **본문 폰트** 자리다', () => {
+    const call = codeOf(readFileSync(join(ROOT, 'src', 'demo', 'call.ts'), 'utf8'));
+    /* 먼저 「여기에 문장이 들어간다」가 아직 참인지 봅니다 — 아니면 이
+       가드는 없는 것을 지키고 있는 것입니다. */
+    ok(
+      /\$\('summary'\)\.textContent\s*=/.test(call),
+      '#summary 에 아무도 안 씁니다 — 가드가 낡았습니다',
+    );
+    const tag = /<span[^>]*id="summary"[^>]*>/.exec(markup())?.[0] ?? '';
+    ok(tag !== '', '#summary 를 못 찾았습니다 — 가드가 낡았습니다');
+    ok(!/spabar__meta/.test(tag), '문장이 숫자·상태용 데이터 폰트 자리에 들어 있습니다');
+    ok(/spabar__note/.test(tag), '문장이 설 자리가 없습니다');
+  });
+
+  it('⭐ 두 자리가 **실제로 다른 폰트**다 — 이름만 바꾸면 아무 일도 안 일어난다', () => {
+    /* 이 저장소가 이미 당한 자리입니다 (결함 164) — 규칙을 적었는데
+       그 값이 이미 같아서 아무것도 안 바뀌었습니다. */
+    const sheet = css();
+    const rule = (sel: string): string =>
+      new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`).exec(sheet)?.[1] ?? '';
+    const meta = rule('.spabar__meta');
+    const note = rule('.spabar__note');
+    ok(meta !== '', '.spabar__meta 를 못 찾았습니다 — 가드가 낡았습니다');
+    ok(note !== '', '.spabar__note 를 못 찾았습니다 — 가드가 낡았습니다');
+    ok(/font-family:\s*var\(--font-data\)/.test(meta), '데이터 칸이 데이터 폰트를 안 씁니다');
+    ok(
+      !/font-family:\s*var\(--font-data\)/.test(note),
+      '문장 칸도 데이터 폰트입니다 — 클래스만 둘이고 얼굴은 하나입니다',
+    );
+  });
+});

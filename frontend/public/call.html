@@ -22,8 +22,11 @@
 
   /* 통화 상태 한 줄. 이 화면에서 가장 먼저 읽히는 곳이다.
      ⚠️ 이건 `lede` 가 아니라 **지금 상태**입니다 — 설명문보다 진해야
-     합니다. 그래서 머리말 안이 아니라 그 아래 제 자리에 둡니다. */
-  #summary { font-weight: 600; color: var(--text); }
+     합니다. 그래서 머리말 안이 아니라 그 아래 제 자리에 둡니다.
+     ⚠️ **클래스가 `spabar__meta` 였습니다** (결함 278). 그 자리는 숫자와
+     상태 낱말용(모노·tabular)인데 여기 들어가는 것은 한글 **문장**이라,
+     낱말 사이가 벌어져 성기게 보였습니다. `spabar__note` 로 옮겼습니다 —
+     진하게 하는 것은 그 클래스가 `--text` 로 합니다. */
 
   /* 참가자. 얼굴이 없으므로 이름 첫 글자를 원으로 — 누가 있는지 한눈에.
      ⚠️ **줄마다 긋던 가로선을 걷었습니다** (브리프 §7). 세 사람이면
@@ -153,7 +156,7 @@
        화면에서 가장 먼저 읽히는 상태 줄이라 제목 옆에 앉습니다. -->
   <header class="spabar">
     <h1 class="spabar__title" id="ctx-title">통화</h1>
-    <span class="spabar__meta" id="summary">연결하는 중…</span>
+    <span class="spabar__note" id="summary">연결하는 중…</span>
     <span class="spabar__spacer"></span>
     <span class="by" id="sub" hidden></span>
   </header>
@@ -193,7 +196,10 @@
   <!-- v2 F2 — 하단 고정 컨트롤 바: 마이크 토글 · 녹음 · 나가기 -->
   <div class="actionbar">
     <div class="inner">
-      <button id="mic-toggle" type="button" aria-pressed="true" disabled>마이크 끄기</button>
+      <!-- ⚠️ 처음에는 **아직 안 열린** 상태입니다 (결함 277). 「마이크 끄기 ·
+             눌림」으로 시작하면, `paintMic` 이 돌기 전까지 낭독기는 켜져
+             있다고 읽습니다. 열리면 `paintMic` 이 드러냅니다. -->
+      <button id="mic-toggle" type="button" aria-pressed="false" hidden>마이크 켜기</button>
       <button id="record" class="primary">녹음 화면으로</button>
       <button id="leave" type="button">통화 나가기</button>
     </div>
