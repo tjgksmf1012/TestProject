@@ -51,6 +51,8 @@ interface Entry {
   label: string;
   who: string | null;
   target: string;
+  /** 사람이 읽을 이름. 못 찾으면 `target` 그대로 (결함 293). */
+  target_label: string;
   touches_contribution: boolean;
 }
 
@@ -234,7 +236,11 @@ function App() {
             {/* ⚠️ 사람이 없으면 시스템이 한 일입니다 (보존기간 만료 삭제 등).
                 "알 수 없음" 이라고 쓰면 고장으로 읽힙니다. */}
             <span className="awho">{entry.who ?? '시스템'}</span>
-            <span className="atarget">{entry.target}</span>
+            {/* ⛔ 예전에는 `{entry.target}` 이었습니다 (결함 293) — 화면이
+                스스로 「누가 언제 **무엇을** 바꿨는지」라고 적어 두고
+                「무엇」 자리에 `task:4` 를 찍었습니다. 그 업무 이름은
+                「접근성 점검」입니다. 이름은 서버가 줍니다. */}
+            <span className="atarget">{entry.target_label}</span>
           </li>
         ))}
       </ul>

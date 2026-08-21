@@ -4957,7 +4957,11 @@ class ActivityOut(BaseModel):
     #: 사람 말. ⚠️ 서버가 줍니다 — 화면이 두 번째 표를 만들지 않습니다.
     label: str
     who: str | None
+    #: 안 변하는 참조 (`task:4`). 화면에 **그대로 그리지 마십시오**.
     target: str
+    #: 사람이 읽을 이름 (결함 293). 못 찾으면 `target` 그대로입니다 —
+    #: 지운 업무를 「(없음)」 이라고 지어내지 않습니다.
+    target_label: str
     #: 사람의 기여 숫자를 건드린 기록인가. 분쟁에서 제일 먼저 볼 것입니다.
     touches_contribution: bool
 
@@ -4980,6 +4984,7 @@ def read_activity(
             label=entry.label,
             who=entry.who,
             target=entry.target,
+            target_label=entry.target_label,
             touches_contribution=entry.touches_contribution,
         )
         for entry in activity_service.recent(session, project_id, limit=limit)

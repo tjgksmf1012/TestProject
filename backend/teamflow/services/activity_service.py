@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -25,7 +26,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
+from teamflow.db import live
 from teamflow.db import models as m
+from teamflow.services.naming import meeting_label
 
 #: 한 번에 돌려주는 최대 건수. 없으면 프로젝트 한 해치가 한 번에 옵니다.
 MAX_ITEMS = 100
@@ -90,7 +93,20 @@ class Entry:
     #: ⚠️ **"알 수 없음" 같은 글자를 여기서 만들지 않습니다.** 그건 화면이
     #: 할 말이고, 여기서 만들면 그 말이 두 벌이 됩니다.
     who: str | None
+    #: 기계가 가리키는 자리. `task:4` · `members/1` 처럼 **안 변하는 참조**라
+    #: 감사 기록의 값 그대로입니다. 화면에 그대로 그리면 안 됩니다.
     target: str
+    #: 사람이 읽을 이름 (결함 293).
+    #:
+    #: ⚠️ 화면이 `target` 을 그대로 그리고 있었습니다. 활동 기록은 스스로
+    #: 「누가 언제 **무엇을** 바꿨는지」라고 말하는데, 「누가」와 「언제」는
+    #: 맞고 **「무엇」만 `task:4`** 였습니다 — 그 업무 이름은 「접근성
+    #: 점검」이고, `members/1` 은 「김민수」입니다.
+    #:
+    #: ⚠️ **못 찾으면 지어내지 않습니다.** 지운 업무·모르는 종류는 `target`
+    #: 을 그대로 돌려줍니다 — 지어낸 한국어보다 식별자가 정직합니다
+    #: (`describe_category`·`role_label` 과 같은 규칙).
+    target_label: str
     #: 기여 숫자를 건드린 기록인가.
     touches_contribution: bool
 
@@ -110,6 +126,8 @@ def recent(session: Session, project_id: int, *, limit: int = MAX_ITEMS) -> list
         .limit(capped)
     ).all()
 
+    labels = _target_labels(session, [row.target or "" for row, _ in rows])
+
     return [
         Entry(
             id=row.id,
@@ -118,7 +136,72 @@ def recent(session: Session, project_id: int, *, limit: int = MAX_ITEMS) -> list
             label=describe(row.action),
             who=who,
             target=row.target or "",
+            target_label=labels.get(row.target or "", row.target or ""),
             touches_contribution=row.action in TOUCHES_CONTRIBUTION,
         )
         for row, who in rows
     ]
+
+
+#: `종류/번호` 또는 `종류:번호`. ⚠️ 이 저장소는 두 구분자를 **둘 다** 씁니다
+#: (`task:4` · `members/1`) — 하나만 보면 절반을 못 읽습니다.
+_TARGET = re.compile(r"^(?P<kind>[a-z_]+)[/:](?P<id>\d+)$")
+
+
+def _target_labels(session: Session, targets: list[str]) -> dict[str, str]:
+    """`task:4` → 「접근성 점검」. **한 번에** 찾습니다 (줄마다 질의 금지).
+
+    ⚠️ 못 찾은 것은 **넣지 않습니다.** 부르는 쪽이 원래 값을 그대로 씁니다 —
+    지운 업무를 「(없음)」 이라고 적으면 그건 지어낸 말이고, 감사 기록에서
+    지어낸 말은 제일 나쁩니다.
+    """
+    by_kind: dict[str, set[int]] = {}
+    for raw in targets:
+        hit = _TARGET.match(raw)
+        if hit is not None:
+            by_kind.setdefault(hit["kind"], set()).add(int(hit["id"]))
+
+    out: dict[str, str] = {}
+
+    def _fill(kind: str, rows: list[tuple[int, str]]) -> None:
+        found = dict(rows)
+        for raw in targets:
+            hit = _TARGET.match(raw)
+            if hit is None or hit["kind"] != kind:
+                continue
+            name = found.get(int(hit["id"]))
+            if name:
+                out[raw] = name
+
+    task_ids = by_kind.get("task", set())
+    if task_ids:
+        # ⚠️ **지운 업무는 이름이 안 나옵니다** — `db/live.py` 한 곳을
+        #    거칩니다 (`TASK-003`). 이름이 없으면 `target` 이 그대로 남고,
+        #    그건 「그 업무는 지워졌다」는 정직한 답입니다. 여기서 조건을
+        #    직접 적으면 다음 사람이 빠뜨립니다.
+        _fill("task", list(session.execute(
+            select(m.Task.id, m.Task.title)
+            .where(m.Task.id.in_(task_ids), live.not_deleted())
+        ).all()))
+
+    # ⚠️ `members/1` 과 `users/1` 은 **같은 사람**을 다르게 가리킵니다
+    #    (한쪽은 프로젝트 구성원, 한쪽은 계정 삭제 기록). 한 번에 찾습니다.
+    people_ids = by_kind.get("members", set()) | by_kind.get("users", set())
+    if people_ids:
+        people = list(session.execute(
+            select(m.User.id, m.User.name).where(m.User.id.in_(people_ids))
+        ).all())
+        _fill("members", people)
+        _fill("users", people)
+
+    meeting_ids = by_kind.get("meetings", set())
+    if meeting_ids:
+        # 회의 이름은 한 벌에서 옵니다 (결함 285) — 제목이 없는 회의도
+        # 「제목 없는 회의 #4」로 부릅니다.
+        _fill("meetings", [
+            (mid, meeting_label(title, mid))
+            for mid, title in session.execute(
+                select(m.Meeting.id, m.Meeting.title).where(m.Meeting.id.in_(meeting_ids))
+            ).all()
+        ])
+    return out
