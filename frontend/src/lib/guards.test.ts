@@ -4393,26 +4393,49 @@ describe('⛔ 달력은 **한 벌**이다 (결함 246)', () => {
 
      ⚠️ 판단이 화면에 있던 것이기도 합니다 — `Home.tsx` 의 `fmtDate`,
      `Contributions.tsx` 의 `fmtComputedAt`. */
-  it('⭐ SPA 화면이 **브라우저 달력**으로 날짜를 짓지 않는다', () => {
-    const base = join(ROOT, '..', 'webapp', 'src');
-    const files: string[] = [];
-    const walk = (dir: string): void => {
+  it('⭐ 화면이 **브라우저 달력**으로 날짜를 짓지 않는다', () => {
+    /* ⚠️ 이 가드는 **`webapp/src` 만** 걷고 있었습니다 (결함 286).
+       레거시 화면 열셋(`src/demo`)은 자동 테스트가 **하나도 없어서**
+       바로 이 파일이 지켜야 하는 자리인데, 찾는 자리에서 통째로
+       빠져 있었습니다 — 활동 화면에 `new Date(at).getMonth()` 를 심고
+       번들까지 다시 만들었더니 **1708개가 전부 통과**했습니다.
+       요구가 아니라 **찾는 자리**가 낡은 것입니다. */
+    const roots = [
+      { label: 'webapp', base: join(ROOT, '..', 'webapp', 'src') },
+      { label: 'demo', base: DEMO },
+      { label: 'lib', base: LIB },
+    ];
+    const files: { label: string; rel: string; full: string }[] = [];
+    const walk = (label: string, base: string, dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
-        if (entry.isDirectory()) walk(full);
-        else if (entry.name.endsWith('.tsx') || entry.name.endsWith('.ts')) files.push(full);
+        if (entry.isDirectory()) walk(label, base, full);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.includes('.test.')) {
+          files.push({ label, rel: full.slice(base.length + 1), full });
+        }
       }
     };
-    walk(base);
+    for (const { label, base } of roots) walk(label, base, base);
+
     const offenders: string[] = [];
-    for (const file of files) {
-      const code = codeOf(readFileSync(file, 'utf8'));
-      // 브라우저의 지역 달력을 꺼내 쓰는 자리들.
-      for (const m of code.matchAll(/\.(getMonth|getDate|getFullYear|getHours|getMinutes)\(/g)) {
-        offenders.push(`${file.slice(base.length + 1)}: ${m[1]}()`);
+    for (const { label, rel, full } of files) {
+      /* 팀 달력을 **만드는** 곳 한 벌은 예외입니다 — 여기가 아니면
+         어디서도 시간대를 다룰 수 없습니다. */
+      if (rel.replace(/\\/g, '/') === 'time/calendar.ts') continue;
+      const code = codeOf(readFileSync(full, 'utf8'));
+      for (const m of code.matchAll(/\.(getMonth|getDate|getFullYear|getHours|getMinutes|getDay)\(/g)) {
+        offenders.push(`${label}/${rel}: ${m[1]}()`);
       }
     }
-    ok(files.length > 0, 'SPA 파일을 하나도 못 찾았습니다 — 가드가 헛돕니다');
+    ok(files.length > 0, '화면 파일을 하나도 못 찾았습니다 — 가드가 헛돕니다');
+    /* 세 뿌리가 **다 걸렸는지** 봅니다. 한 뿌리를 못 찾으면 그 뿌리는
+       조용히 감시 밖입니다 — 이 결함이 바로 그것이었습니다. */
+    for (const { label } of roots) {
+      ok(
+        files.some((f) => f.label === label),
+        `${label} 을 한 파일도 못 걷었습니다 — 가드가 그 구역에 눈을 감습니다`,
+      );
+    }
     ok(
       offenders.length === 0,
       `브라우저 달력으로 날짜를 짓고 있습니다 — 팀 달력(\`@lib/time/calendar\`)을 쓰세요\n    ${offenders.join('\n    ')}`,
