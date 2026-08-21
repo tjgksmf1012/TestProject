@@ -1,5 +1,7 @@
 import * as Popover from '@radix-ui/react-popover';
 
+import { plainText } from '@lib/ui/plain.ts';
+
 // 이유는 **부르면 온다**.
 //
 // ## 정보를 지우는 것이 아니라 옮기는 것입니다
@@ -54,7 +56,7 @@ export function Why({ about, lines, countsAs = '이유' }: WhyProps) {
           <p className="why__title">{about}</p>
           {lines.map((line) => (
             <p className="why__line" key={line}>
-              {line.replace(/\*\*/g, '')}
+              {plainText(line)}
             </p>
           ))}
           <Popover.Arrow className="why__arrow" />

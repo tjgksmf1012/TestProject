@@ -78,6 +78,7 @@ import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { mountEvidence, openEvidence } from './evidence.tsx';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
+import { plainText } from '../lib/ui/plain.ts';
 
 interface Member {
   user_id: number;
@@ -459,7 +460,7 @@ function SpeakingShares({ data }: { data: Speaking | null }) {
     <section className="shares">
       <h2 className="minutes-head">누가 얼마나 말했나</h2>
       {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
-      <p className="text-text-subtle text-[12px]">{SHARE_NOTE.replace(/\*\*/g, '')}</p>
+      <p className="text-text-subtle text-[12px]">{plainText(SHARE_NOTE)}</p>
 
       {why !== null ? (
         // ⚠️ 빈 칸으로 두지 않습니다 — "고장" 이나 "다들 말을 안 했다" 로

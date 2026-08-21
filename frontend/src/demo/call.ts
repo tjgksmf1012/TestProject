@@ -31,6 +31,7 @@ import { escapeHtml } from '../lib/html.ts';
 import { tryGet, unreachableText } from '../lib/http/send.ts';
 import { showNote } from '../lib/ui/failure.ts';
 import { bootApp } from './pwa.ts';
+import { plainText } from '../lib/ui/plain.ts';
 
 const params = new URLSearchParams(location.search);
 // ⚠️ 주소창의 `?api=` 를 그대로 쓰면 회의 음성이 어디로 가는지를 링크
@@ -126,7 +127,7 @@ function render(): void {
 
   const problems = callWarnings(serverWarnings, views, micReady);
   $('warnings').innerHTML = problems
-    .map((w) => `<li>${escapeHtml(w.replace(/\*\*/g, ''))}</li>`)
+    .map((w) => `<li>${escapeHtml(plainText(w))}</li>`)
     .join('');
 }
 

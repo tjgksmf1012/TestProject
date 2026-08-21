@@ -328,6 +328,23 @@ export default function Lobby() {
                 </Problem>
               </p>
             )}
+            {/* ⛔ **눈금이 사람마다 한 벌씩 있었습니다** (결함 261). 셋이면
+                같은 자(`0분 7 13 20 27 33 40분`)가 세 번 그려집니다 — 같은
+                회의의 같은 시간축인데요. 값이 아니라 **잉크만** 세 배였고,
+                이 화면에서 제일 반복되는 글자였습니다. 축은 위에 **한 벌**만
+                두고, 줄에는 막대만 그립니다.
+                ⚠️ 같은 격자(`.lrow`)를 써야 축과 막대가 어긋나지 않습니다. */}
+            {anyJoined && (
+              <div className="lrow lrow--axis" aria-hidden="true">
+                <span />
+                <div className="ribbon-axis">
+                  {ticks.map((t) => (
+                    <span key={t}>{t}</span>
+                  ))}
+                </div>
+                <span />
+              </div>
+            )}
             {statuses.map((status) => {
               const track = trackList?.find((t) => t.user_id === status.userId);
               const gapSpans = diagram.gaps.get(status.userId) ?? [];
@@ -349,7 +366,6 @@ export default function Lobby() {
                       <TrackRibbon
                         size="lg"
                         segments={segmentsFor(status.userId)}
-                        ticks={ticks}
                         label={`${status.name} — ${status.message}`}
                       />
                     )}

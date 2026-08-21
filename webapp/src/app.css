@@ -115,6 +115,9 @@
   --font-sans:    "Pretendard Variable", Pretendard, -apple-system,
                   BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
   --font-display: "Wanted Sans Variable", "Wanted Sans", var(--font-sans);
+  /* ⚠️ **이 집안에는 400·500 두 벌뿐입니다** (위 `@font-face`). 600·700 을
+     적으면 브라우저가 획을 번지게 해서 만들어 냅니다 — `guards.test.ts` 가
+     모노 규칙의 무게를 셉니다 (결함 259). */
   --font-mono:    "JetBrains Mono", "IBM Plex Mono", ui-monospace,
                   "SF Mono", Consolas, monospace;
 
@@ -1393,7 +1396,13 @@ details.disc > .disc__body {
    폭은 전부 4px 격자 위입니다 (120·100·260·60·140). */
 .mrow {
   display: grid;
-  grid-template-columns: 7.5rem minmax(0, 1fr) 6.25rem 16.25rem 3.75rem 8.75rem;
+  /* ⚠️ **남는 폭을 제목 칸이 다 먹고 있었습니다** (결함 260). 1368px 짜리
+     본문에서 제목 칸이 490px 이 되는데 제목은 110px 이라, 제목과 날짜
+     사이에 **380px 짜리 구멍**이 생겼습니다 — 한 줄을 읽는 데 눈이 두 번
+     건너뜁니다. 이제 제목은 제 크기만 쓰고, 남는 폭은 **날짜 칸 뒤**로
+     보냅니다. 오른쪽 셋(리본·%·행동)은 그대로 끝에 붙어 있어 세로로
+     훑을 때 우측 끝이 흔들리지 않습니다 (v2 F6 의 결정). */
+  grid-template-columns: 7.5rem minmax(0, max-content) minmax(6.25rem, 1fr) 16.25rem 3.75rem 8.75rem;
   gap: var(--sp-6);
   align-items: center;
   padding: var(--sp-4) 0;
@@ -1596,6 +1605,9 @@ details.disc > .disc__body {
   border-bottom: 1px dashed var(--c-line);
 }
 .lrow:last-of-type { border-bottom: 0; }
+/* 축은 **한 벌**입니다 (결함 261). 줄이 아니라 머리이므로 선도 여백도 없이. */
+.lrow--axis { padding: 0 0 var(--sp-2); border-bottom: 0; }
+.lrow--axis .ribbon-axis { margin-bottom: 0; }
 /* 아무도 아직 참가 안 했으면 **레인 칸 자체가 없습니다** (v2 F3·F5).
    그릴 게 없는데 칸만 남겨 두면 이름과 상태 낱말 사이가 700px 비고,
    행이 "뭔가 빠졌다" 처럼 보입니다. 한 명이라도 참가하는 순간 위 규칙의
@@ -1733,7 +1745,11 @@ details.disc > .disc__body {
   /* 28px / 라벨 11px = 2.55 — 대시보드 통설의 하한 2.5:1 을 넘깁니다.
      (22px 로 뒀다가 2.0 이라 미달이었습니다. 4px 격자 위 값으로 올림) */
   font-size: 1.75rem;
-  font-weight: var(--fw-semibold);
+  /* ⛔ **여기 600 이 적혀 있었습니다** (결함 259). JetBrains Mono 는 이
+     저장소에 400·500 **두 벌만** 있습니다. 없는 무게를 적으면 브라우저가
+     획을 번지게 해서 만들어 냅니다(합성 볼드) — 이 화면에서 제일 큰
+     28px 숫자가 그렇게 그려지고 있었습니다. 있는 무게로 적습니다. */
+  font-weight: var(--fw-medium);
   letter-spacing: -0.02em;
   color: var(--c-ink);
   white-space: nowrap;
@@ -1828,7 +1844,8 @@ a.chain__link:hover { border-color: var(--c-evidence); }
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--fs-14);
-  font-weight: var(--fw-semibold);
+  /* 모노에는 600 이 없습니다 (결함 259). */
+  font-weight: var(--fw-medium);
   color: var(--c-ink);
   line-height: 1.2;
   min-height: 1.2em;

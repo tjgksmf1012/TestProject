@@ -12,6 +12,7 @@ import {
 import type { Member } from '../api/types.ts';
 import { ROLE_OPTIONS, problemWith, roleSummary, sumOf, toPayload } from '@lib/contribution/roles.ts';
 import { describeRoles } from '@lib/contribution/roles.ts';
+import { plainText } from '@lib/ui/plain.ts';
 import { describeHealth, describeHealthFailure } from '@lib/github/health.ts';
 import {
   disconnectConfirm,
@@ -520,14 +521,19 @@ function RepoSection({
       <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
       {view !== null && (
         <div className={view.tone === 'ok' ? 'card' : 'notice'} style={{ marginTop: 'var(--sp-5)' }} role="note">
+          {/* ⛔ **마크다운 표시가 화면까지 나왔습니다** (결함 262).
+              서버 문구에는 강조(`**…**`)와 코드 표시(백틱)가 섞여 있고,
+              그건 같은 문장이 마크다운 보고서로도 나가기 때문입니다.
+              걷어낼 자리는 화면이고, 그 일은 `@lib` 의 `plainText` 한
+              벌이 합니다 — 예전에는 세 벌이 있었고 셋 다 백틱을 놓쳤습니다. */}
           <p>
-            <strong>{view.headline}</strong>
+            <strong>{plainText(view.headline)}</strong>
           </p>
-          <p className="t13">{view.detail}</p>
-          {view.nextStep !== null && <p className="t13">{view.nextStep}</p>}
+          <p className="t13">{plainText(view.detail)}</p>
+          {view.nextStep !== null && <p className="t13">{plainText(view.nextStep)}</p>}
           {view.warnings.map((w) => (
             <p className="t12 muted" key={w}>
-              {w}
+              {plainText(w)}
             </p>
           ))}
           {view.activity !== '' && <p className="t12 num">{view.activity}</p>}

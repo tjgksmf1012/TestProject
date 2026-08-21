@@ -4751,6 +4751,89 @@ describe('⛔ 되돌릴 수 없는 것은 **묻고, 보이고, 좁아야** 한�
   });
 });
 
+describe('⛔ 글자가 있는 그대로 보여야 한다 (결함 259·261·262)', () => {
+  const css = (): string => readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
+
+  it('⭐ 없는 **무게를 지어내지 않는다** (결함 259)', () => {
+    /* JetBrains Mono 는 이 저장소에 400·500 **두 벌만** 있습니다
+       (`@font-face` 둘). 600 을 적으면 브라우저가 획을 번지게 해서 만들어
+       냅니다 — 기여도 화면의 28px 숫자와 칸반의 근거 개수가 그렇게 그려지고
+       있었습니다.
+
+       ⚠️ **선언된 얼굴을 세어서** 판정합니다. 나중에 600 짜리 파일을
+       들이면 이 가드는 스스로 조용해져야 합니다. */
+    const sheet = css();
+    const faces = new Set(
+      [...sheet.matchAll(/@font-face\s*\{[^}]*JetBrains Mono[^}]*\}/g)].flatMap((m) =>
+        [...m[0].matchAll(/font-weight:\s*(\d+)/g)].map((w) => Number(w[1])),
+      ),
+    );
+    ok(faces.size > 0, 'JetBrains Mono 의 `@font-face` 를 못 찾았습니다 — 가드가 헛돕니다');
+    const WEIGHT: Record<string, number> = {
+      '--fw-normal': 400,
+      '--fw-medium': 500,
+      '--fw-semibold': 600,
+      '--fw-bold': 700,
+    };
+    const offenders: string[] = [];
+    for (const m of sheet.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const body = m[2] ?? '';
+      if (!/font-family:\s*var\(--font-mono\)/.test(body)) continue;
+      const weight = /font-weight:\s*(?:var\((--fw-[\w-]+)\)|(\d+))/.exec(body);
+      if (weight === null) continue;
+      const value = weight[1] !== undefined ? (WEIGHT[weight[1]] ?? 0) : Number(weight[2]);
+      if (value > 0 && !faces.has(value)) {
+        offenders.push(`${(m[1] ?? '').trim().split('\n').pop()} @${value}`);
+      }
+    }
+    strictEqual(
+      offenders.join(' · '),
+      '',
+      `모노에 없는 무게입니다 — 브라우저가 획을 번지게 해서 만들어 냅니다 (있는 것: ${[...faces].join('·')})`,
+    );
+  });
+
+  it('⭐ 시간축은 **한 벌**이다 (결함 261)', () => {
+    /* 참가자 셋이면 같은 자(`0분 7 13 20 27 33 40분`)가 세 번 그려졌습니다.
+       같은 회의의 같은 시간축인데요 — 값이 아니라 **잉크만** 세 배였습니다. */
+    const code = codeOf(
+      readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx'), 'utf8'),
+    );
+    const map = code.indexOf('statuses.map(');
+    ok(map > 0, '참가자 줄을 그리는 자리를 못 찾았습니다 — 가드가 헛돕니다');
+    const inRows = [...code.matchAll(/<TrackRibbon[\s\S]*?\/>/g)].filter(
+      (m) => (m.index ?? 0) > map,
+    );
+    ok(inRows.length > 0, '참가자 줄에 막대가 없습니다 — 가드가 헛돕니다');
+    for (const m of inRows) {
+      ok(!/\bticks=/.test(m[0]), '사람마다 눈금을 그립니다 — 축은 위에 한 벌만 둡니다');
+    }
+    ok(/ribbon-axis/.test(code), '공용 축을 안 그립니다');
+  });
+
+  it('⭐ 마크다운 표시를 **화면에서 걷는 곳이 한 벌**이다 (결함 262)', () => {
+    /* 그 일을 하는 코드가 세 벌 있었고 셋 다 `**` 만 지우고 백틱은 그대로
+       뒀습니다. 설정 화면에 「`GITHUB_WEBHOOK_SECRET`」 이 그대로 떠
+       있었습니다 — 한국어 문장 안의 백틱은 그냥 깨진 글자입니다. */
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith('.test.ts')) files.push(full);
+      }
+    };
+    walk(join(ROOT, 'src', 'demo'));
+    walk(join(ROOT, '..', 'webapp', 'src'));
+    const homemade = files.filter((f) => /replace\(\/\\\*\\\*\/g/.test(codeOf(readFileSync(f, 'utf8'))));
+    strictEqual(
+      homemade.map((f) => f.split('/').pop()).join(' · '),
+      '',
+      '화면이 표시를 직접 걷습니다 — `@lib` 의 `plainText` 한 벌을 쓰세요',
+    );
+  });
+});
+
 describe('⛔ 녹음이 **혼자 멈췄을 때**도 끝까지 간다 (결함 240·241)', () => {
   /* 회의 도중 누가 동의를 철회하면 서버는 청크마다 403 을 줍니다
      (`recording_service.store_chunk` 가 청크마다 동의를 다시 봅니다).

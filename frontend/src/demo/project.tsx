@@ -79,6 +79,7 @@ import {
 } from '../lib/project/roles.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
+import { plainText } from '../lib/ui/plain.ts';
 
 const params = new URLSearchParams(location.search);
 // ⚠️ 주소창의 `?api=` 를 그대로 쓰면 **비밀번호와 회의 음성이 어디로
@@ -193,7 +194,7 @@ function ProjectHealth({ data }: { data: Analytics | null }) {
 
       <h3 className="sub-head">지금 맡고 있는 일</h3>
       {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
-      <p className="sub">{LOAD_NOTE.replace(/\*\*/g, '')}</p>
+      <p className="sub">{plainText(LOAD_NOTE)}</p>
       <ul className="loads">
         {data.load.map((row) => (
           <li key={row.user_id ?? 'none'} className={row.user_id === null ? 'lnone' : undefined}>
