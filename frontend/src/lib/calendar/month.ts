@@ -224,3 +224,99 @@ export function dayAriaLabel(cell: DayCell): string {
     .map((item) => `${describeKind(item.kind)} ${item.title}`)
     .join(', ')}`;
 }
+
+// ══════════════════════════════════════════════════════════════
+// 비어 있을 때 할 말
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 비어 있는 자리에 적을 세 줄.
+ *
+ * ⛔ **격자에 뱃지가 보이는데 「없습니다 · 만드세요」 라고 시키면 안 됩니다.**
+ * 8월을 열면 격자 끝 줄에 9월 초 나흘이 붙어 보이고, 씨앗 프로젝트에서는
+ * 거기에 회의 넷과 마감 하나가 뱃지로 떠 있었습니다. 그런데 바로 아래
+ * 목록은 「이 달에는 잡힌 일이 없습니다 — 일정은 자동으로 생기지 않습니다.
+ * 칸반에서 업무에 마감일을 주세요」 라고 **없다고 단언하고 이미 있는 것을
+ * 만들라고 시켰습니다**(결함 294). 한 화면이 서로 반대되는 말을 합니다.
+ *
+ * 「이 달에는 없다」 자체는 참입니다 — 거짓말은 **이유와 다음 할 일**
+ * 쪽입니다. 그래서 그 두 줄만 격자가 아는 것으로 바꿉니다.
+ */
+export interface EmptyNote {
+  what: string;
+  why: string;
+  how: string;
+}
+
+/** `2026-09-01` → `9월 1일`. 못 읽으면 원문 그대로. */
+export function describeDate(date: string): string {
+  const hit = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (hit === null) return date;
+  return `${Number(hit[2])}월 ${Number(hit[3])}일`;
+}
+
+function dayNumber(date: string): number {
+  return Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10)));
+}
+
+/**
+ * 격자에서 일이 있는 칸 중 기준 날짜에 **가장 가까운** 것. 없으면 `null`.
+ *
+ * ⚠️ 같은 거리면 **앞날**을 고릅니다. 지나간 것을 가리키면 "가서 보라" 는
+ * 말이 쓸모없어집니다.
+ */
+export function nearestDayWithItems(cells: readonly DayCell[], from: string): DayCell | null {
+  const base = dayNumber(from);
+  let best: DayCell | null = null;
+  let bestGap = Number.POSITIVE_INFINITY;
+  let bestAhead = false;
+  for (const cell of cells) {
+    if (cell.items.length === 0) continue;
+    const delta = dayNumber(cell.date) - base;
+    const gap = Math.abs(delta);
+    const ahead = delta >= 0;
+    if (gap < bestGap || (gap === bestGap && ahead && !bestAhead)) {
+      best = cell;
+      bestGap = gap;
+      bestAhead = ahead;
+    }
+  }
+  return best;
+}
+
+/**
+ * 이 격자에서 「비었습니다」 라고 말할 때 함께 할 말.
+ *
+ * `picked` 가 `null` 이면 달 전체가, 아니면 고른 날 하나가 빈 것입니다.
+ */
+export function emptyNote(cells: readonly DayCell[], picked: DayCell | null): EmptyNote {
+  const what = picked === null ? '이 달에는 잡힌 일이 없습니다' : '이 날에는 잡힌 일이 없습니다';
+  const from = picked?.date ?? cells.find((cell) => cell.inMonth)?.date ?? cells[0]?.date ?? '';
+  const near = from === '' ? null : nearestDayWithItems(cells, from);
+
+  // 격자가 통째로 비었을 때만 "만드세요" 가 참입니다.
+  if (near === null) {
+    return {
+      what,
+      why: '일정은 자동으로 생기지 않습니다 — 업무 마감일이나 회의에서 옵니다.',
+      how: '아래에서 회의 일정을 잡거나, 칸반에서 업무에 마감일을 주세요.',
+    };
+  }
+
+  const when = describeDate(near.date);
+  if (near.inMonth) {
+    // 고른 날만 비었습니다 — 이 달에는 있습니다.
+    return {
+      what,
+      why: `이 달에 잡힌 일은 있습니다 — 가장 가까운 것은 ${when}입니다.`,
+      how: '[이 달 전체 보기]를 누르면 이 달에 있는 일이 모두 나옵니다.',
+    };
+  }
+
+  const ahead = dayNumber(near.date) >= dayNumber(from);
+  return {
+    what,
+    why: `가장 가까운 일은 ${when}입니다 — 격자 ${ahead ? '끝' : '앞'}의 흐린 칸에 이미 보입니다.`,
+    how: `[${ahead ? '다음달' : '지난달'}]을 누르면 그 달이 열립니다.`,
+  };
+}

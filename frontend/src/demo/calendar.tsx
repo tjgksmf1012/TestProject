@@ -22,6 +22,7 @@ import {
   dayOf,
   describeKind,
   describeMonth,
+  emptyNote,
   hrefFor,
   isOverdue,
   itemsInMonth,
@@ -265,16 +266,13 @@ function App() {
             </div>
 
             {listed.length === 0 ? (
-              <RawHtml
-                html={emptyHtml({
-                  what:
-                    pickedCell === null
-                      ? '이 달에는 잡힌 일이 없습니다'
-                      : '이 날에는 잡힌 일이 없습니다',
-                  why: '일정은 자동으로 생기지 않습니다 — 업무 마감일이나 회의에서 옵니다.',
-                  how: '아래에서 회의 일정을 잡거나, 칸반에서 업무에 마감일을 주세요.',
-                })}
-              />
+              /* ⛔ **격자에 뱃지가 보이는데 「없습니다 · 만드세요」 라고
+                 시키지 않습니다** (결함 294). 8월을 열면 격자 끝 줄에 9월
+                 초 나흘이 붙어 보이는데, 씨앗 프로젝트는 거기에 회의 넷과
+                 마감 하나가 떠 있었고 이 상자는 「칸반에서 업무에 마감일을
+                 주세요」 라고 했습니다 — 이미 있는 것을 만들라고 시킨
+                 것입니다. 무슨 말을 할지는 격자가 아는 것에서 정합니다. */
+              <RawHtml html={emptyHtml(emptyNote(cells, pickedCell))} />
             ) : (
               <ul className="ilist">
                 {listed.map((thing, i) => {

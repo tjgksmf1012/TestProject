@@ -5,7 +5,10 @@ import {
   dayAriaLabel,
   describeKind,
   describeMonth,
+  describeDate,
   dayOf,
+  emptyNote,
+  nearestDayWithItems,
   hrefFor,
   isOverdue,
   itemsInMonth,
@@ -188,5 +191,84 @@ describe('한 칸 안의 것', () => {
   it('빈 날은 숫자만 읽는다', () => {
     const cells = monthGrid(2026, 9, []);
     strictEqual(dayAriaLabel(cells.find((c) => c.date === '2026-09-10')!), '10일');
+  });
+});
+
+describe('비어 있을 때 할 말 (결함 294)', () => {
+  const at = (kind: string, iso: string, title: string): CalendarItem => ({
+    kind,
+    at: iso,
+    title,
+    task_id: null,
+    meeting_id: 1,
+    who: null,
+    done: false,
+  });
+
+  // 재현한 그림: 8월을 열면 격자 끝 줄에 9월 1·2·3·5 가 붙어 보이고
+  // 거기에 회의 넷이 뱃지로 떠 있었습니다. 8월 자체는 비어 있습니다.
+  const august = () =>
+    monthGrid(2026, 8, [
+      at('meeting_held', '2026-09-01T10:00:00Z', '1주차 정기회의'),
+      at('meeting_held', '2026-09-02T10:00:00Z', '중간발표 리허설'),
+      at('meeting_held', '2026-09-03T10:00:00Z', '제목 없는 회의 #4'),
+      at('meeting_held', '2026-09-05T10:00:00Z', 'DB 스키마 확정 논의'),
+    ]);
+
+  it('⭐ 격자에 뱃지가 보이면 「만드세요」 라고 시키지 않는다', () => {
+    const cells = august();
+    // 심은 것이 실제로 심겼는지부터 — 이 달은 비었고 이웃 칸에는 있습니다.
+    strictEqual(itemsInMonth(cells).length, 0);
+    strictEqual(
+      cells.filter((cell) => !cell.inMonth && cell.items.length > 0).length,
+      4,
+    );
+
+    const note = emptyNote(cells, null);
+    strictEqual(note.what, '이 달에는 잡힌 일이 없습니다');
+    // ⛔ 이 두 줄이 결함 294 의 거짓말입니다.
+    strictEqual(note.why.includes('일정은 자동으로 생기지 않습니다'), false);
+    strictEqual(note.how.includes('칸반에서 업무에 마감일을 주세요'), false);
+    // 대신 격자가 아는 사실을 말합니다.
+    strictEqual(note.why, '가장 가까운 일은 9월 1일입니다 — 격자 끝의 흐린 칸에 이미 보입니다.');
+    strictEqual(note.how, '[다음달]을 누르면 그 달이 열립니다.');
+  });
+
+  it('격자가 통째로 비었을 때만 「만드세요」 가 참이다', () => {
+    const note = emptyNote(monthGrid(2026, 8, []), null);
+    strictEqual(note.why, '일정은 자동으로 생기지 않습니다 — 업무 마감일이나 회의에서 옵니다.');
+    strictEqual(note.how, '아래에서 회의 일정을 잡거나, 칸반에서 업무에 마감일을 주세요.');
+  });
+
+  it('앞쪽 이웃 칸이면 [지난달] 을 가리킨다', () => {
+    // 9월을 열면 격자 앞 줄에 8월 31일이 붙습니다.
+    const cells = monthGrid(2026, 9, [at('meeting_held', '2026-08-31T10:00:00Z', '지난 회의')]);
+    strictEqual(itemsInMonth(cells).length, 0);
+    const note = emptyNote(cells, null);
+    strictEqual(note.why, '가장 가까운 일은 8월 31일입니다 — 격자 앞의 흐린 칸에 이미 보입니다.');
+    strictEqual(note.how, '[지난달]을 누르면 그 달이 열립니다.');
+  });
+
+  it('고른 날만 비었으면 이 달 전체를 가리킨다', () => {
+    const cells = monthGrid(2026, 9, [at('meeting_held', '2026-09-10T10:00:00Z', '회의')]);
+    const picked = cells.find((cell) => cell.date === '2026-09-04')!;
+    const note = emptyNote(cells, picked);
+    strictEqual(note.what, '이 날에는 잡힌 일이 없습니다');
+    strictEqual(note.why, '이 달에 잡힌 일은 있습니다 — 가장 가까운 것은 9월 10일입니다.');
+    strictEqual(note.how, '[이 달 전체 보기]를 누르면 이 달에 있는 일이 모두 나옵니다.');
+  });
+
+  it('같은 거리면 앞날을 고른다 — 지나간 것을 가리키면 쓸모가 없다', () => {
+    const cells = monthGrid(2026, 9, [
+      at('meeting_held', '2026-09-08T10:00:00Z', '지난 것'),
+      at('meeting_held', '2026-09-12T10:00:00Z', '올 것'),
+    ]);
+    strictEqual(nearestDayWithItems(cells, '2026-09-10')?.date, '2026-09-12');
+  });
+
+  it('날짜를 사람 말로. 못 읽으면 원문 그대로', () => {
+    strictEqual(describeDate('2026-09-01'), '9월 1일');
+    strictEqual(describeDate('2026-12-25'), '12월 25일');
+    strictEqual(describeDate('없음'), '없음');
   });
 });
