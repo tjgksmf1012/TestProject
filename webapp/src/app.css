@@ -466,6 +466,33 @@ button.rail__item {
     padding: var(--sp-2) 0;
   }
   .rail__brand, .rail__spacer { display: none; }
+
+  /* ⛔ **프로젝트 칩이 가로 탭바 안에서 세로로 쌓였습니다** (결함 281).
+     `.rail` 만 가로로 눕히고 `.prail` 은 그대로 뒀더니, 칩 기둥의 높이가
+     **탭바 전체의 높이를 끌고 갔습니다.** 재 봤습니다 (720×450, 확대 200%) —
+
+         프로젝트 2개  탭바 114px
+         프로젝트 4개  탭바 **210px**  = 창 높이의 47%
+
+     하나 늘 때마다 48px 씩 자라, 여섯이면 화면을 통째로 덮습니다. 내용은
+     위쪽 240px 로 밀려 있었습니다. 넘침 감사로는 **안 잡힙니다** — 아무것도
+     잘리지 않고 바가 자랄 뿐입니다. 눈으로 보고 잡았습니다.
+
+     칩도 같이 눕히고, 많아지면 **옆으로** 스크롤합니다 — 탭바 높이는
+     프로젝트 수와 무관해집니다. */
+  .prail {
+    flex-direction: row;
+    padding-bottom: 0;
+    margin-bottom: 0;
+    padding-right: var(--sp-3);
+    margin-right: var(--sp-2);
+    border-bottom: 0;
+    border-right: 1px solid var(--c-line);
+    overflow-y: visible;
+    overflow-x: auto;
+    /* 탭 다섯을 밀어내지 않도록 제 몫만 씁니다. */
+    max-width: 38%;
+  }
   .rail__item { border-left: 0; border-top: 2px solid transparent; min-width: 64px; }
   /* ⛔ **로그아웃의 클릭 상자가 탭바의 절반을 넘었습니다** (결함 258).
      세로 레일에서는 `button.rail__item { width: 100% }` 가 72px 열을

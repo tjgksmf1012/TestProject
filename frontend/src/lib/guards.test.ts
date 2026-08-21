@@ -6393,3 +6393,64 @@ describe('⛔ 모달은 손으로 짓지 않는다 (결함 280)', () => {
     );
   });
 });
+
+describe('⛔ 탭바 높이가 프로젝트 수를 따라가지 않는다 (결함 281)', () => {
+  /* 확대 200%(720×450)로 보다가 **눈으로** 잡았습니다. 좁은 폭에서
+     `.rail` 은 가로 탭바로 눕는데 `.prail`(프로젝트 칩)은 그대로 세로로
+     쌓여서, 칩 기둥의 높이가 **탭바 전체의 높이를 끌고 갔습니다.**
+
+         프로젝트 2개  탭바 114px
+         프로젝트 4개  탭바 **210px**   = 창 높이의 47%
+         프로젝트 10개 (고치기 전이라면 ~450px — 화면을 통째로)
+
+     ⚠️ **넘침 감사로는 안 잡힙니다.** 아무것도 잘리지 않고 바가 자랄
+     뿐입니다. 열두 화면 넘침 0건 옆에서 이게 있었습니다. */
+  const narrow = (): string => {
+    const css = readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
+    const at = css.indexOf('@media (max-width: 1023.5px)');
+    ok(at >= 0, '좁은 폭 규칙을 못 찾았습니다 — 가드가 낡았습니다');
+    // 중괄호를 세어 그 블록만 떼어 냅니다.
+    let depth = 0;
+    let i = css.indexOf('{', at);
+    const start = i;
+    for (; i < css.length; i++) {
+      if (css[i] === '{') depth += 1;
+      else if (css[i] === '}') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    return css.slice(start, i);
+  };
+
+  it('⭐ 칩이 탭바와 **같은 축**으로 눕는다', () => {
+    const block = narrow();
+    const rule = (sel: string): string =>
+      new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`).exec(block)?.[1] ?? '';
+    const rail = rule('.rail');
+    const prail = rule('.prail');
+    ok(rail !== '', '좁은 폭의 `.rail` 규칙이 없습니다 — 가드가 낡았습니다');
+    ok(
+      /flex-direction:\s*row/.test(rail),
+      '좁은 폭에서 레일이 안 눕습니다 — 가드가 낡았습니다',
+    );
+    ok(
+      prail !== '' && /flex-direction:\s*row/.test(prail),
+      '칩만 세로로 쌓입니다 — 그 기둥의 높이가 탭바 전체를 끌고 갑니다',
+    );
+    /* 많아지면 **옆으로** 흘러야 탭바 높이가 프로젝트 수와 무관해집니다.
+       세로 스크롤로 두면 다시 높이가 자랍니다. */
+    ok(/overflow-x:\s*auto|overflow-x:\s*scroll/.test(prail), '칩이 많아지면 갈 곳이 없습니다');
+    ok(
+      !/overflow-y:\s*auto/.test(prail),
+      '칩이 아직 세로로 스크롤합니다 — 가로 탭바에서는 높이가 자랍니다',
+    );
+  });
+
+  it('⭐ 넓은 폭은 그대로 세로다 — 좁은 폭 고치다 넓은 폭을 눕히지 않는다', () => {
+    const css = readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
+    const base = /^\.prail\s*\{([^}]*)\}/m.exec(css)?.[1] ?? '';
+    ok(base !== '', '기본 `.prail` 규칙을 못 찾았습니다 — 가드가 낡았습니다');
+    ok(/flex-direction:\s*column/.test(base), '넓은 폭에서도 칩이 가로로 눕습니다');
+  });
+});
