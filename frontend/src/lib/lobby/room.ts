@@ -208,7 +208,22 @@ export function canStart(roster: readonly RosterEntry[]): boolean {
 // 회의 중 — 누구의 트랙이 망가지고 있는가
 // ══════════════════════════════════════════════════════════════
 
-export type TrackVerdict = 'healthy' | 'at_risk' | 'broken' | 'not_joined' | 'finished';
+/**
+ * ⚠️ `unknown` 은 **못 받은 것**입니다 (결함 255). 「참가 안 함」이 아닙니다.
+ *
+ * 트랙 목록을 못 받았는데 화면이 `?? []` 로 빈 목록을 만들면, 세 사람이
+ * 전부 「미참가」로 섭니다 — 재현했습니다. `/tracks` 를 500 으로 막고 이미
+ * 녹음이 끝난 회의의 로비를 열었더니 커버리지 100·98·42% 인 세 사람이
+ * 나란히 「미참가」였고, 화면 어디에도 못 받았다는 말이 없었습니다.
+ * 불변식 ③ — **측정 불가 ≠ 0.**
+ */
+export type TrackVerdict =
+  | 'healthy'
+  | 'at_risk'
+  | 'broken'
+  | 'not_joined'
+  | 'finished'
+  | 'unknown';
 
 export interface MemberStatus {
   userId: number;
@@ -285,6 +300,8 @@ function messageFor(verdict: TrackVerdict, track: TrackHealth | undefined): stri
   const percent = coverage === null || coverage === undefined ? null : Math.round(coverage * 100);
 
   switch (verdict) {
+    case 'unknown':
+      return '트랙 상태를 못 받았습니다 — 참가 여부를 알 수 없습니다';
     case 'not_joined':
       return '아직 참가하지 않았습니다';
     case 'healthy':
@@ -310,14 +327,15 @@ function messageFor(verdict: TrackVerdict, track: TrackHealth | undefined): stri
  */
 export function memberStatuses(
   roster: readonly RosterEntry[],
-  tracks: readonly TrackHealth[]
+  /** ⚠️ **`null` 은 「못 받음」입니다** (결함 255). 빈 배열과 다릅니다. */
+  tracks: readonly TrackHealth[] | null
 ): MemberStatus[] {
   const byUser = new Map<number, TrackHealth>();
-  for (const track of tracks) byUser.set(track.user_id, track);
+  for (const track of tracks ?? []) byUser.set(track.user_id, track);
 
   return roster.map((entry) => {
     const track = byUser.get(entry.user_id);
-    const verdict = verdictOf(track);
+    const verdict = tracks === null ? 'unknown' : verdictOf(track);
     return {
       userId: entry.user_id,
       name: entry.name,
@@ -349,7 +367,11 @@ export interface RoomStatus {
  * 회의가 영영 처리되지 않습니다.** 그래서 강제 종료 버튼이 있고, 이 함수는
  * 그 버튼을 언제 보여줄지 정합니다.
  */
-export function roomStatus(statuses: readonly MemberStatus[]): RoomStatus {
+export function roomStatus(
+  statuses: readonly MemberStatus[],
+  /** ⚠️ 명단이 **아직 안 왔으면** `false` (결함 255). 빈 팀과 다릅니다. */
+  rosterKnown = true,
+): RoomStatus {
   const recording = statuses.filter(
     (s) => s.verdict === 'healthy' || s.verdict === 'at_risk'
   ).length;
@@ -358,11 +380,21 @@ export function roomStatus(statuses: readonly MemberStatus[]): RoomStatus {
   ).length;
   const broken = statuses.filter((s) => s.verdict === 'broken').length;
 
-  // 참가한 사람이 아무도 없으면 아직 시작 전이다. 강제 종료할 게 없다.
-  const anyJoined = statuses.some((s) => s.verdict !== 'not_joined');
+  /* ⚠️ **모르는 것은 「참가했다」도 「안 했다」도 아닙니다** (결함 255).
+     `!== 'not_joined'` 로 세면 못 받은 상태가 전부 「참가했다」가 되어
+     강제 종료 버튼까지 뜹니다. */
+  const unknown = statuses.filter((s) => s.verdict === 'unknown').length;
+  const anyJoined = statuses.some(
+    (s) => s.verdict !== 'not_joined' && s.verdict !== 'unknown'
+  );
 
   let message: string;
-  if (!anyJoined) {
+  if (!rosterKnown) {
+    // 아무것도 모르는 채로 「아무도 참가하지 않았습니다」라고 하지 않습니다.
+    message = '명단을 아직 못 받았습니다 — 누가 참가했는지 알 수 없습니다';
+  } else if (unknown > 0) {
+    message = '트랙 상태를 못 받았습니다 — 누가 참가했는지 알 수 없습니다';
+  } else if (!anyJoined) {
     message = '아직 아무도 참가하지 않았습니다';
   } else if (recording > 0) {
     message = `${recording}명이 녹음 중입니다`;
@@ -377,7 +409,8 @@ export function roomStatus(statuses: readonly MemberStatus[]): RoomStatus {
     notJoined,
     broken,
     // 녹음 중인 사람이 없는데 참가 안 한 사람이 남아 있으면 사람이 풀어야 한다.
-    needsForceFinish: anyJoined && recording === 0 && notJoined > 0,
+    // 모르는 채로 강제 종료를 권하지 않습니다 — 되돌릴 수 없는 일입니다.
+    needsForceFinish: rosterKnown && unknown === 0 && anyJoined && recording === 0 && notJoined > 0,
     message,
   };
 }
@@ -543,10 +576,15 @@ export interface VerdictView {
 }
 
 export function verdictView(status: MemberStatus, canStart: boolean): VerdictView {
+  // 못 받은 것은 국면과 상관없이 **모른다**고만 말합니다 (결함 255).
+  if (status.verdict === 'unknown') {
+    return { word: '모름', message: status.message };
+  }
   if (status.verdict === 'not_joined' && !canStart) {
     return { word: '미참가', message: '이 회의에 참가하지 않았습니다 — 이 사람의 녹음은 없습니다' };
   }
   const WORD: Record<TrackVerdict, string> = {
+    unknown: '모름',
     not_joined: '대기',
     healthy: '녹음 중',
     at_risk: '끊김',

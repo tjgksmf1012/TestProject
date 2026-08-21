@@ -91,7 +91,9 @@ function Lobby() {
   const [me, setMe] = useState<Me | null>(null);
   const [projectId, setProjectId] = useState(0);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
-  const [tracks, setTracks] = useState<TrackHealth[]>([]);
+  /* ⚠️ **`null` 은 「아직 못 받음」입니다** (결함 255). 빈 배열로 두면
+     명단이 먼저 온 찰나에 전원이 「미참가」로 섭니다. */
+  const [tracks, setTracks] = useState<TrackHealth[] | null>(null);
   const [consentMessage, setConsentMessage] = useState('');
   const [progressLine, setProgressLine] = useState('');
   const [canReprocess, setCanReprocess] = useState(false);
@@ -396,7 +398,7 @@ function Lobby() {
   // 밀려오고, 그러면 "그 결정이 나올 때 이 사람이 끊겨 있었다" 가
   // 통째로 거짓이 됩니다.
   const diagram = buildDiagram(
-    tracks.map((t) => ({
+    (tracks ?? []).map((t) => ({
       userId: t.user_id,
       startedAt: t.started_at ?? null,
       endedAt: t.ended_at ?? null,
@@ -407,7 +409,7 @@ function Lobby() {
 
   const startable = canStart(roster);
   // 처리가 끝나야 후보가 생깁니다. 그 전에 눌러도 빈 화면이라 감춥니다.
-  const reviewReady = !(room.recording > 0 || room.notJoined > 0 || tracks.length === 0);
+  const reviewReady = !(room.recording > 0 || room.notJoined > 0 || (tracks?.length ?? 0) === 0);
   // ⚠️ **한 화면에 주 버튼은 하나** (지시서 §8). 내가 아직 동의를 안 했으면
   // "동의합니다" 가 주 동작이고, 하고 나면 주 동작이 넘어갑니다.
   const iAgreed = roster.some((e) => e.user_id === meId && consentStateOf(e) === 'granted');
@@ -545,7 +547,7 @@ function Lobby() {
             // ⭐ 기기가 남긴 경고. **서버가 이미 보내고 있었는데 읽는 곳이
             // 0곳이었습니다** (결함 93). 커버리지가 100% 여도 마이크 설정이
             // 잘못됐으면 그 사람의 자막은 다르게 읽어야 합니다.
-            const alerts = captureAlerts(tracks.find((t) => t.user_id === s.userId));
+            const alerts = captureAlerts(tracks?.find((t) => t.user_id === s.userId));
             return (
               <li key={s.userId} className={s.verdict}>
                 <span className="name">{s.name}</span>

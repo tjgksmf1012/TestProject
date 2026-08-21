@@ -20,6 +20,7 @@ import { describe, it } from 'node:test';
 import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
 import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contribution/ribbon.ts';
 import { attentionAbout } from './review/candidates.ts';
+import { memberStatuses } from './lobby/room.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
@@ -4631,6 +4632,53 @@ describe('⛔ 사유 제목이 **줄들과 같은 것**을 말한다 (결함 253
     } as unknown as Parameters<typeof attentionAbout>[0]);
     ok(!said.includes('낮은'), `71% 를 낮다고 단정합니다: ${said}`);
     ok(said.includes('회원가입 화면 작업'), said);
+  });
+});
+
+describe('⛔ 못 받은 목록을 **빈 목록으로 접지 않는다** (결함 255)', () => {
+  /* 로비가 `tracks.data?.tracks ?? []` 로 트랙을 읽었습니다. 그 `?? []` 가
+     「못 받음」과 「아무도 참가 안 함」을 같은 값으로 만듭니다.
+
+     재현했습니다 — `/tracks` 를 500 으로 막고 **이미 녹음이 끝난** 회의의
+     로비를 열었더니, 커버리지 100·98·42% 인 세 사람이 나란히 「미참가」로
+     섰고 화면 어디에도 못 받았다는 말이 없었습니다. 불변식 ③ 입니다.
+
+     ⚠️ 「참가 안 함」은 이 화면에서 **행동을 부르는 말**입니다 — 강제
+     종료 버튼이 거기 달려 있습니다. 모르는 채로 되돌릴 수 없는 일을
+     권하게 됩니다. */
+  it('⭐ 로비가 트랙을 **`?? []` 로 읽지 않는다**', () => {
+    const code = codeOf(
+      readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx'), 'utf8'),
+    );
+    const folded = [...code.matchAll(/tracks(?:Query)?\.data\?\.\w+\s*\?\?\s*\[\]/g)].map(
+      (m) => m[0],
+    );
+    strictEqual(
+      folded.join(' · '),
+      '',
+      '못 받은 것을 빈 목록으로 접습니다 — 전원이 「미참가」로 섭니다',
+    );
+    ok(/memberStatuses\(/.test(code), '로비가 `memberStatuses` 를 안 부릅니다 — 가드가 헛돕니다');
+  });
+
+  it('⭐ 판단이 **`null` 을 「모름」으로** 받는다', () => {
+    const said = memberStatuses(
+      [{ user_id: 1, name: '김민수', recording: true }] as unknown as Parameters<
+        typeof memberStatuses
+      >[0],
+      null,
+    );
+    strictEqual(said[0]?.verdict, 'unknown');
+    // 반대 방향 — 빈 배열은 그대로 「미참가」여야 합니다.
+    strictEqual(
+      memberStatuses(
+        [{ user_id: 1, name: '김민수', recording: true }] as unknown as Parameters<
+          typeof memberStatuses
+        >[0],
+        [],
+      )[0]?.verdict,
+      'not_joined',
+    );
   });
 });
 

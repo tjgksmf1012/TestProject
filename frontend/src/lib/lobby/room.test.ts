@@ -539,3 +539,53 @@ describe('막아 놓고 말은 하는가 — 동의 단추 (결함 239)', () => 
     }
   });
 });
+
+
+describe('결함 255 — 트랙을 못 받은 것을 「미참가」로 단언하던 자리', () => {
+  const roster = [
+    { user_id: 1, name: '김민수', recording: true },
+    { user_id: 2, name: '이하늘', recording: true },
+  ] as unknown as Parameters<typeof memberStatuses>[0];
+
+  it('⭐ **못 받았으면** 참가 여부를 말하지 않는다', () => {
+    // `/tracks` 를 500 으로 막고 이미 녹음이 끝난 회의의 로비를 열었더니
+    // 커버리지 100·98·42% 인 세 사람이 나란히 「미참가」였습니다.
+    const said = memberStatuses(roster, null);
+    for (const s of said) {
+      strictEqual(s.verdict, 'unknown', s.name);
+      strictEqual(s.message.includes('참가하지 않았습니다'), false, s.message);
+      strictEqual(s.message.includes('못 받았습니다'), true, s.message);
+    }
+  });
+
+  it('⚠️ **빈 배열은 그대로 「미참가」다** — 둘을 가르는 것이 전부다', () => {
+    // 반대 방향입니다. 이걸 안 보면 전부 「모름」으로 덮어도 통과합니다.
+    const said = memberStatuses(roster, []);
+    strictEqual(said[0]?.verdict, 'not_joined');
+    strictEqual(said[0]?.message, '아직 참가하지 않았습니다');
+  });
+
+  it('⭐ 모르는 채로 **강제 종료를 권하지 않는다**', () => {
+    const room = roomStatus(memberStatuses(roster, null));
+    strictEqual(room.needsForceFinish, false);
+    strictEqual(room.notJoined, 0);
+    strictEqual(room.message.includes('못 받았습니다'), true, room.message);
+  });
+
+  it('⭐ **명단도 같다** — 안 왔으면 「아무도 참가 안 함」이라고 안 한다', () => {
+    // 명단이 오기 전 화면은 「참가자 상태 0명」과 「아직 아무도 참가하지
+    // 않았습니다」를 단언했습니다. 아무것도 모르는 채로요.
+    const unknownRoster = roomStatus([], false);
+    strictEqual(unknownRoster.message.includes('아무도 참가하지'), false, unknownRoster.message);
+    strictEqual(unknownRoster.message.includes('못 받았습니다'), true, unknownRoster.message);
+    strictEqual(unknownRoster.needsForceFinish, false);
+    // ⚠️ 반대 방향 — **진짜 빈 팀**은 그대로 말해야 합니다.
+    strictEqual(roomStatus([], true).message, '아직 아무도 참가하지 않았습니다');
+  });
+
+  it('낱말도 「모름」이다 — 국면과 상관없이', () => {
+    const [first] = memberStatuses(roster, null);
+    strictEqual(verdictView(first as MemberStatus, true).word, '모름');
+    strictEqual(verdictView(first as MemberStatus, false).word, '모름');
+  });
+});

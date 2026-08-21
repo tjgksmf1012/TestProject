@@ -56,16 +56,25 @@ export default function Lobby() {
   const { data: me } = useMe();
   const m = useLobbyMutations(meetingId);
 
+  /* ⛔ 명단도 같습니다 (결함 255). 아직 안 온 동안 화면은 「참가자 상태
+     0명」과 「아직 아무도 참가하지 않았습니다」를 **단언**했습니다 —
+     아무것도 모르는 채로요. 세는 것과 말하는 것은 명단이 온 뒤에. */
+  const rosterKnown = consent.data !== undefined;
   const roster = consent.data?.roster ?? [];
-  const trackList: TrackHealth[] = tracks.data?.tracks ?? [];
+  /* ⛔ **`?? []` 가 「못 받음」을 「아무도 참가 안 함」으로 접었습니다**
+     (결함 255). `/tracks` 를 500 으로 막고 이미 녹음이 끝난 회의를 열면
+     커버리지 100·98·42% 인 세 사람이 나란히 「미참가」로 섰고, 화면
+     어디에도 못 받았다는 말이 없었습니다. 아직 안 온 동안도 같습니다 —
+     `null` 을 넘겨 「모른다」고 말하게 합니다. */
+  const trackList: TrackHealth[] | null = tracks.data ? tracks.data.tracks : null;
   const statuses = memberStatuses(roster, trackList);
-  const room = roomStatus(statuses);
+  const room = roomStatus(statuses, rosterKnown);
   const blockers = startBlockers(roster);
 
   // 끝난 트랙이 있으면 실제 시간축 위에 구멍까지 그립니다.
   const inputs: TrackInput[] = useMemo(
     () =>
-      trackList.map((t) => ({
+      (trackList ?? []).map((t) => ({
         userId: t.user_id,
         startedAt: t.started_at ?? null,
         endedAt: t.ended_at ?? null,
@@ -265,7 +274,7 @@ export default function Lobby() {
         <section className="pane" aria-label="참가자 상태">
           <div className="pane__head">
             <h2 className="pane__title">참가자 상태</h2>
-            <span className="pane__count">{roster.length}명</span>
+            <span className="pane__count">{rosterKnown ? `${roster.length}명` : '—'}</span>
           </div>
           <div className="pane__body">
             {/* ⚠️ **홈이 한 말이 여기서 사라지고 있었습니다** (결함 214).
@@ -320,9 +329,10 @@ export default function Lobby() {
               </p>
             )}
             {statuses.map((status) => {
-              const track = trackList.find((t) => t.user_id === status.userId);
+              const track = trackList?.find((t) => t.user_id === status.userId);
               const gapSpans = diagram.gaps.get(status.userId) ?? [];
-              const joined = status.verdict !== 'not_joined';
+              // 모르는 것은 「참가했다」가 아닙니다 (결함 255).
+              const joined = status.verdict !== 'not_joined' && status.verdict !== 'unknown';
               // 같은 판정이라도 **국면이 바뀌면 뜻이 달라집니다** — 끝난
               // 회의의 「대기」는 「미참가」입니다 (결함 214).
               const view = verdictView(status, phase.canStart);
