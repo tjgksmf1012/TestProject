@@ -3991,9 +3991,16 @@ describe('SPA 가 lib 의 판단을 실제로 부르는가 (결함 197 계열)',
     // ⚠️ 여기도 **그리는가**입니다. `{false && (…)}` 로 막아도 낱말은
     //    남습니다 — 심어 보고 알았습니다.
     ok(/\{row\.view\.why !== null && \(/.test(review), '왜 걸렸는지를 안 그립니다');
+    /* ⚠️ 처음에는 `row.view.evidence.map(` 이라는 **글자 그대로**를
+       요구했습니다. 칩을 접는 컴포넌트로 옮기자(UI 패스 v3) 요구는
+       그대로인데 가드만 실패했습니다 — 결함 220 의 가드와 같은 실수입니다.
+       요구는 「근거 id 가 **칩으로 그려진다**」 입니다. */
+    const drawsEvidence =
+      /row\.view\.evidence\.map\(/.test(review) || /ids=\{row\.view\.evidence\}/.test(review);
     ok(
       /\{row\.view\.evidence\.length > 0 && \(/.test(review) &&
-        /row\.view\.evidence\.map\(/.test(review),
+        drawsEvidence &&
+        /<EvidenceChip\b/.test(review),
       '어느 발화가 근거인지 못 봅니다 — 근거 없는 지적은 반박할 수 없습니다',
     );
   });

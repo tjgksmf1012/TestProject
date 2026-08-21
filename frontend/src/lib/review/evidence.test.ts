@@ -3,12 +3,14 @@ import { describe, it } from 'node:test';
 
 import {
   emptyEvidenceNote,
+  EVIDENCE_CHIPS_SHOWN,
   evidenceQuery,
-  withContext,
   evidenceView,
   missingNote,
   speakerNote,
+  splitEvidenceChips,
   type Utterance,
+  withContext,
 } from './evidence.ts';
 
 function utterance(overrides: Partial<Utterance> = {}): Utterance {
@@ -192,5 +194,29 @@ describe('withContext', () => {
 
   it('근거가 없으면 빈 목록', () => {
     deepStrictEqual(withContext(all, []), []);
+  });
+});
+
+describe('근거 칩을 접는 규칙 (UI 패스 v3)', () => {
+  it('적으면 **그대로 다 보여 준다**', () => {
+    for (const n of [0, 1, 3, EVIDENCE_CHIPS_SHOWN]) {
+      const ids = Array.from({ length: n }, (_, i) => i);
+      const { head, rest } = splitEvidenceChips(ids);
+      strictEqual(head.length, n);
+      strictEqual(rest.length, 0);
+    }
+  });
+
+  it('⛔ 하나 남는 것을 「+1」로 접지 않는다 — 접는 쪽이 더 넓다', () => {
+    const ids = Array.from({ length: EVIDENCE_CHIPS_SHOWN + 1 }, (_, i) => i);
+    strictEqual(splitEvidenceChips(ids).rest.length, 0);
+  });
+
+  it('많으면 접되 **버리지 않는다**', () => {
+    const ids = Array.from({ length: 12 }, (_, i) => i);
+    const { head, rest } = splitEvidenceChips(ids);
+    strictEqual(head.length, EVIDENCE_CHIPS_SHOWN);
+    strictEqual(head.length + rest.length, ids.length);
+    deepStrictEqual([...head, ...rest], ids);
   });
 });

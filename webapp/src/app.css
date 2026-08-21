@@ -1773,11 +1773,20 @@ a.chain__link:hover { border-color: var(--c-evidence); }
    되는데 실제로는 "아직 안 이어짐" 입니다 — 이 구분이 이 제품의 전부입니다. */
 /* ⚠️ 빈 고리를 **테두리 모양으로만** 알리지 않습니다. 점선 + 흙빛 `—` +
    라벨, 셋 중 둘 이상이 함께 말해야 색각이상·저시력에서도 읽힙니다. */
+/* ⚠️ **빈 고리는 작습니다.** 값이 없는데 있는 것과 같은 자리를 차지하면
+   카드가 「빈 상자 둘」로 보입니다 — 칸반 카드는 대부분 아직 안 이어져
+   있어서, 카드 높이의 절반이 아무 값도 없는 상자였습니다. 렌더해서 보고
+   고쳤습니다. 뜻(점선 · 흙빛 `—` · 라벨)은 그대로 두고 **크기만** 줄입니다. */
 .chain__link--empty {
   border-style: dashed;
   border-color: var(--c-unknown-line);
   background: transparent;
+  min-width: 2.5rem;
+  padding: var(--sp-1) var(--sp-2);
+  align-self: center;
 }
+.chain__link--empty .chain__value { font-size: var(--fs-12); }
+.chain__link--empty .chain__label { font-size: var(--fs-11); }
 .chain__link--empty .chain__value { color: var(--c-unknown); }
 .chain__link--empty .chain__label { color: var(--c-ink-muted); }
 
@@ -1915,3 +1924,11 @@ a.chain__link:hover { border-color: var(--c-evidence); }
   font-size: var(--fs-11);
   word-break: break-word;
 }
+
+/* 접힌 근거 칩 — 「+N」. 칩과 같은 모양이되 **누를 수 있다**고 말합니다. */
+.chip--more {
+  cursor: pointer;
+  border-style: dashed;
+  color: var(--c-ink-muted);
+}
+.chip--more:hover:not([aria-disabled='true']) { color: var(--c-ink); border-color: var(--c-line-strong); }

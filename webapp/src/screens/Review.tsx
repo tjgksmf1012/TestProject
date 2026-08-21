@@ -35,7 +35,12 @@ import {
   type ReviewContext,
 } from '@lib/review/candidates.ts';
 import { audioNote, emptyTimelineNote, timelineRows, trackAudioUrl, type TimelineRow } from '@lib/review/timeline.ts';
-import { missingNote, emptyEvidenceNote, withContext } from '@lib/review/evidence.ts';
+import {
+  missingNote,
+  emptyEvidenceNote,
+  splitEvidenceChips,
+  withContext,
+} from '@lib/review/evidence.ts';
 import { agendaItems, issueViews } from '@lib/review/minutes.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -101,6 +106,31 @@ function useDraftMap(meetingId: number, liveIds: readonly number[]) {
   };
 
   return { drafts, update, clear };
+}
+
+/**
+ * 근거 칩 묶음 — **다 펼치지 않습니다** (UI 패스 v3).
+ *
+ * 근거 열둘이 두 줄로 깔리면 회의 내용보다 숫자가 먼저 보입니다. 몇 개까지
+ * 펼칠지는 `@lib` 의 `splitEvidenceChips` 가 정하고, 나머지는 「+N」 뒤에
+ * 있습니다 — **감추는 것이 아니라 접는 것**입니다.
+ */
+function EvidenceChips({ ids, onOpen }: { ids: number[]; onOpen: (id: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const { head, rest } = splitEvidenceChips(ids);
+  const shown = open ? ids : head;
+  return (
+    <span className="cand__chips">
+      {shown.map((id) => (
+        <EvidenceChip key={id} id={`#${id}`} onOpen={() => onOpen(id)} />
+      ))}
+      {rest.length > 0 && !open && (
+        <button type="button" className="chip chip--more" onClick={() => setOpen(true)}>
+          +{rest.length}
+        </button>
+      )}
+    </span>
+  );
 }
 
 export default function Review() {
@@ -417,20 +447,15 @@ export default function Review() {
                       <span className="tlrow__why">{row.view.why}</span>
                     )}
                     {row.view.evidence.length > 0 && (
-                      <span className="cand__chips">
-                        {row.view.evidence.map((id) => (
-                          <EvidenceChip
-                            key={id}
-                            id={`#${id}`}
-                            onOpen={() => {
-                              rowRefs.current.get(id)?.scrollIntoView({
-                                behavior: reduceMotion ? 'auto' : 'smooth',
-                                block: 'center',
-                              });
-                            }}
-                          />
-                        ))}
-                      </span>
+                      <EvidenceChips
+                        ids={row.view.evidence}
+                        onOpen={(id) =>
+                          rowRefs.current.get(id)?.scrollIntoView({
+                            behavior: reduceMotion ? 'auto' : 'smooth',
+                            block: 'center',
+                          })
+                        }
+                      />
                     )}
                   </div>
                   <span />
