@@ -62,14 +62,25 @@ _DECISION_LABEL = {
 }
 
 #: 회의가 아직 이 상태면 요약·안건·사안이 **없는 게 아니라 아직 안 나온** 것.
-_UNPROCESSED = frozenset({"recording", "uploading", "processing", "queued", "open"})
+#:
+#: ⚠️ **`pending` 이 여기가 아니라 「처리를 마친 것」에 있었습니다** (결함 289).
+#: `pending` 은 「녹음 중이거나 아직 전원이 끝나지 않음」이라 아무것도 처리된
+#: 적이 없는데, 녹음조차 시작 안 한 회의의 회의록이 「**처리를 마쳤습니다**」
+#: 라고 나갔습니다 — 이 파일이 바로 아래에서 「보고서에서 그건 거짓말입니다」
+#: 라고 적어 둔 그것입니다.
+#:
+#: ⚠️ 여기 있던 `recording`·`uploading`·`open` 과 「처리」쪽의 `done` 은
+#: **회의 상태가 아닙니다** (`done` 은 업무 상태 — 결함 288 과 같은 뿌리).
+#: 없는 값이 섞여 있어서 세 집합이 **꽉 찬 것처럼 보였고**, 그래서 잘못
+#: 들어간 하나가 눈에 안 띄었습니다.
+_UNPROCESSED = frozenset({"pending", "queued", "processing"})
 
 #: 처리를 시도했다가 실패한 것. **아직 안 한 것과 다릅니다** — 기다려도
 #: 안 바뀌고, 사람이 다시 돌려야 합니다.
 _FAILED = frozenset({"failed"})
 
 #: 처리를 마친 것. 요약·안건·사안이 있으면 그게 진짜 결과입니다.
-_PROCESSED = frozenset({"needs_review", "confirmed", "done", "pending"})
+_PROCESSED = frozenset({"needs_review", "confirmed"})
 
 #: 상태 → 보고서에 적을 한 줄.
 #:

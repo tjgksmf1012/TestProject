@@ -413,6 +413,57 @@ def test_every_meeting_status_is_classified():
     )
 
 
+def test_every_meeting_status_is_classified_into_the_right_one():
+    """⭐ **덮는 것만으로는 모자랍니다** — 맞는 칸에 들어가야 합니다 (결함 289).
+
+    위 검사는 「어디에도 안 떨어지는가」만 봤습니다. 그래서 `pending` 이
+    **「처리를 마친 것」**에 들어가 있어도 초록이었고, 녹음조차 시작 안 한
+    회의(발화 0 · 오디오 없음)의 회의록이 이렇게 나갔습니다 —
+
+        처리: 처리를 마쳤습니다
+
+    보고서는 밖으로 나가는 문서라 그 거짓이 그대로 제출물이 됩니다.
+    """
+    from teamflow.db.models import MeetingStatus
+
+    expected = {
+        # 아직 아무것도 안 나온 것 — 기다리면 바뀝니다.
+        MeetingStatus.PENDING: "unprocessed",  # 녹음 전·녹음 중
+        MeetingStatus.QUEUED: "unprocessed",
+        MeetingStatus.PROCESSING: "unprocessed",
+        # 사람이 다시 돌려야 하는 것.
+        MeetingStatus.FAILED: "failed",
+        # 요약·안건·사안이 나온 것.
+        MeetingStatus.NEEDS_REVIEW: "processed",
+        MeetingStatus.CONFIRMED: "processed",
+    }
+    assert set(expected) == set(MeetingStatus), (
+        "회의 상태가 늘거나 줄었습니다 — 이 표에도 넣으십시오"
+    )
+    wrong = {
+        s.value: (minutes.state_of(s.value), want)
+        for s, want in expected.items()
+        if minutes.state_of(s.value) != want
+    }
+    assert not wrong, f"엉뚱한 칸에 들어간 회의 상태입니다 (지금→맞는 것): {wrong}"
+
+
+def test_the_three_sets_hold_no_status_that_does_not_exist():
+    """⚠️ 없는 값이 섞이면 세 집합이 **꽉 찬 것처럼 보입니다** (결함 289).
+
+    `recording`·`uploading`·`open` 과 `done` 이 들어 있었습니다. `done` 은
+    **업무** 상태입니다 (결함 288 과 같은 뿌리). 그 덕에 잘못 들어간 하나가
+    눈에 안 띄었습니다.
+    """
+    from teamflow.db.models import MeetingStatus
+
+    known = {s.value for s in MeetingStatus}
+    strays = sorted(
+        (minutes._UNPROCESSED | minutes._FAILED | minutes._PROCESSED) - known
+    )
+    assert not strays, f"회의 상태가 아닌 값이 분류표에 있습니다: {strays}"
+
+
 def test_the_document_does_not_leak_english_identifiers():
     """⚠️ `processing`·`multitrack` 을 그대로 적지 않습니다.
 
