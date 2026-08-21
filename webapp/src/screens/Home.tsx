@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { shortTeamDate } from '@lib/time/calendar.ts';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
@@ -38,10 +39,12 @@ function spaHref(href: string, projectId: number): string {
   return '/';
 }
 
+/* ⛔ 여기서 `new Date(iso).getMonth()` 로 그리고 있었습니다 — **브라우저
+   달력**입니다. 같은 회의를 서울 사람은 09-02 로, 뉴욕 사람은 09-01 로
+   봅니다. 마감일·달력은 팀 달력이라 한 화면에 달력이 둘이었습니다
+   (결함 246). 판단은 `@lib`. */
 function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return shortTeamDate(iso) ?? '—';
 }
 
 /**

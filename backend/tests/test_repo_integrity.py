@@ -2435,3 +2435,35 @@ def test_the_defect_log_never_reuses_a_measurement_ordinal():
     dupes = [o for o, c in Counter(ordinals).items() if c > 1]
 
     assert not dupes, f"'n번째 자' 순번이 겹칩니다: {dupes}"
+
+def test_api_times_say_which_calendar_they_are_in():
+    """⭐ 응답에 나가는 시각은 **시간대를 글자로 말한다** (결함 246).
+
+    저장은 UTC 인데 **SQLite 는 시간대를 안 돌려줍니다.** 그대로 내보내면
+    한 API 안에 규약이 둘이 됩니다:
+
+        "started_at": "2026-09-08T10:00:00"      ← 표시 없음
+        "computed_at": "2026-08-21T00:10:07Z"    ← 표시 있음
+
+    표시 없는 쪽을 브라우저는 **자기 시간대**로 읽습니다(JS 사양). 그래서
+    서울 사람과 뉴욕 사람이 같은 회의를 다른 순간으로 보고, 자정 근처면
+    날짜까지 갈라집니다.
+
+    ⚠️ 이 검사는 **찾는 자리가 낡지 않게** 필드를 세지 않고 `datetime` 이
+    남아 있는지를 봅니다 — 새 응답 모델이 생기면 그때 걸립니다.
+    """
+    import re
+
+    source = (REPO_ROOT / "backend" / "teamflow" / "api" / "main.py").read_text()
+    # 주석·문서화 문자열은 걷어냅니다 — 이 결함을 **설명하는 글**이 스스로 걸립니다.
+    code = re.sub(r'"""[\s\S]*?"""', " ", source)
+    code = re.sub(r"^\s*#.*$", " ", code, flags=re.M)
+
+    raw = [m.group(0) for m in re.finditer(r"^    [a-z_]+: datetime\b", code, re.M)]
+    assert not raw, (
+        "응답 모델에 맨 `datetime` 이 있습니다 — `UtcDatetime` 을 쓰세요. "
+        "시간대 없이 나가면 브라우저가 자기 달력으로 읽습니다:\n  "
+        + "\n  ".join(x.strip() for x in raw)
+    )
+    assert "UtcDatetime" in code, "`UtcDatetime` 이 없습니다 — 검사가 헛돕니다"
+

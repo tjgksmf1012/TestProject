@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { teamDateTime } from '@lib/time/calendar.ts';
 import { useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
@@ -87,10 +88,11 @@ function evidenceChain(member: MemberScore): ChainLink[] {
   });
 }
 
+/* ⛔ 여기서 `new Date(iso).getHours()` 로 그리고 있었습니다 — **브라우저
+   달력**입니다. 이 제품의 마감일·달력은 팀 달력(`Asia/Seoul`)이라, 한
+   화면에서 달력 두 벌이 섞였습니다(결함 246). 판단은 `@lib`. */
 function fmtComputedAt(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return teamDateTime(iso) ?? '—';
 }
 
 export default function Contributions() {

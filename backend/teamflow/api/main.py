@@ -30,7 +30,7 @@ from fastapi import (
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PlainSerializer
 from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 
@@ -140,6 +140,36 @@ app = FastAPI(
 #    압축**되므로(앞에 프록시가 없습니다) 9 는 매 요청 CPU 를 태우는데,
 #    줄어드는 양은 6 과 몇 % 차이입니다. nginx 기본값도 이 근처입니다.
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+
+
+def _as_utc(value: datetime) -> str:
+    """응답에 나가는 시각은 **언제나 UTC 임을 글자로 말합니다** (결함 246).
+
+    ## 왜 필요한가
+
+    저장은 UTC 입니다(`datetime.now(UTC)`). 그런데 **SQLite 는 시간대를
+    돌려주지 않습니다** — `DateTime(timezone=True)` 라고 적어도 naive 로
+    돌아옵니다. 그대로 내보내면 이런 글자가 나갑니다:
+
+        "started_at": "2026-09-08T10:00:00"      ← 표시 없음
+        "computed_at": "2026-08-21T00:10:07Z"    ← 표시 있음
+
+    한 API 안에 규약이 둘입니다. 그리고 **표시 없는 쪽을 브라우저는 자기
+    시간대로 읽습니다**(JS 사양) — 서울 사람과 뉴욕 사람이 같은 회의를
+    다른 순간으로 봅니다. 자정 근처면 **날짜까지** 갈라집니다.
+
+    ⚠️ 지어내지 않습니다. 시간대가 붙어 있으면 그대로 두고, **없을 때만**
+    "이건 UTC 다" 를 붙입니다 — 저장이 UTC 라는 것은 이 저장소의 규약이고
+    `datetime.now(UTC)` 가 그 증거입니다.
+    """
+    at = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+#: 응답에 나가는 시각. `datetime` 대신 이걸 씁니다.
+UtcDatetime = Annotated[
+    datetime, PlainSerializer(_as_utc, return_type=str, when_used="json")
+]
 
 
 class _NoCompressionForAudio:
@@ -644,7 +674,7 @@ def _chunk_store(settings: Settings) -> ChunkStore:
 class TrackJoin(BaseModel):
     # `user_id` 는 없습니다. **트랙 = 사람**이 이 시스템의 화자 라벨 근거라,
     # 남의 번호로 트랙을 만들 수 있으면 기여도가 통째로 조작 가능해집니다.
-    started_at: datetime
+    started_at: UtcDatetime
     device_label: str | None = Field(default=None, max_length=100)
     sample_rate: int | None = Field(default=None, gt=0)
 
@@ -1095,15 +1125,15 @@ class GithubHealthOut(BaseModel):
 
     repo: str | None
     #: 서명된 배달이 처음 도착한 시각. None 이면 **아직 확인되지 않았습니다.**
-    verified_at: datetime | None
+    verified_at: UtcDatetime | None
     delivery_count: int
-    last_delivery_at: datetime | None
+    last_delivery_at: UtcDatetime | None
 
     #: "이 수치는 언제부터의 활동인가" 한 줄. 범위를 안 밝힌 숫자는
     #: **전부를 센 것처럼** 읽힙니다.
     coverage: str
-    backfilled_at: datetime | None
-    backfilled_to: datetime | None
+    backfilled_at: UtcDatetime | None
+    backfilled_to: UtcDatetime | None
 
 
 @app.get("/api/projects/{project_id}/github", response_model=GithubHealthOut)
@@ -1656,8 +1686,8 @@ def list_chunks(
 
 class TrackComplete(BaseModel):
     #: 소리가 시작된 시각 (결함 230). 옛 클라이언트는 안 보낸다.
-    started_at: datetime | None = None
-    ended_at: datetime
+    started_at: UtcDatetime | None = None
+    ended_at: UtcDatetime
     coverage: float = Field(ge=0, le=1)
     total_gap_ms: int = Field(ge=0)
     longest_gap_ms: int = Field(default=0, ge=0)
@@ -1917,7 +1947,7 @@ class MeetingSummary(BaseModel):
     meeting_id: int
     title: str | None
     status: str
-    started_at: datetime
+    started_at: UtcDatetime
     #: 이 회의에서 사람이 아직 결정하지 않은 업무 후보 수
     pending_candidates: int
     #: 트랙 커버리지의 평균. **못 잰 것은 `None`** 이고 0.0 이 아니다.
@@ -2035,7 +2065,7 @@ class MeetingDetail(BaseModel):
     project_id: int
     title: str | None
     status: str
-    started_at: datetime
+    started_at: UtcDatetime
     capture_mode: str
     # 처리가 끝나기 전에는 None. 실패한 회의도 None 이다 —
     # 빈 문자열로 내려보내면 화면이 "요약이 없는 회의" 로 그린다.
@@ -3442,7 +3472,7 @@ class TaskGithubOut(BaseModel):
     number: int | None
     title: str | None
     actor_login: str
-    merged_at: datetime
+    merged_at: UtcDatetime
     #: 1.0 이면 확정, 그 아래는 추정.
     relevance: float
     confirmed: bool
@@ -3462,7 +3492,7 @@ class TaskOut(BaseModel):
     #: 무엇부터 볼 것인가. **작을수록 급합니다** (`vocab.TaskPriority`).
     priority: int
     deadline: date | None
-    completed_at: datetime | None
+    completed_at: UtcDatetime | None
     origin: TaskOriginOut | None
     #: 사람이 PR 에 적어야 하는 표식. 안 보여주면 아무도 안 적습니다.
     marker: str = ""
@@ -3723,7 +3753,7 @@ class MemberScoreOut(BaseModel):
 
 class ScoreOut(BaseModel):
     algo_version: str
-    computed_at: datetime
+    computed_at: UtcDatetime
     members: list[MemberScoreOut]
     skipped_categories: list[str]
     # ⚠️ 기여 기록은 있는데 **지금 구성원이 아닌** 사람들 (결함 222).
@@ -3760,7 +3790,7 @@ class FinalOut(BaseModel):
     final_value: float
     adjusted_by: int | None
     reason: str | None
-    confirmed_at: datetime
+    confirmed_at: UtcDatetime
 
 
 class FinalsOut(BaseModel):
@@ -4017,9 +4047,9 @@ class ReportOut(BaseModel):
     id: int
     report_type: str
     meeting_id: int | None
-    period_start: datetime | None
-    period_end: datetime | None
-    generated_at: datetime
+    period_start: UtcDatetime | None
+    period_end: UtcDatetime | None
+    generated_at: UtcDatetime
     #: 블록 목록. 구조는 `teamflow/reports/__init__.py` 머리말에 있습니다.
     content: dict[str, Any]
 
@@ -4035,9 +4065,9 @@ class ReportSummary(BaseModel):
     report_type: str
     title: str
     meeting_id: int | None
-    period_start: datetime | None
-    period_end: datetime | None
-    generated_at: datetime
+    period_start: UtcDatetime | None
+    period_end: UtcDatetime | None
+    generated_at: UtcDatetime
 
 
 class GenerateReportIn(BaseModel):
@@ -4049,8 +4079,8 @@ class GenerateReportIn(BaseModel):
     """
 
     report_type: str
-    period_start: datetime | None = None
-    period_end: datetime | None = None
+    period_start: UtcDatetime | None = None
+    period_end: UtcDatetime | None = None
 
     model_config = {"extra": "forbid"}
 
@@ -4227,8 +4257,8 @@ class MessageOut(BaseModel):
     #: 가리키는 곳이라서) — `deleted` 를 보고 화면이 "지워진 메시지" 라고 씁니다.
     body: str
     reply_to_id: int | None
-    created_at: datetime
-    edited_at: datetime | None
+    created_at: UtcDatetime
+    edited_at: UtcDatetime | None
     deleted: bool
     mentions: list[str]
     reactions: list[ReactionOut]
@@ -4652,7 +4682,7 @@ class CalendarItemOut(BaseModel):
     kind: str
     #: ⚠️ **자르지 않은 순간**입니다. 어느 날인지는 화면이 팀 달력으로
     #: 정합니다 — 여기서 또 자르면 시간대 계산이 두 벌이 됩니다.
-    at: datetime
+    at: UtcDatetime
     title: str
     task_id: int | None
     meeting_id: int | None
@@ -4662,20 +4692,20 @@ class CalendarItemOut(BaseModel):
 
 class ScheduleIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
-    at: datetime
+    at: UtcDatetime
     channel_id: int | None = None
 
 
 class RescheduleIn(BaseModel):
     title: str | None = Field(default=None, max_length=200)
-    at: datetime | None = None
+    at: UtcDatetime | None = None
 
 
 class ScheduledOut(BaseModel):
     meeting_id: int
     title: str | None
-    scheduled_at: datetime | None
-    started_at: datetime | None
+    scheduled_at: UtcDatetime | None
+    started_at: UtcDatetime | None
     channel_id: int | None
 
 
@@ -4692,8 +4722,8 @@ def _scheduled_out(meeting: m.Meeting) -> ScheduledOut:
 @app.get("/api/projects/{project_id}/calendar", response_model=list[CalendarItemOut])
 def read_calendar(
     project_id: int,
-    since: datetime,
-    until: datetime,
+    since: UtcDatetime,
+    until: UtcDatetime,
     session: DbSession,
     user: CurrentUser,
 ) -> list[CalendarItemOut]:
@@ -4787,7 +4817,7 @@ def cancel_scheduled_meeting(
 
 class NoticeOut(BaseModel):
     kind: str
-    at: datetime
+    at: UtcDatetime
     #: ⚠️ 저장된 글자가 아니라 **지금 만든** 문장입니다. 업무 이름을 고치면
     #: 이 문장도 따라옵니다.
     text: str
@@ -4867,7 +4897,7 @@ def mark_notifications_read(
 
 class ActivityOut(BaseModel):
     id: int
-    at: datetime
+    at: UtcDatetime
     action: str
     #: 사람 말. ⚠️ 서버가 줍니다 — 화면이 두 번째 표를 만들지 않습니다.
     label: str
@@ -4921,7 +4951,7 @@ class HitOut(BaseModel):
     #: ⚠️ **자르지 않은 대목**입니다. 어디를 잘라야 뜻이 사는지는 화면이
     #: 폭을 알아야 정합니다 — 여기서 자르면 그 판단이 두 벌이 됩니다.
     body: str
-    at: datetime | None
+    at: UtcDatetime | None
     who: str | None
     status: str | None
 
@@ -4958,8 +4988,8 @@ def search_everything(
     #    잘못된 상태를 넣어 본 테스트가 잡았습니다 (결함 135).
     task_status: str | None = Query(default=None, alias="status"),
     priority: int | None = None,
-    since: datetime | None = None,
-    until: datetime | None = None,
+    since: UtcDatetime | None = None,
+    until: UtcDatetime | None = None,
 ) -> list[HitOut]:
     """SEARCH-002~005 — 업무·회의·회의 내용·GitHub.
 

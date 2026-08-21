@@ -66,6 +66,37 @@ export function todayInTeamCalendar(now: Date = new Date()): string {
   return isoFrom(now);
 }
 
+const CLOCK = new Intl.DateTimeFormat('en-GB', {
+  timeZone: TEAM_TIMEZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+/**
+ * 목록에 쓰는 **짧은 날짜** — 팀 달력 기준 `MM-DD` (결함 246).
+ *
+ * ⛔ 화면들이 `new Date(iso).getMonth()` 로 직접 그리고 있었습니다. 그건
+ * **브라우저 달력**입니다 — 같은 회의를 서울 사람은 09-02 로, 뉴욕 사람은
+ * 09-01 로 봅니다. 그런데 이 제품의 마감일·달력은 팀 달력(`Asia/Seoul`)
+ * 이라, 한 화면 안에서 **달력 두 벌**이 섞여 있었습니다.
+ *
+ * ⚠️ 판단이 화면에 있던 것이기도 합니다 — `Home.tsx` 의 `fmtDate`,
+ * `Contributions.tsx` 의 `fmtWhen`. 둘 다 여기로 올렸습니다.
+ */
+export function shortTeamDate(instant: string): string | null {
+  const iso = teamDateOf(instant);
+  return iso === null ? null : iso.slice(5);
+}
+
+/** 팀 달력 기준 `MM-DD HH:MM`. 산정 시각처럼 **분까지** 말해야 할 때. */
+export function teamDateTime(instant: string): string | null {
+  const at = new Date(instant);
+  if (Number.isNaN(at.getTime())) return null;
+  const day = shortTeamDate(instant);
+  return day === null ? null : `${day} ${CLOCK.format(at)}`;
+}
+
 /**
  * 달력 한 장 — **날짜 고르기의 판단** (수정 지시서 v2 F7).
  *

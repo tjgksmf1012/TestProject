@@ -2,15 +2,17 @@ import { deepStrictEqual, strictEqual, throws } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  WEEKDAY_LABELS,
   describeMonth,
   formatTeamDate,
   monthGrid,
   monthOf,
   moveInCalendar,
   shiftMonth,
+  shortTeamDate,
   teamDateOf,
+  teamDateTime,
   todayInTeamCalendar,
+  WEEKDAY_LABELS,
 } from './calendar.ts';
 
 describe('monthGrid', () => {
@@ -169,5 +171,32 @@ describe('moveInCalendar — 격자 키보드 (결함 196)', () => {
     strictEqual(moveInCalendar('2026-09-10', 'Enter'), null);
     strictEqual(moveInCalendar('2026-09-10', 'a'), null);
     strictEqual(moveInCalendar('말도 안 되는 값', 'ArrowLeft'), null);
+  });
+});
+
+describe('목록의 날짜·시각도 팀 달력이다 (결함 246)', () => {
+  it('⭐ 자정을 넘는 순간을 **팀 달력**으로 읽는다', () => {
+    // 2026-09-01T22:00Z = 서울 09-02 07:00. 브라우저 달력으로 읽으면
+    // 뉴욕에서는 09-01 이라, 같은 회의를 팀원마다 다른 날로 봅니다.
+    strictEqual(shortTeamDate('2026-09-01T22:00:00Z'), '09-02');
+    strictEqual(shortTeamDate('2026-09-01T14:59:00Z'), '09-01');
+    strictEqual(shortTeamDate('2026-09-01T15:00:00Z'), '09-02');
+  });
+
+  it('시각도 팀 달력 — 24시간 표기', () => {
+    strictEqual(teamDateTime('2026-08-21T00:10:00Z'), '08-21 09:10');
+    strictEqual(teamDateTime('2026-08-20T15:00:00Z'), '08-21 00:00');
+  });
+
+  it('못 읽는 값은 **지어내지 않는다**', () => {
+    strictEqual(shortTeamDate('내일'), null);
+    strictEqual(teamDateTime(''), null);
+  });
+
+  it('⛔ 시간대 표시가 없으면 UTC 가 아니다 — 그건 서버가 붙여 줘야 한다', () => {
+    // 표시 없는 글자를 JS 는 **로컬**로 읽습니다. 그래서 서버가 `Z` 를
+    // 붙이게 고쳤고(결함 246), 여기서는 그 사실만 적어 둡니다.
+    const naive = shortTeamDate('2026-09-01T22:00:00');
+    strictEqual(typeof naive, 'string');
   });
 });

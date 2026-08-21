@@ -4373,6 +4373,41 @@ describe('⛔ 막아 놓고 **말은 하는가** (결함 235)', () => {
   });
 });
 
+describe('⛔ 달력은 **한 벌**이다 (결함 246)', () => {
+  /* 이 제품의 마감일·달력은 팀 달력(`Asia/Seoul`)입니다(결함 109). 그런데
+     홈과 기여도는 `new Date(iso).getMonth()` 로 **브라우저 달력**을 그리고
+     있었습니다 — 같은 회의를 서울 사람은 09-02, 뉴욕 사람은 09-01 로
+     봤습니다. 재서 확인했습니다(자정을 넘는 순간을 심어서).
+
+     ⚠️ 판단이 화면에 있던 것이기도 합니다 — `Home.tsx` 의 `fmtDate`,
+     `Contributions.tsx` 의 `fmtComputedAt`. */
+  it('⭐ SPA 화면이 **브라우저 달력**으로 날짜를 짓지 않는다', () => {
+    const base = join(ROOT, '..', 'webapp', 'src');
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.tsx') || entry.name.endsWith('.ts')) files.push(full);
+      }
+    };
+    walk(base);
+    const offenders: string[] = [];
+    for (const file of files) {
+      const code = codeOf(readFileSync(file, 'utf8'));
+      // 브라우저의 지역 달력을 꺼내 쓰는 자리들.
+      for (const m of code.matchAll(/\.(getMonth|getDate|getFullYear|getHours|getMinutes)\(/g)) {
+        offenders.push(`${file.slice(base.length + 1)}: ${m[1]}()`);
+      }
+    }
+    ok(files.length > 0, 'SPA 파일을 하나도 못 찾았습니다 — 가드가 헛돕니다');
+    ok(
+      offenders.length === 0,
+      `브라우저 달력으로 날짜를 짓고 있습니다 — 팀 달력(\`@lib/time/calendar\`)을 쓰세요\n    ${offenders.join('\n    ')}`,
+    );
+  });
+});
+
 describe('⛔ 녹음이 **혼자 멈췄을 때**도 끝까지 간다 (결함 240·241)', () => {
   /* 회의 도중 누가 동의를 철회하면 서버는 청크마다 403 을 줍니다
      (`recording_service.store_chunk` 가 청크마다 동의를 다시 봅니다).
