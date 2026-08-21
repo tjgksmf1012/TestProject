@@ -4751,7 +4751,7 @@ describe('⛔ 되돌릴 수 없는 것은 **묻고, 보이고, 좁아야** 한�
   });
 });
 
-describe('⛔ 글자가 있는 그대로 보여야 한다 (결함 259·261·262·263)', () => {
+describe('⛔ 글자가 있는 그대로 보여야 한다 (결함 259·261·262·263·269)', () => {
   const css = (): string => readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
 
   it('⭐ 없는 **무게를 지어내지 않는다** (결함 259)', () => {
@@ -4826,6 +4826,32 @@ describe('⛔ 글자가 있는 그대로 보여야 한다 (결함 259·261·262�
     ok(
       /html:has\(body\.sparail-page\)\s*\{[^}]*padding-left:\s*0/.test(sheet),
       '레일 화면(녹음·통화)이 없는 목록 열 몫을 비웁니다 — 왼쪽 끝이 둘이 됩니다',
+    );
+  });
+
+  it('⭐ 좁은 폭에서 **시간축이 뭉개지지 않는다** (결함 269)', () => {
+    /* 로비는 1024px 아래에서도 두 판이 나란히 서는데, 그러면 막대 칸이
+       **104px 에서 멈춥니다** — 눈금 일곱이 그 안에서 겹쳐 서로를 덮었습니다.
+       재서 잡았습니다(800px: 최소 간격 0px · 겹침 6).
+
+       폭을 줄여 맞추지 않고 **한 줄을 접습니다** — 홈이 좁아질 때 사슬을
+       아래로 내리는 것과 같은 방식(결함 213). */
+    const sheet = css();
+    const wide = /\.lrow\s*\{[^}]*grid-template-columns:[^;]*1fr[^;]*;/.test(sheet);
+    if (!wide) return; // 세 칸이 아니면 이 결함이 생길 수 없습니다.
+    const narrow = [...sheet.matchAll(/@media\s*\(max-width:[^)]*\)\s*\{/g)].map((m) => {
+      let depth = 1;
+      let i = (m.index ?? 0) + m[0].length;
+      while (i < sheet.length && depth > 0) {
+        if (sheet[i] === '{') depth += 1;
+        else if (sheet[i] === '}') depth -= 1;
+        i += 1;
+      }
+      return sheet.slice(m.index ?? 0, i);
+    });
+    ok(
+      narrow.some((b) => /\.lrow__ribbon\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/.test(b)),
+      '좁은 폭에서 막대 칸이 104px 로 눌려 눈금 일곱이 겹칩니다 — 줄을 접으세요',
     );
   });
 

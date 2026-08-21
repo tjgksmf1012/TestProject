@@ -403,10 +403,14 @@ export default function Lobby() {
             {anyJoined && (
               <div className="lrow lrow--axis" aria-hidden="true">
                 <span />
-                <div className="ribbon-axis">
-                  {ticks.map((t) => (
-                    <span key={t}>{t}</span>
-                  ))}
+                {/* ⚠️ 막대와 **같은 칸**(`.lrow__ribbon`)에 넣습니다 — 좁은
+                    폭에서 칸이 접힐 때 축만 남으면 눈금이 어긋납니다. */}
+                <div className="lrow__ribbon">
+                  <div className="ribbon-axis">
+                    {ticks.map((t) => (
+                      <span key={t}>{t}</span>
+                    ))}
+                  </div>
                 </div>
                 <span />
               </div>

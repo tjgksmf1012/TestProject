@@ -1633,6 +1633,22 @@ details.disc > .disc__body {
   padding-top: 14px;
 }
 .lrow__word { font-size: var(--fs-13); color: var(--c-ink-muted); }
+
+/* ⛔ **좁은 폭에서 시간축이 뭉갰습니다** (결함 269). 로비는 1024px 아래에서도
+   두 판이 나란히 서는데, 그러면 막대 칸이 **104px 에서 멈춥니다** — 눈금 일곱이
+   그 안에 겹쳐 글자가 서로를 덮었습니다. 재 봤습니다:
+
+       1200px  축 399px · 최소 간격 49px · 겹침 0
+        900px  축 171px · 최소 간격 11px · 겹침 0
+        800px  축 104px · 최소 간격  0px · **겹침 6**   ← 여기부터 못 읽음
+
+   폭을 줄여서 맞추지 않습니다 — 한 줄을 **접습니다.** 홈의 회의 줄이 좁아질
+   때 사슬을 아래로 내리는 것과 같은 방식입니다(결함 213). */
+@media (max-width: 58rem) {
+  .lrow { grid-template-columns: 5.5rem 1fr; }
+  .lrow__ribbon { grid-column: 1 / -1; }
+  .lrow--axis .lrow__ribbon { grid-column: 1 / -1; }
+}
 /* 아직 갈 수 없는 링크 — 조건이 차면 `href` 가 붙습니다.
    ⚠️ `opacity: .45` 였습니다. 정말로 못 누르니 WCAG 1.4.3 예외에는
    걸리지만, **같은 앱 안에서 「아직 안 됨」 이 두 가지 얼굴**을 갖게
