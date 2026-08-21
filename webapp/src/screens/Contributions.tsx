@@ -9,7 +9,12 @@ import { Why } from '../components/Why.tsx';
 import { useConfirmFinals, useContributions, useFinals, useMembers } from '../api/hooks.ts';
 import { ApiError } from '../api/client.ts';
 import { describeLoadFailure } from '@lib/ui/load.ts';
-import { confidenceRibbon, describeRibbon } from '@lib/contribution/ribbon.ts';
+import {
+  confidenceRibbon,
+  describeTeamRibbon,
+  ribbonReading,
+  sharedConfidence,
+} from '@lib/contribution/ribbon.ts';
 import {
   categoriesForDisplay,
   describeCategory,
@@ -251,6 +256,7 @@ export default function Contributions() {
   // 맨 앞에 세울 한 줄 — 「서로 비교하지 마세요」가 이 화면에서 가장 중요한
   // 문장입니다. 없으면(팀 신뢰도가 낮지 않으면) 첫 경고를 세웁니다.
   const headline = warnings.find((w) => w.includes('비교하지 마세요')) ?? warnings[0];
+  const teamConfidence = sharedConfidence(members.map((m) => m.confidence));
 
   return (
     <AppShell
@@ -270,6 +276,22 @@ export default function Contributions() {
                 <strong>⚠</strong> {headline}
               </p>
               <Why about="이 수치를 읽기 전에" lines={warnings} />
+            </div>
+          )}
+
+          {/* ⭐ 확신도는 **팀 값 하나**입니다 — 사람 줄마다 그리면 팀에 대해
+              아는 것을 사람에 대해 아는 것처럼 말하게 됩니다 (결함 248).
+              값이 갈라지는 날이 오면 `sharedConfidence` 가 `null` 을 주고
+              이 줄은 안 그려집니다. */}
+          {teamConfidence !== null && (
+            <div className="teamconf">
+              <span className="teamconf__who">팀 전체</span>
+              <TrackRibbon
+                size="md"
+                segments={confidenceRibbon(teamConfidence)}
+                label={describeTeamRibbon(teamConfidence)}
+              />
+              <p className="teamconf__read">{ribbonReading(teamConfidence)}</p>
             </div>
           )}
 
@@ -311,21 +333,14 @@ export default function Contributions() {
                     {/* 구간은 **글자가 주인공**입니다. 레인은 보조이고,
                         카드마다 자기 눈금을 가집니다 (v2 F1 · 조사 R3-4). */}
                     <div className="crow__range-cell">
+                      {/* ⛔ **여기에 리본이 있었습니다** (결함 247·248).
+                          247: 길이가 기여도에 비례해 세 줄이 막대그래프였습니다.
+                          248: 길이를 고쳐 놓고 보니 세 리본이 **완전히 같았고**,
+                          그럴 수밖에 없었습니다 — `confidence` 는 팀당 한 번
+                          계산되는 값입니다(`contribution/scoring.py`). 팀에
+                          대해 아는 것을 사람 이름으로 읽어 주던 것이라
+                          **머리말로 한 번만** 올렸습니다. */}
                       <Stat value={describeRange(member)} label="기여 구간" />
-                      {/* ⛔ **여기가 막대그래프였습니다** (결함 247). 세 줄의
-                          리본이 같은 자(0/25/50/75/100)에서 출발했고, 꼬리
-                          길이가 구조적으로 기여도 순위였습니다 — `confidence`
-                          는 팀 상수라 꼬리 끝 = c + s(1−c)/100 이 share 에 대해
-                          늘 순증가합니다. 불변식 ① 을 세 번째로 어긴 자리.
-                          지금은 **언제나 가득 차고** 나뉘는 자리만 다릅니다 —
-                          길이가 같으니 견줄 것이 없습니다. 눈금도 걷었습니다
-                          (공유하는 자를 세우면 그게 곧 순위표이고, 그 자 위에
-                          단위가 둘 앉아 있었습니다). 판단은 `@lib`. */}
-                      <TrackRibbon
-                        size="sm"
-                        segments={confidenceRibbon(member.confidence)}
-                        label={describeRibbon(name, member.confidence)}
-                      />
                     </div>
 
                     {/* ⚠️ 예전에는 `신뢰도 낮음 · 모르는 폭 20%p` 였습니다. 앞을

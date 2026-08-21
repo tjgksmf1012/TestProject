@@ -1,7 +1,12 @@
 import { describe, it } from 'node:test';
 import { strictEqual, deepStrictEqual, ok } from 'node:assert/strict';
 
-import { confidenceRibbon, describeRibbon } from './ribbon.ts';
+import {
+  confidenceRibbon,
+  describeTeamRibbon,
+  ribbonReading,
+  sharedConfidence,
+} from './ribbon.ts';
 import type { RibbonPiece } from './ribbon.ts';
 
 /* 리본이 **가득 찼는가** — 이 검사만 쓰는 자라 여기 둡니다.
@@ -47,14 +52,33 @@ describe('기여도 리본은 **순위를 안 그린다** (결함 247)', () => {
   it('⭐ 낭독기가 듣는 것과 **그림이 말하는 것**이 같다', () => {
     // 예전 aria-label 은 「확신도 45% · 모르는 폭 14%p」 였습니다 — 그림은
     // 확신도 축인데 라벨은 %p 를 말해 눈과 귀가 다른 축을 봤습니다.
-    const said = describeRibbon('박지원', 0.45);
+    const said = describeTeamRibbon(0.45);
     strictEqual(said.includes('45%'), true, said);
     strictEqual(said.includes('55%'), true, said);
     strictEqual(said.includes('%p'), false, said);
   });
 
+  it('⭐ 문구의 임자는 **팀**이다 — 사람 이름을 안 부른다 (결함 248)', () => {
+    // 「김민수 — 확신한 몫 45%」 는 「이 사람은 45%만 파악됐다」로 읽힙니다.
+    // 실제로는 팀당 한 번 계산되는 값이라 세 사람이 전부 같은 45% 였습니다.
+    strictEqual(describeTeamRibbon(0.446).startsWith('팀 전체'), true);
+  });
+
   it('아무것도 모를 때는 **그렇게 말한다**', () => {
-    strictEqual(describeRibbon('김민수', 0).includes('확인하지 못했습니다'), true);
+    strictEqual(describeTeamRibbon(0).includes('확인하지 못했습니다'), true);
+  });
+
+  it('⭐ 값이 갈라지면 **팀 것이라고 안 한다** (결함 248)', () => {
+    strictEqual(sharedConfidence([0.446, 0.446]), 0.446);
+    strictEqual(sharedConfidence([0.446, 0.45]), null);
+    strictEqual(sharedConfidence([]), null);
+    // 0~1 밖은 접습니다 — 리본은 그 밖을 그릴 수 없습니다.
+    strictEqual(sharedConfidence([1.4, 1.4]), 1);
+  });
+
+  it('옆에 서는 글자가 **그림과 같은 값**을 말한다', () => {
+    strictEqual(ribbonReading(0.446), '확신 45% · 모름 55%');
+    strictEqual(ribbonReading(0), '확신 0% · 모름 100%');
   });
 
   it('⛔ 두 조각의 뜻이 겹치지 않는다 — 빈 곳(`empty`)은 안 쓴다', () => {

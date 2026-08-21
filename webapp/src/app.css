@@ -1050,9 +1050,38 @@ details.disc > .disc__body {
 }
 .warnband p { margin: 0; }
 
+/* 팀 확신 리본 — **한 화면에 하나** (결함 248). 확신도는 팀당 한 번
+   계산되는 값이라, 사람 줄마다 그리면 팀에 대해 아는 것을 사람에 대해
+   아는 것처럼 말하게 됩니다. 값은 옆에 **글자로** 섭니다. */
+.teamconf {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6);
+  border-bottom: 1px solid var(--c-line);
+}
+.teamconf > div:nth-child(2) { flex: 1; min-width: 0; }
+.teamconf__who {
+  flex: 0 0 auto;
+  font-size: var(--fs-12);
+  color: var(--c-ink-muted);
+  white-space: nowrap;
+}
+.teamconf__read {
+  margin: 0;
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-12);
+  color: var(--c-ink-muted);
+  white-space: nowrap;
+}
+
 /* 사람마다 **개별 카드** — 레인이 같은 축에 나란히 서면 눈금이 있어도
-   길이 비교표로 읽힙니다 (v2 F1-3 A안). 카드 테두리와 간격이 축을 끊고,
-   눈금(0/25/50/75/100)은 카드마다 자기 것을 갖습니다. */
+   길이 비교표로 읽힙니다 (v2 F1-3 A안).
+   ⚠️ 그 카드 안의 리본은 **지웠습니다** — 길이를 고쳐도(결함 247) 그 그림이
+   말하는 것은 팀 값이었습니다(결함 248). 눈금도 같이 걷었습니다. */
 .crow {
   padding: var(--sp-5) var(--sp-6);
   border: 1px solid var(--c-line);
@@ -1061,13 +1090,19 @@ details.disc > .disc__body {
   margin-bottom: var(--sp-6);
 }
 /* 카드 = 넉 칸. 문장이 아니라 **값들**이 나란히 섭니다.
-   [이름·역할] [구간 + 레인] [모르는 폭] [근거 사슬] */
+   [이름·역할] [구간] [모르는 폭] [근거 사슬]
+
+   ⚠️ 리본이 있던 시절에는 둘째 칸이 `minmax(200px, 1fr)` 이라 폭을 다
+   먹었습니다. 리본을 걷고(결함 248) 그대로 뒀더니 **구간 숫자와 「모름」
+   사이에 500px 짜리 구멍**이 남았습니다 — 렌더해서 보고 알았습니다.
+   지금은 값을 왼쪽으로 모으고, 남는 폭은 사슬 뒤 가장자리에 둡니다. */
 .crow {
   display: grid;
-  grid-template-columns: 9rem minmax(200px, 1fr) 7rem auto;
+  grid-template-columns: 9rem 8.5rem 7rem 1fr;
   align-items: center;
   gap: var(--sp-8);
 }
+.crow .chain { justify-self: start; }
 .crow__id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .crow__name { font-weight: var(--fw-semibold); font-size: var(--fs-14); }
 .crow__role { font-size: var(--fs-11); color: var(--c-ink-faint); }
@@ -1076,7 +1111,7 @@ details.disc > .disc__body {
 
 @media (max-width: 1100px) {
   /* 좁아지면 사슬을 아래 줄로 — 값을 줄이지 않고 접습니다. */
-  .crow { grid-template-columns: 9rem minmax(160px, 1fr) 7rem; }
+  .crow { grid-template-columns: 9rem 8.5rem 1fr; }
   .crow .chain { grid-column: 2 / -1; }
 }
 

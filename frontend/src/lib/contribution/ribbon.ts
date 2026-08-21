@@ -66,9 +66,44 @@ export function confidenceRibbon(confidence: number): RibbonPiece[] {
   return pieces;
 }
 
+/**
+ * 이 확신도가 **팀 것인가** — 모두가 같은 값을 들고 있으면 그 값, 아니면 `null`.
+ *
+ * ## ⛔ 이것도 결함이었습니다 (결함 248)
+ *
+ * `confidence` 는 팀당 **한 번** 계산됩니다 — `contribution/scoring.py` 의
+ * `compute_confidence(coverage)` 는 사람 반복문 **밖**에 있고, 그 한 값이
+ * 세 사람에게 그대로 실립니다. 그런데 화면은 그 리본을 사람 줄마다 그리고
+ * 낭독기에 **「김민수 — 확신한 몫 45%」** 라고 읽어 줬습니다. 재 보니 세
+ * 사람의 문구가 이름만 다르고 숫자가 같았습니다(전부 45%).
+ *
+ * 팀에 대해 아는 것을 **사람에 대해 아는 것처럼** 말한 것이고, 그러면
+ * 「이 사람은 45%만 파악됐다」로 읽힙니다. 불변식 ③(측정 불가 ≠ 0점)이
+ * 지키려는 것과 같은 자리입니다 — **모르는 것의 임자를 바꾸면 안 됩니다.**
+ *
+ * ⚠️ 그래서 「같은 값이니 하나만 그리자」가 아니라 **「같은 값인지 여기서
+ * 확인하고」** 그릴 때만 팀 것이라고 말합니다. 나중에 사람마다 다른 값이
+ * 오면 이 함수가 `null` 을 주고, 화면은 팀 리본을 안 그립니다.
+ */
+export function sharedConfidence(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  const first = values[0] as number;
+  if (!Number.isFinite(first)) return null;
+  for (const v of values) {
+    if (!Number.isFinite(v) || Math.abs(v - first) > 1e-9) return null;
+  }
+  return Math.min(1, Math.max(0, first));
+}
+
 /** 낭독기에 읽힐 한 줄. 그림이 말하는 것과 **같은 것**을 말합니다. */
-export function describeRibbon(name: string, confidence: number): string {
+export function describeTeamRibbon(confidence: number): string {
   const known = Math.round(Math.min(1, Math.max(0, confidence)) * 100);
-  if (known === 0) return `${name} — 아직 아무것도 확인하지 못했습니다`;
-  return `${name} — 확신한 몫 ${known}%, 나머지 ${100 - known}%는 모르는 것입니다`;
+  if (known === 0) return '팀 전체 — 아직 아무것도 확인하지 못했습니다';
+  return `팀 전체 — 확신한 몫 ${known}%, 나머지 ${100 - known}%는 모르는 것입니다`;
+}
+
+/** 리본 옆에 **글자로** 서는 값 — 「값은 글자로, 그림은 폭이나 개수만」. */
+export function ribbonReading(confidence: number): string {
+  const known = Math.round(Math.min(1, Math.max(0, confidence)) * 100);
+  return `확신 ${known}% · 모름 ${100 - known}%`;
 }

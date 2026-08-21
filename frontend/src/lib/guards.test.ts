@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
 import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
-import { confidenceRibbon } from './contribution/ribbon.ts';
+import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contribution/ribbon.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
@@ -4479,6 +4479,68 @@ describe('⛔ 기여도 리본은 **순위를 안 그린다** (결함 247)', () 
       const covered = confidenceRibbon(c).reduce((sum, p) => sum + (p.end - p.start), 0);
       ok(Math.abs(covered - 1) < 1e-9, `확신도 ${c} 에서 리본이 안 가득 찹니다`);
     }
+  });
+});
+
+describe('⛔ 확신 리본은 **팀 것**이다 (결함 248)', () => {
+  /* 결함 247 로 리본 길이를 고쳐 놓고 렌더해 보니, 세 사람의 리본이
+     **완전히 같았습니다.** 그럴 수밖에 없었습니다 — `confidence` 는
+     `compute_confidence(coverage)` 한 번으로 팀 전체에 대해 계산되고
+     (`contribution/scoring.py`, 사람 반복문 **밖**입니다) 그 한 값이 세
+     사람에게 그대로 실립니다. 화면에서 잰 낭독 문구도 이름만 다르고
+     숫자가 전부 45% 였습니다.
+
+     팀에 대해 아는 것을 **사람에 대해 아는 것처럼** 말한 것입니다.
+     「김민수 — 확신한 몫 45%」는 「이 사람은 45%만 파악됐다」로 읽힙니다.
+     불변식 ③(측정 불가 ≠ 0점)이 지키려는 것과 같은 자리 — **모르는 것의
+     임자를 바꾸면 안 됩니다.**
+
+     그래서 리본은 머리말에 **하나**만 서고, 「팀 전체」라고 적습니다. */
+  const screen = (): string =>
+    codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Contributions.tsx'), 'utf8'));
+
+  it('⭐ 리본은 **한 개**이고 사람 줄 **밖**에 선다', () => {
+    const code = screen();
+    const ribbons = [...code.matchAll(/<TrackRibbon\b/g)];
+    strictEqual(
+      ribbons.length,
+      1,
+      '기여도 화면의 리본은 하나입니다 — 사람마다 그리면 팀 값을 사람 값처럼 말합니다',
+    );
+    /* ⚠️ 처음에는 `members.map(` 을 찾았는데, 그 이름의 **임자가 다섯**
+       이었습니다 — 확정 폼 초안·몫 색인·그리고 팀 확신값을 모으는 줄까지.
+       맨 앞에 걸린 것이 리본보다 위에 있어서 가드가 **엉뚱한 자리**를
+       기준으로 재고 실패했습니다. 사람 줄을 그리는 자리는 이것입니다. */
+    const map = code.indexOf('members.map((member) =>');
+    ok(map > 0, '사람 줄을 그리는 `members.map((member) =>` 를 못 찾았습니다 — 가드가 헛돕니다');
+    ok(
+      (ribbons[0]?.index ?? -1) < map,
+      '리본이 사람 줄 안으로 들어갔습니다 — 확신도는 팀당 한 번 계산되는 값입니다',
+    );
+  });
+
+  it('⭐ 리본 문구가 **사람 이름을 부르지 않는다**', () => {
+    // 낭독기에 「김민수 — 확신한 몫 45%」로 읽히던 자리입니다.
+    ok(!/확신한 몫/.test(describeTeamRibbon(0)), '0 일 때는 몫을 말하지 않습니다');
+    ok(
+      describeTeamRibbon(0.446).startsWith('팀 전체'),
+      `리본 문구의 임자가 팀이 아닙니다: ${describeTeamRibbon(0.446)}`,
+    );
+    const lib = codeOf(
+      readFileSync(join(ROOT, 'src', 'lib', 'contribution', 'ribbon.ts'), 'utf8'),
+    );
+    ok(
+      !/export function describeRibbon\b/.test(lib),
+      '사람 이름을 받는 리본 문구가 남아 있습니다',
+    );
+  });
+
+  it('⭐ 값이 **갈라지면** 팀이라고 말하지 않는다', () => {
+    // 「같은 값이니 하나만 그리자」가 아니라 「같은 값인지 확인하고 그린다」.
+    strictEqual(sharedConfidence([0.446, 0.446, 0.446]), 0.446);
+    strictEqual(sharedConfidence([0.446, 0.5, 0.446]), null);
+    strictEqual(sharedConfidence([]), null);
+    strictEqual(sharedConfidence([Number.NaN, Number.NaN]), null);
   });
 });
 
