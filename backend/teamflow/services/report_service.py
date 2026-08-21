@@ -17,6 +17,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from teamflow.contribution import events, profiles
 from teamflow.db import models as m
 from teamflow.db.vocab import REPORT_SCOPE, ReportScope, ReportType
 from teamflow.reports import minutes as minutes_builder
@@ -165,13 +166,16 @@ def _people(session: Session, project_id: int) -> list[period_builder.Person]:
     """
     result = scoring_service.compute(session, project_id)
 
-    names = dict(
-        session.execute(
-            select(m.User.id, m.User.name).join(
-                m.Member, m.Member.user_id == m.User.id
-            ).where(m.Member.project_id == project_id)
-        ).all()
-    )
+    # ⚠️ 역할 비중도 같이 읽습니다 (결함 291). 예전에는 `score.role` 만
+    #    실어서 「기획 60% · 개발 40%」 인 사람이 문서에 「기획」 하나로
+    #    적혔고, 그나마도 `developer` 같은 **영어 식별자 그대로**였습니다.
+    rows = session.execute(
+        select(m.User.id, m.User.name, m.Member.role_shares).join(
+            m.Member, m.Member.user_id == m.User.id
+        ).where(m.Member.project_id == project_id)
+    ).all()
+    names = {user_id: name for user_id, name, _ in rows}
+    shares = {user_id: share for user_id, _, share in rows}
 
     finals = {
         row.user_id: row
@@ -193,7 +197,7 @@ def _people(session: Session, project_id: int) -> list[period_builder.Person]:
         people.append(
             period_builder.Person(
                 name=names.get(user_id, f"#{user_id}"),
-                role=score.role,
+                role=profiles.describe_role_shares(shares.get(user_id), score.role),
                 measured=measured,
                 range_low=round(score.range_low, 1) if measured else None,
                 range_high=round(score.range_high, 1) if measured else None,
@@ -311,7 +315,9 @@ def generate_period(
         period_end=period_end,
         github_backfilled=project.github_backfilled_to is not None,
         confirmed=confirmed,
-        skipped_categories=[str(c) for c in result.skipped_categories],
+        # ⛔ 예전에는 `str(c)` 라 문서에 `document, schedule, peer` 가
+        #    그대로 나갔습니다 (결함 291).
+        skipped_categories=[events.describe_category(str(c)) for c in result.skipped_categories],
         **counts,
     )
 

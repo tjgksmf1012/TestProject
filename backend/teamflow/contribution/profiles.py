@@ -26,6 +26,53 @@ class Role(StrEnum):
     DESIGNER = "designer"
 
 
+#: 사람이 읽을 이름.
+#:
+#: ⚠️ **화면의 `lib/contribution/view.ts` 와 짝입니다** (`PROJECT_ROLE_LABEL`
+#: 과 같은 방식). 갈라지면 `test_role_label.py` 가 터집니다.
+#:
+#: ⚠️ 이 표가 없어서 최종 보고서가 역할을 **`developer` 라고 그대로**
+#: 적었습니다 (결함 291). 한국어 제품의 제출물에 영어 식별자가 뜬 것이고,
+#: 화면은 같은 사람을 「개발 60% · 디자인 40%」라고 부르고 있었습니다.
+ROLE_LABEL: dict[Role, str] = {
+    Role.DEVELOPER: "개발",
+    Role.PLANNER: "기획",
+    Role.DESIGNER: "디자인",
+}
+
+
+def role_label(key: str) -> str:
+    """역할의 한국어 이름.
+
+    ⚠️ 모르는 값은 **그대로 돌려줍니다.** 역할을 하나 더 만들었는데 표에
+    안 넣었으면, 지어낸 한국어보다 영어 식별자가 정직합니다 — 화면의
+    `roleLabel` 과 같은 규칙입니다.
+    """
+    try:
+        return ROLE_LABEL[Role(key)]
+    except ValueError:
+        return key
+
+
+def describe_role_shares(shares: dict[str, float] | None, primary: str) -> str:
+    """이 사람을 뭐라고 부를 것인가 — 화면(`roleOf`)과 **같은 글자**.
+
+    ⚠️ **절반만 말하지 않습니다.** 기획 60% · 개발 40% 인 사람을 「기획」
+    이라고만 적으면, 그 사람의 코드 활동이 왜 가중치가 낮은지 읽는 사람이
+    알 수 없습니다. 기여도 문서에서 그건 사람을 깎는 쪽으로 읽힙니다.
+
+    비중을 모르면 서버가 가진 주 역할을 그대로 씁니다 — **지어내지
+    않습니다.**
+    """
+    named = [(k, v) for k, v in (shares or {}).items() if v > 0]
+    if not named:
+        return role_label(primary)
+    if len(named) == 1:
+        return role_label(named[0][0])
+    named.sort(key=lambda kv: kv[1], reverse=True)
+    return " · ".join(f"{role_label(k)} {round(v * 100)}%" for k, v in named)
+
+
 @dataclass(frozen=True, slots=True)
 class ScoringProfile:
     """역할 하나의 카테고리별 가중치."""

@@ -482,6 +482,60 @@ def test_the_document_does_not_leak_english_identifiers():
     assert "트랙이 곧 사람" in flat
 
 
+def test_the_period_report_does_not_leak_an_english_role():
+    """⭐ **역할도 영어 식별자를 남기지 않습니다** (결함 291).
+
+    이 검사는 회의록의 `processing`·`multitrack` 만 보고 있었고, 사람별
+    기여가 들어가는 주간·최종 보고서는 안 보고 있었습니다 — 그래서 최종
+    보고서가 `developer` 를 그대로 싣고 화면에 그대로 떴습니다.
+
+    ⚠️ **값만 봅니다.** JSON 의 열쇠(`role`·`blocks` …)는 구조라 영어가
+    맞습니다 — 열쇠까지 세면 이 검사는 영원히 빨갛습니다.
+    """
+    from teamflow.contribution.profiles import Role
+    from teamflow.reports import period as period_builder
+
+    content = period_builder.build(
+        period_builder.PeriodInput(
+            project_name="팀",
+            people=[
+                period_builder.Person(
+                    name="김민수",
+                    role="개발 60% · 디자인 40%",
+                    measured=True,
+                    range_low=10.0,
+                    range_high=20.0,
+                    confidence=0.5,
+                    confidence_label="낮음",
+                    reasons=[],
+                    evidence_count=3,
+                    gaps=[],
+                    final_value=None,
+                    final_reason=None,
+                )
+            ],
+        ),
+        ReportType.FINAL,
+    )
+    values = _string_values(content)
+    leaked = sorted({v for v in values if v in {str(r) for r in Role}})
+    assert not leaked, f"문서에 영어 역할 식별자가 남았습니다: {leaked}"
+
+
+def _string_values(node, out=None):
+    """JSON 에서 **값**인 문자열만 모은다 (열쇠는 뺀다)."""
+    out = [] if out is None else out
+    if isinstance(node, dict):
+        for v in node.values():
+            _string_values(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _string_values(v, out)
+    elif isinstance(node, str):
+        out.append(node)
+    return out
+
+
 def test_a_failed_meeting_is_not_reported_as_finished():
     """실패는 **아직 안 한 것과도, 마친 것과도** 다릅니다."""
     failed = minutes.build(
@@ -594,4 +648,66 @@ def test_no_report_module_formats_a_datetime_by_hand():
     assert not bad, (
         "보고서가 시각을 손으로 찍습니다 — `clock.local_time`/`local_date` 를 "
         "거치세요:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_no_report_text_carries_markdown_syntax():
+    """⭐ 보고서 블록은 **마크다운이 아니라 글자**입니다 (결함 292).
+
+    최종 보고서에 이렇게 찍혀 있었습니다 —
+
+        위 구간은 계산값이며 **확정된 기여도가 아닙니다.**
+
+    화면에도, 「글자로 복사」한 결과에도 별표가 그대로 나갑니다. 강조하려던
+    것이 오히려 문서를 어설프게 보이게 합니다. 렌더해서 눈으로 보고
+    찾았습니다.
+    """
+    import re
+
+    from teamflow.contribution.profiles import Role  # noqa: F401  (씨앗 대조용)
+
+    made = [
+        minutes.build(
+            minutes.MinutesInput(
+                meeting_title="회의",
+                status="needs_review",
+                capture_mode="multitrack",
+                summary="요약",
+            )
+        ),
+        period_builder_content(),
+    ]
+    bad: list[str] = []
+    for content in made:
+        for text in _string_values(content):
+            if re.search(r"\*\*|__|\[[^\]]+\]\([^)]+\)", text):
+                bad.append(text[:80])
+    assert not bad, f"보고서 글자에 마크다운이 섞였습니다: {bad}"
+
+
+def period_builder_content():
+    from teamflow.reports import period as period_builder
+
+    return period_builder.build(
+        period_builder.PeriodInput(
+            project_name="팀",
+            people=[
+                period_builder.Person(
+                    name="김민수",
+                    role="개발",
+                    measured=True,
+                    range_low=10.0,
+                    range_high=20.0,
+                    confidence=0.5,
+                    confidence_label="낮음",
+                    reasons=["근거가 적습니다"],
+                    evidence_count=3,
+                    gaps=["녹음이 끊겼습니다"],
+                    final_value=None,
+                    final_reason=None,
+                )
+            ],
+            skipped_categories=["문서"],
+        ),
+        ReportType.FINAL,
     )
