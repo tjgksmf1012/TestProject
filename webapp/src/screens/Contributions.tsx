@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react';
 import { teamDateTime } from '@lib/time/calendar.ts';
 import { useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
-import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
+import { TrackRibbon } from '../components/TrackRibbon.tsx';
 import { Chain, type ChainLink } from '../components/Chain.tsx';
 import { Stat } from '../components/Stat.tsx';
 import { Why } from '../components/Why.tsx';
 import { useConfirmFinals, useContributions, useFinals, useMembers } from '../api/hooks.ts';
 import { ApiError } from '../api/client.ts';
 import { describeLoadFailure } from '@lib/ui/load.ts';
+import { confidenceRibbon, describeRibbon } from '@lib/contribution/ribbon.ts';
 import {
   categoriesForDisplay,
   describeCategory,
@@ -42,19 +43,6 @@ import { Problem } from '../components/Problem.tsx';
 //
 // 불변식: 이름순 고정 · 구간(단일 점수 없음) · 결측은 황토 · 확정은 사람이.
 // 리본 채움은 **확신도** 비례입니다 — 기여도에 비례하면 그게 순위표입니다.
-
-/** 리본 조각: 왼쪽부터 확신(잉크) → 모르는 폭(빗금) → 빈 곳. */
-function ribbonFor(member: MemberScore, widthPoints: number | null): RibbonSegment[] {
-  const known = Math.min(1, Math.max(0, member.confidence));
-  // ⚠️ 폭을 **잴 수 없으면**(결함 226) 확신한 만큼 말고는 전부 모르는 것입니다.
-  //    0 으로 접으면 리본이 "확신 45% · 모름 0" 이 되어, 나머지 55% 가
-  //    아무 말도 안 하는 빈 곳이 됩니다.
-  const unknown = widthPoints === null ? 1 - known : Math.min(1 - known, widthPoints / 100);
-  return [
-    { start: 0, end: known, kind: 'known' },
-    { start: known, end: known + unknown, kind: 'unknown' },
-  ];
-}
 
 /**
  * 이 사람의 근거를 **사슬**로 — 회의 → 업무 → 코드.
@@ -324,11 +312,19 @@ export default function Contributions() {
                         카드마다 자기 눈금을 가집니다 (v2 F1 · 조사 R3-4). */}
                     <div className="crow__range-cell">
                       <Stat value={describeRange(member)} label="기여 구간" />
+                      {/* ⛔ **여기가 막대그래프였습니다** (결함 247). 세 줄의
+                          리본이 같은 자(0/25/50/75/100)에서 출발했고, 꼬리
+                          길이가 구조적으로 기여도 순위였습니다 — `confidence`
+                          는 팀 상수라 꼬리 끝 = c + s(1−c)/100 이 share 에 대해
+                          늘 순증가합니다. 불변식 ① 을 세 번째로 어긴 자리.
+                          지금은 **언제나 가득 차고** 나뉘는 자리만 다릅니다 —
+                          길이가 같으니 견줄 것이 없습니다. 눈금도 걷었습니다
+                          (공유하는 자를 세우면 그게 곧 순위표이고, 그 자 위에
+                          단위가 둘 앉아 있었습니다). 판단은 `@lib`. */}
                       <TrackRibbon
                         size="sm"
-                        segments={ribbonFor(member, points)}
-                        ticks={['0', '25', '50', '75', '100']}
-                        label={`${name} — 확신도 ${Math.round(member.confidence * 100)}% · 모르는 폭 ${describeWidth(points)}`}
+                        segments={confidenceRibbon(member.confidence)}
+                        label={describeRibbon(name, member.confidence)}
                       />
                     </div>
 

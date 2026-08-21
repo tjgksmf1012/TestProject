@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 
 import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
+import { confidenceRibbon } from './contribution/ribbon.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
@@ -4405,6 +4406,79 @@ describe('⛔ 달력은 **한 벌**이다 (결함 246)', () => {
       offenders.length === 0,
       `브라우저 달력으로 날짜를 짓고 있습니다 — 팀 달력(\`@lib/time/calendar\`)을 쓰세요\n    ${offenders.join('\n    ')}`,
     );
+  });
+});
+
+describe('⛔ 기여도 리본은 **순위를 안 그린다** (결함 247)', () => {
+  /* 이 저장소의 제일 무거운 불변식(①: 순위·리더보드 금지)이 걸린 자리인데
+     **가드가 한 번도 안 울렸습니다.** 조각을 만드는 코드가 `@lib` 이 아니라
+     화면 안(`Contributions.tsx` 의 `ribbonFor`)에 있었기 때문입니다 —
+     실패 ①「만들어 놓고 아무도 안 부름」의 거울상입니다.
+
+     재서 확인했습니다:
+
+         1440px  세 리본의 축 `left` 가 전부 273.00 · 파랑 끝도 셋 다 44.60%
+                  빗금 꼬리 끝만 67.97% / 62.84% / 58.36%
+         900px   세 축이 201→731 로 **픽셀까지 동일**
+
+     그리고 그 꼬리는 우연이 아닙니다. `confidence` 는 팀당 한 번 계산되는
+     상수이고(`scoring.py`) 폭이 `share × (1 − confidence) × 0.5` 이므로
+     꼬리 끝 `= c + s(1 − c)/100` 은 share 에 대해 **구조적으로 순증가**
+     였습니다. 같은 축 위에 세로로 쌓인 막대그래프 = 순위표.
+
+     ⚠️ 눈금도 같이 걷었습니다. 눈금이 서면 그 축은 사람들이 **공유하는
+     자**가 되고, 게다가 그 자 위에 단위가 둘 앉아 있었습니다(파랑은
+     확신도 0~1, 빗금 폭은 기여도 %p). */
+  const screen = (): string =>
+    codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Contributions.tsx'), 'utf8'));
+
+  it('⭐ 화면이 리본 조각을 **직접 짓지 않는다** — 판단은 `@lib`', () => {
+    const code = screen();
+    ok(/confidenceRibbon/.test(code), '기여도 화면이 `confidenceRibbon` 을 안 부릅니다');
+    ok(
+      /from '@lib\/contribution\/ribbon\.ts'/.test(code),
+      '`@lib/contribution/ribbon.ts` 에서 가져오지 않습니다 — 판단이 화면으로 돌아왔습니다',
+    );
+    const homemade = [...code.matchAll(/kind:\s*'(known|unknown|empty)'/g)].map((m) => m[0]);
+    strictEqual(
+      homemade.join(' · '),
+      '',
+      '화면이 리본 조각을 직접 짓고 있습니다 — 순위가 그려져도 가드가 안 울립니다',
+    );
+  });
+
+  it('⭐ 기여도 리본에는 **공유하는 자**를 세우지 않는다', () => {
+    const code = screen();
+    const tags = [...code.matchAll(/<TrackRibbon[\s\S]*?\/>/g)].map((m) => m[0]);
+    ok(tags.length > 0, '기여도 화면에서 리본을 하나도 못 찾았습니다 — 가드가 헛돕니다');
+    const withTicks = tags.filter((t) => /\bticks=/.test(t));
+    strictEqual(
+      withTicks.length,
+      0,
+      '리본에 눈금이 섰습니다 — 여러 사람이 같은 자를 공유하면 그게 순위표입니다',
+    );
+  });
+
+  it('⭐ 리본 길이는 **사람마다 같다** — 기여도가 길이를 못 건드린다', () => {
+    /* 길이가 share 에 딸려 가면 그 순간 다시 막대그래프입니다. 그래서
+       조각을 만드는 함수는 **확신도 하나만** 받습니다.
+
+       ⚠️ 처음에는 `confidenceRibbon.length` 로 셌습니다. **기본값이 붙은
+       인자는 그 수에 안 들어갑니다** — `(c, share = 0)` 을 심었더니
+       가드가 통과했습니다. 잴 도구가 틀린 자리라, 이제 선언을 읽습니다. */
+    const lib = readFileSync(join(ROOT, 'src', 'lib', 'contribution', 'ribbon.ts'), 'utf8');
+    const sig = /export function confidenceRibbon\(([^)]*)\)/.exec(codeOf(lib));
+    ok(sig, '`confidenceRibbon` 선언을 못 찾았습니다 — 가드가 헛돕니다');
+    const params = (sig?.[1] ?? '').split(',').filter((t) => t.trim() !== '');
+    strictEqual(
+      params.length,
+      1,
+      `리본이 확신도 말고 다른 값을 받고 있습니다 — 길이가 기여도에 딸려 갑니다: ${params.join(' · ')}`,
+    );
+    for (const c of [0, 0.2, 0.446, 1]) {
+      const covered = confidenceRibbon(c).reduce((sum, p) => sum + (p.end - p.start), 0);
+      ok(Math.abs(covered - 1) < 1e-9, `확신도 ${c} 에서 리본이 안 가득 찹니다`);
+    }
   });
 });
 
