@@ -4544,6 +4544,59 @@ describe('⛔ 확신 리본은 **팀 것**이다 (결함 248)', () => {
   });
 });
 
+describe('⛔ 안 잰 것을 **만점으로 읽지 않는다** (결함 249·250)', () => {
+  /* 녹음 화면 ③ 「캡처 설정 확인」은 경고 목록이 비면 초록으로
+     「캡처 설정이 요청대로 적용됐습니다」라고 적었습니다. 그 목록은
+     `requestMicrophone()` 이 성공한 뒤에야 채워지는데도요.
+
+     재현했습니다 — `getUserMedia` 를 거부시키고 화면을 열었더니
+     `#blockers` 는 「마이크 권한이 거부됐습니다」인데 `#warnings` 는
+     초록으로 「요청대로 적용됐습니다」였습니다. **아무것도 안 재고
+     만점을 준 것**입니다 (불변식 ③).
+
+     ⚠️ 고치고 색을 재다가 하나 더 나왔습니다 (결함 250). 화면은 심각도를
+     계산해 `li.critical` 처럼 클래스로 붙이고 있었는데, 바로 위
+     `#blockers li, #warnings li` 가 `color` 를 정하고 있어서 **다섯 톤이
+     전부 특성도에서 지고** `--text-muted` 한 색으로 나갔습니다. 캔버스로
+     픽셀을 읽어서 확인했습니다:
+
+         ok/critical/warning/info/gap → 전부 [91, 97, 114]
+
+     「자동 게인이 안 꺼졌습니다」가 빨강이 아니라 회색이었습니다. */
+  const html = (): string => readFileSync(join(ROOT, 'public', 'index.html'), 'utf8');
+
+  it('⭐ 화면이 「요청대로 적용됐습니다」를 **스스로 말하지 않는다**', () => {
+    const code = codeOf(readFileSync(join(ROOT, 'src', 'demo', 'main.ts'), 'utf8'));
+    ok(
+      /describeCaptureCheck\(/.test(code),
+      '녹음 화면이 `describeCaptureCheck` 를 안 부릅니다 — 판단이 화면으로 돌아왔습니다',
+    );
+    ok(
+      !code.includes('요청대로 적용됐습니다'),
+      '화면이 캡처 결과를 직접 단언합니다 — 무엇을 말해도 되는지는 `@lib` 이 정합니다',
+    );
+  });
+
+  it('⭐ 톤 규칙이 **특성도에서 지지 않는다**', () => {
+    /* 잴 것: 「`#…  li` 가 색을 정하는데 `li.톤` 은 id 없이 적혀 있는가」.
+       ⚠️ 낱말이 아니라 **요구**를 잽니다 — 클래스 이름 목록을 박아 두면
+       톤이 하나 늘 때 가드가 조용히 눈을 감습니다. */
+    const style = html();
+    const idScoped = /#(?:blockers|warnings)\s+li\s*\{[^}]*\bcolor\s*:/.test(style);
+    ok(idScoped, '`#warnings li` 가 색을 정하는 규칙을 못 찾았습니다 — 가드가 헛돕니다');
+    const naked: string[] = [];
+    for (const m of style.matchAll(/(^|[\n,{}])\s*(li\.[\w-]+)\s*(,[^{]*)?\{([^}]*)\}/g)) {
+      if (!/\bcolor\s*:/.test(m[4] as string)) continue;
+      naked.push(m[2] as string);
+    }
+    strictEqual(
+      naked.join(' · '),
+      '',
+      'id 로 좁힌 규칙에 져서 **아무 색도 안 나갑니다** — 선택자에 `#blockers`·`#warnings` 를 같이 적으세요',
+    );
+  });
+});
+
 describe('⛔ 녹음이 **혼자 멈췄을 때**도 끝까지 간다 (결함 240·241)', () => {
   /* 회의 도중 누가 동의를 철회하면 서버는 청크마다 403 을 줍니다
      (`recording_service.store_chunk` 가 청크마다 동의를 다시 봅니다).

@@ -51,6 +51,7 @@ import {
 import { awakeBridge, shouldHoldAwake } from '../lib/platform/awake.ts';
 import { describeGiveUp, describeReupload, openChunkStore } from '../lib/platform/chunk-store.ts';
 import { describeGapReason, describeTimeline } from '../lib/recording/timeline.ts';
+import { describeCaptureCheck } from '../lib/recording/capture.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
@@ -238,10 +239,15 @@ function render(): void {
   $('safety').textContent = describeRecordingSafety(safety);
   $('safety').className = isRiskyForRecording(safety) ? 'banner' : 'banner ok-banner';
 
+  // ⛔ **경고 0건을 「요청대로 적용됐습니다」로 읽지 않습니다** (결함 249).
+  //    그 목록은 마이크를 얻은 뒤에야 채워집니다 — 거부당하면 빈 채로
+  //    남고, 그때 초록 글씨는 **아무것도 안 재고 만점을 준 것**입니다.
+  //    무엇을 말해도 되는지는 `@lib` 의 `describeCaptureCheck` 가 정합니다.
   const warnings = client.warnings;
+  const note = describeCaptureCheck(client.appliedSettings, warnings);
   $('warnings').innerHTML = warnings.length
     ? warnings.map((w) => `<li class="${w.severity}">${escapeHtml(w.message)}</li>`).join('')
-    : '<li class="ok">캡처 설정이 요청대로 적용됐습니다</li>';
+    : `<li class="${note?.tone ?? 'gap'}">${escapeHtml(note?.text ?? '')}</li>`;
 }
 
 const PHASE_LABEL: Record<string, string> = {

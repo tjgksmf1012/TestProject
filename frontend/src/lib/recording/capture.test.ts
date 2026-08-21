@@ -6,6 +6,8 @@ import {
   MULTITRACK_AUDIO_CONSTRAINTS,
   RECOMMENDED_BITS_PER_SECOND,
   captureConfidence,
+  describeCaptureCheck,
+  CHECKED_SETTINGS,
   checkAppliedSettings,
   estimateChunkBytes,
   estimateSessionBytes,
@@ -162,5 +164,40 @@ describe('용량 추정', () => {
     const semester = estimateSessionBytes({ durationMs: 3_600_000, trackCount: 5 }) * 15;
     assert.equal(semester, 1_080_000_000);
     assert.ok(semester < 2 * 1024 ** 3);
+  });
+});
+
+describe('describeCaptureCheck (결함 249)', () => {
+  it('⭐ **아직 안 쟀으면** 만점이라고 안 한다', () => {
+    // 마이크를 거부당하면 경고 목록은 빈 채로 남습니다. 예전에는 그
+    // 빈 목록을 「요청대로 적용됐습니다」라고 초록으로 읽었습니다.
+    const note = describeCaptureCheck(null, []);
+    assert.equal(note?.tone, 'gap');
+    assert.equal(note?.text.includes('못 쟀습니다'), true, note?.text);
+    assert.equal(note?.text.includes('적용됐습니다'), false, note?.text);
+  });
+
+  it('⭐ 브라우저가 **값을 안 준 항목**도 못 잰 것이다', () => {
+    // Firefox·Safari 는 `getSettings()` 항목이 고르지 않습니다. 값이 안
+    // 오면 `checkAppliedSettings` 는 그냥 지나치므로 경고가 0건입니다.
+    const note = describeCaptureCheck({ autoGainControl: false }, []);
+    assert.equal(note?.tone, 'gap');
+    for (const c of CHECKED_SETTINGS.slice(1)) {
+      assert.equal(note?.text.includes(c.name), true, `${c.name} 이 안 적혔습니다: ${note?.text}`);
+    }
+  });
+
+  it('넷을 다 읽었고 문제가 없으면 그때 **초록**이다', () => {
+    const note = describeCaptureCheck(
+      { autoGainControl: false, noiseSuppression: false, echoCancellation: false, sampleRate: 48_000 },
+      [],
+    );
+    assert.equal(note?.tone, 'ok');
+    assert.equal(note?.text, '캡처 설정이 요청대로 적용됐습니다');
+  });
+
+  it('문제가 있으면 **겹쳐 말하지 않는다** — 경고 목록이 대신 선다', () => {
+    const warnings = checkAppliedSettings({ autoGainControl: true });
+    assert.equal(describeCaptureCheck({ autoGainControl: true }, warnings), null);
   });
 });

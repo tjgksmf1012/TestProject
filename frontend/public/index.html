@@ -34,13 +34,22 @@
         width: var(--sp-1); height: var(--sp-1); border-radius: var(--r-round);
         background: currentColor;
       }
-      li.ok { color: var(--ok); }
-      li.critical { color: var(--bad); }
+      /* ⛔ **id 를 같이 적습니다** (결함 250).
+         바로 위 `#blockers li, #warnings li` 가 `color` 를 정하고 있어서,
+         `li.ok` 처럼 클래스만 적은 규칙은 **특성도에서 집니다**(0,1,1 <
+         1,0,1). 다섯 톤이 전부 그랬습니다 — 화면은 심각도를 계산해
+         클래스로 붙여 놓고 있었는데, 재 보니 `ok`·`critical`·`warning`·
+         `info`·`gap` 이 **모두 `--text-muted` 한 색**으로 나갔습니다.
+         「자동 게인이 안 꺼졌습니다」가 빨강이 아니라 회색이었습니다. */
+      #blockers li.ok, #warnings li.ok { color: var(--ok); }
+      #blockers li.critical, #warnings li.critical { color: var(--bad); }
       /* ⚠️ 아직 안 한 것은 **경고가 아닙니다.** `마이크 권한을 아직
          허용하지 않았습니다` 는 순서상 당연한 상태이지 잘못이 아니라,
          결측과 같은 흙빛으로 둡니다 (브리프 §13 · docs/05 §5). */
-      li.warning { color: var(--gap); }
-      li.info { color: var(--text-subtle); }
+      #blockers li.warning, #warnings li.warning { color: var(--gap); }
+      /* 못 잰 것(결함 249)도 같은 흙빛입니다. */
+      #blockers li.gap, #warnings li.gap { color: var(--gap); }
+      #blockers li.info, #warnings li.info { color: var(--text-subtle); }
 
       #phase {
         display: inline-block; padding: var(--sp-1) var(--sp-3); border-radius: 999px;

@@ -157,6 +157,10 @@ export class RecordingClient {
   #recorder: RecorderHandle | null = null;
   #nextSeq = 0;
   #warnings: CaptureWarning[] = [];
+  /* ⚠️ **경고 0건과 「아직 안 잼」은 다른 것입니다** (결함 249). 이 값이
+     `null` 인 동안 경고 목록이 비어 있는 것은 「문제 없음」이 아니라
+     「아직 아무것도 안 읽음」입니다. 화면이 그 둘을 가릅니다. */
+  #settings: AppliedAudioSettings | null = null;
 
   constructor(options: RecordingClientOptions) {
     this.#options = options;
@@ -190,6 +194,11 @@ export class RecordingClient {
 
   get warnings(): readonly CaptureWarning[] {
     return this.#warnings;
+  }
+
+  /** 트랙에서 **실제로 읽어 온** 설정. 아직 안 읽었으면 `null`. */
+  get appliedSettings(): AppliedAudioSettings | null {
+    return this.#settings;
   }
 
   /**
@@ -269,7 +278,8 @@ export class RecordingClient {
     try {
       const track = await this.#options.media.requestMicrophone();
       this.#track = track;
-      this.#warnings = checkAppliedSettings(track.getSettings());
+      this.#settings = track.getSettings();
+      this.#warnings = checkAppliedSettings(this.#settings);
       track.onMuteChange((muted) => {
         // 시각 동기화 전의 mute 는 기록하지 않는다. 시각이 없으면 구간을
         // 만들 수 없고, 지어내면 엉뚱한 자리에 공백이 생긴다.
