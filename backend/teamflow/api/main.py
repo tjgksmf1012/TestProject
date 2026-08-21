@@ -27,6 +27,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -1646,11 +1647,24 @@ async def put_chunk(
             "X-Client-At-Ms 헤더가 필요합니다 (동기화된 청크 도착 시각)",
         )
 
-    _own_track(session, meeting_id, track_id, user)
-
     data = await request.body()
-    try:
-        chunk = recording_service.store_chunk(
+
+    # ⛔ **여기부터는 이벤트 루프에서 돌리면 안 됩니다** (결함 279).
+    #
+    #    이 함수는 `async def` 인데(본문을 `await` 로 읽어야 해서) 그 아래는
+    #    전부 **막는 일**입니다 — DB 읽기·쓰기와 파일 쓰기. 그대로 두면
+    #    청크 하나를 처리하는 동안 서버 전체가 멈춥니다.
+    #
+    #    재현했습니다. 순차로 여섯 번은 **한 번에 10ms** 인데, 열둘을
+    #    **동시에** 올리면 둘만 200 이고 나머지 열은 20초 안에 응답이
+    #    아예 안 왔습니다. 같은 조건에서 읽기 열둘은 0.05초에 다 끝납니다 —
+    #    막히는 것은 이 자리뿐입니다.
+    #
+    #    사람 둘이 같이 녹음하는 것이 이 제품의 기본 상황입니다. 청크가
+    #    못 올라가면 그 구간의 소리는 영영 못 잽니다.
+    def _store() -> m.TrackChunk:
+        _own_track(session, meeting_id, track_id, user)
+        return recording_service.store_chunk(
             session,
             _chunk_store(settings),
             meeting_id=meeting_id,
@@ -1659,6 +1673,9 @@ async def put_chunk(
             client_at_ms=x_client_at_ms,
             data=data,
         )
+
+    try:
+        chunk = await run_in_threadpool(_store)
     except recording_service.ConsentError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except recording_service.TrackError as exc:
