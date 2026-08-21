@@ -214,6 +214,16 @@ export class RecordingClient {
     }
   }
 
+  /**
+   * 서버에 내 트랙이 열렸는지 알린다 (결함 272).
+   *
+   * 화면은 참가 요청의 **결과만** 넣습니다 — 「그래서 시작해도 되는가」는
+   * `session.blockers` 가 정합니다.
+   */
+  setTrack(state: SessionState['track']): void {
+    this.#dispatch({ type: 'TRACK', state });
+  }
+
   /** 탭 가시성 변화. iOS 에서는 이게 오디오 중단 신호일 수 있다. */
   setHidden(hidden: boolean): void {
     this.#dispatch({ type: 'VISIBILITY', hidden });

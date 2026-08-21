@@ -65,6 +65,27 @@ export type ConsentState =
 
 export type ClockState = 'unsynced' | 'ok' | 'poor';
 
+/**
+ * 서버에 **내 트랙이 열렸는가.**
+ *
+ * ⚠️ 이걸 안 보고 있었습니다 (결함 272). 녹음이 이미 끝난 회의를 다시
+ * 열면 참가 요청이 409 로 거절되는데, `blockers` 는 그 사실을 몰라서
+ * 「준비됐습니다」라고 답했고, 녹음이 실제로 돌았고, 정지하면
+ * **「커버리지 100.0% · 판정 사용 가능」**이라고 적었습니다 — 서버에는
+ * 청크가 **한 개도** 안 갔는데.
+ *
+ * 올릴 자리가 없는 녹음은 녹음이 아닙니다. 「측정 불가 ≠ 0점」의 짝으로,
+ * **못 올린 것을 올렸다고 하지 않습니다.**
+ *
+ * - `'pending'` — 아직 모릅니다. 참가 요청이 도는 중입니다
+ * - `'open'` — 열렸습니다. 청크가 갈 자리가 있습니다
+ * - `'blocked'` — 못 열었습니다 (거절·닿지 못함). 녹음해도 안 올라갑니다
+ *
+ * ⚠️ `consent === 'solo'` 인 세션에는 **해당 없음**입니다 — 회의에 안 붙은
+ * 녹음은 애초에 올릴 자리가 없고, 그건 고장이 아니라 그 모드의 정의입니다.
+ */
+export type TrackEntry = 'pending' | 'open' | 'blocked';
+
 export type StopReason =
   | 'user'
   | 'consent_revoked'
@@ -77,6 +98,8 @@ export interface SessionState {
   secureContext: boolean;
   permission: PermissionState;
   consent: ConsentState;
+  /** 서버에 내 트랙이 열렸는가 (결함 272) */
+  track: TrackEntry;
   clock: ClockState;
   startedAtMs: ServerTimeMs | null;
   endedAtMs: ServerTimeMs | null;
@@ -96,6 +119,7 @@ export type SessionEvent =
   | { type: 'SECURE_CONTEXT'; secure: boolean }
   | { type: 'PERMISSION'; state: PermissionState }
   | { type: 'CONSENT'; state: ConsentState }
+  | { type: 'TRACK'; state: TrackEntry }
   | { type: 'CLOCK'; state: ClockState }
   | { type: 'START'; atMs: ServerTimeMs }
   | { type: 'CHUNK'; chunk: ChunkMeta }
@@ -112,6 +136,7 @@ export function initialState(): SessionState {
     secureContext: false,
     permission: 'unknown',
     consent: 'pending',
+    track: 'pending',
     clock: 'unsynced',
     startedAtMs: null,
     endedAtMs: null,
@@ -160,6 +185,16 @@ export function blockers(state: SessionState): string[] {
     // 실제로 결함 238 이 그랬다 (「서버 없이도 끝까지 돈다」가 거짓말이 됨).
     case 'solo':
       break;
+  }
+
+  // 올릴 자리가 있는가. `solo` 는 물을 상대가 없듯 **올릴 자리도 없는**
+  // 모드라 여기서 묻지 않습니다 (결함 272).
+  if (state.consent !== 'solo') {
+    if (state.track === 'blocked') {
+      reasons.push('서버에 내 트랙이 열리지 않았습니다 — 지금 녹음해도 팀에 올라가지 않습니다');
+    } else if (state.track === 'pending') {
+      reasons.push('내 트랙을 서버에 여는 중입니다');
+    }
   }
 
   if (state.clock === 'unsynced') {
@@ -381,6 +416,10 @@ export function reduce(state: SessionState, event: SessionEvent): SessionState {
       }
       return next;
     }
+
+    case 'TRACK':
+      if (state.track === event.state) return state;
+      return settle({ ...state, track: event.state });
 
     case 'CLOCK':
       if (state.clock === event.state) return state;

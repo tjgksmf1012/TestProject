@@ -282,6 +282,10 @@ async function refreshConsent(id: string): Promise<void> {
   // ⚠️ 못 물어봤으면 **모르는 것**입니다. 모르는 것을 동의로 읽지 않습니다.
   if (response === null || !response.ok) return;
   client.setConsent(consentStateFrom(await response.json(), myUserId));
+  // 로비에서 동의를 마치고 돌아온 자리입니다. 앞서 **동의가 없어서** 트랙을
+  // 못 열었다면 지금이 다시 열 때입니다 — 안 그러면 조건은 다 찼는데
+  // 올릴 자리만 없는 채로 남습니다 (결함 272).
+  if (client.state.track === 'blocked') void joinMeeting(id);
 }
 
 /**
@@ -291,11 +295,17 @@ async function refreshConsent(id: string): Promise<void> {
  * 선언했고, 그래서 남의 트랙에 목소리를 올릴 수 있었다.
  */
 async function joinMeeting(id: string): Promise<void> {
+  // ⚠️ **지금 여는 중**이라고 먼저 적습니다 (결함 272). 두 가지를 합니다 —
+  //    ① 다시 시도할 때 「못 열었다」가 남아 있지 않게 하고,
+  //    ② 아래 `refreshConsent` 가 「막혔으면 다시 열어라」를 보고 여기로
+  //       되돌아오는 **무한 재귀**를 끊습니다.
+  client.setTrack('pending');
   // ⚠️ 읽기도 `tryGet` 을 거칩니다 (결함 102). 맨 `fetch` 는 닿지 못하면
   // 던지는데, 이 함수는 `void joinMeeting(…)` 으로 불려 거부가 아무 데도
   // 안 걸립니다 — 화면은 아무 말도 안 하고 녹음 버튼만 비활성입니다.
   const me = await tryGet(`${apiBase}/api/auth/me`);
   if (me === null) {
+    client.setTrack('blocked');
     showNote($('join-note'), unreachableText('회의에 들어가지 못했습니다'));
     return;
   }
@@ -329,6 +339,7 @@ async function joinMeeting(id: string): Promise<void> {
     // **폰이 고장난 줄** 안다.
     // ⚠️ `#who` 를 덮지 않습니다 (결함 98). 거기는 **내가 누구인지**를
     // 말하는 자리고, 실패로 덮으면 이름이 사라진 채 부제색으로 앉습니다.
+    client.setTrack('blocked');
     showNote($('join-note'), unreachableText('트랙에 참가하지 못했습니다'));
     return;
   }
@@ -353,6 +364,7 @@ async function joinMeeting(id: string): Promise<void> {
       detailText(body, `HTTP ${response.status}`),
       client.state.consent,
     );
+    client.setTrack('blocked');
     showNote($('join-note'), note.text, note.tone);
     return;
   }
@@ -360,6 +372,9 @@ async function joinMeeting(id: string): Promise<void> {
   const track = (await response.json()) as { track_id: number };
   trackUrl = `${apiBase}/api/meetings/${id}/tracks/${track.track_id}`;
   httpUpload.retarget(trackUrl);
+  // ⚠️ **여기가 「올릴 자리가 생겼다」고 말하는 유일한 자리입니다** (결함 272).
+  //    이 줄이 없으면 `blockers` 가 영원히 「여는 중」에 머뭅니다.
+  client.setTrack('open');
   render();
 }
 

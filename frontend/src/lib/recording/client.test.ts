@@ -166,6 +166,9 @@ async function prepared(options: Parameters<typeof harness>[0] = {}): Promise<Ha
   await h.client.syncClock();
   await h.client.requestMicrophone();
   h.client.setConsent('all_confirmed');
+  // 트랙이 열려야 시작할 수 있습니다 (결함 272) — 올릴 자리 없는 녹음은
+  // 「커버리지 100%」라고 답하면서 **한 조각도 안 보냈습니다**.
+  h.client.setTrack('open');
   return h;
 }
 
@@ -478,8 +481,10 @@ describe('RecordingClient — 상태 알림', () => {
     await client.requestMicrophone();
     client.setConsent('all_confirmed');
     client.setConsent('all_confirmed'); // 같은 값 → 알림 없음
+    client.setTrack('open'); // 트랙까지 열려야 ready (결함 272)
+    client.setTrack('open'); // 같은 값 → 알림 없음
 
-    assert.deepEqual(seen, ['idle', 'idle', 'ready']);
+    assert.deepEqual(seen, ['idle', 'idle', 'idle', 'ready']);
   });
 
   it('⭐ 생성자는 알림을 보내지 않는다', () => {

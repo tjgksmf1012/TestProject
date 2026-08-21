@@ -21,6 +21,13 @@ import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
 import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contribution/ribbon.ts';
 import { attentionAbout } from './review/candidates.ts';
 import { memberStatuses } from './lobby/room.ts';
+import {
+  blockers,
+  initialState,
+  reduce,
+  reduceAll,
+  type SessionEvent,
+} from './recording/session.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DEMO = join(ROOT, 'src', 'demo');
@@ -5992,5 +5999,83 @@ describe('관리자만 되는 일을 **구성원에게 열어 두지 않는다**
         `명단이 왔는지 안 보고 권한을 정합니다 — 모르는 것을 「없음」으로 단언하게 됩니다: ${expr}`,
       );
     }
+  });
+});
+
+describe('⛔ 올릴 자리가 없는 녹음을 받아 주지 않는다 (결함 272)', () => {
+  /* 재현: 녹음이 이미 끝난 회의를 다시 열면 `POST /tracks` 가 409 로
+     거절됩니다. 그런데 `blockers` 는 그 사실을 몰라서 마이크만 허용하면
+     「준비됐습니다」가 떴고, 10초를 녹음하면 정지 뒤에
+
+         커버리지 100.0% · 총 공백 0.0초 · 판정 **사용 가능**
+
+     이라고 적었습니다. 서버 로그에는 그 10초 동안 **청크 요청이 한 개도**
+     없습니다 — 409 하나뿐입니다. 이 제품이 「끊긴 구간은 지어내지 않고
+     『재지 못했다』로 남긴다」고 약속한 자리에서, **없는 녹음을 100%라고
+     지어냈습니다.** */
+  const main = (): string => codeOf(readFileSync(join(ROOT, 'src', 'demo', 'main.ts'), 'utf8'));
+
+  it('⭐ 시작을 막는 규칙이 **트랙이 열렸는지**를 본다', () => {
+    /* ⚠️ 처음에는 `blockers` 의 **본문 글자**를 봤습니다 (`state.track` 이
+       있는가). 조건을 `if (false)` 로 심었더니 **글자는 그대로라 통과**
+       했습니다 — 낱말 말고 요구를 재야 합니다. 그래서 실제로 부릅니다. */
+    const met: SessionEvent[] = [
+      { type: 'SECURE_CONTEXT', secure: true },
+      { type: 'PERMISSION', state: 'granted' },
+      { type: 'CONSENT', state: 'all_confirmed' },
+      { type: 'CLOCK', state: 'ok' },
+      { type: 'TRACK', state: 'open' },
+    ];
+    const opened = reduceAll(initialState(), met);
+    deepStrictEqual(blockers(opened), [], '조건을 다 채웠는데 막고 있습니다');
+
+    const rejected = reduce(opened, { type: 'TRACK', state: 'blocked' });
+    ok(blockers(rejected).length > 0, '거절당한 트랙으로도 녹음을 시작할 수 있습니다');
+
+    // solo 는 올릴 자리가 **원래** 없는 모드입니다. 여기서 막으면
+    // 아무도 못 푸는 조건이 됩니다 (결함 238 과 같은 부류).
+    const solo = reduceAll(initialState(), [...met.slice(0, 2), { type: 'CONSENT', state: 'solo' }, met[3] as SessionEvent]);
+    deepStrictEqual(blockers(solo), [], 'solo 세션까지 막고 있습니다 — 그 모드에는 트랙이 없습니다');
+  });
+
+  it('⭐ 화면이 참가 **결과를** 실제로 넣는다 — 성공도, 실패도', () => {
+    /* 대표 실패 ① — 만들어 놓고 아무도 안 부르면 상태는 영영
+       `pending` 이고, 그러면 **아무도 녹음을 못 합니다.** 반대로 실패
+       갈래에서 안 넣으면 이 결함이 그대로 돌아옵니다. */
+    const code = main();
+    const body = /async function joinMeeting\(([\s\S]*?)\n}/.exec(code)?.[1] ?? '';
+    ok(body.length > 0, 'joinMeeting 을 못 찾았습니다 — 가드가 낡았습니다');
+    ok(/client\.setTrack\('open'\)/.test(body), '트랙이 열려도 아무 데도 안 알립니다');
+    /* ⚠️ 처음에는 `showNote($('join-note')` 를 세어 실패 갈래를 셌습니다 —
+       그 조각은 **성공한 뒤 지우는 자리**(`showNote(…, '')`)와 solo 안내와
+       업로드 재개 안내에도 있어서 수가 안 맞았습니다. 세는 자리가 아니라
+       **요구**를 잽니다: 트랙을 못 연 채 빠져나가는 `return` 마다 바로
+       앞에 「못 열었다」가 있어야 합니다. */
+    const parts = body.split(/\n\s*return;/);
+    // 마지막 조각은 return 뒤의 성공 경로입니다 — 실패 갈래가 아닙니다.
+    const escapes = parts.slice(0, -1);
+    for (const [i, part] of escapes.entries()) {
+      // 로그인으로 **떠나는** 갈래는 예외입니다 — 이 화면이 남지 않습니다.
+      if (/location\.href\s*=/.test(part.slice(part.lastIndexOf('\n  if')))) continue;
+      const lastOpen = part.lastIndexOf("setTrack('open')");
+      const lastBlocked = part.lastIndexOf("setTrack('blocked')");
+      ok(
+        lastBlocked > lastOpen,
+        `${i + 1}번째 이탈 지점이 트랙을 못 연 채 조용히 빠져나갑니다`,
+      );
+    }
+    ok(escapes.length >= 3, `이탈 지점이 ${escapes.length}곳뿐입니다 — 가드가 낡았습니다`);
+  });
+
+  it('⭐ 동의를 마치고 돌아오면 **다시 열어 본다**', () => {
+    /* 안 그러면 이 가드가 만든 새 막다른 길이 생깁니다 — 동의 전에 녹음
+       화면을 연 사람은 조건을 다 채워도 트랙이 `blocked` 인 채입니다. */
+    const code = main();
+    const fn = /async function refreshConsent\(([\s\S]*?)\n}/.exec(code)?.[1] ?? '';
+    ok(fn.length > 0, 'refreshConsent 를 못 찾았습니다 — 가드가 낡았습니다');
+    ok(
+      /joinMeeting\(/.test(fn),
+      '동의를 다시 읽고도 트랙을 다시 안 엽니다 — 조건은 다 찼는데 올릴 자리만 없습니다',
+    );
   });
 });

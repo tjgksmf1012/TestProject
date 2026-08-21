@@ -29,6 +29,8 @@ const PRECONDITIONS: SessionEvent[] = [
   { type: 'PERMISSION', state: 'granted' },
   { type: 'CONSENT', state: 'all_confirmed' },
   { type: 'CLOCK', state: 'ok' },
+  // 서버에 내 트랙이 열려야 「준비됐습니다」입니다 (결함 272).
+  { type: 'TRACK', state: 'open' },
 ];
 
 function ready(): SessionState {
@@ -50,11 +52,12 @@ describe('사전 조건', () => {
     assert.equal(canStart(state), false);
 
     const reasons = blockers(state);
-    assert.equal(reasons.length, 4);
+    assert.equal(reasons.length, 5, JSON.stringify(reasons));
     assert.ok(reasons.some((r) => r.includes('HTTPS')));
     assert.ok(reasons.some((r) => r.includes('마이크 권한')));
     assert.ok(reasons.some((r) => r.includes('동의')));
     assert.ok(reasons.some((r) => r.includes('시각')));
+    assert.ok(reasons.some((r) => r.includes('트랙')));
   });
 
   it('조건을 모두 채우면 ready 가 된다', () => {
@@ -105,6 +108,52 @@ describe('사전 조건', () => {
   it('권한이 거부되면 ready 에서 idle 로 돌아간다', () => {
     const state = reduce(ready(), { type: 'PERMISSION', state: 'denied' });
     assert.equal(state.phase, 'idle');
+  });
+});
+
+describe('올릴 자리가 없는 녹음 (결함 272)', () => {
+  it('⭐ 트랙이 거절당하면 다른 조건이 다 차도 시작을 막는다', () => {
+    // 녹음이 이미 끝난 회의를 다시 열면 참가가 409 로 거절됩니다.
+    // 예전에는 그 사실이 상태에 안 들어와서 「준비됐습니다」가 떴고,
+    // 10초를 녹음하면 **「커버리지 100.0% · 사용 가능」**이라고 답했습니다 —
+    // 서버에는 청크가 **한 개도** 안 갔는데.
+    const state = reduce(ready(), { type: 'TRACK', state: 'blocked' });
+    assert.equal(canStart(state), false);
+    assert.equal(state.phase, 'idle');
+    assert.ok(
+      blockers(state).some((r) => r.includes('팀에 올라가지 않습니다')),
+      JSON.stringify(blockers(state)),
+    );
+  });
+
+  it('아직 여는 중이면 「모른다」로 막는다 — 모르는 것을 열렸다고 읽지 않는다', () => {
+    const state = reduce(ready(), { type: 'TRACK', state: 'pending' });
+    assert.equal(canStart(state), false);
+    assert.ok(blockers(state).some((r) => r.includes('여는 중')));
+  });
+
+  it('열리면 다시 ready 가 된다 — 동의를 마치고 돌아온 자리', () => {
+    const blocked = reduce(ready(), { type: 'TRACK', state: 'blocked' });
+    const opened = reduce(blocked, { type: 'TRACK', state: 'open' });
+    assert.equal(canStart(opened), true);
+    assert.equal(opened.phase, 'ready');
+  });
+
+  it('⭐ solo 세션에는 묻지 않는다 — 회의에 안 붙은 녹음은 올릴 자리가 원래 없다', () => {
+    const solo = reduceAll(initialState(), [
+      { type: 'SECURE_CONTEXT', secure: true },
+      { type: 'PERMISSION', state: 'granted' },
+      { type: 'CONSENT', state: 'solo' },
+      { type: 'CLOCK', state: 'ok' },
+    ]);
+    assert.equal(solo.track, 'pending');
+    assert.deepEqual(blockers(solo), []);
+    assert.equal(canStart(solo), true);
+  });
+
+  it('같은 값이면 같은 객체를 돌려준다 (리듀서 순수성)', () => {
+    const state = ready();
+    assert.equal(reduce(state, { type: 'TRACK', state: 'open' }), state);
   });
 });
 
