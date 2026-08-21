@@ -4751,7 +4751,7 @@ describe('⛔ 되돌릴 수 없는 것은 **묻고, 보이고, 좁아야** 한�
   });
 });
 
-describe('⛔ 글자가 있는 그대로 보여야 한다 (결함 259·261·262)', () => {
+describe('⛔ 글자가 있는 그대로 보여야 한다 (결함 259·261·262·263)', () => {
   const css = (): string => readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
 
   it('⭐ 없는 **무게를 지어내지 않는다** (결함 259)', () => {
@@ -4809,6 +4809,24 @@ describe('⛔ 글자가 있는 그대로 보여야 한다 (결함 259·261·262)
       ok(!/\bticks=/.test(m[0]), '사람마다 눈금을 그립니다 — 축은 위에 한 벌만 둡니다');
     }
     ok(/ribbon-axis/.test(code), '공용 축을 안 그립니다');
+  });
+
+  it('⭐ **없는 열을 위해 자리를 비우지 않는다** (결함 263)', () => {
+    /* 녹음·통화는 메신저 셸(목록 열)이 아니라 좁은 레일(`.sparail`, 72px)을
+       씁니다. 그런데 `html { padding-left: var(--shell-list) }` 가 조건 없이
+       걸려서 있지도 않은 목록 열 몫으로 **256px** 을 비우고 있었습니다.
+       레일과 머리줄은 `position: fixed` 라 그 여백을 무시하므로, 한 화면
+       안에서 왼쪽 끝이 둘이 됐습니다 — 머리줄 96px, 본문 352px.
+
+       ⚠️ 바로 위 주석이 같은 실수를 `--shell-rail` 로 겪고 적어 둔
+       자리인데 `--shell-list` 에서 다시 났습니다. */
+    const sheet = readFileSync(join(ROOT, 'public', 'app.css'), 'utf8');
+    const reserves = /html\s*\{[^}]*padding-left:\s*var\(--shell-list\)/.test(sheet);
+    if (!reserves) return; // 아예 안 비우면 이 결함이 생길 수 없습니다.
+    ok(
+      /html:has\(body\.sparail-page\)\s*\{[^}]*padding-left:\s*0/.test(sheet),
+      '레일 화면(녹음·통화)이 없는 목록 열 몫을 비웁니다 — 왼쪽 끝이 둘이 됩니다',
+    );
   });
 
   it('⭐ 마크다운 표시를 **화면에서 걷는 곳이 한 벌**이다 (결함 262)', () => {

@@ -1462,6 +1462,24 @@ pre {
     padding-left: 0;
   }
 
+  /* ⛔ **없는 열을 위해 256px 을 비워 두고 있었습니다** (결함 263).
+
+     녹음·통화는 메신저 셸(목록 열)이 아니라 **좁은 레일**(`.sparail`, 72px)
+     을 씁니다. 그런데 위 `html { padding-left: var(--shell-list) }` 가
+     조건 없이 걸려서, 이 두 화면은 있지도 않은 목록 열 몫으로 256px 을
+     비우고 있었습니다. 레일과 머리줄은 `position: fixed` 라 그 여백을
+     무시하므로 — 재 봤습니다 —
+
+         머리줄 「녹음 — 스프린트 2 계획」   x = 96
+         본문 첫 글자                      x = 352
+
+     한 화면 안에서 **왼쪽 끝이 두 개**였습니다. 바로 위 주석이 같은 실수를
+     `--shell-rail` 로 겪고 적어 둔 자리인데, `--shell-list` 에서 다시
+     났습니다. */
+  html:has(body.sparail-page) {
+    padding-left: 0;
+  }
+
   body {
     max-width: var(--main-max);
     margin-inline: auto;
