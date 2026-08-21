@@ -6512,3 +6512,72 @@ describe('⛔ 못 물어본 것을 「로그아웃」이라고 하지 않는다 
     ok(/describeLoadFailure\(/.test(code), '문구를 화면이 따로 짓습니다');
   });
 });
+
+describe('⛔ 실패는 **한 어휘**로 말한다 (결함 283)', () => {
+  /* 재현: A 가 카드를 지운 뒤, 그 카드를 아직 들고 있는 B 가 옮기면
+     서버가 **404** 를 줍니다. 그런데 칸반은 무슨 일이 있었든
+
+         바꾸지 못했습니다 — 새로고침한 뒤 다시 해 보세요.
+
+     한 줄이었습니다. 누가 지웠다는 말은 어디에도 없고, 403(권한)·
+     409(남이 먼저)·끊김에도 같은 말을 합니다. `load.ts` 는 그 문구
+     바로 옆에 **"다시 시도하세요" 를 아무 데나 붙이지 않습니다** 라고
+     적어 두고 있었습니다 — 화면 넷 중 셋은 그 어휘를 쓰고 칸반만
+     빠져 있었습니다 (실패 ②: 두 벌이 있으면 한쪽만 고쳐진다). */
+  const screens = (): { name: string; code: string }[] =>
+    readdirSync(join(ROOT, '..', 'webapp', 'src', 'screens'))
+      .filter((f) => f.endsWith('.tsx'))
+      .map((f) => ({
+        name: f,
+        code: codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', f), 'utf8')),
+      }));
+
+  it('⭐ 보낸 뒤의 실패를 **화면이 스스로 짓지 않는다**', () => {
+    /* 「…못했습니다」로 끝나는 문장을 화면이 직접 들고 있으면, 그 화면은
+       공용 어휘와 갈라진 것입니다. 여는 자리(`describeLoadFailure`)와
+       달리 **보낸 뒤**의 실패는 상태마다 할 일이 다릅니다. */
+    const guilty: string[] = [];
+    for (const { name, code } of screens()) {
+      const mutates = /\.mutate\(|\.mutateAsync\(/.test(code);
+      if (!mutates) continue;
+      // 화면 안에 박힌 실패 문장 (여는 실패는 `describeLoadFailure` 가 따로 봅니다)
+      const hardcoded = /<Problem>\s*[^<{][^<]*(?:못했습니다|실패했습니다)[^<]*<\/Problem>/.exec(code);
+      if (hardcoded !== null && !/describeActionFailure\(/.test(code)) {
+        guilty.push(`${name}: ${hardcoded[0].slice(0, 60)}`);
+      }
+    }
+    strictEqual(
+      guilty.join(' · '),
+      '',
+      '보낸 뒤의 실패를 화면이 스스로 말합니다 — `describeActionFailure` 한 벌을 쓰세요',
+    );
+  });
+
+  it('⭐ 칸반이 **무엇이 실패했는지**까지 가른다', () => {
+    const kanban =
+      screens().find((f) => f.name === 'Kanban.tsx')?.code ?? '';
+    ok(kanban !== '', '칸반을 못 찾았습니다 — 가드가 낡았습니다');
+    ok(/describeActionFailure\(/.test(kanban), '칸반이 공용 어휘를 안 씁니다');
+    /* 세 가지 일이 있습니다 — 옮기기·담당자·지우기. 한 이름으로 묶으면
+       「담당자를 못 바꿨다」와 「업무를 못 지웠다」가 같은 말이 됩니다. */
+    const names = [...kanban.matchAll(/what:\s*'([^']+)'/g)].map((m) => m[1]);
+    ok(
+      new Set(names).size >= 3,
+      `실패를 ${new Set(names).size}가지로만 가릅니다 — 옮기기·담당자·지우기는 다른 일입니다`,
+    );
+    /* ⚠️ 상태 코드를 안 넘기면 어휘가 있어도 **한 문장만** 나옵니다.
+
+       처음에는 `statusOf(` 를 세었는데 그 조각은 **선언**
+       (`function statusOf(`)에도 있어서, 넘기는 자리를 전부 `null` 로
+       심어도 1이 나와 통과했습니다 — AGENTS.md 에 적힌 그 함정입니다.
+       넘기는 자리를 직접 봅니다. */
+    const passed = [...kanban.matchAll(/status:\s*([^,\n}]+)/g)].map((m) => (m[1] ?? '').trim());
+    ok(passed.length >= 3, `상태를 넘기는 자리가 ${passed.length}곳입니다 — 가드가 낡았습니다`);
+    const dead = passed.filter((expr) => expr === 'null' || expr === 'undefined');
+    strictEqual(
+      dead.join(' · '),
+      '',
+      '상태 코드 자리에 죽은 값이 있습니다 — 어휘가 갈래를 못 타고 한 문장만 나옵니다',
+    );
+  });
+});

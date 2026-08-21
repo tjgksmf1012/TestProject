@@ -29,8 +29,13 @@ import {
 } from '@lib/kanban/priority.ts';
 import { assigneeText, toggled, type Person } from '@lib/kanban/assignees.ts';
 import { deleteTaskConfirm } from '@lib/project/roles.ts';
-import { describeLoadFailure } from '@lib/ui/load.ts';
+import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
 import { ApiError } from '../api/client.ts';
+
+/** 실패에서 상태 코드만 꺼냅니다. `null` 은 **서버에 못 닿은 것**입니다. */
+function statusOf(error: unknown): number | null {
+  return error instanceof ApiError ? error.status : null;
+}
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { withJosa } from '@lib/text/josa.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -246,6 +251,17 @@ export default function Kanban() {
   const columns = toColumns(tasks, statuses);
   const s = summarize(tasks, todayInTeamCalendar());
 
+  /* 어느 일이 실패했는지에 따라 **할 말이 다릅니다** — 담당자를 못 바꾼
+     것과 업무를 못 지운 것은 다른 사실입니다. 판단·문구는 `@lib`. */
+  const failed =
+    patchTask.error != null
+      ? { what: '업무 바꾸기', status: statusOf(patchTask.error) }
+      : setAssignees.error != null
+        ? { what: '담당자 바꾸기', status: statusOf(setAssignees.error) }
+        : deleteTask.error != null
+          ? { what: '업무 지우기', status: statusOf(deleteTask.error) }
+          : null;
+
   const move = (task: Task, to: string) => {
     patchTask.mutate({ taskId: task.id, patch: statusPatch(to) });
   };
@@ -339,9 +355,24 @@ export default function Kanban() {
             </section>
           ))}
       </div>
-      {(patchTask.isError || setAssignees.isError || deleteTask.isError) && (
+      {/* ⛔ **여기만 문구를 따로 짓고 있었습니다** (결함 283).
+          무슨 일이 있었든 「바꾸지 못했습니다 — 새로고침한 뒤 다시 해
+          보세요」 한 줄이었습니다. `load.ts` 가 그 문구 바로 옆에
+          적어 둔 경고가 이것입니다 —
+
+            "다시 시도하세요" 를 아무 데나 붙이지 않습니다. 다시 눌러도
+            안 되는 실패(권한·충돌·잘못된 요청)에 그렇게 쓰면, 사람은
+            되지 않는 것을 반복하다 제품을 불신하게 됩니다.
+
+          재현했습니다: A 가 카드를 지운 뒤 B 가 그 카드를 옮기면 서버가
+          **404** 를 주는데, 화면은 「새로고침한 뒤 다시 해 보세요」라고만
+          했습니다. 누가 지웠다는 말은 어디에도 없습니다. 공용 어휘는
+          그 자리에서 「대상이 없습니다 — 정하는 사이에 지워졌을 수
+          있습니다」라고 말합니다. 화면 넷 중 셋은 진작 그 어휘를 쓰고
+          있었고 칸반만 빠져 있었습니다 (실패 ②). */}
+      {failed !== null && (
         <div style={{ padding: '0 var(--sp-6) var(--sp-4)' }}>
-          <Problem>바꾸지 못했습니다 — 새로고침한 뒤 다시 해 보세요.</Problem>
+          <Problem>{describeActionFailure(failed.what, failed.status)}</Problem>
         </div>
       )}
     </AppShell>

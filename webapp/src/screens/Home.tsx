@@ -23,6 +23,7 @@ import {
   sectionMeetings,
 } from '@lib/home/next.ts';
 import { codeProblem, normalizeCode, titleProblem } from '@lib/project/setup.ts';
+import { describeActionFailure } from '@lib/ui/load.ts';
 import { Problem } from '../components/Problem.tsx';
 
 // 홈 — "다음에 뭘 해야 하는가" 에 대한 답 (지시서 기타-6 §홈).
@@ -429,10 +430,14 @@ export default function Home() {
                 ))}
               </section>
             )}
+            {/* ⛔ 서버가 준 글자를 그대로 붙이고 있었습니다 (결함 283) —
+                위 기여도 화면과 같은 자리입니다. 문구는 `@lib` 한 벌. */}
             {m.openMeeting.isError && (
               <Problem>
-                회의를 열지 못했습니다 —{' '}
-                {m.openMeeting.error instanceof Error ? m.openMeeting.error.message : '알 수 없는 오류'}
+                {describeActionFailure(
+                  '회의 열기',
+                  m.openMeeting.error instanceof ApiError ? m.openMeeting.error.status : null,
+                )}
               </Problem>
             )}
           </div>

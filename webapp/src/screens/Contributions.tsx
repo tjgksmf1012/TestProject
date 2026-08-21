@@ -8,7 +8,7 @@ import { Stat } from '../components/Stat.tsx';
 import { Why } from '../components/Why.tsx';
 import { useConfirmFinals, useContributions, useFinals, useMembers } from '../api/hooks.ts';
 import { ApiError } from '../api/client.ts';
-import { describeLoadFailure } from '@lib/ui/load.ts';
+import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
 import {
   confidenceRibbon,
   describeTeamRibbon,
@@ -470,9 +470,18 @@ export default function Contributions() {
                 확정했습니다. 시스템 값과 확정값이 함께 기록에 남습니다.
               </p>
             )}
+            {/* ⛔ **서버가 준 글자를 그대로 붙이고 있었습니다** (결함 283).
+                `ApiError.message` 는 `detail` 이라, 사람에게는 아무 말도
+                아닌 문장이 그대로 뜹니다. 게다가 무슨 일이 있었든 같은
+                꼴이라 **할 일**을 말해 주지 못합니다 — 409(남이 먼저
+                확정함)와 403(권한 없음)에 필요한 말이 서로 다릅니다.
+                문구는 `@lib` 한 벌입니다. */}
             {confirm.isError && (
               <Problem>
-                확정하지 못했습니다 — {confirm.error instanceof Error ? confirm.error.message : '알 수 없는 오류'}
+                {describeActionFailure(
+                  '기여도 확정',
+                  confirm.error instanceof ApiError ? confirm.error.status : null,
+                )}
               </Problem>
             )}
           </div>
