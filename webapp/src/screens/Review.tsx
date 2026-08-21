@@ -48,6 +48,7 @@ import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { Problem } from '../components/Problem.tsx';
 import { draftStorageKey, parseDrafts, serializeDrafts } from '@lib/review/drafts.ts';
 import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
+import { meetingLabel } from '@lib/ui/naming.ts';
 import { ApiError } from '../api/client.ts';
 
 // 업무 후보 검토 — 3판 (지시서 07).
@@ -314,7 +315,9 @@ export default function Review() {
     }
   };
 
-  const title = meeting.data?.title ?? '회의 검토';
+  /* ⚠️ 예전에는 `?? '회의 검토'` 였습니다 (결함 285) — 로비는 같은
+     회의를 「회의 준비」라고 불렀습니다. 이름은 `@lib` 한 벌. */
+  const title = meetingLabel(meeting.data?.title, meeting.data?.id ?? meetingId);
   const note = audioNote(timeline.data?.has_audio ?? false, rows);
 
   return (

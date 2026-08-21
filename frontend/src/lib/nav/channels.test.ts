@@ -67,8 +67,10 @@ describe('channelLabel', () => {
   });
 
   it('⭐ 제목이 없으면 번호로 부른다 — 이름 없는 줄을 만들지 않는다', () => {
-    strictEqual(channelLabel(meeting({ meeting_id: 12, title: null })), '회의 12');
-    strictEqual(channelLabel(meeting({ meeting_id: 12, title: '   ' })), '회의 12');
+    /* ⚠️ 낱말은 `@lib/ui/naming.ts` 한 벌에서 옵니다 (결함 285). 예전에는
+       여기가 「회의 12」였고 머리줄은 「제목 없는 회의 #12」였습니다. */
+    strictEqual(channelLabel(meeting({ meeting_id: 12, title: null })), '제목 없는 회의 #12');
+    strictEqual(channelLabel(meeting({ meeting_id: 12, title: '   ' })), '제목 없는 회의 #12');
   });
 });
 

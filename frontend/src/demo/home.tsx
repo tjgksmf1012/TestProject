@@ -57,6 +57,7 @@ import { Byline, NoteLine, RawHtml, type Note } from './parts.tsx';
 import { renderNav } from './nav.ts';
 import { wireLogout } from './logout.ts';
 import { bootApp } from './pwa.ts';
+import { meetingLabel } from '../lib/ui/naming.ts';
 
 const params = new URLSearchParams(location.search);
 // ⚠️ 주소창의 `?api=` 를 그대로 쓰면 **비밀번호와 회의 음성이 어디로
@@ -93,7 +94,7 @@ function MeetingRow({ meeting }: { meeting: Meeting }) {
     <li className={step.actionable ? 'meeting todo' : 'meeting'}>
       <div className="head">
         <span className="dot" data-state={channelState(meeting.status)} />
-        <span className="name">{meeting.title ?? '제목 없는 회의'}</span>
+        <span className="name">{meetingLabel(meeting.title, meeting.meeting_id)}</span>
         <span className="when">{formatMeetingTime(meeting.started_at)}</span>
         {/* ⚠️ **화면 폭짜리 버튼을 다섯 개 쌓지 않습니다** (docs/19 §20).
             예전에는 회의마다 900px 짜리 초록 덩어리가 깔려서, 화면이

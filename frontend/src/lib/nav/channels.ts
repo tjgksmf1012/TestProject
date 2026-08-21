@@ -20,6 +20,7 @@
  */
 
 import { describeMeetingStatus, type Meeting } from '../home/next.ts';
+import { meetingLabel } from '../ui/naming.ts';
 
 /**
  * 채널 옆 점이 무엇을 뜻하는가.
@@ -82,10 +83,14 @@ export function channelState(status: string): ChannelState {
  *
  * ⚠️ 서버는 `title` 을 `null` 로 줄 수 있습니다. 빈 글자를 그대로 그리면
  * 목록에 **누를 수는 있는데 이름이 없는 줄**이 생깁니다.
+ *
+ * ⚠️ 예전에는 여기서 직접 `회의 {번호}` 를 지었습니다 (결함 285). 채널
+ * 목록은 **모든 화면에 늘 떠 있는데**, 같은 회의를 머리줄은 「제목 없는
+ * 회의 #4」, 왼쪽 목록은 「회의 4」라고 불렀습니다. 이름은 한 벌에서
+ * 옵니다 — 여기서는 `Meeting` 모양을 그 한 벌에 넘겨 주기만 합니다.
  */
 export function channelLabel(meeting: Meeting): string {
-  const title = (meeting.title ?? '').trim();
-  return title === '' ? `회의 ${meeting.meeting_id}` : title;
+  return meetingLabel(meeting.title, meeting.meeting_id);
 }
 
 /**

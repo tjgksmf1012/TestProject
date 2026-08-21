@@ -21,6 +21,7 @@ import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
 import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contribution/ribbon.ts';
 import { attentionAbout } from './review/candidates.ts';
 import { describeMissingSummary } from './review/phase.ts';
+import { meetingLabel } from './ui/naming.ts';
 import { memberStatuses } from './lobby/room.ts';
 import {
   blockers,
@@ -6633,5 +6634,96 @@ describe('⛔ 요약이 없을 때 **왜 없는지**를 말한다 (결함 284)',
       said.get('confirmed') !== said.get('pending'),
       '끝난 회의에게 "기다리세요" 라고 합니다',
     );
+  });
+});
+
+describe('⛔ 회의를 **한 이름으로** 부른다 (결함 285)', () => {
+  /* 재현: 씨앗 회의 4번은 `title` 이 `null` 입니다 (「회의 열기」가 이름을
+     안 묻기 때문 — 결함 268). 그 회의 하나를 두고 이름이 **아홉 가지**
+     였습니다.
+
+         홈 목록          제목 없는 회의
+         홈 리본(낭독기)   회의
+         채널 목록        회의 4
+         로비 머리줄·탭    회의 준비      ← 화면의 이름
+         검토 머리줄·탭    회의 검토      ← 화면의 이름
+         칸반 카드 출처    회의
+         회의록(서버)      회의 #4
+         달력·검색(서버)   회의 4
+         알림(서버)        이름 없는 회의
+
+     굵은 둘은 **회의의 이름이 아니라 화면의 이름**입니다. 브라우저 탭이
+     그 글자라, 이름 없는 회의를 둘 열면 탭 둘이 글자 하나 안 틀리고
+     똑같습니다 — 어느 탭이 어느 회의인지 알 방법이 없습니다. */
+  const uiFiles = (): { name: string; code: string }[] => {
+    const out: { name: string; code: string }[] = [];
+    for (const dir of [
+      join(ROOT, '..', 'webapp', 'src', 'screens'),
+      DEMO,
+      join(LIB, 'nav'),
+    ]) {
+      for (const f of readdirSync(dir)) {
+        if (!SCREEN_EXT.test(f) || f.endsWith('.test.ts') || f.endsWith('.test.tsx')) continue;
+        out.push({ name: f, code: codeOf(readFileSync(join(dir, f), 'utf8')) });
+      }
+    }
+    return out;
+  };
+
+  it('⭐ 회의 이름의 **대타를 화면이 짓지 않는다**', () => {
+    /* ⚠️ 낱말(`meetingLabel`)이 있는지 세면 안 됩니다 — 한 자리만 부르고
+       나머지는 각자 지어도 통과합니다. **짓는 모양**을 찾습니다. */
+    const guilty: string[] = [];
+    for (const { name, code } of uiFiles()) {
+      // `meeting.title ?? '…'` · `meeting.data?.title ?? '…'` · `meeting_title ?? '…'`
+      const invented = [
+        ...code.matchAll(/\bmeeting[\w.?]*\.title\s*\?\?\s*(['"`])([^'"`]*)\1/gi),
+        ...code.matchAll(/\bmeeting_title\s*\?\?\s*(['"`])([^'"`]*)\1/gi),
+      ];
+      for (const m of invented) {
+        // 빈 글자는 **이름이 아니라 입력칸 초기값**입니다 (로비의 이름 고치기).
+        if ((m[2] ?? '') === '') continue;
+        guilty.push(`${name}: ${m[0].slice(0, 46)}`);
+      }
+      // 번호로 직접 짓는 모양 (`회의 ${id}`) 도 같은 병입니다.
+      const numbered = /`회의\s*#?\$\{[^}]*(?:id|Id|번호)[^}]*\}`/.exec(code);
+      if (numbered !== null) guilty.push(`${name}: ${numbered[0]}`);
+    }
+    strictEqual(
+      guilty.join(' · '),
+      '',
+      '회의 이름을 화면이 스스로 짓습니다 — `@lib/ui/naming.ts` 의 `meetingLabel` 한 벌을 쓰세요',
+    );
+  });
+
+  it('⭐ **화면의 이름**이 회의 이름 자리에 오지 않는다', () => {
+    /* 로비는 「회의 준비」, 검토는 「회의 검토」였습니다. 머리줄에 넣는
+       값을 떼어 와서, 그것이 글자 상수가 아닌지 봅니다. */
+    const heads = [
+      { name: 'Lobby.tsx', screen: '준비' },
+      { name: 'Review.tsx', screen: '검토' },
+    ];
+    for (const { name, screen } of heads) {
+      const code = codeOf(
+        readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', name), 'utf8'),
+      );
+      const decl = /\bconst title = ([^\n;]+)/.exec(code);
+      ok(decl !== null, `${name}: 머리줄 이름을 못 찾았습니다 — 가드가 낡았습니다`);
+      const expr = (decl?.[1] ?? '').trim();
+      ok(
+        !new RegExp(`['"\`][^'"\`]*${screen}`).test(expr),
+        `${name}: 머리줄에 화면 이름(${screen})이 회의 이름으로 들어갑니다 — ${expr.slice(0, 50)}`,
+      );
+      ok(
+        /meetingLabel\(/.test(expr),
+        `${name}: 회의 이름을 한 벌에서 안 받습니다 — ${expr.slice(0, 50)}`,
+      );
+    }
+  });
+
+  it('⭐ 이름 없는 회의 **둘이 서로 다르게** 불린다', () => {
+    /* 낱말만 맞추고 번호를 안 붙이면, 탭 둘이 다시 똑같아집니다. */
+    strictEqual(meetingLabel(null, 4) === meetingLabel(null, 5), false);
+    ok(meetingLabel(null, 4).includes('4'), '번호가 이름에 없습니다');
   });
 });

@@ -53,6 +53,7 @@ import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { Byline, RawHtml } from './parts.tsx';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
+import { meetingLabel } from '../lib/ui/naming.ts';
 
 interface Member {
   user_id: number;
@@ -107,7 +108,7 @@ function Drawer({ task, warnings }: { task: Task; warnings: readonly string[] })
           <p>손으로 만든 업무입니다 — 회의에서 나온 것이 아닙니다.</p>
         ) : (
           <p>
-            {task.origin.meeting_title ?? '회의'}에서 나온 업무입니다 · 근거 발화{' '}
+            {meetingLabel(task.origin.meeting_title, task.origin.meeting_id)}에서 나온 업무입니다 · 근거 발화{' '}
             {task.origin.evidence_utterance_ids.length}건
           </p>
         )}
@@ -263,7 +264,7 @@ function Card({
       {task.origin && (
         <p className="origin">
           <span className="ico" dangerouslySetInnerHTML={{ __html: iconSvg('meeting') }} />
-          {task.origin.meeting_title ?? '회의'}
+          {meetingLabel(task.origin.meeting_title, task.origin.meeting_id)}
           <span className="ev">근거 {task.origin.evidence_utterance_ids.length}</span>
         </p>
       )}

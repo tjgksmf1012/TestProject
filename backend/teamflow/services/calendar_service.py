@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from teamflow.clock import as_utc
 from teamflow.db import assignees, live
 from teamflow.db import models as m
+from teamflow.services.naming import meeting_label
 
 #: 달력에 놓이는 것의 종류.
 #:
@@ -138,7 +139,7 @@ def collect(
         )
     ).all()
     for meeting in meetings:
-        title = (meeting.title or "").strip() or f"회의 {meeting.id}"
+        title = meeting_label(meeting.title, meeting.id)
         # ⚠️ **연 회의는 연 시각으로** 놓습니다. 예정 시각으로 놓으면
         #    30분 늦게 시작한 회의가 달력에서는 제때 열린 것으로 보입니다.
         if within(meeting.started_at):

@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 from teamflow.clock import as_utc
 from teamflow.db import assignees, live, vocab
 from teamflow.db import models as m
+from teamflow.services.naming import meeting_label
 
 #: 한 종류당 최대 건수.
 #:
@@ -173,7 +174,7 @@ def search_meetings(
         Hit(
             kind="meeting",
             meeting_id=meeting.id,
-            title=(meeting.title or "").strip() or f"회의 {meeting.id}",
+            title=meeting_label(meeting.title, meeting.id),
             at=as_utc(meeting.started_at or meeting.scheduled_at)
             if (meeting.started_at or meeting.scheduled_at) is not None
             else None,

@@ -39,6 +39,7 @@ function statusOf(error: unknown): number | null {
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { withJosa } from '@lib/text/josa.ts';
 import { Problem } from '../components/Problem.tsx';
+import { meetingLabel } from '@lib/ui/naming.ts';
 
 // 칸반 — 카드에서 버튼을 걷어내고 드래그 + ⋯ 메뉴 + 숫자 키로 (지시서 기타-6 §칸반).
 //
@@ -182,7 +183,7 @@ function Card({
             ...(task.origin !== null
               ? {
                   to: `/meeting/${task.origin.meeting_id}/review`,
-                  hint: `${task.origin.meeting_title ?? '회의'}에서 나온 업무입니다 — 근거 발화 보기`,
+                  hint: `${meetingLabel(task.origin.meeting_title, task.origin.meeting_id)}에서 나온 업무입니다 — 근거 발화 보기`,
                 }
               : { hint: '사람이 손으로 만든 업무입니다 — 회의 근거가 없습니다' }),
           },

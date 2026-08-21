@@ -23,6 +23,7 @@ from teamflow.reports import minutes as minutes_builder
 from teamflow.reports import period as period_builder
 from teamflow.reports import scope_key
 from teamflow.services import scoring_service
+from teamflow.services.naming import meeting_label
 
 #: 트랙이 이 상태면 그 사람의 그 구간은 **못 잰** 것입니다.
 _BROKEN_TRACK = {"unusable", "aborted"}
@@ -119,7 +120,7 @@ def generate_minutes(session: Session, meeting_id: int) -> m.Report:
     ).all()
 
     data = minutes_builder.MinutesInput(
-        meeting_title=meeting.title or f"회의 #{meeting.id}",
+        meeting_title=meeting_label(meeting.title, meeting.id),
         status=meeting.status,
         capture_mode=meeting.capture_mode,
         started_at=meeting.started_at,

@@ -36,6 +36,7 @@ import {
 import { Problem } from '../components/Problem.tsx';
 import { describeMeetingStatus } from '@lib/home/next.ts';
 import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
+import { meetingLabel } from '@lib/ui/naming.ts';
 import { ApiError } from '../api/client.ts';
 
 // 회의 로비 — 시그니처가 사는 곳 (지시서 기타-6 §로비).
@@ -162,7 +163,10 @@ export default function Lobby() {
     await m.consent.mutateAsync({ consent_type: 'recording', consented });
   };
 
-  const title = meeting.data?.title ?? '회의 준비';
+  /* ⚠️ 예전에는 `?? '회의 준비'` 였습니다 (결함 285) — **화면의 이름을
+     회의의 이름 자리에** 쓴 것이고, 브라우저 탭까지 그 글자라 이름 없는
+     회의를 둘 열면 탭 둘이 똑같았습니다. 이름은 `@lib` 한 벌. */
+  const title = meetingLabel(meeting.data?.title, meeting.data?.id ?? meetingId);
 
   return (
     <AppShell

@@ -34,6 +34,7 @@ from teamflow.clock import as_utc
 from teamflow.db import assignees, live
 from teamflow.db import models as m
 from teamflow.db.vocab import NotificationKind
+from teamflow.services.naming import meeting_label
 
 #: 마감이 **며칠 앞**이면 임박인가 (NOTIFICATION-003).
 #:
@@ -265,8 +266,11 @@ def _text_for(session: Session, row: m.Notification) -> str:
 
     if kind == NotificationKind.MEETING_SOON and row.meeting_id is not None:
         meeting = session.get(m.Meeting, row.meeting_id)
-        title = (meeting.title or "").strip() if meeting is not None else ""
-        return f"곧 회의가 시작됩니다 — {title or '이름 없는 회의'}"
+        # ⚠️ 예전에는 여기만 「이름 없는 회의」였습니다 (결함 285) —
+        #    화면은 「제목 없는 회의」라고 부릅니다. 낱말 하나가 달라도
+        #    사람은 다른 것으로 읽습니다. 이름은 한 벌에서 옵니다.
+        title = meeting_label(meeting.title, meeting.id) if meeting is not None else None
+        return f"곧 회의가 시작됩니다 — {title or '회의를 찾을 수 없습니다'}"
 
     if kind == NotificationKind.GITHUB and row.task_id is not None:
         task = session.get(m.Task, row.task_id)

@@ -24,6 +24,7 @@ import {
 } from '@lib/home/next.ts';
 import { codeProblem, normalizeCode, titleProblem } from '@lib/project/setup.ts';
 import { describeActionFailure } from '@lib/ui/load.ts';
+import { meetingLabel } from '@lib/ui/naming.ts';
 import { Problem } from '../components/Problem.tsx';
 
 // 홈 — "다음에 뭘 해야 하는가" 에 대한 답 (지시서 기타-6 §홈).
@@ -91,7 +92,7 @@ function MeetingRow({
   return (
     <div className="mrow">
       <span className="mrow__status">{!waiting && <StatusChip status={meeting.status} />}</span>
-      <span className="mrow__title">{meeting.title ?? '제목 없는 회의'}</span>
+      <span className="mrow__title">{meetingLabel(meeting.title, meeting.meeting_id)}</span>
       <span className="mrow__date num">{fmtDate(meeting.started_at)}</span>
       {/* ⚠️ **잴 게 없으면 레인을 안 그립니다** (v2 F3). 예전에는 회의
           다섯 중 넷이 빈 회색 막대였고, 값 없는 요소가 목록의 시각적
@@ -106,7 +107,7 @@ function MeetingRow({
               { start: 0, end: coverage as number, kind: 'known' },
               { start: coverage as number, end: 1, kind: 'unknown' },
             ]}
-            label={`${meeting.title ?? '회의'} — 녹음 커버리지 ${Math.round((coverage as number) * 100)}%`}
+            label={`${meetingLabel(meeting.title, meeting.meeting_id)} — 녹음 커버리지 ${Math.round((coverage as number) * 100)}%`}
           />
         )}
       </span>
