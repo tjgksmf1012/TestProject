@@ -21,6 +21,7 @@ import {
   type Person,
   type ReportContent,
   type ReportSummary,
+  emptyReports,
 } from './view.ts';
 
 function person(over: Partial<Person> = {}): Person {
@@ -321,5 +322,36 @@ describe('⭐ 글자로 옮길 때 문장을 잃지 않는다', () => {
     // 예전에는 `gap` 이 붙은 칸의 **문장이 통째로** 바뀌어 나갔습니다.
     ok(text.includes('처리: 처리하다 실패했습니다'), text);
     ok(text.includes('커버리지: 못 쟀습니다'), text);
+  });
+});
+
+describe('보고서가 없을 때 어디로 보내는가 (결함 312)', () => {
+  it('⭐ 회의가 0개면 **로비로 보내지 않는다** — 갈 곳이 없다', () => {
+    /* 갓 만든 프로젝트에서 재서 확인한 것: `GET /api/projects/3/meetings`
+       가 0개인데 화면은 「회의 로비에서 회의록을 만드세요」라고 했습니다.
+       같은 화면 옆줄은 「아직 연 회의가 없습니다」였습니다. */
+    const empty = emptyReports(0);
+    ok(!/로비에서 회의록을 만드세요/.test(empty.how), empty.how);
+    ok(/아직 연 회의가 없습니다/.test(empty.how), empty.how);
+    // 「여기서 되는 것」은 남깁니다 — 막다른 길로 두지 않습니다.
+    ok(/최종 보고서 만들기/.test(empty.how), empty.how);
+  });
+
+  it('⭐ 회의가 있으면 로비로 보낸다 — 두 국면이 갈라진다', () => {
+    const some = emptyReports(3);
+    ok(/로비에서 회의록을 만드세요/.test(some.how), some.how);
+    ok(emptyReports(0).how !== some.how, '회의 수와 무관하게 같은 말을 합니다');
+  });
+
+  it('⚠️ **모르면 0 이라고 하지 않는다** — 아직 안 온 것과 없는 것은 다르다', () => {
+    // 불변식 ③ 의 화면판입니다. `null` 은 「아직 못 받았다」입니다.
+    strictEqual(emptyReports(null).how, emptyReports(3).how);
+  });
+
+  it('⭐ 「무엇이 비었나」·「왜」는 국면과 무관하다 — 거짓말은 「다음에 뭘」이었다', () => {
+    for (const n of [0, 3, null]) {
+      strictEqual(emptyReports(n).what, '아직 만든 보고서가 없습니다');
+      ok(/자동으로 생기지 않습니다/.test(emptyReports(n).why));
+    }
   });
 });

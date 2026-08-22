@@ -56,7 +56,8 @@ class PeriodInput:
     github_backfilled: bool = False
     #: 팀이 기여도를 확정했는가.
     confirmed: bool = False
-    #: 가중치가 0이라 아예 계산에서 빠진 영역.
+    #: **팀 전체의 활동량이 0이라** 아예 계산에서 빠진 영역 (결함 311).
+    #: 가중치와는 무관합니다 — 만드는 자는 `scoring.py` 의 `team_totals`.
     skipped_categories: list[str] = field(default_factory=list)
 
 
@@ -169,8 +170,23 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
     if not data.github_backfilled:
         holes.append("GitHub 연결 전 활동 — 아직 훑지 않아 보이지 않습니다")
     if data.skipped_categories:
+        # ⛔ **여기서 이유를 지어내고 있었습니다** (결함 311). 예전 문장은
+        #    「**가중치가 0이라** 계산에서 빠진 영역」이었는데, 이 목록을
+        #    만드는 자는 `scoring.py` 의
+        #        skipped = [c for c in Category if team_totals[c] <= 0]
+        #    입니다 — 재는 것은 **가중치가 아니라 팀의 활동량**입니다.
+        #    갓 만든 프로젝트에서 여섯 영역이 전부 여기 실렸고, 그중
+        #    코드(35%)·업무(30%)는 그 사람의 가장 큰 가중치였습니다.
+        #    **밖으로 나가는 문서**가 「네 코드는 0으로 쳤다」고 말한 셈입니다.
+        #
+        #    ⚠️ 불변식 ③ 과도 반대입니다 — 「측정 불가 ≠ 0점」인데 「가중치
+        #    0」은 **일부러 안 세기로 했다**는 뜻으로 읽힙니다. 화면은 같은
+        #    목록을 「이번 계산에서 빠졌습니다」라고만 적고 이유를 안 붙입니다
+        #    (`contribution/view.ts`). 두 자리가 **같은 사실**을 말해야 합니다.
         holes.append(
-            "가중치가 0이라 계산에서 빠진 영역: " + ", ".join(data.skipped_categories)
+            "팀 전체에 기록된 활동이 없어 계산에서 빠진 영역: "
+            + ", ".join(data.skipped_categories)
+            + " — 아무도 안 했다는 뜻이 아니라 이 계산에 잡힌 것이 없다는 뜻입니다"
         )
     for p in data.people:
         for hole in p.gaps:

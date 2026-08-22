@@ -12,11 +12,15 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
 from teamflow.db.vocab import CARRIES_CONTRIBUTION, ReportType
 from teamflow.reports import blocks, minutes, period, scope_key
+
+#: 저장소 뿌리 — 서버 문장과 화면 문장을 **나란히 놓고** 재기 위해 (결함 311).
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _find(content: dict, kind: str) -> list[dict]:
@@ -683,6 +687,82 @@ def test_no_report_text_carries_markdown_syntax():
             if re.search(r"\*\*|__|\[[^\]]+\]\([^)]+\)", text):
                 bad.append(text[:80])
     assert not bad, f"보고서 글자에 마크다운이 섞였습니다: {bad}"
+
+
+def test_the_report_does_not_invent_a_reason_for_a_skipped_category():
+    """⛔ 「가중치가 0이라 계산에서 빠진 영역」 — **지어낸 이유** (결함 311).
+
+    이 목록을 만드는 자는 `scoring.py` 의
+
+        skipped = [c for c in Category if team_totals[c] <= 0]
+
+    입니다. 재는 것은 **가중치가 아니라 팀의 활동량**입니다. 갓 만든
+    프로젝트에서 렌더해 보니 여섯 영역이 전부 실렸고, 그중 코드(35%)·
+    업무(30%)는 그 사람의 **가장 큰 가중치**였습니다 — 밖으로 나가는
+    문서가 「네 코드는 0으로 쳤다」고 말한 셈입니다.
+
+    ⚠️ 불변식 ③(측정 불가 ≠ 0점) 과도 반대 방향입니다.
+    """
+    from teamflow.reports import period as period_builder
+
+    content = period_builder.build(
+        period_builder.PeriodInput(
+            project_name="갓 만든 팀",
+            people=[
+                period_builder.Person(
+                    name="김민수",
+                    role="개발",  # 코드 35% · 업무 30% — 0 이 아닙니다
+                    measured=False,
+                    range_low=None,
+                    range_high=None,
+                    confidence=0.0,
+                    confidence_label="매우 낮음",
+                    reasons=[],
+                    evidence_count=0,
+                    gaps=["활동 기록이 없어 잴 수 없었습니다"],
+                    final_value=None,
+                    final_reason=None,
+                )
+            ],
+            # 실기에서 나오는 모양 그대로 — 갓 만든 프로젝트는 여섯 다 실립니다
+            skipped_categories=["업무", "코드", "회의", "문서", "일정 준수", "동료 평가"],
+        ),
+        ReportType.FINAL,
+    )
+    text = json.dumps(content, ensure_ascii=False)
+
+    assert "가중치가 0" not in text, (
+        "보고서가 이유를 지어냅니다 — 이 목록은 가중치가 아니라 활동량으로 만들어집니다"
+    )
+    assert "팀 전체에 기록된 활동이 없어" in text, text
+    # ⚠️ 「없다」를 「0점」으로 읽히게 두지 않습니다 (불변식 ③).
+    assert "이 계산에 잡힌 것이 없다는 뜻입니다" in text, text
+
+
+def test_the_report_and_the_screen_say_the_same_thing_about_skipped_areas():
+    """⚠️ **같은 사실을 말하는 두 자리를 나란히 놓습니다** (결함 290 의 교훈).
+
+    화면(`lib/contribution/view.ts`)은 같은 목록을 「… 활동은 이번 계산에서
+    빠졌습니다.」라고만 적고 **이유를 안 붙입니다.** 서버가 거기에 없는
+    이유를 덧붙이면 두 자리가 갈라집니다 — 실제로 갈라져 있었습니다.
+    """
+    view = (ROOT / "frontend" / "src" / "lib" / "contribution" / "view.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "이번 계산에서 빠졌습니다" in view, "화면 쪽 문장을 못 찾았습니다"
+    assert "가중치" not in view.split("이번 계산에서 빠졌습니다")[0][-400:], (
+        "화면이 이유를 붙이기 시작했으면 서버 문장과 맞춰야 합니다"
+    )
+
+    period_src = (
+        ROOT / "backend" / "teamflow" / "reports" / "period.py"
+    ).read_text(encoding="utf-8")
+    body = "\n".join(
+        line for line in period_src.splitlines() if not line.strip().startswith("#")
+    )
+    assert "가중치가 0이라 계산에서 빠진" not in body, (
+        "보고서가 아직 가중치를 이유로 댑니다"
+    )
 
 
 def period_builder_content():

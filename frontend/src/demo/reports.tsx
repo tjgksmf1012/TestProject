@@ -24,6 +24,7 @@ import { createRoot } from 'react-dom/client';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import {
+  emptyReports,
   describeConfidence,
   describeFinal,
   describeRange,
@@ -201,6 +202,11 @@ function App() {
   //    줄 알고 옛 클립보드 내용을 붙여 넣습니다 (결함 81 이 말하는 그것).
   const [copyNote, setCopyNote] = useState<Note | null>(null);
   const [busy, setBusy] = useState(false);
+  /* ⚠️ **빈 상자가 「다음에 뭘」을 상수로 뱉고 있었습니다** (결함 312).
+     회의가 0개인 팀에게 「회의 로비에서 회의록을 만드세요」라고 했는데,
+     이 화면은 회의를 **받아 온 적이 없어** 그걸 알 방법이 없었습니다.
+     모르는 동안은 `null` 입니다 — 모르는 것을 0 이라고 하지 않습니다. */
+  const [meetingCount, setMeetingCount] = useState<number | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     const response = await whileLoading(
@@ -232,6 +238,10 @@ function App() {
           return;
         }
         setMe((await response.json()) as Me);
+      }
+      const meetings = await get(`/api/projects/${projectId}/meetings`);
+      if (meetings !== null && meetings.ok) {
+        setMeetingCount(((await meetings.json()) as unknown[]).length);
       }
       await load();
     })();
@@ -402,11 +412,7 @@ function App() {
         {header}
         {actions}
         <RawHtml
-          html={emptyHtml({
-            what: '아직 만든 보고서가 없습니다',
-            why: '보고서는 자동으로 생기지 않습니다 — 팀이 필요할 때 만듭니다.',
-            how: '위의 [최종 보고서 만들기]를 누르거나, 회의 로비에서 회의록을 만드세요.',
-          })}
+          html={emptyHtml(emptyReports(meetingCount))}
         />
       </>
     );
