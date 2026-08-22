@@ -4751,6 +4751,58 @@ describe('⛔ 글을 옮겨 놓았으면 **초점도 데려간다** (결함 302)
   });
 });
 
+describe('⛔ 자리를 바꿔 놓았으면 **초점도 데려간다** — 로비 (결함 303)', () => {
+  /* 「이름 고치기」를 누르면 그 단추가 사라지고 입력칸이 그 자리에
+     생깁니다. 초점을 쥐고 있던 단추가 없어지므로 초점이 **`body` 로
+     떨어집니다.** 「저장」·「취소」도 같습니다 — 여닫이 **셋 다**.
+
+         이름 고치기 → BODY(초점 잃음)
+         취소        → BODY(초점 잃음)
+         저장        → BODY(초점 잃음)   (200 PATCH 는 나갑니다)
+
+     낭독기 사용자는 문서 맨 위로 떨어지고, 키보드 사용자는 자기가 어디
+     있었는지 잃습니다. AGENTS.md 가 손으로 지은 대화상자의 증상으로
+     적어 둔 그것입니다 (결함 280 — 「닫으면 body 에 떨어집니다」).
+
+     ⚠️ 결함 302(채팅)와 같은 부류라 **여는 쪽만 고치면 안 됩니다.**
+     가드가 여는 하나와 닫는 둘을 각각 봅니다. */
+  const lobby = (): string =>
+    codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx'), 'utf8'));
+
+  it('⭐ 이름 칸을 열면 **그 칸으로** 간다', () => {
+    const code = lobby();
+    ok(/ref=\{titleBox\}/.test(code), '이름 칸에 ref 가 없으면 초점을 옮길 방법이 없습니다');
+    /* ⚠️ **낱말이 아니라 「부르는가」를 봅니다** (결함 240 의 교훈).
+       처음에는 `focusTitleBox` 가 200자 안에 나오는지만 봤는데,
+       `void focusTitleBox;` 로 심어도 통과했습니다 — 이름은 그대로
+       있으니까요. 심어 보고서야 알았습니다. */
+    ok(
+      /setRenaming\(true\);[\s\S]{0,200}?(?:requestAnimationFrame\(focusTitleBox\)|focusTitleBox\(\))/.test(
+        code,
+      ),
+      '이름 고치기를 열면서 그 칸으로 초점을 안 데려갑니다',
+    );
+    ok(
+      /setSelectionRange\(/.test(code),
+      '캐럿을 글 끝에 안 두면 고치려다 글 앞에 끼워 넣습니다',
+    );
+  });
+
+  it('⭐ 닫는 **두 갈래 다** 눌렀던 자리로 되돌린다', () => {
+    const code = lobby();
+    const closes = [...code.matchAll(/setRenaming\(false\)/g)];
+    ok(closes.length >= 2, `닫는 자리를 ${closes.length}곳만 찾았습니다 — 저장·취소 둘이어야 합니다`);
+    const orphan = closes.filter((m) => {
+      const after = code.slice(m.index ?? 0, (m.index ?? 0) + 220);
+      return !/renameBtn\.current\?\.focus\(\)/.test(after);
+    });
+    ok(
+      orphan.length === 0,
+      `닫으면서 초점을 안 데려오는 자리가 ${orphan.length}곳 있습니다 — body 로 떨어집니다`,
+    );
+  });
+});
+
 describe('⛔ 기여도 리본은 **순위를 안 그린다** (결함 247)', () => {
   /* 이 저장소의 제일 무거운 불변식(①: 순위·리더보드 금지)이 걸린 자리인데
      **가드가 한 번도 안 울렸습니다.** 조각을 만드는 코드가 `@lib` 이 아니라

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
@@ -65,6 +65,26 @@ export default function Lobby() {
   // 회의 이름 고치기 (결함 268). 판단(빈 글·길이)은 `@lib`.
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
+  /* ⛔ **이름 고치기의 여닫이가 초점을 통째로 잃었습니다** (결함 303).
+     「이름 고치기」를 누르면 그 단추가 사라지고 입력칸이 그 자리에
+     생기는데, 초점을 쥐고 있던 단추가 없어지므로 초점이 `body` 로
+     떨어집니다. 「저장」·「취소」도 같습니다 — **여닫이 셋 다**.
+
+     낭독기 사용자는 문서 맨 위로 떨어지고, 키보드 사용자는 자기가 어디
+     있었는지 잃습니다. AGENTS.md 가 손으로 지은 대화상자의 증상으로
+     적어 둔 그것입니다(결함 280 — 「닫으면 body 에 떨어집니다」).
+
+     ⚠️ **여는 쪽만 고치면 안 됩니다** — 닫는 두 갈래도 같이 데려옵니다. */
+  const titleBox = useRef<HTMLInputElement>(null);
+  const renameBtn = useRef<HTMLButtonElement>(null);
+  /** 방금 생긴 칸으로. 캐럿은 글 끝에 — 앞에 두면 고치려다 앞에 끼워 넣습니다. */
+  const focusTitleBox = useCallback((): void => {
+    const box = titleBox.current;
+    if (box === null) return;
+    box.focus();
+    const end = box.value.length;
+    box.setSelectionRange(end, end);
+  }, []);
   const titleProblem = meetingTitleProblem(titleDraft);
   const roster = consent.data?.roster ?? [];
   /* ⛔ **`?? []` 가 「못 받음」을 「아무도 참가 안 함」으로 접었습니다**
@@ -297,6 +317,7 @@ export default function Lobby() {
                   <input
                     className="input input--sm"
                     id="meeting-title-input"
+                    ref={titleBox}
                     aria-label="회의 이름"
                     aria-invalid={titleProblem !== null}
                     aria-describedby="meeting-title-problem"
@@ -314,7 +335,12 @@ export default function Lobby() {
                         document.getElementById('meeting-title-input')?.focus();
                         return;
                       }
-                      m.rename.mutate(titleDraft.trim(), { onSuccess: () => setRenaming(false) });
+                      m.rename.mutate(titleDraft.trim(), {
+                        onSuccess: () => {
+                          setRenaming(false);
+                          requestAnimationFrame(() => renameBtn.current?.focus());
+                        },
+                      });
                     }}
                   >
                     저장
@@ -322,7 +348,10 @@ export default function Lobby() {
                   <button
                     type="button"
                     className="btn btn--ghost btn--sm"
-                    onClick={() => setRenaming(false)}
+                    onClick={() => {
+                      setRenaming(false);
+                      requestAnimationFrame(() => renameBtn.current?.focus());
+                    }}
                   >
                     취소
                   </button>
@@ -331,9 +360,12 @@ export default function Lobby() {
                 <button
                   type="button"
                   className="btn btn--ghost btn--sm"
+                  ref={renameBtn}
                   onClick={() => {
                     setTitleDraft(meeting.data?.title ?? '');
                     setRenaming(true);
+                    /* 값이 붙은 다음에 옮겨야 캐럿이 글 끝에 섭니다. */
+                    requestAnimationFrame(focusTitleBox);
                   }}
                 >
                   이름 고치기
