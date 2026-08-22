@@ -96,6 +96,17 @@ interface Loaded {
   tasks: Task[];
   statuses: string[];
   members: Member[];
+  /**
+   * 담당자로 남아 있지만 지금은 팀원이 아닌 사람들 (서버의 `former_assignees`).
+   *
+   * ⛔ 이게 없어서 나간 사람이 맡았던 카드가 「**사용자 #3**」으로 떴습니다
+   * (결함 308). `/members` 는 **지금 구성원**뿐이라 나간 사람이 없습니다.
+   *
+   * ⚠️ `members` 에 섞지 **않습니다.** 그 목록은 담당자를 **고르는** 자리
+   * (`AssigneePicker`)에도 쓰여서, 섞으면 떠난 사람에게 새 일을 맡길 수
+   * 있게 됩니다. **이름을 부르는 것과 고르는 것은 다른 일입니다.**
+   */
+  former: Member[];
 }
 
 type Screen =
@@ -222,6 +233,9 @@ function Card({
   today,
   statuses,
   members,
+  /* ⚠️ **이름을 부르는 명단**입니다 — 나간 담당자까지 포함합니다 (결함 308).
+     담당자를 **고르는** 명단(`members`)과 일부러 다릅니다. */
+  naming,
   moving,
   beingDragged,
   onMove,
@@ -234,6 +248,7 @@ function Card({
   today: string;
   statuses: string[];
   members: Member[];
+  naming: Member[];
   moving: boolean;
   beingDragged: boolean;
   onMove: (to: string) => void;
@@ -258,7 +273,7 @@ function Card({
       onDragEnd={onDragEnd}>
       <p className="title">{task.title}</p>
       <p className="meta">
-        {assigneeText(task.assignee_ids, members)}
+        {assigneeText(task.assignee_ids, naming)}
         {task.deadline ? ` · 마감 ${task.deadline}` : ''}
       </p>
 
@@ -381,13 +396,18 @@ function Kanban() {
       setScreen({ k: 'failed', status: boardRes.status });
       return;
     }
-    const payload = (await boardRes.json()) as { statuses: string[]; tasks: Task[] };
+    const payload = (await boardRes.json()) as {
+      statuses: string[];
+      tasks: Task[];
+      former_assignees?: Member[];
+    };
     setScreen({
       k: 'ok',
       data: {
         tasks: payload.tasks,
         statuses: payload.statuses,
         members: memberRes?.ok ? ((await memberRes.json()) as Member[]) : [],
+        former: payload.former_assignees ?? [],
       },
     });
   }, []);
@@ -628,7 +648,10 @@ function Kanban() {
     );
   }
 
-  const { tasks, statuses, members } = screen.data;
+  const { tasks, statuses, members, former } = screen.data;
+  /* 이름을 부를 때만 나간 담당자를 더합니다 — 고르는 자리(`AssigneePicker`)
+     에는 안 넣습니다 (결함 308). */
+  const naming = [...members, ...former];
   const today = todayInTeamCalendar();
   const summary = summarize(tasks, today);
 
@@ -711,6 +734,7 @@ function Kanban() {
                     today={today}
                     statuses={statuses}
                     members={members}
+                    naming={naming}
                     moving={moving}
                     beingDragged={dragTask !== null && dragTask.id === task.id}
                     onMove={(to) => void move(task.id, to)}

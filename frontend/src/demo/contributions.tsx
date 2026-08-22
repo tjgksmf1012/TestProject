@@ -157,10 +157,22 @@ function Drawer({ rest, flags }: { rest: readonly string[]; flags: readonly stri
 function MemberRow({
   member,
   people,
+  /**
+   * 이 프로젝트를 **떠난** 사람들 (서버의 `former_members`).
+   *
+   * ⛔ 이걸 안 받던 동안 나간 사람의 줄이 「**사용자 #3**」이었습니다
+   * (결함 308). `@lib` 의 `nameOf` 는 결함 222 때 이미 나간 사람을 찾도록
+   * 고쳐졌고 SPA 는 넘기고 있었는데, **이 화면만** 안 넘겼습니다.
+   * 게다가 같은 화면이 바로 위에서 「**박지원** 님은 이 프로젝트를
+   * 떠났지만 그때 한 일은 계산에 그대로 들어 있습니다」라고 말합니다 —
+   * 이름을 아는 화면이 이름 자리에 번호를 적고 있었습니다.
+   */
+  former,
   uncertainty,
 }: {
   member: MemberScore;
   people: Person[];
+  former: Person[];
   uncertainty: UncertaintySpan | undefined;
 }) {
   const notes = readBeforeTheNumber(member);
@@ -173,7 +185,7 @@ function MemberRow({
   return (
     <div className="read">
       <div className="read-who">
-        <span className="who">{nameOf(member.user_id, people)}</span>
+        <span className="who">{nameOf(member.user_id, people, former)}</span>
         <span className="role">{roleOf(member, people)}</span>
       </div>
 
@@ -495,6 +507,10 @@ function Contributions() {
   }
 
   const { score, people } = screen;
+  /* ⛔ 나간 사람의 줄이 「사용자 #3」이었습니다 (결함 308). 서버는 그때도
+     `former_members` 로 이름을 같이 보내고 있었고 `@lib` 의 `nameOf` 도
+     받을 준비가 돼 있었는데, **이 화면만** 안 읽었습니다. */
+  const former = score.former_members ?? [];
   const warnings = teamWarnings(score, people);
   const shown = orderForDisplay(score.members, people);
   // ⚠️ 모르는 폭은 **팀에서 가장 넓은 구간** 기준이라 한 사람만 보고는
@@ -546,6 +562,7 @@ function Contributions() {
               key={ms.user_id}
               member={ms}
               people={people}
+              former={former}
               uncertainty={spans.get(ms.user_id)}
             />
           ))
@@ -567,7 +584,7 @@ function Contributions() {
         </p>
         <div id="finals">
           {shown.map((ms) => {
-            const name = nameOf(ms.user_id, people);
+            const name = nameOf(ms.user_id, people, former);
             /* ⛔ 예전에는 `(systemValues.get(id) ?? 0).toFixed(1)` 이라
                안 잰 사람에게 **`0.0%`** 라고 적었습니다 (결함 307). 여섯 줄
                위 카드는 같은 사람을 `—` 라고 그리고 「0 이라는 뜻이 아니라

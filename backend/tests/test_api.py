@@ -1755,3 +1755,61 @@ def test_a_person_who_was_never_measured_cannot_be_confirmed_as_is(
     add_contribution_events(seeded["project_id"], seeded["user_ids"][1], 5)
     still_ok = client.post(url, json={"finals": [{"user_id": user_id}]})
     assert still_ok.status_code == 201, still_ok.text
+
+
+def test_a_departed_assignee_is_still_named_on_the_board(
+    client: TestClient, seeded
+) -> None:
+    """⭐ **나간 사람이 맡았던 카드도 이름으로 부른다** (결함 308).
+
+    ## 재현
+
+    팀원을 내보내고 칸반을 열면 그 사람이 맡았던 카드가 이렇게 떴습니다 —
+
+        DB 스키마 정리 · **사용자 #3** · 마감 2026-09-03
+
+    화면은 담당자 이름을 `/members` 로 찾는데 그 목록은 **지금 구성원**뿐이라
+    나간 사람이 없습니다. 같은 회차에 기여도 화면도 「사용자 #3」이었고,
+    거기서는 더 나빴습니다 — **바로 위에서 「박지원 님은 이 프로젝트를
+    떠났지만 그때 한 일은 계산에 그대로 들어 있습니다」라고 말하면서**
+    이름 자리에는 번호를 적었습니다.
+
+    ⚠️ `/members` 에 나간 사람을 **섞지 않습니다.** 그 목록은 담당자를
+    **고르는** 자리에도 쓰여서, 섞으면 떠난 사람에게 새 일을 맡길 수 있게
+    됩니다. 이름을 부르는 것과 고르는 것은 다른 일이라 목록을 나눕니다.
+    """
+    project_id = seeded["project_id"]
+    owner, leaver = seeded["user_ids"][0], seeded["user_ids"][1]
+
+    # 업무는 회의 후보 승인으로만 생기므로 검사에서는 직접 넣습니다.
+    # 내보내기는 ADMIN 권한이라(`projects/permissions.py`) 로그인한 사람에게
+    # 그 등급을 줍니다 — 씨앗은 등급을 안 정합니다.
+    with db_session.session_scope() as s:
+        task = m.Task(project_id=project_id, title="DB 스키마 정리", status="todo")
+        s.add(task)
+        s.flush()
+        s.add(m.TaskAssignee(task_id=task.id, user_id=leaver))
+        me = s.scalars(
+            select(m.Member).where(
+                m.Member.project_id == project_id, m.Member.user_id == owner
+            )
+        ).one()
+        me.project_role = str(vocab.ProjectRole.OWNER)
+
+    # 아직 팀원일 때는 나간 사람 목록이 비어 있어야 합니다.
+    assert client.get(f"/api/projects/{project_id}/tasks").json()["former_assignees"] == []
+
+    assert client.delete(
+        f"/api/projects/{project_id}/members/{leaver}"
+    ).status_code in (200, 204)
+
+    after = client.get(f"/api/projects/{project_id}/tasks").json()
+    former = after["former_assignees"]
+    assert [f["user_id"] for f in former] == [leaver], after
+    # ⭐ **이름이 있어야** 합니다 — id 만 보내면 화면은 여전히 「사용자 #N」입니다.
+    assert former[0]["name"], former
+
+    # 그리고 **지금 구성원 목록에는 안 섞입니다** — 담당자를 고르는 자리입니다.
+    members = client.get(f"/api/projects/{project_id}/members").json()
+    assert leaver not in [x["user_id"] for x in members]
+    assert owner in [x["user_id"] for x in members]

@@ -3558,6 +3558,16 @@ class TaskBoardOut(BaseModel):
     project_id: int
     statuses: list[str]
     tasks: list[TaskOut]
+    #: 이 보드에 **담당자로 남아 있지만 지금은 팀원이 아닌** 사람들.
+    #:
+    #: ⛔ 이게 없어서 나간 사람이 맡았던 카드가 「**사용자 #3**」으로
+    #:    떴습니다 (결함 308). 화면은 담당자 이름을 `/members` 로 찾는데
+    #:    그 목록은 **지금 구성원**뿐이라 나간 사람이 없습니다.
+    #:
+    #: ⚠️ `/members` 에 나간 사람을 섞지 **않습니다.** 그 목록은 담당자를
+    #:    고르는 자리에도 쓰여서, 섞으면 떠난 사람에게 새 일을 맡길 수
+    #:    있게 됩니다. 이름을 부르는 것과 고르는 것은 다른 일입니다.
+    former_assignees: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _github_for_tasks(
@@ -3601,6 +3611,18 @@ def list_tasks(project_id: int, session: DbSession, user: CurrentUser) -> TaskBo
     rows = task_service.list_tasks(session, project_id)
     github = _github_for_tasks(session, [row["id"] for row in rows])
 
+    # 담당자로 남아 있는데 지금 구성원이 아닌 사람의 **이름**을 같이 싣습니다
+    # (결함 308). 안 실으면 화면이 그 자리에 「사용자 #3」을 적습니다.
+    current = {
+        uid
+        for uid in session.scalars(
+            select(m.Member.user_id).where(m.Member.project_id == project_id)
+        ).all()
+    }
+    departed = sorted(
+        {uid for row in rows for uid in (row.get("assignee_ids") or [])} - current
+    )
+
     return TaskBoardOut(
         project_id=project_id,
         statuses=list(task_service.STATUSES),
@@ -3611,6 +3633,9 @@ def list_tasks(project_id: int, session: DbSession, user: CurrentUser) -> TaskBo
                 github=github.get(row["id"], []),
             )
             for row in rows
+        ],
+        former_assignees=[
+            {"user_id": uid, "name": _display_name(session, uid)} for uid in departed
         ],
     )
 

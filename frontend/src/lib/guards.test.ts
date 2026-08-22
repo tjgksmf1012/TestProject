@@ -7424,3 +7424,49 @@ describe('⛔ 확정 줄이 **안 잰 사람에게 `0.0%`** 라고 적지 않는
     );
   });
 });
+
+describe('⛔ 나간 사람도 **이름으로** 부른다 (결함 308)', () => {
+  /* 팀원을 내보내고 화면을 열었더니 두 곳이 번호를 적고 있었습니다.
+
+       칸반   DB 스키마 정리 · **사용자 #3** · 마감 2026-09-03
+       기여도  **사용자 #3** · 개발 · 18~32%
+
+     기여도 쪽이 더 나빴습니다 — **바로 위에서** 「박지원 님은 이 프로젝트를
+     떠났지만 그때 한 일은 계산에 그대로 들어 있습니다」라고 말하면서 이름
+     자리에는 번호를 적었습니다. 이름을 아는 화면이 그랬습니다.
+
+     ⚠️ `@lib` 의 `nameOf` 는 결함 222 때 이미 나간 사람을 찾도록 고쳐졌고
+     **SPA 는 넘기고 있었습니다.** 레거시 화면만 안 넘겼습니다 — 「한 갈래만
+     고치고 옆 갈래를 그대로 둔 것」(결함 298→301 과 같은 부류). */
+
+  it('⭐ 레거시 기여도 화면이 **나간 사람 명단을** `nameOf` 에 넘긴다', () => {
+    const code = codeOf(readFileSync(join(DEMO, 'contributions.tsx'), 'utf8'));
+    ok(
+      /former_members/.test(code),
+      '서버가 `former_members` 로 이름을 보내는데 화면이 안 읽습니다 (결함 308)',
+    );
+    const bare = [...code.matchAll(/nameOf\(([^)]*)\)/g)].map((m) => m[1] ?? '');
+    const missing = bare.filter((args) => !/former/.test(args));
+    ok(
+      missing.length === 0,
+      '`nameOf` 에 나간 사람 명단을 안 넘깁니다 — 그 줄이 「사용자 #N」이 됩니다:\n    ' +
+        missing.join('\n    '),
+    );
+  });
+
+  it('⭐ 칸반은 **부르는 명단**과 **고르는 명단**을 가른다', () => {
+    /* ⚠️ 나간 사람을 `members` 에 섞으면 담당자를 **고르는** 자리
+       (`AssigneePicker`)에도 들어가, 떠난 사람에게 새 일을 맡길 수 있게
+       됩니다. 이름을 부르는 것과 고르는 것은 다른 일입니다. */
+    const code = codeOf(readFileSync(join(DEMO, 'kanban.tsx'), 'utf8'));
+    ok(/former_assignees/.test(code), '서버의 `former_assignees` 를 안 읽습니다 (결함 308)');
+    ok(
+      /assigneeText\(task\.assignee_ids, naming\)/.test(code),
+      '담당자 이름을 `members` 로 찾고 있습니다 — 나간 사람이 「사용자 #N」이 됩니다',
+    );
+    ok(
+      /<AssigneePicker[^>]*members=\{members\}/.test(code.replace(/\s+/g, ' ')),
+      '담당자를 **고르는** 자리에까지 나간 사람이 섞였습니다 — 떠난 사람에게 일을 맡길 수 있습니다',
+    );
+  });
+});
