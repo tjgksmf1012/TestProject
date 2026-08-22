@@ -2637,6 +2637,25 @@ def test_the_activity_log_never_starts_receiving_meetings_or_chat() -> None:
     )
 
 
+def test_the_product_description_does_not_promise_hand_made_tasks() -> None:
+    """⛔ **사용자가 읽는 문서**가 없는 길을 약속했습니다 (결함 317).
+
+    `docs/00-이-프로그램은-무엇인가.md` 는 비개발자가 제품을 이해하려고
+    읽는 문서입니다. 거기 「손으로 만든 업무는 아무 표시가 없습니다」가
+    남아 있었습니다 — 결함 313 이 화면에서 고친 그 거짓말인데, **문서는
+    안 봤습니다.**
+
+    ⚠️ 가드가 화면만 걷고 문서를 안 걸으면 이 부류는 영영 안 보입니다.
+    """
+    doc = (
+        REPO_ROOT / "docs" / "00-이-프로그램은-무엇인가.md"
+    ).read_text(encoding="utf-8")
+    found = re.search(r"[^\n]*(직접|손으로|수동으로)\s*만[든들][^\n]*업무[^\n]*", doc)
+    assert found is None, (
+        f"제품 소개 문서가 없는 길을 약속합니다 — {found.group(0).strip() if found else ''}"
+    )
+
+
 def test_the_chat_screen_actually_pages_backwards() -> None:
     """⛔ **라우트는 불리는데 인자가 안 불렸습니다** (결함 315).
 

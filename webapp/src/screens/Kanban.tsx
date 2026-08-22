@@ -20,6 +20,7 @@ import {
   sortLinks,
   type Task,
   emptyBoardLine,
+  unknownOriginNote,
 } from '@lib/kanban/board.ts';
 import { canDropOn, dragPayload, draggedTaskId, TASK_DRAG_TYPE } from '@lib/kanban/dnd.ts';
 import {
@@ -191,7 +192,11 @@ function Card({
                   to: `/meeting/${task.origin.meeting_id}/review`,
                   hint: `${meetingLabel(task.origin.meeting_title, task.origin.meeting_id)}에서 나온 업무입니다 — 근거 발화 보기`,
                 }
-              : { hint: '사람이 손으로 만든 업무입니다 — 회의 근거가 없습니다' }),
+              /* ⛔ 예전에는 「사람이 손으로 만든 업무입니다」였습니다
+                 (결함 317). 레거시 셋을 고치고 **여기 네 번째**가 남아
+                 있었는데, 자를 「손으로」까지 넓히고 나서야 잡혔습니다.
+                 문장은 `@lib` 한 벌입니다. */
+              : { hint: unknownOriginNote() }),
           },
           {
             label: 'PR',

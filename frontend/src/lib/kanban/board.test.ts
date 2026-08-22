@@ -23,6 +23,7 @@ import {
   type TaskGithubLink,
   emptyBoard,
   emptyBoardLine,
+  unknownOriginNote,
 } from './board.ts';
 
 const TODAY = '2026-09-10';
@@ -540,5 +541,20 @@ describe('업무가 없을 때 뭐라고 적는가 (결함 313)', () => {
   it('⭐ 한 줄짜리와 세 줄짜리가 **같은 사실**을 말한다 — 두 화면이 갈라지지 않게', () => {
     // 레거시는 세 줄, SPA 는 한 줄입니다. 갈라지면 결함 313 이 그대로입니다.
     ok(emptyBoardLine().includes(emptyBoard().how), `${emptyBoardLine()} ↔ ${emptyBoard().how}`);
+  });
+});
+
+describe('출처 기록이 없는 카드 (결함 317)', () => {
+  it('⛔ 「손으로 만들었다」고 **단언하지 않는다** — 그 길은 없다', () => {
+    /* 결함 313 의 셋째·넷째 자리입니다. 레거시 카드 서랍과 SPA 카드 힌트가
+       `task.origin` 이 비면 「사람이 손으로 만든 업무입니다」라고 적었습니다. */
+    const note = unknownOriginNote();
+    ok(!/(직접|손으로|수동으로)\s*만[든들]/.test(note), note);
+  });
+
+  it('⭐ 모르는 것을 **모른다고** 적는다 (불변식 ③ 과 같은 자리)', () => {
+    ok(/출처 기록이 없습니다/.test(unknownOriginNote()), unknownOriginNote());
+    // 「왜 이런 일이 생기나」까지 적습니다 — 안 적으면 고장으로 읽힙니다.
+    ok(/회의 승인으로만/.test(unknownOriginNote()), unknownOriginNote());
   });
 });

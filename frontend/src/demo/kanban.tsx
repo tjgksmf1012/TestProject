@@ -38,6 +38,7 @@ import {
   toColumns,
   type Task,
   emptyBoard,
+  unknownOriginNote,
 } from '../lib/kanban/board.ts';
 import { canDropOn, draggedTaskId, dragPayload, TASK_DRAG_TYPE } from '../lib/kanban/dnd.ts';
 import { assigneeText, splitNote, toggled } from '../lib/kanban/assignees.ts';
@@ -135,7 +136,10 @@ function Drawer({ task, warnings }: { task: Task; warnings: readonly string[] })
       <summary>자세히</summary>
       <div className="more-body">
         {task.origin === null || task.origin === undefined ? (
-          <p>손으로 만든 업무입니다 — 회의에서 나온 것이 아닙니다.</p>
+          /* ⛔ 예전에는 「손으로 만든 업무입니다」였습니다 (결함 317) —
+             313 이 고친 곳의 **셋째 자리**이고, 이 제품에 그 길은
+             없습니다. 모르는 것은 모른다고 적습니다. */
+          <p>{unknownOriginNote()}</p>
         ) : (
           <p>
             {meetingLabel(task.origin.meeting_title, task.origin.meeting_id)}에서 나온 업무입니다 · 근거 발화{' '}
