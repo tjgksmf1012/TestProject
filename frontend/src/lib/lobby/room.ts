@@ -371,6 +371,19 @@ export function roomStatus(
   statuses: readonly MemberStatus[],
   /** ⚠️ 명단이 **아직 안 왔으면** `false` (결함 255). 빈 팀과 다릅니다. */
   rosterKnown = true,
+  /**
+   * 아직 **시작할 수 있는** 회의인가 (`lobbyPhase(status).canStart`).
+   *
+   * ⛔ 이걸 안 보던 동안, 이미 끝나 **처리에 실패한** 회의의 로비가
+   * 「**아직** 아무도 참가하지 않았습니다」라고 했습니다 (결함 309).
+   * 「아직」은 곧 들어올 사람이 있다는 말인데 회의는 끝났습니다 — 그리고
+   * 그 화면은 홈이 「트랙이 온전한지 확인하세요」라고 보낸 곳입니다.
+   * **아무도 참가 안 한 것이 바로 그 답**인데 「아직」이 그걸 덮었습니다.
+   *
+   * ⚠️ 결함 214 가 `verdictView` 에서 고친 것과 **같은 판단**입니다.
+   * 그때는 사람 줄만 고쳤고 이 요약 줄은 그대로였습니다.
+   */
+  canStart = true,
 ): RoomStatus {
   const recording = statuses.filter(
     (s) => s.verdict === 'healthy' || s.verdict === 'at_risk'
@@ -395,7 +408,9 @@ export function roomStatus(
   } else if (unknown > 0) {
     message = '트랙 상태를 못 받았습니다 — 누가 참가했는지 알 수 없습니다';
   } else if (!anyJoined) {
-    message = '아직 아무도 참가하지 않았습니다';
+    message = canStart
+      ? '아직 아무도 참가하지 않았습니다'
+      : '아무도 참가하지 않았습니다 — 이 회의에는 녹음이 하나도 없습니다';
   } else if (recording > 0) {
     message = `${recording}명이 녹음 중입니다`;
   } else if (notJoined > 0) {
@@ -632,3 +647,52 @@ export const REPROCESS_CONFIRM =
   '이 회의를 처음부터 다시 처리합니다.\n' +
   '앞서 만들어진 발화·업무 후보·결정은 지워지고 새로 만들어집니다.\n' +
   '계속할까요?';
+
+/**
+ * 녹음·통화 단추를 지금 눌러도 되는가, 그리고 안 되면 **뭐라고 적을 것인가**.
+ *
+ * ## ⛔ 끝난 회의에 「전원 동의 후 시작할 수 있습니다」 (결함 309)
+ *
+ * 이 단추의 라벨은 **동의만** 보고 있었습니다. 그래서 이미 끝나 처리에
+ * 실패한 회의에서도 「전원 동의 후 시작할 수 있습니다」라고 적었습니다 —
+ * 동의만 모이면 다시 녹음할 수 있다는 말인데, 그 회의는 지나갔습니다.
+ *
+ * ⚠️ **막혀 있던 것은 우연이었습니다.** 그 회의는 마침 동의가 안 모여
+ * 눌리지 않았을 뿐이고, 전원이 동의한 채로 실패한 회의였다면 「녹음
+ * 화면으로」가 멀쩡히 눌렸을 것입니다 — 결함 214 가 SPA 에서 고친
+ * 첫째 항목(「끝난 회의를 다시 녹음하러 갈 수 있었습니다」)이 이 화면에는
+ * 안 와 있었습니다.
+ *
+ * ⚠️ 순서가 중요합니다. **국면을 먼저** 봅니다 — 끝난 회의에 「동의가
+ * 모자랍니다」라고 하면 사람은 동의를 모으러 갑니다.
+ */
+export interface RecordAffordance {
+  enabled: boolean;
+  /** 녹음 단추에 적을 말. */
+  label: string;
+  /** 통화 단추에 적을 말. */
+  callLabel: string;
+}
+
+export function recordAffordance(
+  /** 아직 시작할 수 있는 국면인가 (`lobbyPhase(status).canStart`). */
+  stillStartable: boolean,
+  /** 전원이 동의했는가 (`canStart(roster)`). */
+  consentReady: boolean,
+): RecordAffordance {
+  if (!stillStartable) {
+    return {
+      enabled: false,
+      label: '이미 끝난 회의입니다',
+      callLabel: '이미 끝난 회의입니다',
+    };
+  }
+  if (!consentReady) {
+    return {
+      enabled: false,
+      label: '전원 동의 후 시작할 수 있습니다',
+      callLabel: '통화도 전원 동의 후에',
+    };
+  }
+  return { enabled: true, label: '녹음 화면으로', callLabel: '통화로 회의하기' };
+}

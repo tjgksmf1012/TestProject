@@ -22,10 +22,13 @@ import {
   captureAlerts,
   consentStateOf,
   describeConsent,
+  lobbyPhase,
   memberStatuses,
+  recordAffordance,
   roomStatus,
   savedExtraConsents,
   startBlockers,
+  verdictView,
   type RosterEntry,
   type TrackHealth,
   REPROCESS_CONFIRM,
@@ -97,6 +100,15 @@ function Lobby() {
      결함 285 가 SPA·서버를 고칠 때 여기만 남았고, 그 가드는 `` `회의
      ${'${id}'}` `` 가 **템플릿 끝에 올 때만** 잡는 자였습니다. */
   const [meetingTitle, setMeetingTitle] = useState<string | null>(null);
+  /**
+   * 이 회의가 어느 국면인가.
+   *
+   * ⛔ 이걸 안 읽던 동안 **끝난 회의에서 「아직 참가하지 않았습니다」**가
+   * 떴습니다 (결함 309). `verdictView` 는 결함 214 때 이미 국면을 보도록
+   * 고쳐졌고 SPA 는 넘기고 있었는데, 이 화면만 서버가 준 원문
+   * (`s.message`)을 그대로 그렸습니다.
+   */
+  const [meetingStatus, setMeetingStatus] = useState<string | null>(null);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   /* ⚠️ **`null` 은 「아직 못 받음」입니다** (결함 255). 빈 배열로 두면
      명단이 먼저 온 찰나에 전원이 「미참가」로 섭니다. */
@@ -204,10 +216,12 @@ function Lobby() {
       const meeting = (await getJson(`/api/meetings/${meetingId}`).catch(() => null)) as {
         project_id: number;
         title: string | null;
+        status: string | null;
       } | null;
       if (meeting !== null) {
         setProjectId(meeting.project_id);
         setMeetingTitle(meeting.title);
+        setMeetingStatus(meeting.status);
       }
       await refresh();
       timer = setInterval(() => void refresh(), POLL_MS) as unknown as number;
@@ -471,8 +485,15 @@ function Lobby() {
   };
 
   const statuses = memberStatuses(roster, tracks);
-  const room = roomStatus(statuses);
-  const blockers = startBlockers(roster);
+  /* ⛔ 국면을 안 넘기던 동안 끝난 회의에서 「**아직** 아무도 참가하지
+     않았습니다」 · 「전원 동의 후 **시작**할 수 있습니다」가 떴습니다
+     (결함 309) — 이미 지나간 일을 준비하라고 말하는 화면이었습니다.
+     판단은 `@lib` 의 `lobbyPhase` 한 벌입니다. */
+  const stillStartable = lobbyPhase(meetingStatus).canStart;
+  const room = roomStatus(statuses, true, stillStartable);
+  /* 시작할 수 없는 회의에 「시작 전 확인」을 그리지 않습니다 (결함 214 가
+     SPA 에서 고친 셋째 항목 — 이 화면에는 안 와 있었습니다). */
+  const blockers = stillStartable ? startBlockers(roster) : [];
 
   // ⭐ 운행도표 — 사람마다 한 줄, 구멍이 **제자리에** 찍힙니다. 축은
   // `buildDiagram` 이 정합니다. 트랙마다 녹음 시작 시각이 다르므로
@@ -490,6 +511,10 @@ function Lobby() {
   const ticks = axisTicks(diagram.durationMs);
 
   const startable = canStart(roster);
+  // ⚠️ **막혀 있던 것은 우연이었습니다** (결함 309). 이 두 버튼은 동의만
+  // 보고 있어서, 전원이 동의한 채로 끝난 회의에서는 「녹음 화면으로」가
+  // 멀쩡히 눌렸습니다. 국면도 같이 봅니다.
+  const affordance = recordAffordance(stillStartable, startable);
   // 처리가 끝나야 후보가 생깁니다. 그 전에 눌러도 빈 화면이라 감춥니다.
   const reviewReady = !(room.recording > 0 || room.notJoined > 0 || (tracks?.length ?? 0) === 0);
   // ⚠️ **한 화면에 주 버튼은 하나** (지시서 §8). 내가 아직 동의를 안 했으면
@@ -633,7 +658,15 @@ function Lobby() {
             return (
               <li key={s.userId} className={s.verdict}>
                 <span className="name">{s.name}</span>
-                <span className="state">{s.message}</span>
+                {/* ⛔ 예전에는 `{s.message}` — 서버가 준 원문 그대로였습니다
+                    (결함 309). 끝난 회의에서도 「**아직** 참가하지
+                    않았습니다」가 떠서, 「트랙이 온전한지 확인하세요」라고
+                    보낸 그 화면이 세 사람을 「곧 들어올 사람」처럼 세워
+                    뒀습니다. 국면을 보는 판단은 `@lib` 의 `verdictView`
+                    한 벌입니다 (결함 214 가 만든 것). */}
+                <span className="state">
+                  {verdictView(s, stillStartable).message}
+                </span>
                 {spans !== null && (
                   <span className="tl">
                     {spans.map((g, i) => (
@@ -673,19 +706,19 @@ function Lobby() {
           <button
             id="record"
             className={reviewReady ? '' : 'primary'}
-            disabled={!startable}
+            disabled={!affordance.enabled}
             onClick={() => (location.href = `/index.html?meeting=${meetingId}`)}
           >
-            {startable ? '녹음 화면으로' : '전원 동의 후 시작할 수 있습니다'}
+            {affordance.label}
           </button>
           {/* 통화도 같은 게이트를 지납니다. 통화는 곧 녹음이고, 녹음은
               전원의 동의가 있어야 시작할 수 있습니다 (docs/07 L1). */}
           <button
             id="call"
-            disabled={!startable}
+            disabled={!affordance.enabled}
             onClick={() => (location.href = `/call.html?meeting=${meetingId}`)}
           >
-            {startable ? '통화로 회의하기' : '통화도 전원 동의 후에'}
+            {affordance.callLabel}
           </button>
           {canReprocess && (
             <button id="reprocess" disabled={busy} onClick={reprocess}>

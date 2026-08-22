@@ -21,6 +21,7 @@ import {
   type MemberStatus,
   type RosterEntry,
   type TrackHealth,
+  recordAffordance,
 } from './room.ts';
 
 function member(
@@ -605,5 +606,37 @@ describe('meetingTitleProblem (결함 268)', () => {
 
   it('평범한 이름은 통과', () => {
     strictEqual(meetingTitleProblem('3차 스프린트 회고'), null);
+  });
+});
+
+describe('끝난 회의의 녹음 단추 (결함 309)', () => {
+  it('⭐ **국면을 먼저 본다** — 끝난 회의에 「동의 후 시작」이라고 하지 않는다', () => {
+    /* 이미 끝나 처리에 실패한 회의에서 「전원 동의 후 시작할 수 있습니다」가
+       떴습니다. 동의만 모이면 다시 녹음할 수 있다는 말인데 그 회의는
+       지나갔습니다 — 사람은 동의를 모으러 갑니다. */
+    const a = recordAffordance(false, false);
+    strictEqual(a.enabled, false);
+    strictEqual(a.label, '이미 끝난 회의입니다');
+    strictEqual(/동의/.test(a.label), false);
+    strictEqual(/동의/.test(a.callLabel), false);
+  });
+
+  it('⭐ 전원이 동의했어도 **끝난 회의는 못 누른다** (결함 214 의 첫째 항목)', () => {
+    // 막혀 있던 것이 우연이 아니게 만듭니다 — 그 회의는 마침 동의가
+    // 안 모였을 뿐이었습니다.
+    strictEqual(recordAffordance(false, true).enabled, false);
+  });
+
+  it('시작 전이고 동의가 모자라면 그 이유를 그대로 말한다', () => {
+    const a = recordAffordance(true, false);
+    strictEqual(a.enabled, false);
+    strictEqual(a.label, '전원 동의 후 시작할 수 있습니다');
+  });
+
+  it('시작 전이고 전원 동의했으면 눌린다', () => {
+    const a = recordAffordance(true, true);
+    strictEqual(a.enabled, true);
+    strictEqual(a.label, '녹음 화면으로');
+    strictEqual(a.callLabel, '통화로 회의하기');
   });
 });

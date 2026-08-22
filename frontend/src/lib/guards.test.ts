@@ -4197,6 +4197,73 @@ describe('로비가 회의 국면을 본다 (결함 214)', () => {
   });
 });
 
+describe('**레거시** 로비도 회의 국면을 본다 (결함 309)', () => {
+  /* ⚠️ **결함 214 가드는 `webapp/src` 만 걷고 있었습니다.** SPA 는 국면을
+     제대로 보는데, 자동 테스트가 하나도 없는 레거시 화면
+     (`frontend/src/demo/lobby.tsx`) 은 감시 밖이었고 실제로 안 보고
+     있었습니다 — 홈이 「트랙이 온전한지 확인하세요」로 보낸 그 화면이
+     트랙이 0개인 실패한 회의를 두고 「아직 아무도 참가하지 않았습니다」·
+     「전원 동의 후 시작할 수 있습니다」라고 적었습니다.
+
+     이 저장소가 반복해서 당한 「한 갈래만 고치고 옆 갈래를 그대로 둔 것」
+     의 세 번째 회차입니다 (결함 301 · 308 · 309). 그래서 가드도 **뿌리
+     마다** 둡니다. */
+  const lobby = readFileSync(join(DEMO, 'lobby.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ 회의 상태를 **국면 판단에 넘긴다** — `import` 만으로는 통과 못 한다', () => {
+    ok(
+      /lobbyPhase\(meetingStatus\)/.test(lobby),
+      '레거시 로비가 회의 상태를 `lobbyPhase` 에 안 넘깁니다',
+    );
+  });
+
+  it('⭐ 사람마다 적는 판정이 `verdictView` 를 **국면과 함께** 거친다', () => {
+    // 「아직 참가하지 않았습니다」 ↔ 「참가하지 않았습니다 — 녹음은 없습니다」
+    // 를 가르는 것이 이 인자입니다. 날 `s.message` 를 그리면 영영 「아직」입니다.
+    const call = /verdictView\(\s*([^)]*)\)/.exec(lobby)?.[1] ?? '';
+    ok(call !== '', '레거시 로비가 `verdictView` 를 안 부릅니다');
+    strictEqual(
+      call.split(',').length,
+      2,
+      `\`verdictView(${call})\` — 국면을 안 넘기면 끝난 회의에도 「아직」이 붙습니다`,
+    );
+  });
+
+  it('⭐ 방 상태도 국면을 받는다 — 끝난 회의에 「아직」이 붙으면 안 된다', () => {
+    const call = /roomStatus\(\s*([^)]*)\)/.exec(lobby)?.[1] ?? '';
+    ok(call !== '', '레거시 로비가 `roomStatus` 를 안 부릅니다');
+    strictEqual(
+      call.split(',').length,
+      3,
+      `\`roomStatus(${call})\` — 국면을 안 넘기면 「아직 아무도 참가하지 않았습니다」가 남습니다`,
+    );
+  });
+
+  it('⭐ 녹음·통화 단추가 **동의만** 보고 있지 않다', () => {
+    /* ⚠️ **막혀 있던 것은 우연이었습니다.** 그 회의는 마침 동의가 안 모여
+       눌리지 않았을 뿐입니다. 전원이 동의한 채로 끝난 회의였다면 「녹음
+       화면으로」가 청록으로 멀쩡히 눌렸습니다 — 그래서 「눌리는가」가
+       아니라 **무엇을 보고 정하는가**를 잽니다. */
+    const gate = /const affordance\s*=\s*([^;]+);/.exec(lobby)?.[1] ?? '';
+    ok(gate !== '', '`recordAffordance` 로 라벨·막힘을 정하는 자리가 없습니다');
+    ok(
+      /stillStartable/.test(gate),
+      `단추가 국면을 안 봅니다 (\`${gate.trim()}\`) — 끝난 회의에서도 녹음하러 갑니다`,
+    );
+    for (const id of ['record', 'call']) {
+      const btn = new RegExp(`id="${id}"([\\s\\S]{0,400}?)</button>`).exec(lobby)?.[1] ?? '';
+      ok(btn !== '', `\`#${id}\` 단추를 못 찾았습니다`);
+      ok(
+        /affordance\.enabled/.test(btn) && /affordance\.(label|callLabel)/.test(btn),
+        `\`#${id}\` 가 아직 \`startable\` 만 보고 라벨을 정합니다`,
+      );
+    }
+  });
+});
+
 describe('확정 막힘 사유는 **한 덩이로 읽혀야** 한다 (결함 215)', () => {
   it('⚠️ 화면이 목록 뒤에 꼬리를 붙이지 않는다 — 문제가 둘 이상이면 엉뚱한 말이 붙는다', () => {
     // 실제로 이렇게 나왔습니다:
