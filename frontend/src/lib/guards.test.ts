@@ -4197,6 +4197,77 @@ describe('로비가 회의 국면을 본다 (결함 214)', () => {
   });
 });
 
+describe('동의 칸도 회의 국면을 본다 — **두 뿌리 다** (결함 310)', () => {
+  /* ⚠️ **뿌리마다 겁니다.** 결함 214 가드가 `webapp/src` 만 걸어서 레거시가
+     통째로 감시 밖이었던 것이 결함 309 였습니다. 이번 결함은 처음부터
+     **양쪽에 다** 있었으니 가드도 양쪽을 걷습니다.
+
+     ⚠️ 그리고 이것은 **결함 251 의 결정을 뒤집지 않습니다.** 서버는 늦은
+     동의를 그대로 받습니다(`test_late_consent_is_still_accepted_on_purpose`
+     가 붙잡고 있습니다). 여기서 재는 것은 **버튼이 무엇을 누르는 것인지
+     말하는가**입니다. */
+  const strip = (code: string) =>
+    code
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', strip(readFileSync(join(DEMO, 'lobby.tsx'), 'utf8'))],
+    ['SPA', strip(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx'), 'utf8'))],
+  ];
+
+  it('⭐ 두 화면 다 `consentAffordance` 에 **국면을 넘긴다**', () => {
+    /* 재서 확인한 것 — 씨앗을 새로 심고 두 회의를 나란히 놓았습니다.
+         회의 2 (pending)           「동의합니다」 btn--primary rgb(61,58,174)
+         회의 5 (failed · 트랙 0개)  「동의합니다」 btn--primary rgb(61,58,174)
+       레거시·SPA 넷이 전부 같았습니다. */
+    for (const [name, code] of ROOTS) {
+      const call = /consentAffordance\(\s*([^)]*)\)/.exec(code)?.[1] ?? '';
+      ok(call !== '', `${name} 로비가 \`consentAffordance\` 를 안 부릅니다`);
+      strictEqual(
+        call.split(',').length,
+        2,
+        `${name}: \`consentAffordance(${call})\` — 국면을 안 넘기면 끝난 회의도 청록입니다`,
+      );
+      ok(
+        /stillStartable|phase\.canStart/.test(call),
+        `${name}: \`consentAffordance(${call})\` 가 국면이 아닌 것을 넘깁니다`,
+      );
+    }
+  });
+
+  it('⭐ 청록 여부와 글자를 **둘 다** 판단에서 받는다 — 하나만 받으면 절반만 고쳐진다', () => {
+    for (const [name, code] of ROOTS) {
+      ok(/consentAct\.primary/.test(code), `${name}: 청록 여부를 판단에서 안 받습니다`);
+      ok(/consentAct\.label/.test(code), `${name}: 동의 단추 글자를 판단에서 안 받습니다`);
+      ok(/consentAct\.refuseLabel/.test(code), `${name}: 거부 단추 글자를 판단에서 안 받습니다`);
+      ok(/consentAct\.note/.test(code), `${name}: 「무엇을 누르는 것인가」를 안 그립니다`);
+    }
+  });
+
+  it('⛔ 동의 단추에 글자를 **박아 두지** 않는다 — 판단이 두 벌이 됩니다', () => {
+    // 「동의합니다」가 화면 코드에 글자로 남아 있으면 국면과 무관하게
+    // 그 글자가 나갈 길이 남습니다. 실패 ②(두 벌이 있으면 한쪽만 고쳐진다).
+    for (const [name, code] of ROOTS) {
+      const 박힌것 = /['"`]동의합니다['"`]/.exec(code)?.[0] ?? null;
+      strictEqual(박힌것, null, `${name}: 동의 단추 글자가 화면에 박혀 있습니다 (${박힌것})`);
+    }
+  });
+
+  it('⭐ 레거시의 사람별 칸도 국면을 본다 — 「대기 중」은 곧 온다는 뜻이다', () => {
+    // 끝난 회의에서 세 사람이 「응답 대기 중」인데 두 줄 아래는
+    // 「3명은 응답하지 않은 채였습니다」였습니다 — 한 패널의 자기모순.
+    const legacy = ROOTS[0]![1]!;
+    const call = /describeConsent\(\s*([^)]*)\)/.exec(legacy)?.[1] ?? '';
+    ok(call !== '', '레거시가 `describeConsent` 를 안 부릅니다');
+    strictEqual(
+      call.split(',').length,
+      2,
+      `\`describeConsent(${call})\` — 국면을 안 넘기면 끝난 회의도 「대기 중」입니다`,
+    );
+  });
+});
+
 describe('**레거시** 로비도 회의 국면을 본다 (결함 309)', () => {
   /* ⚠️ **결함 214 가드는 `webapp/src` 만 걷고 있었습니다.** SPA 는 국면을
      제대로 보는데, 자동 테스트가 하나도 없는 레거시 화면

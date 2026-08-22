@@ -89,14 +89,22 @@ export function consentStateOf(entry: RosterEntry): ConsentState {
   return entry.recording ? 'granted' : 'refused';
 }
 
-export function describeConsent(state: ConsentState): string {
+export function describeConsent(
+  state: ConsentState,
+  /** 아직 시작할 수 있는 국면인가 (`lobbyPhase(status).canStart`). */
+  stillStartable = true,
+): string {
   switch (state) {
     case 'granted':
       return '동의함';
     case 'refused':
       return '거부함';
     case 'pending':
-      return '응답 대기 중';
+      /* ⛔ **「대기 중」은 곧 온다는 뜻입니다** (결함 310). 처리에 실패한
+         회의의 로비에서 세 사람이 나란히 「응답 대기 중」이었는데, 같은
+         화면 두 줄 아래는 「3명은 응답하지 않은 채였**습니다**」였습니다 —
+         한 패널이 현재형과 과거형으로 스스로 모순됐습니다. */
+      return stillStartable ? '응답 대기 중' : '응답 안 함';
   }
 }
 
@@ -647,6 +655,65 @@ export const REPROCESS_CONFIRM =
   '이 회의를 처음부터 다시 처리합니다.\n' +
   '앞서 만들어진 발화·업무 후보·결정은 지워지고 새로 만들어집니다.\n' +
   '계속할까요?';
+
+/**
+ * 동의 단추를 **어떤 회의에 대고** 누르는 것인가.
+ *
+ * ## ⛔ 끝난 회의와 시작 전 회의의 동의 칸이 **글자까지 같았습니다** (결함 310)
+ *
+ * 씨앗을 새로 심고 두 회의를 나란히 재 봤습니다.
+ *
+ *     회의 2 (pending — 아직 시작 안 함)   「동의합니다」 btn--primary  rgb(61,58,174) 흰 글자
+ *     회의 5 (failed  — 트랙 0개, 처리 실패) 「동의합니다」 btn--primary  rgb(61,58,174) 흰 글자
+ *
+ * 레거시·SPA **둘 다** 같았습니다. 지나간 회의에서도 청록 주 버튼이
+ * 「동의합니다」라고 서서, 화면이 가장 크게 가리키는 곳이 **이제 할 일이
+ * 아닌 곳**이었습니다.
+ *
+ * ## ⚠️ 결함 251 의 결정은 **뒤집지 않습니다**
+ *
+ * 「늦은 동의 제출을 서버가 막지 않는다」는 근거를 적어 가며 내린 결정이고
+ * `test_late_consent_is_still_accepted_on_purpose` 가 붙잡고 있습니다 —
+ * 보관·성문 동의는 회의가 끝난 뒤에 정하는 것이 오히려 자연스럽고, 늦게
+ * 낸 기록도 기록입니다. 251 이 고친 것은 **말**이었고, 그 말은 버튼
+ * **아래** 줄이었습니다. 여기서 고치는 것은 **버튼 자신**입니다 —
+ * 문을 닫는 게 아니라, 그 문이 어디로 나는지 적습니다.
+ */
+export interface ConsentAffordance {
+  /** 청록(주 행동)으로 세울 것인가. 녹음이 끝났으면 아니오. */
+  primary: boolean;
+  label: string;
+  refuseLabel: string;
+  /** 국면이 지나갔을 때만. 무엇을 누르는 것인지 한 줄. */
+  note: string | null;
+}
+
+export function consentAffordance(
+  /** 아직 시작할 수 있는 국면인가 (`lobbyPhase(status).canStart`). */
+  stillStartable: boolean,
+  /** 내가 이미 동의했는가. */
+  iAgreed: boolean,
+): ConsentAffordance {
+  if (!stillStartable) {
+    return {
+      primary: false,
+      label: iAgreed ? '동의로 남겨져 있습니다' : '뒤늦게 동의로 남기기',
+      refuseLabel: iAgreed ? '거부로 바꾸기' : '거부로 남기기',
+      /* ⚠️ **251 의 줄이 바로 옆에 있습니다** — 「이 회의의 녹음은 끝났습니다
+         — N명은 응답하지 않은 채였습니다」. 여기서 그 말을 또 하면 거의
+         같은 문장이 두 줄 쌓입니다(렌더해서 봤습니다). 251 이 **안 하는
+         말**만 합니다 — 이 단추를 누르면 무엇이 되는가. */
+      note: '지나간 회의에 대한 기록으로 남습니다 — 원본 보관·성문 저장도 위에서 함께 정해집니다.',
+    };
+  }
+  return {
+    // 이미 동의했으면 주 행동은 넘어갑니다 — 한 화면에 청록은 하나입니다.
+    primary: !iAgreed,
+    label: iAgreed ? '동의했습니다' : '동의합니다',
+    refuseLabel: '거부합니다',
+    note: null,
+  };
+}
 
 /**
  * 녹음·통화 단추를 지금 눌러도 되는가, 그리고 안 되면 **뭐라고 적을 것인가**.

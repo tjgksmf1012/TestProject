@@ -26,6 +26,7 @@ import {
   whyConsentBlocked,
   type TrackHealth,
   REPROCESS_CONFIRM,
+  consentAffordance,
 } from '@lib/lobby/room.ts';
 import { axisTicks, buildDiagram, describeGap, meetingWindow, type TrackInput } from '@lib/track/diagram.ts';
 import {
@@ -169,6 +170,14 @@ export default function Lobby() {
   const anyJoined = statuses.some((s) => s.verdict !== 'not_joined');
 
   /** 동의 단추를 지금 못 누르는 까닭 (결함 239). 판단은 `@lib`. */
+  /* ⚠️ **동의 칸이 국면을 안 봤습니다** (결함 310). 씨앗을 새로 심고
+     회의 2(pending) 와 회의 5(failed·트랙 0개) 를 나란히 재니 동의 단추가
+     `btn btn--primary` · rgb(61,58,174) · 「동의합니다」로 **글자까지**
+     같았습니다 — 레거시도 같았습니다. 결함 251 의 결정(늦은 동의를
+     서버가 막지 않는다)은 그대로 두고 **버튼이 무엇을 누르는 것인지**
+     말하게 합니다. 판단은 `@lib`. */
+  const consentAct = consentAffordance(phase.canStart, iAgreed);
+
   const consentBlocked = whyConsentBlocked({
     sending: m.consent.isPending,
     alreadyAgreed: iAgreed,
@@ -567,7 +576,7 @@ export default function Lobby() {
                   했습니다. 판단은 `@lib` 의 `whyConsentBlocked`. */}
               <button
                 type="button"
-                className={`btn btn--primary${consentBlocked !== null ? ' btn--unmet' : ''}`}
+                className={`btn btn--${consentAct.primary ? 'primary' : 'secondary'}${consentBlocked !== null ? ' btn--unmet' : ''}`}
                 aria-disabled={consentBlocked !== null}
                 aria-describedby={consentBlocked !== null ? 'consent-why' : undefined}
                 onClick={() => {
@@ -575,7 +584,7 @@ export default function Lobby() {
                   void submitConsent(true);
                 }}
               >
-                {iAgreed ? '동의했습니다' : '동의합니다'}
+                {consentAct.label}
               </button>
               {/* 되돌리는 쪽도 보내는 동안은 막힙니다 — 같은 사유를 가리킵니다. */}
               <button
@@ -588,13 +597,21 @@ export default function Lobby() {
                   void submitConsent(false);
                 }}
               >
-                거부합니다
+                {consentAct.refuseLabel}
               </button>
             </div>
             {/* 눈으로 보는 사람과 낭독기가 **같은 문장**을 받습니다. */}
             {consentBlocked !== null && (
               <p className="t13 phase-note" id="consent-why">
                 {consentBlocked}
+              </p>
+            )}
+            {/* ⭐ **막지 않고 적습니다** (결함 310) — 늦은 동의도 기록이라는
+                결함 251 의 결정을 그대로 두고, 그것이 지나간 회의에 대한
+                기록이라는 것만 말합니다. */}
+            {consentAct.note !== null && (
+              <p className="t13 phase-note" id="consent-phase">
+                {consentAct.note}
               </p>
             )}
             {m.consent.isError && (

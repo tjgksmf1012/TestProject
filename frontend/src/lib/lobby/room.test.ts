@@ -1,5 +1,5 @@
 import { describe, it } from 'node:test';
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 
 import {
   MIN_USABLE_COVERAGE,
@@ -22,6 +22,7 @@ import {
   type RosterEntry,
   type TrackHealth,
   recordAffordance,
+  consentAffordance,
 } from './room.ts';
 
 function member(
@@ -65,9 +66,26 @@ describe('consentStateOf', () => {
 });
 
 describe('describeConsent', () => {
+  const STATES = ['granted', 'refused', 'pending'] as const;
+
   it('셋 다 다른 말을 한다', () => {
-    const said = (['granted', 'refused', 'pending'] as const).map(describeConsent);
+    const said = STATES.map((state) => describeConsent(state));
     strictEqual(new Set(said).size, 3);
+  });
+
+  it('⭐ 끝난 회의에서는 「대기 중」이라고 하지 않는다 (결함 310)', () => {
+    // 「대기 중」은 곧 온다는 뜻입니다. 같은 화면 두 줄 아래가 이미
+    // 「N명은 응답하지 않은 채였습니다」라고 과거형으로 적고 있었습니다.
+    strictEqual(describeConsent('pending', false), '응답 안 함');
+    ok(!/대기/.test(describeConsent('pending', false)));
+    // 동의·거부는 사실이라 시제가 없습니다 — 국면이 바뀌어도 그대로입니다.
+    strictEqual(describeConsent('granted', false), '동의함');
+    strictEqual(describeConsent('refused', false), '거부함');
+  });
+
+  it('⚠️ 시작 전에는 「대기 중」 그대로다 — 두 국면이 갈라진다', () => {
+    strictEqual(describeConsent('pending', true), '응답 대기 중');
+    ok(describeConsent('pending', true) !== describeConsent('pending', false));
   });
 });
 
@@ -638,5 +656,55 @@ describe('끝난 회의의 녹음 단추 (결함 309)', () => {
     strictEqual(a.enabled, true);
     strictEqual(a.label, '녹음 화면으로');
     strictEqual(a.callLabel, '통화로 회의하기');
+  });
+});
+
+describe('끝난 회의의 동의 단추 (결함 310)', () => {
+  it('⭐ 시작 전 회의에서는 청록 「동의합니다」 그대로다', () => {
+    const a = consentAffordance(true, false);
+    strictEqual(a.primary, true);
+    strictEqual(a.label, '동의합니다');
+    strictEqual(a.refuseLabel, '거부합니다');
+    strictEqual(a.note, null);
+  });
+
+  it('⭐ 이미 동의했으면 청록을 놓는다 — 한 화면에 주 버튼은 하나', () => {
+    const a = consentAffordance(true, true);
+    strictEqual(a.primary, false);
+    strictEqual(a.label, '동의했습니다');
+  });
+
+  it('⭐ 끝난 회의에서는 청록이 아니고, **무엇을 누르는지** 적는다', () => {
+    /* 재서 확인한 것 — 씨앗을 새로 심고 두 회의를 나란히 놓으니 회의 2
+       (pending) 와 회의 5 (failed·트랙 0개) 의 동의 단추가 클래스도 색도
+       글자도 같았습니다: `btn btn--primary` · rgb(61,58,174) · 「동의합니다」. */
+    const a = consentAffordance(false, false);
+    strictEqual(a.primary, false);
+    strictEqual(a.label, '뒤늦게 동의로 남기기');
+    strictEqual(a.refuseLabel, '거부로 남기기');
+    ok(a.note !== null, '끝난 회의인데 아무 말도 안 합니다');
+    ok(/기록으로 남습니다/.test(a.note as string), a.note as string);
+    /* ⚠️ **251 의 줄을 되풀이하지 않습니다.** 그 줄이 바로 옆에서 「이
+       회의의 녹음은 끝났습니다 — N명은…」이라고 말합니다. 렌더해서 보니
+       거의 같은 문장이 두 줄 쌓여 있었습니다 — 글자를 늘리는 것은 이
+       화면에서 고치려던 것과 반대 방향입니다. */
+    ok(
+      !/회의의 녹음은 (이미 )?끝났습니다/.test(a.note as string),
+      `251 의 문장을 되풀이합니다: ${a.note}`,
+    );
+  });
+
+  it('⭐ 끝난 회의에 이미 동의해 뒀으면 **되돌릴 말**을 준다', () => {
+    const a = consentAffordance(false, true);
+    strictEqual(a.label, '동의로 남겨져 있습니다');
+    strictEqual(a.refuseLabel, '거부로 바꾸기');
+  });
+
+  it('⚠️ 두 국면의 글자가 **갈라진다** — 같으면 결함 310 이 그대로다', () => {
+    // 이 검사가 없으면 「양쪽 다 동의합니다」로 되돌려도 위 넷이 통과합니다.
+    const before = consentAffordance(true, false);
+    const after = consentAffordance(false, false);
+    ok(before.label !== after.label, '두 국면의 동의 단추 글자가 같습니다');
+    ok(before.primary !== after.primary, '두 국면의 청록 여부가 같습니다');
   });
 });

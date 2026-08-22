@@ -20,6 +20,7 @@ import { createRoot } from 'react-dom/client';
 import {
   canStart,
   captureAlerts,
+  consentAffordance,
   consentStateOf,
   describeConsent,
   lobbyPhase,
@@ -514,12 +515,17 @@ function Lobby() {
   // ⚠️ **막혀 있던 것은 우연이었습니다** (결함 309). 이 두 버튼은 동의만
   // 보고 있어서, 전원이 동의한 채로 끝난 회의에서는 「녹음 화면으로」가
   // 멀쩡히 눌렸습니다. 국면도 같이 봅니다.
+  const iAgreed = roster.some((e) => e.user_id === meId && consentStateOf(e) === 'granted');
   const affordance = recordAffordance(stillStartable, startable);
+  // ⚠️ **동의 칸도 국면을 안 봤습니다** (결함 310). 시작 전 회의와 처리에
+  // 실패한 회의의 동의 단추가 클래스도 색도 글자도 같았습니다. 결함 251 의
+  // 결정(늦은 동의를 서버가 막지 않는다)은 그대로 두고, **버튼이 무엇을
+  // 누르는 것인지** 말하게 합니다.
+  const consentAct = consentAffordance(stillStartable, iAgreed);
   // 처리가 끝나야 후보가 생깁니다. 그 전에 눌러도 빈 화면이라 감춥니다.
   const reviewReady = !(room.recording > 0 || room.notJoined > 0 || (tracks?.length ?? 0) === 0);
   // ⚠️ **한 화면에 주 버튼은 하나** (지시서 §8). 내가 아직 동의를 안 했으면
   // "동의합니다" 가 주 동작이고, 하고 나면 주 동작이 넘어갑니다.
-  const iAgreed = roster.some((e) => e.user_id === meId && consentStateOf(e) === 'granted');
 
   return (
     <>
@@ -578,7 +584,7 @@ function Lobby() {
                     {entry.name}
                     {entry.user_id === meId ? ' (나)' : ''}
                   </span>
-                  <span className={`state ${state}`}>{describeConsent(state)}</span>
+                  <span className={`state ${state}`}>{describeConsent(state, stillStartable)}</span>
                 </li>
               );
             })
@@ -618,16 +624,24 @@ function Lobby() {
         <div className="row" style={{ marginTop: '.75rem' }}>
           <button
             id="agree"
-            className={iAgreed ? '' : 'primary'}
+            className={consentAct.primary ? 'primary' : ''}
             disabled={busy}
             onClick={() => submitConsent(true)}
           >
-            동의합니다
+            {consentAct.label}
           </button>
           <button id="refuse" disabled={busy} onClick={() => submitConsent(false)}>
-            거부
+            {consentAct.refuseLabel}
           </button>
         </div>
+        {/* ⭐ **막지 않고 적습니다** — 늦은 동의도 기록이라는 결함 251 의
+            결정을 그대로 두고, 그것이 지나간 회의에 대한 기록이라는 것만
+            말합니다. */}
+        {consentAct.note !== null && (
+          <p className="status" id="consent-phase">
+            {consentAct.note}
+          </p>
+        )}
         <p className="status" id="consent-message">
           {consentMessage}
         </p>
