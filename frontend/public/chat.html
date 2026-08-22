@@ -35,6 +35,29 @@
 
   @media (min-width: 60rem) {
     .cols { grid-template-columns: 15rem 1fr; gap: var(--sp-8); }
+
+    /* ⛔ **채널 목록이 대화와 함께 굴러갑니다** (결함 314).
+
+       채널 20개 · 메시지 60개인 프로젝트에서 재 봤습니다 —
+
+           aside.side  높이 1397px  position: static  overflow-y: visible
+           창 900px · 문서 4409px · 새 메시지로 자동 스크롤 3509px
+           → 채널 목록 top = -3400px, 화면 안에 든 채널 **0/22**
+
+       여섯째 채널에 닿으려면 페이지를 0까지 올려야 하고, 올리면 마지막
+       메시지가 안 보입니다. **두 열 화면인데 두 열을 같이 볼 수 없습니다.**
+
+       같은 저장소의 왼쪽 회의 목록은 이걸 제대로 하고 있습니다
+       (`div.chan { overflow-y: auto }`) — 채널 목록만 빠졌습니다.
+
+       ⚠️ **두 열일 때만** 붙입니다. 좁은 폭에서는 채널이 위·대화가 아래로
+       쌓이므로 (바로 위 주석) 거기서 붙이면 채널이 화면을 계속 먹습니다. */
+    .cols > .side {
+      position: sticky;
+      top: var(--sp-4);
+      max-height: calc(100vh - var(--sp-8));
+      overflow-y: auto;
+    }
   }
 
   .shead { font-size: var(--fs-item); letter-spacing: var(--ls-item);

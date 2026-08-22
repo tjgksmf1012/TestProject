@@ -17,6 +17,7 @@ git 에게 직접 물어봐야 합니다.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -2633,6 +2634,39 @@ def test_the_activity_log_never_starts_receiving_meetings_or_chat() -> None:
         "여기 안 남습니다」라고 말합니다 (결함 304). 이 갈래가 들어오면 그 "
         "문장이 거짓이 됩니다 — `@lib/activity/empty.ts` 를 같이 고치세요:\n  "
         + "\n  ".join(f"{name}  ({actions[name]})" for name in leaked)
+    )
+
+
+def test_the_chat_screen_actually_pages_backwards() -> None:
+    """⛔ **라우트는 불리는데 인자가 안 불렸습니다** (결함 315).
+
+    `message_service.history` 는 `before_id` 를 받도록 만들어져 있고
+    「`before_id` 는 **번호**이지 시각이 아닙니다」라는 근거까지 적혀
+    있습니다. 그런데 화면은 그 인자를 **한 번도 안 보냈습니다** — 메시지
+    60개짜리 채널에서 처음 열 줄이 제품 안에서 영영 안 보였습니다.
+
+    ⚠️ **결함 306 의 라우트 가드는 이걸 못 잡습니다.** 그 라우트는
+    불립니다. 안 불린 것은 **인자**입니다.
+    """
+    chat = (REPO_ROOT / "frontend" / "src" / "demo" / "chat.tsx").read_text(encoding="utf-8")
+    assert "before_id=" in chat, (
+        "채팅 화면이 `before_id` 를 안 보냅니다 — 앞쪽 대화에 닿을 길이 없습니다"
+    )
+
+
+def test_the_client_page_size_matches_the_server() -> None:
+    """⚠️ **짝입니다.** 어긋나면 단추가 영영 안 뜨거나(클라 > 서버) 0개를
+    받고도 계속 뜹니다(클라 < 서버). 낱말이 아니라 **값**을 맞춥니다.
+    """
+    from teamflow.services import message_service
+
+    view = (
+        REPO_ROOT / "frontend" / "src" / "lib" / "chat" / "view.ts"
+    ).read_text(encoding="utf-8")
+    found = re.search(r"MESSAGE_PAGE\s*=\s*(\d+)", view)
+    assert found is not None, "`MESSAGE_PAGE` 를 못 찾았습니다"
+    assert int(found.group(1)) == message_service.MAX_PAGE, (
+        f"화면 {found.group(1)} ↔ 서버 {message_service.MAX_PAGE} — 한 쪽 크기가 갈라졌습니다"
     )
 
 

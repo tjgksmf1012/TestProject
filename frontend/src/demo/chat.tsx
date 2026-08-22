@@ -39,6 +39,9 @@ import {
   describeTime,
   DELETED_TEXT,
   describeEmptyChannel,
+  hasOlderMessages,
+  olderCursor,
+  prependOlder,
   EDITED_MARK,
   MAX_BODY,
   mentionSegments,
@@ -384,8 +387,15 @@ function App() {
     });
   }, []);
 
+  /* ⛔ **대화의 앞부분에 닿을 길이 없었습니다** (결함 315). 서버는 최신
+     50개만 주는데(`MAX_PAGE`) 화면에 「더 보기」가 없어, 메시지 60개짜리
+     채널에서 처음 열 줄이 제품 안에서 영영 안 보였습니다. 서버는 이미
+     `before_id` 를 받을 수 있었고 화면이 한 번도 안 보냈습니다. */
+  const [older, setOlder] = useState<'maybe' | 'none' | 'loading'>('none');
+
   const loadMessages = useCallback(async (channelId: number): Promise<void> => {
     setMessages(null);
+    setOlder('none');
     const response = await whileLoading(
       get(`/api/channels/${channelId}/messages`),
       () => setSlow(true),
@@ -406,7 +416,33 @@ function App() {
       return;
     }
     setFailure(null);
-    setMessages((await response.json()) as ChatMessage[]);
+    const rows = (await response.json()) as ChatMessage[];
+    setMessages(rows);
+    setOlder(hasOlderMessages(rows.length) ? 'maybe' : 'none');
+  }, []);
+
+  /** 앞쪽 한 쪽 더. 판단(더 있을 수 있는가·어디서부터·어떻게 붙이는가)은 `@lib`. */
+  const loadOlder = useCallback(async (channelId: number, cursor: number): Promise<void> => {
+    setOlder('loading');
+    const response = await get(`/api/channels/${channelId}/messages?before_id=${cursor}`);
+    if (response === null) {
+      setFailure(unreachableText('이전 대화를 못 불러왔습니다'));
+      setOlder('maybe');
+      return;
+    }
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    if (!response.ok) {
+      setFailure(describeHttpStatus(response.status) ?? '이전 대화를 못 불러왔습니다');
+      setOlder('maybe');
+      return;
+    }
+    setFailure(null);
+    const rows = (await response.json()) as ChatMessage[];
+    setMessages((current) => prependOlder(rows, current ?? []));
+    setOlder(hasOlderMessages(rows.length) ? 'maybe' : 'none');
   }, []);
 
   useEffect(() => {
@@ -794,6 +830,22 @@ function App() {
             />
           ) : (
             <div className="stream">
+              {/* ⭐ **대화의 앞부분으로 가는 문** (결함 315). 서버는 한 번에
+                  50개만 줍니다 — 그 앞이 있는지 없는지 화면이 말하지
+                  않으면, 사람은 처음 열 줄이 사라진 줄도 모릅니다.
+                  판단은 `@lib` 의 `hasOlderMessages`·`olderCursor`. */}
+              {older !== 'none' && olderCursor(messages) !== null && (
+                <p className="more">
+                  <button
+                    type="button"
+                    id="older"
+                    disabled={older === 'loading'}
+                    onClick={() => void loadOlder(open.id, olderCursor(messages) as number)}
+                  >
+                    {older === 'loading' ? '불러오는 중…' : '이전 대화 더 보기'}
+                  </button>
+                </p>
+              )}
               {dayGroups(messages).map((group) => (
                 <section key={group.date} className="day">
                   {/* ⚠️ 날짜를 안 가르면 어제 온 말과 방금 온 말이 붙어

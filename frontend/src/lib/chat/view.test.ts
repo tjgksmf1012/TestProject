@@ -17,6 +17,10 @@ import {
   sendBlockedReason,
   type ChatChannel,
   type ChatMessage,
+  MESSAGE_PAGE,
+  hasOlderMessages,
+  olderCursor,
+  prependOlder,
 } from './view.ts';
 
 const TEXT: ChatChannel = { id: 1, kind: 'text', name: '일반', position: 1 };
@@ -285,5 +289,41 @@ describe('채널이 비었을 때 (결함 304)', () => {
 
   it('무엇을 하면 되는지 말한다', () => {
     strictEqual(describeEmptyChannel().how.includes('첫 마디'), true);
+  });
+});
+
+describe('대화의 앞부분에 닿는 길 (결함 315)', () => {
+  it('⭐ 한 쪽이 꽉 찼으면 **더 있을 수 있다**고 본다', () => {
+    /* 재서 확인한 것: 채널 하나에 메시지 60개를 넣었더니 서버가 50개를
+       주고 화면이 50개를 그렸고, 「더 보기」 단추는 **0개**였습니다.
+       첫 메시지가 「메시지 11」이라 처음 열 줄이 영영 안 보였습니다. */
+    strictEqual(hasOlderMessages(50), true);
+    strictEqual(hasOlderMessages(49), false);
+    strictEqual(hasOlderMessages(0), false);
+  });
+
+  it('⚠️ 「있다」가 아니라 「있을 수 있다」 — 딱 한 쪽인 채널도 참이다', () => {
+    // 눌러 보면 0개가 오고 그때 단추가 사라집니다. 미리 세면 요청이
+    // 한 번 더 늘고 그 값은 곧 낡습니다.
+    strictEqual(hasOlderMessages(MESSAGE_PAGE), true);
+  });
+
+  it('⭐ 다음 자리는 **가장 오래된 번호**다 — 순서가 뒤섞여 있어도', () => {
+    strictEqual(olderCursor([{ id: 30 }, { id: 11 }, { id: 42 }]), 11);
+    strictEqual(olderCursor([]), null);
+  });
+
+  it('⛔ 이어 붙일 때 **번호로 겹치는 것을 걸러낸다**', () => {
+    // 누른 사이에 새 메시지가 오면 같은 것이 두 번 그려질 수 있습니다.
+    const merged = prependOlder([{ id: 8 }, { id: 9 }, { id: 11 }], [{ id: 11 }, { id: 12 }]);
+    deepStrictEqual(
+      merged.map((m) => m.id),
+      [8, 9, 11, 12],
+    );
+  });
+
+  it('⚠️ 서버 한 쪽 크기와 **짝**이다 — 어긋나면 단추가 영영 안 뜨거나 영영 뜬다', () => {
+    // backend/teamflow/services/message_service.py 의 MAX_PAGE.
+    strictEqual(MESSAGE_PAGE, 50);
   });
 });

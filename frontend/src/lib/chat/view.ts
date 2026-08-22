@@ -19,6 +19,64 @@
 
 import { teamDateOf, todayInTeamCalendar } from '../time/calendar.ts';
 
+/**
+ * 대화의 **앞부분에 닿는 길**.
+ *
+ * ## ⛔ 60개를 넣었는데 50개만 보이고, 나머지 열에 닿을 길이 없었습니다 (결함 315)
+ *
+ * 채널 하나에 메시지 60개를 넣고 열어 봤습니다 —
+ *
+ *     서버가 준 개수   50   (`message_service.MAX_PAGE`)
+ *     화면에 그린 수   50
+ *     첫 메시지        「메시지 11 …」
+ *     「더 보기」 단추   **0개**
+ *
+ * 대화의 처음 열 줄이 제품 안에서 **영영 안 보입니다.**
+ *
+ * ⚠️ **서버는 이미 할 수 있었습니다.** `message_service.history` 가
+ * `before_id` 를 받고, 그 옆에 「`before_id` 는 **번호**이지 시각이
+ * 아닙니다 — 시각으로 자르면 같은 초에 온 메시지가…」라고 근거까지
+ * 적혀 있습니다. 화면이 그 인자를 **한 번도 안 보냈습니다** (실패 ①,
+ * 결함 298·306 과 같은 부류).
+ *
+ * ⚠️ **결함 306 의 라우트 가드는 이걸 못 잡습니다** — 그 라우트는
+ * 불립니다. 안 불리는 것은 **인자**입니다. 낱말이 아니라 요구를
+ * 재려면 「받아 온 개수가 한 쪽 크기와 같으면 더 있을 수 있다」를
+ * 재야 합니다.
+ */
+
+/** 서버 한 쪽의 크기. `backend/teamflow/services/message_service.py` 의 `MAX_PAGE` 와 짝입니다. */
+export const MESSAGE_PAGE = 50;
+
+/**
+ * 더 옛 메시지가 **있을 수 있는가**.
+ *
+ * ⚠️ 「있다」가 아니라 「있을 수 있다」입니다 — 딱 50개인 채널도 참을
+ * 돌려줍니다. 눌러 보면 0개가 오고 그때 단추가 사라집니다. 반대로
+ * 하면(개수를 미리 세면) 요청이 한 번 더 늘고, 그 값은 곧 낡습니다.
+ */
+export function hasOlderMessages(loaded: number, page = MESSAGE_PAGE): boolean {
+  return loaded >= page;
+}
+
+/** 다음으로 물어볼 자리 — **가장 오래된 것의 번호**. 없으면 `null`. */
+export function olderCursor(messages: readonly { id: number }[]): number | null {
+  if (messages.length === 0) return null;
+  return messages.reduce((lowest, m) => (m.id < lowest ? m.id : lowest), messages[0]!.id);
+}
+
+/**
+ * 앞쪽을 이어 붙입니다. **번호로 겹치는 것을 걸러냅니다** — 누른 사이에
+ * 새 메시지가 오면 같은 것이 두 번 그려질 수 있습니다.
+ */
+export function prependOlder<T extends { id: number }>(
+  older: readonly T[],
+  current: readonly T[],
+): T[] {
+  const seen = new Set(current.map((m) => m.id));
+  return [...older.filter((m) => !seen.has(m.id)), ...current];
+}
+
 export interface Reaction {
   mark: string;
   /** 사람 말. ⚠️ **서버가 줍니다** — 화면에 두 번째 표를 만들지 않습니다. */
