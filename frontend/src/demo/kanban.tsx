@@ -46,6 +46,7 @@ import { iconSvg } from '../lib/nav/icons.ts';
 import { deleteTaskConfirm } from '../lib/project/roles.ts';
 import { withJosa } from '../lib/text/josa.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { board as boardSkeleton } from '../lib/ui/skeleton.ts';
@@ -69,6 +70,23 @@ const projectId = Number(params.get('project') ?? '1');
 
 // ⚠️ **읽기도 `tryGet` 을 거칩니다** (결함 102) — 칸반 판이 텅 빈 채로 남았습니다.
 const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
+
+/**
+ * 실패한 응답을 **사람이 읽을 한 줄**로 (결함 301).
+ *
+ * ⛔ 예전에는 `` `지우지 못했습니다 (${describeHttpStatus(response.status)})` ``
+ * 였습니다. `describeHttpStatus` 는 **400·409·422 에 아무 말도 없어서**
+ * `null` 을 돌려주고, 그 글자가 그대로 화면에 나갑니다 —
+ * 「지우지 못했습니다 (null)」. 서버는 그때 「이 프로젝트의 팀원이 아닌
+ * 사람은 담당자로 지정할 수 없습니다」처럼 정확히 말하고 있습니다.
+ *
+ * ⚠️ 이 모양은 **재현하지 못했습니다** — 화면의 담당자 칸이 팀원만
+ * 보여 주기 때문입니다. 그래도 `null` 을 글자로 내보내는 것은 고쳤습니다.
+ */
+async function failureText(response: Response, fallback: string): Promise<string> {
+  const body: unknown = await response.json().catch(() => null);
+  return detailText(body, describeHttpStatus(response.status) ?? fallback);
+}
 
 function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
@@ -434,7 +452,7 @@ function Kanban() {
         return;
       }
       if (!response.ok) {
-        setError(`지우지 못했습니다 (${describeHttpStatus(response.status)})`);
+        setError(await failureText(response, '지우지 못했습니다'));
         return;
       }
       setError('');
@@ -516,7 +534,7 @@ function Kanban() {
         return;
       }
       if (!response.ok) {
-        setError(`담당자를 바꾸지 못했습니다 (${describeHttpStatus(response.status)})`);
+        setError(await failureText(response, '담당자를 바꾸지 못했습니다'));
         return;
       }
       const updated = (await response.json()) as Task;

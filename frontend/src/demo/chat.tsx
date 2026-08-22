@@ -50,6 +50,7 @@ import {
   type ChatMessage,
 } from '../lib/chat/view.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
@@ -82,6 +83,28 @@ const sendJson = (
         : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
     }),
   );
+
+/**
+ * 실패한 응답을 **사람이 읽을 한 줄**로.
+ *
+ * ⛔ 예전에는 `describeHttpStatus(status) ?? '채널을 못 만들었습니다'` 였고,
+ * `describeHttpStatus` 는 **400 에 아무 말도 없습니다**(`null`). 그래서
+ * 이미 있는 이름으로 채널을 만들면 서버가
+ *
+ *     400  `일반` 채널이 이미 있습니다
+ *
+ * 라고 정확히 말하는데 화면은 「채널을 못 만들었습니다」만 띄웠습니다
+ * (결함 301). 사람은 이름이 겹친 건지, 권한이 없는 건지, 서버가 죽은
+ * 건지 알 방법이 없습니다 — 바로 옆 목록에 `#일반` 이 보이는데도요.
+ *
+ * ⚠️ `detail` 을 `string` 으로 단언하지 않습니다 — 422 는 **객체 배열**
+ * 이라 화면에 `[object Object]` 가 찍힙니다 (결함 51). 한 벌짜리
+ * `detailText` 가 그 모양까지 봅니다.
+ */
+async function failureText(response: Response, fallback: string): Promise<string> {
+  const body: unknown = await response.json().catch(() => null);
+  return detailText(body, describeHttpStatus(response.status) ?? fallback);
+}
 
 function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
@@ -463,7 +486,7 @@ function App() {
       }
       if (!response.ok) {
         setNote({
-          text: describeHttpStatus(response.status) ?? '메시지를 못 보냈습니다',
+          text: await failureText(response, '메시지를 못 보냈습니다'),
           tone: 'bad',
         });
         return;
@@ -500,7 +523,7 @@ function App() {
         }
         if (!response.ok) {
           setNote({
-            text: describeHttpStatus(response.status) ?? '반응을 못 보냈습니다',
+            text: await failureText(response, '반응을 못 보냈습니다'),
             tone: 'bad',
           });
           return;
@@ -527,7 +550,7 @@ function App() {
       }
       if (!response.ok) {
         setNote({
-          text: describeHttpStatus(response.status) ?? '메시지를 못 지웠습니다',
+          text: await failureText(response, '메시지를 못 지웠습니다'),
           tone: 'bad',
         });
         return;
@@ -555,7 +578,7 @@ function App() {
       }
       if (!response.ok) {
         setNote({
-          text: describeHttpStatus(response.status) ?? '채널을 못 만들었습니다',
+          text: await failureText(response, '채널을 못 만들었습니다'),
           tone: 'bad',
         });
         return;
@@ -583,7 +606,7 @@ function App() {
       return;
     }
     if (!response.ok) {
-      setNote({ text: describeHttpStatus(response.status) ?? '찾지 못했습니다', tone: 'bad' });
+      setNote({ text: await failureText(response, '찾지 못했습니다'), tone: 'bad' });
       return;
     }
     setNote(null);

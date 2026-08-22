@@ -45,6 +45,7 @@ import {
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { scoreCards } from '../lib/ui/skeleton.ts';
@@ -394,12 +395,12 @@ function Contributions() {
       if (!response.ok) {
         // ⚠️ **`.json()` 도 던집니다.** 500 이 HTML 오류 페이지를 돌려주면
         // 파싱이 실패합니다 (결함 87 이 고친 자리가 다른 길로 열렸던 곳).
-        const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+        const body: unknown = await response.json().catch(() => null);
+        /* ⚠️ 여기 손으로 만든 것이 `detailText` 와 **같은 판단 두 벌**
+           이었습니다 (실패 ②). 422 의 객체 배열까지 보는 쪽은 한 벌뿐이라
+           그것을 씁니다 (결함 51 · 301). */
         setMessage({
-          text:
-            typeof body?.detail === 'string'
-              ? body.detail
-              : (describeHttpStatus(response.status) ?? '확정하지 못했습니다'),
+          text: detailText(body, describeHttpStatus(response.status) ?? '확정하지 못했습니다'),
           tone: 'bad',
         });
         return;

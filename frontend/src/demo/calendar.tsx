@@ -228,8 +228,15 @@ function App() {
         return;
       }
       if (!response.ok) {
+        /* 서버가 쓴 문장이 먼저입니다 (결함 301) — 「회의 이름이 비어
+           있습니다」처럼 400 으로 오는 것들이 `describeHttpStatus` 에는
+           한 줄도 없습니다. 무르기 쪽(결함 298)만 고쳐 두고 **바로 위
+           만들기 쪽은 그대로**였습니다 — 가드가 잡아 줬습니다. */
         setNote({
-          text: describeHttpStatus(response.status) ?? '일정을 못 잡았습니다',
+          text: detailText(
+            await response.json().catch(() => null),
+            describeHttpStatus(response.status) ?? '일정을 못 잡았습니다',
+          ),
           tone: 'bad',
         });
         return;

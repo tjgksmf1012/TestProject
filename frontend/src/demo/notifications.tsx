@@ -33,6 +33,7 @@ import {
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { rows as rowSkeleton } from '../lib/ui/skeleton.ts';
@@ -110,7 +111,12 @@ function App() {
       }
       if (!response.ok) {
         setNote({
-          text: describeHttpStatus(response.status) ?? '읽음 표시를 못 보냈습니다',
+          /* 서버가 쓴 문장이 먼저입니다 (결함 301) — `describeHttpStatus`
+             는 400 에 아무 말도 없습니다. */
+          text: detailText(
+            await response.json().catch(() => null),
+            describeHttpStatus(response.status) ?? '읽음 표시를 못 보냈습니다',
+          ),
           tone: 'bad',
         });
         return;

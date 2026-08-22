@@ -4656,6 +4656,53 @@ describe('⛔ 서버가 쓴 문장을 화면이 버리지 않는다 (결함 300)
   });
 });
 
+describe('⛔ 400 에서 서버가 쓴 문장을 버리지 않는다 (결함 301)', () => {
+  /* `describeHttpStatus` 는 **400 에 아무 말도 없습니다**(`null`). 그래서
+
+       describeHttpStatus(response.status) ?? '채널을 못 만들었습니다'
+
+     는 400 에서 언제나 뒤엣것이 되고, 서버가 쓴
+
+       400  `일반` 채널이 이미 있습니다
+
+     가 통째로 버려집니다. 채팅 화면 일곱 자리가 그 모양이었습니다.
+
+     ⚠️ 결함 300 과 같은 병입니다 — 300 은 409 를 **틀리게** 말했고,
+     이쪽은 400 을 **아무 말도 안 하고** 넘겼습니다. */
+  it('⭐ 레거시 화면이 `describeHttpStatus` 를 맨몸으로 쓰지 않는다', () => {
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.includes('.test.')) {
+          const code = codeOf(readFileSync(full, 'utf8'));
+          /* 「보낸 뒤」의 실패에서만 잽니다 — `response.status` 를 들고
+             있는 자리입니다. 불러오기 실패(`failureHtml`)는 서버 문장이
+             아니라 **다시 불러오기**가 답이라 그대로 둡니다. */
+          for (const m of code.matchAll(/describeHttpStatus\(\s*response\.status\s*\)/g)) {
+            /* ⚠️ **이 창을 200자로 잡았다가 제 코드를 잡았습니다** — 결함
+               298 의 달력 코드는 `detailText` 를 쓰는데 그 위 주석이 길어
+               창 밖으로 밀려났습니다. 자를 고칠 때는 걸린 것이 진짜인지
+               하나씩 보십시오. */
+            const around = code.slice(Math.max(0, (m.index ?? 0) - 700), (m.index ?? 0) + 80);
+            if (/detailText\(/.test(around)) continue;
+            /* 불러오기 실패는 서버 문장이 아니라 **다시 불러오기**가 답입니다.
+               `setFailure`·`setFeedFailure` 처럼 이름이 여럿이라 넓게 잡습니다. */
+            if (/set\w*Failure\(/.test(around)) continue;
+            offenders.push(`${entry.name}: …${code.slice(m.index ?? 0, (m.index ?? 0) + 56).replace(/\s+/g, ' ')}`);
+          }
+        }
+      }
+    };
+    walk(DEMO);
+    ok(
+      offenders.length === 0,
+      `400 에서 서버가 쓴 문장을 버립니다 — \`detailText\` 를 거치세요\n    ${offenders.join('\n    ')}`,
+    );
+  });
+});
+
 describe('⛔ 기여도 리본은 **순위를 안 그린다** (결함 247)', () => {
   /* 이 저장소의 제일 무거운 불변식(①: 순위·리더보드 금지)이 걸린 자리인데
      **가드가 한 번도 안 울렸습니다.** 조각을 만드는 코드가 `@lib` 이 아니라
