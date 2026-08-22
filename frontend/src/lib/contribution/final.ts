@@ -49,10 +49,28 @@ export function sameValue(a: number, b: number): boolean {
 export function problemsWith(
   drafts: Draft[],
   systemValues: Map<number, number>,
+  /**
+   * 아무것도 안 잰 사람들 (`nothingMeasured` — 범주가 하나도 없음).
+   *
+   * ⛔ 이 사람들은 **「시스템 값 그대로」 확정할 수 없습니다** (결함 307) —
+   * 받아들일 값 자체가 없습니다. 팀이 값을 **직접 적고 이유를 남기는 것**은
+   * 됩니다(불변식 ④: 시스템은 판정하지 않습니다).
+   *
+   * ⚠️ 거절은 서버가 합니다. 여기서는 **미리 말해 줄** 뿐입니다 — 눌러서
+   * 400 을 받고 나서야 아는 것보다 낫습니다.
+   */
+  unmeasured: ReadonlySet<number> = new Set(),
 ): string[] {
   const problems: string[] = [];
   for (const draft of drafts) {
-    if (draft.final_value === null) continue;
+    if (draft.final_value === null) {
+      if (unmeasured.has(draft.user_id)) {
+        problems.push(
+          '아직 잰 것이 없어 시스템 값이 없습니다 — 확정하려면 값을 직접 적고 이유를 남기세요',
+        );
+      }
+      continue;
+    }
     if (Number.isNaN(draft.final_value)) {
       problems.push(`숫자가 아닌 값이 있습니다 (${draft.user_id})`);
       continue;
@@ -90,13 +108,52 @@ export function problemsWith(
   return [...new Set(problems)];
 }
 
-/** 서버로 보낼 모양. 안 건드린 칸은 값을 **안 보낸다** — 서버가 시스템 값을 쓴다. */
-export function toPayload(drafts: Draft[], systemValues: Map<number, number>): Payload[] {
+/**
+ * 확정 줄에 적을 **시스템 값**.
+ *
+ * ## ⛔ 안 잰 사람에게 `0.0%` 라고 적고 있었습니다 (결함 307)
+ *
+ * 갓 만든 프로젝트에서 기여도 화면의 카드는 정확히 말합니다 —
+ *
+ *     —                    ← 구간 (`describeRange`)
+ *     모르는 폭 100%p
+ *     이 사람의 활동이 아직 하나도 연결되지 않았습니다
+ *       — 0 이라는 뜻이 아니라 연결이 없다는 뜻입니다.
+ *
+ * 그런데 **여섯 줄 아래** 확정 줄이 「시스템 **0.0%**」였습니다. 같은
+ * 화면이 같은 사실을 두고 서로 다른 말을 합니다(결함 290 과 같은 모양).
+ * 그리고 [이 값으로 확정] 을 누르면 그 0 이 기록으로 남고, 최종 보고서가
+ * 「측정하지 못했습니다」 두 줄 아래에서 「팀 확정 0%」라고 적었습니다.
+ *
+ * ⚠️ **`—` 는 카드와 같은 글자입니다.** 확정 줄만 다른 글자를 쓰면 사람은
+ * 둘이 다른 뜻이라고 읽습니다.
+ */
+export function systemLabel(value: number | undefined, measured: boolean): string {
+  if (!measured) return '—';
+  return `${(value ?? 0).toFixed(1)}%`;
+}
+
+/**
+ * 서버로 보낼 모양. 안 건드린 칸은 값을 **안 보낸다** — 서버가 시스템 값을 쓴다.
+ *
+ * ⚠️ **안 잰 사람은 예외입니다** (결함 307). 그 사람의 시스템 값은 0 으로
+ * 계산되므로, 팀이 **일부러 0 을 적어도** `sameValue(0, 0)` 이 참이 되어
+ * 「안 건드렸다」로 접혔습니다. 그러면 값이 안 실려 나가고 서버가 거절해서,
+ * 팀이 이유까지 적었는데도 400 이 났습니다 — 고치면서 낸 것을 렌더해서
+ * 잡았습니다. 잰 것이 없으면 「시스템과 같다」는 말 자체가 뜻이 없습니다.
+ */
+export function toPayload(
+  drafts: Draft[],
+  systemValues: Map<number, number>,
+  unmeasured: ReadonlySet<number> = new Set(),
+): Payload[] {
   return drafts.map((draft) => {
     const system = systemValues.get(draft.user_id);
     const untouched =
       draft.final_value === null ||
-      (system !== undefined && sameValue(draft.final_value, system));
+      (!unmeasured.has(draft.user_id) &&
+        system !== undefined &&
+        sameValue(draft.final_value, system));
     if (untouched) return { user_id: draft.user_id };
     return {
       user_id: draft.user_id,

@@ -8,6 +8,7 @@ import {
   toPayload,
   type Draft,
   type FinalRow,
+  systemLabel,
 } from './final.ts';
 
 const SYSTEM = new Map([
@@ -258,5 +259,65 @@ describe('저장된 조정을 입력칸에 되돌려 놓기 (결함 97)', () => 
     const system = new Map([[2, 33.552]]);
     const blank: Draft[] = [{ user_id: 2, final_value: null, reason: '' }];
     deepStrictEqual(toPayload(blank, system), [{ user_id: 2 }]);
+  });
+});
+
+describe('안 잰 사람은 「시스템 값 그대로」 확정할 수 없다 (결함 307)', () => {
+  const draft = (userId: number, value: string, reason = ''): Draft => ({
+    user_id: userId,
+    final_value: value === '' ? null : Number(value),
+    reason,
+  });
+
+  it('⭐ **확정 줄이 `0.0%` 라고 적지 않는다** — 카드는 같은 사람을 `—` 라고 그립니다', () => {
+    /* 갓 만든 프로젝트에서 카드는 「— · 모르는 폭 100%p · 0 이라는 뜻이
+       아니라 연결이 없다는 뜻입니다」인데, 여섯 줄 아래 확정 줄은
+       「시스템 0.0%」였습니다. 한 화면이 같은 사실을 두고 서로 다른 말을
+       하고 있었습니다. */
+    strictEqual(systemLabel(0, false), '—');
+    strictEqual(systemLabel(undefined, false), '—');
+  });
+
+  it('쟀으면 숫자를 그대로 적는다 — 결함 191 의 결정을 안 뒤집는다', () => {
+    // 「쟀는데 0건」은 그대로 `0.0%` 입니다.
+    strictEqual(systemLabel(0, true), '0.0%');
+    strictEqual(systemLabel(31.25, true), '31.3%');
+  });
+
+  it('⭐ 안 잰 사람을 **빈 칸으로** 확정하려 하면 막고 이유를 말한다', () => {
+    const problems = problemsWith([draft(7, '')], new Map([[7, 0]]), new Set([7]));
+    strictEqual(problems.length, 1);
+    strictEqual(problems[0]?.includes('잰 것이 없어'), true);
+    strictEqual(problems[0]?.includes('직접 적고'), true);
+  });
+
+  it('⭐ 팀이 **직접 값을 적으면** 막지 않는다 — 시스템은 판정하지 않습니다(불변식 ④)', () => {
+    const problems = problemsWith([draft(7, '0', '이번 스프린트는 휴학')], new Map([[7, 0]]), new Set([7]));
+    strictEqual(problems.length, 0);
+    // 값을 적었으면 「잰 것이 없어…」는 안 나옵니다.
+    strictEqual(problems.some((t) => t.includes('잰 것이 없어')), false);
+  });
+
+  it('안 잰 사람이 아니면 빈 칸은 그대로 통과한다 — 「안 건드렸다」입니다', () => {
+    strictEqual(problemsWith([draft(7, '')], new Map([[7, 12]]), new Set()).length, 0);
+  });
+});
+
+describe('안 잰 사람이 직접 적은 값은 **접히지 않는다** (결함 307 회차)', () => {
+  it('⭐ 시스템 값이 0 이라도 팀이 적은 0 은 그대로 실어 보낸다', () => {
+    /* 고치면서 낸 것입니다. 안 잰 사람의 시스템 값은 0 으로 계산되므로
+       팀이 일부러 0 을 적어도 `sameValue(0, 0)` 이 참이 되어 「안
+       건드렸다」로 접혔고, 값이 안 실려 나가 서버가 400 을 줬습니다 —
+       팀이 이유까지 적었는데도. 렌더해서 잡았습니다. */
+    const drafts = [{ user_id: 7, final_value: 0, reason: '이번 스프린트는 휴학' }];
+    const payload = toPayload(drafts, new Map([[7, 0]]), new Set([7]));
+    strictEqual(payload[0]?.final_value, 0);
+    strictEqual(payload[0]?.reason, '이번 스프린트는 휴학');
+  });
+
+  it('잰 사람은 그대로 — 시스템 값과 같으면 값을 안 보냅니다', () => {
+    const drafts = [{ user_id: 7, final_value: 12, reason: '' }];
+    const payload = toPayload(drafts, new Map([[7, 12]]), new Set());
+    strictEqual(payload[0]?.final_value, undefined);
   });
 });

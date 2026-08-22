@@ -1685,3 +1685,73 @@ def test_the_project_summary_counts_meetings_that_still_have_candidates(
     # ⚠️ 회의 수는 그대로여야 합니다 — 세는 곳을 고치다 분모를 건드리면
     #    「회의 5개」가 조용히 줄어듭니다.
     assert after["meeting_count"] == summary["meeting_count"]
+
+
+def test_a_person_who_was_never_measured_cannot_be_confirmed_as_is(
+    client: TestClient, seeded
+) -> None:
+    """⭐ **잰 것이 없으면 「시스템 값 그대로」 확정을 거절한다** (결함 307).
+
+    ## 재현
+
+    갓 만든 프로젝트(회의 0 · 업무 0 · GitHub 0)에서 기여도 화면을 열면
+    카드가 정확히 말합니다 —
+
+        —                       ← 구간
+        모르는 폭 100%p
+        이 사람의 활동이 아직 하나도 연결되지 않았습니다
+          — 0 이라는 뜻이 아니라 연결이 없다는 뜻입니다.
+
+    그런데 바로 아래 확정 줄은 「시스템 **0.0%**」였고, [이 값으로 확정] 을
+    누르면 201 과 함께 `final_value = 0` 이 남았습니다. 그리고 최종
+    보고서가 이렇게 나갔습니다 —
+
+        김민수  개발
+          측정하지 못했습니다
+          수집된 활동 데이터가 없습니다
+          팀 확정 0%            ← 두 줄 아래
+
+    한 문서가 「못 쟀다」와 「0% 로 확정」을 같이 말합니다. 불변식 ③
+    (측정 불가 ≠ 0점)이 **팀 밖으로 나가는 문서**에서 깨졌습니다.
+
+    ## 무엇을 막고 무엇을 막지 않는가
+
+    · ⛔ 막습니다 — **시스템 값을 그대로 받아들이는 것.** 잰 것이 없으면
+      받아들일 값 자체가 없습니다
+    · ✅ 안 막습니다 — **팀이 직접 0 을 적는 것.** 그건 사람의 판단이고
+      사유와 함께 남습니다 (불변식 ④: 시스템은 판정하지 않습니다)
+    """
+    user_id = seeded["user_ids"][0]
+    url = _final_url(seeded)
+
+    # 활동을 **하나도** 넣지 않습니다 — 갓 만든 프로젝트 그대로.
+    #
+    # ⚠️ 처음에는 이 검사를 「한 사람만 활동이 있는 팀」으로 썼고 **통과**
+    #    했습니다. 팀에 살아 있는 범주가 하나라도 있으면 서버가 모두에게
+    #    그 범주 칸을 개수 0 으로 만들어 주기 때문입니다 — 그건 결함 191 이
+    #    「쟀는데 0건인 것은 그대로 `0%` 다」로 못 박아 둔 **다른** 경우이고,
+    #    그 씨앗으로는 아무것도 안 재고 있었습니다.
+    refused = client.post(url, json={"finals": [{"user_id": user_id}]})
+    assert refused.status_code == 400, refused.text
+    assert "잰 것이 없어" in refused.json()["detail"]
+
+    # ✅ 팀이 **직접** 0 을 적고 이유를 남기는 것은 됩니다 (불변식 ④)
+    decided = client.post(
+        url,
+        json={
+            "finals": [
+                {"user_id": user_id, "final_value": 0, "reason": "이번 스프린트는 휴학"}
+            ]
+        },
+    )
+    assert decided.status_code == 201, decided.text
+    rows = {r["user_id"]: r for r in client.get(url).json()["finals"]}
+    assert rows[user_id]["final_value"] == 0
+    assert rows[user_id]["reason"] == "이번 스프린트는 휴학"
+
+    # ✅ **쟀는데 0건인 사람**은 그대로 확정됩니다 — 결함 191 의 결정을
+    #    이 검사가 뒤집지 않는다는 증거입니다. 팀에 활동이 생기면 이 사람도
+    #    범주 칸을 (개수 0 으로) 갖게 되고, 그때는 `0%` 가 맞습니다.
+    add_contribution_events(seeded["project_id"], seeded["user_ids"][1], 5)
+    still_ok = client.post(url, json={"finals": [{"user_id": user_id}]})
+    assert still_ok.status_code == 201, still_ok.text

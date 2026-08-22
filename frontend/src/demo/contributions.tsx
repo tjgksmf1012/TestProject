@@ -21,6 +21,7 @@ import {
   hasNoEvidence,
   integrityNotes,
   nameOf,
+  nothingMeasured,
   orderForDisplay,
   readBeforeTheNumber,
   roleOf,
@@ -38,6 +39,7 @@ import {
   BLIND_CONFIRM,
   describeFinals,
   problemsWith,
+  systemLabel,
   toPayload,
   type Draft,
   type FinalRow,
@@ -363,7 +365,11 @@ function Contributions() {
       };
     });
 
-    const problems = problemsWith(drafts, systemValues);
+    /* ⛔ 안 잰 사람은 「시스템 값 그대로」 확정할 수 없습니다 (결함 307) —
+       받아들일 값 자체가 없습니다. 판정은 `@lib` 의 `nothingMeasured` 하나로
+       하고, 거절은 서버가 합니다. */
+    const unmeasured = new Set(shown.filter(nothingMeasured).map((ms) => ms.user_id));
+    const problems = problemsWith(drafts, systemValues, unmeasured);
     if (problems.length > 0) {
       // ⚠️ 서버도 같은 규칙으로 거절합니다. 여기서 먼저 말하는 이유는,
       // 서버가 400 을 돌려준 뒤에 알려 주면 그때는 이미 다른 사람의
@@ -380,7 +386,7 @@ function Contributions() {
         fetch(`${apiBase}/api/projects/${projectId}/contributions/final`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ finals: toPayload(drafts, systemValues) }),
+          body: JSON.stringify({ finals: toPayload(drafts, systemValues, unmeasured) }),
           credentials: 'same-origin',
         }),
       );
@@ -562,12 +568,18 @@ function Contributions() {
         <div id="finals">
           {shown.map((ms) => {
             const name = nameOf(ms.user_id, people);
-            const system = (systemValues.get(ms.user_id) ?? 0).toFixed(1);
+            /* ⛔ 예전에는 `(systemValues.get(id) ?? 0).toFixed(1)` 이라
+               안 잰 사람에게 **`0.0%`** 라고 적었습니다 (결함 307). 여섯 줄
+               위 카드는 같은 사람을 `—` 라고 그리고 「0 이라는 뜻이 아니라
+               연결이 없다는 뜻입니다」라고 말합니다 — 한 화면이 같은 사실을
+               두고 서로 다른 말을 하고 있었습니다. */
+            const measured = !nothingMeasured(ms);
+            const system = systemLabel(systemValues.get(ms.user_id), measured);
             return (
               <div className="final-row" key={ms.user_id} data-user={ms.user_id}>
                 <span className="who">{name}</span>
                 {/* ⚠️ 시스템 값은 **지워지지 않고 나란히 남습니다.** */}
-                <span className="sys">시스템 {system}%</span>
+                <span className="sys">시스템 {system}</span>
                 <label>
                   확정{' '}
                   <input
@@ -576,7 +588,7 @@ function Contributions() {
                     step="0.1"
                     min="0"
                     max="100"
-                    placeholder={system}
+                    placeholder={measured ? system : ""}
                     aria-label={`${name} 확정값`}
                     value={typedOf(ms.user_id).value}
                     onChange={(e) => setTypedFor(ms.user_id, { value: e.target.value })}
