@@ -261,18 +261,17 @@ function App() {
     async (type: 'weekly' | 'final'): Promise<void> => {
       setBusy(true);
       setNote(null);
-      // ⚠️ 주간은 **지난 7일**로 못 박습니다. 기간을 사람이 고르는 화면은
-      //    아직 없으므로, 없는 것을 있는 척 고르게 하지 않습니다.
-      const end = new Date();
-      const start = new Date(end.getTime() - 6 * 24 * 3600 * 1000);
-      const body =
-        type === 'weekly'
-          ? {
-              report_type: 'weekly',
-              period_start: start.toISOString(),
-              period_end: end.toISOString(),
-            }
-          : { report_type: 'final' };
+      /* ⛔ **기간을 화면이 짓지 않습니다** (결함 296).
+         예전에는 여기서 「지난 7일」(`end - 6일 ~ end`)을 만들어 보냈습니다.
+         그 창은 누를 때마다 굴러가서 `scope_key` 가 날마다 달라졌고,
+         **하루에 한 벌씩 주간 보고서가 쌓였습니다** — 사흘 눌러 세 벌이
+         나오는 것을 재현했습니다. 게다가 단추는 「이번 주」라고 적혀
+         있는데 이 제품의 「이번 주」는 월~일입니다(`meeting/resolve.py` ·
+         `lib/calendar/month.ts`).
+
+         팀 달력을 아는 곳은 서버입니다(`clock.team_week`). 기간을 안
+         보내면 서버가 팀 달력의 이번 주로 채웁니다. */
+      const body = { report_type: type };
 
       const response = await trySend(() =>
         fetch(`${apiBase}/api/projects/${projectId}/reports`, {

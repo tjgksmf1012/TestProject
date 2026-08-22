@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -315,14 +315,104 @@ def test_minutes_cannot_be_requested_from_the_project_route(
     assert "회의록은 회의에서" in response.json()["detail"]
 
 
-def test_a_weekly_report_without_a_period_is_refused(client: TestClient, seeded):
-    """⚠️ 조용히 기본 기간을 쓰면 **멀쩡한 주를 덮어씁니다.**"""
+# ── 「이번 주」는 서버가 정합니다 (결함 296) ────────────────────────
+#
+# ⚠️ **여기 있던 검사를 바꿨습니다.** 예전에는 기간 없는 `weekly` 를 400 으로
+#    거절했고 이유가 이렇게 적혀 있었습니다 —
+#
+#        ⚠️ 조용히 기본 기간을 쓰면 **멀쩡한 주를 덮어씁니다.**
+#
+#    그 걱정은 **아무 기본값**을 두는 경우에 참입니다. 그런데 그 계약 때문에
+#    유일한 실사용자(보고서 화면)가 「지난 7일」을 직접 만들어 보내고
+#    있었고, 그 창은 누를 때마다 굴러가서 `scope_key` 가 날마다 달라졌습니다
+#    — **하루에 한 벌씩 주간 보고서가 쌓였습니다**(사흘 눌러 세 벌, 그중
+#    둘은 제목까지 같아 사람 눈에 구별이 안 됨). `_upsert` 가 「쌓으면 안
+#    됩니다」라고 적어 둔 것이 아무것도 안 막고 있었습니다.
+#
+#    그래서 기본값을 **정해진 것**(팀 달력의 이번 주)으로 두고, 원래 걱정은
+#    아래 둘째 검사가 **실제로 재도록** 옮겨 적었습니다.
+
+
+def test_a_bare_weekly_report_means_this_team_week(client: TestClient, seeded):
+    """기간을 안 주면 **팀 달력의 이번 주**입니다."""
+    from teamflow import clock
+
     response = client.post(
         f"/api/projects/{seeded['project_id']}/reports",
         json={"report_type": "weekly"},
     )
-    assert response.status_code == 400
-    assert "period_start" in response.json()["detail"]
+    assert response.status_code == 201
+    body = response.json()
+    start, end = clock.team_week()
+    assert clock.local_date(datetime.fromisoformat(body["period_start"])) == clock.local_date(
+        start
+    )
+    assert clock.local_date(datetime.fromisoformat(body["period_end"])) == clock.local_date(end)
+    # 월요일에서 시작해 일요일에 끝납니다.
+    assert clock.local_date(datetime.fromisoformat(body["period_start"])).weekday() == 0
+    assert clock.local_date(datetime.fromisoformat(body["period_end"])).weekday() == 6
+
+
+def test_the_default_week_never_overwrites_another_week(client: TestClient, seeded):
+    """⭐ 원래 걱정을 **실제로 잽니다** — 기본값이 남의 주를 덮으면 안 됩니다."""
+    from teamflow import clock
+
+    # 지지난 주를 손으로 만들어 둡니다.
+    other_start, other_end = clock.team_week(datetime(2020, 6, 1, 3, 0, tzinfo=UTC))
+    made = client.post(
+        f"/api/projects/{seeded['project_id']}/reports",
+        json={
+            "report_type": "weekly",
+            "period_start": other_start.isoformat(),
+            "period_end": other_end.isoformat(),
+        },
+    )
+    assert made.status_code == 201
+    other_id = made.json()["id"]
+
+    # 기간 없이 한 번 더 — 이번 주로 갑니다.
+    fresh = client.post(
+        f"/api/projects/{seeded['project_id']}/reports",
+        json={"report_type": "weekly"},
+    )
+    assert fresh.status_code == 201
+    assert fresh.json()["id"] != other_id
+
+    # 옛 주는 그대로 있습니다.
+    kept = client.get(f"/api/reports/{other_id}")
+    assert kept.status_code == 200
+    assert clock.local_date(
+        datetime.fromisoformat(kept.json()["period_start"])
+    ) == clock.local_date(other_start)
+
+
+def test_pressing_the_weekly_button_on_different_days_does_not_stack(
+    client: TestClient, seeded
+):
+    """⭐ 결함 296 본체 — **한 주에 주간 보고서는 한 벌**입니다.
+
+    굴러가는 창이었을 때는 이 셋이 서로 다른 `scope_key` 를 만들어 세 벌이
+    쌓였고, 그중 둘은 제목까지 같았습니다.
+    """
+    from teamflow import clock
+
+    project_id = seeded["project_id"]
+    monday = datetime(2026, 8, 17, 1, 0, tzinfo=UTC)
+    for days in (0, 1, 3):
+        start, end = clock.team_week(monday + timedelta(days=days))
+        response = client.post(
+            f"/api/projects/{project_id}/reports",
+            json={
+                "report_type": "weekly",
+                "period_start": start.isoformat(),
+                "period_end": end.isoformat(),
+            },
+        )
+        assert response.status_code == 201
+
+    listed = client.get(f"/api/projects/{project_id}/reports").json()
+    weekly = [row for row in listed if row["report_type"] == "weekly"]
+    assert len(weekly) == 1, [row["title"] for row in weekly]
 
 
 # ══════════════════════════════════════════════════════════════

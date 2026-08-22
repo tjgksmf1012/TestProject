@@ -17,6 +17,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from teamflow import clock
 from teamflow.contribution import events, profiles
 from teamflow.db import models as m
 from teamflow.db.vocab import REPORT_SCOPE, ReportScope, ReportType
@@ -296,6 +297,17 @@ def generate_period(
         # 최종은 프로젝트 전체입니다 — 기간을 안 받습니다. 받으면 "최종" 이
         # 여러 벌 생기고, 그건 최종이 아닙니다.
         period_start = period_end = None
+    elif report_type is ReportType.WEEKLY and period_start is None and period_end is None:
+        # ⭐ **주간의 「이번 주」는 여기서 정합니다** (결함 296).
+        #
+        # 화면이 「지난 7일」을 만들어 보내고 있었습니다. 그 창은 누를 때마다
+        # 굴러가므로 `scope_key` 가 날마다 달라지고, 하루에 한 벌씩 주간
+        # 보고서가 쌓였습니다 — 바로 위 `_upsert` 가 「쌓으면 안 됩니다」
+        # 라고 적어 둔 그것이 **아무것도 안 막고 있었습니다.**
+        #
+        # 팀 달력을 아는 곳은 서버입니다(`clock.team_zone`). 화면이 창을
+        # 지으면 판단이 두 벌이 되고, 그중 한 벌에는 테스트가 없습니다.
+        period_start, period_end = clock.team_week()
 
     counts = _counts(session, project_id, period_start, period_end)
     confirmed = (

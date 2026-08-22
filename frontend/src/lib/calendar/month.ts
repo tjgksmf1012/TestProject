@@ -69,8 +69,13 @@ function iso(at: Date): string {
  * 이 달의 몇째 날부터 격자를 그릴 것인가 — **그 주의 월요일**.
  *
  * ⚠️ 일요일 시작이 아니라 월요일 시작입니다. 이 제품은 팀 프로젝트
- * 도구이고 주간 보고서도 월~일로 끊습니다(`reports/period.py`). 달력만
- * 일요일 시작이면 "이번 주" 가 두 뜻이 됩니다.
+ * 도구이고 주간 보고서도 월~일로 끊습니다(`teamflow/clock.py` 의
+ * `team_week`). 달력만 일요일 시작이면 "이번 주" 가 두 뜻이 됩니다.
+ *
+ * ⚠️ 이 줄은 한동안 **사실이 아니었습니다** — `reports/period.py` 를
+ * 가리키고 있었는데 그 파일은 받은 기간을 찍기만 하고, 실제로는 화면이
+ * 「지난 7일」을 만들어 보내고 있었습니다(결함 296). 문서에 적힌 것을
+ * 그대로 믿지 말고 세어 보라는 것이 이 저장소의 규칙입니다.
  */
 export function weekStart(year: number, month: number): Date {
   const first = new Date(Date.UTC(year, month - 1, 1));
