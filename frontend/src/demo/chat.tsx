@@ -339,6 +339,24 @@ function App() {
 
   const open = channels?.find((c) => c.id === openId) ?? null;
   const foot = useRef<HTMLDivElement>(null);
+  /* ⛔ **「고치기」·「답글」을 눌러도 초점이 그 자리에 남아 있었습니다**
+     (결함 302). 글은 아래 작성칸으로 옮겨 가는데 초점은 안 갑니다 —
+     키보드만 쓰는 사람은 **Tab 을 31~32번** 눌러야 그 칸에 닿습니다
+     (남은 메시지마다 반응·답글·고치기·지우기 넷을 지나갑니다). 메시지가
+     쌓일수록 더 멀어집니다.
+
+     화면은 「고치는 중」이라고 말은 합니다 — 실패 ③ 「할 일을 알려 주고
+     그 일을 할 자리를 안 줌」 그대로입니다. */
+  const draftBox = useRef<HTMLTextAreaElement>(null);
+
+  /** 글을 옮겨 놓은 칸으로 **데려다 줍니다.** 캐럿은 글 끝에 둡니다. */
+  const goToDraft = useCallback((): void => {
+    const box = draftBox.current;
+    if (box === null) return;
+    box.focus();
+    const end = box.value.length;
+    box.setSelectionRange(end, end);
+  }, []);
 
   const loadChannels = useCallback(async (): Promise<void> => {
     const response = await get(`/api/projects/${projectId}/channels`);
@@ -795,11 +813,15 @@ function App() {
                         onReply={(target) => {
                           setReplyTo(target);
                           setEditing(null);
+                          goToDraft();
                         }}
                         onEdit={(target) => {
                           setEditing(target);
                           setReplyTo(null);
                           setDraft(target.body);
+                          /* ⚠️ `setDraft` 는 다음 그리기에 반영되므로 캐럿을
+                             끝에 두려면 그 뒤에 옮겨야 합니다. */
+                          requestAnimationFrame(goToDraft);
                         }}
                         onDelete={(target) => void remove(target)}
                         onReact={(target, mark) => {
@@ -854,6 +876,7 @@ function App() {
               </label>
               <textarea
                 id="draft"
+                ref={draftBox}
                 value={draft}
                 rows={2}
                 maxLength={MAX_BODY}

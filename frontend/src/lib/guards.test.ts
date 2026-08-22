@@ -4703,6 +4703,54 @@ describe('⛔ 400 에서 서버가 쓴 문장을 버리지 않는다 (결함 301
   });
 });
 
+describe('⛔ 글을 옮겨 놓았으면 **초점도 데려간다** (결함 302)', () => {
+  /* 채팅에서 「고치기」·「답글」을 누르면 글이 아래 작성칸으로 옮겨 가는데
+     초점은 누른 단추에 그대로 있었습니다. 키보드만 쓰는 사람은 **Tab 을
+     31~32번** 눌러야 그 칸에 닿습니다 — 남은 메시지마다 반응·답글·
+     고치기·지우기 넷을 지나가야 하므로 메시지가 쌓일수록 멀어집니다.
+
+     화면은 「고치는 중」이라고 말은 합니다. 실패 ③ 「할 일을 알려 주고
+     그 일을 할 자리를 안 줌」 그대로입니다.
+
+     ⚠️ **두 갈래를 같이 봅니다.** 「고치기」만 고치고 「답글」을 두면
+     이 저장소에서 제일 흔한 재발 모양이 됩니다 (실패 ②). */
+  const chat = (): string => codeOf(readFileSync(join(DEMO, 'chat.tsx'), 'utf8'));
+
+  it('⭐ `onEdit`·`onReply` 둘 다 작성칸으로 초점을 옮긴다', () => {
+    const code = chat();
+    const missing: string[] = [];
+    for (const hook of ['onReply', 'onEdit']) {
+      /* 그 콜백 하나를 통째로 떼어 냅니다 — 중괄호가 닫힐 때까지. */
+      const start = code.indexOf(`${hook}={(`);
+      ok(start >= 0, `${hook} 을 못 찾았습니다 — 가드가 낡았습니다`);
+      let depth = 0;
+      let end = start;
+      for (let i = code.indexOf('{', start + hook.length); i < code.length; i++) {
+        if (code[i] === '{') depth++;
+        else if (code[i] === '}') {
+          depth--;
+          if (depth === 0) { end = i; break; }
+        }
+      }
+      const body = code.slice(start, end + 1);
+      if (!/goToDraft\s*\)?\s*[;)]|goToDraft\(\)/.test(body)) missing.push(hook);
+    }
+    ok(
+      missing.length === 0,
+      `글만 옮기고 초점을 안 데려갑니다 — 키보드로는 서른 번 넘게 Tab 해야 닿습니다: ${missing.join(', ')}`,
+    );
+  });
+
+  it('⭐ 작성칸에 **닿을 손잡이**가 있다', () => {
+    const code = chat();
+    ok(/ref=\{draftBox\}/.test(code), '작성칸에 ref 가 없으면 초점을 옮길 방법이 없습니다');
+    ok(
+      /setSelectionRange\(/.test(code),
+      '캐럿을 글 끝에 두지 않으면 이어 쓰려다 글 앞에 끼워 넣게 됩니다',
+    );
+  });
+});
+
 describe('⛔ 기여도 리본은 **순위를 안 그린다** (결함 247)', () => {
   /* 이 저장소의 제일 무거운 불변식(①: 순위·리더보드 금지)이 걸린 자리인데
      **가드가 한 번도 안 울렸습니다.** 조각을 만드는 코드가 `@lib` 이 아니라
