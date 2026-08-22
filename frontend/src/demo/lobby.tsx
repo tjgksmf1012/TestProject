@@ -109,6 +109,7 @@ function Lobby() {
   const [consentNote, setConsentNote] = useState<Note | null>(null);
   const [roomNote, setRoomNote] = useState<Note | null>(null);
   const [reprocessNote, setReprocessNote] = useState<Note | null>(null);
+  const [minutesNote, setMinutesNote] = useState<Note | null>(null);
   const [keepAudio, setKeepAudio] = useState(true);
   const [keepVoiceprint, setKeepVoiceprint] = useState(true);
   const [slow, setSlow] = useState(false);
@@ -365,6 +366,68 @@ function Lobby() {
    * ⚠️ **되돌릴 수 없는 일이라 먼저 묻습니다.** 다시 처리하면 앞판의
    * 발화·후보·결정이 지워지고 새로 만들어집니다.
    */
+  /**
+   * 회의록을 만든다 (`POST /api/meetings/{id}/minutes`).
+   *
+   * ## ⛔ 이 단추가 **없었습니다** (결함 306)
+   *
+   * 서버 갈래는 처음부터 있었고 검사도 붙어 있었는데 **부르는 곳이
+   * 0곳**이었습니다. 그런데 보고서 화면의 빈 상자는 사람에게 이렇게
+   * 말하고 있었습니다 —
+   *
+   *     위의 [최종 보고서 만들기]를 누르거나,
+   *     **회의 로비에서 회의록을 만드세요.**
+   *
+   * 로비에는 그런 단추가 없었습니다. 실패 ③ 그대로입니다: 할 일을 알려
+   * 주고 그 일을 할 자리를 안 준 것. (결함 298 과 같은 모양 — 그때는
+   * 일정을 **무르는** 자리가 없었습니다.)
+   *
+   * ⚠️ 회의 상태를 안 가립니다. `reports/minutes.py` 의 `state_of` 가
+   * 「아직 처리 전」·「처리 실패」·「처리를 마침」을 문서 안에 적으므로,
+   * 녹음 전 회의의 회의록도 **거짓말을 하지 않습니다** (결함 289).
+   *
+   * ⚠️ 만들고 나면 **볼 자리로 데려갑니다.** 만들어 놓고 어디 있는지
+   * 안 알려 주면 이 저장소가 반복해서 낸 실패 ③ 을 또 내는 것입니다.
+   */
+  const makeMinutes = (): void => {
+    void (async () => {
+      setBusy(true);
+      setMinutesNote(null);
+      try {
+        const response = await trySend(() =>
+          fetch(`${apiBase}/api/meetings/${meetingId}/minutes`, {
+            method: 'POST',
+            credentials: 'same-origin',
+          }),
+        );
+        if (response === null) {
+          setMinutesNote({ text: unreachableText('회의록을 만들지 못했습니다'), tone: 'bad' });
+          return;
+        }
+        if (isSessionExpired(response.status)) {
+          goToLogin();
+          return;
+        }
+        if (!response.ok) {
+          // 서버가 사람에게 쓴 문장이 일반론보다 언제나 낫습니다 (결함 300).
+          const body = (await response.json().catch(() => null)) as unknown;
+          setMinutesNote({
+            text: detailText(body, `회의록을 만들지 못했습니다 (HTTP ${response.status})`),
+            tone: 'bad',
+          });
+          return;
+        }
+        if (projectId !== null) {
+          location.href = `/reports.html?project=${projectId}`;
+          return;
+        }
+        setMinutesNote({ text: '회의록을 만들었습니다 — 보고서 화면에 있습니다.', tone: 'plain' });
+      } finally {
+        setBusy(false);
+      }
+    })();
+  };
+
   const reprocess = (): void => {
     const ok = window.confirm(REPROCESS_CONFIRM);
     if (!ok) return;
@@ -662,12 +725,19 @@ function Lobby() {
           >
             기여도 보기
           </button>
+          {/* ⛔ 이 단추가 없어서 `POST /api/meetings/{id}/minutes` 를 부르는
+              곳이 0곳이었습니다 — 그런데 보고서 화면은 「회의 로비에서
+              회의록을 만드세요」라고 적고 있었습니다 (결함 306). */}
+          <button id="minutes" className="linkish" disabled={busy} onClick={makeMinutes}>
+            회의록 만들기
+          </button>
           {room.needsForceFinish && (
             <button id="finish" className="linkish danger" disabled={busy} onClick={forceFinish}>
               강제 종료
             </button>
           )}
         </div>
+        <NoteLine note={minutesNote} id="minutes-note" />
       </section>
     </>
   );

@@ -2634,3 +2634,110 @@ def test_the_activity_log_never_starts_receiving_meetings_or_chat() -> None:
         "문장이 거짓이 됩니다 — `@lib/activity/empty.ts` 를 같이 고치세요:\n  "
         + "\n  ".join(f"{name}  ({actions[name]})" for name in leaked)
     )
+
+
+def test_every_server_route_has_a_caller() -> None:
+    """⭐ 서버 갈래마다 **부르는 곳**이 있어야 한다.
+
+    ## 왜 이 검사가 생겼나
+
+    결함 298(일정을 무르는 자리가 없었다)을 고치면서 AGENTS.md 에 이렇게
+    적어 뒀습니다 —
+
+    > 서버의 갈래마다 부르는 곳이 있는지 세는 가드가 낱말을 세는 것보다
+    > 낫습니다.
+
+    그걸 실제로 세어 봤더니 `POST /api/meetings/{id}/minutes` 가 나왔습니다
+    (결함 306). 만들어져 있고 검사도 붙어 있는데 **부르는 곳이 0곳**이었고,
+    그 사이 보고서 화면은 사람에게 「회의 로비에서 회의록을 만드세요」라고
+    말하고 있었습니다. 로비에 그런 단추가 없었습니다 (실패 ③).
+
+    ## ⚠️ 이 자의 위험 — 주소를 조각으로 만드는 곳
+
+    녹음 클라이언트는 `${trackUrl}/chunks/${seq}` 처럼 **주소를 이어 붙여**
+    만듭니다. 전체 경로를 글자로 찾는 자는 그걸 못 보고 「부르는 곳 0곳」
+    이라고 답합니다 — 처음 돌렸을 때 실제로 셋이 그렇게 잡혔습니다.
+    그래서 예외는 **왜 예외인지**를 같이 적습니다.
+
+    ⚠️ 「덮는가」만이 아니라 **「맞는 칸인가」**도 봅니다 (결함 289):
+    예외에 적어 뒀는데 이제는 제대로 불리는 갈래가 있으면 그것도
+    알려 줍니다 — 낡은 예외는 다음 사람을 속입니다.
+    """
+    import re
+
+    # 예외 — **왜** 화면에서 전체 경로로 안 잡히는지 적습니다.
+    EXCUSED = {
+        "POST /api/github/webhook": "GitHub 이 부릅니다 — 화면이 부르는 갈래가 아닙니다",
+        "PUT /api/meetings/{meeting_id}/tracks/{track_id}/chunks/{seq}": (
+            "`browser-adapter.ts` 가 `${trackUrl}/chunks/${seq}` 로 이어 붙입니다"
+        ),
+        "GET /api/meetings/{meeting_id}/tracks/{track_id}/chunks": (
+            "`demo/main.ts` 가 `${trackUrl}/chunks` 로 이어 붙입니다"
+        ),
+        "POST /api/meetings/{meeting_id}/tracks/{track_id}/complete": (
+            "`demo/main.ts` 가 `${trackUrl}/complete` 로 이어 붙입니다"
+        ),
+        # ⚠️ 아래 둘은 **진짜로 아무도 안 부릅니다.** 숨기지 않고 적어 둡니다 —
+        #    만들어 놓고 화면에 안 이은 것이고(실패 ①), 붙일 때 이 줄을 지웁니다.
+        "PUT /api/projects/{project_id}/channels/order": (
+            "CHANNEL-005 채널 순서 — 서버만 있고 화면에 아직 안 이었습니다"
+        ),
+        "GET /api/projects/{project_id}/mentions": (
+            "멘션 자동완성 — 서버만 있고 화면에 아직 안 이었습니다 "
+            "(멘션 자체는 서버가 본문에서 찾아 내므로 동작합니다)"
+        ),
+    }
+
+    routes: list[tuple[str, str, str]] = []
+    for path in sorted((REPO_ROOT / "backend" / "teamflow" / "api").rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        prefix = ""
+        head = re.search(r"APIRouter\(([^)]*)\)", source, re.S)
+        if head:
+            got = re.search(r'prefix\s*=\s*"([^"]*)"', head.group(1))
+            if got:
+                prefix = got.group(1)
+        for hit in re.finditer(
+            r'@\w+\.(get|post|patch|put|delete)\(\s*"([^"]*)"', source
+        ):
+            routes.append(
+                (hit.group(1).upper(), prefix + hit.group(2), str(path.relative_to(REPO_ROOT)))
+            )
+
+    assert len(routes) > 50, f"라우트를 {len(routes)}개밖에 못 찾았습니다 — 가드가 헛돕니다"
+
+    screens: list[str] = []
+    for base in ("frontend/src", "webapp/src"):
+        for path in (REPO_ROOT / base).rglob("*"):
+            if path.suffix in (".ts", ".tsx") and ".test." not in path.name:
+                code = path.read_text(encoding="utf-8")
+                # 주석의 「예전에는 이렇게 불렀다」를 진짜 호출로 물지 않게 걷습니다.
+                code = re.sub(r"/\*[\s\S]*?\*/", "", code)
+                code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
+                screens.append(code)
+
+    def called(route_path: str) -> bool:
+        pattern = re.escape(route_path)
+        pattern = re.sub(r"\\\{[a-z_]+\\\}", r"[^/`'\"\\s]+", pattern)
+        rx = re.compile(pattern)
+        return any(rx.search(code) for code in screens)
+
+    orphans: list[str] = []
+    stale: list[str] = []
+    for method, route_path, where in routes:
+        key = f"{method} {route_path}"
+        if called(route_path):
+            if key in EXCUSED:
+                stale.append(f"{key}  — 예외에 적힌 사유가 낡았습니다: {EXCUSED[key]}")
+        elif key not in EXCUSED:
+            orphans.append(f"{key}  ({where})")
+
+    assert not orphans, (
+        "이 서버 갈래를 **부르는 화면이 하나도 없습니다** — 만들어 놓고 안 이은 것이거나\n"
+        "  (실패 ①), 주소를 조각으로 만들어 이 자가 못 본 것입니다. 후자면 위\n"
+        "  `EXCUSED` 에 **왜인지** 적으세요:\n  " + "\n  ".join(orphans)
+    )
+    assert not stale, (
+        "이제 제대로 불리는데 예외에 남아 있습니다 — 낡은 예외는 다음 사람을 속입니다:\n  "
+        + "\n  ".join(stale)
+    )
