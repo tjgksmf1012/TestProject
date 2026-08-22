@@ -23,6 +23,7 @@ import {
   type TaskGithubLink,
   emptyBoard,
   emptyBoardLine,
+  cardMarks,
   unknownOriginNote,
 } from './board.ts';
 
@@ -565,5 +566,52 @@ describe('출처 기록이 없는 카드 (결함 317)', () => {
        적어 둔 그것입니다. */
     const note = unknownOriginNote();
     ok(!/지워졌|옛 자료|고장|오류/.test(note), `없는 이유를 붙였습니다: ${note}`);
+  });
+});
+
+describe('카드 표면의 표 (결함 319)', () => {
+  const task = (over: Partial<Task>): Task =>
+    ({
+      id: 1, title: 't', assignee_ids: [1], status: 'todo',
+      deadline: null, completed_at: null, origin: null, github: [], priority: 2,
+      ...over,
+    }) as Task;
+
+  it('⛔ 마감만 지난 업무에 「기여도에 반영 안 됨」을 붙이지 않는다', () => {
+    /* 재서 확인한 것: 마감을 과거로 옮기니 「접근성 점검」(담당자 둘)의
+       표면이 「기여도에 반영 안 됨」이었습니다. 서버는 늦게 끝낸 업무에도
+       `TASK_COMPLETED`(10점)를 그대로 줍니다 — 늦음이 바꾸는 것은
+       **일정 준수** 범주뿐입니다. */
+    const marks = cardMarks(task({ assignee_ids: [1, 2], deadline: '2026-08-10' }), '2026-08-22');
+    ok(!marks.some((m) => /반영 안 됨/.test(m.text)), JSON.stringify(marks));
+    ok(marks.some((m) => m.tone === 'late'), JSON.stringify(marks));
+  });
+
+  it('⭐ 담당자가 없을 때만 「기여도에 반영 안 됨」이다', () => {
+    const none = cardMarks(task({ assignee_ids: [], deadline: null }), '2026-08-22');
+    deepStrictEqual(none, [{ text: '기여도에 반영 안 됨', tone: 'gap' }]);
+  });
+
+  it('⭐ 둘 다면 둘 다 — 하나로 뭉개지 않는다', () => {
+    const both = cardMarks(task({ assignee_ids: [], deadline: '2026-08-10' }), '2026-08-22');
+    deepStrictEqual(both.map((m) => m.tone), ['gap', 'late']);
+  });
+
+  it('⭐ 제때인 업무에는 아무 표도 없다', () => {
+    deepStrictEqual(cardMarks(task({ deadline: '2026-09-30' }), '2026-08-22'), []);
+    deepStrictEqual(cardMarks(task({ deadline: null }), '2026-08-22'), []);
+  });
+
+  it('⚠️ 늦게 **완료**한 것과 아직 안 한 것을 가른다', () => {
+    /* ⚠️ 완료된 업무는 `completed_at` 이 있어야 늦음을 잽니다 —
+       처음 쓴 씨앗은 `completed_at: null` 이라 **실기가 만들 수 없는
+       모양**이었고, 그래서 아무 표도 안 나왔습니다 (결함 288 의 교훈). */
+    const done = cardMarks(
+      task({ deadline: '2026-08-10', status: 'done', completed_at: '2026-08-15T01:00:00Z' }),
+      '2026-08-22',
+    );
+    strictEqual(done[0]?.text, '늦게 완료');
+    const todo = cardMarks(task({ deadline: '2026-08-10' }), '2026-08-22');
+    strictEqual(todo[0]?.text, '마감 지남');
   });
 });

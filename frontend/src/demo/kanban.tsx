@@ -34,6 +34,7 @@ import {
   sortLinks,
   statusPatch,
   summarize,
+  cardMarks,
   taskWarnings,
   toColumns,
   type Task,
@@ -312,7 +313,15 @@ function Card({
       {/* 못 재는 자리 — **형태로** 말합니다. 전문은 접힌 곳에.
           ⚠️ 못 잰다는 말은 경고가 아닙니다 — 담당자가 없는 업무는 잘못된
           것이 아니라 **누구 기여인지 알 수 없는** 것이라 흙빛입니다. */}
-      {warnings.length > 0 && <p className="gapmark">기여도에 반영 안 됨</p>}
+      {/* ⛔ 예전에는 `warnings.length > 0` 하나로 **종류를 안 보고**
+          「기여도에 반영 안 됨」을 붙였습니다 (결함 319). 담당자가 둘인데
+          마감만 지난 업무에도 그 말이 붙었고, 그건 거짓입니다 — 늦게 끝낸
+          업무도 완료 점수는 그대로 받습니다. 판단은 `@lib`. */}
+      {cardMarks(task, today).map((mark) => (
+        <p key={mark.tone} className={mark.tone === 'gap' ? 'gapmark' : 'gapmark latemark'}>
+          {mark.text}
+        </p>
+      ))}
 
       <div className="moves">
         {/* ⭐ 지우기 (`TASK-003`).

@@ -318,6 +318,51 @@ export function moveDirection(
  * 입니다. 반대로 **담당자가 없는 업무는 완료해도 기여도에 잡히지 않으므로**
  * 그건 말해 줘야 합니다.
  */
+/**
+ * 카드 **표면**에 붙일 표. 서랍을 안 열어도 보이는 것입니다.
+ *
+ * ## ⛔ 늦은 업무에 「기여도에 반영 안 됨」 (결함 319)
+ *
+ * 레거시 카드는 경고가 하나라도 있으면 **종류를 안 보고** 이 한 문장을
+ * 붙였습니다 —
+ *
+ *     {warnings.length > 0 && <p className="gapmark">기여도에 반영 안 됨</p>}
+ *
+ * 마감을 과거로 옮겨 재 봤습니다. 「접근성 점검」은 담당자가 **둘**이고
+ * 경고는 「마감일(2026-08-10)이 지났습니다」 하나뿐인데, 표면은
+ * **「기여도에 반영 안 됨」**이었습니다.
+ *
+ * **그 말은 거짓입니다.** 서버를 확인했습니다 — 늦게 끝낸 업무도
+ * `TASK_COMPLETED`(10점)를 그대로 받고, 늦음이 바꾸는 것은 **일정 준수**
+ * 범주뿐입니다 (`task_service._record_deadline_verdict`). 기여도에서
+ * 빠지는 것은 **담당자가 없을 때**입니다.
+ *
+ * 기여를 다루는 제품에서 「네 늦은 일은 안 쳐준다」는 말이 사실이 아닌 채로
+ * 나가면 안 됩니다.
+ *
+ * ⚠️ **SPA 는 처음부터 갈라 그리고 있었습니다** — `{overdue && <span
+ * className="kcard__late">지남</span>}`. 301·308·309·313·316 에 이어
+ * 레거시만 갈라진 여섯 번째입니다.
+ */
+export interface CardMark {
+  text: string;
+  /** `gap` = 기여도에서 빠짐 · `late` = 마감이 지남 (빠지는 것과 다릅니다). */
+  tone: 'gap' | 'late';
+}
+
+export function cardMarks(task: Task, today: string): CardMark[] {
+  const marks: CardMark[] = [];
+  // 이것만이 「기여도에 반영 안 됨」입니다 — 서버도 담당자 없는 업무에는
+  // 완료 이벤트를 사람에게 못 답니다.
+  if (task.assignee_ids.length === 0) {
+    marks.push({ text: '기여도에 반영 안 됨', tone: 'gap' });
+  }
+  if (isOverdue(task, today)) {
+    marks.push({ text: task.status === 'done' ? '늦게 완료' : '마감 지남', tone: 'late' });
+  }
+  return marks;
+}
+
 export function taskWarnings(task: Task, today: string): string[] {
   const warnings: string[] = [];
 
