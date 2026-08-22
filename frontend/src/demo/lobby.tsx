@@ -13,6 +13,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { pageTitle } from '../lib/shell/title.ts';
+import { meetingLabel } from '../lib/ui/naming.ts';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -90,6 +92,11 @@ function Lobby() {
   // 그건 사용자가 자기 신원을 스스로 선언하는 구조였습니다.
   const [me, setMe] = useState<Me | null>(null);
   const [projectId, setProjectId] = useState(0);
+  /* ⛔ **회의를 번호로 부르고 있었습니다** (결함 299). 이 화면은 서버가
+     주는 `title` 을 받아 놓고 `project_id` 만 꺼내 쓰고 있었습니다 —
+     결함 285 가 SPA·서버를 고칠 때 여기만 남았고, 그 가드는 `` `회의
+     ${'${id}'}` `` 가 **템플릿 끝에 올 때만** 잡는 자였습니다. */
+  const [meetingTitle, setMeetingTitle] = useState<string | null>(null);
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   /* ⚠️ **`null` 은 「아직 못 받음」입니다** (결함 255). 빈 배열로 두면
      명단이 먼저 온 찰나에 전원이 「미참가」로 섭니다. */
@@ -195,13 +202,25 @@ function Lobby() {
       setMe((await response.json()) as Me);
       const meeting = (await getJson(`/api/meetings/${meetingId}`).catch(() => null)) as {
         project_id: number;
+        title: string | null;
       } | null;
-      if (meeting !== null) setProjectId(meeting.project_id);
+      if (meeting !== null) {
+        setProjectId(meeting.project_id);
+        setMeetingTitle(meeting.title);
+      }
       await refresh();
       timer = setInterval(() => void refresh(), POLL_MS) as unknown as number;
     })();
     return () => clearInterval(timer);
   }, [refresh]);
+
+  /* ⚠️ **탭도 회의 이름을 이고 있어야 합니다** (결함 285 가 적어 둔 피해).
+     레거시 화면은 `.html` 의 `<title>` 을 그대로 쓰기 때문에, 이름 없는
+     회의 둘을 열면 탭 둘이 「회의 로비 — TeamFlow」로 글자 하나 안 틀리고
+     똑같았습니다. 형식은 한 벌(`pageTitle`)에서 옵니다. */
+  useEffect(() => {
+    document.title = pageTitle(`${meetingLabel(meetingTitle, meetingId)} 로비`);
+  }, [meetingTitle, meetingId]);
 
   const meId = me?.user_id ?? 0;
 
@@ -429,7 +448,7 @@ function Lobby() {
         {sub !== null && sub.tone === 'bad' ? (
           <span className="bad">{sub.text}</span>
         ) : (
-          `회의 ${meetingId} · 팀원 ${roster.length}명`
+          `${meetingLabel(meetingTitle, meetingId)} · 팀원 ${roster.length}명`
         )}
       </p>
 

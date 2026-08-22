@@ -6856,9 +6856,18 @@ describe('⛔ 회의를 **한 이름으로** 부른다 (결함 285)', () => {
         if ((m[2] ?? '') === '') continue;
         guilty.push(`${name}: ${m[0].slice(0, 46)}`);
       }
-      // 번호로 직접 짓는 모양 (`회의 ${id}`) 도 같은 병입니다.
-      const numbered = /`회의\s*#?\$\{[^}]*(?:id|Id|번호)[^}]*\}`/.exec(code);
-      if (numbered !== null) guilty.push(`${name}: ${numbered[0]}`);
+      /* 번호로 직접 짓는 모양 (`회의 ${id}`) 도 같은 병입니다.
+
+         ⚠️ **이 자가 틀렸었습니다** (결함 299). 끝에 `` ` `` 를 붙여 둬서
+         **번호가 템플릿의 마지막일 때만** 잡았습니다. 레거시 로비의
+
+             `회의 ${meetingId} · 팀원 ${roster.length}명`
+
+         은 뒤에 글자가 더 있어서 그대로 통과했고, 그 화면은 회의를
+         「회의 1」이라고 부르고 있었습니다. 이름을 막는 것은 요구를 재는
+         것이 아닙니다 — **어기는 다른 길**을 같이 세십시오. */
+      const numbered = /`[^`]*회의\s*#?\$\{[^}]*(?:id|Id|번호)[^}]*\}/.exec(code);
+      if (numbered !== null) guilty.push(`${name}: ${numbered[0].slice(0, 46)}`);
     }
     strictEqual(
       guilty.join(' · '),
