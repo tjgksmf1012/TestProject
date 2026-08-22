@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { detailText } from '../lib/http/detail.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import {
@@ -301,8 +302,12 @@ function App() {
         return;
       }
       if (!response.ok) {
+        /* ⛔ 서버가 사람에게 쓴 문장을 버리고 있었습니다 (결함 316). */
         setNote({
-          text: `보고서를 만들지 못했습니다 (HTTP ${response.status})`,
+          text: detailText(
+            await response.json().catch(() => null),
+            `보고서를 만들지 못했습니다 (HTTP ${response.status})`,
+          ),
           tone: 'bad',
         });
         return;

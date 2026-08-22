@@ -41,6 +41,7 @@ import {
   type Lane,
   type ReviewContext,
 } from '../lib/review/candidates.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
@@ -877,7 +878,13 @@ function Review() {
         return;
       }
       if (!response.ok) {
-        setResult({ tone: 'bad', text: `제출 실패 (HTTP ${response.status})` });
+        setResult({
+          tone: 'bad',
+          text: detailText(
+            await response.json().catch(() => null),
+            `제출 실패 (HTTP ${response.status})`,
+          ),
+        });
         return;
       }
       const body = (await response.json()) as {

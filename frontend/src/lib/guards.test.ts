@@ -4197,6 +4197,100 @@ describe('로비가 회의 국면을 본다 (결함 214)', () => {
   });
 });
 
+describe('레거시 설정 화면도 **관리 권한을 본다** (결함 316)', () => {
+  /* ⚠️ 소유자가 아닌 사람(초대 코드로 막 들어온 최소라)으로 꽉 찬
+     프로젝트를 걸어 보고 잡았습니다 —
+
+         「코드 새로 만들기」  disabled=false · aria-disabled 없음
+         눌렀더니             403 {"detail":"이 작업을 할 권한이 없습니다"}
+         화면이 한 말          「코드를 새로 만들지 못했습니다 (HTTP 403)」
+
+     `manageBlockedBecause` 는 `@lib` 에 **이미 있었고**, 그 주석이 예로
+     드는 것이 바로 이 단추입니다. SPA 는 셋 다 부르는데 레거시는 0번
+     불렀습니다 — 301·308·309·313 에 이은 다섯 번째입니다. */
+  const project = readFileSync(join(DEMO, 'project.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  it('⭐ 관리 단추 셋이 **모두** 판단을 거친다 — 하나만 빠져도 그 문이 열린다', () => {
+    for (const [what, id] of [
+      ['초대 코드 새로 만들기', 'rotate'],
+      ['프로젝트 이름 바꾸기', 'save-title'],
+      ['저장소 연결', 'save-repo'],
+    ]) {
+      ok(
+        new RegExp(`manageBlockedBecause\\(\\s*myRole\\s*,\\s*'${what}'`).test(project),
+        `\`${id}\` 가 \`manageBlockedBecause(myRole, '${what}')\` 를 안 거칩니다`,
+      );
+    }
+  });
+
+  it('⭐ 막힌 단추는 `aria-disabled` 이고 **사유를 가리킨다** (결함 234·239)', () => {
+    for (const id of ['rotate', 'save-title', 'save-repo']) {
+      const btn = new RegExp(`id="${id}"([\\s\\S]{0,400}?)</button>`).exec(project)?.[1] ?? '';
+      ok(btn !== '', `\`#${id}\` 단추를 못 찾았습니다`);
+      ok(/aria-disabled=/.test(btn), `\`#${id}\` 가 \`aria-disabled\` 를 안 씁니다`);
+      ok(/aria-describedby=/.test(btn), `\`#${id}\` 가 사유를 안 가리킵니다`);
+    }
+  });
+
+  it('⛔ 가리킨 사유가 **실제로 그려진다** — 가리키기만 하면 빈 곳을 읽습니다', () => {
+    for (const id of ['rotate-why', 'title-why', 'repo-why']) {
+      ok(new RegExp(`id="${id}"`).test(project), `\`#${id}\` 를 가리키는데 그리는 곳이 없습니다`);
+    }
+  });
+
+  it('⚠️ `myRole` 이 **「아직 모름」을 살린다** — `?? null` 로 뭉개지 않는다 (결함 254)', () => {
+    // 명단이 아직 안 왔을 때 `null` 이면 소유자에게도 「관리자에게
+    // 요청하세요」라고 말합니다. 그 둘은 다른 상태입니다.
+    const line = /const myRole = ([^;]+);/.exec(project)?.[1] ?? '';
+    ok(line !== '', '`myRole` 을 못 찾았습니다');
+    ok(!/\?\?\s*null/.test(line), `\`myRole = ${line.trim()}\` — 「아직 모름」이 「없음」으로 뭉개집니다`);
+  });
+});
+
+describe('**보낸 뒤** 실패에서 서버 문장을 버리지 않는다 (결함 316)', () => {
+  /* ⚠️ **결함 301 의 가드는 이걸 못 봤습니다.** 그 가드는
+     `describeHttpStatus(response.status)` 라는 **낱말**을 막습니다.
+     그런데 요구를 어기는 **다른 길**이 열려 있었습니다 — 화면이
+     `HTTP ${'${status}'}` 를 문장에 **직접 박는** 것입니다. 여섯 곳이
+     그 모양이었고, 그중 하나가 최소라에게 「HTTP 403」을 보여 줬습니다.
+
+     결함 295 가 적어 둔 그것입니다 — 「가드를 쓸 때는 「이 요구를 어기는
+     다른 길이 있나」를 같이 세십시오. 낱말 하나를 막는 것은 요구를 재는
+     것이 아닙니다」. */
+  const SENDING = /method:\s*'(POST|PATCH|PUT|DELETE)'|send\(|sendJson\(/;
+
+  it('⭐ 보내고 실패한 자리는 `detailText` 를 거친다', () => {
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.includes('.test.')) {
+          const code = codeOf(readFileSync(full, 'utf8'));
+          for (const m of code.matchAll(/HTTP \$\{[^}]+\}/g)) {
+            const at = m.index ?? 0;
+            const around = code.slice(Math.max(0, at - 700), at + 80);
+            if (/detailText\(/.test(around)) continue;
+            /* 불러오기 실패는 서버 문장이 아니라 **다시 불러오기**가
+               답입니다 (결함 301 이 적어 둔 예외). 보낸 자리만 잽니다. */
+            if (!SENDING.test(around)) continue;
+            offenders.push(`${entry.name}: …${code.slice(at - 40, at + 30).replace(/\s+/g, ' ')}`);
+          }
+        }
+      }
+    };
+    walk(DEMO);
+    strictEqual(
+      offenders.join('\n    '),
+      '',
+      `보낸 뒤 실패에서 서버가 쓴 문장을 버립니다 — \`detailText\` 를 거치세요`,
+    );
+  });
+});
+
 describe('빈 상자 껍질이 격자를 **가로지른다** (결함 313)', () => {
   /* ⚠️ **짝입니다.** 한쪽만 남으면 조용히 되돌아갑니다 —
      클래스만 남으면 규칙이 없어 다시 한 칸에 갇히고, 규칙만 남으면

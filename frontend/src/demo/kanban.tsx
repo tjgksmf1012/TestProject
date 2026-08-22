@@ -505,7 +505,12 @@ function Kanban() {
         return;
       }
       if (!response.ok) {
-        setError(`옮기지 못했습니다 (HTTP ${response.status})`);
+        setError(
+          detailText(
+            await response.json().catch(() => null),
+            `옮기지 못했습니다 (HTTP ${response.status})`,
+          ),
+        );
         return;
       }
       const updated = (await response.json()) as Task;
