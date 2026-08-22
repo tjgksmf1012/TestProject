@@ -21,6 +21,8 @@ import {
   dayAriaLabel,
   dayOf,
   describeKind,
+  canCancelMeeting,
+  cancelMeetingConfirm,
   describeMonth,
   emptyNote,
   hrefFor,
@@ -35,6 +37,7 @@ import {
   type DayCell,
 } from '../lib/calendar/month.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
@@ -146,6 +149,61 @@ function App() {
   useEffect(() => {
     void load(at.year, at.month);
   }, [at, load]);
+
+  /* ⛔ **만들어 놓고 아무도 안 부르던 것**입니다 (결함 298).
+     `DELETE /api/scheduled-meetings/{id}` 는 서버에 처음부터 있었고 검사도
+     붙어 있었는데 부르는 곳이 0곳이었습니다 — 잘못 잡거나 두 번 잡은
+     일정이 달력·홈·회의 목록에 **영영 남았습니다.**
+
+     ⚠️ 무를 수 있는지 **최종 판정은 서버**입니다. 여기서 다시 판단하면
+     같은 규칙이 두 벌이 되고, 격자가 이웃 달을 걸치면 이미 연 회의도
+     `meeting_planned` 로 그려질 수 있습니다. 거절당하면 **서버가 한 말**을
+     그대로 보여 줍니다. */
+  const cancelMeeting = useCallback(
+    async (meetingId: number, title: string): Promise<void> => {
+      if (!window.confirm(cancelMeetingConfirm(title))) return;
+      setSending(true);
+      try {
+        const response = await trySend(() =>
+          fetch(`${apiBase}/api/scheduled-meetings/${meetingId}`, {
+            method: 'DELETE',
+            credentials: 'same-origin',
+          }),
+        );
+        if (response === null) {
+          setNote({ text: unreachableText('일정을 못 물렀습니다'), tone: 'bad' });
+          return;
+        }
+        if (isSessionExpired(response.status)) {
+          goToLogin();
+          return;
+        }
+        if (!response.ok) {
+          /* 400 은 「이미 연 회의는 무를 수 없습니다」입니다 — 그 문장이
+             `describeHttpStatus` 의 일반론보다 훨씬 쓸모 있습니다.
+
+             ⚠️ `detail` 을 `string` 으로 단언하면 안 됩니다 — 422 는
+             **객체 배열**이라 화면에 `[object Object]` 가 찍힙니다
+             (결함 51). 한 벌짜리 `detailText` 를 씁니다. 이 가드가
+             바로 위 코드를 잡아 줬습니다. */
+          const body: unknown = await response.json().catch(() => null);
+          setNote({
+            text: detailText(
+              body,
+              describeHttpStatus(response.status) ?? '일정을 못 물렀습니다',
+            ),
+            tone: 'bad',
+          });
+          return;
+        }
+        setNote({ text: '일정을 물렀습니다.', tone: 'plain' });
+        await load(at.year, at.month);
+      } finally {
+        setSending(false);
+      }
+    },
+    [at, load],
+  );
 
   const schedule = useCallback(async (): Promise<void> => {
     setSending(true);
@@ -296,6 +354,17 @@ function App() {
                         </a>
                       )}
                       {thing.who !== null && <span className="iwho">{thing.who}</span>}
+                      {/* 잡아 둔 일정은 **무를 자리**가 있어야 합니다 (결함 298). */}
+                      {canCancelMeeting(thing) && (
+                        <button
+                          type="button"
+                          className="icancel"
+                          disabled={sending}
+                          onClick={() => void cancelMeeting(thing.meeting_id!, thing.title)}
+                        >
+                          무르기
+                        </button>
+                      )}
                     </li>
                   );
                 })}

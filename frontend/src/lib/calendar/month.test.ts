@@ -7,6 +7,8 @@ import {
   describeMonth,
   describeDate,
   dayOf,
+  canCancelMeeting,
+  cancelMeetingConfirm,
   emptyNote,
   nearestDayWithItems,
   hrefFor,
@@ -270,5 +272,38 @@ describe('비어 있을 때 할 말 (결함 294)', () => {
     strictEqual(describeDate('2026-09-01'), '9월 1일');
     strictEqual(describeDate('2026-12-25'), '12월 25일');
     strictEqual(describeDate('없음'), '없음');
+  });
+});
+
+describe('잡아 둔 일정 무르기 (결함 298)', () => {
+  const item = (over: Partial<CalendarItem> = {}): CalendarItem => ({
+    kind: 'meeting_planned',
+    at: '2026-09-15T01:00:00Z',
+    title: '주간 스탠드업',
+    task_id: null,
+    meeting_id: 7,
+    who: null,
+    done: false,
+    ...over,
+  });
+
+  it('⭐ 잡아 둔 회의에만 무르기를 보여 준다', () => {
+    strictEqual(canCancelMeeting(item()), true);
+    // 이미 연 회의는 서버가 거절합니다 — 단추를 그리지 않습니다.
+    strictEqual(canCancelMeeting(item({ kind: 'meeting_held' })), false);
+    // 마감일은 무를 것이 아닙니다 (칸반에서 고칩니다).
+    strictEqual(canCancelMeeting(item({ kind: 'task_due', meeting_id: null })), false);
+    strictEqual(canCancelMeeting(item({ kind: 'project_due', meeting_id: null })), false);
+  });
+
+  it('⚠️ 가리킬 회의가 없으면 안 그린다 — 누를 곳이 없습니다', () => {
+    strictEqual(canCancelMeeting(item({ meeting_id: null })), false);
+  });
+
+  it('⚠️ 없는 위험을 말하지 않는다 — 다시 잡으면 그만입니다', () => {
+    const said = cancelMeetingConfirm('주간 스탠드업');
+    strictEqual(said.includes('주간 스탠드업'), true);
+    // `deleteTaskConfirm` 과 달리 「되돌릴 수 없습니다」가 아닙니다.
+    strictEqual(said.includes('되돌릴 수 없습니다'), false);
   });
 });

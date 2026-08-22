@@ -4536,6 +4536,61 @@ describe('⛔ 「이번 주」를 화면이 짓지 않는다 (결함 296)', () =
   });
 });
 
+describe('⛔ 잡아 둔 일정을 **무를 자리**가 있다 (결함 298)', () => {
+  /* 서버에는 `DELETE /api/scheduled-meetings/{id}` 가 처음부터 있었고
+     검사(`test_cancelling_only_works_before_it_is_opened`)까지 붙어
+     있었는데 **부르는 곳이 0곳**이었습니다 — 이 저장소의 대표 실패 ①
+     「만들어 놓고 아무도 안 부름」입니다.
+
+     드러난 모양: 일정을 잘못 잡거나 두 번 잡으면 달력·홈·회의 목록에
+     **영영 남았습니다.** 화면 셋(SPA 로비·레거시 로비·일정)을 열어
+     「무르기/취소/삭제」를 찾았고 셋 다 없었습니다.
+
+     ⚠️ 그래서 이 가드는 **세 갈래(만들기·이름 고치기·무르기)가 각각
+     부르는 곳을 가졌는가**를 봅니다 — 낱말이 아니라 요구입니다. */
+  const ROUTES = [
+    { method: 'POST', path: 'scheduled-meetings', what: '일정 잡기' },
+    { method: 'PATCH', path: 'scheduled-meetings', what: '이름 고치기' },
+    { method: 'DELETE', path: 'scheduled-meetings', what: '일정 무르기' },
+  ];
+
+  it('⭐ 서버의 세 갈래가 모두 화면에서 불린다', () => {
+    const sources: string[] = [];
+    const collect = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) collect(full);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.includes('.test.')) {
+          sources.push(codeOf(readFileSync(full, 'utf8')));
+        }
+      }
+    };
+    collect(DEMO);
+    collect(join(ROOT, '..', 'webapp', 'src'));
+    collect(LIB);
+    ok(sources.length > 0, '화면 파일을 하나도 못 찾았습니다 — 가드가 헛돕니다');
+
+    const missing = ROUTES.filter(({ method, path }) =>
+      !sources.some((code) => {
+        if (!code.includes(path)) return false;
+        /* 같은 파일 안에서 그 주소를 부르면서 그 메서드를 쓰는가.
+           `fetch(..., { method: 'DELETE' })` 도 `api.patch(...)` 도 잡습니다. */
+        const verb = method.toLowerCase();
+        return (
+          new RegExp(`['"\`]${method}['"\`]`).test(code) ||
+          new RegExp(`\\.${verb}\\s*[<(]`).test(code)
+        );
+      }),
+    );
+    ok(
+      missing.length === 0,
+      `서버에만 있고 부르는 곳이 없습니다 — 만들어 놓고 아무도 안 부르는 것입니다:\n    ${missing
+        .map((r) => `${r.method} /api/${r.path} (${r.what})`)
+        .join('\n    ')}`,
+    );
+  });
+});
+
 describe('⛔ 기여도 리본은 **순위를 안 그린다** (결함 247)', () => {
   /* 이 저장소의 제일 무거운 불변식(①: 순위·리더보드 금지)이 걸린 자리인데
      **가드가 한 번도 안 울렸습니다.** 조각을 만드는 코드가 `@lib` 이 아니라

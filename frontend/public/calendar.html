@@ -106,6 +106,15 @@
   .ititle { font-size: var(--fs-label); color: var(--text); }
   .iwho { font-size: var(--fs-caption); color: var(--text-subtle); }
 
+  /* 잡아 둔 일정 무르기 (결함 298). ⚠️ 줄 끝으로 밀어 둡니다 — 제목 옆에
+     붙으면 읽는 눈이 매번 버튼을 지나갑니다. 위험한 단추가 아니라
+     **가끔 쓰는** 단추라 조용한 모양입니다. */
+  .icancel { margin-left: auto; min-height: var(--tap);
+             padding: var(--sp-1) var(--sp-3);
+             background: transparent; border: 1px solid var(--line);
+             border-radius: var(--r-ctrl); color: var(--text-muted);
+             font-size: var(--fs-caption); }
+
   /* ── 일정 잡기 ─────────────────────────────────────── */
   .sform { display: grid; gap: var(--sp-2); max-width: 26rem; }
   .clabel { font-size: var(--fs-caption); color: var(--text-subtle); }
