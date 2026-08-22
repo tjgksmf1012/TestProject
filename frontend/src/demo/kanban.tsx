@@ -37,6 +37,7 @@ import {
   taskWarnings,
   toColumns,
   type Task,
+  emptyBoard,
 } from '../lib/kanban/board.ts';
 import { canDropOn, draggedTaskId, dragPayload, TASK_DRAG_TYPE } from '../lib/kanban/dnd.ts';
 import { assigneeText, splitNote, toggled } from '../lib/kanban/assignees.ts';
@@ -579,7 +580,11 @@ function Kanban() {
     <>
       <header className="head">
         <h1>칸반</h1>
-        <p className="lede">회의에서 승인된 업무와 직접 만든 업무가 단계별로 놓입니다.</p>
+        {/* ⛔ 예전에는 「회의에서 승인된 업무와 **직접 만든 업무**가…」였습니다
+            (결함 313). 빈 상자만 고치고 **여기를 놓칠 뻔했습니다** — 이 줄은
+            비어 있지 않을 때도 늘 보이니 더 자주 읽힙니다. 같은 화면에서
+            같은 모양을 몇 곳이나 쓰는지 세고 고칩니다(실패 ②). */}
+        <p className="lede">회의에서 승인된 업무가 단계별로 놓입니다.</p>
         {me !== null && <Byline name={me.name} avatar={me.avatar} what="보는 중" />}
       </header>
     </>
@@ -681,10 +686,15 @@ function Kanban() {
       {summary.total === 0 ? (
         <div id="board" className="board">
           <RawHtml
+            /* ⛔ 예전 문구는 「… **직접 만들 수도 있습니다**」였습니다
+               (결함 313). 이 제품에 그 길은 **일부러** 없습니다 — 업무를
+               만드는 코드는 `approval_service.py` 한 곳이고 그 옆에
+               「승인 없이 tasks 에 쓰는 경로는 없다 — 그게 불변식이다」라고
+               적혀 있습니다. 화면의 컨트롤 열셋을 세어 봐도 만드는 것은
+               없었습니다. SPA 는 처음부터 맞게 적고 있었고, 이제 **한 벌**
+               입니다. */
             html={emptyHtml({
-              what: '여기에는 팀의 업무 카드가 단계별로 놓입니다.',
-              why: '아직 등록된 업무가 하나도 없습니다 — 고장이 아닙니다.',
-              how: '회의를 열어 녹음하면 AI가 업무 후보를 뽑고, 승인한 것이 여기로 옵니다. 직접 만들 수도 있습니다.',
+              ...emptyBoard(),
               action: { label: '회의 열기', href: `/project.html?project=${projectId}` },
             })}
           />

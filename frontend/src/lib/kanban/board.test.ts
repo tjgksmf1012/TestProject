@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { TEAM_TIMEZONE, teamDateOf } from '../time/calendar.ts';
@@ -21,6 +21,8 @@ import {
   toColumns,
   type Task,
   type TaskGithubLink,
+  emptyBoard,
+  emptyBoardLine,
 } from './board.ts';
 
 const TODAY = '2026-09-10';
@@ -508,5 +510,35 @@ describe('countText — 못 잰 것을 0 으로 말하지 않는다 (불변식 �
 
   it('숫자는 그대로', () => {
     strictEqual(countText(3), '3');
+  });
+});
+
+describe('업무가 없을 때 뭐라고 적는가 (결함 313)', () => {
+  it('⛔ 「직접 만들」 길이 있다고 하지 않는다 — 이 제품에 그 길은 없다', () => {
+    /* 재서 확인한 것: 갓 만든 프로젝트의 레거시 칸반에서 보이는 컨트롤
+       열셋을 전부 세었는데 업무를 만드는 것이 하나도 없었습니다. 서버도
+       같습니다 — `approval_service.py` 가 유일한 자리이고 그 옆에
+       「승인 없이 tasks 에 쓰는 경로는 없다 — 그게 불변식이다」. */
+    const empty = emptyBoard();
+    const all = `${empty.what} ${empty.why} ${empty.how}`;
+    ok(!/직접 만들 수/.test(all), all);
+    ok(/승인/.test(all), `업무가 어디서 오는지 안 적습니다: ${all}`);
+  });
+
+  it('⭐ **왜** 그 길이 없는지 적는다 — 「안 됩니다」만 적으면 고장처럼 읽힌다', () => {
+    ok(/일부러/.test(emptyBoard().why), emptyBoard().why);
+  });
+
+  it('⛔ 마크다운 별표를 쓰지 않는다 — 이 자리는 글자 그대로 그려진다 (결함 292)', () => {
+    const empty = emptyBoard();
+    for (const [key, text] of Object.entries(empty)) {
+      ok(!/\*\*/.test(text), `${key} 에 별표가 있습니다: ${text}`);
+    }
+    ok(!/\*\*/.test(emptyBoardLine()), emptyBoardLine());
+  });
+
+  it('⭐ 한 줄짜리와 세 줄짜리가 **같은 사실**을 말한다 — 두 화면이 갈라지지 않게', () => {
+    // 레거시는 세 줄, SPA 는 한 줄입니다. 갈라지면 결함 313 이 그대로입니다.
+    ok(emptyBoardLine().includes(emptyBoard().how), `${emptyBoardLine()} ↔ ${emptyBoard().how}`);
   });
 });

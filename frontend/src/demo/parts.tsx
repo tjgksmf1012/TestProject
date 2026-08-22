@@ -40,7 +40,18 @@ export function RawHtml({
     button.addEventListener('click', handler);
     return () => button.removeEventListener('click', handler);
   }, [html, onRetry]);
-  return <div ref={ref} dangerouslySetInnerHTML={{ __html: html }} />;
+  /* ⚠️ **이 껍질이 격자 항목 하나로 들어갑니다** (결함 313). 칸반의
+     `#board` 는 `display: grid` 인데, `.empty-state` 의
+     `grid-column: 1 / -1` 은 껍질이 아니라 안쪽 상자에 붙어 있어
+     **닿지 않았습니다.** 그래서 빈 상자가 1024px 격자에서 **241px 한
+     칸**만 먹고, 한 줄에 한글 열넷씩 일곱 줄로 접혔습니다.
+
+     저장소는 이미 같은 문제를 스켈레톤에서 `.sk-wrap { display: contents }`
+     로 풀어 뒀습니다 (`app.css`) — 그 옆에 「겉껍질이 격자 항목 하나로
+     들어가면 카드 셋이 한 칸에 우겨넣어집니다」라고 적혀 있습니다.
+     같은 처리를 여기에도 씁니다: 껍질을 지우면 안의 상자가 **그릇의
+     격자에 직접** 놓이고 `grid-column: 1 / -1` 이 그제야 먹습니다. */
+  return <div className="raw-wrap" ref={ref} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 /**

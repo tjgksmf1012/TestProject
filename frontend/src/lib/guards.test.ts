@@ -4197,6 +4197,87 @@ describe('로비가 회의 국면을 본다 (결함 214)', () => {
   });
 });
 
+describe('빈 상자 껍질이 격자를 **가로지른다** (결함 313)', () => {
+  /* ⚠️ **짝입니다.** 한쪽만 남으면 조용히 되돌아갑니다 —
+     클래스만 남으면 규칙이 없어 다시 한 칸에 갇히고, 규칙만 남으면
+     붙일 곳이 없습니다.
+
+     재서 확인한 것 (1440×900, 갓 만든 프로젝트):
+
+         고치기 전  .empty-state 241px · .why 199px · 한글 열넷씩 일곱 줄
+         고친 뒤    .empty-state 1024px · .why 544px
+
+     `.empty-state` 의 `grid-column: 1 / -1` 은 **껍질이 아니라 안쪽
+     상자**에 붙어 있어서, `RawHtml` 이 만든 껍질이 격자 항목으로
+     들어가는 순간 닿지 않았습니다. 저장소가 스켈레톤에서 이미
+     `.sk-wrap { display: contents }` 로 푼 문제입니다 (실패 ②). */
+  const parts = readFileSync(join(DEMO, 'parts.tsx'), 'utf8');
+  const css = readFileSync(join(ROOT, 'public', 'app.css'), 'utf8');
+
+  it('⭐ `RawHtml` 껍질에 이름이 붙어 있다', () => {
+    const wrap = /return <div className="([\w-]+)" ref=\{ref\}/.exec(parts)?.[1] ?? null;
+    strictEqual(wrap, 'raw-wrap', '`RawHtml` 껍질에 `raw-wrap` 이 없습니다');
+  });
+
+  it('⭐ 그 이름이 격자에서 **사라진다** — `display: contents`', () => {
+    const rule = /\.raw-wrap\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    ok(rule !== '', '`.raw-wrap` 규칙이 없습니다 — 껍질이 한 칸을 먹습니다');
+    ok(
+      /display:\s*contents/.test(rule),
+      `\`.raw-wrap { ${rule.trim()} }\` — 껍질이 아직 격자 항목입니다`,
+    );
+  });
+
+  it('⚠️ 스켈레톤 껍질도 같은 처리를 유지한다 — 같은 문제, 같은 답', () => {
+    ok(/\.sk-wrap\s*\{[^}]*display:\s*contents/.test(css), '`.sk-wrap` 처리가 사라졌습니다');
+  });
+});
+
+describe('칸반 빈 상자가 **없는 길**을 가리키지 않는다 (결함 313)', () => {
+  /* ⚠️ 이번 것은 결함 312 보다 나쁜 쪽입니다. 312 는 「아직 없는 곳」을
+     가리켰지만, 이것은 **제품이 일부러 막아 둔 것**을 하라고 시켰습니다 —
+     업무를 만드는 코드는 `approval_service.py` 한 곳이고 그 옆에
+     「승인 없이 tasks 에 쓰는 경로는 없다 — 그게 불변식이다」라고 적혀
+     있습니다. SPA 는 처음부터 맞게 적고 있었고 레거시만 갈라졌습니다
+     (301·308·309 에 이은 네 번째). 그래서 **두 뿌리 다** 걷습니다. */
+  const strip = (code: string) =>
+    code
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', strip(readFileSync(join(DEMO, 'kanban.tsx'), 'utf8'))],
+    [
+      'SPA',
+      strip(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Kanban.tsx'), 'utf8')),
+    ],
+  ];
+
+  it('⛔ 「직접 만든/만들」 업무를 어느 화면도 말하지 않는다 — 빈 상자 **밖**도', () => {
+    /* ⚠️ 처음엔 빈 상자만 고치고 **머리줄을 놓칠 뻔했습니다** —
+       「회의에서 승인된 업무와 **직접 만든 업무**가 단계별로 놓입니다」.
+       그 줄은 비어 있지 않을 때도 늘 보이니 더 자주 읽힙니다. 렌더해서
+       눈으로 잡았습니다. 그래서 자를 파일 **전체**로 넓혔습니다. */
+    for (const [name, code] of ROOTS) {
+      const 걸린것 = /[^\n]*직접 만[든들][^\n]*/.exec(code)?.[0]?.trim() ?? null;
+      strictEqual(걸린것, null, `${name}: 이 제품에 없는 길을 가리킵니다 — ${걸린것}`);
+    }
+  });
+
+  it('⭐ 빈 상자 문장이 **`@lib` 한 벌**에서 온다 — 두 화면이 갈라졌던 자리다', () => {
+    ok(/emptyBoard\(\)/.test(ROOTS[0]![1]!), '레거시가 `emptyBoard` 를 안 씁니다');
+    ok(/emptyBoardLine\(\)/.test(ROOTS[1]![1]!), 'SPA 가 `emptyBoardLine` 을 안 씁니다');
+  });
+
+  it('⛔ 업무가 어디서 오는지를 화면에 **글자로 박아 두지** 않는다', () => {
+    // 박아 두면 `@lib` 를 고쳐도 그 글자가 그대로 나갑니다 (실패 ②).
+    for (const [name, code] of ROOTS) {
+      const 박힌것 = /['"`][^'"`]*업무 후보를 뽑고[^'"`]*['"`]/.exec(code)?.[0] ?? null;
+      strictEqual(박힌것, null, `${name}: 빈 상자 문장이 화면에 박혀 있습니다`);
+    }
+  });
+});
+
 describe('보고서 빈 상자가 회의 수를 보고 말한다 (결함 312)', () => {
   const reports = readFileSync(join(DEMO, 'reports.tsx'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ')

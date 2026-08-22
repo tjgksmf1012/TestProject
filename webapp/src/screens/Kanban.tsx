@@ -19,6 +19,7 @@ import {
   describePull,
   sortLinks,
   type Task,
+  emptyBoardLine,
 } from '@lib/kanban/board.ts';
 import { canDropOn, dragPayload, draggedTaskId, TASK_DRAG_TYPE } from '@lib/kanban/dnd.ts';
 import {
@@ -327,7 +328,9 @@ export default function Kanban() {
         )}
         {cannotLoad === null && board.isSuccess && tasks.length === 0 && (
           <div className="empty" style={{ alignSelf: 'flex-start', flex: 1 }}>
-            아직 업무가 없습니다 — 회의 검토에서 후보를 승인하면 여기 올라옵니다.
+            {/* ⭐ 문장은 `@lib` 한 벌입니다 (결함 313). 레거시가 여기와
+                갈라져 「직접 만들 수도 있습니다」라고 말하고 있었습니다. */}
+            {emptyBoardLine()}
           </div>
         )}
         {cannotLoad === null &&
