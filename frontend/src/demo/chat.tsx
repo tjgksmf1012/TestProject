@@ -38,6 +38,7 @@ import {
   dayGroups,
   describeTime,
   DELETED_TEXT,
+  describeEmptyChannel,
   EDITED_MARK,
   MAX_BODY,
   mentionSegments,
@@ -784,11 +785,12 @@ function App() {
             slow && <div aria-busy="true" dangerouslySetInnerHTML={{ __html: rowSkeleton(4) }} />
           ) : messages.length === 0 ? (
             <RawHtml
-              html={emptyHtml({
-                what: '아직 아무 말도 없습니다',
-                why: `${channelTitle(open)} 채널이 방금 만들어졌습니다.`,
-                how: '아래에 첫 마디를 적어 보세요.',
-              })}
+              /* ⛔ 예전에는 「`${channelTitle(open)}` 채널이 **방금
+                 만들어졌습니다**」였습니다 (결함 304 회차). 화면은 만든
+                 시각을 받지 않습니다 — 채널 목록은 {id, kind, name,
+                 position} 뿐이라 「방금」인지 알 수가 없었습니다. 문구는
+                 한 벌(`@lib`)에서 옵니다. */
+              html={emptyHtml({ what: '아직 아무 말도 없습니다', ...describeEmptyChannel() })}
             />
           ) : (
             <div className="stream">

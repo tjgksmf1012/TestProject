@@ -6,6 +6,7 @@ import {
   canSend,
   carriesMessages,
   channelTitle,
+  describeEmptyChannel,
   continuesRun,
   dayGroups,
   describeDay,
@@ -265,5 +266,24 @@ describe('보낼 수 있는가', () => {
   it('보통은 보낼 수 있다', () => {
     strictEqual(canSend('안녕하세요', TEXT), true);
     strictEqual(sendBlockedReason('안녕하세요', TEXT), null);
+  });
+});
+
+describe('채널이 비었을 때 (결함 304)', () => {
+  it('⭐ **「방금 만들어졌습니다」라고 단언하지 않는다** — 화면은 만든 시각을 받지 않습니다', () => {
+    /* `GET /api/projects/{id}/channels` 는 {id, kind, name, position} 만
+       돌려줍니다. 지난달에 만들어 둔 채널도 「방금」이라고 말했습니다. */
+    const { why } = describeEmptyChannel();
+    strictEqual(/방금/.test(why), false);
+    strictEqual(/만들어졌습니다/.test(why), false);
+  });
+
+  it('⭐ **바쁜 팀인데 왜 여기가 비었나**에 답한다', () => {
+    const { why } = describeEmptyChannel();
+    strictEqual(why.includes('채널마다'), true);
+  });
+
+  it('무엇을 하면 되는지 말한다', () => {
+    strictEqual(describeEmptyChannel().how.includes('첫 마디'), true);
   });
 });

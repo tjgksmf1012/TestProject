@@ -4803,6 +4803,101 @@ describe('⛔ 자리를 바꿔 놓았으면 **초점도 데려간다** — 로�
   });
 });
 
+describe('⛔ 빈 상자가 **화면이 안 본 것**을 단언하지 않는다 (결함 304)', () => {
+  /* 활동 기록이 이렇게 말하고 있었습니다.
+
+       아직 기록된 활동이 없습니다
+       기록은 누가 무언가를 바꿀 때 쌓입니다 — **아직 아무도 안 바꿨습니다.**
+
+     같은 순간 그 팀에는 회의 다섯 · 업무 카드 넷 · 세 사람의 기여도 근거가
+     있었습니다. `what` 은 참이고 **`why` 가 거짓**입니다 — 화면은 자기
+     목록이 빈 것만 확인해 놓고 **팀 전체**를 말했습니다.
+
+     결함 294(일정 화면)와 같은 모양입니다. 그때 적어 둔 규칙:
+     「빈 상자를 지을 때는 「무엇이 비었나」와 「무엇이 있나」를 갈라
+     보십시오」. */
+  it('⭐ 빈 상자 문구가 **아무 일도 없었다**고 말하지 않는다', () => {
+    const guilty: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.includes('.test.')) {
+          const code = codeOf(readFileSync(full, 'utf8'));
+          for (const m of code.matchAll(
+            /(아직 )?아무도 안 (바꿨|했|만들|썼)|아무 일도 (없|안 )/g,
+          )) {
+            /* ⚠️ **부정문을 잡으면 안 됩니다.** 기여도 화면은 「아직 이을
+               활동이 하나도 없습니다 — **아무도 안 했다는 뜻이 아닙니다**」
+               라고 정확히 부정하고 있는데, 처음 쓴 자가 그 부정을 물었습니다
+               (거짓 양성). 「잡혔다」는 「맞다」가 아닙니다. */
+            const around = code.slice(Math.max(0, (m.index ?? 0) - 20), (m.index ?? 0) + 60);
+            if (/(뜻이 )?아닙니다|아니라|안 그렇/.test(around)) continue;
+            guilty.push(`${entry.name}: ${m[0]}`);
+          }
+        }
+      }
+    };
+    walk(DEMO);
+    walk(join(ROOT, '..', 'webapp', 'src'));
+    walk(LIB);
+    ok(
+      guilty.length === 0,
+      `빈 목록을 보고 **팀 전체가 아무것도 안 했다**고 단언합니다 — 그 화면이 못 보는 일이 있습니다\n    ${guilty.join('\n    ')}`,
+    );
+  });
+
+  it('⭐ 활동 화면의 빈 문구는 **한 벌**(`@lib`)에서 온다', () => {
+    const code = codeOf(readFileSync(join(DEMO, 'activity.tsx'), 'utf8'));
+    ok(
+      /describeEmptyActivity\(\)/.test(code),
+      '빈 문구를 화면이 직접 짓고 있습니다 — 판단은 `@lib` 한 벌입니다',
+    );
+  });
+
+  /* 같은 회차에 쓸다가 나온 **두 번째 자리**입니다. 채팅의 빈 채널이
+     「`#공지` 채널이 **방금 만들어졌습니다**」라고 적고 있었는데, 채널
+     목록이 돌려주는 것은 `{id, kind, name, position}` 뿐입니다 — 화면은
+     만든 시각을 **받지도 않습니다.** 지난달에 만들어 두고 아무도 안 쓴
+     채널도 똑같이 「방금」이라고 말합니다.
+
+     ⚠️ 「아무도 안 …」과 달리 이쪽은 **시각**에 대한 단언입니다. 성질은
+     같습니다 — 화면이 확인하지 않은 것을 빈 상자가 말합니다. */
+  it('⭐ 빈 상자가 **받지도 않은 시각**을 말하지 않는다', () => {
+    const guilty: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.includes('.test.')) {
+          const code = codeOf(readFileSync(full, 'utf8'));
+          /* `emptyHtml({...})` 안만 봅니다 — 다른 자리의 「방금」은 진짜
+             방금 일어난 일(막 보낸 메시지 등)일 수 있습니다. */
+          for (const m of code.matchAll(/emptyHtml\(\{[\s\S]{0,400}?\}\)/g)) {
+            if (/방금|조금 전|막 만들어/.test(m[0])) {
+              guilty.push(`${entry.name}: ${m[0].replace(/\s+/g, ' ').slice(0, 90)}`);
+            }
+          }
+        }
+      }
+    };
+    walk(DEMO);
+    walk(join(ROOT, '..', 'webapp', 'src'));
+    ok(
+      guilty.length === 0,
+      `빈 상자가 **언제 생겼는지**를 말합니다 — 화면이 그 시각을 받는지 확인하세요\n    ${guilty.join('\n    ')}`,
+    );
+  });
+
+  it('⭐ 채팅의 빈 채널 문구도 **한 벌**(`@lib`)에서 온다', () => {
+    const code = codeOf(readFileSync(join(DEMO, 'chat.tsx'), 'utf8'));
+    ok(
+      /describeEmptyChannel\(\)/.test(code),
+      '빈 채널 문구를 화면이 직접 짓고 있습니다 — 판단은 `@lib` 한 벌입니다',
+    );
+  });
+});
+
 describe('⛔ 기여도 리본은 **순위를 안 그린다** (결함 247)', () => {
   /* 이 저장소의 제일 무거운 불변식(①: 순위·리더보드 금지)이 걸린 자리인데
      **가드가 한 번도 안 울렸습니다.** 조각을 만드는 코드가 `@lib` 이 아니라

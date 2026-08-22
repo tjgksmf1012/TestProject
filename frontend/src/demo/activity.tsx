@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { describeEmptyActivity } from '../lib/activity/empty.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
 import { tryGet, unreachableText } from '../lib/http/send.ts';
 import { describeTime } from '../lib/chat/view.ts';
@@ -211,11 +212,11 @@ function App() {
       <>
         {header}
         <RawHtml
-          html={emptyHtml({
-            what: '아직 기록된 활동이 없습니다',
-            why: '기록은 누가 무언가를 바꿀 때 쌓입니다 — 아직 아무도 안 바꿨습니다.',
-            how: '업무 후보를 승인하거나 역할 비중을 바꾸면 여기에 남습니다.',
-          })}
+          /* ⛔ 「아직 아무도 안 바꿨습니다」라고 **단언하고 있었습니다**
+             (결함 304). 같은 순간 그 팀에는 회의 다섯·업무 넷·기여도
+             근거가 있었습니다 — 화면은 자기 목록이 빈 것만 보고 팀 전체를
+             말했습니다. 문구는 한 벌(`@lib`)에서 옵니다. */
+          html={emptyHtml({ what: '아직 기록된 활동이 없습니다', ...describeEmptyActivity() })}
         />
       </>
     );

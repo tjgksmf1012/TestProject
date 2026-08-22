@@ -2577,3 +2577,60 @@ def test_every_audit_target_kind_has_a_human_name() -> None:
         "읽는 쪽이 아는데 **아무도 안 쓰는** 종류입니다 — 낡은 것이거나 "
         "찾는 자리가 틀린 것입니다:\n  " + "\n  ".join(stale)
     )
+
+
+def test_the_activity_log_never_starts_receiving_meetings_or_chat() -> None:
+    """⭐ 활동 화면의 빈 상자가 **주장하는 범위**를 서버가 계속 지켜야 한다.
+
+    ## 왜 이 검사가 생겼나
+
+    결함 304 에서 활동 화면이 「아직 아무도 안 바꿨습니다」라고 단언했습니다.
+    같은 순간 그 팀에는 회의 다섯 · 업무 카드 넷 · 세 사람의 기여도 근거가
+    있었습니다. 고친 문장은 **이 기록이 무엇을 받는지**를 말합니다.
+
+        이 기록에는 사람이 손으로 내린 결정만 쌓입니다 …
+        **회의를 열거나 녹음하거나 이야기 나눈 것은 여기 안 남습니다.**
+
+    그 문장은 서버가 **회의를 열 때 감사 기록을 안 쓴다**는 사실 위에 서
+    있습니다. 나중에 누가 `meeting_created` 를 감사 기록에 넣으면 화면은
+    조용히 거짓말을 시작합니다 — 오류도 안 나고 아무도 안 봅니다.
+    (실패 ② — 같은 사실이 두 곳에 있으면 반드시 갈라집니다.)
+
+    ⚠️ 낱말이 아니라 **요구**를 잽니다: 「회의를 여는 것 · 녹음하는 것 ·
+    이야기 나누는 것」이 감사 기록의 갈래에 없어야 합니다. 폐기(`revoked`)·
+    삭제(`deleted`)·재처리(`reprocess`)는 **사람이 손으로 내린 결정**이라
+    화면이 말하는 범위 안이고, 그래서 예외입니다.
+    """
+    import re
+
+    forbidden = ("created", "started", "recorded", "uploaded", "sent", "posted", "opened")
+    allowed_even_though_matching = {
+        # 「손으로 내린 결정」이라 화면이 말하는 범위 안입니다.
+        "meeting_reprocess_requested",
+    }
+
+    actions: dict[str, str] = {}
+    for path in sorted(REPO_ROOT.glob("backend/teamflow/**/*.py")):
+        source = path.read_text(encoding="utf-8")
+        code = re.sub(r'"""[\s\S]*?"""', "", source)
+        code = re.sub(r"^\s*#.*$", "", code, flags=re.M)
+        for hit in re.finditer(r'action="(?P<name>[a-z_]+)"', code):
+            actions.setdefault(hit["name"], str(path.relative_to(REPO_ROOT)))
+
+    assert actions, "감사 기록에 action 을 쓰는 곳을 하나도 못 찾았습니다 — 가드가 헛돕니다"
+
+    leaked = sorted(
+        name
+        for name in actions
+        if name not in allowed_even_though_matching
+        and (
+            any(name.endswith(f"_{word}") for word in forbidden)
+            or name.startswith(("meeting_created", "message_", "chat_", "channel_"))
+        )
+    )
+    assert not leaked, (
+        "활동 화면의 빈 상자가 「회의를 열거나 녹음하거나 이야기 나눈 것은 "
+        "여기 안 남습니다」라고 말합니다 (결함 304). 이 갈래가 들어오면 그 "
+        "문장이 거짓이 됩니다 — `@lib/activity/empty.ts` 를 같이 고치세요:\n  "
+        + "\n  ".join(f"{name}  ({actions[name]})" for name in leaked)
+    )
