@@ -144,7 +144,21 @@ function paint(context: NavContext, shell: ShellData = {}): void {
   const host = document.getElementById('nav');
   if (!host) return;
 
+  // ⚠️ **같은 문을 두 번 그리지 않습니다.** `navLinks` 는 「여기서 갈 수
+  // 있는 곳 전부」라서 탭 넷도 들어 있습니다 — 그대로 그리면 한 화면에
+  // 홈·기여도·설정이 **두 번** 나옵니다 (탭에 한 번, 이 줄에 한 번).
+  //
+  // ⚠️ 탭 목록을 여기에 **베껴 적지 않습니다** — `navTabs` 에게 묻습니다
+  // (실패 ②: 같은 판단이 두 곳에 있으면 반드시 갈라집니다). 그리고
+  // **켜진** 탭만 뺍니다: 프로젝트를 모르면 탭 셋이 흐린 채로 주소가
+  // 없으므로, 그때 이 줄에서까지 빼면 갈 길이 아예 없어집니다.
+  const covered = new Set(
+    navTabs(context)
+      .filter((tab) => tab.enabled)
+      .map((tab) => tab.screen),
+  );
   const links = navLinks(context)
+    .filter((link) => !covered.has(link.screen))
     .map((link) => `<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`)
     .join('');
   const notes = missingLinks(context)

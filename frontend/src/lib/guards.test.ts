@@ -424,11 +424,16 @@ describe('모바일 규칙', () => {
     // 여기서는 **공용 CSS 가 id 선택자로 레이아웃을 걸지 않는가**만
     // 봅니다. id 는 화면 하나의 것이라는 기대로 붙는데 공용 규칙이
     // 거기 걸리면 다른 화면이 조용히 물려받습니다.
-    // `#tabs` 는 예외입니다 — **전 화면이 같은 뜻으로 쓰는 유일한 id**
-    // 입니다. `renderNav` 가 화면마다 정확히 하나를 채우고, 그 하나가
-    // 모든 화면에서 같은 것(아래 탭바)입니다. 이건 이름이 겹쳐서 생긴
-    // 사고가 아니라 의도한 공용 요소입니다.
-    const GLOBAL_IDS = new Set(['#tabs']);
+    // `#tabs` 와 `#nav` 은 예외입니다 — **전 화면이 같은 뜻으로 쓰는 둘**
+    // 입니다. `renderNav` 가 화면마다 정확히 하나씩 채우고, 그 하나가
+    // 모든 화면에서 같은 것(아래 탭바 · 더 보기 줄)입니다. 이건 이름이
+    // 겹쳐서 생긴 사고가 아니라 의도한 공용 요소입니다.
+    //
+    // ⚠️ `#nav` 을 더할 때 **먼저 세어 봤습니다** — 이 이름을 다른 뜻으로
+    // 쓰는 화면이 있으면 그건 예외가 아니라 결함 55·56 그 자체입니다.
+    // 열두 화면 전부 셸이 채우는 그 자리이고, 읽는 코드는 `nav.ts` 한
+    // 곳뿐입니다 (결함 305 에서 되살렸습니다).
+    const GLOBAL_IDS = new Set(['#tabs', '#nav']);
     const css = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
     const layout = /#([a-z][a-z0-9-]*)\s*\{[^}]*display:\s*(grid|flex)/g;
     const offenders = [...css.matchAll(layout)]
@@ -7303,5 +7308,75 @@ describe('⛔ 「이 회의는 언제인가」는 **한 벌**이다 (결함 287)
         `${rel}: started_at 이 비어 있을 수 없다고 적혀 있습니다 — ${decl?.[1]}`,
       );
     }
+  });
+});
+
+describe('⛔ 만든 화면에 **들어갈 문**이 있다 (결함 305)', () => {
+  /* 채팅·일정·알림·활동 기록·찾기·보고서 — **여섯 화면이 제품 어디에서도
+     안 닿았습니다.** 주소를 손으로 치는 것 말고는 방법이 없었습니다.
+
+     원인은 실패 ① 그대로입니다. `@lib/nav/links.ts` 의 `navLinks` 는 그
+     여섯으로 가는 링크를 **정확히 만들고 있었고**, 주석에는 「⚠️ 탭이
+     아니라 여기입니다」라고 왜 여기 두는지까지 적혀 있었습니다. 그리는
+     쪽(`demo/nav.ts`)도 멀쩡했습니다 —
+
+         const host = document.getElementById('nav');
+         if (!host) return;                    // ← 언제나 여기서 돌아섬
+
+     `<nav id="nav">` 이 **열두 화면 어디에도 없었습니다.** 2026-08-07 에
+     「위쪽 링크 줄을 아래로 내렸습니다」라며 탭바로 바꾸면서 그 자리를
+     지웠고, 그 뒤에 만든 여섯 화면이 **이미 없어진 줄**에 등록됐습니다.
+     오류도 안 나고 테스트도 다 초록이었습니다.
+
+     ⚠️ **「부르는가」를 세는 가드는 이걸 못 잡습니다** — `nav.ts` 는
+     `navLinks` 를 제대로 부릅니다. 잡히지 않은 것은 **그린 것이 갈 곳**
+     입니다. 그래서 이 가드는 요구를 잽니다: 만든 화면마다 문이 있는가. */
+
+  const shellScreens = (): string[] =>
+    readdirSync(PUBLIC)
+      .filter((name) => name.endsWith('.html'))
+      .filter((name) => /id="tabs"/.test(readFileSync(join(PUBLIC, name), 'utf8')))
+      .map((name) => name.replace(/\.html$/, ''))
+      .sort();
+
+  it('⭐ 셸을 쓰는 화면에는 **더 보기 줄이 설 자리**가 있다', () => {
+    const missing = shellScreens().filter(
+      (stem) => !/id="nav"/.test(readFileSync(join(PUBLIC, `${stem}.html`), 'utf8')),
+    );
+    ok(
+      missing.length === 0,
+      '`demo/nav.ts` 는 `#nav` 이 있어야 `navLinks` 를 그립니다. 이 화면에는 그 자리가 없어\n' +
+        '    거기서는 채팅·일정·알림·활동·찾기·보고서로 **갈 길이 없습니다**:\n    ' +
+        missing.join(', '),
+    );
+  });
+
+  it('⭐ 만든 화면마다 **탭이든 더 보기 줄이든** 문이 하나는 있다', () => {
+    /* 여기가 진짜 요구입니다. 화면을 새로 만들고 `navLinks` 에 안 넣으면
+       그 화면은 아무도 못 갑니다 — 여섯이 그랬습니다. */
+    const nav = readFileSync(join(LIB, 'nav', 'links.ts'), 'utf8');
+    const doored = new Set<string>();
+    // 탭 넷
+    for (const m of nav.matchAll(/const TAB_ORDER: ScreenId\[\] = \[([^\]]+)\]/g)) {
+      for (const q of (m[1] ?? '').matchAll(/'([a-z]+)'/g)) {
+        if (q[1] !== undefined) doored.add(q[1]);
+      }
+    }
+    // 더 보기 줄이 만드는 주소
+    for (const m of nav.matchAll(/href: `\/([a-z-]+)\.html/g)) {
+      if (m[1] !== undefined) doored.add(m[1]);
+    }
+
+    ok(doored.size >= 8, `문을 만드는 자리를 못 찾았습니다 — 가드가 헛돕니다 (${doored.size}개)`);
+
+    /* 셸을 쓰는 화면 = 사람이 머무는 화면입니다. 녹음(`index`)·통화(`call`)는
+       셸이 없고 회의 안에서만 뜻이 있어 여기서 뺍니다. */
+    const orphans = shellScreens().filter((stem) => !doored.has(stem));
+    ok(
+      orphans.length === 0,
+      '이 화면은 **들어갈 문이 하나도 없습니다** — 주소를 손으로 치는 수밖에 없습니다.\n' +
+        '    `@lib/nav/links.ts` 의 `navLinks` 에 넣거나, 넣지 않을 이유를 여기 적으세요:\n    ' +
+        orphans.join(', '),
+    );
   });
 });

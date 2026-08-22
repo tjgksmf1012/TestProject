@@ -867,6 +867,63 @@ body.no-tabs.has-actionbar {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   더 보기 줄 (`#nav`)
+   ══════════════════════════════════════════════════════════════
+
+   탭은 **넷 그대로** 둡니다 — 사람은 자리를 기억해서 누르므로 다섯째가
+   끼면 넷째를 누르려던 손이 엉뚱한 화면으로 갑니다(2026-08-07 결정).
+   그래서 채팅·일정·알림·활동·찾기·보고서는 여기로 옵니다.
+
+   ⛔ **이 줄이 없어서 그 여섯이 제품 전체에서 안 닿았습니다** (결함 305).
+   `src/demo/nav.ts` 는 `#nav` 이 있으면 채우는데, 그 자리가 열두 화면
+   어디에도 없었습니다. 오류도 안 나고, 링크를 만드는 `navLinks` 는 잘
+   돌고 있었습니다 — 만든 것을 아무도 안 부른 것입니다(실패 ①).
+
+   ⚠️ 본문 **끝**에 둡니다. 위에 두면 화면마다 링크 일곱 줄이 먼저 오고,
+   이 저장소가 줄이려고 애쓴 「글자가 너무 많다」를 도로 늘립니다. */
+
+#nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+  align-items: center;
+
+  margin-top: var(--sp-8);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+#nav:empty {
+  display: none;
+}
+
+#nav a {
+  /* 44px 손가락 표적 — 폰을 뺐어도 창 반쪽·확대 200%·터치 노트북에서
+     필요합니다 (결함 72·150). */
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+#nav a:hover,
+#nav a:focus-visible {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+/* 못 가는 곳과 그 이유 (`missingLinks`). 링크가 아니라 **설명**이라
+   흐리게 두되, 글자 하한 아래로는 안 내립니다 — `--text-subtle` 은
+   `tokens.css` 가 surface 5.17:1 로 재 둔 값입니다. */
+#nav .miss {
+  color: var(--text-subtle);
+  font-size: 0.8125rem;
+}
+
+/* ══════════════════════════════════════════════════════════════
    하단 탭바
    ══════════════════════════════════════════════════════════════
 
