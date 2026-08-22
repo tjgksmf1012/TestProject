@@ -290,6 +290,7 @@ export default function Review() {
             describeActionFailure(
               '검토 확정',
               error instanceof ApiError ? error.status : null,
+              error instanceof ApiError ? error.detail : null,
             ),
           );
         },

@@ -439,6 +439,7 @@ export default function Home() {
                 {describeActionFailure(
                   '회의 열기',
                   m.openMeeting.error instanceof ApiError ? m.openMeeting.error.status : null,
+                  m.openMeeting.error instanceof ApiError ? m.openMeeting.error.detail : null,
                 )}
               </Problem>
             )}

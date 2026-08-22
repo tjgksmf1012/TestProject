@@ -481,6 +481,7 @@ export default function Contributions() {
                 {describeActionFailure(
                   '기여도 확정',
                   confirm.error instanceof ApiError ? confirm.error.status : null,
+                  confirm.error instanceof ApiError ? confirm.error.detail : null,
                 )}
               </Problem>
             )}

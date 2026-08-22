@@ -216,6 +216,7 @@ export default function Lobby() {
               {describeActionFailure(
                 '회의 강제 종료',
                 m.finish.error instanceof ApiError ? m.finish.error.status : null,
+                m.finish.error instanceof ApiError ? m.finish.error.detail : null,
               )}
             </Problem>
           )}
@@ -345,7 +346,7 @@ export default function Lobby() {
           <Problem id="meeting-title-problem" tone="incomplete">
             {renaming ? titleProblem : null}
           </Problem>
-          <Problem>{m.rename.isError ? describeActionFailure('회의 이름 고치기', m.rename.error instanceof ApiError ? m.rename.error.status : null) : null}</Problem>
+          <Problem>{m.rename.isError ? describeActionFailure('회의 이름 고치기', m.rename.error instanceof ApiError ? m.rename.error.status : null, m.rename.error instanceof ApiError ? m.rename.error.detail : null) : null}</Problem>
           <div className="pane__body">
             {/* ⚠️ **홈이 한 말이 여기서 사라지고 있었습니다** (결함 214).
                 홈은 "처리에 실패했습니다 — 트랙이 온전한지 확인하세요"
@@ -391,6 +392,9 @@ export default function Lobby() {
                     ? describeActionFailure(
                         '다시 처리',
                         reprocess.error instanceof ApiError ? reprocess.error.status : null,
+                        /* 409 는 「처리에 실패했거나 큐에 걸린 회의만 다시
+                           처리할 수 있습니다」입니다 — 그 문장이 필요합니다. */
+                        reprocess.error instanceof ApiError ? reprocess.error.detail : null,
                       )
                     : reprocess.isSuccess
                       ? (reprocess.data?.message ?? '')

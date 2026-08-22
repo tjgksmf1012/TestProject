@@ -580,6 +580,9 @@ function RepoSection({
               {describeActionFailure(
                 '지난 활동 가져오기',
                 backfill.error instanceof ApiError ? backfill.error.status : null,
+                backfill.error instanceof ApiError ? backfill.error.detail : null,
+                /* ⭐ 서버가 「GitHub App 자격 증명이 없습니다」라고 정확히
+                   말하는데 화면이 버리고 있었습니다 (결함 300). */
               )}
             </Problem>
           )}

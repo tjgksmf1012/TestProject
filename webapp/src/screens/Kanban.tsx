@@ -36,6 +36,11 @@ import { ApiError } from '../api/client.ts';
 function statusOf(error: unknown): number | null {
   return error instanceof ApiError ? error.status : null;
 }
+
+/** 서버가 사람에게 쓴 문장. 409 에서는 이것이 일반론보다 낫습니다 (결함 300). */
+function detailOf(error: unknown): string | null {
+  return error instanceof ApiError ? error.detail : null;
+}
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { withJosa } from '@lib/text/josa.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -256,11 +261,23 @@ export default function Kanban() {
      것과 업무를 못 지운 것은 다른 사실입니다. 판단·문구는 `@lib`. */
   const failed =
     patchTask.error != null
-      ? { what: '업무 바꾸기', status: statusOf(patchTask.error) }
+      ? {
+          what: '업무 바꾸기',
+          status: statusOf(patchTask.error),
+          detail: detailOf(patchTask.error),
+        }
       : setAssignees.error != null
-        ? { what: '담당자 바꾸기', status: statusOf(setAssignees.error) }
+        ? {
+            what: '담당자 바꾸기',
+            status: statusOf(setAssignees.error),
+            detail: detailOf(setAssignees.error),
+          }
         : deleteTask.error != null
-          ? { what: '업무 지우기', status: statusOf(deleteTask.error) }
+          ? {
+              what: '업무 지우기',
+              status: statusOf(deleteTask.error),
+              detail: detailOf(deleteTask.error),
+            }
           : null;
 
   const move = (task: Task, to: string) => {
@@ -373,7 +390,7 @@ export default function Kanban() {
           있었고 칸반만 빠져 있었습니다 (실패 ②). */}
       {failed !== null && (
         <div style={{ padding: '0 var(--sp-6) var(--sp-4)' }}>
-          <Problem>{describeActionFailure(failed.what, failed.status)}</Problem>
+          <Problem>{describeActionFailure(failed.what, failed.status, failed.detail)}</Problem>
         </div>
       )}
     </AppShell>

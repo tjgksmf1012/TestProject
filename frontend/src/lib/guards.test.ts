@@ -4591,6 +4591,71 @@ describe('⛔ 잡아 둔 일정을 **무를 자리**가 있다 (결함 298)', ()
   });
 });
 
+describe('⛔ 서버가 쓴 문장을 화면이 버리지 않는다 (결함 300)', () => {
+  /* 「지난 활동 가져오기」를 누르면 서버는 이렇게 답합니다.
+
+       409  서버에 GitHub App 자격 증명이 없거나 App이 아직 이 저장소에
+            설치되지 않았습니다. 지난 활동을 가져오려면 그것부터 필요합니다.
+
+     그런데 화면은 「**다른 사람이 먼저 처리했습니다.** 새로고침해서 지금
+     상태를 보고 다시 정해 주세요」라고 했습니다 — 없던 사람을 지어내고,
+     아무리 새로고침해도 안 되는 일을 시켰습니다.
+
+     `ApiError` 는 `status` 와 `detail` 을 **둘 다** 들고 있는데 화면들이
+     `status` 만 꺼내 쓰고 있었습니다. 그래서 **상태만 꺼내는 자리는
+     문장도 같이 꺼내는가**를 잽니다 — 낱말이 아니라 짝입니다. */
+  it('⭐ `describeActionFailure` 에 상태를 주면 **문장도 같이** 준다', () => {
+    const files: { name: string; code: string }[] = [];
+    const collect = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) collect(full);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.includes('.test.')) {
+          files.push({ name: entry.name, code: codeOf(readFileSync(full, 'utf8')) });
+        }
+      }
+    };
+    collect(join(ROOT, '..', 'webapp', 'src'));
+    collect(DEMO);
+    ok(files.length > 0, '화면 파일을 하나도 못 찾았습니다 — 가드가 헛돕니다');
+
+    const offenders: string[] = [];
+    for (const { name, code } of files) {
+      /* 호출 하나를 통째로 떼어 냅니다 — 괄호가 닫힐 때까지. */
+      for (const hit of code.matchAll(/describeActionFailure\(/g)) {
+        let depth = 0;
+        let end = hit.index ?? 0;
+        for (let i = (hit.index ?? 0) + 'describeActionFailure'.length; i < code.length; i++) {
+          if (code[i] === '(') depth++;
+          else if (code[i] === ')') {
+            depth--;
+            if (depth === 0) { end = i; break; }
+          }
+        }
+        const call = code.slice(hit.index ?? 0, end + 1);
+        // 상태를 꺼내 쓰는 호출인가 (`.status` 또는 `statusOf(`·`failed.status`).
+        if (!/\.status\b|statusOf\(/.test(call)) continue;
+        // 그렇다면 문장도 꺼내야 합니다.
+        if (!/\.detail\b|detailOf\(/.test(call)) {
+          offenders.push(`${name}: ${call.replace(/\s+/g, ' ').slice(0, 70)}`);
+        }
+      }
+    }
+    ok(
+      offenders.length === 0,
+      `서버가 쓴 문장(\`ApiError.detail\`)을 버리고 있습니다 — 409 는 그 문장이 전부입니다\n    ${offenders.join('\n    ')}`,
+    );
+  });
+
+  it('⭐ 어휘가 **없는 사람을 지어내지 않는다**', () => {
+    const code = codeOf(readFileSync(join(LIB, 'ui', 'load.ts'), 'utf8'));
+    ok(
+      !/다른 사람이 먼저/.test(code),
+      '409 를 「다른 사람이 먼저 처리했습니다」로 때우고 있습니다 — 이 제품의 409 다섯은 전부 조건 미충족입니다',
+    );
+  });
+});
+
 describe('⛔ 기여도 리본은 **순위를 안 그린다** (결함 247)', () => {
   /* 이 저장소의 제일 무거운 불변식(①: 순위·리더보드 금지)이 걸린 자리인데
      **가드가 한 번도 안 울렸습니다.** 조각을 만드는 코드가 `@lib` 이 아니라

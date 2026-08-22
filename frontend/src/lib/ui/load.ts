@@ -64,7 +64,15 @@ export function describeLoadFailure(what: string, status: number | null): string
  * 되는 실패(권한·충돌·잘못된 요청)에 그렇게 쓰면, 사람은 되지 않는 것을
  * 반복하다 제품을 불신하게 됩니다.
  */
-export function describeActionFailure(what: string, status: number | null): string {
+export function describeActionFailure(
+  what: string,
+  status: number | null,
+  /**
+   * 서버가 **사람에게 쓴 문장** (`ApiError.detail`). 409 에서는 이것이
+   * 일반론보다 언제나 낫습니다 — 아래 참고.
+   */
+  detail?: string | null,
+): string {
   const 를 = withJosa(what, '을를');
   if (status === null || status === 0) {
     // ⚠️ **"안 됐다" 고 단언하지 않습니다.** 요청이 서버에 닿은 뒤 답만
@@ -75,7 +83,26 @@ export function describeActionFailure(what: string, status: number | null): stri
   if (status === 403) return `이 ${를} 할 권한이 없습니다.`;
   if (status === 404) return `대상이 없습니다 — 정하는 사이에 지워졌을 수 있습니다. 새로고침해 보세요.`;
   if (status === 409) {
-    return `다른 사람이 먼저 처리했습니다. 새로고침해서 지금 상태를 보고 다시 정해 주세요.`;
+    /* ⛔ 예전에는 「**다른 사람이 먼저 처리했습니다.** 새로고침해서 지금
+       상태를 보고 다시 정해 주세요」였습니다 (결함 300).
+
+       이 제품의 409 를 **전부 세어 봤더니 다섯인데 하나도 그 뜻이
+       아닙니다** — 저장소가 이미 남의 프로젝트 것 · 저장소가 아직 연결 안
+       됨 · 서버에 GitHub App 자격 증명 없음 · 실패·대기 중인 회의만 다시
+       처리 가능 · 확정할 기여도가 없음. 전부 **조건이 안 맞는다**이고,
+       새로고침해도 영원히 그대로입니다.
+
+       재현: 「지난 활동 가져오기」를 누르면 서버는 「서버에 GitHub App
+       자격 증명이 없거나 App이 아직 이 저장소에 설치되지 않았습니다」
+       라고 정확히 말하는데, 화면은 「다른 사람이 먼저 처리했습니다」
+       라고 **없던 사람을 지어내** 말하고 있었습니다.
+
+       바로 위 머리말이 금지한 그것입니다 — 「다시 시도하세요」를 다시
+       눌러도 안 되는 실패에 붙이면 사람은 되지 않는 것을 반복합니다. */
+    const said = (detail ?? '').trim();
+    if (said !== '') return said;
+    // 서버가 아무 말도 안 했으면 **원인을 지어내지 않습니다.**
+    return `지금 상태에서는 ${를} 할 수 없습니다.`;
   }
   if (status >= 500) return `${를} 처리하지 못했습니다. 잠시 뒤 다시 시도하세요.`;
   return `${를} 처리하지 못했습니다 (HTTP ${status}).`;

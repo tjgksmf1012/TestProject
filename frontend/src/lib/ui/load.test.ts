@@ -86,8 +86,46 @@ describe('보냈는데 안 됐을 때 (결함 218)', () => {
     strictEqual(/새로고침/.test(action), true);
   });
 
-  it('409 는 **여기서만** 뜻이 있다 — 남이 먼저 했다', () => {
-    strictEqual(/다른 사람이 먼저/.test(describeActionFailure('업무 옮기기', 409)), true);
+  /* ⚠️ **여기 있던 검사를 바꿨습니다** (결함 300).
+
+     예전에는 「409 는 여기서만 뜻이 있다 — **남이 먼저 했다**」였고,
+     `/다른 사람이 먼저/` 를 못 박고 있었습니다. 그런데 이 제품이 실제로
+     내보내는 409 를 **전부 세어 보니 다섯인데 하나도 그 뜻이 아닙니다** —
+
+         다른 프로젝트가 이미 이 저장소를 쓰고 있습니다
+         저장소가 연결되지 않았습니다. 먼저 owner/repo를 저장하세요.
+         서버에 GitHub App 자격 증명이 없거나 App이 아직 …
+         처리에 실패했거나 큐에 걸린 회의만 다시 처리할 수 있습니다
+         확정할 기여도가 없습니다. 활동 기록이 하나도 없습니다
+
+     전부 **조건이 안 맞는다**이고 새로고침해도 영원히 그대로입니다.
+     검사가 못 박고 있던 것은 근거를 적어 둔 결정이 아니라 **틀린 가정**
+     이었습니다. 지키려던 것(409 는 일반론으로 때우지 않는다)은 아래
+     둘이 그대로 잽니다. */
+  it('⭐ 409 는 **서버가 쓴 문장**을 그대로 보여 준다 (결함 300)', () => {
+    const said = '서버에 GitHub App 자격 증명이 없거나 App이 아직 이 저장소에 설치되지 않았습니다.';
+    strictEqual(describeActionFailure('지난 활동 가져오기', 409, said), said);
+  });
+
+  it('⚠️ 409 에서 **없는 사람을 지어내지 않는다**', () => {
+    const generic = describeActionFailure('업무 옮기기', 409);
+    strictEqual(/다른 사람이 먼저/.test(generic), false);
+    // 다시 눌러도 안 되는 실패에 「다시」 를 붙이지 않습니다 (`load.ts` 머리말).
+    strictEqual(/다시|새로고침/.test(generic), false);
+    strictEqual(generic, '지금 상태에서는 업무 옮기기를 할 수 없습니다.');
+  });
+
+  it('⚠️ 빈 문장은 문장이 아니다 — 일반론으로 돌아갑니다', () => {
+    strictEqual(describeActionFailure('업무 옮기기', 409, '   '), '지금 상태에서는 업무 옮기기를 할 수 없습니다.');
+    strictEqual(describeActionFailure('업무 옮기기', 409, null), '지금 상태에서는 업무 옮기기를 할 수 없습니다.');
+  });
+
+  it('⚠️ 다른 상태 코드는 서버 문장에 안 흔들린다 — 문구가 한 벌이어야 합니다', () => {
+    // 500 의 서버 문장은 사람에게 쓴 것이 아닙니다 (스택·내부 이름).
+    strictEqual(
+      describeActionFailure('검토 확정', 500, 'IntegrityError: UNIQUE constraint failed'),
+      describeActionFailure('검토 확정', 500),
+    );
   });
 
   it('⚠️ 조사를 앞말에 맞춰 붙인다', () => {
