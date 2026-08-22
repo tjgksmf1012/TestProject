@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 
 from teamflow.db import models as m
@@ -241,3 +243,116 @@ def test_a_deleted_task_does_not_come_back_by_name(client: TestClient, seeded):
 
     rows = client.get(f"/api/projects/{project_id}/activity").json()
     assert rows[0]["target_label"] == f"task:{task_id}", "지운 업무의 이름이 되살아났습니다"
+
+
+# ══════════════════════════════════════════════════════════════
+# 씨앗에 없던 종류들 (결함 297)
+#
+# 결함 293 은 **씨앗 데이터에 있던 넷**만 고쳤습니다. 실제로 「업무 후보
+# 승인」을 눌러 보니 다섯째가 식별자 그대로 나왔습니다:
+#
+#     업무 후보 승인   김민수   meeting_task_candidates/1
+#
+# ⚠️ 「기능을 한 번 쓰고 *다른* 화면을 다시 열기」 — 제 고침에도 그대로
+#    적용됩니다. 씨앗에 없는 상태는 아무도 안 재고 있습니다.
+# ══════════════════════════════════════════════════════════════
+
+
+def test_a_candidate_target_reads_as_its_title(client: TestClient, seeded):
+    """⭐ 「업무 후보 승인」이 무엇을 승인했는지 보입니다."""
+    project_id = seeded["project_id"]
+    with db_session.session_scope() as session:
+        meeting = m.Meeting(
+            project_id=project_id,
+            title="1주차 정기회의",
+            status="pending",
+            started_by=seeded["user_ids"][0],
+        )
+        session.add(meeting)
+        session.flush()
+        candidate = m.MeetingTaskCandidate(
+            meeting_id=meeting.id,
+            title="로그인 API 구현",
+            confidence=0.9,
+        )
+        session.add(candidate)
+        session.flush()
+        candidate_id = candidate.id
+    plant_target(
+        seeded, "candidate_approved", f"meeting_task_candidates/{candidate_id}"
+    )
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == "로그인 API 구현"
+    assert rows[0]["target"] == f"meeting_task_candidates/{candidate_id}"
+
+
+def test_a_final_contribution_target_names_the_person(client: TestClient, seeded):
+    """⭐ `final_contributions/3:7` — **번호가 둘**입니다.
+
+    ⚠️ 하나짜리 자(`^kind[/:]\\d+$`)로는 이 모양을 아예 못 읽습니다. 하필
+    「기여도 확정값 조정」 — 분쟁에서 제일 먼저 볼 줄입니다.
+    """
+    project_id = seeded["project_id"]
+    user_id = seeded["user_ids"][0]
+    plant_target(seeded, "score_adjusted", f"final_contributions/{project_id}:{user_id}")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == "김민수의 확정 기여도"
+
+
+def test_a_voiceprint_target_names_whose_it_is(client: TestClient, seeded):
+    """⭐ 성문 폐기는 **누구의** 성문인지가 전부입니다."""
+    project_id = seeded["project_id"]
+    user_id = seeded["user_ids"][0]
+    with db_session.session_scope() as session:
+        voiceprint = m.Voiceprint(user_id=user_id, project_id=project_id, embedding=[])
+        session.add(voiceprint)
+        session.flush()
+        voiceprint_id = voiceprint.id
+    plant_target(seeded, "voiceprint_revoked", f"voiceprints/{voiceprint_id}")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == "김민수의 성문"
+
+
+def test_an_audio_target_names_its_meeting(client: TestClient, seeded):
+    """⭐ 녹음 삭제는 **어느 회의의** 녹음인지가 전부입니다.
+
+    ⚠️ 지운 뒤에도 행은 남습니다(`deleted_at` 만 찍습니다) — 그래서 이름을
+    찾을 수 있습니다. 못 찾으면 지어내지 않고 식별자를 그대로 둡니다.
+    """
+    project_id = seeded["project_id"]
+    with db_session.session_scope() as session:
+        meeting = m.Meeting(
+            project_id=project_id,
+            title=None,
+            status="pending",
+            started_by=seeded["user_ids"][0],
+        )
+        session.add(meeting)
+        session.flush()
+        asset = m.AudioAsset(
+            meeting_id=meeting.id,
+            kind="chunk",
+            storage_key="k",
+            encryption_key_id="e",
+            retention_until=datetime(2027, 1, 1, tzinfo=UTC),
+        )
+        session.add(asset)
+        session.flush()
+        asset_id, meeting_id = asset.id, meeting.id
+    plant_target(seeded, "audio_deleted", f"audio_assets/{asset_id}")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    # 제목 없는 회의도 한 벌에서 이름을 받습니다 (결함 285).
+    assert rows[0]["target_label"] == f"제목 없는 회의 #{meeting_id}의 녹음"
+
+
+def test_an_unknown_pair_target_is_still_not_invented(client: TestClient, seeded):
+    """⚠️ 못 찾으면 **지어내지 않습니다** — 결함 293 의 규칙 그대로."""
+    project_id = seeded["project_id"]
+    plant_target(seeded, "score_adjusted", f"final_contributions/{project_id}:99999")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == f"final_contributions/{project_id}:99999"

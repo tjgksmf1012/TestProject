@@ -147,6 +147,32 @@ def recent(session: Session, project_id: int, *, limit: int = MAX_ITEMS) -> list
 #: (`task:4` · `members/1`) — 하나만 보면 절반을 못 읽습니다.
 _TARGET = re.compile(r"^(?P<kind>[a-z_]+)[/:](?P<id>\d+)$")
 
+#: `final_contributions/3:7` — **번호가 둘**입니다 (프로젝트:사람).
+#: ⚠️ 위 정규식은 이 모양을 아예 못 읽습니다. 하나짜리 자로 재면 이
+#: 기록만 통째로 이름 없이 나갑니다 — 하필 「기여도 확정값 조정」,
+#: 분쟁에서 제일 먼저 볼 줄입니다.
+_PAIR_TARGET = re.compile(r"^(?P<kind>[a-z_]+)/(?P<left>\d+):(?P<right>\d+)$")
+
+#: 이름을 찾아 줄 수 있는 종류. ⚠️ **감사 기록에 쓰이는 종류와 짝**이어야
+#: 합니다 — `test_activity_target_kinds` 가 백엔드에서 `target=` 을 쓰는
+#: 곳을 전부 걷어서 여기 있는지 봅니다.
+#:
+#: 결함 293 은 씨앗 데이터에 있던 넷만 고쳤고, 실제로 「업무 후보 승인」을
+#: 눌러 보니 다섯째(`meeting_task_candidates`)가 식별자 그대로 나왔습니다
+#: (결함 297). 종류를 하나씩 더하는 대신 **짝을 재는 가드**를 뒀습니다.
+KNOWN_TARGET_KINDS: frozenset[str] = frozenset(
+    {
+        "task",
+        "members",
+        "users",
+        "meetings",
+        "meeting_task_candidates",
+        "final_contributions",
+        "audio_assets",
+        "voiceprints",
+    }
+)
+
 
 def _target_labels(session: Session, targets: list[str]) -> dict[str, str]:
     """`task:4` → 「접근성 점검」. **한 번에** 찾습니다 (줄마다 질의 금지).
@@ -204,4 +230,57 @@ def _target_labels(session: Session, targets: list[str]) -> dict[str, str]:
                 select(m.Meeting.id, m.Meeting.title).where(m.Meeting.id.in_(meeting_ids))
             ).all()
         ])
+
+    # ⭐ 업무 후보 — 「업무 후보 승인」·「거절」·「AI 결과를 사람이 고침」
+    #    셋이 이 종류를 가리킵니다 (결함 297). 셋 다 사람이 AI 의 판단을
+    #    뒤집은 기록이라, 무엇을 뒤집었는지가 안 보이면 읽을 수가 없습니다.
+    candidate_ids = by_kind.get("meeting_task_candidates", set())
+    if candidate_ids:
+        _fill("meeting_task_candidates", list(session.execute(
+            select(m.MeetingTaskCandidate.id, m.MeetingTaskCandidate.title)
+            .where(m.MeetingTaskCandidate.id.in_(candidate_ids))
+        ).all()))
+
+    # 녹음 — 어느 회의의 것인가. ⚠️ 지운 뒤에도 행은 남습니다
+    #    (`deleted_at` 만 찍습니다) 그래서 이름을 찾을 수 있습니다.
+    asset_ids = by_kind.get("audio_assets", set())
+    if asset_ids:
+        _fill("audio_assets", [
+            (aid, f"{meeting_label(title, mid)}의 녹음")
+            for aid, mid, title in session.execute(
+                select(m.AudioAsset.id, m.Meeting.id, m.Meeting.title)
+                .join(m.Meeting, m.Meeting.id == m.AudioAsset.meeting_id)
+                .where(m.AudioAsset.id.in_(asset_ids))
+            ).all()
+        ])
+
+    # 성문 — 누구의 것인가. ⚠️ 폐기는 임베딩만 비우고 행은 남깁니다.
+    print_ids = by_kind.get("voiceprints", set())
+    if print_ids:
+        _fill("voiceprints", [
+            (vid, f"{name}의 성문")
+            for vid, name in session.execute(
+                select(m.Voiceprint.id, m.User.name)
+                .join(m.User, m.User.id == m.Voiceprint.user_id)
+                .where(m.Voiceprint.id.in_(print_ids))
+            ).all()
+        ])
+
+    # ⭐ `final_contributions/3:7` — 번호가 둘이라 위 자로는 안 읽힙니다.
+    #    가리키는 것은 **그 사람의 확정 기여도**입니다.
+    pairs = [(raw, hit) for raw in targets if (hit := _PAIR_TARGET.match(raw)) is not None]
+    user_ids = {
+        int(hit["right"]) for _, hit in pairs if hit["kind"] == "final_contributions"
+    }
+    if user_ids:
+        names = dict(session.execute(
+            select(m.User.id, m.User.name).where(m.User.id.in_(user_ids))
+        ).all())
+        for raw, hit in pairs:
+            if hit["kind"] != "final_contributions":
+                continue
+            name = names.get(int(hit["right"]))
+            if name:
+                out[raw] = f"{name}의 확정 기여도"
+
     return out

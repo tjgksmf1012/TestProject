@@ -2530,3 +2530,50 @@ def test_no_module_compares_a_meeting_status_that_does_not_exist() -> None:
         "회의 상태로 **없는 값**을 비교합니다 — 그 가지는 영원히 안 탑니다:\n  "
         + "\n  ".join(bad)
     )
+
+
+def test_every_audit_target_kind_has_a_human_name() -> None:
+    """⭐ 감사 기록에 **쓰는 종류**와 **읽는 쪽이 아는 종류**가 짝이어야 한다.
+
+    ## 왜 이 검사가 생겼나
+
+    결함 293 에서 활동 기록의 `target` 에 사람 이름을 붙였습니다. 그런데
+    **씨앗 데이터에 있던 넷만** 고쳤습니다. 「업무 후보 승인」을 실제로 눌러
+    보니 다섯째가 나왔고, 화면은 이렇게 적었습니다 (결함 297):
+
+        업무 후보 승인   김민수   meeting_task_candidates/1
+
+    그 화면은 스스로 「누가 언제 **무엇을** 바꿨는지」라고 말합니다. 종류를
+    하나씩 더하는 것으로는 여섯째가 또 나옵니다 — **짝을 재는 자**를 둡니다.
+
+    ⚠️ 「덮는가」만이 아니라 **「맞는 칸인가」**도 봅니다 (결함 289 의 교훈):
+    읽는 쪽이 아는데 아무도 안 쓰는 종류가 있으면 그것도 알려 줍니다.
+    """
+    import re
+
+    from teamflow.services.activity_service import KNOWN_TARGET_KINDS
+
+    written: dict[str, str] = {}
+    for pattern in ("backend/teamflow/**/*.py",):
+        for path in sorted(REPO_ROOT.glob(pattern)):
+            source = path.read_text(encoding="utf-8")
+            # 주석·문서문자열의 「나쁜 예」를 물지 않게 걷어냅니다 (AGENTS.md).
+            code = re.sub(r'"""[\s\S]*?"""', "", source)
+            code = re.sub(r"^\s*#.*$", "", code, flags=re.M)
+            for hit in re.finditer(r'target=f?"(?P<kind>[a-z_]+)[/:]\{', code):
+                written.setdefault(hit["kind"], str(path.relative_to(REPO_ROOT)))
+
+    assert written, "감사 기록에 target 을 쓰는 곳을 하나도 못 찾았습니다 — 가드가 헛돕니다"
+
+    unnamed = sorted(k for k in written if k not in KNOWN_TARGET_KINDS)
+    assert not unnamed, (
+        "감사 기록이 이 종류를 식별자 그대로 내보냅니다 — "
+        "`activity_service._target_labels` 에 이름을 붙이세요:\n  "
+        + "\n  ".join(f"{kind}  ({written[kind]})" for kind in unnamed)
+    )
+
+    stale = sorted(KNOWN_TARGET_KINDS - set(written))
+    assert not stale, (
+        "읽는 쪽이 아는데 **아무도 안 쓰는** 종류입니다 — 낡은 것이거나 "
+        "찾는 자리가 틀린 것입니다:\n  " + "\n  ".join(stale)
+    )
