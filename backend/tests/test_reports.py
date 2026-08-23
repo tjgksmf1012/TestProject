@@ -742,9 +742,17 @@ def test_the_report_does_not_invent_a_reason_for_a_skipped_category():
 def test_the_report_and_the_screen_say_the_same_thing_about_skipped_areas():
     """⚠️ **같은 사실을 말하는 두 자리를 나란히 놓습니다** (결함 290 의 교훈).
 
-    화면(`lib/contribution/view.ts`)은 같은 목록을 「… 활동은 이번 계산에서
-    빠졌습니다.」라고만 적고 **이유를 안 붙입니다.** 서버가 거기에 없는
-    이유를 덧붙이면 두 자리가 갈라집니다 — 실제로 갈라져 있었습니다.
+    ## ⚠️ 이 검사는 한 번 **아무것도 안 재고 있었습니다** (결함 323)
+
+    처음 판은 「화면이 `가중치` 라고 적지 않는가」라는 **부정만** 봤습니다.
+    그래서 화면이 이유를 **하나도 안 붙인** 상태가 그대로 초록이었습니다 —
+    결함 291 이 적어 둔 「짝 검사가 키 집합만 보고 있던 것」과 같은
+    모양입니다. **짝을 잴 때는 양쪽이 같은 글자를 내는가까지 봅니다.**
+
+    화면에서 이 문장이 왜 중요한가: 활동이 있는 팀에서는 「아직 이 팀에서
+    잰 활동이 없습니다」 줄이 **안 나오므로**, 사람은 이유 없는
+    「문서, 일정 준수, 동료 평가 활동은 이번 계산에서 빠졌습니다」만
+    봅니다. 기여를 다루는 제품에서 그건 「네 활동은 뺐다」로 읽힙니다.
     """
     view = (ROOT / "frontend" / "src" / "lib" / "contribution" / "view.ts").read_text(
         encoding="utf-8"
@@ -754,15 +762,28 @@ def test_the_report_and_the_screen_say_the_same_thing_about_skipped_areas():
         "화면이 이유를 붙이기 시작했으면 서버 문장과 맞춰야 합니다"
     )
 
+    # ⭐ **양쪽이 같은 말을 하는가.** 주석이 아니라 실제로 내보내는 글자에서
+    #    찾습니다 — 주석에 적어 두고 안 고친 것이 바로 결함 323 이었습니다.
+    view_body = "\n".join(
+        line for line in view.splitlines() if not line.strip().startswith(("//", "*", "/*"))
+    )
     period_src = (
         ROOT / "backend" / "teamflow" / "reports" / "period.py"
     ).read_text(encoding="utf-8")
-    body = "\n".join(
+    period_body = "\n".join(
         line for line in period_src.splitlines() if not line.strip().startswith("#")
     )
-    assert "가중치가 0이라 계산에서 빠진" not in body, (
+    for clause in ("팀 전체에 기록된 활동이 없어", "이 계산에 잡힌 것이 없다는 뜻입니다"):
+        assert clause in period_body, f"보고서가 「{clause}」 를 안 씁니다"
+        assert clause in view_body, (
+            f"화면이 「{clause}」 를 안 씁니다 — 같은 사실을 두 자리가 다르게 말하고 "
+            "있습니다. 화면만 보는 사람은 「빠졌습니다」 를 「내 활동은 뺐다」 로 읽습니다"
+        )
+
+    assert "가중치가 0이라 계산에서 빠진" not in period_body, (
         "보고서가 아직 가중치를 이유로 댑니다"
     )
+
 
 
 def period_builder_content():

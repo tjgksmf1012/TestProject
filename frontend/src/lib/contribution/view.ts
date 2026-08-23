@@ -492,9 +492,22 @@ export function teamWarnings(score: TeamScore, people: readonly Person[]): strin
     );
   }
 
+  /* ⛔ **「빠졌습니다」만 적으면 「네 활동은 뺐다」로 읽힙니다** (결함 323).
+     이 목록을 만드는 자는 `scoring.py` 의
+         skipped = [c for c in Category if team_totals[c] <= 0]
+     이라 재는 것은 **팀의 활동량**입니다 — 사람의 잘잘못이 아닙니다.
+
+     ⚠️ 보고서(`reports/period.py`)는 결함 311 에서 여기에 이유를 붙였고,
+     그 주석은 「화면은 이유를 안 붙입니다 — 두 자리가 **같은 사실**을
+     말해야 합니다」라고 **적어만 두고** 갔습니다. 활동이 있는 팀에서는
+     위의 「아직 이 팀에서 잰 활동이 없습니다」 줄도 안 나오므로, 사람은
+     이유 없는 「빠졌습니다」만 봅니다. 문장을 서버와 맞춥니다. */
   if (score.skipped_categories.length > 0) {
     const skipped = score.skipped_categories.map(describeCategory).join(', ');
-    warnings.push(`${skipped} 활동은 이번 계산에서 빠졌습니다.`);
+    warnings.push(
+      `${skipped} — 팀 전체에 기록된 활동이 없어 이번 계산에서 빠졌습니다. ` +
+        '아무도 안 했다는 뜻이 아니라 이 계산에 잡힌 것이 없다는 뜻입니다.',
+    );
   }
 
   /* ⚠️ **나간 사람의 기록은 계산에 그대로 들어갑니다** (결함 222). 빼면
