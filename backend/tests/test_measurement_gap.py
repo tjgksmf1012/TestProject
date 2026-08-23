@@ -525,6 +525,48 @@ def test_retention_expiry_says_something_different(engine):
     assert "끊" not in reason
 
 
+def test_deleting_a_recording_moves_everyones_share_so_it_is_drawn_loudly(engine):
+    """⭐ 원본 삭제는 **팀 전원의 몫을 움직입니다** — 눈에 띄게 그려야 합니다.
+
+    ## 왜 이 검사가 생겼나 (결함 329)
+
+    「내 녹음과 성문 지우기」를 실제로 눌러 보고, 지운 상태와 안 지운 상태를
+    **같은 세션에서** 계산해 견줬습니다:
+
+        김민수 42.19% → 40.75%   (-1.45%p)
+        이하늘 32.95% → 35.25%   (+2.30%p)
+        박지원 24.85% → 24.00%   (-0.85%p)
+
+    이 저장소에서 한 번에 제일 크게 움직이는 기록입니다. 그런데 활동 화면은
+    그 줄을 `touches_contribution: false` 로 받아 평범하게 그렸습니다 —
+    「업무 담당자 변경」은 눈에 띄게 그리면서요.
+
+    `TOUCHES_CONTRIBUTION` 옆에는 「**눈에 띄는 쪽으로 틀립니다** — 안 보이는
+    것보다 한 번 더 보이는 것이 낫습니다」라고 적혀 있었습니다. 손으로 고른
+    목록이라 재 본 적이 없었던 것입니다.
+
+    ⚠️ **숫자가 움직이는 것과 그 기록에 붙은 표시를 한 검사에서 묶습니다.**
+    따로 두면 한쪽만 고쳐집니다 (실패 ②).
+    """
+    from teamflow.services.activity_service import TOUCHES_CONTRIBUTION
+
+    project_id, user_id = seed_deleted_audio(deleted_reason="user_request")
+    gaps = gaps_for(project_id)
+
+    # 먼저 「정말 움직이는가」 — 이것이 참이라야 아래 요구가 의미가 있습니다.
+    assert user_id in gaps, (
+        "원본이 지워졌는데 측정 불가로 안 잡혔습니다 — 이 검사가 헛돕니다"
+    )
+    assert gaps[user_id][0].category is Category.MEETING
+
+    # 그러니 그 사실을 적는 행동은 **눈에 띄게** 그려야 합니다.
+    for action in ("user_data_revoked", "audio_deleted"):
+        assert action in TOUCHES_CONTRIBUTION, (
+            f"`{action}` 는 사람의 몫을 움직이는데 평범하게 그려집니다 — "
+            "분쟁에서 제일 먼저 볼 줄입니다"
+        )
+
+
 def test_refusing_to_keep_the_original_is_not_written_up_as_an_accident(engine):
     """⭐ ② 원본 보관 **거부**는 권리 행사다 — 사고처럼 적으면 안 된다.
 
