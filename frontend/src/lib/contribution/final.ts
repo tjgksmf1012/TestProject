@@ -1,4 +1,5 @@
 
+import { teamDateTime } from '../time/calendar.ts';
 import { withJosa } from '../text/josa.ts';
 /**
  * 최종 확정 — **사람이** 확정한다 (`docs/05` §5).
@@ -274,7 +275,20 @@ export function describeFinals(finals: FinalRow[], names: Map<number, string>): 
 
   const first = finals[0];
   if (first === undefined) return '아직 아무도 확정하지 않았습니다.';
-  const when = new Date(first.confirmed_at).toLocaleString('ko-KR');
+  /* ⚠️ **브라우저 달력이었습니다** (결함 334). `toLocaleString` 을 시간대
+     없이 부르면 보는 사람의 시간대로 찍힙니다 — 같은 순간을
+
+         서울   26. 9. 2. AM 1:30
+         뉴욕   26. 9. 1. PM 12:30
+
+     로 **날짜까지 갈라서** 보여 줍니다. 하필 이 값은 「누가 **언제**
+     확정했는가」 — 분쟁에서 제일 먼저 보는 줄입니다. 팀 달력 한 벌
+     (`Asia/Seoul`)로 그립니다 (결함 246).
+
+     ⚠️ 결함 287 이 `home/next.ts` 에서 같은 것을 고치고 「예전에는
+     `toLocaleString` 을 시간대 없이 불렀습니다」라고 적어 뒀는데, 그때
+     **이 자리와 레거시 기여도 화면은 안 봤습니다.** */
+  const when = teamDateTime(first.confirmed_at) ?? first.confirmed_at;
 
   // ⚠️ `은(는)` 이 그대로 화면에 나오고 있었습니다 (결함 76).
   const who = confirmers(finals, names).join(', ');

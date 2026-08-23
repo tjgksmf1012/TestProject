@@ -1174,13 +1174,33 @@ def test_the_screens_read_the_calendar_from_one_place():
     root = REPO_ROOT / "frontend" / "src"
 
     offenders = []
-    for path in sorted(root.rglob("*.ts")):
+    # ⚠️ **`.tsx` 도 걷습니다** (결함 334). 예전에는 `*.ts` 만 훑어서
+    #    **화면 파일이 통째로 감시 밖**이었습니다 — AGENTS.md 가
+    #    「화면 파일을 세는 곳이 `.ts` 로 하드코딩돼 `.tsx` 를 못 본 것」
+    #    이라고 적어 둔 그 함정이고, 실제로 레거시 기여도 화면이 그 구멍으로
+    #    브라우저 달력을 쓰고 있었습니다. 심어서 확인했습니다: 옛 자로는
+    #    `.tsx` 에 심어도 **0건**이었습니다.
+    for path in sorted([*root.rglob("*.ts"), *root.rglob("*.tsx")]):
         rel = path.relative_to(REPO_ROOT / "frontend").as_posix()
-        if rel in allowed or rel.endswith(".test.ts"):
+        if rel in allowed or rel.endswith(".test.ts") or rel.endswith(".test.tsx"):
             continue
         source = path.read_text()
         for number, line in enumerate(source.splitlines(), 1):
-            if re.search(r"\.getMonth\(\)|\.getDate\(\)|\.getFullYear\(\)", line):
+            # ⚠️ **낱말이 아니라 요구를 잽니다** (결함 295·334). 예전에는
+            #    `getMonth()` 류만 막았는데, 브라우저 달력으로 가는 길은
+            #    하나가 아닙니다 — `toLocaleString()` 을 **시간대 없이**
+            #    부르면 똑같이 보는 사람의 달력이 됩니다. 실제로 그 길로
+            #    두 곳이 새고 있었습니다(`lib/contribution/final.ts` 는
+            #    **두 뿌리가 같이 쓰는** 자리였습니다).
+            #
+            #    `timeZone` 을 명시한 호출은 통과시킵니다 — 그건 팀 달력을
+            #    직접 지정한 것이고, `calendar.ts` 자신이 그렇게 합니다.
+            by_hand = re.search(r"\.getMonth\(\)|\.getDate\(\)|\.getFullYear\(\)", line)
+            loose_locale = (
+                re.search(r"\.toLocale(?:Date|Time)?String\(", line)
+                and "timeZone" not in line
+            )
+            if by_hand or loose_locale:
                 offenders.append(f"{rel}:{number}  {line.strip()}")
 
     assert not offenders, (

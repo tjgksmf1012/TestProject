@@ -52,6 +52,7 @@ import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { scoreCards } from '../lib/ui/skeleton.ts';
 import { Byline, RawHtml } from './parts.tsx';
+import { teamDateTime } from '../lib/time/calendar.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -530,7 +531,7 @@ function Contributions() {
       {header}
 
       <p className="meta-line" id="meta">
-        {score.algo_version} · {new Date(score.computed_at).toLocaleString('ko-KR')} 기준
+        {score.algo_version} · {teamDateTime(score.computed_at) ?? score.computed_at} 기준
       </p>
 
       {/* ⚠️ 이 경고는 **안 줄였습니다.** 여기가 이 제품의 윤리가 사는
