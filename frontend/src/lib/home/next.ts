@@ -141,7 +141,19 @@ export function nextStepFor(meeting: Meeting): NextStep {
         actionable: true,
       };
 
+    /* ⛔ **차례를 기다리는 것과 하고 있는 것은 다릅니다** (결함 325).
+       예전에는 둘을 한 갈래로 묶어 `queued` 회의에도 「처리 중입니다」라고
+       했습니다. 그런데 상태 이름표는 「처리 대기」라서 한 줄 안에서
+       **「처리 대기 — 처리 중입니다」**로 스스로 모순됐습니다.
+       바로 위 `pending` 이 세 국면을 가른 것과 같은 이유입니다(결함 287). */
     case 'queued':
+      return {
+        href: null,
+        label: '',
+        reason: '처리 차례를 기다리는 중입니다 — 아직 시작하지 않았습니다',
+        actionable: false,
+      };
+
     case 'processing':
       return {
         href: null,

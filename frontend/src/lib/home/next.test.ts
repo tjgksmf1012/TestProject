@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
@@ -75,8 +75,21 @@ describe('nextStepFor', () => {
       const step = nextStepFor(meeting({ status }));
       strictEqual(step.href, null, status);
       strictEqual(step.actionable, false, status);
-      strictEqual(step.reason.includes('처리 중'), true, status);
+      ok(step.reason.length > 0, status);
     }
+  });
+
+  it('⭐ **차례를 기다리는 것**과 **하고 있는 것**을 다르게 말한다 (결함 325)', () => {
+    /* 예전에는 둘이 한 갈래라 `queued` 에도 「처리 중입니다」라고 했습니다.
+       상태 이름표는 「처리 대기」라서 한 줄 안에서 **「처리 대기 — 처리
+       중입니다」**로 스스로 모순됐고, 워커가 안 돌면 그 회의는 영영
+       시작되지 않는데 화면은 계속 「처리 중」이라고 말했습니다. */
+    const queued = nextStepFor(meeting({ status: 'queued' })).reason;
+    const processing = nextStepFor(meeting({ status: 'processing' })).reason;
+    ok(queued !== processing, `둘이 같은 말을 합니다: ${queued}`);
+    // 아직 시작 안 한 것을 「하고 있다」고 말하지 않습니다.
+    strictEqual(queued.includes('처리 중입니다'), false, queued);
+    strictEqual(processing.includes('처리 중입니다'), true, processing);
   });
 
   it('검토를 마쳤으면 칸반으로', () => {

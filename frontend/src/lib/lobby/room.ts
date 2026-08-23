@@ -544,7 +544,13 @@ export interface LobbyPhase {
 
 export function lobbyPhase(status: string | null | undefined): LobbyPhase {
   switch (status) {
+    // ⛔ 차례를 기다리는 것과 하고 있는 것은 다릅니다 (결함 325).
     case 'queued':
+      return {
+        canStart: false,
+        note: '녹음이 끝났습니다. 처리 차례를 기다리는 중입니다.',
+        go: null,
+      };
     case 'processing':
       return {
         canStart: false,

@@ -181,7 +181,21 @@ def describe(progress: Progress | None, *, meeting_status: str) -> str:
         line = f"{stage} · {progress.percent}%"
         return f"{line} — {progress.detail}" if progress.detail else line
 
-    if meeting_status in ("queued", "processing"):
+    # ⛔ **차례를 기다리는 것과 하고 있는 것은 다릅니다** (결함 325).
+    #
+    # 예전에는 `("queued", "processing")` 을 한 갈래로 묶어 둘 다 「처리
+    # 중입니다」라고 했습니다. 그런데 `queued` 는 **줄에 서 있는 것**이고,
+    # 워커가 안 돌면 **영영 시작되지 않습니다.** 그 상태에서 「처리 중」은
+    # 일어나지 않는 일을 일어나고 있다고 말하는 것이고, 팀은 기다리기만
+    # 하다가 「다시 처리하기」를 누를 생각을 못 합니다 — 결함 106 이
+    # 「팀은 기다리기만 하고 다시 녹음하지 않습니다」로 적어 둔 바로 그
+    # 실패 모양입니다.
+    #
+    # ⚠️ 바로 위 주석이 「모르는 것과 안 한 것은 다릅니다」라고 적어 두고도
+    #    이 줄에서 그 둘을 뭉개고 있었습니다.
+    if meeting_status == "queued":
+        return "처리 차례를 기다리는 중입니다 — 아직 시작하지 않았습니다"
+    if meeting_status == "processing":
         # ⚠️ "0%" 가 아닙니다. 모르는 것과 안 한 것은 다릅니다.
         return "처리 중입니다 — 진행 상황은 아직 알 수 없습니다"
     return ""
