@@ -31,6 +31,7 @@ import {
   consentAffordance,
   discardAffordance,
   DISCARD_CONFIRM,
+  EXTRA_CONSENTS,
 } from '@lib/lobby/room.ts';
 import { axisTicks, buildDiagram, describeGap, meetingWindow, type TrackInput } from '@lib/track/diagram.ts';
 import {
@@ -648,22 +649,38 @@ export default function Lobby() {
             <p className="t13" style={{ marginBottom: 'var(--sp-4)' }}>
               {consent.data?.message ?? ''}
             </p>
-            <label className="t13" style={{ display: 'flex', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
-              <input
-                type="checkbox"
-                checked={rawAudioValue}
-                onChange={(e) => setRawAudio(e.target.checked)}
-              />
-              원본 음성 보관 — 검토 화면에서 구간을 다시 들을 수 있습니다
-            </label>
-            <label className="t13" style={{ display: 'flex', gap: 'var(--sp-3)', marginBottom: 'var(--sp-4)' }}>
-              <input
-                type="checkbox"
-                checked={voiceprintValue}
-                onChange={(e) => setVoiceprint(e.target.checked)}
-              />
-              목소리 특징 저장 — 다음 회의에서 화자를 더 잘 알아봅니다
-            </label>
+            {/* ⛔ 글은 `@lib` 한 벌입니다 (결함 335). 여기 있던 두 줄은
+                **동의했을 때 얻는 것만** 말하고 거부하면 어떻게 되는지를
+                한 글자도 안 했습니다 — `docs/07` §2.3 이 ②③ 에 대해
+                요구하는 것이 바로 그 「거부해도 됩니다」입니다. */}
+            {EXTRA_CONSENTS.map((item, i) => (
+              <label
+                key={item.key}
+                className="t13"
+                style={{
+                  display: 'flex',
+                  gap: 'var(--sp-3)',
+                  marginBottom: i === EXTRA_CONSENTS.length - 1 ? 'var(--sp-4)' : 'var(--sp-3)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={item.key === 'rawAudio' ? rawAudioValue : voiceprintValue}
+                  onChange={(e) =>
+                    item.key === 'rawAudio'
+                      ? setRawAudio(e.target.checked)
+                      : setVoiceprint(e.target.checked)
+                  }
+                />
+                {/* 글자와 설명을 **한 상자**에 넣습니다 — 형제로 두면
+                    라벨의 격자 항목이 셋이 되어 설명이 왼쪽으로 떨어집니다
+                    (레거시에서 223px 어긋났던 자리입니다). */}
+                <span style={{ display: 'grid', gap: '2px' }}>
+                  {item.label}
+                  <span className="t12 muted">{item.hint}</span>
+                </span>
+              </label>
+            ))}
             <div className="sec__row">
               {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 (결함 234).
                   이미 동의한 사람의 버튼이 `disabled` 면 **Tab 이 건너뛰어**

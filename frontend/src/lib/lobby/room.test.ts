@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 
 import {
+  EXTRA_CONSENTS,
   MIN_USABLE_COVERAGE,
   WARN_GAP_MS,
   canStart,
@@ -740,5 +741,42 @@ describe('빈 회의를 무르기 (결함 320)', () => {
 
   it('⭐ 무르기 전에 **되돌릴 수 없다**고 말한다', () => {
     ok(/되돌릴 수 없습니다/.test(DISCARD_CONFIRM), DISCARD_CONFIRM);
+  });
+});
+
+describe('따로 받는 동의 ②③ 의 글 (결함 335)', () => {
+  // `docs/07` §2.3 은 ②③ 에 대해 **「거부해도 서비스 이용 가능」** 을
+  // 요구합니다. SPA 로비는 동의했을 때 얻는 것만 말하고 거부하면 어떻게
+  // 되는지를 한 글자도 안 했습니다.
+  //
+  // ⚠️ **낱말을 세는 자가 아닙니다.** 「거부」라는 글자가 있는지가 아니라
+  // **거부해도 된다고 말하는가**를 봅니다 — 「거부하면 회의를 못 합니다」도
+  // 「거부」를 담고 있지만 요구를 어깁니다.
+  it('⭐ 둘 다 「거부해도 됩니다」를 말한다', () => {
+    for (const item of EXTRA_CONSENTS) {
+      ok(item.hint.startsWith('거부해도 됩니다'), `${item.label} → ${item.hint}`);
+    }
+  });
+
+  it('⭐ 거부하면 어떻게 되는지를 말한다 — ② 는 지우고 ③ 는 잃을 것이 없다', () => {
+    const byKey = new Map(EXTRA_CONSENTS.map((c) => [c.key, c.hint]));
+    const rawAudio = byKey.get('rawAudio') ?? '';
+    const voiceprint = byKey.get('voiceprint') ?? '';
+    ok(/지웁니다/.test(rawAudio), rawAudio);
+    // ③ 은 `docs/07` §2.3 의 "멀티트랙 모드면 애초에 불필요" 입니다.
+    ok(/트랙별 녹음/.test(voiceprint), voiceprint);
+  });
+
+  it('⛔ 성문이 화자 식별을 **더 잘 하게 한다**고 말하지 않는다', () => {
+    // 파이프라인이 `speaker_source` 에 쓰는 값은 `"track"` 한 곳뿐이고
+    // `Voiceprint(` 를 만드는 프로덕션 코드는 0곳입니다. 성문에 동의해도
+    // 화자 식별은 한 자도 좋아지지 않습니다 — 없는 이득을 내걸고 받는
+    // 동의는 동의가 아닙니다.
+    for (const item of EXTRA_CONSENTS) {
+      ok(
+        !/(더 잘|정확(도|하게)|잘 알아).*(화자|목소리)|화자.*(더 잘|정확)/.test(item.hint),
+        `${item.label} 가 이 제품이 하지 않는 일을 약속합니다 → ${item.hint}`,
+      );
+    }
   });
 });

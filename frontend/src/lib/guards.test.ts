@@ -23,7 +23,7 @@ import { attentionAbout } from './review/candidates.ts';
 import { describeMissingSummary } from './review/phase.ts';
 import { meetingLabel } from './ui/naming.ts';
 import { describeMeetingWhen, meetingWhen } from './home/next.ts';
-import { memberStatuses } from './lobby/room.ts';
+import { EXTRA_CONSENTS, memberStatuses } from './lobby/room.ts';
 import {
   blockers,
   initialState,
@@ -3302,21 +3302,45 @@ describe('상태 화면 (지시서 §7)', () => {
     // 결국 아무도 거부할 수 없었기 때문입니다.
     //
     // 존재가 아니라 **호출**을 셉니다 (결함 47·63·감사 #8 교훈).
+    //
+    // ⚠️ **이 자는 두 번 낡았습니다** (결함 335).
+    //
+    //   ① 체크박스를 `id="keep-audio"` 라는 **글자**로 찾았습니다. 두
+    //      로비가 글을 `@lib` 의 `EXTRA_CONSENTS` 에서 읽게 되자 그
+    //      글자가 화면에서 사라졌고, 요구는 하나도 안 바뀌었는데 자만
+    //      터졌습니다 — "화면을 옮기면 가드가 눈을 감는다" 의 사촌입니다.
+    //   ② 걷는 자리가 **레거시뿐**이었습니다. `/app` 의 로비는 이 자가
+    //      한 번도 안 보고 있었고, 그래서 SPA 가 ②③ 을 「동의하면 얻는
+    //      것」으로만 설명하는 동안 이 검사는 초록이었습니다 (결함 321 과
+    //      같은 모양 — **뿌리마다 따로 세십시오**).
     for (const id of ['keep-audio', 'keep-voiceprint']) {
-      strictEqual(
-        screenHas('lobby', `id="${id}"`),
-        true,
-        `로비에 ${id} 체크박스가 없습니다 — 물어보지 않으면 거부할 수 없습니다`,
+      ok(
+        EXTRA_CONSENTS.some((c) => c.id === id),
+        `@lib 의 EXTRA_CONSENTS 에 ${id} 가 없습니다 — 물어보지 않으면 거부할 수 없습니다`,
       );
     }
 
-    const lobbyTs = codeOf((demoSource('lobby') ?? ''));
-    for (const type of ['raw_audio_retention', 'voiceprint_storage']) {
-      strictEqual(
-        lobbyTs.includes(type),
-        true,
-        `로비가 ${type} 을 서버로 보내지 않습니다`,
+    // 두 로비가 **그 한 벌을 실제로 그리는가**. 부르는 곳을 뿌리마다 셉니다.
+    const lobbies: { root: string; code: string }[] = [
+      { root: 'frontend/src/demo', code: demoSource('lobby') ?? '' },
+      {
+        root: 'webapp/src',
+        code: readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx'), 'utf8'),
+      },
+    ];
+    for (const { root, code } of lobbies) {
+      ok(code.length > 0, `${root} 의 로비를 못 읽었습니다`);
+      ok(
+        /EXTRA_CONSENTS\.map\(/.test(codeOf(code)),
+        `${root} 의 로비가 EXTRA_CONSENTS 를 안 그립니다 — 화면이 글을 따로 적으면 두 로비가 갈라집니다`,
       );
+      for (const type of ['raw_audio_retention', 'voiceprint_storage']) {
+        strictEqual(
+          codeOf(code).includes(type),
+          true,
+          `${root} 의 로비가 ${type} 을 서버로 보내지 않습니다`,
+        );
+      }
     }
   });
 

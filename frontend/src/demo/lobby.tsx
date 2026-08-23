@@ -25,6 +25,7 @@ import {
   describeConsent,
   discardAffordance,
   DISCARD_CONFIRM,
+  EXTRA_CONSENTS,
   lobbyPhase,
   memberStatuses,
   recordAffordance,
@@ -641,30 +642,27 @@ function Lobby() {
           <legend>
             <span className="cap">따로 받는 동의</span>
           </legend>
-          <label>
-            <input
-              type="checkbox"
-              id="keep-audio"
-              checked={keepAudio}
-              onChange={(e) => setKeepAudio(e.target.checked)}
-            />
-            <span>
-              원본 음성 파일 보관
-              <span className="hint">거부하면 회의록을 만든 뒤 바로 지웁니다</span>
-            </span>
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              id="keep-voiceprint"
-              checked={keepVoiceprint}
-              onChange={(e) => setKeepVoiceprint(e.target.checked)}
-            />
-            <span>
-              목소리 특징 저장
-              <span className="hint">거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다</span>
-            </span>
-          </label>
+          {/* ⛔ 글은 `@lib` 한 벌입니다 (결함 335) — 여기서 다시 적으면
+              두 로비가 같은 동의를 다르게 설명합니다. */}
+          {EXTRA_CONSENTS.map((item) => (
+            <label key={item.key}>
+              <input
+                type="checkbox"
+                id={item.id}
+                checked={item.key === 'rawAudio' ? keepAudio : keepVoiceprint}
+                onChange={(e) =>
+                  item.key === 'rawAudio'
+                    ? setKeepAudio(e.target.checked)
+                    : setKeepVoiceprint(e.target.checked)
+                }
+              />
+              {/* 글자와 설명은 **한 상자**에 (가드: 체크박스 라벨의 설명을 형제로 두지 않는다). */}
+              <span>
+                {item.label}
+                <span className="hint">{item.hint}</span>
+              </span>
+            </label>
+          ))}
         </fieldset>
 
         <div className="row" style={{ marginTop: '.75rem' }}>

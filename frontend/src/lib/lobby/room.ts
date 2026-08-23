@@ -484,6 +484,52 @@ export function captureAlerts(track: TrackHealth | undefined): string[] {
  * 응답 없음&#34; 이고 `false`(거부)와 다릅니다 — 이 저장소가 로스터에서
  * 지키는 구분입니다.
  */
+/**
+ * ②③ — **따로 받는 동의** 두 가지의 이름과 설명.
+ *
+ * ## 왜 `@lib` 에 있는가 (결함 335)
+ *
+ * 이 두 줄은 두 뿌리가 각자 적고 있었고, **갈라졌습니다.**
+ *
+ *     레거시  ② 거부하면 회의록을 만든 뒤 바로 지웁니다
+ *             ③ 거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다
+ *     SPA     ② 검토 화면에서 구간을 다시 들을 수 있습니다
+ *             ③ 다음 회의에서 화자를 더 잘 알아봅니다
+ *
+ * `/app` 쪽은 **동의했을 때 얻는 것만** 말하고 거부하면 어떻게 되는지를
+ * 한 글자도 안 말했습니다. `docs/07` §2.3 은 ②③ 에 대해 "거부해도
+ * 서비스 이용 가능" 을 요구하고, ② 는 "전사 완료 후 원본 즉시 삭제",
+ * ③ 은 "멀티트랙 모드면 애초에 불필요" 라고 못 박아 뒀습니다.
+ *
+ * ⚠️ ③ 의 SPA 문장은 **이 제품이 하지 않는 일**이었습니다. 파이프라인이
+ * `speaker_source` 에 쓰는 값은 `"track"` **한 곳뿐**이고
+ * (`pipeline/meeting_pipeline.py`), `Voiceprint(` 를 만드는 프로덕션
+ * 코드는 0곳입니다. 성문은 화자 식별을 **더 잘 하게 만들지 않습니다.**
+ *
+ * ⚠️ **이건 닫아 둔 결정을 뒤집는 것이 아닙니다.** `docs/17` 의
+ * 「「목소리 특징 저장」 동의 — 결함이 아니었습니다」는 ③ 을 **묻는 것**이
+ * 옳다고 적으면서 그 근거로 "화면도 이미 그렇게 말합니다 — 거부해도
+ * 됩니다" 를 들었습니다. 그 전제가 한 뿌리에서 깨져 있던 것입니다.
+ *
+ * ⛔ **화면에서 이 글을 다시 적지 마십시오.** 두 로비가 여기서 읽습니다.
+ */
+export const EXTRA_CONSENTS = [
+  {
+    key: 'rawAudio',
+    id: 'keep-audio',
+    label: '원본 음성 보관',
+    hint: '거부해도 됩니다 — 그러면 회의록을 만든 뒤 원본을 바로 지웁니다',
+  },
+  {
+    key: 'voiceprint',
+    id: 'keep-voiceprint',
+    label: '목소리 특징 저장',
+    hint: '거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다',
+  },
+] as const;
+
+export type ExtraConsent = (typeof EXTRA_CONSENTS)[number];
+
 export function savedExtraConsents(
   roster: readonly RosterEntry[],
   userId: number,
