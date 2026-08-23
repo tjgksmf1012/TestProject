@@ -679,7 +679,13 @@ def test_no_report_text_carries_markdown_syntax():
                 summary="요약",
             )
         ),
+        # ⚠️ **두 종류를 다 걸어야 합니다** (결함 332 회차). 이 자는 오래도록
+        #    `FINAL` 하나만 지어서, 주간 보고서에만 나가는 글자는 **구조적으로
+        #    못 봤습니다** — 결함 286 이 「가드가 걷는 자리가 한쪽뿐인지
+        #    보십시오」라고 적어 둔 그 모양이고, 실제로 이 회차에 주간 전용
+        #    문단을 별표째로 넣었는데 이 검사가 초록이었습니다.
         period_builder_content(),
+        period_builder_content(ReportType.WEEKLY),
     ]
     bad: list[str] = []
     for content in made:
@@ -739,6 +745,67 @@ def test_the_report_does_not_invent_a_reason_for_a_skipped_category():
     assert "이 계산에 잡힌 것이 없다는 뜻입니다" in text, text
 
 
+def test_a_weekly_report_says_the_shares_are_cumulative_not_this_week():
+    """⭐ 한 문서에 **축이 둘**이면 그렇다고 말해야 합니다 (결함 332).
+
+    ## 재현
+
+    아무 일도 없던 주에 주간 보고서를 만들었더니:
+
+        ## 이 기간에 일어난 일
+           회의 0건 · 처리된 회의 0건 · 완료한 업무 0건 · GitHub 0건
+        ## 사람별 기여
+           김민수 30.5~53.9%   박지원 18.0~31.7%   이하늘 23.8~42.1%
+
+    아래 셋은 **최종 보고서와 한 자도 다르지 않은 값**입니다. 위 문단이
+    「이 기간」이라고 말해 놓은 뒤라, 사람은 아래도 그 주의 몫으로 읽습니다.
+
+    원인: `counts` 는 기간으로 걸러 오는데 `_people()` 은 **기간을 안
+    받습니다.** 기간별 재계산은 산정 엔진에 기간 개념을 넣는 일이라 고르지
+    않고, **무엇을 재고 있는지 말하게** 했습니다 — 결함 311·323·331 과
+    같은 방법입니다.
+
+    ⚠️ 최종 보고서는 프로젝트가 곧 기간이므로 이 말을 붙이지 않습니다.
+    붙이면 없는 구분을 만듭니다.
+    """
+    from teamflow.reports import period as period_builder
+
+    def make(report_type: ReportType) -> str:
+        return json.dumps(
+            period_builder.build(
+                period_builder.PeriodInput(
+                    project_name="TeamFlow 시연 프로젝트",
+                    people=[
+                        period_builder.Person(
+                            name="김민수",
+                            role="개발",
+                            range_low=30.5,
+                            range_high=53.9,
+                            confidence=0.45,
+                            confidence_label="낮음",
+                            evidence_count=11,
+                        )
+                    ],
+                    period_start=datetime(2026, 8, 23, 15, tzinfo=UTC),
+                    period_end=datetime(2026, 8, 30, 15, tzinfo=UTC),
+                ),
+                report_type,
+            ),
+            ensure_ascii=False,
+        )
+
+    weekly = make(ReportType.WEEKLY)
+    assert "누적" in weekly, (
+        "주간 보고서가 프로젝트 전체 값을 그 주의 몫처럼 내놓습니다"
+    )
+    assert "이 주에 한 일이 아니라" in weekly, weekly
+
+    final = make(ReportType.FINAL)
+    assert "누적" not in final, (
+        "최종 보고서는 프로젝트가 곧 기간입니다 — 없는 구분을 만들지 마십시오"
+    )
+
+
 def test_the_report_and_the_screen_say_the_same_thing_about_skipped_areas():
     """⚠️ **같은 사실을 말하는 두 자리를 나란히 놓습니다** (결함 290 의 교훈).
 
@@ -786,7 +853,7 @@ def test_the_report_and_the_screen_say_the_same_thing_about_skipped_areas():
 
 
 
-def period_builder_content():
+def period_builder_content(report_type: ReportType = ReportType.FINAL):
     from teamflow.reports import period as period_builder
 
     return period_builder.build(
@@ -809,6 +876,8 @@ def period_builder_content():
                 )
             ],
             skipped_categories=["문서"],
+            period_start=datetime(2026, 8, 23, 15, tzinfo=UTC),
+            period_end=datetime(2026, 8, 30, 15, tzinfo=UTC),
         ),
-        ReportType.FINAL,
+        report_type,
     )
