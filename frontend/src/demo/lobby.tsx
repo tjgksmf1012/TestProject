@@ -23,6 +23,8 @@ import {
   consentAffordance,
   consentStateOf,
   describeConsent,
+  discardAffordance,
+  DISCARD_CONFIRM,
   lobbyPhase,
   memberStatuses,
   recordAffordance,
@@ -404,6 +406,50 @@ function Lobby() {
    * ⚠️ 만들고 나면 **볼 자리로 데려갑니다.** 만들어 놓고 어디 있는지
    * 안 알려 주면 이 저장소가 반복해서 낸 실패 ③ 을 또 내는 것입니다.
    */
+  /**
+   * **아무것도 안 담긴 회의를 무릅니다** (결함 320).
+   *
+   * ⚠️ 무른 뒤에는 이 회의가 없으므로 **머무를 수 없습니다** — 홈으로
+   * 데려갑니다. 안 데려가면 화면이 404 를 그리거나 빈 채로 남습니다.
+   */
+  const discard = (): void => {
+    if (!window.confirm(DISCARD_CONFIRM)) return;
+    void guardedDiscard();
+  };
+  const guardedDiscard = async (): Promise<void> => {
+    setBusy(true);
+    setMinutesNote(null);
+    try {
+      const response = await trySend(() =>
+        fetch(`${apiBase}/api/meetings/${meetingId}`, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+        }),
+      );
+      if (response === null) {
+        setMinutesNote({ text: unreachableText('회의를 무르지 못했습니다'), tone: 'bad' });
+        return;
+      }
+      if (isSessionExpired(response.status)) {
+        goToLogin();
+        return;
+      }
+      if (!response.ok) {
+        /* ⛔ 서버가 사람에게 쓴 문장을 씁니다 (결함 300·301·316). 409 는
+           「녹음이 N건 담겨 있어…」처럼 그때마다 다릅니다. */
+        const body = (await response.json().catch(() => null)) as unknown;
+        setMinutesNote({
+          text: detailText(body, `회의를 무르지 못했습니다 (HTTP ${response.status})`),
+          tone: 'bad',
+        });
+        return;
+      }
+      location.href = '/home.html';
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const makeMinutes = (): void => {
     void (async () => {
       setBusy(true);
@@ -778,6 +824,14 @@ function Lobby() {
           <button id="minutes" className="linkish" disabled={busy} onClick={makeMinutes}>
             회의록 만들기
           </button>
+          {/* ⭐ **만드는 단추를 봤으면 무르는 단추를 같이** (결함 298·320).
+              「회의 열기」는 누른 만큼 회의를 만드는데 무르는 길이 없었습니다.
+              판단은 `@lib` — 녹음이 하나라도 있으면 못 무릅니다. */}
+          {discardAffordance(meetingStatus ?? '', tracks?.length ?? 0).can && (
+            <button id="discard" className="linkish danger" disabled={busy} onClick={discard}>
+              이 회의 무르기
+            </button>
+          )}
           {room.needsForceFinish && (
             <button id="finish" className="linkish danger" disabled={busy} onClick={forceFinish}>
               강제 종료

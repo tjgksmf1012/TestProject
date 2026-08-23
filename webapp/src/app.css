@@ -1983,6 +1983,25 @@ a.chain__link:hover { border-color: var(--c-evidence); }
   margin: var(--sp-3) 0 0;
 }
 
+/* 회의 단위 동작을 **패널 맨 아래 한 줄**로 모읍니다 (결함 320·321).
+   ⚠️ 처음에는 이 둘을 참가자 명단 **위**에 뒀습니다 — 렌더해 보니
+   화면을 열자마자 제일 먼저 보이는 것이 「이 회의 무르기」였습니다.
+   레거시 로비와 같은 자리(맨 아래)로 맞춥니다. */
+.pane-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-line);
+}
+
+/* 안쪽 `.phase-act` 는 이미 한 줄이므로 위 여백을 겹쳐 주지 않습니다. */
+.pane-acts .phase-act {
+  margin: 0;
+}
+
 
 .preflight {
   margin-top: var(--sp-8);

@@ -48,6 +48,8 @@ class Action(StrEnum):
     DELETE_PROJECT = "delete_project"
     #: 업무를 지우기 (`TASK-001~003`)
     DELETE_TASK = "delete_task"
+    #: **아무것도 안 담긴** 회의를 무르기 (결함 320)
+    DELETE_MEETING = "delete_meeting"
 
 
 #: 이 행동을 하려면 **최소 이 등급**이어야 한다.
@@ -68,6 +70,16 @@ _ALLOWED: dict[Action, ProjectRole] = {
     #    지우는 대신 **완료로 옮겨 버립니다** — 그러면 진행률이 거짓이
     #    되고, 그 숫자가 기여도와 보고서로 흘러갑니다.
     Action.DELETE_TASK: ProjectRole.MEMBER,
+    # ⚠️ **회의를 여는 것도 팀원입니다** (`create_meeting` 은
+    #    `_require_project_member` 만 봅니다). 여는 것이 팀원인데 무르는
+    #    것만 관리자면, 실수로 연 빈 회의가 관리자를 부를 때까지 목록에
+    #    남습니다 — 결함 320 에서 세 번 눌러 회의가 5→8개가 됐고 지우는
+    #    길이 아예 없었습니다.
+    #
+    # ⚠️ 이 권한만으로는 부족합니다. **아무것도 안 담긴 회의**(녹음 전 ·
+    #    트랙 0)만 무를 수 있다는 것이 진짜 방어선이고, 그건 라우트가
+    #    봅니다. 여기서는 "누가" 만 정합니다.
+    Action.DELETE_MEETING: ProjectRole.MEMBER,
 }
 
 

@@ -2244,6 +2244,67 @@ class ReprocessOut(BaseModel):
     message: str
 
 
+@app.delete("/api/meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+def discard_empty_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Response:
+    """**아무것도 안 담긴** 회의를 무른다 (결함 320).
+
+    ## 왜 이 문이 생겼나
+
+    「회의 열기」는 누른 만큼 회의를 만듭니다. 세 번 누르니 회의가 5→8개가
+    됐고, **무르는 길이 아예 없었습니다** — 서버에도(405) 화면에도(단추
+    0개). 잘못 연 회의가 홈·회의 목록·왼쪽 레일에 영영 남았습니다.
+    결함 298 이 일정에서 잡은 것과 같은 모양입니다.
+
+    ## ⛔ 무엇을 지우는 게 **아닌지**가 더 중요합니다
+
+    이 문은 **녹음이 하나도 없는 회의**만 지웁니다. 트랙이 하나라도 있으면
+    409 로 거절합니다 — 소리는 다시 못 만들고, 그 소리가 발화·후보·업무·
+    기여도로 이어져 있습니다. 「녹음한 것을 지우기」는 **다른 문**이고
+    (`POST /api/projects/{id}/me/data`), 그건 개인정보 파기 절차입니다.
+
+    ⚠️ 그래서 판정은 상태 하나가 아니라 **트랙 수**입니다. 상태만 보면
+    `pending` 인데 이미 트랙이 붙은 회의(녹음 중 참가)가 새어 나갑니다.
+    """
+    meeting = _load_meeting(session, meeting_id)
+    _require_can(session, meeting.project_id, user, permissions.Action.DELETE_MEETING)
+
+    tracks = session.scalars(
+        select(m.MeetingTrack).where(m.MeetingTrack.meeting_id == meeting_id)
+    ).all()
+    if tracks:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"녹음이 {len(tracks)}건 담긴 회의는 무를 수 없습니다 — "
+            "소리는 다시 만들 수 없습니다. 내 녹음을 지우려면 설정의 "
+            "「내 녹음과 성문 지우기」를 쓰세요.",
+        )
+    if meeting.status not in ("pending", "recording"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"이미 처리에 들어간 회의는 무를 수 없습니다 (지금 {meeting.status})",
+        )
+
+    # ⚠️ **지운 것도 기록에 남깁니다.** 회의가 목록에서 사라지면 「내가
+    #    본 그 회의가 어디 갔지」가 남습니다 — 활동 기록이 그 답입니다.
+    session.add(
+        m.AuditLog(
+            project_id=meeting.project_id,
+            actor_id=user.id,
+            action="meeting_discarded",
+            # ⚠️ 이 저장소의 회의 target 은 `meetings/{id}` 입니다 — 처음에
+            #    `meeting:{id}` 라고 적었고 `KNOWN_TARGET_KINDS` 짝 가드가
+            #    잡았습니다(결함 297 이 둔 그 가드입니다).
+            target=f"meetings/{meeting.id}",
+            before={"title": meeting.title, "status": meeting.status},
+            after=None,
+            at=datetime.now(UTC),
+        )
+    )
+    session.delete(meeting)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.post("/api/meetings/{meeting_id}/reprocess", response_model=ReprocessOut)
 def reprocess_meeting(
     meeting_id: int, session: DbSession, user: CurrentUser

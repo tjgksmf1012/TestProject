@@ -177,6 +177,50 @@ export function useReprocess(meetingId: number | undefined) {
   });
 }
 
+/**
+ * **아무것도 안 담긴 회의를 무릅니다** (결함 320).
+ *
+ * ⚠️ 레거시 로비에만 달고 여기를 비워 두면 결함 231 과 **똑같은 모양**이
+ * 됩니다 — 그때는 반대 방향이었습니다(레거시에 있고 SPA 에 없었음).
+ * 판단은 `@lib/lobby/room.ts` 의 `discardAffordance` 한 곳입니다.
+ */
+/**
+ * **회의록을 만듭니다** (결함 306 → 321).
+ *
+ * ⚠️ 306 은 이 갈래를 부르는 곳이 **0곳**인 채로 보고서 화면이 「회의
+ * 로비에서 회의록을 만드세요」라고 말하던 것을 잡았습니다. 그런데 그때
+ * 고친 것은 **레거시 로비뿐**이었고, SPA 로비는 그대로 0곳이었습니다 —
+ * `/app` 으로 들어온 사람에게는 여전히 갈 곳 없는 안내였습니다(결함 321).
+ */
+export function useMakeMinutes(meetingId: number | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ id: number; report_type: string }>(`/api/meetings/${meetingId}/minutes`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['reports'] });
+    },
+  });
+}
+
+export function useDiscardMeeting(meetingId: number | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.del<void>(`/api/meetings/${meetingId}`),
+    onSuccess: () => {
+      /* ⚠️ **없앤 것을 다시 물으면 안 됩니다.** 처음에 이 회의의 질의를
+         `invalidate` 했더니, 홈으로 옮겨 가기 전에 로비가 아직 붙어 있어서
+         `GET /api/meetings/9`·`/consent`·`/tracks` 가 다시 나갔고 **404 가
+         셋** 찍혔습니다(눌러 보고 네트워크를 읽어서 잡았습니다 — 화면에는
+         아무 표시도 안 났습니다). 지운 것은 `remove` 입니다. */
+      queryClient.removeQueries({ queryKey: ['meetings', meetingId] });
+      // 목록은 살아 있으니 다시 셉니다 — 하나 줄었습니다.
+      void queryClient.invalidateQueries({ queryKey: ['meetings'], exact: true });
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+}
+
 export function useProject(projectId: number | undefined) {
   return useQuery({
     queryKey: ['projects', projectId, 'detail'],

@@ -2794,3 +2794,74 @@ def test_every_server_route_has_a_caller() -> None:
         "이제 제대로 불리는데 예외에 남아 있습니다 — 낡은 예외는 다음 사람을 속입니다:\n  "
         + "\n  ".join(stale)
     )
+
+
+def test_meeting_actions_reach_both_roots() -> None:
+    """⭐ **두 로비가 같은 회의 단위 동작을 줘야 합니다** (결함 320).
+
+    ## 왜 이 검사가 생겼나
+
+    이 저장소에는 로비가 **둘**입니다 — 레거시 `frontend/src/demo/lobby.tsx`
+    와 SPA `webapp/src/screens/Lobby.tsx`. 같은 회의를 그리는데 한쪽에만
+    단추가 있으면 **사람이 어느 주소로 들어왔느냐로 할 수 있는 일이
+    달라집니다.** 실제로 세 번 났습니다:
+
+    - 결함 231 — 「다시 처리하기」가 레거시에만 (SPA 로비는 `/reprocess` 를
+      한 번도 안 물어봤습니다)
+    - 결함 306 — 「회의록 만들기」를 부르는 곳이 **0곳**인데, 보고서 화면은
+      「회의 로비에서 회의록을 만드세요」라고 말하고 있었습니다
+    - 결함 320 — 「이 회의 무르기」를 만들면서 **또** 레거시에만 달 뻔했습니다
+      (이번엔 반대 방향입니다)
+
+    ## ⚠️ 왜 결함 306 의 라우트 가드로는 못 잡나
+
+    그 가드는 `frontend/src` 와 `webapp/src` 를 **한 자루에 담아** 셉니다.
+    한쪽에서만 불려도 「부르는 곳 있음」이라 초록입니다 — AGENTS.md 가
+    결함 286 에 적어 둔 **「가드가 걷는 자리가 한쪽뿐인지 보십시오」**의
+    정확히 반대 모양입니다. 그래서 여기서는 **뿌리마다 따로** 셉니다.
+    """
+    import re
+
+    # 로비가 여는 「회의 단위」 갈래. 값은 그 갈래를 **부르는 모양**입니다 —
+    # 레거시는 `fetch(..., {method})`, SPA 는 `api.del`/`api.post` 라
+    # 글자가 다릅니다. 그래서 경로로 찾고, DELETE 만 방법을 같이 봅니다.
+    ACTIONS = {
+        "다시 처리하기 (결함 231)": re.compile(r"/api/meetings/\$\{[^}]+\}/reprocess"),
+        "회의록 만들기 (결함 306)": re.compile(r"/api/meetings/\$\{[^}]+\}/minutes"),
+        # ⚠️ 회의 자체를 지우는 것이라 **뒤에 아무 조각도 안 붙습니다.**
+        #    `/tracks/...` 같은 하위 갈래를 같이 물지 않게 끝을 못 박습니다.
+        # ⚠️ **자를 한 번 넓혔습니다.** 처음에는 「DELETE 라고 적고 나서
+        #    경로」로만 봤는데, 레거시는 `fetch(\`…\`, { method: 'DELETE' })`
+        #    라 **경로가 먼저**입니다 — 제대로 이어 놓은 자리를 거짓으로
+        #    잡았습니다(결함 299 가 적어 둔 「자 자체가 좁았다」).
+        "이 회의 무르기 (결함 320)": re.compile(
+            r"api\.del<[^>]*>\(\s*`[^`]*/api/meetings/\$\{[^}]+\}`"
+            r"|/api/meetings/\$\{[^}]+\}`[\s\S]{0,200}?method:\s*'DELETE'"
+        ),
+    }
+
+    roots = {
+        "레거시 frontend/src": REPO_ROOT / "frontend" / "src",
+        "SPA webapp/src": REPO_ROOT / "webapp" / "src",
+    }
+
+    missing: list[str] = []
+    for label, root in roots.items():
+        codes: list[str] = []
+        for path in root.rglob("*"):
+            if path.suffix in (".ts", ".tsx") and ".test." not in path.name:
+                code = path.read_text(encoding="utf-8")
+                # 주석의 「예전에는 이렇게 불렀다」를 진짜 호출로 물지 않게 걷습니다
+                # (결함 238 — 마크업에서 세 번째로 걸린 함정입니다).
+                code = re.sub(r"/\*[\s\S]*?\*/", "", code)
+                code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
+                codes.append(code)
+        assert codes, f"{label} 에서 파일을 못 찾았습니다 — 가드가 헛돕니다"
+        for action, rx in ACTIONS.items():
+            if not any(rx.search(code) for code in codes):
+                missing.append(f"{action} — {label} 에서 부르는 곳이 0곳입니다")
+
+    assert not missing, (
+        "회의 로비의 동작이 **한쪽 뿌리에만** 있습니다. 같은 회의를 그리는 두\n"
+        "  화면인데 들어온 주소로 할 수 있는 일이 갈립니다:\n  " + "\n  ".join(missing)
+    )

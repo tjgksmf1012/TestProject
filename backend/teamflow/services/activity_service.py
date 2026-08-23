@@ -47,6 +47,7 @@ ACTION_LABEL: dict[str, str] = {
     "candidate_approved": "업무 후보 승인",
     "candidate_rejected": "업무 후보 거절",
     "github_login_changed": "GitHub 계정 연결 변경",
+    "meeting_discarded": "빈 회의 무름",
     "meeting_reprocess_requested": "회의 재처리 요청",
     "score_adjusted": "기여도 확정값 조정",
     "task_assignees_changed": "업무 담당자 변경",
@@ -136,11 +137,31 @@ def recent(session: Session, project_id: int, *, limit: int = MAX_ITEMS) -> list
             label=describe(row.action),
             who=who,
             target=row.target or "",
-            target_label=labels.get(row.target or "", row.target or ""),
+            target_label=(
+                labels.get(row.target or "") or _remembered_name(row) or (row.target or "")
+            ),
             touches_contribution=row.action in TOUCHES_CONTRIBUTION,
         )
         for row, who in rows
     ]
+
+
+def _remembered_name(row: m.AuditLog) -> str | None:
+    """사라진 것의 이름 — **기록에 적힌 것만** 씁니다.
+
+    ⚠️ `_target_labels` 는 **지금 DB 에 있는 것**만 찾습니다. 무른 회의처럼
+    행 자체가 사라지는 기록은 영영 못 찾아서 화면에 `meetings/8` 이 그대로
+    나갑니다 — 결함 293·297 이 고친 바로 그 모양(식별자가 사람에게 나감)
+    입니다. 지울 때 `before` 에 이름을 적어 두었으면 **그것이 답**입니다.
+
+    ⛔ 지어내지 않습니다. 적어 둔 게 없으면 `None` 이고, 부르는 쪽이
+    `target` 을 그대로 씁니다 — 지운 업무에서 이미 내린 결정입니다.
+    """
+    before = row.before
+    if not isinstance(before, dict):
+        return None
+    name = before.get("title")
+    return name.strip() if isinstance(name, str) and name.strip() else None
 
 
 #: `종류/번호` 또는 `종류:번호`. ⚠️ 이 저장소는 두 구분자를 **둘 다** 씁니다

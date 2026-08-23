@@ -946,3 +946,66 @@ def test_hover_steps_around_blocked_buttons(spa: str):
         "막힌 버튼 위에서 hover 가 채움을 되돌립니다 — 글자가 사라집니다. "
         "`:not([aria-disabled='true'])` 를 붙이세요:\n  " + "\n  ".join(bad)
     )
+
+
+def test_a_destructive_control_differs_when_it_is_just_sitting_there(spa: str):
+    """⛔ **되돌릴 수 없는 단추는 쉬고 있을 때도 달라 보여야 합니다** (결함 322).
+
+    ## 무엇이 잘못돼 있었나
+
+    레거시의 `.linkish.danger` 규칙이 **`@media (hover: hover)` 안에만**
+    있었습니다. 즉 위험 신호가 **마우스를 올린 사람에게만** 보이고,
+    키보드로 도는 사람과 손가락으로 쓰는 사람에게는 평생 안 보입니다.
+
+    쉬고 있는 상태를 재 보니 「강제 종료」(`linkish danger`)와 옆의 평범한
+    「칸반 보기」(`linkish`)가 `rgb(102, 109, 128)` 으로 **글자색까지
+    똑같았습니다.** 클래스는 꼬박꼬박 붙어 있었고 **아무 색도 안
+    나갔습니다** — 결함 250 이 녹음 화면에서 겪은 것과 같은 모양이고,
+    이번에는 규칙이 **아예 없던** 쪽입니다.
+
+    ⚠️ 이 자리의 빨강은 불변식 ③ 의 「결측은 빨강이 아니라 흙빛」과 **다른
+    자리**입니다. 결측은 「못 잰 것」이고, 이건 「사람이 되돌릴 수 없는 일을
+    누르는 것」입니다.
+
+    ## ⚠️ 이 자의 한계
+
+    글자로 잽니다 — 「그 규칙이 실제로 이겼는가」(특성도)까지는 못 봅니다.
+    그건 렌더해서 픽셀로 확인했고(밝은 `rgb(176,46,46)` · 다크
+    `rgb(224,106,106)`, 다크 대비 5.27:1·5.68:1), 여기서는 **규칙이
+    `:hover` 밖에 있는지**만 지킵니다.
+    """
+    legacy = LEGACY_APP_CSS.read_text(encoding="utf-8")
+
+    # 「되돌릴 수 없다」를 말하는 클래스들. 뿌리마다 이름이 다릅니다.
+    # ⚠️ **자를 한 번 조였습니다.** 처음에는 `\.linkish\.danger` 였는데 그
+    #    자는 `.linkish.dangerXX` 도 **통과시킵니다** — 규칙 이름을 바꿔
+    #    심었더니 초록이 떴습니다. 이름 끝을 못 박습니다.
+    WANTED = (
+        ("frontend", legacy, r"\.linkish\.danger(?![-\w])"),
+        ("webapp", spa, r"\.btn--danger-quiet(?![-\w])"),
+    )
+
+    missing: list[str] = []
+    for where, css_text, selector_rx in WANTED:
+        rules = re.sub(r"/\*.*?\*/", "", css_text, flags=re.S)
+        resting = False
+        for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", rules):
+            selector, body = m.group(1).strip(), m.group(2)
+            if not re.search(selector_rx, selector):
+                continue
+            # ⚠️ `:hover`·`:active`·`:focus` 안에만 있는 것은 **쉬고 있을 때**
+            #    아무 말도 안 합니다 — 그게 이 결함이었습니다.
+            if re.search(r":(hover|active|focus)", selector):
+                continue
+            if re.search(r"(?<![-a-z])color:", body):
+                resting = True
+        if not resting:
+            missing.append(
+                f"[{where}] {selector_rx} 가 쉬고 있을 때 `color` 를 정하지 않습니다"
+            )
+
+    assert missing == [], (
+        "되돌릴 수 없는 단추가 **쉬고 있을 때** 평범한 단추와 같아 보입니다 — "
+        + " | ".join(missing)
+        + ". `:hover` 안에만 적으면 키보드·터치 사용자에게는 영영 안 보입니다."
+    )

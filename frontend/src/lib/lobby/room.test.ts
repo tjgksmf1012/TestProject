@@ -23,6 +23,8 @@ import {
   type TrackHealth,
   recordAffordance,
   consentAffordance,
+  discardAffordance,
+  DISCARD_CONFIRM,
 } from './room.ts';
 
 function member(
@@ -706,5 +708,37 @@ describe('끝난 회의의 동의 단추 (결함 310)', () => {
     const after = consentAffordance(false, false);
     ok(before.label !== after.label, '두 국면의 동의 단추 글자가 같습니다');
     ok(before.primary !== after.primary, '두 국면의 청록 여부가 같습니다');
+  });
+});
+
+describe('빈 회의를 무르기 (결함 320)', () => {
+  it('⭐ 녹음이 하나도 없는 갓 연 회의는 무를 수 있다', () => {
+    /* 재서 확인한 것: 「회의 열기」를 세 번 누르니 회의가 5→8개가 됐고
+       `DELETE /api/meetings/8` 은 405, 화면 셋의 지우는 단추는 0개였습니다. */
+    strictEqual(discardAffordance('pending', 0).can, true);
+    strictEqual(discardAffordance('pending', 0).why, null);
+  });
+
+  it('⛔ **녹음이 하나라도 있으면 못 무른다** — 소리는 다시 못 만든다', () => {
+    const a = discardAffordance('pending', 1);
+    strictEqual(a.can, false);
+    ok(/녹음이 1건/.test(a.why ?? ''), a.why ?? '');
+    // 막았으면 갈 곳을 줍니다 — 개인정보 파기는 **다른 문**입니다.
+    ok(/내 녹음과 성문 지우기/.test(a.why ?? ''), a.why ?? '');
+  });
+
+  it('⚠️ 상태가 아니라 **트랙 수**를 먼저 본다 — pending 인데 트랙이 붙은 회의', () => {
+    // 상태만 보면 이 회의가 새어 나갑니다.
+    strictEqual(discardAffordance('pending', 2).can, false);
+  });
+
+  it('⛔ 처리에 들어간 회의는 못 무른다', () => {
+    for (const st of ['queued', 'processing', 'needs_review', 'confirmed', 'failed']) {
+      strictEqual(discardAffordance(st, 0).can, false, st);
+    }
+  });
+
+  it('⭐ 무르기 전에 **되돌릴 수 없다**고 말한다', () => {
+    ok(/되돌릴 수 없습니다/.test(DISCARD_CONFIRM), DISCARD_CONFIRM);
   });
 });

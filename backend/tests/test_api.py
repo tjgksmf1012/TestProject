@@ -1813,3 +1813,100 @@ def test_a_departed_assignee_is_still_named_on_the_board(
     members = client.get(f"/api/projects/{project_id}/members").json()
     assert leaver not in [x["user_id"] for x in members]
     assert owner in [x["user_id"] for x in members]
+
+
+def _open_a_meeting(client: TestClient, project_id: int, title: str) -> int:
+    made = client.post(
+        f"/api/projects/{project_id}/meetings",
+        json={"title": title, "capture_mode": "multitrack"},
+    )
+    assert made.status_code == 201, made.text
+    return made.json()["meeting_id"]
+
+
+def test_an_empty_meeting_can_be_discarded(client: TestClient, seeded: dict) -> None:
+    """⭐ **잘못 연 회의를 무를 수 있어야 합니다** (결함 320).
+
+    「회의 열기」는 누른 만큼 회의를 만듭니다. 세 번 누르니 회의가 5→8개가
+    됐는데 `DELETE /api/meetings/{id}` 가 **405** 였고, 설정·홈·로비의
+    무르는 단추도 0개였습니다 — 잘못 연 회의가 영영 남았습니다.
+    결함 298 이 일정에서 잡은 것과 같은 모양(만드는 자리만 있고 무르는
+    자리가 없음)입니다.
+    """
+    mid = _open_a_meeting(client, seeded["project_id"], "실수로 연 회의")
+    assert client.get(f"/api/meetings/{mid}").status_code == 200
+
+    gone = client.delete(f"/api/meetings/{mid}")
+    assert gone.status_code == 204, gone.text
+    assert client.get(f"/api/meetings/{mid}").status_code == 404
+
+
+def test_a_meeting_with_a_recording_is_never_discarded(
+    client: TestClient, seeded: dict
+) -> None:
+    """⛔ **소리가 담긴 회의는 못 무릅니다.**
+
+    소리는 다시 만들 수 없고, 그 소리가 발화·후보·업무·기여도로 이어져
+    있습니다. 「녹음한 것을 지우기」는 개인정보 파기라는 **다른 문**입니다.
+
+    ⚠️ 판정은 상태가 아니라 **트랙 수**입니다 — 그래서 씨앗을 상태가
+    `pending` **인데 트랙이 붙은** 회의로 만듭니다. 상태만 보는 자는
+    이 회의를 통과시킵니다.
+    """
+    mid = _open_a_meeting(client, seeded["project_id"], "녹음이 담긴 회의")
+    with db_session.session_scope() as s:
+        s.add(
+            m.MeetingTrack(
+                meeting_id=mid,
+                user_id=seeded["user_ids"][0],
+                started_at=NOW,
+                status="recording",
+            )
+        )
+        assert s.get(m.Meeting, mid).status == "pending"
+
+    refused = client.delete(f"/api/meetings/{mid}")
+    assert refused.status_code == 409, refused.text
+    detail = refused.json()["detail"]
+    assert "녹음이" in detail and "무를 수 없습니다" in detail, detail
+    # 막았으면 갈 곳을 줍니다 (결함 300 — 서버가 사람에게 쓴 문장).
+    assert "내 녹음과 성문 지우기" in detail, detail
+    # 그리고 회의는 그대로 있습니다.
+    assert client.get(f"/api/meetings/{mid}").status_code == 200
+
+
+def test_a_meeting_already_in_processing_is_never_discarded(
+    client: TestClient, seeded: dict
+) -> None:
+    """⛔ 트랙이 없어도 **처리에 들어간 회의**는 못 무릅니다.
+
+    씨앗 회의는 `needs_review` 이고 트랙이 0건입니다 — 트랙만 보는 자는
+    이 회의를 지워 버리고, 그러면 후보 둘과 그 근거가 같이 사라집니다.
+    """
+    mid = seeded["meeting_id"]
+    refused = client.delete(f"/api/meetings/{mid}")
+    assert refused.status_code == 409, refused.text
+    assert "처리에 들어간" in refused.json()["detail"], refused.text
+    assert client.get(f"/api/meetings/{mid}").status_code == 200
+
+
+def test_discarding_a_meeting_is_written_to_the_audit_log(
+    client: TestClient, seeded: dict
+) -> None:
+    """⚠️ **무른 것도 기록에 남깁니다.** 회의가 목록에서 사라지면 「내가 본
+    그 회의가 어디 갔지」가 남습니다 — 활동 기록이 그 답입니다."""
+    mid = _open_a_meeting(client, seeded["project_id"], "무를 회의")
+    assert client.delete(f"/api/meetings/{mid}").status_code == 204
+
+    feed = client.get(f"/api/projects/{seeded['project_id']}/activity").json()
+    said = [e for e in feed if e["action"] == "meeting_discarded"]
+    assert said, f"활동 기록에 안 남았습니다: {feed[:3]}"
+    # ⚠️ 어휘가 사람 말을 줘야 합니다 — 화면이 두 번째 표를 만들지 않습니다.
+    assert said[0]["label"] and said[0]["label"] != "meeting_discarded", said[0]
+    assert said[0]["who"], said[0]
+    # ⭐ **이름이 나와야 합니다** (결함 293·297). ⚠️ 무른 회의는 행 자체가
+    #    사라져서 `_target_labels` 가 **영영 못 찾습니다** — 그래서 지울 때
+    #    `before` 에 적어 둔 이름을 씁니다. 안 그러면 `meetings/8` 이 그대로
+    #    사람에게 나갑니다.
+    assert said[0]["target_label"] == "무를 회의", said[0]
+    assert said[0]["target"] == f"meetings/{mid}", said[0]

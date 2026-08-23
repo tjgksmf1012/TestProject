@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
 import { Disclosure } from '../components/Disclosure.tsx';
@@ -11,6 +11,8 @@ import {
   useMe,
   useMeeting,
   useMeetingProgress,
+  useDiscardMeeting,
+  useMakeMinutes,
   useReprocess,
   useTracks,
 } from '../api/hooks.ts';
@@ -27,6 +29,8 @@ import {
   type TrackHealth,
   REPROCESS_CONFIRM,
   consentAffordance,
+  discardAffordance,
+  DISCARD_CONFIRM,
 } from '@lib/lobby/room.ts';
 import { axisTicks, buildDiagram, describeGap, meetingWindow, type TrackInput } from '@lib/track/diagram.ts';
 import {
@@ -160,6 +164,9 @@ export default function Lobby() {
   // 「다시 처리할 수 있는가」는 **서버가** 정합니다 (결함 231).
   const progress = useMeetingProgress(meetingId);
   const reprocess = useReprocess(meetingId);
+  const discard = useDiscardMeeting(meetingId);
+  const minutes = useMakeMinutes(meetingId);
+  const navigate = useNavigate();
   const canGoRecord = phase.canStart && startConditions.every((c) => c.met);
 
   // 지금 이 창이 녹음을 끝까지 붙잡을 수 있는가. 판단은 `@lib` 에 있습니다.
@@ -538,6 +545,98 @@ export default function Lobby() {
                 </ul>
               </div>
             )}
+            {/* ⭐ **회의 단위 동작은 맨 아래 한 줄로.** 처음에는 이 둘을
+                참가자 명단 **위**에 뒀는데, 렌더해서 보니 화면을 열자마자
+                제일 먼저 보이는 것이 「이 회의 무르기」였습니다 — 되돌릴 수
+                없는 것에 맨 윗자리를 준 것입니다. 레거시 로비는 같은 동작을
+                **맨 아래 줄**에 둡니다(칸반 보기 · 기여도 보기 · 회의록
+                만들기 · 이 회의 무르기). 두 화면을 같은 순서로 둡니다.
+                ⚠️ 코드만 보고는 안 보였습니다 — 캡처를 보고 잡았습니다. */}
+            <div className="pane-acts">
+              {/* ⛔ **여기도 레거시에만 있었습니다** (결함 306 → 321).
+                  306 은 「회의록 만들기」를 부르는 곳이 **0곳**인데 보고서
+                  화면이 「회의 로비에서 회의록을 만드세요」라고 말하던 것을
+                  잡았습니다 — 그런데 그때 고친 것은 **레거시 로비뿐**이라
+                  `/app` 으로 들어온 사람에게는 여전히 갈 곳이 없었습니다.
+
+                  ⚠️ **만들고 나면 볼 자리로 데려갑니다.** SPA 에는 아직
+                  보고서 화면이 없으므로 레거시 `/reports.html` 로 보냅니다
+                  (`/call.html`·`/index.html` 과 같은 방식). 안 데려가면
+                  만들어 놓고 어디 있는지 안 알려 주는 실패 ③ 입니다. */}
+              <p className="phase-act">
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={minutes.isPending}
+                  onClick={() => {
+                    minutes.mutate(undefined, {
+                      onSuccess: () => {
+                        const project = meeting.data?.project_id;
+                        if (project !== undefined) {
+                          window.location.href = `/reports.html?project=${project}`;
+                        }
+                      },
+                    });
+                  }}
+                >
+                  {minutes.isPending ? '회의록을 만드는 중…' : '회의록 만들기'}
+                </button>
+                <Problem>
+                  {minutes.isError
+                    ? describeActionFailure(
+                        '회의록 만들기',
+                        minutes.error instanceof ApiError ? minutes.error.status : null,
+                        /* 400 은 「아직 처리가 안 끝났습니다」 같은 서버 문장
+                           입니다 — 일반론보다 언제나 낫습니다(결함 300). */
+                        minutes.error instanceof ApiError ? minutes.error.detail : null,
+                      )
+                    : null}
+                </Problem>
+              </p>
+              {/* ⭐ **만드는 단추를 봤으면 무르는 단추를 같이** (결함 320).
+                  「회의 열기」는 누른 만큼 회의를 만드는데 무르는 길이
+                  서버에도(405) 화면에도(0개) 없었습니다.
+
+                  ⚠️ 레거시에만 달면 결함 231 과 **같은 모양**입니다 — 그때는
+                  반대 방향이었고, 이 파일 위쪽에 그 주석이 있습니다.
+                  판단은 `@lib` 한 곳(`discardAffordance`): 녹음이 하나라도
+                  담겼거나 처리에 들어갔으면 이 단추는 아예 안 그립니다. */}
+              {discardAffordance(meeting.data?.status ?? '', trackList?.length ?? 0).can && (
+                <p className="phase-act">
+                  <button
+                    type="button"
+                    /* ⛔ 되돌릴 수 없는 것을 **바로 위 「회의록 만들기」와
+                       같은 모양**으로 뒀더니 색까지 똑같았습니다(결함 320).
+                       `btn--danger-quiet` 가 이미 있었는데 안 썼습니다. */
+                    className="btn btn--danger-quiet"
+                    disabled={discard.isPending}
+                    onClick={() => {
+                      // ⚠️ 되돌릴 수 없습니다 — 묻고 나서 합니다. 문구는
+                      //    `@lib` 한 곳에 있습니다(레거시와 같은 말).
+                      if (!window.confirm(DISCARD_CONFIRM)) return;
+                      discard.mutate(undefined, {
+                        /* ⚠️ 무른 뒤에는 이 회의가 없으므로 **머무를 수
+                           없습니다** — 안 데려가면 화면이 404 를 그립니다. */
+                        onSuccess: () => navigate('/'),
+                      });
+                    }}
+                  >
+                    {discard.isPending ? '무르는 중…' : '이 회의 무르기'}
+                  </button>
+                  <Problem>
+                    {discard.isError
+                      ? describeActionFailure(
+                          '회의 무르기',
+                          discard.error instanceof ApiError ? discard.error.status : null,
+                          /* 409 는 「녹음이 N건 담긴 회의는…」입니다 — 서버가
+                             사람에게 쓴 문장이 일반론보다 낫습니다(결함 300). */
+                          discard.error instanceof ApiError ? discard.error.detail : null,
+                        )
+                      : null}
+                  </Problem>
+                </p>
+              )}
+            </div>
           </div>
         </section>
 

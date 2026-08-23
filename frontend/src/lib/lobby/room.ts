@@ -657,6 +657,53 @@ export const REPROCESS_CONFIRM =
   '계속할까요?';
 
 /**
+ * 이 회의를 **무를 수 있는가**, 없으면 왜.
+ *
+ * ## ⛔ 잘못 연 회의가 영영 남았습니다 (결함 320)
+ *
+ * 「회의 열기」는 누른 만큼 회의를 만듭니다. 세 번 누르니 회의가 5→8개가
+ * 됐고 **무르는 길이 아예 없었습니다** —
+ *
+ *     DELETE /api/meetings/8   →  405 Method Not Allowed
+ *     설정·홈·로비의 지우는 단추 →  0개
+ *
+ * 결함 298 이 일정에서 잡은 것과 같은 모양이고, 그때 「만드는 단추를
+ * 봤으면 무르는 단추를 같이 찾으십시오」라고 적어 뒀습니다.
+ *
+ * ## ⛔ 무엇을 못 무르는지가 더 중요합니다
+ *
+ * **녹음이 하나라도 있으면 못 무릅니다.** 소리는 다시 만들 수 없고, 그
+ * 소리가 발화·후보·업무·기여도로 이어져 있습니다. 「녹음한 것을 지우기」는
+ * **다른 문**이고(설정의 「내 녹음과 성문 지우기」) 그건 개인정보 파기
+ * 절차입니다.
+ *
+ * ⚠️ 판정은 상태 하나가 아니라 **트랙 수**입니다 — 상태만 보면 `pending`
+ * 인데 이미 트랙이 붙은 회의가 새어 나갑니다. 서버도 같은 것을 봅니다.
+ */
+export interface DiscardAffordance {
+  can: boolean;
+  /** 못 무를 때만. 왜인지 + 어디로 가야 하는지. */
+  why: string | null;
+}
+
+export function discardAffordance(status: string, trackCount: number): DiscardAffordance {
+  if (trackCount > 0) {
+    return {
+      can: false,
+      why: `녹음이 ${trackCount}건 담겨 있어 무를 수 없습니다 — 내 녹음을 지우려면 설정의 「내 녹음과 성문 지우기」를 쓰세요.`,
+    };
+  }
+  if (status !== 'pending' && status !== 'recording') {
+    return { can: false, why: '이미 처리에 들어간 회의는 무를 수 없습니다.' };
+  }
+  return { can: true, why: null };
+}
+
+/** 무르기 전에 물을 말. 되돌릴 수 없다는 것을 적습니다. */
+export const DISCARD_CONFIRM =
+  '이 회의를 목록에서 없앱니다.\n녹음이 하나도 없는 회의만 없앨 수 있고, 없앤 것은 되돌릴 수 없습니다.\n계속할까요?';
+
+/**
  * 동의 단추를 **어떤 회의에 대고** 누르는 것인가.
  *
  * ## ⛔ 끝난 회의와 시작 전 회의의 동의 칸이 **글자까지 같았습니다** (결함 310)
