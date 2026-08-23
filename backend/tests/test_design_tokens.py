@@ -1009,3 +1009,71 @@ def test_a_destructive_control_differs_when_it_is_just_sitting_there(spa: str):
         + " | ".join(missing)
         + ". `:hover` 안에만 적으면 키보드·터치 사용자에게는 영영 안 보입니다."
     )
+
+
+def test_being_late_is_never_painted_as_blame(spa: str):
+    """⛔ **늦은 것을 빨강으로 칠하지 않습니다** (결함 324).
+
+    ## 이 제품이 이미 세 번 내린 결정
+
+    - 결함 319 (칸반): 「늦은 것은 **사실**이지 『네가 뭘 잘못했다』가
+      아닙니다」 → `.task .latemark { color: var(--text-subtle) }`
+    - SPA 우선순위 칩: 「긴급만 색을 씁니다. **빨강이 아니라 황토** —
+      빨강은 "네가 뭘 잘못했다"」 → `.kprio--urgent`
+    - 불변식 ③: 결측은 빨강이 아니라 흙빛(`--gap`)
+
+    그런데 **알림 화면만** 「지연」을 `--bad`(빨강)로 그리고 있었습니다.
+    같은 사실을 칸반은 옅은 잉크로, 알림은 빨강으로 — 결함 290 이 적어 둔
+    「같은 사실을 말하는 두 자리를 나란히 놓으십시오」의 위반이고, 하필
+    빨강 쪽이 **그 사람에게 직접 보내는 알림**이었습니다.
+
+    ## ⚠️ 무엇을 재는가
+
+    「빨강을 쓰지 마라」가 아니라 **「늦음·긴급을 뜻하는 자리가 위험색을
+    쓰지 마라」**입니다. 위험색 자체는 되돌릴 수 없는 단추에 필요합니다
+    (결함 322) — 거기서는 옳습니다.
+    """
+    ROOT_DIR = LEGACY_APP_CSS.parent   # frontend/public
+
+    # (파일, 선택자, 그 선택자가 무슨 뜻인가) — 뜻을 적어 둡니다.
+    PLACES = [
+        ("notifications.html", ".nitem.urgent", "`isUrgent` = kind가 overdue — 마감이 지난 알림"),
+        ("notifications.html", ".nitem.urgent .nkind", "그 알림의 「지연」 이름표"),
+        ("kanban.html", ".task .latemark", "카드의 「마감 지남」·「늦게 완료」"),
+    ]
+    DANGER = ("--bad", "--c-danger")
+
+    offenders: list[str] = []
+    for filename, selector, meaning in PLACES:
+        path = ROOT_DIR / filename
+        assert path.exists(), f"{filename} 이 없습니다 — 가드가 헛돕니다"
+        css = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.S)
+        found = False
+        for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+            sel, body = m.group(1).strip(), m.group(2)
+            # 선택자가 정확히 이것인 규칙만 (앞부분만 물지 않게)
+            if not any(s.strip() == selector for s in sel.split(",")):
+                continue
+            found = True
+            for token in DANGER:
+                if token in body:
+                    offenders.append(f"{filename} `{selector}` ({meaning}) → {token}")
+        assert found, (
+            f"{filename} 에서 `{selector}` 규칙을 못 찾았습니다 — 화면을 옮겼으면 "
+            "이 가드의 자리도 같이 고치십시오(결함 286)"
+        )
+
+    assert offenders == [], (
+        "늦음을 위험색으로 칠하고 있습니다 — " + " | ".join(offenders) + ". "
+        "늦은 것은 사실이지 「네가 뭘 잘못했다」가 아닙니다(결함 319·324). "
+        "구별은 글자와 잉크 세기로 하십시오."
+    )
+
+    # ⭐ SPA 가 같은 결정을 적어 둔 자리도 지킵니다 — 한쪽만 지키면 갈라집니다.
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", spa, flags=re.S)):
+        sel, body = m.group(1).strip(), m.group(2)
+        if any(s.strip() == ".kprio--urgent" for s in sel.split(",")):
+            assert "--c-danger" not in body, (
+                "SPA 의 「긴급」 칩이 위험색을 씁니다 — 그 규칙 옆에 "
+                "「빨강이 아니라 황토」라고 적혀 있습니다"
+            )
