@@ -3859,6 +3859,105 @@ describe('리본 옆의 값 (결함 336)', () => {
   });
 });
 
+describe('귀에 없는 것에 손이 닿지 않는다 (결함 337)', () => {
+  /**
+   * `aria-hidden="true"` 가 붙은 요소의 **부분 나무**를 잘라 냅니다.
+   *
+   * ⚠️ `aria-hidden` 은 낭독기에게만 하는 말이고 **초점 순서는 안
+   * 건드립니다.** 그 안에 버튼·링크·입력칸이 있으면 낭독기에는 "없는
+   * 것" 인데 키보드로는 닿습니다 — 로그인 화면에서는 **첫 Tab** 이
+   * 거기였습니다.
+   */
+  const hiddenSubtrees = (code: string): string[] => {
+    const out: string[] = [];
+    const open = /<([A-Za-z][\w.]*)((?:[^<>'"]|'[^']*'|"[^"]*")*?)>/g;
+    let m: RegExpExecArray | null;
+    while ((m = open.exec(code)) !== null) {
+      const [whole, tag, attrs] = m;
+      if (!/aria-hidden\s*=\s*[{"']?\s*(?:true|'true'|"true")/.test(attrs ?? '')) continue;
+      if ((attrs ?? '').trimEnd().endsWith('/')) continue; // 자기 닫음 = 안이 없다
+      // 같은 이름의 여닫이를 세어 짝을 찾습니다.
+      const pair = new RegExp(`<${tag}\\b|</${tag}>`, 'g');
+      pair.lastIndex = m.index + whole.length;
+      let depth = 1;
+      let end = -1;
+      let q: RegExpExecArray | null;
+      while ((q = pair.exec(code)) !== null) {
+        depth += q[0].startsWith('</') ? -1 : 1;
+        if (depth === 0) {
+          end = q.index;
+          break;
+        }
+      }
+      out.push(code.slice(m.index + whole.length, end === -1 ? code.length : end));
+    }
+    return out;
+  };
+
+  /** 초점을 받는 것 — 태그와, 이 저장소에서 버튼을 그리는 컴포넌트. */
+  const FOCUSABLE = /<(button|a\s|a>|input|select|textarea)\b|<(EvidenceChip|Picker)\b|tabIndex=\{?0/;
+
+  const roots: { root: string; base: string[] }[] = [
+    { root: 'webapp/src', base: [ROOT, '..', 'webapp', 'src'] },
+    { root: 'frontend/src/demo', base: [ROOT, 'src', 'demo'] },
+  ];
+
+  it('⭐ `aria-hidden` 안에 초점을 받는 것이 없다 — 뿌리마다', () => {
+    const offenders: string[] = [];
+    let walked = 0;
+    for (const { root, base } of roots) {
+      const dir = join(...base);
+      const files: string[] = [];
+      const walk = (d: string) => {
+        for (const e of readdirSync(d, { withFileTypes: true })) {
+          const full = join(d, e.name);
+          if (e.isDirectory()) walk(full);
+          else if (/\.tsx$/.test(e.name)) files.push(full);
+        }
+      };
+      if (!existsSync(dir)) continue;
+      walk(dir);
+      for (const file of files) {
+        const code = codeOf(readFileSync(file, 'utf8'));
+        for (const sub of hiddenSubtrees(code)) {
+          walked += 1;
+          const hit = sub.match(FOCUSABLE);
+          if (hit) offenders.push(`${root}/${file.slice(dir.length + 1)} → ${hit[0]}`);
+        }
+      }
+    }
+    // ⚠️ **안 보고 있는 상태 자체가 실패여야 합니다** (결함 286).
+    ok(walked > 0, 'aria-hidden 이 붙은 자리를 하나도 못 찾았습니다 — 자가 낡았습니다');
+    strictEqual(
+      offenders.join('\n'),
+      '',
+      'aria-hidden 안에 키보드로 닿는 것이 있습니다 — 낭독기에는 없다고 해 놓고 손은 닿습니다',
+    );
+  });
+
+  it('⛔ 근거 칩에 **아무 데도 안 가는** onOpen 을 주지 않는다', () => {
+    // `EvidenceChip.tsx` 의 첫 줄이 「칩은 언제나 원문으로 이어져야
+    // 합니다 (실패 ③)」입니다. 삽화용 칩은 `EvidenceChipStill` 입니다.
+    const offenders: string[] = [];
+    for (const { root, base } of roots) {
+      const dir = join(...base);
+      if (!existsSync(dir)) continue;
+      const walk = (d: string): string[] =>
+        readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+          const full = join(d, e.name);
+          return e.isDirectory() ? walk(full) : /\.tsx$/.test(e.name) ? [full] : [];
+        });
+      for (const file of walk(dir)) {
+        const code = codeOf(readFileSync(file, 'utf8'));
+        for (const m of code.matchAll(/onOpen=\{\s*\(\s*\)\s*=>\s*\{\s*\}\s*\}/g)) {
+          offenders.push(`${root}/${file.slice(dir.length + 1)} → ${m[0]}`);
+        }
+      }
+    }
+    strictEqual(offenders.join('\n'), '', '근거 칩이 눌러도 아무 데도 안 갑니다');
+  });
+});
+
 describe('첫 화면 껍데기 (`webapp/index.html`)', () => {
   const raw = readFileSync(join(ROOT, '..', 'webapp', 'index.html'), 'utf8');
   // ⚠️ **주석을 걷어냅니다.** 이 파일의 주석에는 `role="status"` 같은 낱말이
