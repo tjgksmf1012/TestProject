@@ -3958,6 +3958,57 @@ describe('귀에 없는 것에 손이 닿지 않는다 (결함 337)', () => {
   });
 });
 
+describe('접는 폭은 읽는 사람의 글자를 따라간다 (결함 338)', () => {
+  /**
+   * 화면이 「한 줄이 안 들어가면 접는다」를 정하는 breakpoint 는 **`rem`**
+   * 이어야 합니다.
+   *
+   * `px` 로 적으면 **창 폭**만 봅니다. 브라우저 기본 글자를 32px 로 키운
+   * 사람은 창이 그대로 1440px 이라 넓은 배치가 유지되는데, 칸 폭은 `rem`
+   * 이라 두 배가 됩니다 — 결함 213 이 **좁은 창**에서 고친 무너짐이
+   * **넓은 창**에서 그대로 다시 났습니다 (홈의 회의 제목 다섯이 폭 0,
+   * 주 단추 다섯이 오른끝 1624 > 1440, `.main` 이 `overflow: hidden` 이라
+   * 스크롤로도 못 닿음 — WCAG 1.4.4).
+   *
+   * ⚠️ **낱말이 아니라 요구를 잽니다.** 「`px` 를 쓰지 마라」가 아니라
+   * 「**폭 breakpoint** 가 읽는 사람의 글자를 따라가는가」입니다 —
+   * 미디어 쿼리의 `rem` 은 브라우저 기본 글자를 봅니다.
+   */
+  const cssFiles = (): { rel: string; css: string }[] => {
+    const files: { rel: string; css: string }[] = [
+      { rel: 'webapp/src/app.css', css: join(ROOT, '..', 'webapp', 'src', 'app.css') },
+      { rel: 'frontend/public/app.css', css: join(PUBLIC, 'app.css') },
+      { rel: 'frontend/public/tokens.css', css: join(PUBLIC, 'tokens.css') },
+    ]
+      .filter((f) => existsSync(f.css))
+      .map((f) => ({ rel: f.rel, css: readFileSync(f.css, 'utf8') }));
+    // 화면의 `<style>` 도 같은 요구를 집니다 — 걷는 자리가 한쪽뿐이면 안 됩니다.
+    for (const name of readdirSync(PUBLIC).filter((n) => n.endsWith('.html'))) {
+      const inline = readFileSync(join(PUBLIC, name), 'utf8').match(/<style>([\s\S]*?)<\/style>/)?.[1];
+      if (inline) files.push({ rel: `frontend/public/${name}`, css: inline });
+    }
+    return files;
+  };
+
+  it('⭐ 폭 breakpoint 가 `px` 가 아니다 — 뿌리마다', () => {
+    const offenders: string[] = [];
+    let queries = 0;
+    for (const { rel, css } of cssFiles()) {
+      for (const m of css.matchAll(/@media[^{]*?\((?:min|max)-width:\s*([\d.]+)(px|rem|em)\s*\)/g)) {
+        queries += 1;
+        if (m[2] === 'px') offenders.push(`${rel} → ${m[0].trim()}`);
+      }
+    }
+    // 안 보고 있는 상태 자체가 실패여야 합니다 (결함 286).
+    ok(queries >= 5, `폭 breakpoint 를 ${queries}개밖에 못 찾았습니다 — 자가 낡았습니다`);
+    strictEqual(
+      offenders.join('\n'),
+      '',
+      '접는 폭이 `px` 입니다 — 글자를 키운 사람에게는 안 접힙니다 (rem 으로 적으세요)',
+    );
+  });
+});
+
 describe('첫 화면 껍데기 (`webapp/index.html`)', () => {
   const raw = readFileSync(join(ROOT, '..', 'webapp', 'index.html'), 'utf8');
   // ⚠️ **주석을 걷어냅니다.** 이 파일의 주석에는 `role="status"` 같은 낱말이
@@ -7467,8 +7518,19 @@ describe('⛔ 탭바 높이가 프로젝트 수를 따라가지 않는다 (결�
      뿐입니다. 열두 화면 넘침 0건 옆에서 이게 있었습니다. */
   const narrow = (): string => {
     const css = readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
-    const at = css.indexOf('@media (max-width: 1023.5px)');
-    ok(at >= 0, '좁은 폭 규칙을 못 찾았습니다 — 가드가 낡았습니다');
+    /* ⚠️ **단위를 글자로 찾지 않습니다** (결함 338). 예전에는
+       `'@media (max-width: 1023.5px)'` 를 통째로 찾았는데, 접는 폭을
+       `rem` 으로 바꾸자 요구는 하나도 안 바뀌었는데 이 자만 터졌습니다 —
+       결함 335 가 `id="keep-audio"` 에서 겪은 것과 같은 모양입니다.
+       찾는 것은 「셸을 접는 그 블록」이지 그것을 적은 글자가 아닙니다. */
+    const at = (() => {
+      for (const m of css.matchAll(/@media\s*\(max-width:[^)]*\)\s*\{/g)) {
+        const head = css.slice(m.index ?? 0, (m.index ?? 0) + 400);
+        if (/\.app\s*\{[^}]*grid-template-columns:\s*1fr/.test(head)) return m.index ?? -1;
+      }
+      return -1;
+    })();
+    ok(at >= 0, '셸을 접는 좁은 폭 규칙을 못 찾았습니다 — 가드가 낡았습니다');
     // 중괄호를 세어 그 블록만 떼어 냅니다.
     let depth = 0;
     let i = css.indexOf('{', at);

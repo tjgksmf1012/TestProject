@@ -2369,7 +2369,7 @@ body.sparail-page .actionbar {
 body.sparail-page.has-actionbar { padding-bottom: 6rem; }
 
 /* 좁은 폭 — 레일이 하단 탭바로 (webapp 셸과 같은 전환점 1024px) */
-@media (max-width: 1023.5px) {
+@media (max-width: 63.97rem) {
   body.sparail-page {
     padding-left: var(--sp-4);
     padding-right: var(--sp-4);
