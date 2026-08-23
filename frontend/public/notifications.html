@@ -74,10 +74,17 @@
            color: var(--text-subtle); }
   .ntext { font-size: var(--fs-label); color: var(--text); }
 
+  /* 시각 (결함 331). ⚠️ **본문보다 옅게, 종류표와 같은 크기로.** 이 값은
+     소식이 아니라 소식을 읽는 눈금입니다 — 활동 기록이 시각을 그리는
+     방식과 같은 무게로 둡니다. `tabular-nums` 는 줄마다 자릿수가
+     흔들리지 않게 합니다. */
+  .nwhen { flex: none; font-size: var(--fs-caption); color: var(--text-subtle);
+           font-variant-numeric: tabular-nums; white-space: nowrap; }
+
   /* ⚠️ 손가락에서는 16px 밑으로 내려가지 않습니다. */
   @media (hover: none) and (pointer: coarse) {
     .ntext, .ncount { font-size: 1rem; }
-    .nkind, .badge { font-size: .875rem; }
+    .nkind, .nwhen, .badge { font-size: .875rem; }
   }
         </style>
 </head>

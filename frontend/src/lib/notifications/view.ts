@@ -10,6 +10,8 @@
  * 여기 있는 것은 **어떻게 보일 것인가**뿐입니다.
  */
 
+import { shortTeamDate, teamDateTime } from '../time/calendar.ts';
+
 export interface Notice {
   kind: string;
   at: string;
@@ -50,6 +52,39 @@ export function describeKind(kind: string): string {
  */
 export function isUrgent(notice: Notice): boolean {
   return notice.kind === 'overdue';
+}
+
+/**
+ * 이 줄의 시각을 **무엇이라고 부를 것인가** (결함 331).
+ *
+ * ## ⚠️ `at` 은 종류마다 다른 것을 가리킵니다
+ *
+ * 저장된 알림(`mention`·`assigned`·`meeting_soon`·`github`)의 `at` 은
+ * **일어난 때**이고, 파생 알림(`due_soon`·`overdue`)의 `at` 은
+ * **마감일**입니다 (`notification_service.deadline_notices` 가
+ * `at=due` 로 만듭니다).
+ *
+ * 서버는 둘을 **한 축에 놓고 내림차순**으로 정렬합니다. 그래서 아직
+ * 오지 않은 마감이 목록 맨 위에 오고, 이미 지난 마감이 채팅 호출보다
+ * 아래로 내려갑니다 — 재현했습니다:
+ *
+ *     1. 곧 마감입니다 — 접근성 점검      at=2026-08-25  ← 미래
+ *     2. 업무를 맡았습니다 — 배포 방식 조사  at=2026-08-23
+ *     3. 김민수 님이 대화에서 나를 불렀습니다 at=2026-08-23
+ *     4. 마감일이 지났습니다 — 개발 환경…   at=2026-08-20  ← 제일 급한 것
+ *
+ * 그리고 **화면은 시각을 한 글자도 안 그리고 있었습니다.** 축은 있는데
+ * 보이지 않으니 사람은 그 순서를 「새것부터」로 읽습니다.
+ *
+ * 여기서는 **무엇을 가리키는 시각인지 이름을 붙여** 돌려줍니다. 순서를
+ * 바꾸는 것은 제품 결정이라 건드리지 않았습니다 — `docs/17` 331번의
+ * 「결정이 필요한 자리」를 보십시오.
+ */
+export function timeLabel(notice: Notice): string | null {
+  const isDeadline = notice.kind === 'due_soon' || notice.kind === 'overdue';
+  const shown = isDeadline ? shortTeamDate(notice.at) : teamDateTime(notice.at);
+  if (shown === null) return null;
+  return isDeadline ? `마감 ${shown}` : shown;
 }
 
 /**

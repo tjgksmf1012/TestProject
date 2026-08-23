@@ -8,6 +8,7 @@ import {
   hrefFor,
   isUrgent,
   readableIds,
+  timeLabel,
   type Notice,
 } from './view.ts';
 
@@ -101,5 +102,36 @@ describe('빈 상태', () => {
     for (const part of [note.what, note.why, note.how]) {
       strictEqual(part.length > 0, true);
     }
+  });
+});
+
+describe('시각 (결함 331)', () => {
+  it('일어난 때는 팀 달력의 날짜와 시각으로 그린다', () => {
+    const shown = timeLabel(notice({ kind: 'mention', at: '2026-09-01T05:00:00Z' }));
+    strictEqual(shown !== null, true);
+    strictEqual(shown?.startsWith('마감 '), false);
+    // 팀 달력은 Asia/Seoul — UTC 05:00 은 그날 14시입니다.
+    strictEqual(shown?.includes('14'), true, shown ?? '(없음)');
+  });
+
+  it('⭐ 마감 알림의 시각은 **마감일**이라고 이름을 붙인다', () => {
+    // `deadline_notices` 는 `at=due` 로 만듭니다 — 「일어난 때」가 아닙니다.
+    // 이름을 안 붙이면 사람은 같은 축의 다른 뜻을 못 봅니다.
+    for (const kind of ['due_soon', 'overdue']) {
+      const shown = timeLabel(notice({ kind, at: '2026-08-25T00:00:00Z' }));
+      strictEqual(shown?.startsWith('마감 '), true, `${kind}: ${shown ?? '(없음)'}`);
+    }
+  });
+
+  it('읽을 수 없는 값에 아무 말도 지어내지 않는다', () => {
+    strictEqual(timeLabel(notice({ at: '' })), null);
+    strictEqual(timeLabel(notice({ at: '어제쯤' })), null);
+  });
+
+  it('⭐ 브라우저 달력이 아니라 **팀 달력**으로 그린다', () => {
+    // 결함 246 — 같은 순간을 팀원마다 다른 날로 보면 안 됩니다.
+    // 자정을 넘는 순간을 심습니다: UTC 2026-09-01T16:00 = 서울 09-02 01:00.
+    const shown = timeLabel(notice({ kind: 'overdue', at: '2026-09-01T16:00:00Z' }));
+    strictEqual(shown?.includes('09-02'), true, shown ?? '(없음)');
   });
 });

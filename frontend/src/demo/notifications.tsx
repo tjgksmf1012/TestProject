@@ -28,6 +28,7 @@ import {
   hrefFor,
   isUrgent,
   readableIds,
+  timeLabel,
   type Notice,
 } from '../lib/notifications/view.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
@@ -186,12 +187,18 @@ function App() {
         <ul className="nlist">
           {notices.map((notice, i) => {
             const href = hrefFor(notice, projectId);
+            const when = timeLabel(notice);
             const classes = ['nitem'];
             if (!notice.read && notice.notification_id !== null) classes.push('fresh');
             if (isUrgent(notice)) classes.push('urgent');
             return (
               <li key={`${notice.kind}-${notice.notification_id}-${i}`} className={classes.join(' ')}>
                 <span className="nkind">{describeKind(notice.kind)}</span>
+                {/* ⚠️ 시각을 그리는 곳 (결함 331). 서버는 `at` 을 줄곧 보내고
+                    있었는데 **화면이 한 글자도 안 그렸습니다** — 목록이 그
+                    값으로 정렬되는데도요. 무엇을 가리키는 시각인지는
+                    `@lib` 이 정합니다(마감일과 일어난 때는 다릅니다). */}
+                {when !== null && <span className="nwhen">{when}</span>}
                 {href === null ? (
                   <span className="ntext">{notice.text}</span>
                 ) : (
