@@ -159,7 +159,19 @@ export function whyText(finding: Finding): string | null {
     //    사정이지 사람이 알 말이 아닙니다 (결함 78·86 과 같은 부류).
     const shared = words(detail.shared_words);
     if (shared.length > 0) return `${shared.join(' · ')}에 대한 결정이 둘입니다`;
-    if (detail.how === 'supersedes') return '회의에서 앞의 결정을 뒤집었습니다';
+    // ⚠️ **`what` 을 되풀이하지 않습니다** (결함 339). 예전에는
+    //    "회의에서 앞의 결정을 뒤집었습니다" 를 돌려줬는데, 바로 윗줄의
+    //    `what` 이 "앞의 결정을 뒤집었습니다" 라 화면에 **같은 말이 두 줄**
+    //    이었습니다. 「왜」 칸을 차지하면서 아무 말도 안 하는 것은 이 함수의
+    //    머리말이 금지한 바로 그것입니다.
+    //
+    //    탐지기는 **어느 결정을 뒤집었는지**를 보내고 있습니다. 그걸 적습니다.
+    const superseded = detail.superseded_content;
+    if (typeof superseded === 'string' && superseded.trim() !== '') {
+      // 따옴표 뒤에 조사를 붙이면 앞말 받침을 따라가야 해서 갈라집니다 —
+      // 콜론으로 끊어 조사를 아예 안 씁니다.
+      return `앞 결정: 「${superseded.trim()}」`;
+    }
     return null;
   }
 

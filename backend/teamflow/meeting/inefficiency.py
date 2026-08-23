@@ -498,6 +498,13 @@ def find_decision_conflicts(decisions: list[Decided]) -> list[Finding]:
                     # 화면에 "결정이 번복됐습니다" 만 뜨고 **어느 결정인지
                     # 볼 방법이 없습니다.** 가드가 이걸 잡았습니다.
                     "decision_ids": [earlier.id, later.id],
+                    # ⚠️ **번호가 아니라 글입니다** (결함 339). 번호만 달아
+                    # 두면 화면이 그것으로 할 말이 없어서 결국 "앞의 결정을
+                    # 뒤집었습니다" 만 뜹니다 — 바로 위 주석이 막으려던 그
+                    # 상태입니다. 실제로 `decision_ids`·`superseded_decision_id`
+                    # 를 읽는 화면 파일이 **두 뿌리 다 0개**였습니다.
+                    # 식별자 대신 이름을 보내는 것은 결함 293 의 결정입니다.
+                    "superseded_content": earlier.content,
                     **detail,
                 },
                 severity=SEVERITY,
