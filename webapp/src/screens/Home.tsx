@@ -13,6 +13,8 @@ import {
 import { api, ApiError } from '../api/client.ts';
 import type { MeetingSummary } from '../api/types.ts';
 import {
+  coverageReading,
+  describeCoverageRibbon,
   emphasisFor,
   emptyProjectsMessage,
   hasLane,
@@ -108,12 +110,20 @@ function MeetingRow({
               { start: 0, end: coverage as number, kind: 'known' },
               { start: coverage as number, end: 1, kind: 'unknown' },
             ]}
-            label={`${meetingLabel(meeting.title, meeting.meeting_id)} — 녹음 커버리지 ${Math.round((coverage as number) * 100)}%`}
+            label={describeCoverageRibbon(
+              meetingLabel(meeting.title, meeting.meeting_id),
+              coverage as number,
+            )}
           />
         )}
       </span>
+      {/* ⭐ **축에 이름을 붙입니다** (결함 336). 예전에는 `80%` 뿐이라
+          `aria-label` 만 「녹음 커버리지」를 알고 있었고, 「처리 중」·
+          「검토 필요」가 적힌 줄들 사이에서 그 막대는 **처리 진행률**로
+          읽혔습니다. 형제 자리인 기여도는 이미 `ribbonReading()` 으로
+          「확신 45% · 모름 55%」를 눈에도 적고 있었습니다. */}
       <span className="mrow__cov num">
-        {hasLane(coverage) ? `${Math.round((coverage as number) * 100)}%` : ''}
+        {hasLane(coverage) ? coverageReading(coverage as number) : ''}
       </span>
       <span className="mrow__action">
         {step.href !== null ? (

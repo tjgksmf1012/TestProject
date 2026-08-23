@@ -2,6 +2,8 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  coverageReading,
+  describeCoverageRibbon,
   describeMeetingStatus,
   emphasisFor,
   describeProject,
@@ -425,5 +427,34 @@ describe('결함 252 — 화면이 `actionable` 을 뒤집던 자리', () => {
     strictEqual(emphasisFor(todo, true), 'primary');
     // 덩어리 밖의 갈 수 있는 줄은 테두리 버튼입니다 (v2 F9).
     strictEqual(emphasisFor(nextStepFor(meeting({ status: 'pending' })), false), 'secondary');
+  });
+});
+
+describe('리본 옆의 값에는 이름이 붙는다 (결함 336)', () => {
+  // 「값은 글자로, 그림은 폭이나 개수만」 — 그런데 홈은 그 글자를 `80%`
+  // 라고만 적었습니다. 축 이름이 `aria-label` 에만 있어서 **낭독기가
+  // 눈보다 많이 알고** 있었습니다.
+  it('⭐ 눈에 보이는 값이 무엇의 값인지 말한다', () => {
+    strictEqual(coverageReading(0.8), '커버리지 80%');
+    strictEqual(coverageReading(1), '커버리지 100%');
+    strictEqual(coverageReading(0), '커버리지 0%');
+  });
+
+  it('⭐ 귀로 듣는 줄과 눈으로 보는 줄이 **같은 값**을 말한다', () => {
+    // 결함 310 에서 겪은 것 — 라벨을 고쳤는데 재는 자가 옛 글자를 찾아
+    // 「없음」이 나왔습니다. 둘을 한 곳에서 만들면 갈라질 수 없습니다.
+    for (const c of [0, 0.42, 0.805, 1]) {
+      ok(
+        describeCoverageRibbon('1주차 정기회의', c).includes(coverageReading(c)),
+        `${c} → ${describeCoverageRibbon('1주차 정기회의', c)}`,
+      );
+    }
+  });
+
+  it('⛔ 반올림이 두 곳에서 갈라지지 않는다', () => {
+    // 눈은 80%, 귀는 80.5% 같은 것이 나오면 같은 그림을 두 사람이 다르게
+    // 읽습니다.
+    strictEqual(coverageReading(0.805), '커버리지 81%');
+    ok(describeCoverageRibbon('회의', 0.805).endsWith('커버리지 81%'));
   });
 });

@@ -432,3 +432,30 @@ export function emphasisFor(step: NextStep, waiting: boolean): StepEmphasis {
 export function hasLane(coverage: number | null): boolean {
   return coverage !== null && Number.isFinite(coverage);
 }
+
+/**
+ * 홈의 리본 옆에 **글자로** 서는 값 — 「값은 글자로, 그림은 폭이나 개수만」.
+ *
+ * ## 왜 이름이 붙는가 (결함 336)
+ *
+ * 홈은 이 값을 **`80%` 라고만** 그렸습니다. 축 이름은 `aria-label` 에만
+ * 있어서 **낭독기는 「녹음 커버리지 80%」를 듣고 눈으로 보는 사람은
+ * 「80%」만 봤습니다.** 같은 요소에서 귀가 눈보다 많이 아는 상태입니다.
+ *
+ * 그리고 그 목록의 옆 줄들은 「처리 중」·「검토 필요」라고 적혀 있습니다 —
+ * 그 사이에서 80% 까지 찬 막대는 **처리 진행률**로 읽힙니다. 실제로는
+ * 녹음이 얼마나 온전히 잡혔는가이고, 둘은 전혀 다른 것입니다.
+ *
+ * 형제 자리인 기여도는 이미 이렇게 하고 있었습니다 —
+ * `ribbonReading()` 이 「확신 45% · 모름 55%」를 **눈에도** 적습니다.
+ * 홈만 빠져 있었습니다 (결함 331 의 「값에 이름을 붙이면 두 뜻이 보인다」).
+ */
+export function coverageReading(coverage: number): string {
+  return `커버리지 ${Math.round(coverage * 100)}%`;
+}
+
+/** 낭독기에 읽힐 한 줄. 그림이 말하는 것과 **같은 것**을 말합니다. */
+export function describeCoverageRibbon(title: string, coverage: number): string {
+  return `${title} — 녹음 ${coverageReading(coverage)}`;
+}
+

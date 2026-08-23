@@ -3805,6 +3805,60 @@ describe('베타 체험 QA — 화면이 터졌을 때·프로젝트가 둘일 �
 });
 
 
+describe('리본 옆의 값 (결함 336)', () => {
+  /** `webapp/src` 아래 화면 소스 전부 — 뿌리마다 따로 셉니다 (결함 321). */
+  const spaScreens = (): { rel: string; code: string }[] => {
+    const base = join(ROOT, '..', 'webapp', 'src');
+    const out: { rel: string; code: string }[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name))
+          out.push({ rel: full.slice(base.length + 1), code: readFileSync(full, 'utf8') });
+      }
+    };
+    if (!existsSync(base)) return out;
+    walk(base);
+    return out;
+  };
+
+  it('⛔ 리본을 그리는 화면이 퍼센트를 **직접 조립**하지 않는다', () => {
+    // 홈은 `${Math.round(coverage * 100)}%` 를 **두 곳에서 따로** 만들고
+    // 있었습니다 — 눈에 보이는 칸과 `aria-label`. 둘이 갈라질 수 있는
+    // 것도 문제지만, 더 나쁜 것은 **눈 쪽에만 축 이름이 빠진** 것이었고
+    // 아무도 그걸 못 봤습니다.
+    //
+    // ⚠️ **낱말이 아니라 요구를 잽니다** — 「커버리지」라는 글자가 있는가가
+    // 아니라 「값을 화면이 직접 조립하는가」를 봅니다. 이름 붙이는 일은
+    // `@lib` 한 곳에서만 일어나야 갈라지지 않습니다 (결함 295·316).
+    const offenders: string[] = [];
+    for (const { rel, code } of spaScreens()) {
+      const body = codeOf(code);
+      if (!/<TrackRibbon\b/.test(body)) continue;
+      for (const [line] of body.matchAll(/^.*Math\.round\([^\n]*\)\s*\*?\s*[^\n]*%`/gm)) {
+        offenders.push(`${rel}  ${line.trim()}`);
+      }
+    }
+    strictEqual(
+      offenders.join('\n'),
+      '',
+      '리본을 그리는 화면이 퍼센트를 직접 만듭니다 — `@lib` 의 이름 붙은 함수를 쓰세요',
+    );
+  });
+
+  it('⭐ 홈의 커버리지 값이 `@lib` 의 이름 붙은 함수에서 온다', () => {
+    const home = spaScreens().find((f) => f.rel.endsWith('Home.tsx'));
+    ok(home !== undefined, 'webapp 에 Home.tsx 가 없습니다');
+    for (const fn of ['coverageReading(', 'describeCoverageRibbon(']) {
+      ok(
+        codeOf(home.code).includes(fn),
+        `Home.tsx 가 ${fn} 를 안 씁니다 — 눈과 귀가 갈라집니다`,
+      );
+    }
+  });
+});
+
 describe('첫 화면 껍데기 (`webapp/index.html`)', () => {
   const raw = readFileSync(join(ROOT, '..', 'webapp', 'index.html'), 'utf8');
   // ⚠️ **주석을 걷어냅니다.** 이 파일의 주석에는 `role="status"` 같은 낱말이
