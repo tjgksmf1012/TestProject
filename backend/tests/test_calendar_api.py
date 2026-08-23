@@ -128,6 +128,52 @@ def test_the_range_is_respected(client: TestClient, seeded, dated_task):
     assert items == []
 
 
+def test_a_range_without_a_timezone_is_answered_not_crashed(
+    client: TestClient, seeded, dated_task
+):
+    """⭐ 시간대 없이 온 범위에 **500 을 주면 안 됩니다** (결함 330).
+
+    ## 왜 이 검사가 생겼나
+
+    `collect()` 는 DB 에서 읽은 값만 `clock.as_utc` 로 맞추고 **요청으로 들어온
+    `since`·`until` 은 그대로** 썼습니다. 그래서 시간대가 안 붙은 요청이
+    비교에서 터졌습니다:
+
+        GET /api/projects/1/calendar?since=2026-09-01&until=2026-09-30
+        → 500  TypeError: can't compare offset-naive and offset-aware datetimes
+
+    `as_utc` 의 docstring 이 **인용해 둔 바로 그 오류**입니다. 막으려고 만든
+    함수를 **한쪽 피연산자에만** 걸어 둔 것입니다.
+
+    ⚠️ **아무도 안 재고 있던 이유**: 이 파일의 `window()` 도 화면도 언제나
+    `+00:00`/`Z` 를 붙여 보냅니다. 씨앗이 한 갈래만 만들면 다른 갈래는
+    영영 안 그려집니다.
+
+    ⚠️ 저장은 UTC 라는 것이 이 저장소의 규약이므로(`clock.as_utc`), 시간대가
+    없는 값은 **UTC 로 읽는 것이 맞습니다** — 400 으로 거절하는 것이 아니라
+    같은 답을 줘야 합니다.
+    """
+    aware = client.get(
+        f"/api/projects/{seeded['project_id']}/calendar", params=window()
+    )
+    assert aware.status_code == 200, aware.text
+
+    naive = client.get(
+        f"/api/projects/{seeded['project_id']}/calendar",
+        params={
+            "since": (NOW - timedelta(days=30)).replace(tzinfo=None).isoformat(),
+            "until": (NOW + timedelta(days=30)).replace(tzinfo=None).isoformat(),
+        },
+    )
+    assert naive.status_code == 200, naive.text
+    assert naive.json() == aware.json(), (
+        "시간대만 뺐는데 답이 달라졌습니다 — 저장이 UTC 라는 규약과 어긋납니다"
+    )
+    assert [i["task_id"] for i in naive.json() if i["task_id"] == dated_task], (
+        "범위 안의 업무가 안 나옵니다 — 이 검사가 헛돕니다"
+    )
+
+
 def test_a_backwards_range_is_refused(client: TestClient, seeded):
     response = client.get(
         f"/api/projects/{seeded['project_id']}/calendar",
