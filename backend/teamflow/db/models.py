@@ -1175,8 +1175,11 @@ class AuditLog(Base):
     id: Mapped[int] = _pk()
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"))
     actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    # score_adjusted | consent_revoked | audio_deleted | weights_changed |
-    # candidate_approved | member_removed
+    # ⚠️ **여기에 목록을 적지 마십시오.** 예전에는 여섯 개가 적혀 있었는데,
+    # 코드가 실제로 쓰는 것은 열여섯이었고 적힌 것 중 둘(`consent_revoked`)
+    # 은 **아무도 안 쓰고** 있었습니다 — 주석이 스스로 낡은 것입니다
+    # (결함 328). 어휘의 원본은 `services/activity_service.ACTION_LABEL`
+    # 이고, 짝 가드가 「쓰는 것 == 이름표가 있는 것」을 셉니다.
     action: Mapped[str] = mapped_column(String(50), nullable=False)
     target: Mapped[str] = mapped_column(String(100), nullable=False)
     before: Mapped[dict | None] = mapped_column(JSONType)

@@ -235,11 +235,11 @@ def test_the_audit_log_is_now_read_somewhere():
     assert writes > 0, "감사 로그를 쓰는 곳이 0곳이 됐습니다 — 기록이 끊겼습니다"
     # 문서가 적어 둔 개수도 같이 봅니다. ⚠️ 처음에 "다섯 곳" 이라고 적었는데
     # 실제로는 열한 곳이었습니다 — 세지 않고 눈대중으로 적은 것입니다.
-    assert writes == 14, (
+    assert writes == 15, (
         f"감사 로그를 쓰는 곳이 {writes}곳입니다 — `docs/20` ACTIVITY-001 의 "
         "개수를 고치십시오"
     )
-    assert "쓰기는 열네 곳" in _doc(), (
+    assert "쓰기는 열다섯 곳" in _doc(), (
         "문서에서 쓰기 개수를 적은 자리를 못 찾았습니다 — 문구가 바뀌었으면 "
         "이 검사도 같이 고치십시오"
     )
@@ -264,6 +264,17 @@ def test_the_action_labels_cover_every_action_the_code_writes():
     assert not missing, (
         f"사람 말이 없는 감사 행동입니다: {missing} — "
         "`activity_service.ACTION_LABEL` 에 넣으십시오"
+    )
+
+    # ⚠️ **반대 방향도 봅니다** (결함 328). 이 검사는 오래도록 「덮는가」만
+    # 봤습니다. 그동안 `models.py` 주석은 어휘랍시고 여섯 개를 적어 두고
+    # 있었고 그중 `member_removed` 는 **쓰는 곳이 0곳**이었습니다 —
+    # 「목록에 있으니 되겠지」로 읽히면 아무 일도 안 일어납니다(실패 ①).
+    # 결함 289 가 「맞는 칸인가도 보십시오」로 적어 둔 그것입니다.
+    stale = sorted(set(activity_service.ACTION_LABEL) - written)
+    assert not stale, (
+        f"이름표는 있는데 **아무도 안 쓰는** 행동입니다: {stale} — "
+        "낡은 것이거나 만들어 놓고 안 부르는 것입니다"
     )
 
 

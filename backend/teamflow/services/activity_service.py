@@ -48,6 +48,7 @@ ACTION_LABEL: dict[str, str] = {
     "candidate_rejected": "업무 후보 거절",
     "github_login_changed": "GitHub 계정 연결 변경",
     "meeting_discarded": "빈 회의 무름",
+    "member_removed": "팀원 내보내기",
     "meeting_reprocess_requested": "회의 재처리 요청",
     "score_adjusted": "기여도 확정값 조정",
     "task_assignees_changed": "업무 담당자 변경",
@@ -75,6 +76,10 @@ TOUCHES_CONTRIBUTION: frozenset[str] = frozenset(
         "weights_changed",
         "ai_output_corrected",
         "task_assignees_changed",
+        # ⚠️ 나가면 그 사람의 역할 비중이 `members` 행과 함께 사라집니다.
+        # 적어 둔 것으로 되살리지만(결함 327), **되돌릴 수 없는 행동이고
+        # 남은 팀의 몫이 움직이는 자리**라 눈에 띄게 그립니다.
+        "member_removed",
     }
 )
 
@@ -160,8 +165,14 @@ def _remembered_name(row: m.AuditLog) -> str | None:
     before = row.before
     if not isinstance(before, dict):
         return None
-    name = before.get("title")
-    return name.strip() if isinstance(name, str) and name.strip() else None
+    # ⚠️ 종류마다 이름이 담긴 칸이 다릅니다 — 회의는 `title`, 사람은 `name`.
+    # 하나만 보면 절반이 식별자 그대로 나갑니다 (결함 328 에서 `members/3`
+    # 이 그랬습니다).
+    for key in ("title", "name"):
+        name = before.get(key)
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return None
 
 
 #: `종류/번호` 또는 `종류:번호`. ⚠️ 이 저장소는 두 구분자를 **둘 다** 씁니다

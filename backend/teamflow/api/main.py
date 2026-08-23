@@ -2631,6 +2631,52 @@ def change_member_role(
     )
 
 
+def _remember_departure(
+    session: Session, project_id: int, member: m.Member, *, actor_id: int
+) -> None:
+    """나간 사람이 **어떤 역할이었는지**를 적어 둡니다 (결함 327·328).
+
+    ## 왜 적어야 하는가 — 안 적으면 점수가 움직입니다
+
+    `load_profiles` 는 `members` 행에서만 역할 비중을 읽습니다. 행이 사라지면
+    그 사람의 겸직(개발 60% · 디자인 40%)이 **기본 개발자 프로파일로 조용히
+    떨어지고**, 같은 순간에 다시 계산해도 몫이 달라집니다. 재 봤습니다 —
+    가중치 `task 0.5882 / code 0.4118` → `0.4615 / 0.5385`, 몫
+    `24.85% → 24.68%`, 그리고 그만큼을 **남은 두 사람이 나눠 가졌습니다.**
+
+    바로 이 함수를 부르는 자리의 주석이 막겠다고 적은 그 일입니다 —
+    「나갔다고 해서 그 사람이 한 일이 없던 일이 되면, **남은 팀의 기여도
+    비율이 조용히 부풀고** 회의록에 구멍이 납니다」.
+
+    ## 왜 감사 기록인가
+
+    `audit_logs` 는 이 저장소가 「사라진 것의 이름」을 이미 기억하는 자리
+    입니다(결함 320 의 무른 회의). 그리고 내보내기는 **되돌릴 수 없는
+    행동**인데 여태 한 줄도 안 남았습니다 — `member_removed` 는 모델
+    주석의 어휘에 있으면서 **쓰는 곳이 0곳**이었습니다(실패 ①).
+
+    ⛔ 지어내지 않습니다. `before` 에는 그 순간 행에 **실제로 있던 값**만
+    적습니다.
+    """
+    user = session.get(m.User, member.user_id)
+    session.add(
+        m.AuditLog(
+            project_id=project_id,
+            actor_id=actor_id,
+            action="member_removed",
+            target=f"members/{member.user_id}",
+            before={
+                "name": user.name if user is not None else None,
+                "project_role": member.project_role,
+                "role_shares": dict(member.role_shares or {}),
+                "github_login": member.github_login,
+            },
+            after=None,
+            at=datetime.now(UTC),
+        )
+    )
+
+
 @app.delete(
     "/api/projects/{project_id}/members/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -2661,6 +2707,7 @@ def remove_member(
             status.HTTP_403_FORBIDDEN, "나보다 높거나 같은 사람은 내보낼 수 없습니다"
         )
 
+    _remember_departure(session, project_id, target, actor_id=actor.user_id)
     session.delete(target)
     session.flush()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -2691,6 +2738,7 @@ def leave_project(
     if problem is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, problem)
 
+    _remember_departure(session, project_id, member, actor_id=member.user_id)
     session.delete(member)
     session.flush()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

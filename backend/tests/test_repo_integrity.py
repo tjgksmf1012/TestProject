@@ -2580,6 +2580,30 @@ def test_every_audit_target_kind_has_a_human_name() -> None:
     )
 
 
+def test_leaving_a_project_is_written_down_on_both_ways_out() -> None:
+    """⭐ 내보내기와 스스로 나가기 **둘 다** 기록을 남겨야 한다 (결함 328).
+
+    ⚠️ 이 저장소에서 제일 흔한 재발 모양은 **한 갈래만 고치는 것**입니다
+    (실패 ② · 결함 298→301). 나가는 문은 둘인데 한쪽만 적으면, 스스로
+    나간 사람의 역할 비중은 여전히 소리 없이 사라집니다 (결함 327).
+    """
+    source = (REPO_ROOT / "backend/teamflow/api/main.py").read_text(encoding="utf-8")
+
+    exits = [
+        name
+        for name in ("def remove_member(", "def leave_project(")
+        if name in source
+    ]
+    assert len(exits) == 2, f"나가는 문을 둘 다 못 찾았습니다: {exits}"
+
+    for name in exits:
+        body = source.split(name, 1)[1].split("\n@app.", 1)[0]
+        assert "_remember_departure(" in body, (
+            f"{name.strip('def (')} 이 나가는 사람의 역할 비중을 안 적습니다 — "
+            "적어 두지 않으면 기여도가 조용히 다시 계산됩니다 (결함 327)"
+        )
+
+
 def test_the_activity_log_never_starts_receiving_meetings_or_chat() -> None:
     """⭐ 활동 화면의 빈 상자가 **주장하는 범위**를 서버가 계속 지켜야 한다.
 

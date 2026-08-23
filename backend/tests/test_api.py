@@ -569,6 +569,36 @@ def add_contribution_events(project_id: int, user_id: int, count: int) -> None:
             )
 
 
+def add_code_events(project_id: int, user_id: int, count: int) -> None:
+    """**두 번째 범주**의 근거. 왜 필요한가 — 결함 327 회차에 배운 것.
+
+    ⚠️ `add_contribution_events` 는 `task` 하나만 만듭니다. 범주가 하나뿐이면
+    가중치가 무엇이든 **정규화되어 1.0** 이라, 개발자 프로파일과 겸직
+    프로파일이 **같은 값**을 냅니다. 그 자로 재면 프로파일이 바뀌어도
+    안 걸립니다 — 실제로 심어 보고 알았습니다(0건이 나왔습니다).
+
+    「두 정렬 기준이 같은 데이터로 잰 것」과 같은 함정입니다 (AGENTS.md).
+    **갈라지는 데이터**로 재십시오.
+    """
+    from teamflow.contribution.events import Category, EventType, SourceKind
+
+    with db_session.session_scope() as s:
+        for i in range(count):
+            s.add(
+                m.ContributionEventRow(
+                    project_id=project_id,
+                    user_id=user_id,
+                    occurred_at=NOW,
+                    category=Category.CODE.value,
+                    event_type=EventType.PR_MERGED.value,
+                    source_kind=SourceKind.GITHUB_EVENT.value,
+                    source_id=900_000 + user_id * 100 + i,
+                    magnitude=1.0,
+                    event_metadata={},
+                )
+            )
+
+
 def test_contributions_shares_sum_to_100(client: TestClient, seeded):
     add_contribution_events(seeded["project_id"], seeded["user_ids"][0], 5)
     add_contribution_events(seeded["project_id"], seeded["user_ids"][1], 3)
@@ -1365,6 +1395,108 @@ def test_removing_a_member_does_not_break_contributions(client: TestClient, seed
         _final_url(seeded), json={"finals": [{"user_id": u} for u in users[:2]]}
     )
     assert confirmed.status_code == 201, confirmed.text
+
+
+def test_being_removed_does_not_silently_reweigh_what_you_did(
+    client: TestClient, seeded
+):
+    """⭐ 나간 사람의 **역할 비중**도 남아야 한다 (결함 327).
+
+    ## 재현
+
+    `load_profiles` 는 `members` 행에서만 역할 비중을 읽었습니다. 행이
+    사라지면 겸직(개발 60% · 디자인 40%)이 **기본 개발자 프로파일로 조용히
+    떨어지고**, 같은 순간에 다시 계산해도 그 사람 몫이 움직였습니다:
+
+        가중치  task 0.5882 / code 0.4118  →  0.4615 / 0.5385
+        몫      24.85%  →  24.68%   (남은 두 사람이 +0.10 · +0.08 로 나눠 가짐)
+
+    `remove_member` 의 주석이 막겠다고 적은 바로 그 일입니다 —
+    「남은 팀의 기여도 비율이 조용히 부풀고」.
+
+    ⚠️ **몫이 아니라 가중치를 잽니다.** 몫은 시간 감쇠로도 조금씩 움직여서
+    「달라졌다」가 무엇 때문인지 못 가릅니다 — 가중치는 시간과 무관합니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+    add_contribution_events(seeded["project_id"], users[2], 2)
+    # ⚠️ 범주가 하나면 가중치가 무엇이든 1.0 으로 정규화됩니다 — 갈라지는
+    # 데이터라야 프로파일이 바뀐 것을 잽니다.
+    add_code_events(seeded["project_id"], users[2], 2)
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(
+            select(m.Member).where(m.Member.project_id == seeded["project_id"])
+        ).all()
+        for row in rows:
+            if row.user_id == users[0]:
+                row.project_role = vocab.ProjectRole.OWNER
+            if row.user_id == users[2]:
+                # 겸직 — 기본 프로파일과 **갈라지는** 값이라야 잽니다.
+                row.role_shares = {"developer": 0.6, "designer": 0.4}
+
+    def weights_of(user_id: int) -> dict[str, float]:
+        body = client.get(f"/api/projects/{seeded['project_id']}/contributions").json()
+        row = next(mm for mm in body["members"] if mm["user_id"] == user_id)
+        return {c["category"]: round(c["weight"], 6) for c in row["categories"]}
+
+    before = weights_of(users[2])
+    assert before, "가중치를 하나도 못 읽었습니다 — 검사가 헛돕니다"
+
+    removed = client.delete(
+        f"/api/projects/{seeded['project_id']}/members/{users[2]}"
+    )
+    assert removed.status_code == 204, removed.text
+
+    assert weights_of(users[2]) == before, (
+        "나갔다고 그 사람을 재던 자가 바뀌었습니다 — 한 일은 그대로인데 "
+        "값이 움직입니다"
+    )
+
+
+def test_walking_out_by_yourself_is_written_down_too(client: TestClient, seeded):
+    """⭐ 나가는 문은 **둘**이고 둘 다 적어야 합니다 (결함 327·328).
+
+    한 갈래만 고치는 것이 이 저장소에서 제일 흔한 재발 모양입니다
+    (실패 ② · 결함 298→301).
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+    add_code_events(seeded["project_id"], users[1], 2)
+
+    with db_session.session_scope() as s:
+        row = s.scalars(
+            select(m.Member).where(
+                m.Member.project_id == seeded["project_id"],
+                m.Member.user_id == users[1],
+            )
+        ).one()
+        row.role_shares = {"developer": 0.6, "designer": 0.4}
+
+    def weights_of(user_id: int) -> dict[str, float]:
+        body = client.get(f"/api/projects/{seeded['project_id']}/contributions").json()
+        row = next(mm for mm in body["members"] if mm["user_id"] == user_id)
+        return {c["category"]: round(c["weight"], 6) for c in row["categories"]}
+
+    before = weights_of(users[1])
+    assert before
+
+    login_as(client, users[1])
+    left = client.post(f"/api/projects/{seeded['project_id']}/members/me/leave")
+    assert left.status_code == 204, left.text
+
+    login_as(client, users[0])
+    assert weights_of(users[1]) == before
+
+    with db_session.session_scope() as s:
+        logged = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "member_removed")
+        ).all()
+        assert [row.target for row in logged] == [f"members/{users[1]}"], (
+            "스스로 나간 것이 감사 기록에 안 남았습니다"
+        )
 
 
 def test_leaving_a_project_does_not_break_contributions(client: TestClient, seeded):

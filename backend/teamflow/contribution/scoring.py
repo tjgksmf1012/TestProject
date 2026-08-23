@@ -390,6 +390,7 @@ def score_team(
     profiles: dict[int, ScoringProfile],
     coverage: CoverageStats,
     unmeasurable: dict[int, list[MeasurementGap]] | None = None,
+    former_profiles: dict[int, ScoringProfile] | None = None,
 ) -> TeamScoreResult:
     """팀 전체 기여도를 산정한다.
 
@@ -415,9 +416,26 @@ def score_team(
     #    조용히 부풀고, 그건 `remove_member` 가 그 사람의 기록을 일부러
     #    남겨 두는 이유와 정면으로 어긋납니다. 기본 프로파일로 **계속
     #    셉니다** — 그 사람이 한 일은 실제로 있었습니다.
+    #
+    # ⚠️ **「나간 사람」은 여기서만 정합니다** — `profiles` 에 없는 사람.
+    #    나갈 때 적어 둔 프로파일(`former_profiles`)을 `profiles` 에 미리
+    #    합쳐 버리면 이 줄이 아무도 못 찾고, 화면은 다시 「사용자 #3」 을
+    #    띄웁니다 (결함 222 가 반대 방향으로 되살아납니다). 실제로 결함 327
+    #    을 고치다 그렇게 됐고 검사 둘이 잡았습니다 — **누구인가**와
+    #    **무엇으로 재는가**는 다른 질문입니다.
     former = sorted(uid for uid in users if uid not in profiles)
     if former:
-        profiles = {**profiles, **{uid: DEFAULT_PROFILES[Role.DEVELOPER] for uid in former}}
+        # 적어 둔 역할 비중이 있으면 **그것으로** 잽니다 (결함 327). 없으면
+        # 기본 프로파일 — 오늘까지의 동작 그대로이고, 모르는 것을 아는 척
+        # 하지 않습니다.
+        remembered = former_profiles or {}
+        profiles = {
+            **profiles,
+            **{
+                uid: remembered.get(uid, DEFAULT_PROFILES[Role.DEVELOPER])
+                for uid in former
+            },
+        }
     clean: dict[int, list[ContributionEvent]] = {
         uid: deduplicate(events_by_user[uid]) for uid in users
     }

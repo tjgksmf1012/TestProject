@@ -10,6 +10,7 @@ docs/05-기여도-산정-설계.md §1
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from sqlalchemy import case, func, select
@@ -191,13 +192,82 @@ def load_profiles(session: Session, project_id: int) -> dict[int, ScoringProfile
             except (ValueError, TypeError):
                 continue
 
-        if not shares or sum(shares.values()) <= 0:
-            profiles[member.user_id] = DEFAULT_PROFILES[Role.DEVELOPER]
-        elif len(shares) == 1:
-            profiles[member.user_id] = DEFAULT_PROFILES[next(iter(shares))]
-        else:
-            profiles[member.user_id] = blended_profile(shares)
+        profiles[member.user_id] = _profile_from_shares(shares)
+
     return profiles
+
+
+def load_former_profiles(session: Session, project_id: int) -> dict[int, ScoringProfile]:
+    """**나간 사람**을 재던 역할 가중치 (결함 327).
+
+    나간 사람의 기여 이벤트는 계산에 그대로 남습니다
+    (`TeamScoreResult.former_members` 참고). 그러면 **그 사람을 재던 역할
+    비중**도 남아 있어야 합니다 — 없으면 같은 순간에 다시 계산해도 몫이
+    움직이고, 그만큼을 남은 사람들이 나눠 가집니다.
+
+    ⚠️ **`load_profiles` 에 합치지 마십시오.** 「지금 구성원인가」를 정하는
+    것이 그 표라서, 합치면 `score_team` 이 나간 사람을 못 찾고 화면이 다시
+    「사용자 #3」 을 띄웁니다 (결함 222). 고치다 실제로 그렇게 됐습니다.
+    """
+    return {
+        user_id: _profile_from_shares(shares)
+        for user_id, shares in _remembered_role_shares(session, project_id).items()
+    }
+
+
+def _profile_from_shares(shares: dict[Role, float]) -> ScoringProfile:
+    """역할 비중 → 가중치 프로파일. **한 곳에서만** 정합니다.
+
+    ⚠️ 두 벌이 되면 나간 사람과 남은 사람이 다른 규칙으로 재집니다 —
+    이 저장소의 실패 ②입니다.
+    """
+    if not shares or sum(shares.values()) <= 0:
+        return DEFAULT_PROFILES[Role.DEVELOPER]
+    if len(shares) == 1:
+        return DEFAULT_PROFILES[next(iter(shares))]
+    return blended_profile(shares)
+
+
+def _remembered_role_shares(session: Session, project_id: int) -> dict[int, dict[Role, float]]:
+    """나갈 때 **적어 둔** 역할 비중 (결함 327).
+
+    `members` 행은 사라지지만 `_remember_departure` 가 `audit_logs` 에
+    그 순간의 `role_shares` 를 적어 둡니다. 이 저장소가 「사라진 것」을
+    기억하는 자리는 거기 하나입니다(결함 320 의 무른 회의와 같은 방법).
+
+    ⛔ **지어내지 않습니다.** 적어 둔 게 없으면(이 기록이 생기기 전에
+    나간 사람) 여기 안 담기고, 부르는 쪽이 기본 프로파일을 씁니다 —
+    오늘까지의 동작 그대로입니다. 모르는 것을 아는 척하지 않습니다.
+
+    같은 사람이 여러 번 나갔으면 **마지막 기록**이 답입니다.
+    """
+    rows = session.scalars(
+        select(m.AuditLog)
+        .where(
+            m.AuditLog.project_id == project_id,
+            m.AuditLog.action == "member_removed",
+        )
+        .order_by(m.AuditLog.at, m.AuditLog.id)
+    ).all()
+
+    out: dict[int, dict[Role, float]] = {}
+    for row in rows:
+        hit = re.match(r"^members/(\d+)$", row.target or "")
+        if hit is None:
+            continue
+        before = row.before if isinstance(row.before, dict) else {}
+        raw = before.get("role_shares")
+        if not isinstance(raw, dict):
+            continue
+        shares: dict[Role, float] = {}
+        for key, value in raw.items():
+            try:
+                shares[Role(key)] = float(value)
+            except (ValueError, TypeError):
+                continue
+        if shares:
+            out[int(hit[1])] = shares
+    return out
 
 
 def load_coverage(session: Session, project_id: int) -> CoverageStats:
@@ -540,6 +610,7 @@ def compute(session: Session, project_id: int) -> TeamScoreResult:
         profiles,
         load_coverage(session, project_id),
         unmeasurable=load_measurement_gaps(session, project_id),
+        former_profiles=load_former_profiles(session, project_id),
     )
 
 
