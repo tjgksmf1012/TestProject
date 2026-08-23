@@ -77,6 +77,7 @@ import {
 } from '../lib/review/timeline.ts';
 import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { mountEvidence, openEvidence } from './evidence.tsx';
+import { draftStorageKey, parseDrafts, serializeDrafts } from '../lib/review/drafts.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 import { plainText } from '../lib/ui/plain.ts';
@@ -840,10 +841,44 @@ function Review() {
 
   const draftOf = (id: number): Draft => drafts.get(id) ?? emptyDraft();
 
+  /* ⚠️ **표시한 결정을 새로고침 한 번에 잃었습니다** (결함 333).
+     `@lib/review/drafts.ts` 는 결함 217 이 바로 이걸 막으려고 만든
+     것인데 **SPA 에만 배선돼 있었습니다** — 이 저장소가 네 번째로
+     당한 「한쪽 뿌리만 고쳐진」 자리입니다(231·306·320·321).
+
+     재현: 레거시에서 「업무로 등록」을 누르니 카드가 표시되고(1건)
+     나간 요청은 0건 — 여기까지는 설계대로입니다(검토는 한 번에
+     확정하는 절차). 그런데 새로고침하니 **0건**이 되고
+     `sessionStorage` 는 비어 있었습니다. 경고도 없습니다.
+
+     판단(무엇을 남기고 버릴지)은 `@lib` 한 벌입니다. 여기서는 읽고
+     쓰기만 합니다 — SPA 의 `useDraftMap` 과 같은 규칙입니다. */
+  const restored = useRef(false);
+  const liveIds = screen.k === 'ok' ? screen.data.candidates.map((c) => c.id) : [];
+  const liveKey = liveIds.join(',');
+
+  useEffect(() => {
+    if (restored.current || liveIds.length === 0) return;
+    restored.current = true;
+    const saved = parseDrafts(sessionStorage.getItem(draftStorageKey(meetingId)), liveIds);
+    if (saved.size > 0) setDrafts(saved);
+    // ⚠️ 후보 목록이 **온 뒤에** 한 번만. 그전에는 무엇이 아직 살아 있는
+    //    후보인지 몰라 거를 수가 없습니다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId, liveKey]);
+
   const update = (id: number, patch: Partial<Draft>): void => {
     setDrafts((prev) => {
       const next = new Map(prev);
       next.set(id, { ...(prev.get(id) ?? emptyDraft()), ...patch });
+      // ⚠️ **바꿀 때마다 씁니다.** 「나갈 때 저장」은 브라우저가 탭을
+      //    죽이면 안 돌고, 그때가 바로 잃으면 안 되는 순간입니다.
+      try {
+        sessionStorage.setItem(draftStorageKey(meetingId), serializeDrafts(next));
+      } catch {
+        // 저장이 안 되는 브라우저(사생활 모드 등)에서도 검토는 되어야
+        // 합니다. 못 남기는 것이 못 쓰는 것보다 낫습니다.
+      }
       return next;
     });
   };
@@ -903,6 +938,12 @@ function Review() {
           : describeSubmitResult(body.approved_count, body.approved_task_ids),
       });
       setDrafts(new Map());
+      // 확정에 성공했으면 초안은 이미 뜻이 없습니다 (결함 333).
+      try {
+        sessionStorage.removeItem(draftStorageKey(meetingId));
+      } catch {
+        /* 위와 같은 이유 */
+      }
       await load();
     } finally {
       setSending(false);

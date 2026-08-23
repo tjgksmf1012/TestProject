@@ -2820,6 +2820,51 @@ def test_every_server_route_has_a_caller() -> None:
     )
 
 
+def test_both_review_screens_keep_a_draft_through_a_refresh() -> None:
+    """⭐ **검토하던 것을 잃는 화면이 있으면 안 됩니다** (결함 333).
+
+    ## 왜 이 검사가 생겼나
+
+    `@lib/review/drafts.ts` 는 결함 217 이 「새로고침 한 번에 전부
+    날아갔습니다」를 고치려고 만든 것입니다. 그런데 **SPA 에만
+    배선돼 있었습니다.** 브라우저로 재서 확인한 것 —
+
+        레거시: 「업무로 등록」 → 표시 1건 · 나간 요청 0건
+                새로고침       → 표시 **0건** · sessionStorage **비어 있음**
+
+    이 저장소가 **네 번째로** 당한 「한쪽 뿌리만 고쳐진」 자리입니다
+    (231 · 306 · 320 · 321). 레거시 화면은 라우트가 유지되므로(R8)
+    사람이 실제로 그리로 들어옵니다 — 들어온 사람은 몇 분어치 입력을
+    말없이 잃습니다.
+
+    ⚠️ **낱말이 아니라 요구를 잽니다**: 두 화면이 `drafts.ts` 의
+    세 갈래(되살리기 · 쓰기 · 확정 뒤 비우기)를 다 거치는가.
+    하나라도 빠지면 그 화면만 조용히 잃습니다.
+    """
+    roots = {
+        "레거시": REPO_ROOT / "frontend/src/demo/review.tsx",
+        "SPA": REPO_ROOT / "webapp/src/screens/Review.tsx",
+    }
+    needed = {
+        "되살리기": "parseDrafts(",
+        "쓰기": "serializeDrafts(",
+        "확정 뒤 비우기": "removeItem(draftStorageKey(",
+    }
+
+    missing: list[str] = []
+    for label, path in roots.items():
+        assert path.exists(), f"{label} 검토 화면을 못 찾았습니다: {path}"
+        source = path.read_text(encoding="utf-8")
+        for what, needle in needed.items():
+            if needle not in source:
+                missing.append(f"{label}: {what} ({needle})")
+
+    assert not missing, (
+        "검토 초안을 지키지 않는 화면이 있습니다 — 그 화면으로 들어온 "
+        "사람만 새로고침 한 번에 잃습니다:\n  " + "\n  ".join(missing)
+    )
+
+
 def test_meeting_actions_reach_both_roots() -> None:
     """⭐ **두 로비가 같은 회의 단위 동작을 줘야 합니다** (결함 320).
 
