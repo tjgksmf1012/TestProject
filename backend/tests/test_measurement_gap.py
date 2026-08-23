@@ -20,6 +20,8 @@ from teamflow.contribution.confidence import CoverageStats, compute_confidence
 from teamflow.contribution.events import Category, ContributionEvent, EventType, SourceKind
 from teamflow.contribution.profiles import DEFAULT_PROFILES, Role
 from teamflow.contribution.scoring import MeasurementGap, score_team
+from teamflow.jobs import retention
+from teamflow.services import scoring_service
 
 OCCURRED = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 
@@ -521,6 +523,53 @@ def test_retention_expiry_says_something_different(engine):
     assert "보존기간" in reason
     assert "본인 요청" not in reason
     assert "끊" not in reason
+
+
+def test_refusing_to_keep_the_original_is_not_written_up_as_an_accident(engine):
+    """⭐ ② 원본 보관 **거부**는 권리 행사다 — 사고처럼 적으면 안 된다.
+
+    결함 326. `consent_refused` 만 문구가 없어서 「(사유 미기록)」으로
+    나갔습니다. **사유는 기록돼 있습니다** — 같은 응답의 `detail` 에
+    `"deleted_reason": "consent_refused"` 가 들어 있는 채로, 문장은 없다고
+    말하고 있었습니다.
+
+    거부한 사람이 화면에서 보는 것이 「이유는 모르겠는데 네 녹음이
+    사라졌다」이면, 그 사람은 자기가 누른 것과 일어난 일을 잇지 못합니다.
+    """
+    project_id, user_id = seed_deleted_audio(deleted_reason="consent_refused")
+    reason = gaps_for(project_id)[user_id][0].reason
+
+    assert "사유 미기록" not in reason, reason
+    assert "동의하지 않아" in reason, reason
+    assert "끊" not in reason, reason
+    assert "0" not in reason, reason  # 0점이라는 말은 절대 쓰지 않는다
+
+
+def test_every_deletion_reason_the_code_can_write_has_a_sentence():
+    """⭐ **어휘에 있는 값마다 문구가 있어야 합니다** (결함 326).
+
+    ⚠️ 앞선 검사 셋은 `user_request` · `retention_expired` · `None` 을
+    쟀습니다. `consent_refused` 는 `retention.py` 가 **실제로 쓰는 값**인데
+    아무도 안 재고 있었고, 그래서 문구가 없는 채로 오래 있었습니다.
+    낱개를 세는 대신 **짝**을 셉니다 — 넷째 사유가 생기면 그 문장을 쓰기
+    전까지 여기서 터집니다.
+
+    `_DELETION_REASON_UNKNOWN` 은 이 표에 없습니다. 그건 `deleted_reason`
+    이 **NULL** 일 때(이 열이 생기기 전에 지워진 행)의 답이고, 코드가
+    적어 넣는 값이 아닙니다.
+    """
+    written = {
+        value
+        for name, value in vars(retention).items()
+        if name.startswith("REASON_") and isinstance(value, str)
+    }
+    assert written, "retention.py 에서 REASON_* 상수를 하나도 못 찾았습니다"
+
+    missing = written - set(scoring_service._DELETION_REASON_TEXT)
+    assert not missing, f"문구가 없는 삭제 사유: {sorted(missing)}"
+
+    extra = set(scoring_service._DELETION_REASON_TEXT) - written
+    assert not extra, f"retention.py 가 안 쓰는 사유에 문구가 있습니다: {sorted(extra)}"
 
 
 def test_unknown_reason_does_not_guess(engine):
