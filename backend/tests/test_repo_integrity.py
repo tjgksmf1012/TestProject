@@ -324,6 +324,87 @@ def test_every_value_the_server_sends_has_a_korean_word_on_the_screen():
     )
 
 
+def _screen_label_pairs() -> list[tuple[str, dict, str, str]]:
+    """서버와 화면이 **같은 낱말을 두 벌** 적어 둔 자리.
+
+    ⚠️ 위 `_screen_vocabularies` 는 **키 집합**만 봅니다. 결함 291 이
+    그 한계를 이렇게 적어 두고 갔습니다.
+
+    > 짝 검사가 「키 집합」만 보고 있던 것 — 서버 어휘 ↔ 화면 이름표 짝
+    > 검사가 넷 있었는데 **키가 같은가**만 봤습니다. … 짝을 잴 때는
+    > **양쪽이 같은 글자를 내는가**까지 보십시오
+
+    키만 보면 한쪽이 「반대 의견」, 다른 쪽이 「반대」로 갈라져도 초록입니다.
+    같은 발언이 회의록과 화면에서 다른 이름으로 불리는 것이고, 결함 290 이
+    회의 시각에서 겪은 것과 같은 모양입니다.
+
+    ⚠️ **여기 넣을 수 있는 것은 서버에도 이름표 표가 있는 것뿐입니다.**
+    `REACTION_LABEL`·`GITHUB_EVENT_LABEL` 은 서버가 **글자를 실어 보내서**
+    화면에 사본이 없습니다 — 두 벌이 아니므로 갈라질 수 없습니다.
+    """
+    from teamflow.db import vocab
+
+    return [
+        ("발언 유형", vocab.UTTERANCE_LABEL, "frontend/src/lib/review/labels.ts", "TYPE_LABEL"),
+        (
+            "프로젝트 권한",
+            vocab.PROJECT_ROLE_LABEL,
+            "frontend/src/lib/project/roles.ts",
+            "ROLE_LABEL",
+        ),
+        (
+            "사용자 상태",
+            vocab.PRESENCE_LABEL,
+            "frontend/src/lib/project/presence.ts",
+            "PRESENCE_LABEL",
+        ),
+        (
+            "업무 우선순위",
+            vocab.TASK_PRIORITY_LABEL,
+            "frontend/src/lib/kanban/priority.ts",
+            "PRIORITY_LABEL",
+        ),
+        ("업무 상태", vocab.TASK_STATUS_LABEL, "frontend/src/lib/kanban/board.ts", "STATUS_LABEL"),
+    ]
+
+
+def test_the_two_copies_of_each_label_say_the_same_word():
+    """⭐ 짝을 잴 때는 **양쪽이 같은 글자를 내는가**까지 본다 (결함 291 의 숙제).
+
+    이건 기록된 결정이 아니라 **적어만 두고 간 숙제**입니다 — AGENTS 가
+    둘을 가르라고 적어 뒀고, 숙제는 하는 것이 뒤집는 것이 아닙니다.
+    """
+    import re
+
+    problems: list[str] = []
+    pairs = _screen_label_pairs()
+    # 안 보고 있는 상태 자체가 실패여야 합니다 (결함 286).
+    assert len(pairs) >= 5, f"짝을 {len(pairs)}개밖에 안 재고 있습니다 — 표가 낡았습니다"
+
+    for name, server, rel, table in pairs:
+        source = (REPO_ROOT / rel).read_text()
+        block = re.search(
+            rf"{table}: Record<[^,>]+, string> = \{{(.*?)\}};", source, re.DOTALL
+        )
+        if block is None:
+            problems.append(f"{name}: {rel} 에서 {table} 을 못 찾았습니다")
+            continue
+        screen = dict(
+            re.findall(r"^\s*'?([\w]+)'?:\s*'([^']*)'", block.group(1), re.MULTILINE)
+        )
+        expected = {str(getattr(k, "value", k)): v for k, v in server.items()}
+        assert expected, f"{name}: 서버 이름표가 비었습니다 — 표가 낡았습니다"
+        for key in sorted(expected):
+            mine = expected[key]
+            theirs = screen.get(key)
+            if theirs != mine:
+                problems.append(f"{name}.{key}: 서버「{mine}」 ≠ 화면「{theirs}」")
+
+    assert problems == [], "같은 값을 두 곳이 다르게 부릅니다:\n" + "\n".join(
+        f"  {p}" for p in problems
+    )
+
+
 def test_the_vocabulary_table_itself_is_not_stale():
     """표가 낡으면 **아무것도 안 보면서 통과**한다.
 
