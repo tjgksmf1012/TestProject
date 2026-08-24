@@ -8585,3 +8585,67 @@ describe('레일의 개수 알약이 축 이름을 눈에도 적는다 (결함 3
     ok(/channelCountText\(/.test(nav), '눈에 보이는 글자를 `@lib` 에서 안 받습니다');
   });
 });
+
+// ══════════════════════════════════════════════════════════════
+// 회의 **첫 발화**의 시각이 빈칸으로 나가던 것 (결함 353)
+// ══════════════════════════════════════════════════════════════
+//
+// 8분짜리 회의를 실기 경로로 만들어 두 검토 화면을 열었더니, `0:00` 에
+// 시작한 첫 발화의 시각 칸이 **두 뿌리 다 비어** 있었습니다.
+//
+//     (빈칸)  김민수 · 정보 제공   0번째로 진행 상황을 공유합니다
+//      0:30   이하늘 · 정보 제공   1번째로 진행 상황을 공유합니다
+//
+// 빈칸은 「모른다」로 읽힙니다. 그런데 그 시각은 **정확히 압니다.**
+//
+// 원인은 `0` 에 두 뜻이 실려 있던 것입니다 — 같은 자(`atText`)가 **글자까지
+// 똑같이 두 파일에 복사돼** 있었고(`findings.ts` · `minutes.ts`), 둘 다
+// `ms <= 0` 을 `null` 로 떨어뜨렸습니다. 사건·미해결 사안에는 맞는 규칙
+// 입니다(근거가 없으면 구간이 `0~0`). 그런데 발화 한 줄이 그 자를 썼습니다.
+//
+// ⚠️ **실기가 그 값을 만듭니다** — `to_segments` 의 `start_ms = start *
+// hop_ms` 에서 `start` 는 0부터입니다. 녹음 버튼을 누르며 바로 말하면
+// 첫 구간이 정확히 `0` 입니다.
+
+describe('발화의 `0` 은 시각이고, 근거 구간의 `0` 은 「모른다」 (결함 353)', () => {
+  const review = join(ROOT, 'src', 'lib', 'review');
+
+  it('⭐ mm:ss 를 만드는 자리가 **한 곳**이다', () => {
+    /* 두 벌이 있으면 다음 사람이 아무거나 가져다 씁니다 — 실제로 그래서
+       발화가 「근거가 없으면 0」 쪽 자를 썼습니다 (대표 실패 ②). */
+    const makers: string[] = [];
+    for (const file of readdirSync(review).filter((f) => f.endsWith('.ts') && !f.includes('.test.'))) {
+      const code = codeOf(readFileSync(join(review, file), 'utf8'));
+      if (/padStart\(2,\s*'0'\)/.test(code) && /\/\s*60/.test(code)) makers.push(file);
+    }
+    deepStrictEqual(
+      makers,
+      ['moment.ts'],
+      'mm:ss 를 만드는 자리가 여럿입니다 — 판단은 `moment.ts` 한 곳입니다',
+    );
+  });
+
+  it('⭐ **발화 한 줄**은 `0` 을 시각으로 그리는 자를 쓴다', () => {
+    const code = codeOf(readFileSync(join(review, 'evidence.ts'), 'utf8'));
+    ok(
+      /at:\s*momentText\(/.test(code),
+      '발화의 시각을 `momentText` 로 안 만듭니다 — `0:00` 이 빈칸으로 나갑니다',
+    );
+    ok(
+      !/\batText\(/.test(code),
+      '발화 한 줄이 「근거가 없으면 0」 쪽 자를 씁니다 — 첫 발화가 빈칸이 됩니다',
+    );
+  });
+
+  it('⭐ **사건·미해결 사안**은 `0` 을 「모른다」로 둔다 — 근거를 적어 내린 결정', () => {
+    /* 이쪽을 같이 고치면 근거 없는 사건이 **회의 맨 처음에 있었던 일**로
+       읽힙니다. 뒤집지 않았다는 것을 못 박아 둡니다. */
+    for (const file of ['findings.ts', 'minutes.ts']) {
+      const code = codeOf(readFileSync(join(review, file), 'utf8'));
+      ok(
+        /atText\s*=\s*evidenceMomentText/.test(code),
+        `${file} 이 근거 구간용 자를 안 씁니다`,
+      );
+    }
+  });
+});

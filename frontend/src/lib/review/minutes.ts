@@ -25,6 +25,8 @@
  */
 
 /** 서버 `UnresolvedIssueOut` 과 같은 모양. */
+import { evidenceMomentText } from './moment.ts';
+
 export interface UnresolvedIssue {
   content: string;
   /** 언제 나온 얘기인가. 근거가 없으면 둘 다 0 — 시각을 지어내지 않는다. */
@@ -39,14 +41,16 @@ export interface Minutes {
   unresolved_issues: UnresolvedIssue[];
 }
 
-/** `mm:ss`. 근거가 없어 0 인 것은 시각을 만들어 내지 않고 null. */
-export function atText(startMs: number): string | null {
-  if (!Number.isFinite(startMs) || startMs <= 0) return null;
-  const total = Math.floor(startMs / 1000);
-  const mm = Math.floor(total / 60);
-  const ss = total % 60;
-  return `${mm}:${String(ss).padStart(2, '0')}`;
-}
+/**
+ * `mm:ss`. 근거가 없어 0 인 것은 시각을 만들어 내지 않고 null.
+ *
+ * ⚠️ **`findings.ts` 에 글자까지 똑같은 사본이 있었습니다** (결함 353).
+ * 판단은 `moment.ts` 한 곳입니다.
+ *
+ * ⛔ **발화 한 줄에는 이걸 쓰지 마십시오** — 발화의 `0` 은 「모른다」가
+ * 아니라 「회의 시작과 동시에」입니다. 그쪽은 `momentText` 입니다.
+ */
+export const atText = evidenceMomentText;
 
 export interface IssueView {
   content: string;

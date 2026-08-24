@@ -21,6 +21,8 @@
  */
 
 /** 서버가 주는 한 건 (`GET /api/meetings/{id}` 의 `findings`). */
+import { evidenceMomentText } from './moment.ts';
+
 export interface Finding {
   kind: string;
   start_ms: number;
@@ -91,12 +93,15 @@ export const KIND_ORDER: readonly string[] = [
   'overlap_surge',
 ];
 
-/** `750000` → `12:30`. 음수나 0은 `null` — **시각을 지어내지 않습니다.** */
-export function atText(ms: number): string | null {
-  if (!Number.isFinite(ms) || ms <= 0) return null;
-  const total = Math.floor(ms / 1000);
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-}
+/**
+ * `750000` → `12:30`. 음수나 0은 `null` — **시각을 지어내지 않습니다.**
+ *
+ * ⚠️ **`minutes.ts` 에 글자까지 똑같은 사본이 있었습니다** (결함 353).
+ * 두 벌이 있으면 다음 사람이 아무거나 가져다 쓰고, 실제로 발화 한 줄이
+ * 「근거가 없으면 0」 쪽 자를 써서 회의 **첫 발화의 시각이 빈칸**으로
+ * 나갔습니다. 판단은 이제 `moment.ts` 한 곳입니다.
+ */
+export const atText = evidenceMomentText;
 
 function span(finding: Finding): string | null {
   const from = atText(finding.start_ms);

@@ -10,7 +10,10 @@
  */
 
 import { describeType } from './labels.ts';
-import { atText } from './minutes.ts';
+// ⚠️ **`minutes.ts` 의 `atText` 가 아닙니다** (결함 353) — 그쪽은
+//    「근거가 없어 0」을 `null` 로 떨어뜨립니다. 발화의 `0` 은
+//    「회의 시작과 동시에」라는 **시각**입니다.
+import { momentText } from './moment.ts';
 
 /** 서버가 주는 발화 한 줄 (`GET /api/meetings/{id}/utterances`). */
 export interface Utterance {
@@ -91,7 +94,7 @@ export function speakerNote(source: string, confidence: number | null): string |
 export function evidenceView(utterance: Utterance): EvidenceView {
   return {
     id: utterance.id,
-    at: atText(utterance.start_ms),
+    at: momentText(utterance.start_ms),
     text: utterance.text,
     // ⚠️ 이름이 없으면 **지어내지 않습니다.** `사용자 #3` 같은 것도
     // 안 씁니다 — 그건 사람 이름처럼 읽힙니다.
