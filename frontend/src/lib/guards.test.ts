@@ -22,6 +22,7 @@ import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contri
 import { attentionAbout } from './review/candidates.ts';
 import { describeMissingSummary } from './review/phase.ts';
 import { meetingLabel } from './ui/naming.ts';
+import { withJosa } from './text/josa.ts';
 import { describeMeetingWhen, meetingWhen } from './home/next.ts';
 import { EXTRA_CONSENTS, memberStatuses } from './lobby/room.ts';
 import {
@@ -8356,6 +8357,181 @@ describe('⛔ 나간 사람도 **이름으로** 부른다 (결함 308)', () => {
     ok(
       /<AssigneePicker[^>]*members=\{members\}/.test(code.replace(/\s+/g, ' ')),
       '담당자를 **고르는** 자리에까지 나간 사람이 섞였습니다 — 떠난 사람에게 일을 맡길 수 있습니다',
+    );
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 우선순위가 **한쪽 뿌리에만** 그려지던 것 (결함 348)
+// ══════════════════════════════════════════════════════════════
+//
+// 씨앗의 업무 넷이 전부 `priority = 2` 라 우선순위는 **한 번도 안
+// 그려져 있었습니다.** 실기 경로(`PATCH /tasks/{id}`)로 `0·1·3` 을 만들고
+// 두 칸반을 렌더해 보니:
+//
+//     SPA      긴급 · 높음 · 낮음 배지 + `⋯` 메뉴에 넷
+//     레거시   **우선순위라는 글자가 한 자도 없음**
+//
+// 판단은 `@lib/kanban/priority.ts` 에 다 있었고(`test_repo_integrity.py`
+// 가 서버 어휘와 짝까지 잽니다), **부르는 화면이 SPA 하나뿐**이었습니다.
+// 실패 ①(만들어 놓고 아무도 안 부름)이 뿌리 하나에서 난 모양이고,
+// 「한쪽만 고쳐진다」의 **열 번째**입니다
+// (231·306·320·321·333·334·335·337·345).
+//
+// ⚠️ **라우트를 세는 가드는 이걸 못 봅니다** (결함 315 가 적어 둔 그것) —
+// `PATCH /tasks/{id}` 는 옮기기가 이미 부르고 있어서 초록입니다. 안 불린
+// 것은 **`priority` 라는 칸**이었습니다.
+
+describe('우선순위를 두 뿌리가 다 그린다 (결함 348)', () => {
+  /**
+   * 뿌리마다 화면 소스 전부. **합쳐서 세면 한쪽만 고쳐도 초록입니다** —
+   * 결함 321 이 바로 그렇게 통과했습니다.
+   */
+  const rootsOf = (): Array<[string, { rel: string; code: string }[]]> => {
+    const collect = (base: string): { rel: string; code: string }[] => {
+      const out: { rel: string; code: string }[] = [];
+      const walk = (dir: string) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name))
+            out.push({ rel: full.slice(base.length + 1), code: readFileSync(full, 'utf8') });
+        }
+      };
+      walk(base);
+      return out;
+    };
+    return [
+      ['레거시', collect(DEMO)],
+      ['SPA', collect(join(ROOT, '..', 'webapp', 'src'))],
+    ];
+  };
+
+  /**
+   * 요구를 갈라 잽니다 — **보는 것**과 **정하는 것**은 다른 일입니다.
+   *
+   * ⚠️ 낱말 하나(`priority`)를 세면 안 됩니다. 그 글자는 타입 선언에도
+   * `PATCH` 본문에도 있어서, 화면이 아무것도 안 그려도 걸립니다 —
+   * 결함 316 이 「낱말을 막는 것은 요구를 재는 것이 아니다」로 적어 둔
+   * 그것입니다. **`@lib` 의 어느 함수를 거치는가**로 잽니다.
+   */
+  const NEEDS: Array<[string, RegExp]> = [
+    ['값을 **보여 주는** 자리', /\bdescribePriority\(/],
+    ['`보통` 을 안 그리는 판단', /\bshowsBadge\(/],
+    ['값을 **정하는** 자리', /\bpriorityChoices\(/],
+  ];
+
+  for (const [rootName, files] of rootsOf()) {
+    for (const [what, ruler] of NEEDS) {
+      it(`⭐ ${rootName} — ${withJosa(what, '이가')} 있다`, () => {
+        const callers = files.filter((f) => ruler.test(codeOf(f.code))).map((f) => f.rel);
+        ok(
+          callers.length > 0,
+          `${rootName} 에서 ${ruler.source} 를 부르는 화면이 0개입니다 — ` +
+            '판단은 `@lib/kanban/priority.ts` 에 있는데 이 뿌리만 안 부릅니다',
+        );
+      });
+    }
+  }
+
+  it('⭐ 정하는 자리는 **네 값을 다** 준다 — 목록을 손으로 적지 않는다', () => {
+    /* 화면이 `[0,1,2,3]` 을 직접 적으면 어휘가 늘 때 한쪽만 늘어납니다.
+       `priorityChoices` 가 `PRIORITIES` 를 돌므로 그 함수를 거치면 됩니다. */
+    for (const [rootName, files] of rootsOf()) {
+      const hand = files.filter((f) => /\[\s*0\s*,\s*1\s*,\s*2\s*,\s*3\s*\]/.test(codeOf(f.code)));
+      deepStrictEqual(
+        hand.map((f) => f.rel),
+        [],
+        `${rootName}: 우선순위 목록을 화면이 손으로 적었습니다 — priorityChoices 를 쓰세요`,
+      );
+    }
+  });
+
+  it('⛔ 우선순위가 기여도에 닿지 않는다 — 드롭다운 하나가 점수 발행기가 됩니다', () => {
+    /* `priority.ts` 가 주석으로 금지한 것입니다. 주석은 아무것도 안
+       막으므로(결함 337·341) 여기서 잽니다 — 서버가 이 값으로 기여
+       이벤트를 만들면 아무 일도 안 하고 자기 업무를 `긴급` 으로 바꾸는
+       것만으로 점수가 오릅니다. */
+    const scoring = join(ROOT, '..', 'backend', 'teamflow', 'contribution');
+    const guilty: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.py')) {
+          const py = readFileSync(full, 'utf8').replace(/#[^\n]*/g, ' ');
+          if (/\.priority\b|\bpriority\s*=/.test(py)) guilty.push(entry.name);
+        }
+      }
+    };
+    walk(scoring);
+    deepStrictEqual(guilty, [], '기여도 계산이 우선순위를 읽습니다');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 누를 때마다 초점이 `body` 로 떨어지던 것 (결함 349)
+// ══════════════════════════════════════════════════════════════
+//
+// 레거시 칸반의 카드 컨트롤은 요청이 도는 동안 `disabled` 가 됩니다.
+// 브라우저는 초점을 쥔 요소가 `disabled` 가 되면 **초점을 버리고**, 다시
+// `enabled` 가 돼도 돌려주지 않습니다. 키보드만 쓰는 사람은 카드를 한 칸
+// 옮길 때마다 문서 맨 앞에서 다시 Tab 해야 했습니다.
+//
+// 재현(1440×1000, 키보드만):
+//
+//     담당자 체크박스에서 Space   → 200 PATCH · 초점 BODY
+//     「검토 중으로」에서 Enter    → 200 PATCH · 초점 BODY
+//     우선순위 라디오에서 ↓       → 200 PATCH · 초점 BODY
+//
+// ⚠️ 마우스로는 아무 일도 안 일어납니다 — **눈으로는 안 보입니다.**
+// 결함 280·303 이 대화상자와 로비에서 적어 둔 것의 세 번째 자리입니다.
+//
+// ⚠️ **담당자·우선순위만 고치고 한 번 재 봤다가** 「옮기기」가 그대로
+// `body` 인 것을 잡았습니다 — 그 버튼은 카드가 다른 열로 가면서 **통째로
+// 사라져** 되돌릴 데가 없었습니다. 「한 갈래만 고치고 옆 갈래를 그대로 둔
+// 것」(결함 298·301)이 될 뻔했습니다.
+
+describe('일이 끝나면 초점을 되돌린다 (결함 349)', () => {
+  const raw = readFileSync(join(DEMO, 'kanban.tsx'), 'utf8');
+  const code = codeOf(raw);
+  const count = (re: RegExp): number => (code.match(re) ?? []).length;
+
+  it('⭐ **잴 것이 있는가** — 요청 중에 잠그는 컨트롤이 실제로 있다', () => {
+    /* 이걸 먼저 봅니다. 화면이 잠금을 아예 안 쓰게 되면 아래 검사들이
+       거저 통과합니다 — 결함 347 의 「빈손이면 `⊆` 는 거저 참」과 같은
+       부류입니다. */
+    ok(count(/disabled=\{moving\}/g) >= 3, '요청 중에 잠그는 자리가 셋도 안 됩니다');
+  });
+
+  it('⭐ 잠금을 만지는 자리가 **둘뿐**이다 — 기억하는 곳과 되돌리는 곳', () => {
+    /* `setMoving(` 을 갈래마다 직접 부르면 **그 갈래만** 초점을 잃습니다.
+       실제로 셋 다 그랬습니다. 판단을 한 곳으로 모으는 것이 고침입니다. */
+    strictEqual(
+      count(/setMoving\(/g),
+      2,
+      '`setMoving` 을 `lock`·`unlock` 밖에서 부릅니다 — 그 갈래는 초점을 잃습니다',
+    );
+  });
+
+  it('⭐ 거는 곳과 푸는 곳의 **짝이 맞는다**', () => {
+    const locks = count(/\block\(\);/g);
+    const unlocks = count(/\bunlock\(\);/g);
+    ok(locks >= 3, `잠그는 갈래가 ${locks}개뿐입니다 — 담당자·옮기기·우선순위 셋입니다`);
+    strictEqual(locks, unlocks, `잠그는 곳 ${locks} · 푸는 곳 ${unlocks} — 짝이 안 맞습니다`);
+  });
+
+  it('⭐ 되돌릴지 말지를 **`@lib` 이 정한다** — 화면이 손으로 정하지 않는다', () => {
+    ok(/focusPlan\(/.test(code), '`@lib/ui/focus.ts` 의 `focusPlan` 을 안 거칩니다');
+    /* ⚠️ 그 자리가 사라진 갈래(`nearby`)까지 씁니다. 안 쓰면 카드를 옮긴
+       뒤에 초점이 `body` 에 남습니다 — 고치려던 바로 그 증상입니다. */
+    ok(/'nearby'/.test(code), '카드가 옮겨 간 갈래를 안 씁니다 — 옮기기는 그대로 초점을 잃습니다');
+  });
+
+  it('⚠️ 한 프레임 기다린 뒤에 되돌린다 — 안 그러면 아직 `disabled` 라 튕긴다', () => {
+    ok(
+      /requestAnimationFrame\(/.test(code),
+      'React 가 다시 그리기 전에 `focus()` 를 부르면 그 자리가 아직 `disabled` 입니다',
     );
   });
 });
