@@ -8827,3 +8827,101 @@ describe('사람이 넣은 긴 글이 가로로 안 민다 (결함 354)', () => 
     }
   });
 });
+
+// ══════════════════════════════════════════════════════════════
+// 칸반으로 가는 주소는 **프로젝트를 달고 있어야** 한다 (결함 355)
+// ══════════════════════════════════════════════════════════════
+
+describe('칸반 주소에 프로젝트가 실려 있다', () => {
+  /**
+   * 레거시 칸반은 `Number(params.get('project') ?? '1')` 입니다 —
+   * 주소에 프로젝트가 없으면 **1번 프로젝트**를 엽니다. `nav/links.ts` 의
+   * 머리말이 바로 이것을 금지합니다: "id 가 없는데 링크를 만들면 눌렀을 때
+   * 엉뚱한 프로젝트(기본값 1)로 갑니다. **없는 링크를 안 만드는 것이
+   * 여기서 하는 판단입니다.**"
+   *
+   * 그런데 같은 판단이 `home/next.ts`·`review/phase.ts` 에도 있었고 그쪽은
+   * 안 지키고 있었습니다(대표 실패 ②). 프로젝트가 하나뿐인 시연
+   * 데이터에서는 기본값 1 이 **언제나 맞아서** 아무 일도 안 일어납니다 —
+   * 두 번째 프로젝트를 만들고 그쪽 회의에서 눌러야 드러납니다.
+   *
+   * ⚠️ **낱말이 아니라 요구를 잽니다.** "`nextStepFor` 가 인자를 둘
+   * 받는가" 는 자리를 바꾸면 눈을 감습니다. 여기서 재는 것은 **주소
+   * 자체**입니다 — 어디서 만들든 `?` 뒤에 `project=` 가 있어야 합니다.
+   *
+   * ⚠️ **주석부터 걷습니다** (결함 238). 이 저장소는 "예전에는
+   * `/kanban.html?meeting=6` 이었다" 를 주석에 적어 둡니다 — 안 걷으면
+   * 고쳐 놓은 자리가 자기 설명 때문에 빨개집니다.
+   */
+  const stripComments = (source: string): string =>
+    source
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(?<![:\w])\/\/[^\n]*/g, '');
+
+  /** 뿌리마다 따로 셉니다 — 한쪽만 고친 것이 이 저장소의 대표 실패입니다. */
+  const ROOTS: Array<[string, string]> = [
+    ['레거시(frontend/src)', join(ROOT, 'src')],
+    ['SPA(webapp/src)', join(ROOT, '..', 'webapp', 'src')],
+  ];
+
+  for (const [name, base] of ROOTS) {
+    it(`⭐ ${name} — \`kanban.html?\` 주소는 전부 \`project=\` 를 단다`, () => {
+      const found: string[] = [];
+      const bad: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+            continue;
+          }
+          if (!/\.tsx?$/.test(entry.name) || entry.name.endsWith('.test.ts')) continue;
+          const source = stripComments(readFileSync(full, 'utf8'));
+          for (const m of source.matchAll(/kanban\.html(\?[^`'"\s<>]*)?/g)) {
+            const where = `${full.split('/').slice(-2).join('/')}: ${m[0]}`;
+            found.push(where);
+            const query = m[1];
+            if (query !== undefined && !query.includes('project=')) bad.push(where);
+          }
+        }
+      };
+      walk(base);
+
+      /* ⚠️ **안 보고 있는 상태 자체가 실패입니다.** 화면을 옮기면 가드가
+         눈을 감습니다 — 이 저장소에서 여덟 번 그랬습니다. */
+      ok(found.length > 0, `${name}: 칸반 주소를 한 개도 못 찾았습니다 — 이 가드가 낡았습니다`);
+      deepStrictEqual(
+        bad,
+        [],
+        `${name}: 프로젝트 없이 칸반으로 보내는 주소가 있습니다 — ` +
+          '레거시 칸반은 없으면 1번 프로젝트를 엽니다',
+      );
+    });
+  }
+
+  it('⭐ 판단 함수가 프로젝트를 **기본값 없이** 요구한다', () => {
+    /* ⚠️ `Function.length` 로 세면 안 됩니다 — **기본값이 붙은 인자는 그
+       수에 안 들어갑니다**(결함 247). 선언을 읽어서 잽니다.
+
+       기본값을 두면 두 화면이 조용히 옛 동작을 이어받고 타입이 아무것도
+       안 막습니다. 그게 이 결함이 오래 산 이유입니다. */
+    const CASES: Array<[string, string, string]> = [
+      [join(ROOT, 'src', 'lib', 'home', 'next.ts'), 'nextStepFor', 'projectId'],
+      [join(ROOT, 'src', 'lib', 'review', 'phase.ts'), 'reviewEmptyState', 'projectId'],
+    ];
+    for (const [path, fn, param] of CASES) {
+      const source = readFileSync(path, 'utf8');
+      const declared = new RegExp(`export function ${fn}\\(([\\s\\S]*?)\\)\\s*:`).exec(source);
+      ok(declared !== null, `${fn}: 선언을 못 찾았습니다 — 이 가드가 낡았습니다`);
+      const params = declared[1] as string;
+      ok(
+        new RegExp(`${param}\\s*:\\s*number`).test(params),
+        `${fn}: \`${param}: number\` 를 안 받습니다 — ${params}`,
+      );
+      ok(
+        !new RegExp(`${param}\\s*:\\s*number\\s*=`).test(params),
+        `${fn}: \`${param}\` 에 기본값이 붙었습니다 — 그러면 화면이 조용히 옛 동작을 이어받습니다`,
+      );
+    }
+  });
+});

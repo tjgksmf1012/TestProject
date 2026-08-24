@@ -117,8 +117,51 @@ export function describeMeetingStatus(status: string): string {
  * ⭐ **처리 중인 회의에는 버튼을 만들지 않습니다.** 눌러도 아직 아무것도
  * 없는 곳으로 갈 뿐입니다. 기다리라고 말하는 게 맞습니다.
  */
-export function nextStepFor(meeting: Meeting): NextStep {
+/**
+ * 이 회의가 **지금 사람을 기다리는가**.
+ *
+ * ## ⚠️ 왜 따로 떼었나 (결함 355)
+ *
+ * `sectionMeetings` 가 이 물음에 답하려고 `nextStepFor(m).actionable` 을
+ * 불렀습니다. 그런데 `nextStepFor` 는 **칸반 링크**를 만들어야 해서
+ * 프로젝트 id 가 필요해졌고, 목록을 가르는 일에는 프로젝트가 아무 상관이
+ * 없습니다. 필요 없는 값을 끌고 다니면 다음 사람이 아무 숫자나 넣습니다.
+ *
+ * ⚠️ **판단을 두 벌로 만들지 않습니다** — `nextStepFor` 의 `needs_review`
+ * 갈래도 이 함수를 부릅니다. 조건이 갈라지면 「검토 필요 2건」이라고
+ * 세어 놓고 그중 하나에는 검토할 것이 없는 상태로 돌아갑니다(결함 252).
+ */
+export function waitsForPeople(meeting: Meeting): boolean {
+  return meeting.status === 'needs_review' && meeting.pending_candidates > 0;
+}
+
+/**
+ * 이 회의에서 **다음에 할 일**.
+ *
+ * ## ⚠️ `projectId` 를 받는 이유 (결함 355)
+ *
+ * 칸반은 **프로젝트의 화면**입니다. 그런데 여기서 만드는 링크는
+ * `/kanban.html?meeting=6` 처럼 회의만 달고 있었고, 레거시 칸반은
+ * `params.get('project') ?? '1'` 이라 **없으면 1번**을 엽니다.
+ *
+ * `nav/links.ts` 는 머리말에서 바로 이것을 금지합니다 — "id 가 없는데
+ * 링크를 만들면 눌렀을 때 엉뚱한 프로젝트(기본값 1)로 갑니다. **없는
+ * 링크를 안 만드는 것이 여기서 하는 판단입니다.**" 같은 판단이 두 곳에
+ * 있었고 한쪽만 지키고 있었습니다 (대표 실패 ②).
+ *
+ * 프로젝트가 하나뿐인 시연 데이터에서는 기본값 1 이 **언제나 맞아서**
+ * 아무 일도 안 일어납니다. 프로젝트를 둘 만들고 두 번째 프로젝트의
+ * 회의에서 눌러야 드러납니다 — 재서 확인했습니다(프로젝트 1의 칸반이
+ * 열렸습니다).
+ *
+ * ⚠️ **기본값을 두지 않습니다.** 두면 두 화면이 조용히 옛 동작을
+ * 이어받고, 타입이 아무것도 안 막습니다.
+ */
+export function nextStepFor(meeting: Meeting, projectId: number): NextStep {
   const id = meeting.meeting_id;
+  /* 칸반은 프로젝트 화면이므로 **둘 다** 답니다. `meeting` 은 "어느
+     회의에서 왔는지" 이고, `project` 가 없으면 갈 곳이 정해지지 않습니다. */
+  const kanban = `/kanban.html?project=${projectId}&meeting=${id}`;
 
   switch (meeting.status) {
     case 'pending':
@@ -163,10 +206,10 @@ export function nextStepFor(meeting: Meeting): NextStep {
       };
 
     case 'needs_review':
-      if (meeting.pending_candidates === 0) {
+      if (!waitsForPeople(meeting)) {
         // 승인 화면으로 보내면 빈 목록이 뜬다. 고장이 아니라 결과다.
         return {
-          href: `/kanban.html?meeting=${id}`,
+          href: kanban,
           label: '칸반 보기',
           reason: '검토할 업무 후보가 없습니다 — 회의에서 업무가 나오지 않았습니다',
           actionable: false,
@@ -181,7 +224,7 @@ export function nextStepFor(meeting: Meeting): NextStep {
 
     case 'confirmed':
       return {
-        href: `/kanban.html?meeting=${id}`,
+        href: kanban,
         label: '칸반 보기',
         reason: '검토를 마쳤습니다',
         actionable: false,
@@ -388,11 +431,14 @@ export function sectionMeetings(meetings: readonly Meeting[]): HomeSections {
      덩어리에 들어가, 머리말이 「검토 필요 **2**」라고 세고 있었습니다.
      한 건은 검토할 것이 없는데요. `nextStepFor` 는 그 회의에 대해 이미
      `actionable: false` 라고 답하고 있었습니다 — **판단이 있는데 안 물어본
-     것**입니다. */
-  const waitingForPeople = (m: Meeting): boolean =>
-    m.status === 'needs_review' && nextStepFor(m).actionable;
-  const needsReview = meetings.filter(waitingForPeople).slice().sort(byRecent);
-  const rest = meetings.filter((m) => !waitingForPeople(m)).slice().sort(byRecent);
+     것**입니다.
+
+     ⚠️ 그 판단은 이제 `waitsForPeople` 한 곳입니다 (결함 355). 예전에는
+     여기서 `nextStepFor(m).actionable` 을 불렀는데, 그 함수가 칸반 링크
+     때문에 **프로젝트 id** 를 받게 되면서 목록을 가르는 일과 아무 상관
+     없는 값을 끌고 다녀야 했습니다. */
+  const needsReview = meetings.filter(waitsForPeople).slice().sort(byRecent);
+  const rest = meetings.filter((m) => !waitsForPeople(m)).slice().sort(byRecent);
   return { needsReview, rest };
 }
 

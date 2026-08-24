@@ -17,6 +17,7 @@ import {
   orderProjects,
   requestedProjectId,
   sectionMeetings,
+  waitsForPeople,
   type Meeting,
   type Project,
 } from './next.ts';
@@ -50,13 +51,13 @@ function project(over: Partial<Project> = {}): Project {
 
 describe('nextStepFor', () => {
   it('녹음 전이면 로비로', () => {
-    const step = nextStepFor(meeting({ status: 'pending' }));
+    const step = nextStepFor(meeting({ status: 'pending' }), 4);
     strictEqual(step.href, '/lobby.html?meeting=7');
     strictEqual(step.actionable, true);
   });
 
   it('검토할 후보가 있으면 승인 화면으로 — 몇 건인지 같이', () => {
-    const step = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 3 }));
+    const step = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 3 }), 4);
     strictEqual(step.href, '/review.html?meeting=7');
     strictEqual(step.label.includes('3건'), true);
     strictEqual(step.actionable, true);
@@ -65,7 +66,7 @@ describe('nextStepFor', () => {
   it('⭐ needs_review 인데 후보가 0건이면 승인 화면으로 보내지 않는다', () => {
     // 보내면 빈 목록이 뜨고 사용자는 화면이 고장 났다고 생각한다.
     // 실제로는 "AI 가 업무로 뽑을 만한 게 없었다" 이고 그건 정상이다.
-    const step = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 0 }));
+    const step = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 0 }), 4);
     strictEqual((step.href ?? '').includes('review.html'), false);
     strictEqual(step.actionable, false);
     strictEqual(step.reason.includes('업무가 나오지 않았습니다'), true);
@@ -74,7 +75,7 @@ describe('nextStepFor', () => {
   it('⭐ 처리 중이면 버튼을 만들지 않는다', () => {
     // 눌러도 아직 아무것도 없는 곳으로 갈 뿐이다.
     for (const status of ['queued', 'processing']) {
-      const step = nextStepFor(meeting({ status }));
+      const step = nextStepFor(meeting({ status }), 4);
       strictEqual(step.href, null, status);
       strictEqual(step.actionable, false, status);
       ok(step.reason.length > 0, status);
@@ -86,8 +87,8 @@ describe('nextStepFor', () => {
        상태 이름표는 「처리 대기」라서 한 줄 안에서 **「처리 대기 — 처리
        중입니다」**로 스스로 모순됐고, 워커가 안 돌면 그 회의는 영영
        시작되지 않는데 화면은 계속 「처리 중」이라고 말했습니다. */
-    const queued = nextStepFor(meeting({ status: 'queued' })).reason;
-    const processing = nextStepFor(meeting({ status: 'processing' })).reason;
+    const queued = nextStepFor(meeting({ status: 'queued' }), 4).reason;
+    const processing = nextStepFor(meeting({ status: 'processing' }), 4).reason;
     ok(queued !== processing, `둘이 같은 말을 합니다: ${queued}`);
     // 아직 시작 안 한 것을 「하고 있다」고 말하지 않습니다.
     strictEqual(queued.includes('처리 중입니다'), false, queued);
@@ -95,12 +96,61 @@ describe('nextStepFor', () => {
   });
 
   it('검토를 마쳤으면 칸반으로', () => {
-    strictEqual(nextStepFor(meeting({ status: 'confirmed' })).href, '/kanban.html?meeting=7');
+    strictEqual(
+      nextStepFor(meeting({ status: 'confirmed' }), 4).href,
+      '/kanban.html?project=4&meeting=7',
+    );
+  });
+
+  it('⭐ 칸반으로 보내는 링크에는 **프로젝트가 실려** 있다 (결함 355)', () => {
+    /* 레거시 칸반은 `params.get('project') ?? '1'` 입니다 — 프로젝트가
+       없으면 **1번**을 엽니다. 프로젝트가 하나뿐인 시연 데이터에서는
+       그 기본값이 언제나 맞아서 아무 일도 안 일어납니다. 두 번째
+       프로젝트를 만들고 그쪽 회의에서 눌러야 드러납니다 — 실제로
+       프로젝트 1의 보드가 열렸습니다.
+
+       ⚠️ **갈라지는 값으로 잽니다**: 프로젝트 4 · 회의 7. 둘이 같으면
+       어느 숫자가 어느 칸에 들어갔는지 못 가립니다. 그리고 1 이 아니어야
+       기본값과 갈라집니다. */
+    for (const m of [
+      meeting({ status: 'confirmed' }),
+      meeting({ status: 'needs_review', pending_candidates: 0 }),
+    ]) {
+      const href = nextStepFor(m, 4).href ?? '';
+      strictEqual(href.includes('kanban.html'), true, href);
+      strictEqual(href.includes('project=4'), true, `프로젝트가 안 실렸습니다: ${href}`);
+      strictEqual(href.includes('meeting=7'), true, `어느 회의에서 왔는지가 빠졌습니다: ${href}`);
+    }
+  });
+
+  it('⭐ 목록을 가르는 판단과 줄의 판단이 **한 곳**에서 나온다 (결함 252·355)', () => {
+    /* `sectionMeetings` 는 예전에 `nextStepFor(m).actionable` 을 불렀습니다.
+       `nextStepFor` 가 프로젝트를 받게 되면서, 목록을 가르는 일과 아무
+       상관 없는 값을 끌고 다녀야 했습니다 — 그래서 `waitsForPeople` 로
+       떼어 냈고, **둘 다** 그것을 씁니다. 갈라지면 「검토 필요 2건」이라고
+       세어 놓고 그중 하나에는 검토할 것이 없습니다. */
+    for (const candidates of [0, 3]) {
+      const m = meeting({ status: 'needs_review', pending_candidates: candidates });
+      strictEqual(
+        nextStepFor(m, 4).actionable,
+        waitsForPeople(m),
+        `후보 ${candidates}건에서 두 판단이 갈립니다`,
+      );
+      strictEqual(
+        sectionMeetings([m]).needsReview.length === 1,
+        waitsForPeople(m),
+        `후보 ${candidates}건에서 목록이 다르게 갈립니다`,
+      );
+    }
+    // 다른 상태는 어느 쪽으로도 「사람을 기다림」이 아닙니다.
+    for (const status of ['pending', 'queued', 'processing', 'confirmed', 'failed']) {
+      strictEqual(waitsForPeople(meeting({ status, pending_candidates: 3 })), false, status);
+    }
   });
 
   it('⭐ 실패한 회의는 트랙을 확인하게 보낸다', () => {
     // 실패의 가장 흔한 원인이 트랙이 비었거나 망가진 것이다.
-    const step = nextStepFor(meeting({ status: 'failed' }));
+    const step = nextStepFor(meeting({ status: 'failed' }), 4);
     strictEqual((step.href ?? '').includes('lobby.html'), true);
     strictEqual(step.reason.includes('트랙'), true);
   });
@@ -108,14 +158,14 @@ describe('nextStepFor', () => {
   it('⭐ 모르는 상태를 숨기지 않는다', () => {
     // 숨기면 그 회의가 화면에서 사라진다. 상태 값이 늘거나 데이터가
     // 손상됐을 때 가장 확인이 필요한 회의가 바로 그것이다.
-    const step = nextStepFor(meeting({ status: 'archived' }));
+    const step = nextStepFor(meeting({ status: 'archived' }), 4);
     strictEqual(step.reason.includes('archived'), true);
     strictEqual((step.href ?? '').length > 0, true);
   });
 
   it('버튼이 없어도 이유는 항상 있다', () => {
     for (const status of ['pending', 'queued', 'processing', 'needs_review', 'confirmed', 'failed', '무엇']) {
-      strictEqual(nextStepFor(meeting({ status })).reason.length > 0, true, status);
+      strictEqual(nextStepFor(meeting({ status }), 4).reason.length > 0, true, status);
     }
   });
 });
@@ -253,7 +303,7 @@ describe('meetingWhen · describeMeetingWhen — 이 회의는 언제인가 (결
        아직 오지 않은 날의 일을 지금 하라는 말이 됩니다. */
     const step = nextStepFor(meeting({
       status: 'pending', started_at: null, scheduled_at: '2026-09-30T01:00:00Z',
-    }));
+    }), 4);
     strictEqual(step.actionable, false);
     strictEqual(step.label, '회의 열기');
     strictEqual(step.reason.includes('잡아 둔'), true);
@@ -262,7 +312,7 @@ describe('meetingWhen · describeMeetingWhen — 이 회의는 언제인가 (결
   it('연 `pending` 회의는 지금 할 일이 맞다', () => {
     const step = nextStepFor(meeting({
       status: 'pending', started_at: '2026-09-01T01:00:00Z', scheduled_at: null,
-    }));
+    }), 4);
     strictEqual(step.actionable, true);
     strictEqual(step.label, '회의 로비로');
   });
@@ -416,17 +466,17 @@ describe('결함 252 — 화면이 `actionable` 을 뒤집던 자리', () => {
   });
 
   it('⭐ **`actionable` 이 아니면 강조하지 않는다** — 덩어리 안이어도', () => {
-    const nothing = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 0 }));
+    const nothing = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 0 }), 4);
     strictEqual(nothing.actionable, false);
     strictEqual(emphasisFor(nothing, true), 'ghost');
     strictEqual(emphasisFor(nothing, false), 'ghost');
   });
 
   it('primary 는 **검토 필요 덩어리 안의 할 일**에만', () => {
-    const todo = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 3 }));
+    const todo = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 3 }), 4);
     strictEqual(emphasisFor(todo, true), 'primary');
     // 덩어리 밖의 갈 수 있는 줄은 테두리 버튼입니다 (v2 F9).
-    strictEqual(emphasisFor(nextStepFor(meeting({ status: 'pending' })), false), 'secondary');
+    strictEqual(emphasisFor(nextStepFor(meeting({ status: 'pending' }), 4), false), 'secondary');
   });
 });
 

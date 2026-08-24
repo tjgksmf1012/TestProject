@@ -80,7 +80,7 @@ function MeetingRow({
    */
   waiting: boolean;
 }) {
-  const step = nextStepFor({ ...meeting, title: meeting.title });
+  const step = nextStepFor({ ...meeting, title: meeting.title }, projectId);
 
   // ⚠️ 예전에는 **줄마다** `GET /api/meetings/{id}/tracks` 를 불렀습니다.
   //    회의 다섯짜리 시연 데이터로 홈 한 번에 요청 7건이었고(재서 확인),

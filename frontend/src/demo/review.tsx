@@ -95,6 +95,12 @@ interface Member {
 interface MeetingInfo {
   title: string | null;
   status: string;
+  /* ⚠️ **서버는 처음부터 보내고 있었는데 이 화면만 안 받아 적었습니다**
+     (결함 355). 그래서 빈 상자의 「칸반 보기」가 프로젝트 없이 나갔고,
+     레거시 칸반은 없으면 1번을 엽니다 — 왼쪽 열의 칸반 링크는 같은
+     화면에서 `?project=2` 를 제대로 달고 있었습니다(`nav.ts` 가 같은
+     응답에서 꺼내 씁니다). */
+  project_id: number;
   summary: string | null;
   next_agenda: string[];
   unresolved_issues: UnresolvedIssue[];
@@ -981,7 +987,7 @@ function Review() {
       <Timeline findings={meeting.findings ?? []} meetingStatus={meeting.status} />
 
       {candidates.length === 0 ? (
-        <RawHtml html={emptyHtml(reviewEmptyState(meeting.status, meetingId))} />
+        <RawHtml html={emptyHtml(reviewEmptyState(meeting.status, meetingId, meeting.project_id))} />
       ) : (
         <>
           {/* ⚠️ **세기만 하고 거르지 않는 탭은 거짓말입니다.** */}

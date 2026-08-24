@@ -88,8 +88,10 @@ type Screen =
 // 조각들
 // ══════════════════════════════════════════════════════════════
 
-function MeetingRow({ meeting }: { meeting: Meeting }) {
-  const step = nextStepFor(meeting);
+function MeetingRow({ meeting, projectId }: { meeting: Meeting; projectId: number }) {
+  /* ⚠️ **프로젝트를 같이 넘깁니다** (결함 355). 칸반 링크는 프로젝트가
+     없으면 1번으로 갑니다 — 프로젝트가 둘인 사람은 남의 보드를 봅니다. */
+  const step = nextStepFor(meeting, projectId);
   return (
     <li className={step.actionable ? 'meeting todo' : 'meeting'}>
       <div className="head">
@@ -136,7 +138,7 @@ function ProjectSection({ row }: { row: WithMeetings }) {
       ) : (
         <ul className="meetings">
           {row.meetings.map((m) => (
-            <MeetingRow key={m.meeting_id} meeting={m} />
+            <MeetingRow key={m.meeting_id} meeting={m} projectId={id} />
           ))}
         </ul>
       )}

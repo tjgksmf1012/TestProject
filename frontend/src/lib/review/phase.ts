@@ -154,14 +154,24 @@ export function describeMissingSummary(status: string | null | undefined): strin
  * ⚠️ `reviewPhase` 와 **나란히 둡니다.** 둘은 같은 표를 다른 모양으로
  * 내보내는 것이라, 한쪽에만 갈래가 생기는 순간 화면 둘이 갈라집니다.
  * `phase.test.ts` 가 **두 함수가 같은 상태 집합을 가르는지** 잽니다.
+ *
+ * ## ⚠️ `projectId` 를 받는 이유 (결함 355)
+ *
+ * 칸반 링크가 `/kanban.html?meeting=6` 이었습니다. 레거시 칸반은
+ * `params.get('project') ?? '1'` 이라 **없으면 1번 프로젝트**를 엽니다 —
+ * 같은 화면의 왼쪽 열 링크는 `?project=2&meeting=6` 으로 제대로 달고
+ * 있었으니, **한 화면 안에서 같은 모양 둘 중 하나만** 맞았습니다
+ * (결함 298·301 과 같은 자리). `home/next.ts` 의 `nextStepFor` 도 같은
+ * 병이었습니다.
  */
 export function reviewEmptyState(
   status: string | null | undefined,
   meetingId: number,
+  projectId: number,
 ): EmptyState {
   const what = '여기에는 회의에서 뽑은 업무 후보가 나옵니다.';
   const lobby = `/lobby.html?meeting=${meetingId}`;
-  const kanban = `/kanban.html?meeting=${meetingId}`;
+  const kanban = `/kanban.html?project=${projectId}&meeting=${meetingId}`;
 
   switch (status) {
     case 'pending':

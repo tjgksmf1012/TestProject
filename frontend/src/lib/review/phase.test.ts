@@ -128,8 +128,8 @@ describe('줄에 서 있는 회의를 「하고 있다」고 하지 않는다 (�
     strictEqual(q.emptyNote === p.emptyNote, false, `둘이 같은 말입니다: ${q.emptyNote}`);
     strictEqual(q.emptyNote.includes('아직 시작하지 않았습니다'), true, q.emptyNote);
 
-    const qe = reviewEmptyState('queued', 7);
-    const pe = reviewEmptyState('processing', 7);
+    const qe = reviewEmptyState('queued', 7, 3);
+    const pe = reviewEmptyState('processing', 7, 3);
     strictEqual(qe.why === pe.why, false, `빈 상자도 둘이 같은 말입니다: ${qe.why}`);
   });
 
@@ -137,13 +137,29 @@ describe('줄에 서 있는 회의를 「하고 있다」고 하지 않는다 (�
     // 서버가 `can_reprocess = status in ("failed","queued")` 로 열어 둔
     // 문입니다. 안 알려 주면 사람은 기다리기만 합니다 (실패 ③).
     strictEqual(reviewPhase('queued').go?.screen, 'lobby');
-    strictEqual(reviewEmptyState('queued', 7).action?.href.includes('lobby.html'), true);
+    strictEqual(reviewEmptyState('queued', 7, 3).action?.href.includes('lobby.html'), true);
+  });
+
+  it('⭐ 빈 상자의 칸반 링크에도 **프로젝트가 실려** 있다 (결함 355)', () => {
+    /* 같은 화면의 왼쪽 열 링크는 `?project=2&meeting=6` 을 제대로 달고
+       있었는데(`nav.ts` 가 `GET /api/meetings/{id}` 의 `project_id` 를
+       꺼내 씁니다) 이 빈 상자만 회의만 달고 있었습니다 — **한 화면에서
+       같은 모양 둘 중 하나만** 맞은 것입니다(결함 298·301 과 같은 자리).
+
+       ⚠️ 갈라지는 값으로 잽니다: 회의 7 · 프로젝트 4. 1 이 아니어야
+       레거시 칸반의 기본값(`?? '1'`)과 갈라집니다. */
+    for (const status of ['confirmed', 'needs_review']) {
+      const href = reviewEmptyState(status, 7, 4).action?.href ?? '';
+      strictEqual(href.includes('kanban.html'), true, `${status}: ${href}`);
+      strictEqual(href.includes('project=4'), true, `${status}: 프로젝트가 안 실렸습니다 — ${href}`);
+      strictEqual(href.includes('meeting=7'), true, `${status}: 회의가 안 실렸습니다 — ${href}`);
+    }
   });
 
   it('⛔ 「잠시 뒤에 새로고침하세요」는 **하고 있는 것**에만 붙는다', () => {
     // 시작도 안 한 일을 기다리게 하는 말입니다.
-    strictEqual(reviewEmptyState('queued', 7).how.includes('새로고침'), false);
-    strictEqual(reviewEmptyState('processing', 7).how.includes('새로고침'), true);
+    strictEqual(reviewEmptyState('queued', 7, 3).how.includes('새로고침'), false);
+    strictEqual(reviewEmptyState('processing', 7, 3).how.includes('새로고침'), true);
   });
 
   it('⭐ 옆 갈래(요약 칸)도 같이 간다 (결함 301)', () => {
@@ -172,7 +188,7 @@ describe('줄에 서 있는 회의를 「하고 있다」고 하지 않는다 (�
 
     strictEqual(
       group((s) => reviewPhase(s).emptyNote),
-      group((s) => reviewEmptyState(s, 1).why),
+      group((s) => reviewEmptyState(s, 1, 3).why),
       '두 함수가 상태를 다르게 묶습니다 — 한쪽에만 갈래가 생기면 화면 둘이 갈라집니다',
     );
   });
