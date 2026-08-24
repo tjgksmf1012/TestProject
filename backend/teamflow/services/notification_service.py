@@ -31,9 +31,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
-from teamflow.db import assignees, live
+from teamflow.db import assignees, live, vocab
 from teamflow.db import models as m
 from teamflow.db.vocab import NotificationKind
+from teamflow.github import presenting
 from teamflow.services.naming import meeting_label
 
 #: 마감이 **며칠 앞**이면 임박인가 (NOTIFICATION-003).
@@ -209,6 +210,40 @@ def announce_upcoming_meetings(session: Session, *, now: datetime) -> int:
     return made
 
 
+#: 어느 사건인지 **알 수 없을 때** 쓰는 뭉뚱그린 말.
+#:
+#: ⚠️ 지금은 안 쓰입니다 — `vocab.LINKED_TO_TASKS` 가 하나뿐이라
+#: `github_event_word` 가 그 하나의 이름을 정확히 말합니다. 집합이 늘면
+#: 여기로 떨어지고, 그때는 **알림 행이 사건을 가리키게** 만드는 것이
+#: 맞습니다(`github_event_id`).
+VAGUE_GITHUB_WORD = "연결된 PR 상태가 바뀌었습니다"
+
+
+def github_event_word() -> str:
+    """GitHub 알림이 **무슨 일**을 가리키는가.
+
+    ## ⚠️ 왜 이런 모양인가 (결함 357)
+
+    `notifications` 는 **글자를 저장하지 않습니다** — 무엇을 가리키는지만
+    담습니다(이 모듈 머리말). 그래서 이 알림 행에는 「어느 GitHub
+    사건인가」가 없고, 예전에는 그래서 문장이 「연결된 PR **상태가
+    바뀌었습니다**」였습니다.
+
+    그런데 이 알림을 만들 수 있는 사건은 지금 **하나뿐**입니다
+    (`vocab.LINKED_TO_TASKS` — `task_link_service` 가 그 집합만 잇습니다).
+    하나면 그 하나의 이름을 그대로 말할 수 있습니다.
+
+    ⚠️ **낱말을 여기서 짓지 않습니다.** `presenting.event_label` 을
+    거칩니다 — GitHub 피드와 찾기가 같은 사건을 「PR 병합」이라고 부르는데
+    알림만 다른 말을 하고 있었습니다(결함 347 이 그 모듈을 만든 이유가
+    정확히 이것이고, 이 자리를 빠뜨렸습니다).
+    """
+    kinds = vocab.LINKED_TO_TASKS
+    if len(kinds) != 1:
+        return VAGUE_GITHUB_WORD
+    return presenting.event_label(str(next(iter(kinds))))
+
+
 def mark_read(session: Session, user_id: int, notification_ids: list[int]) -> int:
     """읽음 표시.
 
@@ -274,11 +309,9 @@ def _text_for(session: Session, row: m.Notification) -> str:
 
     if kind == NotificationKind.GITHUB and row.task_id is not None:
         task = session.get(m.Task, row.task_id)
-        return (
-            f"연결된 PR 상태가 바뀌었습니다 — {task.title}"
-            if task is not None
-            else "연결된 업무를 찾을 수 없습니다"
-        )
+        if task is None:
+            return "연결된 업무를 찾을 수 없습니다"
+        return f"{github_event_word()} — {task.title}"
 
     # ⚠️ 모르는 종류를 그럴듯한 문장으로 지어내지 않습니다.
     return "알림"

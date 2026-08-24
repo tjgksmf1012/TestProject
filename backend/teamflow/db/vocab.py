@@ -454,6 +454,20 @@ class GithubEventKind(StrEnum):
     ISSUE_CLOSED = "issues.closed"
 
 
+#: **업무에 이을 수 있는 사건.** `task_link_service` 가 이 집합만 봅니다.
+#:
+#: ⚠️ 여기 모아 둔 이유는 **알림 문장이 이 집합에 기대기 때문**입니다
+#: (결함 357). `notifications` 표는 「무엇을 가리키는지」만 담고 글자는
+#: 안 담아서, GitHub 알림 행에는 **어느 사건인지가 없습니다.** 그런데
+#: 이 집합이 하나뿐이면 그 하나의 이름을 그대로 말할 수 있습니다 —
+#: 「연결된 PR 상태가 바뀌었습니다」처럼 뭉뚱그릴 필요가 없습니다.
+#:
+#: ⛔ **둘 이상으로 늘리려면 알림 쪽을 같이 고쳐야 합니다.** 늘리는 순간
+#: 「어느 사건인가」를 알 수 없게 되고, 그때는 알림 행이 사건을 가리키게
+#: (`github_event_id`) 만드는 것이 맞습니다. 가드가 잡습니다.
+LINKED_TO_TASKS: frozenset[GithubEventKind] = frozenset({GithubEventKind.PR_MERGED})
+
+
 #: 종류 → 사람 말. 서버가 라벨을 만들어 내려보냅니다 — 화면에 두 번째
 #: 표를 만들지 마십시오 (`activity` 의 `label` 과 같은 방식).
 GITHUB_EVENT_LABEL: dict[GithubEventKind, str] = {
