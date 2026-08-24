@@ -688,8 +688,11 @@ def test_the_seed_writes_gaps_in_the_same_shape_production_does():
 
 #: 두 쪽이 반드시 같아야 하는 상수. `(뜻, 백엔드 파일, 백엔드 이름, 프런트 이름)`.
 #:
-#: 프런트 파일은 전부 `frontend/src/lib/recording/timeline.ts` 입니다 —
-#: 늘면 튜플에 파일을 더하세요.
+#: 프런트 값은 `frontend/src/lib/recording/timeline.ts` **한 곳**에만
+#: 있어야 합니다. ⚠️ 「한 파일만 읽는다」와 「한 곳에만 있다」는 다릅니다 —
+#: 예전에는 앞엣것만 지켰고, `lobby/room.ts` 가 `MIN_USABLE_COVERAGE` 를
+#: **따로 들고** 있어도 검사 전부가 초록이었습니다(결함 363). 아래
+#: `test_the_paired_numbers_live_in_exactly_one_place` 가 그것을 셉니다.
 PAIRED_CONSTANTS = [
     (
         "이보다 짧은 공백은 보고하지 않는다",
@@ -764,6 +767,60 @@ def test_the_same_number_on_both_sides_really_is_the_same():
             )
 
     assert not problems, "서버와 화면의 숫자가 갈라졌습니다:\n  " + "\n  ".join(problems)
+
+
+def test_the_paired_numbers_live_in_exactly_one_place():
+    """⭐ 서버와 짝지은 숫자가 화면 쪽에 **딱 한 벌**만 있는가 (결함 363).
+
+    `test_the_same_number_on_both_sides_really_is_the_same` 은 서버와
+    `recording/timeline.ts` 를 맞춥니다. 그 자는 **읽는 파일이 하나**라,
+    같은 이름이 `@lib` 의 **다른 파일**에도 있으면 아무것도 못 봅니다.
+
+    실제로 `MIN_USABLE_COVERAGE` 가 세 벌이었습니다 — 서버 ·
+    `recording/timeline.ts` · **`lobby/room.ts`**. 로비의 값을 `0.5` 로
+    바꾸고 번들까지 다시 만든 뒤 전부 돌렸더니 **pytest 2145 · 프런트
+    1969 이 전부 초록**이었습니다. 그 상태에서 로비는 커버리지 0.6 짜리
+    트랙을 「쓸 만합니다」라고 하고 서버는 `unusable` 로 저장합니다 —
+    앞 검사의 docstring 이 **바로 그 해악**을 적어 두고 있는데, 정작
+    그 자리를 안 보고 있었습니다.
+
+    ⚠️ **낱말이 아니라 요구를 잽니다.** 「timeline.ts 를 읽는가」가 아니라
+    **「정의가 딱 하나인가」**를 셉니다 — 그래야 다음 사람이 네 번째
+    사본을 만들어도 잡힙니다. 다시 내보내는 것(`export { X }`)은 정의가
+    아니므로 세지 않습니다.
+    """
+    import re
+
+    lib = REPO_ROOT / "frontend" / "src" / "lib"
+    problems = []
+    for _, _, _, front_name in PAIRED_CONSTANTS:
+        # 정의인 자리만 셉니다 — 다시 내보내는 것(`export { X }`)은 정의가
+        # 아닙니다. ⚠️ **`export` 를 요구하면 안 됩니다** — 이 표의 셋 중
+        # 둘은 모듈 안에서만 쓰는 `const` 입니다(처음에 그렇게 썼다가
+        # 「0곳」이 나왔습니다).
+        pattern = re.compile(
+            rf"^\s*(?:export\s+)?const\s+{front_name}\b[^=\n]*=\s*[0-9]",
+            re.MULTILINE,
+        )
+        where = [
+            str(path.relative_to(REPO_ROOT))
+            for path in sorted(lib.rglob("*.ts"))
+            if not path.name.endswith(".test.ts")
+            and pattern.search(path.read_text(encoding="utf-8"))
+        ]
+        if len(where) != 1:
+            problems.append(
+                f"{front_name}: 정의가 {len(where)}곳입니다 — {', '.join(where) or '(0곳)'}"
+            )
+        elif where[0] != FRONT_CONSTANTS:
+            problems.append(
+                f"{front_name}: {where[0]} 에 있습니다 — 짝 검사는 {FRONT_CONSTANTS} 를 읽습니다"
+            )
+
+    assert not problems, (
+        "서버와 짝지은 숫자가 화면 쪽에 여러 벌이거나 엉뚱한 곳에 있습니다:\n  "
+        + "\n  ".join(problems)
+    )
 
 
 def test_the_paired_constant_table_is_not_stale():

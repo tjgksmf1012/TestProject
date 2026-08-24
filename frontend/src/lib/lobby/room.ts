@@ -78,8 +78,19 @@ export interface TrackHealth {
 
 export type ConsentState = 'granted' | 'refused' | 'pending';
 
-/** 커버리지가 이 아래면 그 트랙으로는 발언량을 판단할 수 없다. */
-export const MIN_USABLE_COVERAGE = 0.8;
+/**
+ * 커버리지가 이 아래면 그 트랙으로는 발언량을 판단할 수 없다.
+ *
+ * ⚠️ **여기서 값을 다시 적지 않습니다** (결함 363). 예전에는 이 파일이
+ * `0.8` 을 따로 들고 있었습니다 — 서버·녹음 화면과 **세 벌**이었고,
+ * 그 셋을 맞추는 가드(`test_the_same_number_on_both_sides_really_is_the_same`)
+ * 는 `recording/timeline.ts` **한 파일만** 걷고 있었습니다. 이 파일의 값을
+ * 0.5 로 바꿔도 검사 전부가 초록이었습니다 — 로비는 「쓸 만합니다」,
+ * 서버는 `unusable` 로 저장하는 상태가 조용히 만들어집니다.
+ */
+import { MIN_USABLE_COVERAGE } from '../recording/timeline.ts';
+
+export { MIN_USABLE_COVERAGE };
 
 /** 회의 중 이만큼 공백이 쌓이면 화면에 경고를 띄운다. */
 export const WARN_GAP_MS = 30_000;
