@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from teamflow.db import models as m
 from teamflow.db import session as db_session
@@ -347,3 +348,72 @@ def test_planned_and_held_meetings_share_one_timeline(client: TestClient, seeded
     rows = client.get(f"/api/projects/{project_id}/meetings").json()
     # 제일 나중 것이 맨 위 (최근 것부터).
     assert rows[0]["title"] == "아주 나중 회의"
+
+
+def test_undoing_a_schedule_takes_its_minutes_with_it(client: TestClient, seeded):
+    """⭐ 일정을 무르면 **그 회의로 만든 회의록도** 사라진다 (결함 359).
+
+    `cancel_meeting` 은 「행을 지우면 그것들이 허공에 뜹니다」라고 적어 두고
+    **연** 회의를 막았습니다. 그런데 안 연 회의에도 딸리는 것이 하나
+    있었습니다 — 로비의 「회의록 만들기」는 잡아만 둔 회의에도 있습니다.
+
+    무르면 회의는 홈·레일·달력에서 사라지는데 그 회의록만 보고서 목록에
+    남았고, **지울 방법이 저장소 어디에도 없었습니다**(`reports` 에 DELETE
+    갈래가 0곳). 재서 확인했습니다.
+    """
+    project_id = seeded["project_id"]
+    made = client.post(
+        f"/api/projects/{project_id}/scheduled-meetings",
+        json={"title": "잘못 잡은 회의", "at": (NOW + timedelta(days=3)).isoformat()},
+    )
+    assert made.status_code == 201, made.text
+    meeting_id = made.json()["meeting_id"]
+
+    minutes = client.post(f"/api/meetings/{meeting_id}/minutes")
+    assert minutes.status_code == 201, minutes.text
+
+    # ⚠️ **만들어진 것을 먼저 확인합니다.** 안 하면 「지웠더니 없다」가
+    #    「애초에 없었다」와 구별되지 않습니다.
+    before = client.get(f"/api/projects/{project_id}/reports").json()
+    assert any(r["meeting_id"] == meeting_id for r in before), (
+        f"회의록이 안 만들어졌습니다 — 이 검사는 아무것도 안 재고 있습니다: {before}"
+    )
+
+    assert client.delete(f"/api/scheduled-meetings/{meeting_id}").status_code == 204
+
+    after = client.get(f"/api/projects/{project_id}/reports").json()
+    assert not any(r["meeting_id"] == meeting_id for r in after), (
+        f"무른 회의의 회의록이 목록에 남았습니다 — 지울 방법이 없습니다: {after}"
+    )
+
+
+def test_no_report_points_at_a_meeting_that_is_gone(client: TestClient, seeded):
+    """⭐ **요구**를 잽니다 — 보고서가 가리키는 회의는 반드시 있다.
+
+    위 검사는 「무르기」 한 갈래만 봅니다. 회의 행이 사라지는 길이 하나 더
+    생기면 그 자는 눈을 감습니다 — 그래서 남는 쪽을 직접 셉니다.
+    """
+    project_id = seeded["project_id"]
+    # 살아남는 회의록 하나 — 없으면 아래 「고아 0건」이 거저 참입니다.
+    client.post(f"/api/meetings/{seeded['meeting_id']}/minutes")
+
+    made = client.post(
+        f"/api/projects/{project_id}/scheduled-meetings",
+        json={"title": "무를 회의", "at": (NOW + timedelta(days=4)).isoformat()},
+    )
+    meeting_id = made.json()["meeting_id"]
+    client.post(f"/api/meetings/{meeting_id}/minutes")
+    client.delete(f"/api/scheduled-meetings/{meeting_id}")
+
+    with db_session.session_scope() as s:
+        live_ids = set(s.scalars(select(m.Meeting.id)).all())
+        pointing = [
+            (r.id, r.meeting_id)
+            for r in s.scalars(select(m.Report))
+            if r.meeting_id is not None
+        ]
+        # ⚠️ **가리키는 보고서가 하나는 있어야** 이 검사가 뜻을 갖습니다.
+        #    전부 지워 버리면 「고아 0건」은 거저 참입니다.
+        assert pointing, "회의를 가리키는 보고서가 하나도 없습니다 — 아무것도 안 재고 있습니다"
+        orphans = [(rid, mid) for rid, mid in pointing if mid not in live_ids]
+        assert not orphans, f"없는 회의를 가리키는 보고서가 있습니다: {orphans}"

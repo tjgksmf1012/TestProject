@@ -1,5 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   coverageReading,
@@ -507,4 +510,65 @@ describe('리본 옆의 값에는 이름이 붙는다 (결함 336)', () => {
     strictEqual(coverageReading(0.805), '커버리지 81%');
     ok(describeCoverageRibbon('회의', 0.805).endsWith('커버리지 81%'));
   });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 파이썬 쪽과 **같은 판단**을 낸다 (결함 358)
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * ⚠️ 이 검사는 파이썬 쪽 검사와 **같은 파일**을 읽습니다.
+ *
+ *     backend/tests/test_meeting_when.py
+ *
+ * 회의록은 **기록**이라 만든 순간의 글자를 저장하므로 서버도 「이 회의는
+ * 언제인가」를 알아야 합니다. 그래서 이 규칙은 두 벌일 수밖에 없고,
+ * 갈라지지 않게 하는 방법이 이 짝 검사입니다 (결함 345 의 방법).
+ *
+ * ⚠️ **글자를 맞추지 않습니다.** 홈은 「예정 09-15 10:00」(월-일),
+ * 회의록은 「예정 2026-09-15 10:00」(전체 날짜) — 형식이 다릅니다.
+ * 같은 것은 **판단**입니다: 어느 시각을 쓰는가, 그리고 예정인가.
+ */
+interface WhenCase {
+  왜: string;
+  started_at: string | null;
+  scheduled_at: string | null;
+  at: string | null;
+  planned: boolean;
+}
+
+const WHEN_CASES: WhenCase[] = JSON.parse(
+  readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), 'meeting_when_cases.json'),
+    'utf8',
+  ),
+).cases;
+
+describe('파이썬 쪽과 같은 판단을 낸다 (결함 358)', () => {
+  it('사례 파일이 비어 있지 않다 — 빈 파일이면 두 검사 다 조용히 통과한다', () => {
+    strictEqual(WHEN_CASES.length > 0, true);
+  });
+
+  it('⭐ 사례가 **갈라지는** 값을 담고 있다', () => {
+    /* ⚠️ `started_at` 만 보는 옛 코드도 통과하는 사례만 모으면 이 검사는
+       아무것도 안 잽니다 — 그게 결함 358 이 오래 산 방식입니다. */
+    const plannedOnly = WHEN_CASES.filter(
+      (c) => !c.started_at && c.scheduled_at !== null && c.at !== null,
+    );
+    strictEqual(
+      plannedOnly.length > 0,
+      true,
+      '「잡아만 둔 회의」 사례가 없습니다 — 옛 코드도 통과하는 사례뿐입니다',
+    );
+  });
+
+  for (const c of WHEN_CASES) {
+    it(`⭐ ${c.왜}`, () => {
+      const got = meetingWhen({ started_at: c.started_at, scheduled_at: c.scheduled_at });
+      const expected = c.at === null ? null : new Date(c.at).getTime();
+      const actual = got.at === null ? null : new Date(got.at).getTime();
+      strictEqual(actual, expected, `${c.왜}: 어느 시각을 쓰는지가 다릅니다`);
+      strictEqual(got.planned, c.planned, `${c.왜}: 「예정인가」가 다릅니다`);
+    });
+  }
 });

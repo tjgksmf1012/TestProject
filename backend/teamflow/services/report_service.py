@@ -127,6 +127,9 @@ def generate_minutes(session: Session, meeting_id: int) -> m.Report:
         status=meeting.status,
         capture_mode=meeting.capture_mode,
         started_at=meeting.started_at,
+        # ⚠️ **잡아 둔 시각도 넘깁니다** (결함 358) — 안 넘기면 달력에서 잡은
+        #    회의의 회의록이 「일시 못 쟀습니다」로 나갑니다.
+        scheduled_at=meeting.scheduled_at,
         summary=meeting.summary,
         next_agenda=list(meeting.next_agenda or []),
         unresolved=[

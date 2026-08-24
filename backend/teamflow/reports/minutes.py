@@ -46,7 +46,17 @@ class MinutesInput:
     meeting_title: str
     status: str
     capture_mode: str
+    #: 회의를 **연** 시각. 아직 안 연 회의는 비어 있습니다.
     started_at: datetime | None = None
+    #: **잡아 둔** 시각. 이미 연 회의는 비어 있습니다.
+    #:
+    #: ⚠️ 이게 없던 동안 회의록은 `started_at` 만 봤습니다 (결함 358).
+    #: 달력에서 일정을 잡은 회의는 시각을 **알고 있는데** 회의록이
+    #: 「일시 못 쟀습니다」라고 적었습니다 — 홈은 같은 회의를
+    #: 「예정 09-15 10:00」이라고 부릅니다. 「못 쟀습니다」는 이 제품의
+    #: 불변식(**측정 불가 ≠ 0점**)이 쓰는 말이라, 아는 값에 붙이면
+    #: 그 말이 닳습니다.
+    scheduled_at: datetime | None = None
     summary: str | None = None
     next_agenda: list[str] = field(default_factory=list)
     unresolved: list[Issue] = field(default_factory=list)
@@ -118,6 +128,32 @@ def state_of(status: str) -> str:
 _CAPTURE_LABEL = {"multitrack": "사람마다 따로 녹음 (트랙이 곧 사람)"}
 
 
+def meeting_when(
+    started_at: datetime | None, scheduled_at: datetime | None
+) -> tuple[datetime | None, bool]:
+    """이 회의는 **언제인가** — `(시각, 예정인가)`.
+
+    ## ⚠️ 같은 규칙이 두 벌입니다 (결함 358)
+
+    화면 쪽은 `frontend/src/lib/home/next.ts` 의 `meetingWhen` 입니다.
+    보고서는 **기록**이라 만든 순간의 글자를 저장하므로 서버가 문장을
+    만들어야 하고, 그래서 이 규칙이 파이썬에도 있어야 합니다.
+
+    두 벌을 **알고** 둡니다 — `meeting_when_cases.json` 을 두 검사가 같이
+    읽습니다. 한쪽만 고치면 **양쪽 다** 빨개집니다 (결함 345 의 방법).
+
+    ⚠️ **둘 다 없으면 시각을 지어내지 않습니다.** 그때만 「못 잼」입니다.
+    """
+    if started_at is not None:
+        return started_at, False
+    # ⚠️ **둘 다 없어도 `planned` 는 참입니다.** 화면 쪽 `meetingWhen` 이
+    #    그렇습니다 — 그 값의 뜻이 「예정 시각이 있다」가 아니라 **「아직 안
+    #    연 회의인가」**이기 때문입니다. 시각이 없으면 두 자리 다 그 값을
+    #    안 읽으므로(화면은 `—`, 회의록은 gap) 눈에 보이지는 않지만,
+    #    **두 벌이 같은 답을 내야** 짝 검사가 뜻을 갖습니다.
+    return scheduled_at, True
+
+
 def build(data: MinutesInput) -> dict[str, Any]:
     """회의록 내용을 만든다. 순수 함수 — 데이터베이스를 모릅니다."""
     state = state_of(data.status)
@@ -126,7 +162,16 @@ def build(data: MinutesInput) -> dict[str, Any]:
     # ⛔ 예전에는 `f"{data.started_at:%Y-%m-%d %H:%M}"` 였습니다 (결함 290).
     #    서버가 들고 있는 값은 UTC 라, 같은 회의를 화면은 19:00 · 문서는
     #    10:00 이라고 했습니다. 밖으로 나가는 쪽이 틀린 것이 더 나쁩니다.
-    when = f"{clock.local_time(data.started_at):%Y-%m-%d %H:%M}" if data.started_at else None
+    #
+    # ⛔ 그리고 `started_at` **하나만** 봤습니다 (결함 358). 화면 쪽은
+    #    결함 287 이 「화면마다 `started_at ?? scheduled_at` 를 적으면
+    #    한쪽만 고쳐집니다」라고 적고 `meetingWhen` 한 벌로 모았는데,
+    #    보고서 builder 가 그 표에 안 들어가 있었습니다.
+    at, planned = meeting_when(data.started_at, data.scheduled_at)
+    when = f"{clock.local_time(at):%Y-%m-%d %H:%M}" if at is not None else None
+    # 「예정」은 홈이 쓰는 말과 같습니다 (`describeMeetingWhen`).
+    if when is not None and planned:
+        when = f"예정 {when}"
     body: list[dict[str, Any]] = [
         blocks.facts(
             [
@@ -134,7 +179,7 @@ def build(data: MinutesInput) -> dict[str, Any]:
                     "일시",
                     when or "",
                     gap=when is None,
-                    note="" if when else "시작 시각이 기록되지 않았습니다",
+                    note="" if when else "연 시각도 잡아 둔 시각도 없습니다",
                 ),
                 # ⚠️ 여기에 `processing` 같은 **식별자를 그대로 적지 않습니다.**
                 #    보고서는 밖으로 나가는 문서입니다 — 받는 사람에게 영어

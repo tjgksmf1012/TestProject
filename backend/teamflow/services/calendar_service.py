@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
@@ -269,5 +269,19 @@ def cancel_meeting(session: Session, meeting: m.Meeting) -> None:
     """
     if meeting.started_at is not None:
         raise CalendarError("이미 연 회의는 무를 수 없습니다")
+
+    # ⚠️ **이 회의로 만든 회의록도 같이 지웁니다** (결함 359).
+    #
+    # 위 문장이 「행을 지우면 그것들이 허공에 뜹니다」라고 적어 두고 연
+    # 회의를 막았는데, **안 연 회의에도 딸리는 것이 하나 있었습니다** —
+    # 로비의 「회의록 만들기」는 잡아만 둔 회의에도 있습니다. 일정을
+    # 무르면 회의는 홈·레일·달력에서 사라지는데 그 회의록만 보고서
+    # 목록에 남았고, **지울 방법이 저장소 어디에도 없었습니다**
+    # (`reports` 에는 DELETE 갈래가 0곳). 재서 확인했습니다.
+    #
+    # ⚠️ 「무르기」는 **없던 일로 하는 것**입니다. 남기려면 남기는 이유가
+    # 있어야 하는데, 안 연 회의의 회의록에는 지킬 내용이 없습니다 —
+    # 요약도 안건도 후보도 전부 「아직 처리하지 않았습니다」입니다.
+    session.execute(delete(m.Report).where(m.Report.meeting_id == meeting.id))
     session.delete(meeting)
     session.flush()
