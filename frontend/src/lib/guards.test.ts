@@ -22,6 +22,7 @@ import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contri
 import { attentionAbout } from './review/candidates.ts';
 import { describeMissingSummary } from './review/phase.ts';
 import { meetingLabel } from './ui/naming.ts';
+import { appRailHref } from './nav/rail.ts';
 import { withJosa } from './text/josa.ts';
 import { describeMeetingWhen, meetingWhen } from './home/next.ts';
 import { EXTRA_CONSENTS, memberStatuses } from './lobby/room.ts';
@@ -8921,6 +8922,80 @@ describe('칸반 주소에 프로젝트가 실려 있다', () => {
       ok(
         !new RegExp(`${param}\\s*:\\s*number\\s*=`).test(params),
         `${fn}: \`${param}\` 에 기본값이 붙었습니다 — 그러면 화면이 조용히 옛 동작을 이어받습니다`,
+      );
+    }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// SPA 셸의 탭은 **지금 보는 프로젝트를 잃지 않는다** (결함 356)
+// ══════════════════════════════════════════════════════════════
+
+describe('셸 탭이 프로젝트를 잃지 않는다', () => {
+  const SHELL = join(ROOT, '..', 'webapp', 'src', 'components', 'AppShell.tsx');
+  /* ⚠️ **어휘를 여기 다시 적지 않습니다.** `ScreenId` 는 타입이라 실행
+     시점에 없으므로, 원본인 `nav/links.ts` 의 유니언을 읽어서 씁니다 —
+     화면이 하나 늘면 이 가드도 같이 자랍니다. */
+  const SCREEN_IDS: string[] = (() => {
+    const source = readFileSync(join(ROOT, 'src', 'lib', 'nav', 'links.ts'), 'utf8');
+    const union = /export type ScreenId =([\s\S]*?);/.exec(source);
+    ok(union !== null, '`ScreenId` 유니언을 못 찾았습니다 — 이 가드가 낡았습니다');
+    return [...(union[1] as string).matchAll(/'([a-z]+)'/g)].map((m) => m[1] as string);
+  })();
+  const stripComments = (source: string): string =>
+    source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(?<![:\w])\/\/[^\n]*/g, '');
+
+  it('⭐ 탭 주소를 화면이 **손으로 적지 않는다**', () => {
+    /* 예전에는 셸이 네 칸의 주소를 직접 적었고, 그래서 「홈」만 `'/'`
+       였습니다 — 프로젝트 2 의 칸반을 보다가 홈을 누르면 목록 첫 번째
+       (1번)로 떨어지고, 그때부터 탭 셋이 전부 1번을 가리켰습니다.
+       레일을 다시 눌러야 돌아갈 수 있었습니다.
+
+       `appRailHref` 는 처음부터 `/?project=N` 을 만들고 있었고, 그
+       머리말이 「SPA 의 홈은 프로젝트 하나의 계기판입니다 — 어느
+       프로젝트의 계기판인지를 `?project=` 로 말합니다」라고 적어
+       뒀습니다. 레일만 그것을 부르고 있었습니다(실패 ①·②). */
+    const source = stripComments(readFileSync(SHELL, 'utf8'));
+    ok(
+      /appRailHref\(/.test(source),
+      '셸이 `appRailHref` 를 안 부릅니다 — 주소를 손으로 적으면 레일과 갈라집니다',
+    );
+    const handmade = [...source.matchAll(/`\/project\/\$\{[^`]*`/g)].map((m) => m[0]);
+    deepStrictEqual(
+      handmade,
+      [],
+      '셸이 SPA 주소를 손으로 적고 있습니다 — `appRailHref` 를 쓰십시오',
+    );
+  });
+
+  it('⭐ 탭이 가리키는 화면은 **전부 프로젝트를 실어 나른다**', () => {
+    /* ⚠️ 이건 배선이 아니라 **요구**입니다. 탭 넷이 가리키는 화면
+       각각에 대해, `@lib` 이 만드는 주소가 프로젝트 번호를 담고 있어야
+       합니다. 담지 않으면 그 칸을 누르는 순간 「어느 프로젝트인가」가
+       사라집니다.
+
+       ⚠️ 7 로 잽니다 — 1 이면 레거시 칸반의 기본값(`?? '1'`)과 갈라지지
+       않아 아무것도 못 잽니다(결함 355 가 같은 함정을 겪었습니다). */
+    for (const screen of ['home', 'kanban', 'contributions', 'project'] as const) {
+      const href = appRailHref(screen, 7);
+      ok(
+        href.includes('7'),
+        `${screen}: 주소에 프로젝트가 없습니다 — ${href}`,
+      );
+    }
+  });
+
+  it('⚠️ 셸이 탭에 쓰는 화면 이름이 `@lib` 의 어휘에 **실제로 있다**', () => {
+    /* 이름을 오타 내면 `appRailHref` 가 조용히 칸반으로 떨어뜨립니다
+       (`STAYS` 에 없는 화면의 기본 동작). 그러면 「기여도」를 눌렀는데
+       칸반이 열립니다 — 오류는 안 납니다. */
+    const source = stripComments(readFileSync(SHELL, 'utf8'));
+    const used = [...source.matchAll(/screen:\s*'([a-z]+)'\s*as const/g)].map((m) => m[1]);
+    ok(used.length === 4, `셸의 탭이 넷이 아닙니다(${used.length}) — 이 가드가 낡았습니다`);
+    for (const screen of used) {
+      ok(
+        SCREEN_IDS.includes(screen as string),
+        `셸이 모르는 화면 이름을 씁니다: ${screen}`,
       );
     }
   });

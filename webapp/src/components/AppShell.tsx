@@ -113,12 +113,30 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
   //    것은 이 저장소가 결함으로 세는 모양입니다(빈 `<a>` · 갈 곳 없는
   //    버튼). 링크를 지우지 않고 **이유를 답니다.**
   const noProject = pid === undefined;
+  /* ⚠️ **주소는 `@lib` 이 만듭니다** (결함 356). 예전에는 여기서 손으로
+     적었고, 그래서 「홈」만 `'/'` 였습니다 — 프로젝트 2 의 칸반을 보다가
+     홈을 누르면 **목록 첫 번째(1번)** 로 떨어지고, 그때부터 탭 셋이 전부
+     1번을 가리켰습니다. 프로젝트 2 로 돌아가려면 레일을 다시 눌러야
+     했습니다.
+
+     `appRailHref` 는 처음부터 `/?project=N` 을 만들고 있었고 그 머리말이
+     「SPA 의 홈은 프로젝트 하나의 계기판입니다 — 어느 프로젝트의
+     계기판인지를 `?project=` 로 말합니다」라고 적어 뒀습니다. 레일만
+     그것을 부르고 **탭은 손으로 적고 있었습니다**(실패 ①·②).
+
+     ⚠️ 네 칸 다 `appRailHref` 가 「머무를 수 있다」고 보는 화면입니다
+     (`home` + `STAYS` 셋). 회의 화면은 탭에 없습니다. */
   const items = [
-    { label: '홈', to: '/', active: pathname === '/' || pathname.startsWith('/meeting/'), icon: <IconHome />, blocked: false },
-    { label: '칸반', to: noProject ? '/' : `/project/${pid}/kanban`, active: pathname.includes('/kanban'), icon: <IconKanban />, blocked: noProject },
-    { label: '기여도', to: noProject ? '/' : `/project/${pid}/contributions`, active: pathname.includes('/contributions'), icon: <IconContrib />, blocked: noProject },
-    { label: '설정', to: noProject ? '/' : `/project/${pid}/settings/role`, active: pathname.includes('/settings'), icon: <IconSettings />, blocked: noProject },
-  ];
+    { label: '홈', screen: 'home' as const, active: pathname === '/' || pathname.startsWith('/meeting/'), icon: <IconHome /> },
+    { label: '칸반', screen: 'kanban' as const, active: pathname.includes('/kanban'), icon: <IconKanban /> },
+    { label: '기여도', screen: 'contributions' as const, active: pathname.includes('/contributions'), icon: <IconContrib /> },
+    { label: '설정', screen: 'project' as const, active: pathname.includes('/settings'), icon: <IconSettings /> },
+  ].map((item) => ({
+    ...item,
+    to: pid === undefined ? '/' : appRailHref(item.screen, pid),
+    /* 홈은 프로젝트가 없어도 갈 곳이 있습니다 — 거기서 만들거나 참가합니다. */
+    blocked: noProject && item.screen !== 'home',
+  }));
 
   // ⚠️ SPA 는 페이지가 새로 뜨지 않으므로 **제목을 우리가 갈아 끼워야**
   //    합니다. 안 하면 아홉 화면이 전부 `TeamFlow` 하나고, 낭독기는 화면이
