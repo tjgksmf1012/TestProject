@@ -1040,3 +1040,68 @@ def test_the_demo_project_has_an_owner(engine, seeded) -> None:
     assert roles.count("owner") == 1, f"소유자가 {roles.count('owner')}명입니다 — {roles}"
     # 나머지는 팀원. 관리자를 시드가 만들 이유는 없습니다.
     assert set(roles) == {"owner", "member"}, roles
+
+
+def test_live_documents_do_not_misstate_what_the_seed_makes(seeded, engine):
+    """⭐ 살아 있는 문서가 **씨앗이 만드는 개수**를 틀리게 말하지 않는가.
+
+    `AGENTS.md` 가 오래도록 「씨앗은 회의 5개·**채널 2개**뿐이라」라고
+    적고 있었습니다. 세어 보니 씨앗은 채널을 **하나도** 안 만듭니다 —
+    채팅은 빈 채널 목록으로 시작합니다. 회의 5개는 맞았고 채널만
+    틀렸습니다.
+
+    ⚠️ **이 저장소 자신의 규칙이 이 자리에 걸립니다** — 「문서에 적힌
+    숫자를 그대로 믿지 말고 세어 보세요」. 그 규칙이 적힌 파일이 바로
+    틀린 숫자를 들고 있었습니다(결함 341 이 `vocab.py` 에서 겪은 그것).
+
+    ⚠️ **행을 셉니다, 부르는 자리가 아니라.** 처음에는 씨앗 대본의
+    `m.Meeting(` 을 셌는데 **2** 가 나왔습니다 — 그중 하나가 루프 안에
+    있어서 실제로는 5행을 만듭니다. 「부르는 자리」와 「만들어지는 것」은
+    다릅니다. 그래서 씨앗을 실제로 돌리는 이 파일에 둡니다.
+    """
+    import re
+
+    from teamflow.db import models as md
+
+    repo_root = Path(__file__).resolve().parents[2]
+
+    # 문서가 「씨앗은 … <이름> N개」 라고 적는 것들.
+    CLAIMS = {"회의": md.Meeting, "채널": md.Channel, "업무": md.Task}
+    with Session(engine) as session:
+        made = {
+            korean: session.query(model).count() for korean, model in CLAIMS.items()
+        }
+
+    pattern = re.compile(rf"({'|'.join(CLAIMS)})\s*(\d+)\s*개")
+    bad: list[str] = []
+    for name in ("AGENTS.md", "README.md"):
+        path = repo_root / name
+        if not path.exists():
+            continue
+        # ⚠️ **인용부터 걷습니다** (결함 238 의 마크다운판). 이 저장소는
+        #    「예전에는 이렇게 적혀 있었다」를 낫표 안에 인용해 둡니다 —
+        #    안 걷으면 **틀렸다고 적어 둔 그 문장**을 살아 있는 주장으로
+        #    읽고 자기 자신을 잡습니다. 실제로 그렇게 잡혔습니다.
+        #
+        # ⚠️ **줄 단위로 걷으면 안 됩니다** — 인용이 두 줄에 걸치면 여는
+        #    낫표가 앞줄에 있어 뒷줄에서는 안 보입니다(결함 299 의 모양).
+        #    문서 전체에서 지우되 **줄바꿈은 남겨** 줄 번호를 지킵니다.
+        text = re.sub(
+            r"「[^」]*」",
+            lambda m: re.sub(r"[^\n]", " ", m.group(0)),
+            path.read_text(encoding="utf-8"),
+        )
+        for line_no, line in enumerate(text.splitlines(), 1):
+            # 「씨앗」 이 있는 줄만 봅니다 — 다른 맥락의 「회의 5개」 는
+            # 이 검사가 말할 것이 아닙니다.
+            if "씨앗" not in line:
+                continue
+            for hit in pattern.finditer(line):
+                korean, claimed = hit.group(1), int(hit.group(2))
+                if made[korean] != claimed:
+                    bad.append(
+                        f"{name}:{line_no} — '{hit.group(0)}' "
+                        f"(씨앗이 실제로 만드는 것은 {made[korean]}개)"
+                    )
+
+    assert not bad, "씨앗이 만드는 개수를 틀리게 적은 곳이 있습니다:\n  " + "\n  ".join(bad)
