@@ -44,7 +44,18 @@ class Action(StrEnum):
     REMOVE_MEMBER = "remove_member"
     #: 남의 권한을 바꾸기
     CHANGE_ROLE = "change_role"
-    #: 프로젝트를 통째로 지우기
+    #: 프로젝트를 통째로 지우기.
+    #:
+    #: ⚠️ **부르는 라우트가 아직 없습니다** (결함 351). 일곱 갈래 중
+    #: 유일하게 0곳이고, `DELETE /api/projects/{id}` 는 405 입니다 —
+    #: 즉 지금 이 제품에서 프로젝트는 **아무도 못 지웁니다.**
+    #:
+    #: 그래도 남겨 둡니다: 아래 `_ALLOWED` 의 「소유자만」은 근거를 적어
+    #: 내린 결정이고 `test_only_the_owner_deletes_the_project` 가 못
+    #: 박아 뒀습니다. 만들 때 그 정책부터 다시 정하지 않게 두는 것입니다.
+    #:
+    #: ⚠️ 이름이 닮은 `scripts/seed_demo.py` 의 `_delete_project` 는
+    #: **시연 데이터를 다시 심는 도구**이지 이 행동이 아닙니다.
     DELETE_PROJECT = "delete_project"
     #: 업무를 지우기 (`TASK-001~003`)
     DELETE_TASK = "delete_task"
