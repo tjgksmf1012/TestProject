@@ -1974,11 +1974,16 @@ pre {
   }
 
   /* 남은 업무 후보 수. 글자색이 `--chrome-side` 인 것은 실수가 아닙니다 —
-     대비가 대칭이라 강조색 위에서 4.51:1 이 그대로 나옵니다. */
+     대비가 대칭이라 강조색 위에서 4.51:1 이 그대로 나옵니다.
+
+     ⚠️ **글자가 「후보 3」입니다** (결함 350). 숫자만 그리면 메신저 셸의
+     둥근 알약이라 「안 읽은 개수」로 읽힙니다 — 축 이름이 `aria-label`
+     에만 있어서 **귀가 눈보다 많이 알고 있었습니다**(결함 336 과 같은 모양).
+     그래서 좌우 여백을 한 칸 늘립니다. 알약이 아니라 **이름표**입니다. */
   .chan-count {
     flex: 0 0 auto;
     min-width: var(--sp-4);
-    padding: 0 var(--sp-1);
+    padding: 0 var(--sp-2);
     border-radius: var(--r-round);
     background: var(--chrome-accent);
     color: var(--chrome-side);

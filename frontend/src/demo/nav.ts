@@ -22,6 +22,7 @@ import {
 } from '../lib/nav/links.ts';
 import {
   channelAriaLabel,
+  channelCountText,
   emptyChannelsNote,
   meetingChannels,
   shellHeading,
@@ -492,10 +493,14 @@ function renderChannels(channels: MeetingChannel[]): string {
   const rows = shown
     .map((channel) => {
       const current = channel.current ? ' aria-current="page"' : '';
+      // ⚠️ **글자는 `@lib` 이 정합니다** (결함 350). 예전에는 숫자만
+      //    그려서 낭독기만 축 이름을 들었습니다 — 메신저 셸에서 채널
+      //    이름 옆의 둥근 알약은 「안 읽은 개수」로 읽힙니다.
+      const countText = channelCountText(channel.pending);
       const count =
-        channel.pending === null
+        countText === null
           ? ''
-          : `<span class="chan-count">${escapeHtml(String(channel.pending))}</span>`;
+          : `<span class="chan-count">${escapeHtml(countText)}</span>`;
       return (
         `<a class="chan-row" href="${escapeHtml(channel.href)}"${current}` +
         ` aria-label="${escapeHtml(channelAriaLabel(channel))}">` +

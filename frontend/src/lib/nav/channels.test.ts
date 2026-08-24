@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   channelAriaLabel,
+  channelCountText,
   channelHref,
   channelLabel,
   channelState,
@@ -160,6 +161,43 @@ describe('channelAriaLabel', () => {
     const [channel] = meetingChannels([meeting({ pending_candidates: 0 })]);
     ok(channel);
     ok(!channelAriaLabel(channel).includes('검토 대기'), channelAriaLabel(channel));
+  });
+});
+
+describe('channelCountText — 알약에 뭐라고 적는가 (결함 350)', () => {
+  it('⭐ **축 이름을 눈에도 적는다** — 숫자만 적으면 「안 읽은 개수」로 읽힌다', () => {
+    /* 재현: 레일이 「1주차 정기회의 ③」이었고, 낭독기만 「업무 후보 3건
+       검토 대기」를 들었습니다 — **귀가 눈보다 많이 아는 상태**(결함 336).
+       이 셸은 일부러 메신저를 본떴고(docs/19), 그 세계에서 채널 이름 옆의
+       둥근 알약은 안 읽은 개수입니다. 이 제품에도 안 읽은 알림이 있고
+       같은 모양으로 그립니다 — 다만 그쪽은 이름표를 달고 있습니다. */
+    const text = channelCountText(3);
+    ok(text !== null);
+    ok(/후보/.test(text), text);
+    ok(text.includes('3'), text);
+  });
+
+  it('⛔ 숫자 하나만 내보내지 않는다 — 그것이 결함이었다', () => {
+    for (const n of [1, 3, 12, 99]) {
+      strictEqual(channelCountText(n) === String(n), false, `${n} 을 숫자만 내보냅니다`);
+    }
+  });
+
+  it('남은 후보가 없으면 알약 자체가 없다 — 「0건 남음」은 뜻이 없다', () => {
+    strictEqual(channelCountText(null), null);
+  });
+
+  it('⭐ 눈과 귀가 **같은 축**을 말한다', () => {
+    // 두 채널이 다른 축을 말하면 고친 게 아니라 옮긴 것입니다.
+    const [channel] = meetingChannels([
+      meeting({ title: '스프린트 회고', status: 'needs_review', pending_candidates: 3 }),
+    ]);
+    ok(channel);
+    const eye = channelCountText(channel.pending);
+    const ear = channelAriaLabel(channel);
+    ok(eye !== null);
+    ok(ear.includes('후보'), `귀: ${ear}`);
+    ok(eye.includes('후보'), `눈: ${eye}`);
   });
 });
 
