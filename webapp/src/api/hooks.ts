@@ -8,6 +8,7 @@ import type {
   ProjectSummary,
   RevokeResult,
   TracksResponse,
+  TypeTally,
 } from './types.ts';
 import type { GithubHealth } from '@lib/github/health.ts';
 import type { Task } from '@lib/kanban/board.ts';
@@ -23,6 +24,7 @@ import type { TeamScore } from '@lib/contribution/view.ts';
 import type { FinalRow, Payload } from '@lib/contribution/final.ts';
 import type { Candidate, ReviewPayload } from '@lib/review/candidates.ts';
 import type { TimelineUtterance } from '@lib/review/timeline.ts';
+import type { Speaking } from '@lib/review/speaking.ts';
 import type { UnresolvedIssue } from '@lib/review/minutes.ts';
 import type { Finding } from '@lib/review/findings.ts';
 
@@ -339,6 +341,30 @@ export function useTimeline(meetingId: number | undefined) {
   return useQuery({
     queryKey: ['meetings', meetingId, 'timeline'],
     queryFn: () => api.get<TimelineResponse>(`/api/meetings/${meetingId}/timeline`),
+    enabled: meetingId !== undefined,
+  });
+}
+
+/**
+ * 이 회의에서 무슨 말이 오갔나 (`REVIEW-005`) · 누가 얼마나 말했나
+ * (`AI-AUDIO-005`) — **SPA 가 오래 안 부르던 둘** (결함 352).
+ *
+ * ⚠️ 서버는 **사람별 유형 건수를 안 줍니다.** 막는 자리를 화면이 아니라
+ * API 에 둔 것이고(`docs/20` §3), 그래서 여기서도 받은 것을 그대로
+ * `@lib` 에 넘깁니다 — 화면에서 다시 묶으면 그 순간 리더보드가 됩니다.
+ */
+export function useUtteranceTypes(meetingId: number | undefined) {
+  return useQuery({
+    queryKey: ['meetings', meetingId, 'utterance-types'],
+    queryFn: () => api.get<TypeTally>(`/api/meetings/${meetingId}/utterance-types`),
+    enabled: meetingId !== undefined,
+  });
+}
+
+export function useSpeaking(meetingId: number | undefined) {
+  return useQuery({
+    queryKey: ['meetings', meetingId, 'speaking'],
+    queryFn: () => api.get<Speaking>(`/api/meetings/${meetingId}/speaking`),
     enabled: meetingId !== undefined,
   });
 }

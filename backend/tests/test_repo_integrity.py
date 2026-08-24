@@ -2840,6 +2840,21 @@ def test_every_server_route_has_a_caller() -> None:
     ⚠️ 「덮는가」만이 아니라 **「맞는 칸인가」**도 봅니다 (결함 289):
     예외에 적어 뒀는데 이제는 제대로 불리는 갈래가 있으면 그것도
     알려 줍니다 — 낡은 예외는 다음 사람을 속입니다.
+
+    ## ⛔ 이 자가 **구조적으로 못 보는 것** (결함 352)
+
+    두 뿌리를 **한 자루에 담아** 셉니다. 그래서 「레거시는 부르는데 SPA 는
+    안 부른다」가 초록입니다 — 결함 321 이 다른 가드에서 겪은 그것이고,
+    실제로 `GET /api/meetings/{id}/utterance-types`(REVIEW-005)와
+    `GET /api/meetings/{id}/speaking` 이 그렇게 숨어 있었습니다.
+
+    ⚠️ **뿌리마다 따로 세는 것으로 바꾸면 안 됩니다.** SPA 는 화면이
+    아홉이고 레거시는 열셋이라, 채팅·일정·알림·활동·찾기·보고서의
+    라우트 스물여덟이 전부 「SPA 가 안 부름」으로 걸립니다 — 그건 결함이
+    아니라 설계입니다.
+
+    그래서 **같은 화면이 두 뿌리에 다 있는 자리**만 따로 잽니다:
+    `test_both_review_screens_ask_for_the_same_meeting_facts`.
     """
     import re
 
@@ -2919,6 +2934,93 @@ def test_every_server_route_has_a_caller() -> None:
         "이제 제대로 불리는데 예외에 남아 있습니다 — 낡은 예외는 다음 사람을 속입니다:\n  "
         + "\n  ".join(stale)
     )
+
+
+def test_both_review_screens_ask_for_the_same_meeting_facts() -> None:
+    """⭐ **두 검토 화면이 같은 회의 사실을 묻습니다** (결함 352).
+
+    ## 왜 이 검사가 생겼나
+
+    같은 회의(`/review.html?meeting=1` · `/app/meeting/1/review`)를 열고
+    네트워크를 나란히 찍었더니, SPA 가 **두 갈래를 아예 안 부르고**
+    있었습니다:
+
+        GET /api/meetings/{id}/utterance-types   REVIEW-005 「무슨 말이 오갔나」
+        GET /api/meetings/{id}/speaking          AI-AUDIO-005 「누가 얼마나 말했나」
+
+    그 판의 머리 주석은 「통계·요약은 **접고** 전사가 주인공」이었는데,
+    요약만 접혀 있고 통계는 **아예 없었습니다.** `docs/20` 은 REVIEW-005 를
+    ✅ 로 적으면서 어느 뿌리인지는 안 적었습니다.
+
+    ## ⚠️ 라우트 가드는 이걸 **구조적으로** 못 봅니다
+
+    위 `test_...no_screen_calls_it` 이 두 뿌리를 한 자루에 담아 세기
+    때문입니다(결함 321 과 같은 모양). 그렇다고 그 자를 뿌리마다 가르면
+    채팅·일정·알림처럼 **SPA 에 아예 없는 화면**의 라우트 스물여덟이 전부
+    걸립니다 — 그건 결함이 아니라 설계입니다.
+
+    그래서 **같은 화면이 두 뿌리에 다 있는 자리**만 좁혀서 잽니다.
+    """
+    import re
+
+    def strip(code: str) -> str:
+        code = re.sub(r"/\*[\s\S]*?\*/", "", code)
+        return re.sub(r"^\s*//.*$", "", code, flags=re.M)
+
+    #: `/api/meetings/{id}/<여기>` 의 마지막 조각.
+    SEGMENT = r"/api/meetings/\$\{[^}]+\}/([a-z-]+)"
+
+    legacy_code = strip(
+        (REPO_ROOT / "frontend" / "src" / "demo" / "review.tsx").read_text(encoding="utf-8")
+    )
+    legacy = set(re.findall(SEGMENT, legacy_code))
+
+    # ⚠️ **SPA 는 `hooks.ts` 를 통째로 세면 안 됩니다.** 거기에는 로비의
+    #    갈래(`consent`·`tracks`·`finish`…)도 같이 있어서, 검토 화면이 안
+    #    쓰는 것까지 「부른다」로 잡힙니다 — 처음에 그렇게 짰다가 여섯이
+    #    거짓으로 잡혔습니다. **검토 화면이 실제로 쓰는 훅**만 따라갑니다.
+    screen = strip(
+        (REPO_ROOT / "webapp" / "src" / "screens" / "Review.tsx").read_text(encoding="utf-8")
+    )
+    hooks_code = (REPO_ROOT / "webapp" / "src" / "api" / "hooks.ts").read_text(encoding="utf-8")
+    bodies = dict(
+        re.findall(
+            r"export function (use\w+)\([^)]*\)\s*\{(.*?)\n\}", hooks_code, re.DOTALL
+        )
+    )
+    used = {name for name in bodies if re.search(rf"\b{name}\(", screen)}
+    assert used, "검토 화면이 훅을 하나도 안 씁니다 — 이 검사가 낡았습니다"
+    spa = {seg for name in used for seg in re.findall(SEGMENT, strip(bodies[name]))}
+
+    assert legacy, "레거시 검토가 회의에 아무것도 안 묻습니다 — 이 검사가 낡았습니다"
+    assert spa, "SPA 검토가 회의에 아무것도 안 묻습니다 — 이 검사가 낡았습니다"
+
+    #: 한쪽만 부르는 것 — **왜인지** 적습니다. 지금은 비어 있습니다:
+    #: 고치고 나니 다섯 갈래가 정확히 같아졌습니다
+    #: (`candidates` · `members` · `speaking` · `timeline` · `utterance-types`).
+    #:
+    #: ⚠️ **처음에 여기 둘을 지어냈다가 아래 「낡음」 검사에 걸렸습니다.**
+    #: `timeline` 은 레거시도 부릅니다 — 다만 「타임라인」 여닫이를 펴야
+    #: 부르는 **늦은 호출**이라, 네트워크만 보고 「SPA 만 부른다」로 읽었던
+    #: 것입니다. 예외는 **재 보고** 적으십시오.
+    EXCUSED_LEGACY_ONLY: dict[str, str] = {}
+    EXCUSED_SPA_ONLY: dict[str, str] = {}
+
+    missing = sorted(legacy - spa - set(EXCUSED_LEGACY_ONLY))
+    assert missing == [], (
+        f"SPA 검토가 안 묻는 갈래: {missing} — 레거시만 그 사실을 그립니다. "
+        "`/app` 으로 들어온 사람에게는 그 판이 통째로 없습니다"
+    )
+    extra = sorted(spa - legacy - set(EXCUSED_SPA_ONLY))
+    assert extra == [], f"레거시 검토가 안 묻는 갈래: {extra}"
+
+    # ⚠️ **예외가 낡는 것도 잽니다** (결함 306). 이제 둘 다 부르는데 예외에
+    #    남아 있으면 다음 사람이 「아직 안 붙었다」로 읽습니다.
+    stale = sorted(
+        [name for name in EXCUSED_LEGACY_ONLY if name in spa]
+        + [name for name in EXCUSED_SPA_ONLY if name in legacy]
+    )
+    assert stale == [], f"이제 둘 다 부르는데 예외에 남아 있습니다: {stale}"
 
 
 def test_both_review_screens_keep_a_draft_through_a_refresh() -> None:

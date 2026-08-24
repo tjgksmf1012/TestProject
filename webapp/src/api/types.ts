@@ -99,3 +99,15 @@ export interface ProjectDetail {
  * 두 벌이 있으면 한쪽만 고쳐집니다(이 저장소의 반복 실패 ②).
  */
 export type { RevokeResult } from '@lib/privacy/deletion.ts';
+
+/**
+ * 유형별 건수 (`REVIEW-005`). **사람 이름이 없습니다** — 서버가 안 줍니다.
+ *
+ * ⚠️ `unclassified` 는 `labels["other"]` 와 **다릅니다.** 앞은 아직 안 잰
+ * 것이고 뒤는 재고 나서 모르는 것입니다.
+ */
+export interface TypeTally {
+  labels: Record<string, number>;
+  unclassified: number;
+  total: number;
+}

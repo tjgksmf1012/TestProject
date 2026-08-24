@@ -610,6 +610,27 @@ button.rail__item {
    타입 유틸
    ========================================================================== */
 .muted { color: var(--c-ink-muted); }
+/* ⚠️ **못 잰 것은 흙빛입니다** — 빨강이 아닙니다. 빨강은 이 저장소에서
+   「네가 뭘 잘못했다」로 읽히는데, 안 잰 것은 잘못이 아닙니다. */
+.gap { color: var(--c-unknown); }
+
+/* 검토 화면의 세는 판 — 「무슨 말이 오갔나」·「누가 얼마나 말했나」 (결함 352).
+
+   ⛔ **막대를 그리지 마십시오.** 값을 같은 축 위에 폭으로 늘어놓으면 그게
+   곧 순위표입니다 (불변식 ① — 이 저장소가 두 번 어긴 규칙). 값은 **글자**
+   로 적고, 그림은 안 그립니다. 그래서 여기에는 폭도 배경도 없습니다. */
+.tally { list-style: none; margin: var(--sp-2) 0 0; padding: 0; }
+.tally li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+}
+/* 점수에 안 들어가는 유형(맞장구·기타)은 흐리게 — 지우지는 않습니다.
+   지우면 「맞장구가 없었다」로 읽힙니다. */
+.tally--zero { color: var(--c-ink-muted); }
 .faint { color: var(--c-ink-faint); }
 .micro {
   font-size: var(--fs-11);

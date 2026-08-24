@@ -2,6 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { describeMissingSummary, describeReviewDone, reviewPhase } from '@lib/review/phase.ts';
+import { pendingNote, typeCounts } from '@lib/review/labels.ts';
+import { plainText } from '@lib/ui/plain.ts';
+import {
+  SHARE_NOTE,
+  inGivenOrder,
+  notMeasurableText,
+  shareText,
+  skewText,
+} from '@lib/review/speaking.ts';
 import { labelInList } from '@lib/people/labels.ts';
 import { Disclosure } from '../components/Disclosure.tsx';
 import { EvidenceChip } from '../components/EvidenceChip.tsx';
@@ -13,6 +22,8 @@ import {
   useCandidates,
   useMeeting,
   useMeetingMembers,
+  useSpeaking,
+  useUtteranceTypes,
   useSubmitReview,
   useTimeline,
 } from '../api/hooks.ts';
@@ -144,6 +155,11 @@ export default function Review() {
   const candidatesQuery = useCandidates(meetingId);
   const timeline = useTimeline(meetingId);
   const membersQuery = useMeetingMembers(meetingId);
+  // ⛔ **SPA 가 이 둘을 안 부르고 있었습니다** (결함 352). 레거시 검토는
+  //    부르고 있었고, 라우트 가드가 두 뿌리를 **한 자루에 담아 세어**
+  //    초록이었습니다 — 결함 321 과 같은 모양입니다.
+  const tally = useUtteranceTypes(meetingId);
+  const speaking = useSpeaking(meetingId);
   const submit = useSubmitReview(meetingId);
 
   const candidates = useMemo(
@@ -427,6 +443,84 @@ export default function Review() {
                     <p className="t12 muted">
                       규칙 기반 관찰입니다 — 문제인지 아닌지는 팀이 정합니다.
                     </p>
+                  </Disclosure>
+                )}
+                {/* ⭐ **무슨 말이 오갔나** (정의서 §10 · `REVIEW-005`) — 결함 352.
+                    이 판의 머리 주석은 「통계·요약은 **접고** 전사가 주인공」
+                    인데, 요약만 접혀 있고 통계는 **아예 없었습니다.**
+                    레거시 검토는 처음부터 그리고 있었습니다.
+
+                    ⚠️ **사람 이름이 여기 없습니다.** 회의 단위로만 셉니다 —
+                    사람별로 세면 그 순간 「누가 제일 많이 제안했나」 표가
+                    되고, 그건 불변식 ①(순위·리더보드 금지)입니다. 서버도
+                    사람별 건수를 안 줍니다.
+
+                    ⚠️ **막대를 안 그립니다.** 값을 같은 축 위에 늘어놓으면
+                    그게 곧 순위표입니다 — 값은 글자로. */}
+                {tally.data !== undefined && tally.data.total > 0 && (
+                  <Disclosure summary="무슨 말이 오갔나">
+                    {/* 안 잰 것을 0 옆에 두지 않습니다 — 따로 적습니다. */}
+                    {pendingNote(tally.data.unclassified, tally.data.total) !== null && (
+                      <p className="t12 gap">
+                        {pendingNote(tally.data.unclassified, tally.data.total)}
+                      </p>
+                    )}
+                    <ul className="tally">
+                      {typeCounts(tally.data.labels)
+                        .filter((row) => row.count > 0)
+                        .map((row) => (
+                          <li key={row.type} className={row.zero ? 'tally--zero' : undefined}>
+                            <span>{row.label}</span>
+                            <span className="num">{row.count}</span>
+                          </li>
+                        ))}
+                    </ul>
+                    {/* ⚠️ 0건인 유형을 통째로 숨기면 「반대가 없었다」가
+                        안 보입니다. 줄로 세우면 시끄러우니 한 줄로. */}
+                    {typeCounts(tally.data.labels).some((row) => row.count === 0) && (
+                      <p className="t12 muted">
+                        없던 것 —{' '}
+                        {typeCounts(tally.data.labels)
+                          .filter((row) => row.count === 0)
+                          .map((row) => row.label)
+                          .join(' · ')}
+                      </p>
+                    )}
+                  </Disclosure>
+                )}
+                {/* ⭐ **누가 얼마나 말했나** (정의서 §9 `AI-AUDIO-005`) — 결함 352.
+
+                    ⚠️ **이 구역이 이 제품에서 제일 위험합니다.** 정의서의
+                    예시가 내림차순 목록, 곧 리더보드입니다. 그래서:
+                    ① 다시 정렬하지 않습니다(서버가 이름 순으로 줍니다)
+                    ② 막대를 안 그립니다 ③ 기여도가 아니라고 화면이 말합니다.
+                    판단은 전부 `@lib/review/speaking.ts`. */}
+                {speaking.data !== undefined && (
+                  <Disclosure summary="누가 얼마나 말했나">
+                    {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
+                    {/* ⚠️ `plainText` 를 거칩니다 — `SHARE_NOTE` 는 마크다운이라
+                        그냥 그리면 **별표가 그대로** 나갑니다. 렌더해서
+                        잡았습니다(이 저장소가 이미 한 번 당한 것). */}
+                    <p className="t12 muted">{plainText(SHARE_NOTE)}</p>
+                    {notMeasurableText(speaking.data) !== null ? (
+                      /* 빈 칸으로 두지 않습니다 — 「고장」으로 읽힙니다. */
+                      <p className="t12 muted">{notMeasurableText(speaking.data)}</p>
+                    ) : (
+                      <>
+                        <ul className="tally">
+                          {inGivenOrder(speaking.data.shares).map((row) => (
+                            <li key={row.user_id}>
+                              <span>{row.name}</span>
+                              <span className="num">{shareText(row)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        {/* ⚠️ 누가인지 안 적고, 나무라지도 않습니다. */}
+                        {skewText(speaking.data) !== null && (
+                          <p className="t12 muted">{skewText(speaking.data)}</p>
+                        )}
+                      </>
+                    )}
                   </Disclosure>
                 )}
               </>
