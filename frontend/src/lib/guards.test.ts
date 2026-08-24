@@ -2555,7 +2555,16 @@ describe('메신저 셸 (docs/19)', () => {
     //     await resolveProjectId(…)  →  paint(…)  →  matchMedia(…)
     //
     // 가운데가 빠지거나 마지막 뒤로 밀리면 잡습니다.
-    const nav = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    // ⚠️ **파일 전체에서 첫 `matchMedia(` 를 찾으면 안 됩니다.** 결함 343
+    // 이 `renderNav` 에 폭 감시를 하나 붙이자 그 호출이 파일 맨 앞으로
+    // 와서, 요구는 하나도 안 바뀌었는데 이 검사만 빨개졌습니다. 이
+    // 검사가 재려는 것은 **`fillChannels` 안의 순서**입니다 — 걷는 자리를
+    // 그 함수 몸통으로 좁힙니다.
+    const whole = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    const bodyAt = whole.indexOf('async function fillChannels(');
+    strictEqual(bodyAt > -1, true, 'nav.ts 에 fillChannels 가 없습니다 — 이 검사도 고치세요');
+    const nav = whole.slice(bodyAt);
+
     const learn = nav.indexOf('await resolveProjectId(');
     const gate = nav.indexOf('matchMedia(');
     strictEqual(learn > -1 && gate > -1, true, 'nav.ts 의 모양이 바뀌었습니다 — 이 검사도 고치세요');
@@ -2566,6 +2575,56 @@ describe('메신저 셸 (docs/19)', () => {
       true,
       '프로젝트를 알아낸 뒤 **너비를 보기 전에** 탭을 다시 그려야 합니다 — ' +
         '안 그러면 폰의 로비에서 칸반·기여도·설정 셋이 흐린 채로 남습니다',
+    );
+  });
+
+  /*
+   * 결함 343 — 「갈 수 없습니다」라고 적은 화면이 그 자리로 가는 링크를
+   * 여섯 개 그리고 있었습니다.
+   *
+   * `missingLinks` 는 이제 「셸이 지금 회의 목록을 그리고 있는가」를 받아서
+   * 판단합니다. 그 값을 화면이 **상수로 적으면** 판단이 통째로 죽는데,
+   * `@lib` 의 검사는 순수 함수만 보므로 그것을 구조적으로 못 봅니다
+   * (대표 실패 ①: 만들어 놓고 아무도 안 부름).
+   *
+   * ⚠️ 낱말이 아니라 **요구**를 잽니다 — 「폭을 본다」와 「프로젝트를
+   * 본다」 둘 다 그 값을 정하는 자리에 있어야 합니다. 회의 목록은
+   * `SHELL_WIDTH` 아래에서 접히고, 프로젝트를 모르면 채울 수가 없습니다.
+   *
+   * ⚠️ 레거시만 잽니다. SPA(`webapp/`)의 라우트는 전부 `:projectId` 를
+   * 들고 있어 이 상태가 아예 없고, 회의 목록 열도 없습니다 — 걷는 자리를
+   * 늘리기 전에 **그 뿌리에 그 상태가 있는지**부터 세었습니다.
+   */
+  it('⭐ 「회의 목록이 보이는가」를 상수로 적지 않는다 (결함 343)', () => {
+    const whole = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+
+    const call = whole.indexOf('missingLinks(');
+    strictEqual(call > -1, true, 'demo/nav.ts 가 missingLinks 를 안 부릅니다');
+
+    // 그 값을 정하는 자리 — 인자로 바로 적었든 위에서 만들었든, 같은
+    // 함수 안에 있습니다. `paintNav` 몸통을 통째로 봅니다.
+    const bodyAt = whole.indexOf('function paintNav(');
+    strictEqual(bodyAt > -1, true, 'demo/nav.ts 에 paintNav 가 없습니다 — 이 검사도 고치세요');
+    const body = whole.slice(bodyAt, whole.indexOf('\n}', bodyAt));
+
+    const decided = body.match(/meetingListShown\s*:([^,}]*)/);
+    strictEqual(decided !== null, true, 'paintNav 안에서 meetingListShown 을 안 정합니다');
+    const value = (decided?.[1] ?? '').trim();
+
+    strictEqual(
+      /^(true|false)$/.test(value),
+      false,
+      `meetingListShown 을 상수 「${value}」로 적었습니다 — 그러면 결함 343 이 그대로 돌아옵니다`,
+    );
+    strictEqual(
+      value.includes('matchMedia'),
+      true,
+      '회의 목록은 창이 좁으면 접힙니다 — 폭을 보지 않으면 좁은 창에서 안내가 통째로 사라집니다',
+    );
+    strictEqual(
+      value.includes('projectId'),
+      true,
+      '프로젝트를 모르면 회의 목록을 채울 수가 없습니다 — 그때는 목록이 있다고 하면 안 됩니다',
     );
   });
 

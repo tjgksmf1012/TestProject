@@ -197,23 +197,57 @@ export function navLinks(context: NavContext): NavLink[] {
 }
 
 /**
- * 이 화면에서 못 가는 곳과 그 이유.
+ * 셸이 **지금 열어 두고 있는 문**.
+ *
+ * `missingLinks` 는 「지금 못 가는 곳」을 말하는 자리인데, 셸이 같은
+ * 화면에서 그 곳으로 가는 문을 이미 그리고 있으면 그 말은 **거짓**이
+ * 됩니다. 그래서 이 사실을 받아서 판단합니다 (결함 343).
+ */
+export interface ShellDoors {
+  /**
+   * 셸의 **회의 목록**이 지금 그려지고 있는가.
+   *
+   * ⚠️ 「회의가 있는가」가 아닙니다. 목록이 비어 있어도 그 자리는
+   * 「아직 연 회의가 없습니다 — 설정에서 엽니다」라고 **더 정확한 말**을
+   * 합니다 — 그 옆에서 「회의를 지정하지 않아」라고 다시 말하면 한 화면이
+   * 같은 사실에 이유를 둘 답니다 (결함 290).
+   */
+  meetingListShown: boolean;
+}
+
+/**
+ * 이 화면에서 아직 못 가는 곳과 **무엇을 해야 열리는가**.
  *
  * 링크를 조용히 빼기만 하면 사용자는 **그 화면이 없는 줄** 압니다.
- * 왜 지금 갈 수 없는지 말해 주는 편이 낫습니다 — 대개 주소에 id 가 빠진
- * 것이고, 그건 고칠 수 있는 문제입니다.
+ * 무엇을 고르면 열리는지 말해 주는 편이 낫습니다.
+ *
+ * ## ⚠️ 「갈 수 없습니다」라고 적지 않습니다 (결함 343)
+ *
+ * 예전 문구는 「회의를 지정하지 않아 로비·검토 화면으로 **갈 수
+ * 없습니다**」였습니다. 그런데 셸의 왼쪽 회의 목록은 같은 화면에서
+ * `/lobby.html?meeting=N` **여섯 개**를 그리고 있었습니다 — 화면이
+ * 「갈 수 없다」고 적은 자리 200px 옆에 그 문이 여섯 개 있었습니다.
+ *
+ * 두 가지를 고쳤습니다:
+ *
+ * 1. **문이 이미 보이면 아무 말도 하지 않습니다** (`meetingListShown`).
+ * 2. 말할 때도 막다른 길이 아니라 **조건과 문**을 말합니다. 「홈」은
+ *    아래 탭바에 늘 있고 회의·프로젝트를 **모두** 늘어놓으므로, 창이
+ *    좁아 회의 목록이 접힌 때에도 참인 답입니다 (390px 에서 확인).
+ *
+ * ⚠️ **프로젝트를 모르면 회의 이야기는 하지 않습니다.** 회의는 프로젝트
+ * 안에 있어서 순서가 있고, 두 줄을 같이 내면 「무엇부터」가 사라집니다.
  */
-export function missingLinks(context: NavContext): string[] {
-  const notes: string[] = [];
-  if (positive(context.meetingId) === null && context.current !== 'home') {
-    notes.push('회의를 지정하지 않아 로비·검토 화면으로 갈 수 없습니다');
+export function missingLinks(context: NavContext, doors: ShellDoors): string[] {
+  if (context.current === 'home') return [];
+
+  if (positive(context.projectId) === null) {
+    return ['칸반·기여도·보고서·설정은 프로젝트를 고르면 열립니다 — 홈에서 고르세요'];
   }
-  if (positive(context.projectId) === null && context.current !== 'home') {
-    notes.push(
-      '프로젝트를 지정하지 않아 칸반·기여도·보고서·설정 화면으로 갈 수 없습니다',
-    );
+  if (positive(context.meetingId) === null && !doors.meetingListShown) {
+    return ['로비·검토는 회의를 고르면 열립니다 — 홈에서 고르세요'];
   }
-  return notes;
+  return [];
 }
 
 /**

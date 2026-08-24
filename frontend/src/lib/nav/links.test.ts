@@ -129,19 +129,55 @@ describe('navLinks', () => {
 });
 
 describe('missingLinks', () => {
+  const 목록없음 = { meetingListShown: false };
+  const 목록있음 = { meetingListShown: true };
+
   it('⭐ 못 가는 이유를 말한다 — 조용히 빼면 화면이 없는 줄 안다', () => {
-    const notes = missingLinks({ current: 'record' });
-    strictEqual(notes.length, 2);
-    strictEqual(notes.some((n) => n.includes('회의')), true);
+    const notes = missingLinks({ current: 'record' }, 목록없음);
+    strictEqual(notes.length, 1);
     strictEqual(notes.some((n) => n.includes('프로젝트')), true);
   });
 
+  it('⭐ 프로젝트를 모르면 회의 이야기는 하지 않는다 — 순서가 있다', () => {
+    const notes = missingLinks({ current: 'kanban' }, 목록없음);
+    strictEqual(notes.length, 1);
+    strictEqual(notes[0]?.includes('로비'), false);
+  });
+
+  it('프로젝트를 알면 회의를 고르라고 말한다', () => {
+    const notes = missingLinks({ current: 'notifications', projectId: 1 }, 목록없음);
+    strictEqual(notes.length, 1);
+    strictEqual(notes[0]?.includes('로비·검토'), true);
+  });
+
+  /*
+   * 결함 343 — 화면이 「갈 수 없습니다」라고 적은 자리 200px 옆에서
+   * 셸의 회의 목록이 `/lobby.html?meeting=N` 여섯 개를 그리고 있었습니다.
+   */
+  it('⭐ 셸이 회의 목록을 그리고 있으면 아무 말도 하지 않는다 (결함 343)', () => {
+    deepStrictEqual(missingLinks({ current: 'notifications', projectId: 1 }, 목록있음), []);
+  });
+
+  it('⭐ 「갈 수 없습니다」라고 적지 않는다 — 문을 말합니다 (결함 343)', () => {
+    const 모두 = [
+      ...missingLinks({ current: 'record' }, 목록없음),
+      ...missingLinks({ current: 'notifications', projectId: 1 }, 목록없음),
+    ];
+    strictEqual(모두.length, 2);
+    for (const note of 모두) {
+      strictEqual(note.includes('갈 수 없'), false, note);
+      // 무엇을 하면 열리는지, 어디서 하면 되는지가 둘 다 있어야 합니다.
+      strictEqual(note.includes('고르면 열립니다'), true, note);
+      strictEqual(note.includes('홈에서'), true, note);
+    }
+  });
+
   it('다 갈 수 있으면 조용하다', () => {
-    deepStrictEqual(missingLinks({ current: 'review', projectId: 1, meetingId: 2 }), []);
+    deepStrictEqual(missingLinks({ current: 'review', projectId: 1, meetingId: 2 }, 목록없음), []);
   });
 
   it('홈에서는 아무 말도 하지 않는다 — 거기서는 id 가 없는 게 정상이다', () => {
-    deepStrictEqual(missingLinks({ current: 'home' }), []);
+    deepStrictEqual(missingLinks({ current: 'home' }, 목록없음), []);
   });
 });
 

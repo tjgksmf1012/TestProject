@@ -930,8 +930,14 @@ body.no-tabs.has-actionbar {
 
 /* 못 가는 곳과 그 이유 (`missingLinks`). 링크가 아니라 **설명**이라
    흐리게 두되, 글자 하한 아래로는 안 내립니다 — `--text-subtle` 은
-   `tokens.css` 가 surface 5.17:1 로 재 둔 값입니다. */
+   `tokens.css` 가 surface 5.17:1 로 재 둔 값입니다.
+
+   ⚠️ **자기 줄을 차지합니다** (결함 343). `#nav` 은 `flex-wrap: wrap` 이라
+   그냥 두면 이 문장이 링크 여섯 뒤에 **여섯째 링크처럼** 붙습니다 —
+   렌더해서 보고 알았습니다. `flex-basis: 100%` 면 줄이 갈라져서 「갈 수
+   있는 곳」과 「무엇을 하면 열리는가」가 눈에 따로 들어옵니다. */
 #nav .miss {
+  flex: 0 0 100%;
   color: var(--text-subtle);
   font-size: 0.8125rem;
 }

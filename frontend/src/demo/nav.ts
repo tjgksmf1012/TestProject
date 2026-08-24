@@ -18,6 +18,7 @@ import {
   navTabs,
   type NavContext,
   type ScreenId,
+  type ShellDoors,
 } from '../lib/nav/links.ts';
 import {
   channelAriaLabel,
@@ -54,9 +55,24 @@ export function renderNav(current: ScreenId): void {
   const context = contextFromSearch(current, location.search);
   paint(context);
 
+  // ⭐ **창 폭이 바뀌면 안내 줄을 다시 그립니다** (결함 343).
+  //
+  // 회의 목록은 `SHELL_WIDTH` 아래에서 통째로 접힙니다. 그러면 「회의를
+  // 고르면 열립니다」를 말해 줄 자리가 그 줄뿐인데, 한 번만 그리면
+  // 넓은 채로 열었다 좁힌 사람에게는 **아무 안내도 안 남습니다.**
+  //
+  // ⚠️ `paint` 전체가 아니라 `#nav` 만 다시 그립니다 — `paint` 를 다시
+  // 부르면 이미 받아 둔 프로젝트 이름·레일이 인자에서 빠져 날아갑니다.
+  window.matchMedia(SHELL_WIDTH).addEventListener('change', () => {
+    if (shownContext !== null) paintNav(shownContext);
+  });
+
   const tabHost = document.getElementById('tabs');
   if (tabHost) void fillChannels(tabHost, context);
 }
+
+/** 마지막으로 그린 맥락. 폭이 바뀌었을 때 다시 그리려고 들고 있습니다. */
+let shownContext: NavContext | null = null;
 
 /**
  * 맥락 하나로 내비 전부를 다시 그린다.
@@ -141,6 +157,18 @@ function paint(context: NavContext, shell: ShellData = {}): void {
     paintRail(context, shell.projects ?? []);
   }
 
+  paintNav(context);
+}
+
+/**
+ * 위쪽 링크 줄 하나만 그린다.
+ *
+ * `paint` 에서 빼낸 이유는 **창 폭이 바뀌면 이 줄만 다시 그려야** 하기
+ * 때문입니다 (결함 343). 셸 전체를 다시 그리면 받아 둔 것이 날아갑니다.
+ */
+function paintNav(context: NavContext): void {
+  shownContext = context;
+
   const host = document.getElementById('nav');
   if (!host) return;
 
@@ -161,7 +189,15 @@ function paint(context: NavContext, shell: ShellData = {}): void {
     .filter((link) => !covered.has(link.screen))
     .map((link) => `<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`)
     .join('');
-  const notes = missingLinks(context)
+  // ⚠️ **셸이 이미 열어 둔 문은 「못 간다」고 말하지 않습니다** (결함 343).
+  // 회의 목록은 `SHELL_WIDTH` 이상에서만 그려지고, 프로젝트를 모르면
+  // 채울 수가 없습니다 — 그 둘이 이 값의 전부입니다. 상수로 적지
+  // 마십시오: 폭은 사람이 창을 끌면 바뀝니다.
+  const doors: ShellDoors = {
+    meetingListShown:
+      (context.projectId ?? 0) > 0 && window.matchMedia(SHELL_WIDTH).matches,
+  };
+  const notes = missingLinks(context, doors)
     .map((note) => `<span class="miss">${escapeHtml(note)}</span>`)
     .join('');
 
