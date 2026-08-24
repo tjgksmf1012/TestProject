@@ -4230,7 +4230,11 @@ describe('SPA 가 lib 의 판단을 실제로 부르는가 (결함 197 계열)',
 
   it('⭐ 팀원 화면이 권한 3단계를 그린다 (`PROJECT-003`·`PROJECT-004`)', () => {
     const settings = code('screens', 'Settings.tsx');
-    for (const fn of ['roleLabel', 'canChangeRoleOf', 'canRemove', 'assignableRoles']) {
+    /* ⚠️ 예전에는 `canChangeRoleOf`·`assignableRoles` 를 셌습니다. 결함
+       362 에서 그 둘을 `roleChoicesFor` 하나로 접었습니다 — **요구는 안
+       바뀌었고 자가 낡은 것**입니다(결함 335 와 같은 부류). 지금 화면이
+       부르는 이름으로 셉니다. */
+    for (const fn of ['roleLabel', 'roleChoicesFor', 'canRemove']) {
       ok(new RegExp(`${fn}\\(`).test(settings), `\`${fn}\` 을 안 부릅니다 — 등급을 다룰 수 없습니다`);
     }
     // ⚠️ **부르는가가 아니라 그리는가**를 봅니다. `roleLabel` 은

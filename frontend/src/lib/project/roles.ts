@@ -78,6 +78,35 @@ export function assignableRoles(myRole: string | null | undefined): ProjectRole[
   return (['owner', 'admin', 'member'] as ProjectRole[]).filter((r) => RANK[r] < mine);
 }
 
+/**
+ * 이 사람의 등급으로 **고를 수 있는 것들**. 고를 게 없으면 빈 배열.
+ *
+ * ⚠️ **`assignableRoles` 와 다릅니다** (결함 362). 저것은 「내가 줄 수
+ * 있는 등급」이고, 이것은 「이 사람에게 **지금과 다른** 등급을 줄 수
+ * 있는가」입니다. 관리자가 팀원을 볼 때 `assignableRoles('admin')` 은
+ * `['member']` 하나를 돌려주는데, 그 사람은 **이미 팀원**입니다 —
+ * 그대로 그리면 **선택지가 하나뿐인 select**, 즉 눌러도 아무 일도
+ * 일어나지 않는 칸이 나갑니다. 두 뿌리 다 그랬고, 관리자가 제품 전체에서
+ * 보는 select 는 그것 하나였습니다.
+ *
+ * ⚠️ **지금 등급을 목록에서 빼지는 않습니다.** select 는 현재 값을
+ * 보여 줘야 하므로 그 항목이 필요합니다. 빼는 것이 아니라, **다른
+ * 것이 하나도 없으면 아예 안 그리는** 것입니다.
+ *
+ * ⚠️ 이건 결함 316 의 「버튼을 지우지 말고 이유를 말하라」와 **다른
+ * 경우**입니다. 저기는 할 수 있는 일이 막힌 것이고, 여기는 **할 수 있는
+ * 일이 처음부터 없는** 것입니다. 등급은 옆에 글자로 그대로 남습니다.
+ */
+export function roleChoicesFor(
+  myRole: string | null | undefined,
+  targetRole: string | null | undefined,
+  { isMe }: { isMe: boolean },
+): ProjectRole[] {
+  if (!canChangeRoleOf(myRole, targetRole, { isMe })) return [];
+  const choices = assignableRoles(myRole);
+  return choices.some((r) => r !== targetRole) ? choices : [];
+}
+
 /** 이 사람을 내보낼 수 있는가. 권한 변경과 같은 규칙입니다. */
 export function canRemove(
   myRole: string | null | undefined,

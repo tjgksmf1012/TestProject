@@ -33,8 +33,7 @@ import {
 import { copySucceeded, copyText, describeCopy } from '@lib/ui/copy.ts';
 import {
   LEAVE_CONFIRM,
-  assignableRoles,
-  canChangeRoleOf,
+  roleChoicesFor,
   canRemove,
   leaveBlockedBecause,
   manageBlockedBecause,
@@ -326,7 +325,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
  * ## ⚠️ 판단은 처음부터 있었는데 이 화면만 안 불렀습니다
  *
  * `@lib/project/roles.ts` 에 `roleLabel`·`canChangeRoleOf`·
- * `assignableRoles`·`canRemove`·`leaveBlockedBecause` 가 전부 있고 검사도
+ * `roleChoicesFor`·`canRemove`·`leaveBlockedBecause` 가 전부 있고 검사도
  * 붙어 있습니다. 레거시 화면(`demo/project.tsx`)은 그걸 부르고 등급
  * `<select>` 와 내보내기 버튼을 그렸는데, **리디자인 SPA 는 이름과 기여도
  * 가중치만 그렸습니다.** 레거시가 부르고 있어서 "아무도 안 쓰는 export"
@@ -360,7 +359,6 @@ function MembersSection({
   const ordered = [...members].sort(
     (a, b) => a.name.localeCompare(b.name, 'ko') || a.user_id - b.user_id,
   );
-  const canGive = assignableRoles(myRole);
   // ⚠️ 나가기가 막히는 이유는 **누르기 전에** 말합니다. 예전에는 누른 뒤
   //    서버 409 로만 나왔습니다.
   const leaveBlocked = leaveBlockedBecause(myRole, members.map((x) => x.project_role));
@@ -370,7 +368,8 @@ function MembersSection({
       <h2 className="sec__title">팀원 {members.length}명</h2>
       {ordered.map((member) => {
         const isMe = member.user_id === myUserId;
-        const mayChange = canChangeRoleOf(myRole, member.project_role, { isMe });
+        // 고를 것이 하나도 없으면 안 그립니다 (결함 362) — 판단은 `@lib`.
+        const canGive = roleChoicesFor(myRole, member.project_role, { isMe });
         const mayRemove = canRemove(myRole, member.project_role, { isMe });
         return (
           <div className="member-row" key={member.user_id}>
@@ -398,7 +397,7 @@ function MembersSection({
             {worthShowing(member.presence) && (
               <span className="presence">● {presenceLabel(member.presence)}</span>
             )}
-            {mayChange && canGive.length > 0 && (
+            {canGive.length > 0 && (
               <label className="member-row__act">
                 <span className="vh">{labelInList(member, ordered)} 등급</span>
                 <select

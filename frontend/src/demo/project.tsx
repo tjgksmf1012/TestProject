@@ -75,8 +75,7 @@ import {
 } from '../lib/analytics/trends.ts';
 import { presenceDot, presenceLabel, worthShowing } from '../lib/project/presence.ts';
 import {
-  assignableRoles,
-  canChangeRoleOf,
+  roleChoicesFor,
   manageBlockedBecause,
   canRemove,
   LEAVE_CONFIRM,
@@ -716,8 +715,9 @@ function ProjectSettings() {
           <ul className="mlist">
             {team.map((person) => {
               const isMe = person.user_id === myId;
-              const canEdit = canChangeRoleOf(myRole, person.project_role, { isMe });
-              const options = assignableRoles(myRole);
+              // 고를 것이 하나도 없으면 안 그립니다 (결함 362) — 판단은 `@lib`.
+              const options = roleChoicesFor(myRole, person.project_role, { isMe });
+              const canEdit = options.length > 0;
               return (
                 <li key={person.user_id}>
                   {/* 프로필 이미지 (`USER-004`). 없으면 아무것도 안 그립니다 —
