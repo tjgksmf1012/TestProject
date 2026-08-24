@@ -37,16 +37,21 @@
  * 안 붙기 때문입니다 — 여기 두면 그 판단이 검증 밖으로 나갑니다.
  */
 
-import { app, BrowserWindow, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, session, shell } from 'electron';
 import { join } from 'node:path';
 
+import {
+  closeButtons,
+  leavesOnAnswer,
+  whenClosing,
+} from '../../src/lib/desktop/closing.ts';
 import {
   offlineNotice,
   safeToOpenOutside,
   sameOrigin,
   serverUrl,
 } from '../../src/lib/desktop/server.ts';
-import { registerAwake } from './awake.ts';
+import { isHoldingAwake, registerAwake } from './awake.ts';
 import { registerChunkStore } from './chunks.ts';
 
 /** 이 창이 머물러도 되는 곳. 여기를 벗어나는 이동은 전부 막습니다. */
@@ -78,6 +83,37 @@ function createWindow(target: URL): BrowserWindow {
   });
 
   win.once('ready-to-show', () => win.show());
+
+  // ⭐ **녹음 중에는 닫기를 묻습니다** (결함 342).
+  //
+  // 이 셸의 존재 이유는 「창을 내리거나 화면이 잠겨도 녹음이 안 끊기게」
+  // 하나뿐인데, **창의 X 하나면 그게 다 무너졌습니다.** 재 보니 녹음
+  // 중(청크 1개·절전방지 true)에 닫자 앱이 통째로 죽었고, 확인도 경고도
+  // 없었습니다 — 그 구간은 영영 못 잽니다.
+  //
+  // ⚠️ 녹음 화면은 그때 「화면을 꺼도 녹음이 이어집니다. **앱을 완전히
+  //    닫지만 마세요**」라고 말하고 있습니다. 그 부탁을 어기는 방법이
+  //    바로 이 버튼이었고, 사람은 X 를 「완전히 닫기」로 안 읽습니다.
+  //
+  // ⚠️ **판단은 여기 없습니다** — `@lib/desktop/closing.ts` 입니다.
+  //    main 에는 자동 검사가 안 붙습니다. 여기는 묻고 답을 옮기는 손입니다.
+  win.on('close', (event) => {
+    const verdict = whenClosing(isHoldingAwake());
+    if (verdict.kind === 'quit') return;
+    event.preventDefault();
+    const answer = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      title: verdict.title,
+      message: verdict.title,
+      detail: verdict.body,
+      buttons: closeButtons(verdict),
+      // 기본값과 Esc 둘 다 **머무르는 쪽**입니다.
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (leavesOnAnswer(answer)) win.destroy();
+  });
 
   // ⚠️ **못 닿으면 창을 안 보여 주는 상태로 두면 안 됩니다.**
   //

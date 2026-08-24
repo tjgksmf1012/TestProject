@@ -232,6 +232,35 @@ const chunksHidden = Number(await page.locator('#chunks').innerText());
 const phaseHidden = await page.locator('#phase').innerText();
 await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].show());
 
+// ⭐ **녹음 중에 창을 닫으면 묻는가** (결함 342). 정지 **전에** 잽니다 —
+//    이 셸의 존재 이유가 「창을 내려도 녹음이 안 끊기게」인데, 창의 X
+//    하나면 그게 다 무너지고 있었습니다(앱이 통째로 죽었습니다).
+//
+// ⚠️ 네이티브 대화상자는 Playwright 가 못 누릅니다. **검사 하네스가**
+//    main 의 `showMessageBoxSync` 를 갈아끼워 「머무르는 쪽」을 고릅니다 —
+//    앱 코드가 아니라 여기서만 하는 일입니다.
+await app.evaluate(({ dialog }) => {
+  globalThis.__asked = null;
+  dialog.showMessageBoxSync = (win, opts) => {
+    globalThis.__asked = { title: opts.title, buttons: opts.buttons, detail: opts.detail };
+    return 0; // 머무릅니다
+  };
+});
+const chunksBeforeClose = Number(await page.locator('#chunks').innerText());
+await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+await page.waitForTimeout(6_500);
+const asked = await app.evaluate(() => globalThis.__asked);
+const chunksAfterClose = Number(await page.locator('#chunks').innerText());
+const closeGuard = {
+  물었나: asked !== null,
+  제목: asked?.title ?? '(안 물음)',
+  머무르는쪽이먼저: asked?.buttons?.[0] ?? '(없음)',
+  청크: `${chunksBeforeClose} → ${chunksAfterClose}`,
+};
+const closeOk =
+  closeGuard.물었나 && chunksAfterClose >= chunksBeforeClose;
+console.log('닫기 잠금 :', JSON.stringify(closeGuard), closeOk ? 'OK' : '⛔ 녹음 중에 그냥 닫힙니다');
+
 await page.click('#stop');
 await page.waitForFunction(() => !document.getElementById('result').hidden, null, { timeout: 10_000 });
 const survival = {

@@ -1664,6 +1664,38 @@ describe('데스크톱 셸 (Electron)', () => {
     }
   });
 
+  it('⭐ 녹음 중에 창을 닫으면 **묻는다** (결함 342)', () => {
+    // 이 셸의 존재 이유는 하나뿐입니다 — 「창을 내리거나 화면이 잠겨도
+    // 녹음이 안 끊기게」. 그런데 창의 X 하나면 그게 다 무너졌습니다.
+    // 재 보니 녹음 중(청크 1개·절전방지 true)에 닫자 앱이 통째로 죽었고,
+    // 확인도 경고도 없었습니다 — 그 구간은 영영 못 잽니다.
+    const source = mainSource();
+    ok(/win\.on\(\s*'close'/.test(source), "창의 `close` 를 안 잡습니다");
+    ok(
+      /event\.preventDefault\(\)/.test(source),
+      '닫기를 막는 코드가 없습니다 — 물어도 그대로 닫히면 소용없습니다',
+    );
+  });
+
+  it('⛔ 닫기 판단을 main 이 직접 하지 않는다 (결함 342)', () => {
+    // main 에는 자동 검사가 안 붙습니다. 「녹음 중인가」를 여기서 직접
+    // 따지면 그 판단은 영영 안 재집니다 — `@lib/desktop/closing.ts` 입니다.
+    const source = mainSource();
+    ok(
+      /whenClosing\(/.test(source),
+      'main 이 `whenClosing` 을 안 부릅니다 — 판단이 main 으로 새었습니다',
+    );
+    ok(
+      /leavesOnAnswer\(/.test(source),
+      '대화상자 응답을 main 이 직접 해석합니다 — 순서를 두 곳이 알면 갈라집니다',
+    );
+    // 「녹음 중인가」를 main 이 제 손으로 따지면 안 됩니다.
+    ok(
+      !/phase\s*===\s*'recording'|isRecording\s*=/.test(source),
+      'main 이 녹음 상태를 직접 판단합니다 — 그 판단은 검사 밖입니다',
+    );
+  });
+
   it('⭐ 바깥으로 나가는 문을 전부 잠근다', () => {
     const source = mainSource();
     // 새 창은 preload 를 물려받습니다 — 남의 사이트가 이 앱의 다리 위에서
