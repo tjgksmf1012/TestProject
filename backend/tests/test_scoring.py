@@ -539,3 +539,81 @@ def test_team_wide_reasons_do_not_point_at_a_person():
         "팀 전체를 잰 사유가 사람을 가리킵니다 — 이 문장은 사람 이름 밑에 "
         f"그려지므로 카드 주인을 가리킨다고 읽힙니다: {guilty}"
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# `ranked_ids` — 「내부 검증 전용」이라고 적어 두고 **아무도 안 쓰던 것**
+# ══════════════════════════════════════════════════════════════
+#
+# `TeamScoreResult.ranked_ids()` 의 docstring 은 이렇습니다:
+#
+#     ⚠️ 내부 검증·테스트 전용.
+#     **UI에 순위를 노출하지 말 것** (docs/05 §5, docs/07 E2).
+#
+# 그런데 세어 보니 **부르는 곳이 0곳**이었습니다 — 검사도 포함해서.
+# 즉 「테스트 전용」이라는 말 자체가 참이 아니었고, 불변식 ①(순위·리더보드
+# 금지)을 지키는 것은 **주석 한 줄**뿐이었습니다. 주석은 아무것도 안
+# 막습니다(결함 337·341·351 이 같은 부류).
+#
+# ⚠️ **지우지 않았습니다.** `docs/05` 는 검증 방법 셋 중 하나로
+# 「팀 내부 순위와의 상관(Spearman)」을 적어 뒀고, 그건 실제 팀이 있어야
+# 하는 사용자 연구입니다 — 그때 순위가 필요합니다. 대신 **그 함수에
+# 제 일을 시킵니다**: 아래 검사가 그것으로 「API 순서가 순위가 아니다」를
+# 증명합니다.
+
+
+def test_the_ranking_helper_is_only_ever_used_to_prove_we_do_not_rank():
+    """⭐ 순위 자는 **순위가 아님을 증명하는 데**만 씁니다 (불변식 ①).
+
+    ⚠️ **갈라지는 데이터로 잽니다.** 점수 순·이름 순·번호 순이 전부 같은
+    팀으로 재면 어느 순서로 나가도 통과합니다 — 이 저장소가 정렬 검사에서
+    이미 한 번 당한 함정입니다.
+    """
+    from teamflow.contribution.scoring import MemberScore, TeamScoreResult
+
+    # 번호 순 1·2·3 / 점수 순 2·1·3 — **셋이 다 다릅니다.**
+    def scored(user_id: int, share: float) -> MemberScore:
+        return MemberScore(
+            user_id=user_id,
+            role="developer",
+            share=share,
+            range_low=share,
+            range_high=share,
+            confidence=1.0,
+            categories=[],
+        )
+
+    members = {1: scored(1, 0.30), 2: scored(2, 0.50), 3: scored(3, 0.20)}
+    result = TeamScoreResult(members=members, algo_version="test")
+
+    ranked = result.ranked_ids()
+    assert ranked == [2, 1, 3], f"순위 자가 점수 순이 아닙니다: {ranked}"
+
+    # ⭐ **응답이 그 순서면 안 됩니다.** 서버는 번호 순으로 주고, 화면이
+    #    이름 순으로 다시 세웁니다(`orderForDisplay`).
+    as_sent = sorted(members)
+    assert as_sent != ranked, (
+        "서버가 내려보내는 순서가 점수 순과 같습니다 — 화면이 다시 세우지 "
+        "않으면 그대로 리더보드입니다"
+    )
+
+
+def test_no_production_code_calls_the_ranking_helper():
+    """⛔ 순위 자를 **제품 코드가 부르지 않는다** (`docs/07` E2).
+
+    주석으로만 막혀 있던 것을 검사로 옮깁니다. 부르는 곳이 생기면 그게
+    화면으로 새는 첫걸음입니다.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "teamflow"
+    callers = [
+        str(path.relative_to(root))
+        for path in root.rglob("*.py")
+        if re.search(r"\.ranked_ids\(", path.read_text(encoding="utf-8"))
+    ]
+    assert callers == [], (
+        f"제품 코드가 순위 자를 부릅니다: {callers} — 같은 데이터라도 순위로 "
+        "보이는 순간 서비스의 성격이 바뀝니다 (docs/07 E2)"
+    )

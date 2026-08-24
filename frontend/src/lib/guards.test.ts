@@ -8649,3 +8649,107 @@ describe('발화의 `0` 은 시각이고, 근거 구간의 `0` 은 「모른다�
     }
   });
 });
+
+// ══════════════════════════════════════════════════════════════
+// 기여도 줄을 **점수 순으로 그리지 않는다** — 뿌리마다 (가드)
+// ══════════════════════════════════════════════════════════════
+//
+// 불변식 ①(순위·리더보드 금지)은 이 저장소가 **두 번 어긴** 규칙입니다.
+// 판단은 `@lib` 에 있고(`orderForDisplay`) 그 자체는 검사가 붙어 있으며
+// (`view.test.ts` — 점수 순으로 넘겨도 이름 순), 서버 쪽 보고서도
+// `test_reports.py` 가 잽니다.
+//
+// ⛔ **안 재던 것은 「화면이 그 함수를 거치는가」였습니다.**
+//
+// 그리고 이건 조용히 깨집니다 — `GET /api/projects/{id}/contributions` 는
+// `sorted(events_by_user)`, 즉 **번호 순**으로 내려옵니다. 시연 데이터에서
+// 그 번호 순이 하필
+//
+//     김민수 42.19 · 이하늘 32.95 · 박지원 24.85
+//
+// **내림차순**입니다. 화면이 `orderForDisplay` 를 빼먹으면 완벽한
+// 리더보드가 그려지는데 **검사는 전부 초록**입니다.
+//
+// ⚠️ 씨앗이 「이름 순 ≠ 번호 순」이라 다행히 갈라집니다
+// (이름 순 김민수·박지원·이하늘 = 번호 1·3·2). 갈라지는 데이터가 없었으면
+// 이 가드도 아무것도 못 잽니다.
+
+describe('기여도 줄은 점수 순이 아니다 — 뿌리마다 (불변식 ①)', () => {
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'contributions.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Contributions.tsx')],
+  ];
+
+  for (const [rootName, path] of ROOTS) {
+    it(`⭐ ${rootName} — 그리는 목록이 **이름 순으로 다시 세운 것**이다`, () => {
+      /* ⚠️ **「파일에 그 낱말이 있는가」로 재면 안 됩니다.** 레거시는 그
+         함수를 두 곳에서 부르는데(초안 하나, 그리는 목록 하나), 그리는
+         쪽만 빼도 낱말은 그대로 남습니다 — 심어 보고 알았습니다.
+         재야 할 것은 **JSX 에서 그리는 그 목록이** 거기서 나왔는가입니다.
+
+         ⚠️ 자를 두 번 고쳤습니다:
+         ① `= … orderForDisplay(` 사이를 `[\s\S]{0,120}` 로 뒀더니 `;` 를
+            넘어가 **다음 문장의 호출을 앞 변수 것으로** 붙였습니다
+         ② `.map(` 을 전부 셌더니 값 표를 만드는 `new Map(…​.map(…))` 까지
+            「그린다」로 잡혔습니다 — JSX 안(`{x.map(`)만 셉니다 */
+      const code = codeOf(readFileSync(path, 'utf8'));
+      const ordered = new Set(
+        [...code.matchAll(/(?:const|let)\s+(\w+)[^=;]*=\s*[^;}]{0,160}?orderForDisplay\(/g)].map(
+          (hit) => hit[1],
+        ),
+      );
+      ok(ordered.size > 0, `${rootName}: orderForDisplay 로 만든 목록이 없습니다`);
+
+      /* 사람 줄을 그리는 자리 — 이 저장소가 기여도 한 줄에 쓰는 이름은
+         `ms`(레거시) · `member`(SPA) 입니다. 이름을 바꾸면 아래 「찾았는가」
+         가 터지므로 **조용히 통과하지는 않습니다.** */
+      const rows = [...code.matchAll(/\{\s*(\w+(?:\.\w+)*)\.map\(\s*\(?\s*(\w+)/g)]
+        .filter((hit) => hit[2] === 'ms' || hit[2] === 'member')
+        .map((hit) => hit[1]);
+      ok(
+        rows.length > 0,
+        `${rootName}: 사람 줄을 그리는 자리를 못 찾았습니다 — 이 가드가 낡았습니다`,
+      );
+
+      const raw = [...new Set(rows)].filter((name) => !ordered.has(name));
+      deepStrictEqual(
+        raw,
+        [],
+        `${rootName} 가 서버가 준 순서를 그대로 그립니다(${raw.join(', ')}) — 그 순서는 ` +
+          '번호 순이고, 시연 데이터에서는 하필 점수 내림차순입니다(= 리더보드)',
+      );
+    });
+
+    it(`⛔ ${rootName} — 사람 목록을 **값으로** 정렬하지 않는다`, () => {
+      /* ⚠️ 낱말이 아니라 요구를 잽니다 — `sort` 자체는 범주·근거를 줄
+         세우는 데도 씁니다. 막을 것은 **사람의 값**으로 세우는 것입니다. */
+      const code = codeOf(readFileSync(path, 'utf8'));
+      const byValue = code.match(
+        /\.sort\(\s*\([^)]*\)\s*=>\s*[^)]*\b(share|score|ratio|range_high|range_low|confidence)\b/g,
+      );
+      deepStrictEqual(
+        byValue ?? [],
+        [],
+        `${rootName}: 사람을 값으로 줄 세웁니다 — 정렬이 곧 순위입니다`,
+      );
+    });
+  }
+
+  it('⚠️ **갈라지는 데이터로 재고 있는가** — 이름 순과 번호 순이 다른가', () => {
+    /* 씨앗이 `김민수(1)·이하늘(2)·박지원(3)` 이면 두 기준이 같아져
+       번호 순으로 나가도 통과합니다. 이 저장소가 정렬 검사에서 한 번
+       당한 함정입니다 — 그래서 그 전제를 여기서 못 박습니다. */
+    const seed = readFileSync(join(ROOT, '..', 'scripts', 'seed_demo.py'), 'utf8');
+    for (const name of ['김민수', '이하늘', '박지원']) {
+      ok(seed.includes(name), `씨앗에 ${name} 이 없습니다 — 이 가드의 전제가 깨졌습니다`);
+    }
+    // 이름 순: 김 < 박 < 이 → 번호로는 1 · 3 · 2 (번호 순 1 · 2 · 3 과 다름)
+    const byName = ['김민수', '박지원', '이하늘'];
+    const byId = ['김민수', '이하늘', '박지원'];
+    strictEqual(
+      byName.join() === byId.join(),
+      false,
+      '이름 순과 번호 순이 같은 씨앗입니다 — 정렬 검사가 아무것도 안 잽니다',
+    );
+  });
+});
