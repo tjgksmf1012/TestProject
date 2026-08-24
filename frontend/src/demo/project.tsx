@@ -20,6 +20,11 @@ import {
   repoProblem,
   titleProblem,
 } from '../lib/project/setup.ts';
+import {
+  cannotTellApartNote,
+  labelInList,
+  tellsApartInList,
+} from '../lib/people/labels.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
 import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import {
@@ -730,7 +735,10 @@ function ProjectSettings() {
                     {worthShowing(person.presence) && (
                       <span className={`pdot ${presenceDot(person.presence)}`} aria-hidden="true" />
                     )}
-                    {person.name ?? `사용자 #${person.user_id}`}
+                    {/* ⭐ **같은 이름이 둘이면 손잡이를 붙입니다** (결함 345).
+                        바로 옆이 「내보내기」 — 되돌릴 수 없는 단추입니다.
+                        판단은 `@lib/people/labels.ts`. */}
+                    {labelInList(person, team)}
                     {worthShowing(person.presence) && (
                       <span className="pstat">{presenceLabel(person.presence)}</span>
                     )}
@@ -741,7 +749,7 @@ function ProjectSettings() {
                       className="mrole"
                       value={person.project_role ?? 'member'}
                       onChange={(e) => void changeRole(person.user_id, e.target.value)}
-                      aria-label={`${person.name ?? ''} 권한`}
+                      aria-label={`${labelInList(person, team)} 권한`}
                     >
                       {/* ⚠️ 지금 값이 목록에 없을 수 있습니다(내가 줄 수 없는
                           등급). 빼면 select 가 엉뚱한 값을 보여 줍니다. */}
@@ -763,14 +771,17 @@ function ProjectSettings() {
                     <button
                       className="mout"
                       onClick={() =>
-                        void removeMember(
-                          person.user_id,
-                          person.name ?? `사용자 #${person.user_id}`,
-                        )
+                        void removeMember(person.user_id, labelInList(person, team))
                       }
                     >
                       내보내기
                     </button>
+                  )}
+                  {/* ⚠️ 이름표를 붙여도 두 줄이 똑같은 경우 (둘 다 GitHub
+                      미연결). 「구분됩니다」인 척하면 사람이 되돌릴 수 없는
+                      단추를 찍습니다 — 막지는 않고 사실만 적습니다. */}
+                  {!tellsApartInList(person, team) && (
+                    <span className="mbio">{cannotTellApartNote()}</span>
                   )}
                   {/* 자기소개 (`USER-004`) — 적을 수 있는데 아무도 못 보면
                       "할 일을 알려 주고 자리를 안 줌" 입니다. 여기가 그 자리. */}

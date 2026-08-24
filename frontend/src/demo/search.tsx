@@ -31,6 +31,7 @@ import {
   hrefFor,
   type Hit,
 } from '../lib/search/view.ts';
+import { labelInList } from '../lib/people/labels.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
 import { tryGet, unreachableText } from '../lib/http/send.ts';
 import { STATUS_LABEL } from '../lib/kanban/board.ts';
@@ -55,6 +56,9 @@ function goToLogin(): void {
 interface Member {
   user_id: number;
   name: string;
+  /** ⭐ 같은 이름이 둘일 때 가르는 손잡이 (결함 345). 서버가 프로젝트
+      안에서 유일하게 지킵니다. */
+  github_login?: string | null;
 }
 
 function App() {
@@ -160,7 +164,8 @@ function App() {
             <option value="">누구든</option>
             {members.map((member) => (
               <option key={member.user_id} value={String(member.user_id)}>
-                {member.name}
+                {/* 결함 345 — 같은 이름 둘이면 목록이 같은 글자 두 줄입니다. */}
+                {labelInList(member, members)}
               </option>
             ))}
           </select>

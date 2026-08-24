@@ -708,7 +708,11 @@ describe('⛔ 새 팀의 첫 화면이 「서로를 비교하지 마세요」라
 });
 
 describe('떠난 사람의 기록 (결함 222)', () => {
-  const GONE: Person[] = [{ user_id: 9, name: '박지원', role_shares: { developer: 100 } }];
+  // ⚠️ **`PEOPLE` 에 없는 이름**을 씁니다. 예전에는 `박지원` 이었는데,
+  //    그 이름은 지금 구성원(user_id 3)에도 있어서 결함 345 의 동명이인
+  //    갈래로 떨어졌습니다 — 이 검사가 재려는 것은 「나간 사람도 이름으로
+  //    부르는가」이지 동명이인이 아닙니다. 겹치는 경우는 아래에 따로 둡니다.
+  const GONE: Person[] = [{ user_id: 9, name: '정우성', role_shares: { developer: 100 } }];
 
   it('⭐ 나간 사람이 목록에 있는 **이유를 말한다**', () => {
     // 그 사람의 기록은 계산에 그대로 들어갑니다 — 빼면 남은 사람들의 몫이
@@ -717,7 +721,7 @@ describe('떠난 사람의 기록 (결함 222)', () => {
     const notes = teamWarnings(team({ former_members: GONE }), PEOPLE);
     const line = notes.find((n) => n.includes('떠났지만'));
     strictEqual(line !== undefined, true, '아무 말도 안 합니다');
-    strictEqual(/박지원/.test(line as string), true, '이름을 안 부릅니다');
+    strictEqual(/정우성/.test(line as string), true, '이름을 안 부릅니다');
     strictEqual(/실제보다 커집니다/.test(line as string), true);
   });
 
@@ -729,7 +733,15 @@ describe('떠난 사람의 기록 (결함 222)', () => {
     // `people` 은 지금 구성원이라 나간 사람이 없습니다. 서버가 이름을
     // 같이 보내므로 두 명단을 합쳐 찾습니다.
     strictEqual(nameOf(9, PEOPLE), '사용자 #9');
-    strictEqual(nameOf(9, PEOPLE, GONE), '박지원');
+    strictEqual(nameOf(9, PEOPLE, GONE), '정우성');
+  });
+
+  it('⭐ 나간 사람이 지금 구성원과 **이름이 같으면** 갈라 부른다 (결함 345)', () => {
+    // 화면에는 둘이 **같이** 그려집니다. 지금 구성원끼리만 안 겹친다고
+    // 안심하면, 나간 박지원과 남아 있는 박지원이 같은 줄로 읽힙니다.
+    const 겹침: Person[] = [{ user_id: 9, name: '박지원', github_login: 'jiwon-old' }];
+    strictEqual(nameOf(3, PEOPLE, 겹침), '박지원 · GitHub 미연결');
+    strictEqual(nameOf(9, PEOPLE, 겹침), '박지원 · @jiwon-old');
   });
 
   it('아무 데도 없는 번호는 숨기지 않는다 — 번호라도 보여야 제보할 수 있다', () => {

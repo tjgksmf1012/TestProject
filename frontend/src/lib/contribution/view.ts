@@ -73,11 +73,19 @@ export interface TeamScore {
 }
 
 /** 이름을 붙이려면 팀원 명단이 필요하다. 서버 점수에는 user_id 만 있다. */
+import { labelInList } from '../people/labels.ts';
+
 export interface Person {
   user_id: number;
   name: string;
   /** 역할 비중. 겸직이면 둘 이상이 들어 있다. */
   role_shares?: Record<string, number>;
+  /**
+   * ⭐ 같은 이름이 둘일 때 가르는 손잡이 (결함 345). 프로젝트 안에서
+   * **유일**하도록 서버가 지킵니다 — 설정 화면이 그 이유를 적어 뒀습니다
+   * (「남의 아이디를 적으면 그 사람의 PR이 내 기여가 됩니다」).
+   */
+  github_login?: string | null;
 }
 
 /**
@@ -144,9 +152,16 @@ export function nameOf(
   people: readonly Person[],
   former: readonly Person[] = [],
 ): string {
-  const found =
-    people.find((p) => p.user_id === userId) ?? former.find((p) => p.user_id === userId);
-  return found?.name ?? `사용자 #${userId}`;
+  // ⭐ **같은 이름이 둘이면 손잡이를 붙입니다** (결함 345). 기여도 화면은
+  //    이름 옆에 값을 붙이고 그 옆에 **확정 칸**을 둡니다 — 이름이 같으면
+  //    `aria-label` 까지 「이하늘 확정값」으로 같아져서, 팀이 합의해
+  //    확정한다는 그 입력이 사람을 못 가릅니다(불변식 ④).
+  //
+  // ⚠️ 나간 사람까지 **한 목록으로** 보고 판정합니다 — 화면에는 둘이
+  //    같이 그려지므로, 지금 구성원끼리만 안 겹친다고 안심하면 안 됩니다.
+  const everyone = [...people, ...former];
+  const found = everyone.find((p) => p.user_id === userId);
+  return found === undefined ? `사용자 #${userId}` : labelInList(found, everyone);
 }
 
 /**

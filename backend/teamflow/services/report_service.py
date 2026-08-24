@@ -21,6 +21,7 @@ from teamflow import clock
 from teamflow.contribution import events, profiles
 from teamflow.db import models as m
 from teamflow.db.vocab import REPORT_SCOPE, ReportScope, ReportType
+from teamflow.people import labels as people_labels
 from teamflow.reports import minutes as minutes_builder
 from teamflow.reports import period as period_builder
 from teamflow.reports import scope_key
@@ -171,12 +172,30 @@ def _people(session: Session, project_id: int) -> list[period_builder.Person]:
     #    실어서 「기획 60% · 개발 40%」 인 사람이 문서에 「기획」 하나로
     #    적혔고, 그나마도 `developer` 같은 **영어 식별자 그대로**였습니다.
     rows = session.execute(
-        select(m.User.id, m.User.name, m.Member.role_shares).join(
-            m.Member, m.Member.user_id == m.User.id
-        ).where(m.Member.project_id == project_id)
+        select(
+            m.User.id, m.User.name, m.Member.role_shares, m.Member.github_login
+        ).join(m.Member, m.Member.user_id == m.User.id).where(
+            m.Member.project_id == project_id
+        )
     ).all()
-    names = {user_id: name for user_id, name, _ in rows}
-    shares = {user_id: share for user_id, _, share in rows}
+    shares = {user_id: share for user_id, _, share, _ in rows}
+
+    # ⚠️ **같은 이름이 둘이면 갈라 부릅니다** (결함 345). 이 문서는 사람
+    #    이름 옆에 기여 구간을 붙이므로, 이름이 같으면 두 항목이 누구
+    #    것인지 알 수 없습니다 — 팀 **밖으로 나가는** 문서입니다.
+    #
+    # ⚠️ 화면이 아니라 **여기서** 붙입니다. `reports.body` 는 만든 순간의
+    #    글자를 저장하고 화면은 그것을 그대로 그립니다(「글자로 복사」도
+    #    같은 글자입니다). 화면에서 붙이면 저장된 기록과 사람이 읽는 글이
+    #    갈라집니다. 두 벌인 것은 `people/label_cases.json` 짝 검사가
+    #    지킵니다.
+    refs = [
+        people_labels.PersonRef(user_id=user_id, name=name, github_login=login)
+        for user_id, name, _, login in rows
+    ]
+    names = {
+        ref.user_id: people_labels.label_in_list(ref, refs) for ref in refs
+    }
 
     finals = {
         row.user_id: row

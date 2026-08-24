@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { labelInList } from '../lib/people/labels.ts';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -288,7 +289,12 @@ function Contributions() {
       return;
     }
     const body = (await response.json()) as { finals: FinalRow[] };
-    setFinalState(describeFinals(body.finals, new Map(people.map((p) => [p.user_id, p.name]))));
+    setFinalState(describeFinals(
+        body.finals,
+        // 결함 345 — 같은 이름 둘이면 「이하늘이 33% 로 확정」이 누구 말인지
+        // 알 수 없습니다. 이름표는 `@lib` 한 곳에서 붙입니다.
+        new Map(people.map((p) => [p.user_id, labelInList(p, people)])),
+      ));
     // ⚠️ **판단은 `adjustmentsToRestore` 가 합니다.** 되돌릴 것이 없으면
     // 비웁니다 — 남겨 두면 다시 그린 표에 지난 조정이 유령처럼 남습니다.
     const saved = adjustmentsToRestore(body.finals);

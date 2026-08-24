@@ -11,6 +11,11 @@ import {
 } from '../api/hooks.ts';
 import type { Member } from '../api/types.ts';
 import { ROLE_OPTIONS, problemWith, roleSummary, sumOf, toPayload } from '@lib/contribution/roles.ts';
+import {
+  cannotTellApartNote,
+  labelInList,
+  tellsApartInList,
+} from '@lib/people/labels.ts';
 import { describeRoles } from '@lib/contribution/roles.ts';
 import { plainText } from '@lib/ui/plain.ts';
 import { describeHealth, describeHealthFailure } from '@lib/github/health.ts';
@@ -376,11 +381,18 @@ function MembersSection({
             )}
             <div>
               <div className="member-row__name">
-                {member.name}
+                {/* ⭐ 같은 이름이 둘이면 손잡이를 붙입니다 (결함 345) —
+                    이 줄 오른쪽 끝이 「내보내기」입니다. */}
+                {labelInList(member, ordered)}
                 {/* 등급은 **글자**입니다. 색이나 길이로 줄 세우지 않습니다. */}
                 <span className="member-row__rank">{roleLabel(member.project_role)}</span>
               </div>
               <div className="member-row__roles">{describeRoles(member.role_shares)}</div>
+              {/* 이름표를 붙여도 두 줄이 똑같은 경우 (둘 다 GitHub 미연결).
+                  막지는 않고 사실만 적습니다 — 시스템은 판정하지 않습니다. */}
+              {!tellsApartInList(member, ordered) && (
+                <div className="t12 muted">{cannotTellApartNote()}</div>
+              )}
               {member.bio !== null && member.bio !== '' && <div className="t12 muted">{member.bio}</div>}
             </div>
             {worthShowing(member.presence) && (
@@ -388,7 +400,7 @@ function MembersSection({
             )}
             {mayChange && canGive.length > 0 && (
               <label className="member-row__act">
-                <span className="vh">{member.name} 등급</span>
+                <span className="vh">{labelInList(member, ordered)} 등급</span>
                 <select
                   className="input input--sm"
                   value={member.project_role}
@@ -420,7 +432,7 @@ function MembersSection({
                 className="btn btn--danger-quiet btn--sm"
                 disabled={removeMember.isPending}
                 onClick={() => {
-                  if (window.confirm(`${member.name} 님을 이 프로젝트에서 내보냅니다. 그 사람이 한 일(업무·발화·기여 기록)은 그대로 남습니다.`)) {
+                  if (window.confirm(`${labelInList(member, ordered)} 님을 이 프로젝트에서 내보냅니다. 그 사람이 한 일(업무·발화·기여 기록)은 그대로 남습니다.`)) {
                     removeMember.mutate(member.user_id);
                   }
                 }}

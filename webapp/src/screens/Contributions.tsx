@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { labelInList } from '@lib/people/labels.ts';
 import { teamDateTime } from '@lib/time/calendar.ts';
 import { useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
@@ -372,7 +373,11 @@ export default function Contributions() {
                 lines={[
                   team.notice,
                   ...(finals.data && finals.data.finals.length > 0
-                    ? [describeFinals(finals.data.finals, new Map(people.map((p) => [p.user_id, p.name])))]
+                    ? [describeFinals(
+                        finals.data.finals,
+                        // 결함 345 — 이름표는 `@lib` 한 곳에서.
+                        new Map(people.map((p) => [p.user_id, labelInList(p, people)])),
+                      )]
                     : []),
                 ]}
               />

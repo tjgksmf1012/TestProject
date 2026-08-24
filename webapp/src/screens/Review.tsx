@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { describeMissingSummary, describeReviewDone, reviewPhase } from '@lib/review/phase.ts';
+import { labelInList } from '@lib/people/labels.ts';
 import { Disclosure } from '../components/Disclosure.tsx';
 import { EvidenceChip } from '../components/EvidenceChip.tsx';
 import { Conditions, describeConditions, type Condition } from '../components/Conditions.tsx';
@@ -674,7 +675,11 @@ export default function Review() {
                             assigneeOverride: next === null ? null : Number(next),
                           })
                         }
-                        options={members.map((m) => ({ value: String(m.user_id), label: m.name }))}
+                        /* 결함 345 — 같은 이름 둘이면 목록이 같은 글자 두 줄입니다. */
+                        options={members.map((m) => ({
+                          value: String(m.user_id),
+                          label: labelInList(m, members),
+                        }))}
                         emptyLabel="미지정"
                         ariaLabel={`${candidate.title} — 담당자`}
                       />

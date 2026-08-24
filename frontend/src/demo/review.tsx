@@ -42,6 +42,7 @@ import {
   type ReviewContext,
 } from '../lib/review/candidates.ts';
 import { detailText } from '../lib/http/detail.ts';
+import { labelInList } from '../lib/people/labels.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
@@ -86,6 +87,8 @@ interface Member {
   user_id: number;
   name: string;
   role_shares: Record<string, number>;
+  /** ⭐ 같은 이름을 가르는 손잡이 (결함 345). */
+  github_login?: string | null;
 }
 
 interface MeetingInfo {
@@ -274,7 +277,8 @@ function CandidateCard({
             )}
             {members.map((m) => (
               <option key={m.user_id} value={m.user_id}>
-                {m.name}
+                {/* 결함 345 — 같은 이름 둘이면 목록이 같은 글자 두 줄입니다. */}
+                {labelInList(m, members)}
               </option>
             ))}
           </select>

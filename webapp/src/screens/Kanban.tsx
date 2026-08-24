@@ -23,6 +23,7 @@ import {
   unknownOriginNote,
 } from '@lib/kanban/board.ts';
 import { canDropOn, dragPayload, draggedTaskId, TASK_DRAG_TYPE } from '@lib/kanban/dnd.ts';
+import { labelInList } from '@lib/people/labels.ts';
 import {
   describePriority,
   priorityChoices,
@@ -136,7 +137,8 @@ function Card({
                   onSelect={() => onToggleAssignee(task, person.user_id)}
                 >
                   {task.assignee_ids.includes(person.user_id) ? '✓ ' : ''}
-                  {person.name}
+                  {/* 결함 345 — 여기서 잘못 고르면 남의 기여로 셉니다. */}
+                  {labelInList(person, people)}
                 </Menu.Item>
               ))}
               <div className="menu__sep" />

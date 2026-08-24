@@ -156,8 +156,10 @@ function BlockView({ block }: { block: Block }) {
     case 'people':
       return (
         <div className="people">
-          {block.people.map((person) => (
-            <PersonRow key={`${person.name}/${person.role}`} person={person} />
+          {block.people.map((person, index) => (
+            /* ⚠️ 이름+역할을 열쇠로 쓰면 **동명이인**에서 겹칩니다 (결함 345).
+               보고서의 `Person` 에는 번호가 없으므로 자리를 같이 씁니다. */
+            <PersonRow key={`${index}/${person.name}/${person.role}`} person={person} />
           ))}
         </div>
       );

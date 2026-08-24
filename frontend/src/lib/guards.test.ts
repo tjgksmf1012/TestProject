@@ -4738,6 +4738,103 @@ describe('칸반 빈 상자가 **없는 길**을 가리키지 않는다 (결함 
   });
 });
 
+describe('사람 목록은 이름표를 @lib 에서 받는다 (결함 345)', () => {
+  /*
+   * 이 제품은 사람을 **이름으로** 부릅니다(결함 293·297). 그런데 이름은
+   * 유일하지 않습니다 — 팀에 같은 이름이 둘이면 설정 화면에 되돌릴 수
+   * 없는 「내보내기」 단추가 **글자까지 같은 줄** 둘에 붙고, 기여도 확정
+   * 칸의 `aria-label` 도 「이하늘 확정값」으로 같아집니다.
+   *
+   * 재현: 팀원 둘의 이름을 같게 만들고 열었습니다.
+   *
+   *     설정   이하늘 | 팀원 ▾ | 내보내기
+   *            이하늘 | 팀원 ▾ | 내보내기
+   *     찾기   담당자: 누구든 / 김민수 / 이하늘 / 이하늘
+   *
+   * 손잡이는 이미 있습니다 — `github_login` 은 프로젝트 안에서 **유일**
+   * 하도록 서버가 지키고(설정 화면이 그 이유를 적어 뒀습니다), 팀원
+   * 목록에 실려 옵니다. 화면이 이미 쥐고 있는 것입니다(결함 294).
+   *
+   * ⚠️ **뿌리마다 따로 셉니다.** 「한쪽만 고쳐진다」가 이 저장소의 대표
+   * 재발입니다(231·306·320·321·333·334·335·337).
+   */
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', DEMO],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens')],
+  ];
+
+  /**
+   * 예외 — **왜 예외인가**를 같이 적습니다. 예외가 낡는 것도 재야 하므로
+   * (결함 306), 아래에 그 근거를 확인하는 검사를 둡니다.
+   */
+  const EXEMPT: Record<string, string> = {
+    'reports.tsx':
+      '보고서의 `Person` 은 서버가 만든 **기록**입니다. `reports.body` 에 저장된 ' +
+      '글자를 그대로 그리므로 이름표는 서버가 붙입니다 — 화면에서 붙이면 저장된 ' +
+      '기록과 사람이 읽는 글이 갈라집니다. 파이썬 쪽은 `people/labels.py`.',
+  };
+
+  /** 목록을 돌며 사람 이름을 **그대로** 그리는 자리. */
+  const BARE = /\{\s*(?:member|person|people\[\w+\]|m)\.name\s*\}|label:\s*\w+\.name\b/;
+
+  for (const [rootName, dir] of ROOTS) {
+    it(`⭐ ${rootName} — 사람 이름을 목록에서 **맨몸으로** 그리지 않는다`, () => {
+      const guilty: string[] = [];
+      for (const file of readdirSync(dir).filter((f) => f.endsWith('.tsx'))) {
+        if (EXEMPT[file] !== undefined) continue;
+        const code = codeOf(readFileSync(join(dir, file), 'utf8'));
+        if (BARE.test(code)) guilty.push(file);
+      }
+      deepStrictEqual(
+        guilty,
+        [],
+        `${rootName}: 목록의 사람 이름을 그대로 그립니다 — 같은 이름이 둘이면 ` +
+          '두 줄이 똑같아집니다. `@lib/people/labels.ts` 의 `labelInList` 를 쓰세요',
+      );
+    });
+
+    it(`⭐ ${rootName} — 이름표를 @lib 에서 받는 파일이 **있다**`, () => {
+      /* 위 검사는 「없는가」만 봅니다. 화면이 이름을 아예 안 그리게 되면
+         그것도 통과하므로, 부르는 곳을 **세어서** 같이 봅니다(결함 306). */
+      let callers = 0;
+      for (const file of readdirSync(dir).filter((f) => f.endsWith('.tsx'))) {
+        if (/labelInList\(/.test(readFileSync(join(dir, file), 'utf8'))) callers += 1;
+      }
+      ok(callers > 0, `${rootName} 에서 labelInList 를 부르는 화면이 0개입니다`);
+    });
+  }
+
+  it('⭐ 예외가 낡지 않았는가 — 서버가 정말 이름표를 붙이는가', () => {
+    /* 「예외입니다」라고 적어 두고 서버가 안 붙이면, 그 화면만 조용히
+       옛날로 돌아갑니다 (결함 306 이 적어 둔 그것). 파이썬 쪽이 실제로
+       `label_in_list` 를 거치는지 셉니다. */
+    const service = readFileSync(
+      join(ROOT, '..', 'backend', 'teamflow', 'services', 'report_service.py'),
+      'utf8',
+    );
+    ok(
+      /label_in_list\(/.test(service),
+      'reports.tsx 를 예외로 뒀는데 서버(report_service.py)가 이름표를 안 붙입니다',
+    );
+    ok(
+      Object.keys(EXEMPT).length === 1,
+      '예외가 늘었습니다 — 하나씩 근거를 확인하고 이 검사도 넓히세요',
+    );
+  });
+
+  it('⭐ 못 가르는 줄에는 **그 사실을 적는다** — 두 뿌리 다', () => {
+    /* 둘 다 GitHub 미연결이면 이름표를 붙여도 두 줄이 똑같습니다.
+       「구분됩니다」인 척하면 사람이 되돌릴 수 없는 단추를 찍습니다. */
+    for (const [rootName, dir] of ROOTS) {
+      const files = readdirSync(dir).filter((f) => f.endsWith('.tsx'));
+      const said = files.some((f) =>
+        /cannotTellApartNote\(\)/.test(readFileSync(join(dir, f), 'utf8')),
+      );
+      ok(said, `${rootName} 에서 못 가른다는 사실을 말하는 화면이 0개입니다`);
+    }
+  });
+});
+
 describe('팀 전체를 잰 것은 사람 이름 밑에서도 범위를 말한다 (결함 344)', () => {
   const reports = readFileSync(join(DEMO, 'reports.tsx'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ')

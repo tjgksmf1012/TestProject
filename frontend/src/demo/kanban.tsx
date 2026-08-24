@@ -41,6 +41,7 @@ import {
   emptyBoard,
   unknownOriginNote,
 } from '../lib/kanban/board.ts';
+import { labelInList } from '../lib/people/labels.ts';
 import { canDropOn, draggedTaskId, dragPayload, TASK_DRAG_TYPE } from '../lib/kanban/dnd.ts';
 import { assigneeText, splitNote, toggled } from '../lib/kanban/assignees.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
@@ -62,6 +63,9 @@ import { meetingLabel } from '../lib/ui/naming.ts';
 interface Member {
   user_id: number;
   name: string;
+  /** ⭐ 같은 이름이 둘일 때 가르는 손잡이 (결함 345). 서버가 프로젝트
+      안에서 유일하게 지킵니다. */
+  github_login?: string | null;
 }
 
 const params = new URLSearchParams(location.search);
@@ -226,7 +230,9 @@ function AssigneePicker({
                  여기서 배열을 주무르면 같은 판단이 두 벌이 됩니다. */
               onChange={() => onAssign(toggled(task.assignee_ids, member.user_id))}
             />
-            {member.name}
+            {/* 결함 345 — 같은 이름이 둘이면 손잡이를 붙입니다. 여기서
+                잘못 고르면 남의 기여로 셉니다. */}
+            {labelInList(member, members)}
           </label>
         ))}
       </div>
