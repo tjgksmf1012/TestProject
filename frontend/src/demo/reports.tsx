@@ -32,6 +32,8 @@ import {
   describeReportType,
   describeWhen,
   gapsOf,
+  personGapsHeading,
+  teamReasonsHeading,
   subjectOf,
   toPlainText,
   tooNewToRender,
@@ -86,18 +88,29 @@ function PersonRow({ person }: { person: Person }) {
       </div>
       <div className="pwhy">
         {person.reasons.length > 0 && (
-          <ul className="notes">
-            {person.reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
+          <>
+            {/* ⚠️ **이 목록은 사람마다 똑같습니다** (결함 344). 서버는
+                `compute_confidence` 를 팀당 한 번 부르고, 보고서는 그것을
+                사람 이름 밑에 그립니다. 머리말이 없으면 네 줄이 그 사람에
+                대한 지적으로 읽힙니다 — 커버리지 1.0 인 사람의 항목이
+                「녹음이 끊긴 트랙이 있습니다」를 이고 있었습니다. */}
+            <p className="notes-head">{teamReasonsHeading()}</p>
+            <ul className="notes">
+              {person.reasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          </>
         )}
         {holes.length > 0 && (
-          <ul className="notes notes-gap">
-            {holes.map((hole) => (
-              <li key={hole}>{hole}</li>
-            ))}
-          </ul>
+          <>
+            <p className="notes-head">{personGapsHeading()}</p>
+            <ul className="notes notes-gap">
+              {holes.map((hole) => (
+                <li key={hole}>{hole}</li>
+              ))}
+            </ul>
+          </>
         )}
         {final !== null && <p className="final">{final}</p>}
       </div>

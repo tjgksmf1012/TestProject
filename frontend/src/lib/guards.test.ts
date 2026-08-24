@@ -4738,6 +4738,70 @@ describe('칸반 빈 상자가 **없는 길**을 가리키지 않는다 (결함 
   });
 });
 
+describe('팀 전체를 잰 것은 사람 이름 밑에서도 범위를 말한다 (결함 344)', () => {
+  const reports = readFileSync(join(DEMO, 'reports.tsx'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+  const view = codeOf(readFileSync(join(LIB, 'reports', 'view.ts'), 'utf8'));
+
+  /*
+   * 서버는 `compute_confidence` 를 **팀당 한 번** 부릅니다 — 세 사람의
+   * `confidence` 와 `confidence_reasons` 가 글자 하나까지 같습니다. 그런데
+   * 보고서는 그것을 사람 이름 밑에 그립니다.
+   *
+   * 재현: 커버리지 1.0 · 회의 근거 6건인 김민수의 항목이 「신뢰도 47%
+   * (낮음)」과 「녹음이 끊긴 트랙이 있습니다 — 해당 팀원의 발언량은 측정할
+   * 수 없습니다」를 이고 있었습니다. 끊긴 트랙의 주인은 다른 사람입니다.
+   *
+   * 두 화면은 이미 범위를 적고 있었습니다(레거시 「팀 신뢰도」 · SPA
+   * 「팀 전체」). **보고서만** 안 적었고, 그게 팀 밖으로 나가는 문서입니다.
+   */
+  it('⭐ 신뢰도 한 줄이 **누구의 것인지** 말한다', () => {
+    const body = /export function describeConfidence[\s\S]*?\n}/.exec(view)?.[0] ?? '';
+    ok(body !== '', 'reports/view.ts 에 describeConfidence 가 없습니다 — 이 검사도 고치세요');
+    ok(
+      /['\`][^'\`]*팀[^'\`]*신뢰도/.test(body),
+      '보고서의 신뢰도 줄이 범위를 안 말합니다 — 이 값은 팀 하나를 잰 것인데 ' +
+        '사람 이름 밑에 그려집니다',
+    );
+  });
+
+  it('⭐ 팀 공통 사유 목록에 **머리말**을 붙인다 — 만들어만 두지 않는다', () => {
+    /* `@lib` 에 이름을 만들어 놓고 화면이 안 부르면 없는 것입니다(실패 ①).
+       낱말이 아니라 **부르는가**를 잽니다. */
+    ok(
+      /export function teamReasonsHeading/.test(view),
+      '`teamReasonsHeading` 이 @lib 에 없습니다',
+    );
+    ok(
+      /teamReasonsHeading\(\)/.test(reports),
+      '보고서 화면이 `teamReasonsHeading` 을 안 부릅니다 — 사람 이름 밑의 네 줄이 ' +
+        '그 사람에 대한 지적으로 읽힙니다',
+    );
+    /* 글자로 베껴 적으면 두 벌이 되고 반드시 갈라집니다(실패 ②). */
+    ok(
+      !/['"\`]팀 공통['"\`]/.test(reports),
+      '머리말을 화면에 글자로 베껴 적었습니다 — `teamReasonsHeading()` 을 부르세요',
+    );
+  });
+
+  it('⭐ **옆 갈래도** 이름을 붙인다 — 위만 붙이면 반쪽입니다', () => {
+    /* 두 목록은 잇달아 그려집니다. 위에만 「팀 공통」을 달면 아래 줄까지
+       그 머리말 아래로 읽힙니다 — 결함 301 이 「한 갈래만 고치고 옆
+       갈래를 그대로 둔 것」으로 적어 둔 이 저장소에서 제일 흔한 재발
+       모양입니다. 렌더해서 보고 알았습니다. */
+    ok(
+      /export function personGapsHeading/.test(view),
+      '`personGapsHeading` 이 @lib 에 없습니다',
+    );
+    ok(
+      /personGapsHeading\(\)/.test(reports),
+      '팀 공통 목록에만 머리말을 붙이고 이 사람만의 목록은 그대로 뒀습니다',
+    );
+  });
+});
+
 describe('보고서 빈 상자가 회의 수를 보고 말한다 (결함 312)', () => {
   const reports = readFileSync(join(DEMO, 'reports.tsx'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, ' ')

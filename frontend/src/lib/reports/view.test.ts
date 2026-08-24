@@ -94,7 +94,9 @@ describe('구간과 결측', () => {
 
   it('못 쟀으면 신뢰도라는 말 자체가 안 나온다', () => {
     strictEqual(describeConfidence(person({ measured: false, confidence: null })), null);
-    strictEqual(describeConfidence(person()), '신뢰도 90% (높음)');
+    // 결함 344 — 「팀」이 붙습니다. 이 값은 팀 하나를 잰 것인데 보고서는
+    // 그것을 사람 이름 밑에 그립니다.
+    strictEqual(describeConfidence(person()), '팀 신뢰도 90% (높음)');
   });
 
   it('빈 사유는 걸러진다 — 빈 줄이 화면에 남지 않게', () => {

@@ -504,3 +504,38 @@ def test_every_utterance_label_has_a_weight():
             f"`{kind.value}` 의 점수가 0 입니다 — `scoring.py` 의 "
             "`event_points` 에 자리를 만드십시오"
         )
+
+
+def test_team_wide_reasons_do_not_point_at_a_person():
+    """⭐ 팀 전체를 잰 사유가 **사람을 가리키면** 안 된다 (결함 344).
+
+    `compute_confidence` 는 팀 하나의 `CoverageStats` 를 받아 **한 벌**을
+    돌려주고, `scoring.py` 는 그것을 팀원 수만큼 복사해 붙입니다 — 세 사람의
+    `confidence_reasons` 는 글자 하나까지 같습니다. 그런데 화면과 보고서는
+    그 목록을 **사람 이름 밑에** 그립니다.
+
+    그래서 문장이 사람을 가리키면 받는 이가 없고, 읽는 사람은 카드의 주인을
+    가리킨다고 읽습니다. 재현한 것:
+
+        최종 보고서 · 김민수(트랙 커버리지 1.0 · 회의 근거 6건)
+          근거 11건
+          · 녹음이 끊긴 트랙이 있습니다 — **해당 팀원의** 발언량은 측정할 수 없습니다
+
+    끊긴 트랙의 주인은 박지원 한 사람이었습니다.
+
+    ⚠️ 누가 못 잰 것인지는 그 사람의 `measurement_gaps` 가 따로 말합니다 —
+    거기 문장은 사람을 가리켜도 됩니다. 여기만 안 됩니다.
+    """
+    from teamflow.contribution.confidence import _REASON_TEXT
+
+    # 「그 사람」을 가리키는 말. 팀 문장에는 받는 이가 없습니다.
+    pointing = ("해당 팀원", "이 팀원", "그 팀원", "해당 팀원의", "본인", "이 사람")
+    guilty = [
+        (key, text)
+        for key, text in _REASON_TEXT.items()
+        if any(word in text for word in pointing)
+    ]
+    assert not guilty, (
+        "팀 전체를 잰 사유가 사람을 가리킵니다 — 이 문장은 사람 이름 밑에 "
+        f"그려지므로 카드 주인을 가리킨다고 읽힙니다: {guilty}"
+    )

@@ -162,12 +162,48 @@ export function describeRange(person: Person): string {
   return `${person.range_low}% ~ ${person.range_high}%`;
 }
 
-/** 신뢰도 한 줄. 못 쟀으면 신뢰도라는 말 자체가 뜻이 없습니다. */
+/**
+ * 신뢰도 한 줄. 못 쟀으면 신뢰도라는 말 자체가 뜻이 없습니다.
+ *
+ * ## ⚠️ 「팀」을 붙입니다 (결함 344)
+ *
+ * 이 값은 **팀 하나를 잰 것**입니다 — 서버가 `compute_confidence` 를 팀당
+ * 한 번 부르고, 세 사람의 `confidence` 가 소수점까지 같습니다. 그런데
+ * 보고서는 그 값을 사람 이름 밑에 그리므로, 범위를 안 적으면 「이 사람의
+ * 신뢰도」로 읽힙니다.
+ *
+ * 두 화면은 이미 범위를 적고 있었습니다 — 레거시는 「팀 신뢰도 낮음」,
+ * SPA 는 리본 위에 「팀 전체」. **보고서만 안 적었고**, 그게 팀 밖으로
+ * 나가는 문서입니다 (결함 290 — 같은 사실을 말하는 자리를 나란히).
+ */
 export function describeConfidence(person: Person): string | null {
   if (!person.measured || person.confidence === null) return null;
   const percent = Math.round(person.confidence * 100);
   const label = person.confidence_label ?? '';
-  return label === '' ? `신뢰도 ${percent}%` : `신뢰도 ${percent}% (${label})`;
+  return label === '' ? `팀 신뢰도 ${percent}%` : `팀 신뢰도 ${percent}% (${label})`;
+}
+
+/**
+ * 사람 이름 밑에 붙는 **팀 공통** 사유 목록의 머리말 (결함 344).
+ *
+ * 목록 자체는 사람마다 똑같습니다. 머리말이 없으면 네 줄이 그 사람에
+ * 대한 지적으로 읽힙니다 — 「못 잼:」이 그 사람의 것이라고 말하는 것과
+ * 짝을 맞춥니다.
+ */
+export function teamReasonsHeading(): string {
+  return '팀 공통';
+}
+
+/**
+ * 그 아래 **이 사람만의** 목록 머리말 (결함 344).
+ *
+ * ⚠️ **위만 이름 붙이면 반쪽입니다.** 두 목록은 잇달아 그려지므로,
+ * 위에만 「팀 공통」을 달면 아래 줄까지 그 머리말 아래로 읽힙니다 —
+ * 이 저장소에서 제일 흔한 재발 모양입니다(결함 301: 한 갈래만 고치고
+ * 옆 갈래를 그대로 둔 것). 렌더해서 보고 알았습니다.
+ */
+export function personGapsHeading(): string {
+  return '이 사람';
 }
 
 /**
@@ -248,7 +284,7 @@ function personLines(person: Person): string[] {
   const confidence = describeConfidence(person);
   if (confidence !== null) lines.push(`  ${confidence}`);
   if (person.measured) lines.push(`  근거 ${person.evidence_count}건`);
-  for (const reason of person.reasons) lines.push(`  · ${reason}`);
+  for (const reason of person.reasons) lines.push(`  · ${teamReasonsHeading()}: ${reason}`);
   for (const hole of gapsOf(person)) lines.push(`  · 못 잼: ${hole}`);
   const final = describeFinal(person);
   if (final !== null) lines.push(`  ${final}`);
