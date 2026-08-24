@@ -437,7 +437,7 @@ export default function Review() {
                 <Why about="이 회의의 소리" lines={[note]} />
               </p>
             )}
-            {rows.length === 0 && <div className="empty">{emptyTimelineNote()}</div>}
+            {rows.length === 0 && <div className="empty">{emptyTimelineNote(meeting.data?.status)}</div>}
             {rows.map((row, i) =>
               row.kind === 'finding' ? (
                 <div className="tlrow" key={`f-${i}`}>

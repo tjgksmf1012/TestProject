@@ -42,11 +42,12 @@ import {
   type ReviewContext,
 } from '../lib/review/candidates.ts';
 import { detailText } from '../lib/http/detail.ts';
+import { reviewEmptyState } from '../lib/review/phase.ts';
 import { labelInList } from '../lib/people/labels.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
-import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
+import { emptyHtml } from '../lib/ui/empty.ts';
 import { Byline, RawHtml } from './parts.tsx';
 import { failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
@@ -380,42 +381,6 @@ function CandidateCard({
   );
 }
 
-/** 후보가 0건일 때, **회의 상태에 따라** 다른 말을 한다. */
-function emptyReviewState(status: string): EmptyState {
-  const what = '여기에는 회의에서 뽑은 업무 후보가 나옵니다.';
-  if (status === 'queued' || status === 'processing') {
-    return {
-      what,
-      why: '녹음을 아직 처리하는 중입니다.',
-      how: '끝나면 여기에 후보가 나옵니다. 잠시 뒤에 새로고침하세요.',
-    };
-  }
-  if (status === 'failed') {
-    return {
-      what,
-      why: '녹음 처리에 실패해서 후보를 만들지 못했습니다.',
-      how: '로비에서 트랙이 온전한지 확인하세요 — 끊긴 구간이 많으면 처리가 실패합니다.',
-      action: { label: '트랙 상태 보기', href: `/lobby.html?meeting=${meetingId}` },
-    };
-  }
-  if (status === 'confirmed') {
-    return {
-      what,
-      why: '이 회의의 후보는 모두 검토를 마쳤습니다.',
-      how: '승인한 업무는 칸반에 있습니다.',
-      action: { label: '칸반 보기', href: `/kanban.html?meeting=${meetingId}` },
-    };
-  }
-  // needs_review 인데 0건 — 처리는 끝났고 뽑을 게 없었습니다.
-  // **고장이 아니라 결과입니다.**
-  return {
-    what,
-    why: '처리는 끝났는데 업무로 뽑을 만한 발언이 없었습니다 — 고장이 아닙니다.',
-    how: '회의에서 누가·무엇을·언제까지 하기로 했는지 말하면 그 발언이 후보가 됩니다.',
-    action: { label: '칸반 보기', href: `/kanban.html?meeting=${meetingId}` },
-  };
-}
-
 // ══════════════════════════════════════════════════════════════
 // 화면
 // ══════════════════════════════════════════════════════════════
@@ -586,7 +551,14 @@ function Findings({ findings }: { findings: Finding[] }) {
  * ⚠️ 재생 위치는 서버가 준 `position_ms` 입니다 — `start_ms` 로 틀면
  * 공백만큼 밀린 **엉뚱한 말**이 나옵니다 (`lib/review/timeline.ts`).
  */
-function Timeline({ findings }: { findings: Finding[] }) {
+function Timeline({
+  findings,
+  meetingStatus,
+}: {
+  findings: Finding[];
+  /** ⭐ 빈 타임라인이 **무슨 말을 할지** 정합니다 (결함 346). */
+  meetingStatus: string;
+}) {
   type State =
     | { k: 'idle' }
     | { k: 'loading' }
@@ -686,7 +658,7 @@ function Timeline({ findings }: { findings: Finding[] }) {
         )}
         {state.k === 'ok' &&
           (state.utterances.length === 0 ? (
-            <p className="mtl-note">{emptyTimelineNote()}</p>
+            <p className="mtl-note">{emptyTimelineNote(meetingStatus)}</p>
           ) : (
             (() => {
               const rows = timelineRows(state.utterances, findings);
@@ -1006,10 +978,10 @@ function Review() {
       <SpeechTypes counts={types} />
             <SpeakingShares data={speaking} />
       <Findings findings={meeting.findings ?? []} />
-      <Timeline findings={meeting.findings ?? []} />
+      <Timeline findings={meeting.findings ?? []} meetingStatus={meeting.status} />
 
       {candidates.length === 0 ? (
-        <RawHtml html={emptyHtml(emptyReviewState(meeting.status))} />
+        <RawHtml html={emptyHtml(reviewEmptyState(meeting.status, meetingId))} />
       ) : (
         <>
           {/* ⚠️ **세기만 하고 거르지 않는 탭은 거짓말입니다.** */}

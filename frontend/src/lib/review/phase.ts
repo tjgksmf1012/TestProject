@@ -28,6 +28,8 @@
  * ⚠️ **모르는 상태는 「아직 안 왔다」로 둡니다.** 새 상태가 생겼을 때
  * 「다 끝났다」고 말해 버리면, 아직 올 것이 남았는데 사람이 떠납니다.
  */
+import type { EmptyState } from '../ui/empty.ts';
+
 export interface ReviewPhase {
   /** 지금 후보를 결정할 수 있는 국면인가. */
   canReview: boolean;
@@ -64,8 +66,36 @@ export function reviewPhase(status: string | null | undefined): ReviewPhase {
         emptyNote: '회의 처리에 실패해 후보가 없습니다. 로비에서 다시 처리할 수 있습니다.',
         go: { label: '회의 로비로', screen: 'lobby' },
       };
+    case 'pending':
+      // ⛔ **녹음도 안 한 회의입니다** (결함 346). 「처리가 끝나면」은
+      //    처리가 시작될 것을 전제하는데, 아직 녹음조차 안 했습니다.
+      //    바로 옆 요약 칸(`describeMissingSummary`)은 결함 284 에서
+      //    이 갈래를 이미 갈라 놨습니다 — 후보 칸만 남아 있었습니다.
+      return {
+        canReview: false,
+        emptyNote: '아직 녹음하지 않은 회의입니다 — 녹음을 마치면 후보가 만들어집니다.',
+        go: { label: '회의 로비로', screen: 'lobby' },
+      };
+    case 'queued':
+      // ⛔ **줄에 서 있는 것과 하고 있는 것은 다릅니다** (결함 325·346).
+      //
+      // 예전에는 이 갈래가 `processing` 과 한 `default` 에 묶여 있어서,
+      // 큐에 걸린 회의에게도 「처리가 끝나면 올라옵니다」라고 했습니다.
+      // 워커가 안 돌면 **영영 시작되지 않는데** 사람은 기다립니다 —
+      // 결함 325 가 홈·로비 셋을 고치면서 이 화면만 표에서 빠졌습니다.
+      //
+      // ⚠️ **갈 곳을 줍니다.** 서버는 `queued` 를 다시 처리할 수 있게
+      // 열어 두었고(`can_reprocess = status in ("failed","queued")`),
+      // 그 단추는 로비에 있습니다. 여기서 안 알려 주면 실패 ③ 입니다.
+      return {
+        canReview: false,
+        emptyNote:
+          '처리 차례를 기다리는 중입니다 — 아직 시작하지 않았습니다. ' +
+          '오래 걸리면 로비에서 다시 처리할 수 있습니다.',
+        go: { label: '회의 로비로', screen: 'lobby' },
+      };
     default:
-      // `queued`·`processing`·모르는 상태. 아직 올 것이 남았습니다.
+      // `processing`·모르는 상태. 아직 올 것이 남았습니다.
       return {
         canReview: false,
         emptyNote: '검토할 후보가 없습니다 — 회의 처리가 끝나면 AI 초안이 여기 올라옵니다.',
@@ -102,7 +132,86 @@ export function describeMissingSummary(status: string | null | undefined): strin
       return '처리는 끝났는데 요약이 만들어지지 않았습니다 — 소리가 짧거나 알아듣지 못했을 수 있습니다.';
     case 'failed':
       return '회의 처리에 실패해 요약이 없습니다. 로비에서 다시 처리할 수 있습니다.';
+    case 'queued':
+      // 옆 갈래도 같이 갑니다 (결함 301). 후보 칸만 고치고 요약 칸을 두면
+      // 한 화면이 같은 회의를 두고 서로 다른 말을 합니다.
+      return '처리 차례를 기다리는 중입니다 — 아직 시작하지 않았습니다.';
     default:
       return '요약이 아직 없습니다 — 처리가 끝나면 여기 담깁니다.';
+  }
+}
+
+/**
+ * 후보 칸이 비었을 때의 **빈 상자 한 덩어리** — 레거시 검토 화면이 씁니다.
+ *
+ * ## ⚠️ 왜 화면에서 옮겨 왔나 (결함 346)
+ *
+ * 이 판단은 `demo/review.tsx` 안에 있었습니다. 화면 코드에는 자동 검사가
+ * 없으므로, 결함 325 가 서버와 홈·로비에서 `queued` 를 갈라놓는 동안 이
+ * 함수만 **묶인 채로 남았습니다.** 같은 물음(`상태 → 무슨 말을 하나`)이
+ * 두 곳에 있었고, 한쪽만 고쳐졌습니다 — 대표 실패 ②.
+ *
+ * ⚠️ `reviewPhase` 와 **나란히 둡니다.** 둘은 같은 표를 다른 모양으로
+ * 내보내는 것이라, 한쪽에만 갈래가 생기는 순간 화면 둘이 갈라집니다.
+ * `phase.test.ts` 가 **두 함수가 같은 상태 집합을 가르는지** 잽니다.
+ */
+export function reviewEmptyState(
+  status: string | null | undefined,
+  meetingId: number,
+): EmptyState {
+  const what = '여기에는 회의에서 뽑은 업무 후보가 나옵니다.';
+  const lobby = `/lobby.html?meeting=${meetingId}`;
+  const kanban = `/kanban.html?meeting=${meetingId}`;
+
+  switch (status) {
+    case 'pending':
+      // ⛔ 결함 346 — 이 갈래가 없어서 `needs_review` 와 같은 `default` 로
+      //    떨어졌고, **녹음도 안 한 회의**가 「처리는 끝났는데 뽑을 만한
+      //    발언이 없었습니다」를 받았습니다. 결함 289 가 회의록에서 잡은
+      //    바로 그 모양(녹음도 안 한 회의를 「처리를 마친 것」으로)입니다.
+      return {
+        what,
+        why: '아직 녹음하지 않은 회의입니다 — 녹음을 마치면 후보가 만들어집니다.',
+        how: '로비에서 동의를 받고 녹음을 시작하세요.',
+        action: { label: '회의 로비로', href: lobby },
+      };
+    case 'queued':
+      // ⛔ 결함 325·346 — `processing` 과 한 갈래였습니다. 「잠시 뒤에
+      //    새로고침하세요」는 시작도 안 한 일을 기다리게 하는 말입니다.
+      return {
+        what,
+        why: '처리 차례를 기다리는 중입니다 — 아직 시작하지 않았습니다.',
+        how: '오래 걸리면 로비에서 다시 처리할 수 있습니다.',
+        action: { label: '회의 로비로', href: lobby },
+      };
+    case 'processing':
+      return {
+        what,
+        why: '녹음을 처리하는 중입니다.',
+        how: '끝나면 여기에 후보가 나옵니다. 잠시 뒤에 새로고침하세요.',
+      };
+    case 'failed':
+      return {
+        what,
+        why: '녹음 처리에 실패해서 후보를 만들지 못했습니다.',
+        how: '로비에서 트랙이 온전한지 확인하세요 — 끊긴 구간이 많으면 처리가 실패합니다.',
+        action: { label: '트랙 상태 보기', href: lobby },
+      };
+    case 'confirmed':
+      return {
+        what,
+        why: '이 회의의 후보는 모두 검토를 마쳤습니다.',
+        how: '승인한 업무는 칸반에 있습니다.',
+        action: { label: '칸반 보기', href: kanban },
+      };
+    default:
+      // needs_review 인데 0건 — 처리는 끝났고 뽑을 게 없었습니다.
+      // **고장이 아니라 결과입니다.**
+      return {
+        what,
+        why: '처리는 끝났는데 업무로 뽑을 만한 발언이 없었습니다 — 고장이 아닙니다.',
+        how: '회의에서 누가·무엇을·언제까지 하기로 했는지 말하면 그 발언이 후보가 됩니다.',
+        action: { label: '칸반 보기', href: kanban },
+      };
   }
 }

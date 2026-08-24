@@ -99,7 +99,22 @@ describe('타임라인 (REVIEW-002)', () => {
   });
 
   it('빈 회의와 소리 없는 회의는 이유를 말한다', () => {
-    assert.match(emptyTimelineNote(), /발화가 없습니다/);
+    // ⭐ 결함 346 — 상태를 받습니다. 「빈 목록은 고장과 구별이 안 된다」는
+    //    요구는 그대로이므로 **상태마다** 확인합니다.
+    // ⚠️ 낱말 목록으로 재지 않습니다 — 처음에 `/없습니다|쌓입니다/` 로
+    //    적었다가 「…기다리는 중입니다」에 걸려 빨개졌습니다. 요구는
+    //    「빈 목록이 고장으로 안 읽히게 **이유를 말한다**」입니다.
+    for (const status of ['pending', 'queued', 'processing', 'failed', 'needs_review', 'confirmed', null]) {
+      const text = emptyTimelineNote(status);
+      assert.ok(text.length > 15, `${status}: 너무 짧아 이유가 안 됩니다 — ${text}`);
+      assert.match(text, / — /, `${status}: 이유를 안 붙였습니다 — ${text}`);
+      assert.doesNotMatch(text, /[A-Za-z_]{3,}/, `${status}: 내부 식별자가 샜습니다 — ${text}`);
+    }
+    // ⛔ 처리에 **실패한** 회의에게 「기다리면 온다」로 읽히면 안 됩니다.
+    assert.doesNotMatch(emptyTimelineNote('failed'), /아직 처리되지 않았거나/);
+    // ⭐ 상태마다 다른 말이어야 합니다 — 한 문장이면 상태를 안 본 것입니다.
+    const 말들 = ['pending', 'queued', 'processing', 'failed'].map((s) => emptyTimelineNote(s));
+    assert.equal(new Set(말들).size, 4, JSON.stringify(말들));
     assert.match(noAudioNote(), /보관돼 있지 않습니다/);
   });
 
