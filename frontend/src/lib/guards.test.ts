@@ -8753,3 +8753,77 @@ describe('기여도 줄은 점수 순이 아니다 — 뿌리마다 (불변식 �
     );
   });
 });
+
+// ══════════════════════════════════════════════════════════════
+// 사람이 넣은 긴 글이 **페이지를 가로로 늘리던 것** (결함 354)
+// ══════════════════════════════════════════════════════════════
+//
+// 자기소개(`USER-004`)는 이 제품에서 사람이 직접 넣는 제일 긴 글입니다
+// (300자). 씨앗에는 **한 번도 없어서**(`bio` 가 전부 `null`) 아무도
+// 그려진 것을 본 적이 없었습니다.
+//
+// 넣어 보니 — 띄어쓰기가 있는 평범한 글은 멀쩡합니다. **긴 주소를 붙여
+// 넣으면** 갈라집니다:
+//
+//     레거시 설정   한 줄 1540px · 문서 1849px > 창 1600px
+//                   `body` 가 `overflow-x: hidden` → 넘친 만큼 **영영 안 보임**
+//     SPA 팀원      한 줄 1619px — `.pane__body`(auto)가 담아 줘서 스크롤로 닿음
+//
+// 원인은 **플렉스 항목의 기본값 `min-width: auto`** 입니다. 내용의 최소
+// 크기 아래로 안 줄어들어서, `app.css` 가 `body` 에 걸어 둔
+// `overflow-wrap: break-word` 가 **일할 자리가 없습니다** — 끊을 필요가
+// 생기기 전에 상자가 먼저 자랍니다.
+//
+// ⚠️ **저장소가 이미 두 곳에 적어 둔 규칙입니다** — 「긴 URL 이나
+// `owner/repository` 같은 영문 덩어리는 끊어야 가로로 안 밀립니다」와
+// 「**모든** 자식에 `min-width: 0` 이 필요합니다」. 사람이 넣는 제일 긴
+// 글을 그리는 자리에만 빠져 있었습니다.
+
+describe('사람이 넣은 긴 글이 가로로 안 민다 (결함 354)', () => {
+  const RULES: Array<[string, string, RegExp]> = [
+    [
+      '레거시 설정의 자기소개',
+      join(ROOT, 'public', 'project.html'),
+      /\.mbio\s*\{[^}]*\}/,
+    ],
+    [
+      'SPA 팀원 줄의 글 칸',
+      join(ROOT, '..', 'webapp', 'src', 'app.css'),
+      /\.member-row\s*>\s*div\s*\{[^}]*\}/,
+    ],
+  ];
+
+  for (const [what, path, ruler] of RULES) {
+    it(`⭐ ${what} 은 **줄어들 수 있다** (\`min-width: 0\`)`, () => {
+      const css = readFileSync(path, 'utf8');
+      const rule = css.match(ruler);
+      ok(
+        rule !== null,
+        `${what}: 규칙을 못 찾았습니다 — 이 가드가 낡았습니다(선택자가 바뀌었나요?)`,
+      );
+      ok(
+        /min-width:\s*0/.test(rule[0]),
+        `${what}: \`min-width: 0\` 이 없습니다 — 플렉스 항목의 기본값 ` +
+          '`min-width: auto` 는 내용 최소 크기 아래로 안 줄어들어서, 긴 주소 하나가 ' +
+          '페이지를 가로로 늘립니다',
+      );
+    });
+  }
+
+  it('⚠️ 끊을 규칙 자체는 **공용에 살아 있다** — 위 검사의 전제', () => {
+    /* `min-width: 0` 만으로는 안 됩니다. 끊어 주는 것은 `overflow-wrap`
+       이고, 그건 `body` 에 한 벌 걸려 있습니다. 그게 사라지면 위 검사가
+       초록인 채로 다시 밀립니다 — **전제를 같이 재십시오.** */
+    const SHARED: Array<[string, string]> = [
+      ['레거시', join(ROOT, 'public', 'app.css')],
+      ['SPA', join(ROOT, '..', 'webapp', 'src', 'app.css')],
+    ];
+    for (const [name, path] of SHARED) {
+      const css = readFileSync(path, 'utf8');
+      ok(
+        /overflow-wrap:\s*break-word/.test(css),
+        `${name}: 긴 덩어리를 끊는 규칙이 없어졌습니다`,
+      );
+    }
+  });
+});

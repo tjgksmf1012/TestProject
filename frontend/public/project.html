@@ -159,7 +159,23 @@
   .mface { width: 28px; height: 28px; border-radius: var(--r-round);
            object-fit: cover; flex: none; }
   /* 자기소개 — 한 줄 전부를 차지해 이름 아래로 내려앉습니다. */
-  .mbio { flex-basis: 100%; font-size: var(--fs-caption); color: var(--text-subtle); }
+  /* 자기소개 (`USER-004`) — 이 화면에서 **사람이 직접 넣는 제일 긴 글**
+     입니다(300자까지).
+
+     ⚠️ **`min-width: 0` 이 없으면 안 끊깁니다** (결함 354). 이 줄은
+     `display: flex` 이고, 플렉스 항목의 기본값 `min-width: auto` 는
+     **내용의 최소 크기 아래로 안 줄어듭니다.** 그러면 `app.css` 가
+     `body` 에 걸어 둔 `overflow-wrap: break-word` 가 **일할 자리가
+     없습니다** — 끊을 필요가 생기기 전에 상자가 먼저 자라 버립니다.
+
+     띄어쓰기가 있는 글은 어절에서 접히니 멀쩡한데, **긴 주소를 붙여
+     넣으면** 한 줄이 1540px 이 되고 문서가 1849px 로 자랍니다. `body` 는
+     `overflow-x: hidden` 이라 넘친 만큼은 **영영 안 보입니다.**
+
+     `app.css` 는 이 규칙을 이미 두 곳에 적어 뒀습니다 — 「긴 URL 이나
+     `owner/repository` 같은 영문 덩어리는 끊어야 가로로 안 밀립니다」와
+     「**모든** 자식에 `min-width: 0` 이 필요합니다」. 여기만 빠졌습니다. */
+  .mbio { flex-basis: 100%; min-width: 0; font-size: var(--fs-caption); color: var(--text-subtle); }
   /* 지금 붙어 있는가 (`USER-005`).
      ⚠️ **오프라인에는 아무 표시도 안 붙습니다** — 클래스가 없으면 이
      규칙이 아예 안 걸립니다. 회색 점을 찍어 "없음" 을 세게 만들지

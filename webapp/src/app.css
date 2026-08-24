@@ -1395,6 +1395,13 @@ details.disc > .disc__body {
   border-bottom: 1px dashed var(--c-line);
 }
 .member-row:last-of-type { border-bottom: 0; }
+/* ⚠️ **이름·역할·자기소개가 든 칸은 줄어들 수 있어야 합니다** (결함 354).
+   플렉스 항목의 기본값 `min-width: auto` 는 내용의 최소 크기 아래로 안
+   줄어들어서, 300자 자기소개에 긴 주소가 들어가면 상자가 1619px 로 자랍니다
+   — `overflow-wrap: break-word` 가 일할 자리가 없어지는 것입니다.
+   여기는 `.pane__body` 가 `overflow-x: auto` 라 스크롤로 닿기는 하지만,
+   그건 담아 준 것이지 고친 것이 아닙니다. */
+.member-row > div { min-width: 0; }
 /* 등급은 **글자**입니다 — 색이나 막대로 줄 세우지 않습니다(불변식 1).
    이름 옆 작은 라벨로 붙여, 이름과 한 덩어리로 읽히게 합니다. */
 .member-row__rank {
