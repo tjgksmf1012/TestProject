@@ -458,6 +458,81 @@ def test_what_we_claim_to_produce_is_actually_produced():
     )
 
 
+def _speaker_sources_written_in_code() -> set[str]:
+    """`speaker_source` 에 **값을 대입하는** 자리를 훑는다.
+
+    ⚠️ **주석부터 걷습니다** (결함 238). `confidence.py` 는 어느 값이
+    확정인지를 주석으로 적어 두고 있어서, 글자만 찾으면 `manual` 과
+    `diarization` 이 "쓰이는 것" 으로 잡힙니다.
+
+    ⚠️ 그리고 **글자가 어딘가 보이는가**가 아니라 **대입하는가**를 봅니다.
+    옆 칸(`MeetingEventType`)은 느슨한 자로 충분했지만 이 칸은 아닙니다 —
+    자는 칸마다 따로 정해야 합니다.
+    """
+    import re
+
+    written: set[str] = set()
+    for path in (REPO_ROOT / "backend" / "teamflow").rglob("*.py"):
+        if path.name == "vocab.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        # 주석과 독스트링을 걷어 낸다.
+        text = re.sub(r"#.*", "", text)
+        text = re.sub(r'"""[\s\S]*?"""', "", text)
+        for value in vocab.SpeakerSource:
+            if re.search(
+                rf'speaker_source\s*(?::\s*\w+\s*)?=\s*["\']{re.escape(str(value))}["\']',
+                text,
+            ):
+                written.add(str(value))
+    return written
+
+
+def test_the_two_speaker_source_sets_cover_what_the_database_accepts():
+    """⭐ `WRITTEN` + `NOT_WRITTEN_YET` 이 `STORED` 를 정확히 덮는다."""
+    covered = vocab.WRITTEN | vocab.NOT_WRITTEN_YET
+    missing = vocab.STORED - covered
+    assert not missing, (
+        f"저장 가능한데 어느 쪽에도 없습니다: {sorted(str(v) for v in missing)} — "
+        "`WRITTEN`(쓰는 코드가 있다) 이나 `NOT_WRITTEN_YET`(이유와 함께) 에 넣으십시오"
+    )
+    stray = covered - vocab.STORED
+    assert not stray, f"저장도 못 하는데 들어 있습니다: {sorted(str(v) for v in stray)}"
+    both = vocab.WRITTEN & vocab.NOT_WRITTEN_YET
+    assert not both, f"양쪽에 다 들어 있습니다: {sorted(str(v) for v in both)}"
+
+
+def test_what_we_claim_to_write_is_actually_written():
+    """⭐ **"쓴다" 고 적은 화자 출처는 진짜 쓰는 코드가 있어야 합니다** (결함 340).
+
+    이 파일의 머리말은 「만들어진다고 적은 값에 진짜 만드는 코드가 있는가」를
+    재려고 `vocab.py` 가 생겼다고 적어 두고 있습니다. 그런데 그 검사가
+    **옆 칸(`MeetingEventType`)에만** 있었고, 정작 이 파일이 생긴 계기인
+    `speaker_source` 에는 없었습니다 — 결함 328 이 적어 둔 「같은 표의 옆
+    칸은 따로 재야 합니다」입니다.
+
+    재 보니 `STORED` 는 넷을 주장하는데 쓰는 자리는 `track` 하나였습니다.
+    """
+    written = _speaker_sources_written_in_code()
+
+    # 안 보고 있는 상태 자체가 실패여야 합니다 (결함 286).
+    assert written, "`speaker_source=` 로 쓰는 자리를 하나도 못 찾았습니다 — 자가 낡았습니다"
+
+    claimed = {str(v) for v in vocab.WRITTEN}
+    missing = claimed - written
+    assert not missing, (
+        f"쓴다고 적혀 있는데 코드에 없습니다: {sorted(missing)} — "
+        "지웠다면 `NOT_WRITTEN_YET` 으로 **이유와 함께** 옮기십시오"
+    )
+
+    surprise = written - claimed
+    assert not surprise, (
+        f"쓰는 코드가 생겼는데 아직 `NOT_WRITTEN_YET` 에 있습니다: {sorted(surprise)} — "
+        "`db/vocab.py` 에서 `WRITTEN` 으로 옮기십시오. 안 옮기면 이 저장소가 "
+        "「무엇이 되고 무엇이 안 되는가」를 계속 틀리게 말합니다"
+    )
+
+
 def test_the_meeting_event_model_constraint_is_built_from_the_vocabulary():
     declared = _model_constraint(
         m.MeetingEvent.__table__, "ck_meeting_event_type", "event_type"

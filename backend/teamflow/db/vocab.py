@@ -73,6 +73,43 @@ NOT_STORED_YET: frozenset[SpeakerSource] = frozenset(
     }
 )
 
+#: `STORED` 중에서 **프로덕션 코드가 실제로 쓰는** 값.
+#:
+#: ⚠️ 이 파일의 머리말이 「만들어진다고 적은 값에 진짜 만드는 코드가
+#: 있는가」를 재려고 생겼는데, 정작 **이 칸에는 그 검사가 없었습니다**
+#: (결함 340). 옆 칸인 `MeetingEventType` 에는
+#: `EVENT_PRODUCED`/`EVENT_NOT_PRODUCED_YET` 과 그것을 대조하는 검사가
+#: 있습니다 — 같은 표의 옆 칸은 따로 재야 합니다.
+#:
+#: 세어 보니 `STORED` 는 넷을 주장하는데 `speaker_source=` 로 쓰는 자리는
+#: **`track` 하나뿐**이었습니다.
+WRITTEN: frozenset[SpeakerSource] = frozenset({SpeakerSource.TRACK})
+
+#: 저장은 **할 수 있는데** 지금 쓰는 코드가 없는 값과 **그 이유**.
+#:
+#: ⚠️ `NOT_STORED_YET` 과 다릅니다. 저쪽은 **DB 가 거절하는** 값이고,
+#: 이쪽은 DB 가 받아 주는데 **아무도 안 쓰는** 값입니다. 둘을 한 집합에
+#: 뭉치면 "왜 안 나오는가" 의 답이 달라집니다.
+#:
+#: · `voiceprint` — `Voiceprint(` 를 만드는 프로덕션 코드가 0곳입니다.
+#:   멀티트랙이면 성문이 필요 없기 때문이고, 그런데도 **동의는 먼저**
+#:   받습니다 (`docs/07` P3·§2.3, `docs/17` 의 닫은 결정).
+#: · `manual` — 사람이 화자를 지정하는 자리가 **서버 갈래 0곳 · 화면
+#:   0곳**입니다. `docs/07` §2.3 이 "③ 거부 → 수동 매핑. **멀티트랙
+#:   모드면 애초에 불필요**" 라고 적어 둔 그 이유입니다.
+#: · `diarization` — 단일 트랙·혼합 녹음 경로가 없어 나올 자리가 없습니다.
+#:
+#: ⚠️ **여기 있는 값에도 화면은 제 가지를 가집니다** (`review/evidence.ts`).
+#: 경로가 열리는 날 화면부터 만들지 않아도 되게 해 둔 것이지, "이미 되는
+#: 기능" 이라는 뜻이 아닙니다.
+NOT_WRITTEN_YET: frozenset[SpeakerSource] = frozenset(
+    {
+        SpeakerSource.VOICEPRINT,
+        SpeakerSource.MANUAL,
+        SpeakerSource.DIARIZATION,
+    }
+)
+
 #: 화자가 **확정된** 것으로 세는 값. 신뢰도의 입력입니다 (docs/06 §4).
 #:
 #: ⚠️ `voiceprint` 는 여기 없습니다. 유사도가 아무리 높아도 추정입니다 —
