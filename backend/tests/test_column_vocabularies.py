@@ -533,6 +533,79 @@ def test_what_we_claim_to_write_is_actually_written():
     )
 
 
+def test_the_vocabulary_prose_does_not_contradict_its_own_sets():
+    """⭐ 「만드는 코드가 없다」를 **글로** 적었으면 집합도 그래야 한다 (결함 341).
+
+    `vocab.py` 는 "같은 값이 여러 곳에 따로 적혀 갈라지는 것" 을 막으려고
+    생긴 파일인데, **자기 자신이 그 방식으로 갈라져 있었습니다.**
+
+        484줄  ⚠️ `GITHUB` 은 아직 만드는 코드가 0곳입니다
+        522줄  ⚠️ 지금은 비어 있습니다. `GITHUB` … `_tell_the_assignee` 가 만듭니다
+
+    서른여덟 줄 간격입니다. 맞는 쪽은 아래였고(웹훅이 실제로 부릅니다),
+    위는 낡은 채로 남아 있었습니다.
+
+    ⚠️ **글을 금지하는 자가 아닙니다.** 「이 값은 아직 안 만들어진다」고
+    글로 적는 것 자체는 괜찮습니다 — 다만 그렇게 적었으면 **그 값이 정말
+    「아직」 집합에 들어 있어야** 합니다. 집합은 테스트가 지키니까요.
+    """
+    import re
+
+    source = (REPO_ROOT / "backend" / "teamflow" / "db" / "vocab.py").read_text(
+        encoding="utf-8"
+    )
+
+    #: 「아직 안 만들어진다」를 담는 집합들 — 여기 있으면 글로 그렇게 적어도 됩니다.
+    excused: set[str] = {
+        str(v)
+        for group in (
+            vocab.NOT_STORED_YET,
+            vocab.NOT_WRITTEN_YET,
+            vocab.NOTIFICATION_NOT_PRODUCED_YET,
+            vocab.EVENT_NOT_PRODUCED_YET,
+        )
+        for v in group
+    }
+
+    #: 어휘의 **모든** 값 이름 — 대문자 상수 이름(`GITHUB`)과 값(`github`) 둘 다.
+    names: dict[str, str] = {}
+    for enum in (
+        vocab.SpeakerSource,
+        vocab.NotificationKind,
+        vocab.MeetingEventType,
+        vocab.ConsentType,
+        vocab.TaskStatus,
+    ):
+        for member in enum:
+            names[member.name] = str(member)
+            names[str(member)] = str(member)
+
+    #: 「만드는 코드가 없다」는 주장을 담은 줄.
+    claim = re.compile(r"만드는 코드가 0곳|아직 만드는 코드가 없|쓰는 코드가 0곳|만드는 곳이 0곳")
+
+    offenders: list[str] = []
+    lines_seen = 0
+    for number, line in enumerate(source.splitlines(), start=1):
+        if not line.lstrip().startswith("#"):
+            continue
+        lines_seen += 1
+        if not claim.search(line):
+            continue
+        for token in re.findall(r"`([A-Za-z_.]+)`", line):
+            value = names.get(token)
+            if value is None:
+                continue
+            if value not in excused:
+                offenders.append(
+                    f"{number}줄: 「{token}」 에 만드는 코드가 없다고 적었는데 "
+                    "「아직」 집합에는 없습니다 — 글과 집합 중 하나가 낡았습니다"
+                )
+
+    # 안 보고 있는 상태 자체가 실패여야 합니다 (결함 286).
+    assert lines_seen > 50, f"주석 줄을 {lines_seen}개밖에 못 찾았습니다 — 자가 낡았습니다"
+    assert not offenders, "어휘의 글과 집합이 어긋납니다:\n  " + "\n  ".join(offenders)
+
+
 def test_the_meeting_event_model_constraint_is_built_from_the_vocabulary():
     declared = _model_constraint(
         m.MeetingEvent.__table__, "ck_meeting_event_type", "event_type"
