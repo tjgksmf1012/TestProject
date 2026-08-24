@@ -88,6 +88,34 @@
   .cnew { display: grid; gap: var(--sp-2); margin: 0 0 var(--sp-5); }
   .clabel { font-size: var(--fs-caption); color: var(--text-subtle); }
 
+  /* ── 채널 종류 고르기 (결함 360) ────────────────────────
+
+     ⚠️ **줄마다 44px 입니다.** 라디오 자체는 작아서, 줄 전체를 표적으로
+     만들지 않으면 터치·확대에서 못 누릅니다 (`docs/15` 의 손가락 표적).
+
+     ⚠️ 설명 줄(`khint`)은 이름 **아래**에 둡니다. 옆에 붙이면 이름이
+     길어질 때 두 줄로 접히면서 어느 설명이 어느 이름의 것인지 흐려집니다. */
+  .ckind { display: grid; gap: var(--sp-1); border: 0; padding: 0; margin: 0; min-width: 0; }
+  .ckind legend { font-size: var(--fs-caption); color: var(--text-subtle); padding: 0; }
+  /* ⚠️ **공용 규칙과 싸우지 않습니다.** `app.css` 의
+     `label:has(> input[type='radio'])` 가 (0,2,1)로 `.ckind label`(0,1,1)을
+     **이깁니다** — `display: grid` 를 줘도 안 먹습니다. 처음에 격자로
+     짰다가 렌더해서 잡았습니다: 「음성 채널」이 「음성 / 채널」 두 줄로
+     쪼개져 있었습니다(결함 250 과 같은 부류 — 클래스만 붙이고 안 재 본 것).
+
+     그 공용 규칙은 일부러 있는 것입니다 — 라벨 줄 전체가 **접촉면**이고
+     `min-height: var(--tap)` 로 44px 을 줍니다. 그래서 flex 를 그대로 쓰고
+     **줄바꿈만** 더합니다 (결함 348 이 칸반에서 쓴 방법). */
+  .ckind label { flex-wrap: wrap; align-items: center; }
+  .ckind .kname { font-size: var(--fs-body); color: var(--text); min-width: 0; }
+  /* 설명은 **다음 줄 전체**. 옆에 붙이면 이름이 접힙니다. */
+  .ckind .khint {
+    flex-basis: 100%;
+    font-size: var(--fs-caption);
+    color: var(--text-subtle);
+    min-width: 0;
+  }
+
   /* ── 대화 ─────────────────────────────────────────────
 
      줄 길이를 묶습니다. ⚠️ `ch` 가 아니라 `rem` 입니다 — `ch` 는 숫자 `0`

@@ -9000,3 +9000,76 @@ describe('셸 탭이 프로젝트를 잃지 않는다', () => {
     }
   });
 });
+
+// ══════════════════════════════════════════════════════════════
+// 채널을 만들 때 **종류를 고를 수 있다** (결함 360)
+// ══════════════════════════════════════════════════════════════
+
+describe('채널 종류를 화면이 고른다', () => {
+  const CHAT = join(ROOT, 'src', 'demo', 'chat.tsx');
+  const stripComments = (source: string): string =>
+    source
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+      .replace(/(?<![:\w])\/\/[^\n]*/g, '');
+
+  it('⭐ 만드는 요청이 종류를 **박아 두지 않는다**', () => {
+    /* 예전에는 `kind: 'text'` 였습니다. 서버는 처음부터 둘 다 받았고
+       화면은 음성 채널을 제대로 그렸는데(`voiceChannelNote`), 만들 길만
+       없었습니다 — 그런데 `vocab.py` 는 「두 종류 다 화면에서 만들 수
+       있고」라고, `docs/20` 은 CHANNEL-002 를 ✅ 라고 적어 뒀습니다.
+
+       ⚠️ **주석부터 걷습니다** (결함 238) — 이 저장소는 「예전에는
+       `kind: 'text'` 였다」를 주석에 적어 둡니다. */
+    const source = stripComments(readFileSync(CHAT, 'utf8'));
+    const pinned = [...source.matchAll(/kind:\s*'(\w+)'/g)].map((m) => m[1]);
+    deepStrictEqual(
+      pinned,
+      [],
+      `채널을 만들 때 종류가 박혀 있습니다: ${pinned.join(', ')}`,
+    );
+  });
+
+  it('⭐ 종류 목록을 **서버에서 받아** 그린다 — 화면이 지어내지 않는다', () => {
+    /* ⚠️ 화면이 자기 표를 만들면 서버의 `CHANNEL_LABEL` 과 두 벌이 되고,
+       종류가 늘 때 한쪽만 고쳐집니다 (`/api/chat/reactions` 와 같은 이유).
+
+       그래서 재는 것은 **낱말이 아니라 배선**입니다: 그 주소를 부르고,
+       받은 것을 그대로 돌면서 그립니다. */
+    const source = stripComments(readFileSync(CHAT, 'utf8'));
+    ok(
+      /\/api\/chat\/channel-kinds/.test(source),
+      '채널 종류를 서버에서 안 받아 옵니다',
+    );
+    ok(
+      /kinds\.map\(/.test(source),
+      '받은 목록을 돌면서 그리지 않습니다 — 화면이 목록을 지어내고 있을 수 있습니다',
+    );
+    /* 한국어 이름표가 화면에 **적혀 있으면** 두 벌입니다. */
+    for (const word of ['텍스트 채널', '음성 채널']) {
+      ok(
+        !source.includes(word),
+        `화면이 종류 이름을 직접 적고 있습니다: ${word} — 서버의 어휘와 두 벌이 됩니다`,
+      );
+    }
+  });
+
+  it('⚠️ 고르는 줄이 **손가락 표적**이다 — 공용 규칙에 기댑니다', () => {
+    /* `app.css` 의 `label:has(> input[type='radio'])` 가 줄 전체를
+       접촉면으로 만들고 `min-height: var(--tap)` 를 줍니다. 그 규칙이
+       사라지면 라디오 점만 표적이 됩니다 — **전제를 같이 잽니다**
+       (결함 354 의 방법).
+
+       ⚠️ 이 규칙은 특성도 (0,2,1)로 `.ckind label`(0,1,1)을 **이깁니다.**
+       처음에 `display: grid` 로 짰다가 안 먹어서 렌더해서 잡았습니다. */
+    const css = readFileSync(join(ROOT, 'public', 'app.css'), 'utf8');
+    /* ⚠️ **묶인 선택자**입니다 — `label:has(> input[type='checkbox']),`
+       다음 줄에 라디오가 옵니다. 붙어 있다고 가정한 첫 자는 못 찾았습니다. */
+    const rule = /label:has\(> input\[type='radio'\]\)[^{]*\{[^}]*\}/.exec(css);
+    ok(rule !== null, '공용 라디오 라벨 규칙을 못 찾았습니다 — 이 가드가 낡았습니다');
+    ok(
+      /min-height:\s*var\(--tap\)/.test(rule[0]),
+      '라디오 라벨 줄에 손가락 표적 높이가 없습니다',
+    );
+  });
+});

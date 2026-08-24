@@ -65,6 +65,13 @@ import { NoteLine, RawHtml, type Note } from './parts.tsx';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
+/** `GET /api/chat/channel-kinds` 한 줄. **서버가 어휘의 주인**입니다. */
+interface ChannelKindChoice {
+  kind: string;
+  label: string;
+  hint: string;
+}
+
 const params = new URLSearchParams(location.search);
 // ⚠️ 주소창의 `?api=` 를 그대로 쓰면 링크 하나로 팀 대화가 어디로 가는지
 // 바뀝니다. 채널에는 팀 내부 이야기가 쌓입니다.
@@ -331,6 +338,12 @@ function App() {
   const [sending, setSending] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
   const [newName, setNewName] = useState('');
+  /* ⚠️ **종류를 서버에서 받아 옵니다** (결함 360). 예전에는 만드는 자리에
+     종류가 아예 없었고 `kind: 'text'` 가 박혀 있었습니다 — 서버는 처음부터
+     둘 다 받았고 화면은 음성 채널을 제대로 그렸는데, 만들 길만 없었습니다.
+     목록을 화면에 적으면 서버의 `CHANNEL_LABEL` 과 두 벌이 됩니다. */
+  const [kinds, setKinds] = useState<ChannelKindChoice[]>([]);
+  const [newKind, setNewKind] = useState('text');
   const [query, setQuery] = useState('');
   const [found, setFound] = useState<{ channel_name: string; message: ChatMessage }[] | null>(
     null,
@@ -462,6 +475,13 @@ function App() {
       if (response === null || !response.ok) return;
       const rows = (await response.json()) as { mark: string; label: string }[];
       setLabels(Object.fromEntries(rows.map((r) => [r.mark, r.label])));
+    })();
+    void (async () => {
+      // 채널 종류. ⚠️ 못 받으면 **고르는 칸을 안 그립니다** — 종류를
+      //    화면이 지어내면 서버의 어휘와 두 벌이 됩니다(결함 360).
+      const response = await get('/api/chat/channel-kinds');
+      if (response === null || !response.ok) return;
+      setKinds((await response.json()) as ChannelKindChoice[]);
     })();
     void loadChannels();
   }, [loadChannels]);
@@ -624,7 +644,7 @@ function App() {
     setSending(true);
     try {
       const response = await sendJson(`/api/projects/${projectId}/channels`, 'POST', {
-        kind: 'text',
+        kind: newKind,
         name: newName,
       });
       if (response === null) {
@@ -752,6 +772,36 @@ function App() {
               placeholder="예: 디자인"
               onChange={(event) => setNewName(event.target.value)}
             />
+            {/* ⚠️ **종류를 고를 자리** (결함 360). 서버는 처음부터 둘 다
+                받았고 화면은 음성 채널을 제대로 그렸는데(`voiceChannelNote`),
+                만드는 자리만 텍스트로 박혀 있었습니다 — `vocab.py` 는 「두
+                종류 다 화면에서 만들 수 있고」라고, `docs/20` 은 CHANNEL-002
+                를 ✅ 라고 적어 두고 있었습니다.
+
+                ⚠️ 이름표와 설명은 **서버가 줍니다.** 여기 적으면 어휘가 두
+                벌이 되고, 종류가 늘 때 한쪽만 고쳐집니다.
+
+                ⚠️ 못 받았으면 **안 그립니다.** 빈 라디오 묶음을 그리면
+                누를 수 있는데 아무 뜻이 없는 칸이 됩니다. */}
+            {kinds.length > 0 && (
+              <fieldset className="ckind">
+                <legend>채널 종류</legend>
+                {kinds.map((choice) => (
+                  <label key={choice.kind} htmlFor={`kind-${choice.kind}`}>
+                    <input
+                      id={`kind-${choice.kind}`}
+                      type="radio"
+                      name="channel-kind"
+                      value={choice.kind}
+                      checked={newKind === choice.kind}
+                      onChange={() => setNewKind(choice.kind)}
+                    />
+                    <span className="kname">{choice.label}</span>
+                    <span className="khint">{choice.hint}</span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
             <button type="submit" id="add-channel" disabled={newName.trim() === '' || sending}>
               채널 만들기
             </button>

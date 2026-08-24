@@ -4614,6 +4614,34 @@ def list_reaction_choices(user: CurrentUser) -> list[ReactionChoice]:
     ]
 
 
+class ChannelKindChoice(BaseModel):
+    kind: str
+    label: str
+    #: 무엇이 달라지는지 한 줄. 이름만 다르면 사람은 아무거나 고릅니다.
+    hint: str
+
+
+@app.get("/api/chat/channel-kinds", response_model=list[ChannelKindChoice])
+def list_channel_kind_choices(user: CurrentUser) -> list[ChannelKindChoice]:
+    """만들 수 있는 채널 종류 전부 (CHANNEL-001·002).
+
+    ⚠️ **화면이 이 표를 자기 안에 두면 안 됩니다** — `/api/chat/reactions`
+    와 같은 이유입니다. 두 벌이 되면 반드시 한쪽만 고쳐집니다.
+
+    ⚠️ 이 갈래가 없던 동안 **화면에는 종류를 고를 자리가 아예 없었고**
+    `kind: 'text'` 가 박혀 있었습니다 (결함 360). 서버는 처음부터 둘 다
+    받았고 화면은 둘 다 그렸는데, 만드는 자리만 하나였습니다.
+    """
+    return [
+        ChannelKindChoice(
+            kind=str(kind),
+            label=vocab.CHANNEL_LABEL[kind],
+            hint=vocab.CHANNEL_HINT[kind],
+        )
+        for kind in vocab.ChannelKind
+    ]
+
+
 @app.get("/api/projects/{project_id}/channels", response_model=list[ChannelOut])
 def list_channels(
     project_id: int, session: DbSession, user: CurrentUser
