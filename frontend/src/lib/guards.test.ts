@@ -9073,3 +9073,115 @@ describe('채널 종류를 화면이 고른다', () => {
     );
   });
 });
+
+describe('점수에 안 들어가는 발언 유형이 실제로 다르게 그려진다 (결함 361)', () => {
+  /* `review/labels.ts` 의 `ZERO_SCORE` 는 「맞장구·기타는 점수에 안
+     들어간다」는 판단이고, 두 뿌리 다 그 값을 받아 클래스를 붙입니다.
+     붙이기까지는 둘 다 했는데 **SPA 에서는 아무 일도 안 일어났습니다** —
+     `.tally--zero { color: var(--c-ink-muted) }` 인데 그 줄이 담긴
+     `.disc__body` 가 이미 `--c-ink-muted` 라, 있던 색을 그대로 다시
+     칠하고 있었습니다. 열세 줄이 두 테마에서 전부 같은 색이었고, 하필
+     그 회의에서 제일 큰 숫자가 「기타 5」였습니다.
+
+     ⚠️ **낱말이 아니라 요구를 잽니다.** `.tally--zero` 라는 글자가
+     있는지가 아니라, **그 규칙이 물려받는 색과 다른 색을 내는가**를
+     봅니다 — 글자만 세면 이 결함은 초록입니다(결함 164 의 「심었는데
+     아무 일도 안 일어난 것」이 CSS 에서 난 것입니다).
+
+     ⚠️ **뿌리마다 따로 걷습니다** — 레거시는 처음부터 맞았고 SPA 만
+     틀렸습니다. 합쳐서 세면 한쪽이 다른 쪽을 덮습니다. */
+
+  const WEBAPP = join(ROOT, '..', 'webapp', 'src');
+
+  const stripCss = (source: string): string => source.replace(/\/\*[\s\S]*?\*\//g, '');
+
+  /** `선택자 { … }` 블록에서 `color:` 값을 꺼낸다. 없으면 `null`. */
+  function colorOf(css: string, selector: string): string | null {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // 선택자가 쉼표 묶음의 **어디에 있든** 잡습니다 — 첫 줄만 보면
+    // 묶음의 둘째 줄에 있는 것을 통째로 놓칩니다.
+    const re = new RegExp(`(?:^|[,{}])\\s*[^{}]*?${escaped}(?![-\\w])[^{}]*\\{([^}]*)\\}`, 'm');
+    const block = re.exec(css);
+    const body = block?.[1];
+    if (body === undefined) return null;
+    const decl = /(?:^|;)\s*color\s*:\s*([^;}]+)/.exec(body);
+    return decl?.[1]?.trim() ?? null;
+  }
+
+  /** 같은 블록에서 `font-weight:` 값을 꺼낸다. 없으면 `null`. */
+  function weightOf(css: string, selector: string): string | null {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?:^|[,{}])\\s*[^{}]*?${escaped}(?![-\\w])[^{}]*\\{([^}]*)\\}`, 'm');
+    const block = re.exec(css);
+    const body = block?.[1];
+    if (body === undefined) return null;
+    const decl = /(?:^|;)\s*font-weight\s*:\s*([^;}]+)/.exec(body);
+    return decl?.[1]?.trim() ?? null;
+  }
+
+  it('⭐ 레거시 — 0점 줄의 색이 보통 줄과 다르다', () => {
+    const css = stripCss(readFileSync(join(ROOT, 'public', 'review.html'), 'utf8'));
+    const normal = colorOf(css, '.tname');
+    const zero = colorOf(css, '.tzero .tname');
+    ok(normal !== null, '.tname 의 색 규칙이 없습니다');
+    ok(zero !== null, '.tzero .tname 의 색 규칙이 없습니다');
+    ok(
+      normal !== zero,
+      `0점 줄이 보통 줄과 같은 색입니다 — 둘 다 ${String(zero)} 입니다`,
+    );
+  });
+
+  it('⭐ SPA — 0점 줄의 색이 그 줄이 물려받는 색과 다르다', () => {
+    const css = stripCss(readFileSync(join(WEBAPP, 'app.css'), 'utf8'));
+    // `.tally` 는 스스로 색을 안 정하고 `.disc__body` 에서 물려받습니다.
+    const inherited = colorOf(css, '.disc__body');
+    const zero = colorOf(css, '.tally--zero');
+    ok(inherited !== null, '.disc__body 의 색 규칙이 없습니다 — 물려받는 자리가 바뀌었습니다');
+    ok(zero !== null, '.tally--zero 의 색 규칙이 없습니다');
+    ok(
+      inherited !== zero,
+      `0점 줄이 물려받는 색을 그대로 다시 칠합니다 — 둘 다 ${String(zero)} 입니다`,
+    );
+  });
+
+  it('⭐ 신호가 색 하나가 아니다 — 고대비에서도 남는다', () => {
+    /* `forced-colors: active` 는 **색을 전부 덮습니다.** 색만으로 「안
+       세는 것」을 표시하면 고대비에서 열세 줄이 같은 검정이 되고 구별이
+       사라집니다 — 실제로 재 보니 SPA 가 그랬고, 레거시는 숫자의 **무게**
+       까지 떨어뜨려서 살아남았습니다(400 vs 600).
+
+       ⚠️ 그러니 뿌리마다 **무게가 갈리는지**를 봅니다. 색을 재는 위 두
+       검사와 **다른 축**입니다 — 한 축만 재면 다른 축이 죽은 것을
+       못 봅니다(결함 280 이 대화상자에서 적어 둔 그것). */
+    const cases: Array<[string, string, string, string]> = [
+      ['레거시', join(ROOT, 'public', 'review.html'), '.tnum', '.tzero .tname, .tzero .tnum'],
+      ['SPA', join(WEBAPP, 'app.css'), '.tally .num', '.tally--zero .num'],
+    ];
+    for (const [name, file, countedSel, zeroSel] of cases) {
+      const css = stripCss(readFileSync(file, 'utf8'));
+      const counted = weightOf(css, countedSel);
+      const zero = weightOf(css, zeroSel);
+      ok(counted !== null, `${name}: ${countedSel} 에 무게가 없습니다`);
+      ok(zero !== null, `${name}: ${zeroSel} 에 무게가 없습니다`);
+      ok(
+        counted !== zero,
+        `${name}: 0점 줄과 보통 줄의 무게가 같습니다(${String(zero)}) — 고대비에서 신호가 사라집니다`,
+      );
+    }
+  });
+
+  it('⭐ 두 뿌리가 **다** 그 판단을 화면에 붙인다', () => {
+    /* 한쪽만 붙이면 나머지 한쪽에서는 「안 세는 것」이 「세는 것」과
+       구별이 안 됩니다. 「부르는가」를 뿌리마다 셉니다. */
+    const roots: Array<[string, string]> = [
+      ['레거시', readFileSync(join(ROOT, 'src', 'demo', 'review.tsx'), 'utf8')],
+      ['SPA', readFileSync(join(WEBAPP, 'screens', 'Review.tsx'), 'utf8')],
+    ];
+    for (const [name, source] of roots) {
+      ok(
+        /row\.zero\s*\?/.test(source),
+        `${name} 화면이 0점 여부를 안 쓰고 있습니다`,
+      );
+    }
+  });
+});
