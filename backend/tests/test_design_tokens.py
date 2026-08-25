@@ -1077,3 +1077,54 @@ def test_being_late_is_never_painted_as_blame(spa: str):
                 "SPA 의 「긴급」 칩이 위험색을 씁니다 — 그 규칙 옆에 "
                 "「빨강이 아니라 황토」라고 적혀 있습니다"
             )
+
+
+def test_the_uncertainty_dots_survive_forced_colors() -> None:
+    """⭐ 「점 하나가 4%p」라고 적으면 고대비에서도 **점이 보여야** 한다.
+
+    ## ⛔ 점 열여섯이 통째로 사라졌습니다 (결함 393)
+
+    `.unc-dots i` 는 `background: var(--gap)` 하나로 그려집니다. 그런데
+    `forced-colors: active`(고대비)는 채움을 **시스템 배경색으로 덮습니다** —
+    밝은 쪽에서는 흰 바탕에 흰색, 다크에서는 검은 바탕에 검은색이라 하나도
+    안 보였습니다. 브라우저로 재서 확인했습니다:
+
+        고대비        점 rgb(255,255,255) · body rgb(255,255,255)
+        고대비+다크    점 rgb(0,0,0)       · body rgb(0,0,0)
+
+    바로 옆 문구는 「모르는 폭 20%p · **점 하나가 4%p**」입니다.
+    `lib/contribution/view.ts` 가 그 자리에 「점을 안 찍는데 "점 하나가
+    4%p" 라고 적으면 없는 그림을 설명합니다」라고 적어 두고 **개수가 0인
+    경우만** 막고 있었습니다 — 고대비는 개수가 열여섯인데 **안 보이는**
+    경우입니다.
+
+    ⚠️ 색이 뜻을 나르는 것이 아닙니다. 뜻은 **개수**이고(「값은 글자로,
+    그림은 폭이나 개수만」), 고대비에서도 개수는 셀 수 있어야 합니다.
+
+    ⚠️ 이 검사가 **못 보는 것**: 다른 화면의 작은 그림들. 같은 회차에
+    전수로 세어 보니 채움만으로 그려지는 것이 더 있는데(레일 상태 점 ·
+    SPA 리본 · 검토 타임라인 점), 그것들은 **뜻이 같은 줄의 글자에**
+    있어서 사라져도 사실이 안 없어집니다 — 결함 350 이 레일 점에 대해
+    「값이 아니라 장식」이라고 적어 둔 그것입니다.
+    """
+    html = (
+        Path(__file__).resolve().parents[2] / "frontend" / "public" / "contributions.html"
+    ).read_text(encoding="utf-8")
+
+    assert ".unc-dots i" in html, "점 규칙이 없습니다 — 이 검사가 낡았습니다"
+    forced = re.search(
+        r"@media\s*\(\s*forced-colors:\s*active\s*\)\s*\{(?P<body>[^}]*\{[^}]*\}[^}]*)\}",
+        html,
+    )
+    assert forced is not None, (
+        "고대비 규칙이 없습니다 — 채움만으로 그린 점은 고대비에서 배경색으로 "
+        "덮여 사라지는데, 옆 문구는 「점 하나가 4%p」라고 그 그림을 가리킵니다 "
+        "(결함 393)"
+    )
+    body = forced.group("body")
+    assert ".unc-dots i" in body, f"고대비 규칙이 점을 안 다룹니다: {body[:120]}"
+    # 시스템 색 이름만 안 덮입니다 — 토큰이나 hex 를 적으면 그대로 사라집니다.
+    assert re.search(r"background:\s*(CanvasText|LinkText|Highlight)\b", body), (
+        f"고대비 규칙이 시스템 색이 아닌 값을 씁니다: {body[:120]} — "
+        "`var(--gap)` 이나 hex 는 그 모드에서 다시 덮입니다"
+    )

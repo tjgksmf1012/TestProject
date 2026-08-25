@@ -108,6 +108,28 @@
               margin-top: var(--sp-4); max-width: 11rem; }
   .unc-dots i { width: var(--sp-2); height: var(--sp-2); border-radius: var(--r-round);
                 background: var(--gap); }
+
+  /* ⛔ **고대비에서 점이 통째로 사라졌습니다** (결함 393).
+     `forced-colors: active` 는 채움을 시스템 배경색으로 덮습니다 — 점 열여섯이
+     밝은 쪽에서는 흰 바탕에 흰색, 다크에서는 검은 바탕에 검은색이 되어
+     **하나도 안 보였습니다.** 그런데 바로 옆 문구는 「모르는 폭 20%p ·
+     **점 하나가 4%p**」라고 그 그림을 가리킵니다.
+
+     `lib/contribution/view.ts` 가 그 자리에 이렇게 적어 두고 있었습니다 —
+     「점을 안 찍는데 "점 하나가 4%p" 라고 적으면 없는 그림을 설명합니다」.
+     그 함수는 **개수가 0일 때**를 막고 있었고, 고대비는 개수가 열여섯인데
+     **안 보이는** 경우라 그 자에 안 걸렸습니다.
+
+     시스템 색 이름은 안 덮이므로 그것으로 다시 세웁니다. `CanvasText` 는
+     그 모드의 **글자색**이라 바탕과 대비가 보장됩니다 — 새 hex 를 만드는
+     것이 아닙니다(팔레트 규칙 그대로).
+
+     ⚠️ 색은 여기서 뜻을 나르지 않습니다. 뜻은 **개수**이고(「값은 글자로,
+     그림은 폭이나 개수만」), 고대비에서도 개수는 그대로 셀 수 있어야
+     합니다. */
+  @media (forced-colors: active) {
+    .unc-dots i { background: CanvasText; }
+  }
   .unc-note { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-2) 0 0; }
   .unc-none { font-size: var(--fs-caption); color: var(--text-subtle); margin: var(--sp-4) 0 0; }
 
