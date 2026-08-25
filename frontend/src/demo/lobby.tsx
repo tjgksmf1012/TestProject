@@ -766,11 +766,22 @@ function Lobby() {
             있으면, 화면이 가장 크게 가리키는 곳이 **이제 할 일이 아닌
             곳**입니다. 청록은 한 번에 하나만 켭니다. */}
         <div className="act-main">
+          {/* ⚠️ 진짜 `disabled` 가 아니라 `aria-disabled` 입니다 (결함 374).
+              진짜 `disabled` 는 **초점을 못 받습니다** — 씨앗의 다섯 회의
+              **전부**에서 이 단추는 막혀 있었고, Tab 으로는 한 번도 닿지
+              않았습니다. 즉 키보드·낭독기만 쓰는 사람은 「전원 동의 후
+              시작할 수 있습니다」라는 말을 **영영 못 듣습니다.** SPA 는
+              결함 219 에서 이미 고쳐 두었습니다(`aria-disabled` + `tabIndex`).
+              ⚠️ 막는 이유는 **라벨 자신**이라 따로 가리킬 칸이 없습니다 —
+              닿기만 하면 들립니다. */}
           <button
             id="record"
             className={reviewReady ? '' : 'primary'}
-            disabled={!affordance.enabled}
-            onClick={() => (location.href = `/index.html?meeting=${meetingId}`)}
+            aria-disabled={!affordance.enabled}
+            onClick={() => {
+              if (!affordance.enabled) return;
+              location.href = `/index.html?meeting=${meetingId}`;
+            }}
           >
             {affordance.label}
           </button>
@@ -778,8 +789,11 @@ function Lobby() {
               전원의 동의가 있어야 시작할 수 있습니다 (docs/07 L1). */}
           <button
             id="call"
-            disabled={!affordance.enabled}
-            onClick={() => (location.href = `/call.html?meeting=${meetingId}`)}
+            aria-disabled={!affordance.enabled}
+            onClick={() => {
+              if (!affordance.enabled) return;
+              location.href = `/call.html?meeting=${meetingId}`;
+            }}
           >
             {affordance.callLabel}
           </button>

@@ -9664,6 +9664,63 @@ describe('화면이 덧칠한 버튼도 **막힌 모양**을 갖는다 (결함 3
   });
 });
 
+describe('로비의 녹음·통화 게이트는 **닿을 수 있다** (결함 374)', () => {
+  /* 레거시는 `disabled={!affordance.enabled}` 였습니다. 씨앗의 다섯 회의
+     **전부**에서 이 단추는 막혀 있고, Tab 으로는 한 번도 안 닿았습니다 —
+     즉 「전원 동의 후 시작할 수 있습니다」·「이미 끝난 회의입니다」라는
+     말을 키보드·낭독기만 쓰는 사람은 **영영 못 듣습니다.** SPA 는 결함
+     219 에서 같은 자리를 이미 고쳤습니다(`aria-disabled` + `tabIndex`).
+
+     ⚠️ 이 자가 **못 보는 것**: 막는 판단(`recordAffordance`)이 맞는지는
+     안 봅니다 — 그건 `room.test.ts` 가 봅니다. 여기서는 **닿는가**와
+     **누르면 되돌아가는가**만 봅니다. */
+
+  const SCREENS: Array<[string, string, RegExp]> = [
+    ['레거시', join(DEMO, 'lobby.tsx'), /id="record"[\s\S]{0,400}?\/>|id="record"[\s\S]{0,600}?<\/button>/],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx'), /canGoRecord[\s\S]{0,800}?tabIndex/],
+  ];
+
+  it('⭐ 두 뿌리의 로비 화면을 **둘 다** 보고 있다', () => {
+    const missing = SCREENS.filter(([, f]) => !existsSync(f)).map(([n]) => n);
+    deepStrictEqual(missing, [], `로비 화면을 못 찾았습니다: ${missing.join(', ')}`);
+  });
+
+  it('⭐ 녹음·통화가 **진짜 `disabled` 로 막히지 않는다**', () => {
+    const offenders: string[] = [];
+    for (const [name, file] of SCREENS) {
+      if (!existsSync(file)) continue;
+      const code = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+        .replace(/(?<![:\w])\/\/[^\n]*/g, ' ');
+      /* 막는 값이 `disabled` 에 들어가면 초점을 잃습니다. 이름을 세지 않고
+         **막는 값이 어디에 쓰였는가**를 봅니다. */
+      const gate = name === '레거시' ? 'affordance\\.enabled' : 'canGoRecord';
+      const hard = new RegExp(`(?<!aria-)\\bdisabled=\\{[^}]*${gate}`).test(code);
+      if (hard) offenders.push(`${name}: 막는 값이 진짜 disabled 에 들어갑니다 — 키보드가 못 닿습니다`);
+      const soft = new RegExp(`aria-disabled=\\{[^}]*${gate}`).test(code);
+      if (!soft) offenders.push(`${name}: 막힘을 aria-disabled 로 그리지 않습니다`);
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      `막힌 녹음·통화 단추에 키보드가 못 닿습니다:\n  ${offenders.join('\n  ')}`,
+    );
+  });
+
+  it('⭐ 막혔을 때 **누르면 되돌아간다** — 그리기만 하면 요청이 나갑니다', () => {
+    const code = readFileSync(join(DEMO, 'lobby.tsx'), 'utf8');
+    /* `aria-disabled` 는 낭독기에게 하는 말일 뿐입니다. 손이 그 값을 보고
+       되돌아가지 않으면 막힌 단추가 그냥 눌립니다(결함 280·365). */
+    const guarded = code.match(/if\s*\(!affordance\.enabled\)\s*return;/g) ?? [];
+    strictEqual(
+      guarded.length,
+      2,
+      `녹음·통화 둘 다 되돌아가야 합니다 — 지금 ${guarded.length}곳`,
+    );
+  });
+});
+
 describe('막힌 「업무로 등록」은 **닿을 수 있고 왜인지 말한다** (결함 373)', () => {
   /* 레거시는 `disabled={blockers.length > 0}` 이었습니다. 진짜 `disabled`
      는 **초점을 못 받습니다** — 문서를 한 바퀴(Tab 56번) 돌아도 막힌
