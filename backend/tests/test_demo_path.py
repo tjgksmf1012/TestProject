@@ -1266,3 +1266,49 @@ def test_the_pending_candidate_can_still_be_approved(seeded: dict):
         "승인 대기 후보의 마감이 과거입니다 — 서버가 「마감일이 과거입니다」로 "
         f"막아 시연의 승인 장면이 안 돕니다 (결함 388): {stale}"
     )
+
+
+def test_the_seed_makes_name_order_visible(seeded: dict):
+    """⭐ 씨앗의 **이름 순 · 번호 순 · 점수 순**이 서로 갈린다.
+
+    불변식 ①은 「목록은 이름 순. 점수 순 정렬 금지」입니다. 그런데 그것을
+    **화면에서 확인할 수 있으려면** 세 순서가 갈라져야 합니다 — 이름 순과
+    번호 순이 같은 명단이면 화면이 `orderForDisplay` 를 통째로 빼먹어도
+    그대로 통과합니다(결함 327 이 가중치에서, 348 이 우선순위에서 겪은
+    그것). 실제로 오래도록 그랬습니다: 예전 씨앗에서 서버가 내려보내는
+    번호 순이 **하필 점수 내림차순**이었습니다.
+
+    지금은 갈립니다 —
+
+        번호 순  김민수(1) · 이하늘(2) · 박지원(3)
+        이름 순  김민수 · 박지원 · 이하늘        ← 화면이 그리는 순서
+        점수 순  이하늘 · 김민수 · 박지원
+
+    ⚠️ **점수는 재서 봅니다.** 씨앗의 이벤트 배치가 바뀌면 다시 겹칠 수
+    있고, 겹치는 순간 이 검사가 먼저 웁니다 — 그때 고칠 것은 화면이 아니라
+    **씨앗**입니다.
+    """
+    from teamflow.services import scoring_service
+
+    with db_session.session_scope() as session:
+        members = session.scalars(select(m.Member).where(m.Member.project_id == 1)).all()
+        people = {
+            member.user_id: session.get(m.User, member.user_id).name for member in members
+        }
+        scored = scoring_service.compute(session, project_id=1)
+
+    by_id = sorted(people)
+    by_name = sorted(people, key=lambda uid: people[uid])
+    # ⚠️ `TeamScoreResult.members` 는 **dict** 입니다 (`{user_id: MemberScore}`).
+    shares = {uid: row.share for uid, row in scored.members.items()}
+    by_score = sorted(shares, key=lambda uid: -shares[uid])
+
+    assert len(by_id) >= 3, f"씨앗 팀원이 {len(by_id)}명입니다 — 이 검사가 낡았습니다"
+    assert by_name != by_id, (
+        f"이름 순과 번호 순이 같습니다: {[people[u] for u in by_name]} — 화면이 "
+        "이름 순으로 세우는지 **구조적으로** 확인할 수 없습니다 (불변식 ①)"
+    )
+    assert by_score != by_name, (
+        f"점수 순과 이름 순이 같습니다: 점수 {shares} — 리더보드를 그려도 "
+        "이름 순처럼 보입니다 (불변식 ①)"
+    )
