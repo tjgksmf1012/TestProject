@@ -220,6 +220,47 @@ describe('한 칸 안의 것', () => {
     const cells = monthGrid(2026, 9, []);
     ok(!dayAriaLabel(cells.find((c) => c.date === '2026-09-11')!, '2026-09-10').includes('오늘'));
   });
+
+  /*
+   * 결함 407 — 이웃 달 칸도 **귀로** 갈라져야 합니다.
+   *
+   * 결함 400 이 눈(고대비·흐린 색)을 고치면서 「귀 쪽은 안 고쳤습니다 —
+   * 다음 실마리」로 끝냈습니다. 브라우저로 재 보니 8월 격자의 이웃 달 칸
+   * **열하나 전부**가 이 달의 어느 칸과 글자까지 똑같이 읽혔습니다.
+   */
+  it('⭐ 이웃 달 칸은 달을 함께 읽는다 — 같은 격자에 같은 숫자가 둘', () => {
+    const cells = monthGrid(2026, 8, []);
+    const dup: string[] = [];
+    const labels = new Map<string, boolean>(); // 이름표 → inMonth
+    for (const cell of cells) {
+      const label = dayAriaLabel(cell, '2026-08-26');
+      const seen = labels.get(label);
+      if (seen !== undefined && seen !== cell.inMonth) dup.push(label);
+      labels.set(label, cell.inMonth);
+    }
+    deepStrictEqual(
+      dup,
+      [],
+      `이 달 칸과 이웃 달 칸이 귀로 같습니다: ${dup.join(', ')}`,
+    );
+  });
+
+  it('⭐ 이 달 칸에는 달을 안 붙인다 — 머리줄이 이미 말합니다', () => {
+    const cells = monthGrid(2026, 8, []);
+    const inMonth = cells.filter((c) => c.inMonth);
+    strictEqual(inMonth.length, 31);
+    const withMonth = inMonth
+      .map((c) => dayAriaLabel(c, '2026-08-26'))
+      .filter((l) => /월\s/.test(l));
+    deepStrictEqual(withMonth, [], `이 달 칸이 달을 되풀이합니다: ${withMonth.join(', ')}`);
+  });
+
+  it('⭐ 오늘이 이웃 달 칸이어도 둘 다 말한다', () => {
+    const cells = monthGrid(2026, 8, []);
+    const sep1 = cells.find((c) => c.date === '2026-09-01');
+    ok(sep1 !== undefined && !sep1.inMonth);
+    strictEqual(dayAriaLabel(sep1, '2026-09-01'), '9월 1일, 오늘');
+  });
 });
 
 describe('비어 있을 때 할 말 (결함 294)', () => {

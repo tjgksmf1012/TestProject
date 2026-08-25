@@ -231,7 +231,18 @@ export function dayAriaLabel(cell: DayCell, today: string): string {
      알 수 없었습니다: 이 이름표가 「26일」이라 「1일」과 모양이 같았습니다.
      같은 파일이 **고른 날**에는 `aria-current="date"` 를 붙이고 있었으니,
      안 붙어 있던 것은 오늘 쪽입니다. */
-  const day = cell.date === today ? `${cell.day}일, 오늘` : `${cell.day}일`;
+  /* ⛔ **이웃 달 칸도 귀로 갈라져야 합니다** (결함 407). 8월 격자에는
+     7월 27~31 과 9월 1~6 이 앞뒤로 붙고, 이 달에도 27~31 · 1~6 이
+     있습니다 — 재 보니 **열한 칸이 이 달의 어느 칸과 글자까지 똑같이**
+     읽혔습니다(「27일」 ↔ 「27일」). 눈으로는 결함 400 이 흐린 색으로
+     갈라 뒀지만 색은 귀에 안 옵니다.
+
+     ⚠️ **이 달 칸에는 달을 안 붙입니다** — 머리줄이 이미 「2026년 8월」
+     이라고 말하고, 서른한 번 되풀이하면 그 말이 배경이 됩니다
+     (`docs/22` 처방 ①). 예외인 칸에만 붙입니다. */
+  const month = Number(cell.date.slice(5, 7));
+  const label = cell.inMonth ? `${cell.day}일` : `${month}월 ${cell.day}일`;
+  const day = cell.date === today ? `${label}, 오늘` : label;
   if (cell.items.length === 0) return day;
   return `${day}, ${cell.items.length}건 — ${cell.items
     .map((item) => `${describeKind(item.kind)} ${item.title}`)
