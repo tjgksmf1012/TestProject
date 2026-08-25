@@ -881,3 +881,91 @@ def period_builder_content(report_type: ReportType = ReportType.FINAL):
         ),
         report_type,
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 「처리를 마쳤다」에는 **두 얼굴**이 있습니다 (결함 369)
+# ══════════════════════════════════════════════════════════════
+
+
+def _minutes(**over):
+    base = dict(
+        meeting_title="DB 스키마 확정 논의",
+        status="needs_review",
+        capture_mode="multitrack",
+        started_at=datetime(2026, 9, 5, 1, 0, tzinfo=UTC),
+    )
+    base.update(over)
+    return minutes.build(minutes.MinutesInput(**base))
+
+
+def _empty_notes(content) -> list[str]:
+    return [b["empty_note"] for b in content["blocks"] if b["kind"] == "list" and not b["items"]]
+
+
+def test_minutes_do_not_assert_absence_when_nothing_was_transcribed():
+    """⭐ 소리가 하나도 안 잡힌 회의록이 「없었습니다」라고 단언하면 안 된다.
+
+    회의록은 **팀 밖으로 나가는 문서**입니다. 「미해결로 남은 사안이
+    없습니다」는 회의 내용에 대한 주장인데, 발화가 0건이면 그건 알 수
+    없는 것입니다 — 이 제품의 불변식(**측정 불가 ≠ 0점**)이 문장에도
+    그대로 걸립니다.
+    """
+    silent = _minutes(utterance_count=0)
+    notes = _empty_notes(silent)
+    assert len(notes) == 3, f"빈 목록이 셋이어야 합니다: {notes}"
+    for note in notes:
+        assert "없습니다" not in note or "확인할 수 없습니다" in note, (
+            f"발화가 0건인데 없었다고 단언합니다: {note!r}"
+        )
+
+    # 왜 확인할 수 없는지는 **한 번** 말합니다 — 사실 줄과 요약 자리에서.
+    facts = next(b for b in silent["blocks"] if b["kind"] == "facts")
+    assert any(f["label"] == "기록된 발화" and f["value"] == "0건" for f in facts["items"]), (
+        f"이 문서가 무엇을 근거로 쓰였는지 안 적습니다: {facts['items']}"
+    )
+    gaps = [b["text"] for b in silent["blocks"] if b["kind"] == "gap"]
+    assert any("기록되지 않아" in g for g in gaps), gaps
+
+
+def test_minutes_still_say_none_when_the_meeting_was_heard():
+    """⭐ 발화가 있는데 결과가 없으면 그건 **진짜 없는** 것이다."""
+    heard = _minutes(utterance_count=12)
+    notes = _empty_notes(heard)
+    assert notes == [
+        "다음 안건으로 잡힌 것이 없습니다.",
+        "미해결로 남은 사안이 없습니다.",
+        "회의에서 뽑힌 업무 후보가 없습니다.",
+    ], notes
+
+
+def test_minutes_never_guess_when_the_count_was_not_measured():
+    """⭐ 안 센 것은 0 이 아니다 — 옛 부름은 옛 문장 그대로.
+
+    ⚠️ `utterance_count` 의 기본값을 0 으로 두면, 안 넘긴 자리가 전부
+    「소리가 하나도 안 잡혔다」가 되어 **멀쩡한 회의록이 그렇게 나갑니다.**
+    """
+    unknown = _minutes()
+    assert _empty_notes(unknown) == _empty_notes(_minutes(utterance_count=12))
+    facts = next(b for b in unknown["blocks"] if b["kind"] == "facts")
+    assert not any(f["label"] == "기록된 발화" for f in facts["items"]), (
+        "안 센 값을 사실처럼 적습니다"
+    )
+
+
+def test_every_processed_branch_has_its_own_sentence():
+    """⭐ 갈래를 세고 **그 개수만큼** 문장이 있는가 (결함 326·365·369).
+
+    빈 목록 옆 문구가 갈래마다 달라야 합니다. 두 갈래가 같은 글자를 받으면
+    읽는 사람은 둘을 구별할 방법이 없습니다.
+    """
+    cases = {
+        "아직 처리 안 함": _minutes(status="pending", utterance_count=0),
+        "처리했고 소리 없음": _minutes(status="needs_review", utterance_count=0),
+        "처리했고 들림": _minutes(status="needs_review", utterance_count=12),
+    }
+    seen: dict[tuple[str, ...], str] = {}
+    for name, content in cases.items():
+        key = tuple(_empty_notes(content))
+        assert key not in seen, f"{name} 와 {seen[key]} 가 같은 문장을 받습니다: {key}"
+        seen[key] = name

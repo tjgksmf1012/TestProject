@@ -567,3 +567,40 @@ def test_the_note_only_appears_when_something_really_is_unprocessed(
         assert f"{total - processed}건" in note, (
             f"설명의 숫자가 사실과 다릅니다 — {total}−{processed} 인데 「{note}」"
         )
+
+
+def test_the_service_counts_the_utterances_it_hands_the_builder(
+    client: TestClient, seeded, db: Session
+):
+    """⭐ 소리가 하나도 안 잡힌 회의의 회의록이 **API 를 통과한 뒤에도**
+    없었다고 단언하지 않는가 (결함 369).
+
+    ⚠️ 생성기만 보면 놓칩니다. 실제로 놓쳤습니다 — builder 는 갈래를 제대로
+    가르는데 **서비스가 개수를 안 넘기면** 아무 일도 안 일어나고, 검사
+    셋이 전부 초록이었습니다(대표 실패 ①). 여기서는 서비스가 **세어서
+    넘기는가**를 봅니다.
+    """
+    silent = m.Meeting(
+        project_id=seeded["project_id"],
+        title="아무 말도 안 잡힌 회의",
+        started_at=NOW,
+        duration_sec=600,
+        status=m.MeetingStatus.NEEDS_REVIEW.value,
+        started_by=seeded["user_ids"][0],
+    )
+    db.add(silent)
+    db.commit()
+    db.refresh(silent)
+
+    content = client.post(f"/api/meetings/{silent.id}/minutes").json()["content"]
+    facts = next(b for b in content["blocks"] if b["kind"] == "facts")
+    assert any(f["label"] == "기록된 발화" and f["value"] == "0건" for f in facts["items"]), (
+        f"서비스가 발화 수를 안 넘겼습니다: {facts['items']}"
+    )
+    notes = [b["empty_note"] for b in content["blocks"] if b["kind"] == "list" and not b["items"]]
+    assert notes and all(n == "확인할 수 없습니다." for n in notes), notes
+
+    # 발화가 있는 회의는 그대로 「없습니다」 — 그건 진짜 없는 것입니다.
+    heard = client.post(f"/api/meetings/{seeded['meeting_id']}/minutes").json()["content"]
+    heard_facts = next(b for b in heard["blocks"] if b["kind"] == "facts")
+    assert any(f["label"] == "기록된 발화" for f in heard_facts["items"]), heard_facts["items"]

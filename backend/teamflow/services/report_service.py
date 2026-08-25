@@ -145,6 +145,21 @@ def generate_minutes(session: Session, meeting_id: int) -> m.Report:
         ],
         tracks_total=len(tracks),
         tracks_broken=sum(1 for t in tracks if t.status in _BROKEN_TRACK),
+        # ⚠️ **세어서 넘깁니다** (결함 369). 안 넘기면 builder 는 「모른다」로
+        #    두고 옛 문장을 그대로 씁니다 — 소리가 하나도 안 잡힌 회의의
+        #    회의록이 「미해결로 남은 사안이 없습니다」라고 단언합니다.
+        utterance_count=session.scalar(
+            select(func.count())
+            .select_from(m.Utterance)
+            .where(m.Utterance.meeting_id == meeting.id)
+        )
+        or 0,
+        # ⚠️ **세어서 넘깁니다** (결함 369). 안 넘기면 builder 는 「모른다」로
+        #    두고 옛 문장을 그대로 씁니다 — 소리가 하나도 안 잡힌 회의의
+        #    회의록이 「미해결로 남은 사안이 없습니다」라고 단언합니다.
+        # ⚠️ **세어서 넘깁니다** (결함 369). 안 넘기면 builder 는 「모른다」로
+        #    두고 옛 문장을 그대로 씁니다 — 소리가 하나도 안 잡힌 회의의
+        #    회의록이 「미해결로 남은 사안이 없습니다」라고 단언합니다.
     )
 
     return _upsert(

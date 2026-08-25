@@ -64,6 +64,12 @@ class MinutesInput:
     #: 트랙(사람별 녹음) 총 개수와 그중 **온전하지 않은** 것.
     tracks_total: int = 0
     tracks_broken: int = 0
+    #: 이 회의에서 **기록된 발화 수**. `None` 은 「안 셌다」이고 0 이 아닙니다.
+    #:
+    #: ⚠️ **기본값을 0 으로 두면 안 됩니다** (결함 369). 안 넘긴 자리가
+    #: 전부 「소리가 하나도 안 잡혔다」가 되어, 멀쩡한 회의록이 그렇게
+    #: 나갑니다 — 이 제품의 불변식(**측정 불가 ≠ 0점**)이 그대로 걸립니다.
+    utterance_count: int | None = None
 
 
 _DECISION_LABEL = {
@@ -158,6 +164,25 @@ def build(data: MinutesInput) -> dict[str, Any]:
     """회의록 내용을 만든다. 순수 함수 — 데이터베이스를 모릅니다."""
     state = state_of(data.status)
     unprocessed = state == "unprocessed"
+    # ⛔ **「처리를 마쳤다」에는 두 얼굴이 있습니다** (결함 369).
+    #    사람들이 이야기했고 결과가 이런 것과, **소리가 하나도 안 잡힌 것.**
+    #    뒤엣것에게 「미해결로 남은 사안이 없습니다」는 알 수 없는 것을
+    #    단언하는 말입니다 — 이 문서는 팀 밖으로 나갑니다.
+    no_transcript = state == "processed" and data.utterance_count == 0
+
+    def empty_note(when_processed: str) -> str:
+        """빈 목록 옆에 적을 말. **갈래 수만큼 문장이 있어야 합니다.**"""
+        if unprocessed:
+            return "아직 회의를 처리하지 않았습니다."
+        if no_transcript:
+            # 「없었다」가 아니라 **「알 수 없다」**입니다.
+            #
+            # ⚠️ 짧게 적습니다 — 왜 확인할 수 없는지는 바로 위 사실 줄
+            #    (「기록된 발화 0건」)과 요약 자리가 이미 말합니다. 세 번
+            #    되풀이하면 읽는 사람이 문서를 훑지 못합니다(결함 366 에서
+            #    같은 것을 렌더해 보고 알았습니다).
+            return "확인할 수 없습니다."
+        return when_processed
 
     # ⛔ 예전에는 `f"{data.started_at:%Y-%m-%d %H:%M}"` 였습니다 (결함 290).
     #    서버가 들고 있는 값은 UTC 라, 같은 회의를 화면은 19:00 · 문서는
@@ -193,6 +218,17 @@ def build(data: MinutesInput) -> dict[str, Any]:
                     _CAPTURE_LABEL.get(data.capture_mode, data.capture_mode),
                 ),
             ]
+            # ⚠️ **이 문서가 무엇을 근거로 쓰였는지**를 한 줄로 적습니다
+            #    (결함 369). 처리를 마친 회의에만 답니다 — 아직 처리 전이면
+            #    개수는 「아직 0」이라 사실이 아닙니다.
+            #
+            # ⚠️ `gap=True` 가 아닙니다. **0 은 못 잰 값이 아니라 잰 0**
+            #    입니다 — 셌더니 하나도 없었다는 사실입니다.
+            + (
+                [blocks.fact("기록된 발화", f"{data.utterance_count}건")]
+                if data.utterance_count is not None and not unprocessed
+                else []
+            )
         )
     ]
 
@@ -202,6 +238,10 @@ def build(data: MinutesInput) -> dict[str, Any]:
         body.append(blocks.paragraph(data.summary))
     elif unprocessed:
         body.append(blocks.gap("아직 회의를 처리하지 않아 요약이 없습니다."))
+    elif no_transcript:
+        # ⚠️ **이유를 지어내지 않습니다.** 마이크가 꺼져 있었는지 아무도
+        #    말을 안 했는지는 여기서 알 수 없습니다 — 아는 것만 적습니다.
+        body.append(blocks.gap("오간 말이 하나도 기록되지 않아 요약이 없습니다."))
     else:
         body.append(blocks.gap("요약을 만들지 못했습니다."))
 
@@ -210,11 +250,7 @@ def build(data: MinutesInput) -> dict[str, Any]:
     body.append(
         blocks.bullets(
             data.next_agenda,
-            empty_note=(
-                "아직 회의를 처리하지 않았습니다."
-                if unprocessed
-                else "다음 안건으로 잡힌 것이 없습니다."
-            ),
+            empty_note=empty_note("다음 안건으로 잡힌 것이 없습니다."),
         )
     )
 
@@ -228,11 +264,7 @@ def build(data: MinutesInput) -> dict[str, Any]:
                 else issue.content
                 for issue in data.unresolved
             ],
-            empty_note=(
-                "아직 회의를 처리하지 않았습니다."
-                if unprocessed
-                else "미해결로 남은 사안이 없습니다."
-            ),
+            empty_note=empty_note("미해결로 남은 사안이 없습니다."),
         )
     )
 
@@ -248,11 +280,7 @@ def build(data: MinutesInput) -> dict[str, Any]:
                 f"{c.title} — {_DECISION_LABEL.get(c.decision, c.decision)}"
                 for c in data.candidates
             ],
-            empty_note=(
-                "아직 회의를 처리하지 않았습니다."
-                if unprocessed
-                else "회의에서 뽑힌 업무 후보가 없습니다."
-            ),
+            empty_note=empty_note("회의에서 뽑힌 업무 후보가 없습니다."),
         )
     )
 
