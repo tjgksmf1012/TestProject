@@ -27,6 +27,7 @@ import {
   whyCannotSubmitBatch,
   type ReviewContext,
   type ReviewSummary,
+  confidenceReading,
 } from './review/candidates.ts';
 import {
   describeMissingSummary,
@@ -10379,5 +10380,84 @@ describe('결함 394 — 끊긴 자리는 **글자로도** 있다 (마우스 전
       !/툴팁에 씁니다\s*\./.test(head) || /툴팁 전용이 아닙니다/.test(head),
       '`describeGap` 주석이 아직 「툴팁에 씁니다」로 끝납니다 — 그 말이 결함 394 를 만들었습니다',
     );
+  });
+});
+
+describe('결함 395 — 확신도 알약이 **축 이름을 글자로** 단다', () => {
+  /* ## ⛔ `34%` 하나만 그리고 「AI 확신도」는 `title` 에 있었습니다
+   *
+   * 결함 394 가 「`title` 을 쓰는 다른 자리는 안 셌습니다」로 남긴 숙제를
+   * 폈습니다. 두 뿌리의 `title=` 을 전수로 세고 **「그 값이 본문 글자에도
+   * 있는가」**로 갈랐더니, 로비 말고 하나가 더 나왔습니다.
+   *
+   * 레거시 검토의 후보 카드는 업무 제목 **오른쪽**에 알약을 붙이고 그
+   * 안에 `34%` 만 적었습니다. 재서 확인한 것 —
+   *
+   *   · 그 화면에서 `%` 가 나오는 줄은 `["34%","71%","92%"]` 셋뿐 (견줄 것 없음)
+   *   · 접근성 트리에서 `%` 를 이름으로 가진 노드 **0개** (귀에는 아무것도)
+   *   · `aria-label` 도 없음 — 축 이름이 사는 곳은 `title` **하나**
+   *
+   * 제목 옆에 붙은 맨 백분율은 **진행률**로 읽힙니다. 결함 336 이 홈의
+   * 리본에서 겪은 그 모양인데, 저기는 `aria-label` 이라도 있었고 여기는
+   * 마우스 전용입니다.
+   *
+   * ## 「저 혼자 예외인가」 — 세어서 갈랐습니다
+   *
+   * 이 제품이 사람에게 보이는 백분율을 전부 모으니 축을 답니다 —
+   * 「팀의 32%」·「커버리지 80%」·「모르는 폭 20%p」·「팀 신뢰도 62%」·
+   * 「확신 45% · 모름 55%」·「유사도 87%」·「기간 40% 지남」. **맨몸은
+   * 이 하나**였고, 같은 값을 SPA 는 이미 「확신 34%」라고 적고 있었습니다.
+   * 제품의 관습이 아니라 **갈라진 자리**입니다.
+   *
+   * ## 자는 낱말이 아니라 요구를 잽니다
+   *
+   * 「`확신` 이라고 적혀 있는가」로 재면 화면이 그 글자를 손으로 적는 것도
+   * 통과합니다 — 그게 SPA 가 하고 있던 것이고, 그래서 갈렸습니다. 그러니
+   * **「`@lib` 를 거치는가」**와 **「손으로 조립하지 않는가」** 둘을 잽니다
+   * (결함 363 — 가드를 넓히는 것보다 사본을 없애는 것이 낫습니다).
+   *
+   * ⚠️ 이 가드가 못 보는 것: **다른 값**의 맨몸 백분율. 위 census 는 이
+   * 회차에 손으로 셌고, 자로 만들어 두지는 않았습니다.
+   */
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'review.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Review.tsx')],
+  ];
+
+  for (const [rootName, path] of ROOTS) {
+    it(`${rootName} — 확신도 글자를 @lib 에서 가져온다`, () => {
+      const code = readFileSync(path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+      ok(
+        /confidenceReading\(/.test(code),
+        `${rootName} 가 confidenceReading 을 안 부릅니다 — 축 이름 없는 맨 숫자이거나 사본입니다`,
+      );
+      /* 손으로 조립하는 자리가 남아 있으면 그것이 곧 두 번째 벌입니다.
+         `candidate.confidence * 100` 뒤에 `%` 가 오는 모양을 봅니다. */
+      const handmade = [...code.matchAll(/confidence\s*\*\s*100\s*\)?\s*\}?\s*%/g)];
+      strictEqual(
+        handmade.length,
+        0,
+        `${rootName} 가 확신도 글자를 손으로 조립합니다 (${handmade.length}곳) — @lib 과 갈라집니다`,
+      );
+    });
+  }
+
+  it('⭐ 레거시 — 축 이름이 `title` 에만 있지 않다', () => {
+    /* 요구는 「`확신` 이라는 글자가 파일에 있는가」가 아니라 **「눈에 보이는
+       자리에 있는가」**입니다. `title="AI 확신도"` 는 마우스 전용입니다. */
+    const code = readFileSync(join(DEMO, 'review.tsx'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    ok(
+      !/title=["'][^"']*확신도["']/.test(code),
+      '확신도의 축 이름이 아직 `title` 에 있습니다 — 키보드·터치·낭독기가 못 봅니다',
+    );
+  });
+
+  it('⭐ `@lib` 이 축 이름을 실제로 낸다', () => {
+    ok(
+      confidenceReading(0.34).includes('확신'),
+      'confidenceReading 이 축 이름을 안 답니다 — 맨 숫자면 고친 것이 아닙니다',
+    );
+    strictEqual(confidenceReading(0.34), '확신 34%');
+    strictEqual(confidenceReading(0.925), '확신 93%');
   });
 });

@@ -37,6 +37,7 @@ import {
   sortForReview,
   summarize,
   whyCannotSubmitBatch,
+  confidenceReading,
   type Candidate,
   type Draft,
   type Lane,
@@ -258,9 +259,14 @@ function CandidateCard({
           onChange={(e) => onChange({ titleOverride: e.target.value })}
         />
         {/* ⭐ 48px `34%` 를 걷어낸 자리 (브리프 §11). 확신도는 제목을
-            **읽고 나서** 참고하는 값입니다. */}
-        <span className={low ? 'badge low' : 'badge'} title="AI 확신도">
-          {(candidate.confidence * 100).toFixed(0)}%
+            **읽고 나서** 참고하는 값입니다.
+
+            ⛔ **축 이름을 `title` 에 두지 마십시오** (결함 395). 오래도록
+            글자는 `34%` 뿐이고 「AI 확신도」는 `title` 에만 있었습니다 —
+            마우스 전용이고, 접근성 트리에는 그 숫자가 아예 없었습니다.
+            제목 오른쪽에 붙은 맨 백분율은 **진행률**로 읽힙니다. */}
+        <span className={low ? 'badge low' : 'badge'}>
+          {confidenceReading(candidate.confidence)}
         </span>
       </div>
 

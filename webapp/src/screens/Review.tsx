@@ -49,6 +49,7 @@ import {
   reviewLane,
   sortForReview,
   summarize,
+  confidenceReading,
   type Candidate,
   type Draft,
   type ReviewContext,
@@ -683,7 +684,9 @@ export default function Review() {
                     {lane === 'approve' && <span className="cand__state cand__state--approve">등록 표시됨</span>}
                     {lane === 'reject' && <span className="cand__state cand__state--reject">거절 표시됨</span>}
                     <span className="cand__conf">
-                      확신 {Math.round(candidate.confidence * 100)}%
+                      {/* 글자는 `@lib` 에서 (결함 395). 여기 손으로 적으면
+                          레거시와 갈라집니다 — 실제로 갈라져 있었습니다. */}
+                      {confidenceReading(candidate.confidence)}
                       {/* 사유는 **지우지 않습니다** — 원문 그대로 한 번의
                           동작으로 닿습니다. 카드마다 같은 문장을 펼쳐 두면
                           셋이면 186자가 되고, 늘 있는 글자는 배경이 되어
