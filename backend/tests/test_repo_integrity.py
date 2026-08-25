@@ -55,6 +55,14 @@ SERVER_ONLY_OR_ASSEMBLED: dict[str, str] = {
         ),
         # ⚠️ 아래 둘은 **진짜로 아무도 안 부릅니다.** 숨기지 않고 적어 둡니다 —
         #    만들어 놓고 화면에 안 이은 것이고(실패 ①), 붙일 때 이 줄을 지웁니다.
+        "PATCH /api/channels/{channel_id}": (
+            "CHANNEL-003 채널 이름 변경 — 서버만 있고 화면에 아직 안 이었습니다. "
+            "자가 헐거워 오래 숨어 있었습니다(결함 378)"
+        ),
+        "DELETE /api/channels/{channel_id}": (
+            "CHANNEL-004 채널 삭제(보관) — 서버만 있고 화면에 아직 안 이었습니다. "
+            "자가 헐거워 오래 숨어 있었습니다(결함 378)"
+        ),
         "PUT /api/projects/{project_id}/channels/order": (
             "CHANNEL-005 채널 순서 — 서버만 있고 화면에 아직 안 이었습니다"
         ),
@@ -2974,10 +2982,32 @@ def test_every_server_route_has_a_caller() -> None:
                 code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
                 screens.append(code)
 
+    #: 주소 한 조각에 올 수 있는 글자 — `/` 와 따옴표·백틱·공백은 경계입니다.
+    SEG = "[^/`'\"\\s]+"
+
     def called(route_path: str) -> bool:
-        pattern = re.escape(route_path)
-        pattern = re.sub(r"\\\{[a-z_]+\\\}", r"[^/`'\"\\s]+", pattern)
-        rx = re.compile(pattern)
+        """이 갈래를 부르는 화면이 있는가.
+
+        ⚠️ **자가 두 곳에서 헐거웠습니다** (결함 378):
+
+        1. `{id}` 자리를 그냥 `+` 로 두면 **역추적**이 아래 끝 못 박기를
+           무력화합니다 — `${channelId}` 를 `${channelI` 까지 줄여 가며
+           맞추다가 `}` 앞에서 성공해 버립니다. **원자 그룹**으로 막습니다.
+        2. `search` 만 쓰면 **더 긴 형제 갈래**가 짧은 갈래를 대신
+           만족시킵니다. 화면이 `/api/channels/${id}/messages` 를 부르는
+           것만으로 `PATCH /api/channels/{channel_id}` 가 「불린다」로
+           잡혔고, 채널 이름 변경·삭제는 **화면에 컨트롤이 0개**인 채
+           초록이었습니다.
+
+        ⚠️ 끝을 막을 때 「뒤에 아무 글자도 오면 안 된다」로 쓰면 `?q=` 가
+        붙는 자리(찾기·달력)를 전부 「안 불린다」로 잡습니다. 막을 것은
+        **경로가 더 이어지는 것**뿐입니다.
+
+        ⚠️ 이 자가 **못 보는 것**: HTTP 메서드는 안 봅니다. 같은 주소에
+        `GET` 과 `DELETE` 가 있으면 하나만 불려도 둘 다 초록입니다.
+        """
+        pattern = re.sub(r"\\\{[a-z_]+\\\}", lambda _: f"(?>{SEG})", re.escape(route_path))
+        rx = re.compile(pattern + r"(?![A-Za-z0-9_/-])")
         return any(rx.search(code) for code in screens)
 
     orphans: list[str] = []
