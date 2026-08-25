@@ -3829,3 +3829,145 @@ def test_the_requirements_table_does_not_claim_unwired_things() -> None:
         "요구사항 대조표가 안 이어진 것을 「다 됐다」로 적고 있습니다:\n  "
         + "\n  ".join(offenders)
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 마감일을 바꾸는 자리 ↔ 그것을 전제로 하는 말 (결함 386)
+# ══════════════════════════════════════════════════════════════
+
+#: 서버가 마감일을 바꾸는 갈래. 이 갈래가 돌아야 `DEADLINE_CHANGED` 가 생기고,
+#: 그게 있어야 `frequent_deadline_change` 무결성 플래그가 뜰 수 있습니다.
+_TASK_PATCH_CALL = re.compile(
+    r"""
+    (?:                                  # 업무 PATCH 를 부르는 두 모양
+        patchTask\s*\(                   #   레거시: 공용 헬퍼
+      | api\.patch\s*<[^>]*>\s*\(        #   SPA: 타입 붙은 헬퍼
+      | api\.patch\s*\(
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _blanked_ts(source: str) -> str:
+    """TS/TSX 의 주석을 **길이를 지켜** 지웁니다.
+
+    ⚠️ `_blanked` 는 파이썬 모양(`\"\"\"` · `#`)이라 JS 주석을 못 걷습니다.
+    이 저장소의 화면 주석은 「예전에는 이렇게 적었고 왜 바꿨다」를 **옛 문장
+    그대로** 인용합니다 — 안 걷으면 자가 **내 고침의 주석**을 위반으로 뭅니다.
+    결함 238 이 마크업에서 겪은 그것이고, 실제로 이 검사를 처음 돌렸을 때
+    잡힌 것이 방금 고친 `calendar.tsx` 의 주석이었습니다.
+
+    길이를 지키는 이유는 `_blanked` 와 같습니다 — 창을 잘라 보는 자가
+    엉뚱한 자리를 가리키지 않게.
+    """
+
+    def blank(match: re.Match[str]) -> str:
+        return "".join("\n" if ch == "\n" else " " for ch in match.group(0))
+
+    # `{/* … */}` 는 `/* … */` 가 먼저 먹으므로 블록 → 줄 순서면 충분합니다.
+    code = re.sub(r"/\*[\s\S]*?\*/", blank, source)
+    return re.sub(r"//[^\n]*", blank, code)
+
+
+def _screens_that_send_a_deadline() -> dict[str, list[str]]:
+    """업무 PATCH 본문에 `deadline` 을 싣는 화면 파일 — **뿌리마다 따로**.
+
+    ⚠️ 라우트를 세는 것과 **인자**를 세는 것은 다릅니다 (결함 315).
+    `PATCH /tasks/{id}` 는 옮기기·우선순위가 이미 부르고 있어서 라우트
+    census 로는 언제나 초록입니다. 안 불리는 것은 **`deadline` 이라는 칸**
+    입니다.
+    """
+    roots = {
+        "레거시 frontend/src": REPO_ROOT / "frontend" / "src",
+        "SPA webapp/src": REPO_ROOT / "webapp" / "src",
+    }
+    found: dict[str, list[str]] = {}
+    for name, base in roots.items():
+        hits: list[str] = []
+        if not base.exists():
+            found[name] = hits
+            continue
+        for path in sorted(base.rglob("*.ts")) + sorted(base.rglob("*.tsx")):
+            if ".test." in path.name:
+                continue
+            code = _blanked_ts(path.read_text(encoding="utf-8"))
+            for match in _TASK_PATCH_CALL.finditer(code):
+                # 그 호출의 인자 구간만 봅니다 — 파일 어딘가의 `deadline` 은
+                # 승인 화면의 후보 초안일 수 있습니다.
+                window = code[match.end() : match.end() + 400]
+                if re.search(r"\bdeadline\b", window):
+                    hits.append(str(path.relative_to(REPO_ROOT)))
+                    break
+        found[name] = hits
+    return found
+
+
+def test_nothing_promises_a_deadline_editor_that_does_not_exist() -> None:
+    """⭐ 화면이 「칸반에서 마감일을 고치면」이라고 하면 그 자리가 있어야 한다.
+
+    일정 화면이 「따로 적어 두는 것이 아니라 그때그때 읽어서 만들기 때문에,
+    **칸반에서 마감일을 고치면** 여기가 바로 따라옵니다」라고 적고 있었는데,
+    두 뿌리를 세어 보니 업무 PATCH 에 `deadline` 을 싣는 화면이 **0곳**
+    이었습니다 (결함 386). 마감일은 후보를 승인할 때 한 번 정해지고 그 뒤로
+    바꿀 자리가 없습니다.
+
+    결함 313 의 「화면이 「할 수 있다」고 말하면 그 자리를 세어 보십시오」를
+    마감일에 댄 것입니다.
+    """
+    wired = _screens_that_send_a_deadline()
+    can_edit = any(wired.values())
+
+    promises: list[str] = []
+    for base in (REPO_ROOT / "frontend" / "src", REPO_ROOT / "webapp" / "src"):
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.tsx")) + sorted(base.rglob("*.ts")):
+            if ".test." in path.name:
+                continue
+            text = _blanked_ts(path.read_text(encoding="utf-8"))
+            # 「칸반에서 … 마감일을 고치」 — 줄바꿈이 사이에 있어도 잡습니다.
+            flat = re.sub(r"\s+", " ", text)
+            if re.search(r"칸반에서[^.]{0,40}마감일을 (고치|바꾸|수정)", flat):
+                promises.append(str(path.relative_to(REPO_ROOT)))
+
+    if not can_edit:
+        assert promises == [], (
+            f"마감일을 고칠 수 있다고 말하는 화면: {promises} — 그런데 업무 PATCH 에 "
+            f"deadline 을 싣는 화면은 두 뿌리 다 0곳입니다 (결함 386). "
+            "말을 고치거나 자리를 만드세요"
+        )
+
+
+def test_the_integrity_flag_table_says_whether_the_flag_can_fire() -> None:
+    """⭐ `docs/09` 의 「구현된 무결성 플래그」와 **실제로 뜰 수 있는가**가 짝이다.
+
+    `frequent_deadline_change` 는 `DEADLINE_CHANGED` 를 셉니다. 그 이벤트는
+    `_change_deadline` 만 만들고, 그 함수는 화면이 `deadline` 을 실어 보내야
+    돕니다. 보내는 화면이 0곳이면 그 플래그는 **영원히 안 뜹니다** — 표가
+    「구현된」이라고만 적으면 읽는 사람은 그 장치가 켜져 있다고 믿습니다.
+
+    ⚠️ **양방향입니다.** 마감일을 고치는 자리를 만들면 이 단서가 낡습니다 —
+    그때는 이 검사가 「단서를 지우세요」로 빨개집니다 (결함 297 의 방법).
+    """
+    doc = (REPO_ROOT / "docs" / "09-리스크와-검증-실험.md").read_text(encoding="utf-8")
+    row = [
+        line for line in doc.splitlines() if line.startswith("| `frequent_deadline_change`")
+    ]
+    assert row, "docs/09 에 frequent_deadline_change 줄이 없습니다 — 이 검사가 낡았습니다"
+
+    wired = _screens_that_send_a_deadline()
+    can_edit = any(wired.values())
+    caveated = "아직 뜰 수 없습니다" in row[0]
+
+    if can_edit:
+        assert not caveated, (
+            f"마감일을 보내는 화면이 생겼습니다({wired}) — docs/09 의 "
+            "「아직 뜰 수 없습니다」 단서가 낡았습니다. 지우세요"
+        )
+    else:
+        assert caveated, (
+            "docs/09 가 `frequent_deadline_change` 를 「구현된」 플래그로만 적고 "
+            "있습니다. 그 플래그가 세는 이벤트를 만들 길이 화면에 0곳이라 "
+            "영원히 뜨지 않습니다 (결함 386)"
+        )
