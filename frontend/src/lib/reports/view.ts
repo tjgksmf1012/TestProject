@@ -187,8 +187,9 @@ export function describeConfidence(person: Person): string | null {
  * 사람 이름 밑에 붙는 **팀 공통** 사유 목록의 머리말 (결함 344).
  *
  * 목록 자체는 사람마다 똑같습니다. 머리말이 없으면 네 줄이 그 사람에
- * 대한 지적으로 읽힙니다 — 「못 잼:」이 그 사람의 것이라고 말하는 것과
- * 짝을 맞춥니다.
+ * 대한 지적으로 읽힙니다 — 아래 `personGapsHeading()` 이 그 사람의 것이라고
+ * 말하는 것과 **짝**입니다. 두 머리말은 화면과 복사한 글 **양쪽에서**
+ * 이 파일 하나를 씁니다 (사본이 있으면 한쪽만 고쳐집니다).
  */
 export function teamReasonsHeading(): string {
   return '팀 공통';
@@ -284,8 +285,13 @@ function personLines(person: Person): string[] {
   const confidence = describeConfidence(person);
   if (confidence !== null) lines.push(`  ${confidence}`);
   if (person.measured) lines.push(`  근거 ${person.evidence_count}건`);
+  /* ⚠️ 두 머리말 **다** `@lib` 에서 옵니다. 팀 것은 이미 그랬는데 사람
+     것만 `'못 잼'` 이라는 **글자로 박혀** 있었습니다 — 화면은 「이 사람」을
+     그리고 복사한 글에는 「못 잼」이 나가, 두 자리가 같은 목록을 다른
+     이름으로 부르고 있었습니다. 지금 값이 틀린 것은 아니지만 한쪽만
+     고치면 갈라지는 자리라 **사본을 없앱니다**(결함 363 의 방법). */
   for (const reason of person.reasons) lines.push(`  · ${teamReasonsHeading()}: ${reason}`);
-  for (const hole of gapsOf(person)) lines.push(`  · 못 잼: ${hole}`);
+  for (const hole of gapsOf(person)) lines.push(`  · ${personGapsHeading()}: ${hole}`);
   const final = describeFinal(person);
   if (final !== null) lines.push(`  ${final}`);
   return lines;

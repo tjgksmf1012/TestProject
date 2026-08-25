@@ -15,7 +15,9 @@ import {
   describeReportType,
   describeWhen,
   gapsOf,
+  personGapsHeading,
   subjectOf,
+  teamReasonsHeading,
   toPlainText,
   tooNewToRender,
   type Person,
@@ -137,7 +139,9 @@ describe('⭐ 복사한 글자', () => {
     const text = toPlainText(CONTENT);
     ok(text.includes('박바다'));
     ok(text.includes('측정하지 못했습니다'));
-    ok(text.includes('못 잼: 녹음이 끊겨 회의 기여를 못 쟀습니다'));
+    // ⚠️ 글자를 박지 말고 **머리말을 만드는 곳**에서 가져옵니다 — 그래야
+    //    화면과 복사한 글이 같은 이름을 쓰는지 이 검사가 실제로 잽니다.
+    ok(text.includes(`${personGapsHeading()}: 녹음이 끊겨 회의 기여를 못 쟀습니다`));
   });
 
   it('못 잰 항목은 빈 칸이 아니라 "못 쟀습니다" 로 나간다', () => {
@@ -355,5 +359,50 @@ describe('보고서가 없을 때 어디로 보내는가 (결함 312)', () => {
       strictEqual(emptyReports(n).what, '아직 만든 보고서가 없습니다');
       ok(/자동으로 생기지 않습니다/.test(emptyReports(n).why));
     }
+  });
+});
+
+describe('⭐ 두 머리말은 화면과 복사한 글이 **한 벌**을 쓴다 (결함 344 회차)', () => {
+  /* 팀 것은 처음부터 `@lib` 을 거쳤는데 사람 것만 복사 경로에서
+     `'못 잼'` 이라는 **글자로 박혀** 있었습니다 — 화면은 「이 사람」,
+     복사한 글은 「못 잼」. 값이 틀린 것은 아니었지만 한쪽만 고치면
+     갈라지는 자리라 사본을 없앴습니다(결함 363 의 방법).
+
+     ⚠️ 이 검사는 **머리말을 바꿔도 통과해야** 합니다 — 글자가 아니라
+     「같은 곳에서 왔는가」를 재기 때문입니다. */
+  it('복사한 글의 두 머리말이 `@lib` 함수와 글자까지 같다', () => {
+    /* ⚠️ 공용 `CONTENT` 는 `reasons` 가 비어 있어 「팀 공통」 줄이 아예
+       안 나옵니다 — 그걸로 재면 이 검사는 아무것도 안 재는 자가 됩니다.
+       **둘 다 있는** 사람을 여기서 만듭니다. */
+    const text = toPlainText({
+      ...CONTENT,
+      blocks: [
+        {
+          kind: 'people',
+          people: [
+            person({
+              name: '한사람',
+              reasons: ['녹음되지 않은 회의가 있습니다'],
+              gaps: ['녹음이 끊겨 회의 기여를 못 쟀습니다'],
+            }),
+          ],
+        },
+      ],
+    });
+    ok(
+      text.includes(`· ${teamReasonsHeading()}: `),
+      `복사한 글에 「${teamReasonsHeading()}」 머리말이 없습니다`,
+    );
+    ok(
+      text.includes(`· ${personGapsHeading()}: `),
+      `복사한 글에 「${personGapsHeading()}」 머리말이 없습니다 — 화면과 다른 이름을 씁니다`,
+    );
+  });
+
+  it('두 머리말이 서로 다르다 — 같으면 팀 것과 사람 것이 안 갈립니다', () => {
+    ok(
+      teamReasonsHeading() !== personGapsHeading(),
+      '두 머리말이 같습니다 — 결함 344 가 가르려던 것이 다시 뭉개집니다',
+    );
   });
 });
