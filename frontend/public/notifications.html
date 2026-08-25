@@ -70,6 +70,26 @@
   .nitem.urgent { border-left-color: var(--text-subtle); }
   .nitem.urgent .nkind { color: var(--text); font-weight: 600; }
 
+  /* ⛔ **고대비에서는 「안 읽음」이 통째로 사라졌습니다** (결함 399).
+
+     `forced-colors: active` 는 색을 시스템 값으로 덮습니다 — **`transparent`
+     테두리까지** 글자색이 됩니다. 그래서 읽은 줄·안 읽은 줄·지연 줄이 전부
+     같은 2px 막대가 되고(넷 다 `rgb(0,0,0)`), 배지는 「안 읽은 알림 2」라고
+     말하는데 **어느 줄인지** 알 수 없었습니다.
+
+     ⚠️ 「지연」은 살아남습니다 — 바로 위 규칙이 `.nkind` 의 **무게**를 한 단
+     올리고, 무게는 고대비가 안 덮습니다. 「안 읽음」만 색 하나에 실려
+     있었습니다(결함 361 이 적어 둔 그것: 뜻을 색 하나에 실었으면 고대비로
+     재 보십시오).
+
+     시스템 색 이름은 안 덮입니다(결함 393 의 방법) — 읽은 줄은 배경색으로
+     숨기고, 안 읽은 줄은 강조색으로 그립니다. */
+  @media (forced-colors: active) {
+    .nitem { border-left-color: Canvas; }
+    .nitem.fresh { border-left-color: Highlight; }
+    .nitem.urgent { border-left-color: CanvasText; }
+  }
+
   .nkind { flex: none; min-width: 4rem; font-size: var(--fs-caption);
            color: var(--text-subtle); }
   .ntext { font-size: var(--fs-label); color: var(--text); }

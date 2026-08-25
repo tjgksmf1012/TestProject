@@ -1128,3 +1128,71 @@ def test_the_uncertainty_dots_survive_forced_colors() -> None:
         f"고대비 규칙이 시스템 색이 아닌 값을 씁니다: {body[:120]} — "
         "`var(--gap)` 이나 hex 는 그 모드에서 다시 덮입니다"
     )
+
+
+def test_the_unread_bar_survives_forced_colors() -> None:
+    """⭐ 고대비에서도 **어느 줄이 안 읽은 것인지** 보여야 한다.
+
+    ## ⛔ 「안 읽음」이 통째로 사라졌습니다 (결함 399)
+
+    알림 줄의 안 읽음 표시는 왼쪽 2px 막대 하나입니다 — 읽은 줄은
+    `border-left: 2px solid transparent`, 안 읽은 줄만 `--primary`.
+    그런데 `forced-colors: active` 는 색을 시스템 값으로 덮고 **거기에는
+    `transparent` 도 들어갑니다.** 브라우저로 재서 확인했습니다:
+
+        고대비   안읽음 rgb(0,0,0) · 읽음 rgb(0,0,0) · 지연 rgb(0,0,0)
+
+    넷이 전부 같은 검정 막대가 됐습니다. 그런데 바로 위 배지는 **「안 읽은
+    알림 2」**라고 말합니다 — 몇 개인지는 아는데 **어느 줄인지** 알 수
+    없습니다(결함 393 이 「점 하나가 4%p」에서 만난 그 모양).
+
+    ⚠️ **「지연」은 살아남습니다** — 그 규칙은 `.nkind` 의 **무게**도 한 단
+    올리고, 무게는 고대비가 안 덮습니다. 「안 읽음」만 색 하나에 실려
+    있었습니다(결함 361: 뜻을 색 하나에 실었으면 고대비로 재 보십시오).
+
+    고친 뒤 네 값이 갈립니다 —
+
+        고대비      안읽음 Highlight(남색) · 읽음 Canvas(흰색=안 보임) · 지연 CanvasText
+        고대비+다크  안읽음 Highlight(청록) · 읽음 Canvas(검정=안 보임) · 지연 CanvasText
+
+    ⚠️ 이 검사가 **못 보는 것**: 다른 화면의 「테두리 하나로 말하는」 표시.
+    이 회차에는 알림 화면만 셌습니다.
+    """
+    html = (
+        Path(__file__).resolve().parents[2] / "frontend" / "public" / "notifications.html"
+    ).read_text(encoding="utf-8")
+
+    assert ".nitem.fresh" in html, "안 읽음 규칙이 없습니다 — 이 검사가 낡았습니다"
+    forced = re.search(
+        r"@media\s*\(\s*forced-colors:\s*active\s*\)\s*\{(?P<body>(?:[^{}]*\{[^{}]*\})+[^{}]*)\}",
+        html,
+    )
+    assert forced is not None, (
+        "고대비 규칙이 없습니다 — 테두리 하나로 말하는 「안 읽음」은 고대비에서 "
+        "읽은 줄과 **같은 막대**가 되는데, 배지는 「안 읽은 알림 N」이라고 "
+        "그 표시를 가리킵니다 (결함 399)"
+    )
+    body = forced.group("body")
+
+    # ⚠️ 세 갈래가 **모두** 있어야 갈립니다. 안 읽음만 정하면 읽은 줄의
+    #    `transparent` 가 그대로 덮여 둘 다 보이는 막대가 됩니다.
+    for needed in (".nitem ", ".nitem.fresh", ".nitem.urgent"):
+        assert needed in body, f"고대비 규칙에 `{needed}` 가 없습니다: {body[:160]}"
+
+    # ⚠️ 값을 **넓게** 집습니다. `[A-Za-z]+` 로만 집으면 `var(--primary)` 가
+    #    아예 안 잡혀서 「셋 다 안 정했다」는 **엉뚱한 문장**이 나옵니다 —
+    #    가드가 가리키는 줄이 틀리면 다음 사람이 그 줄을 보고 「없는데?」 합니다.
+    colors = [v.strip() for v in re.findall(r"border-left-color:\s*([^;]+);", body)]
+    assert len(colors) >= 3, f"고대비 규칙이 테두리 색을 셋 다 안 정합니다: {colors}"
+
+    # 시스템 색 이름만 안 덮입니다 — 토큰이나 hex 를 적으면 그대로 사라집니다.
+    allowed = {"Canvas", "CanvasText", "Highlight", "LinkText", "GrayText"}
+    assert set(colors) <= allowed, (
+        f"고대비 규칙이 시스템 색이 아닌 값을 씁니다: {sorted(set(colors) - allowed)} — "
+        "`var(--primary)` 나 hex 는 그 모드에서 다시 덮입니다"
+    )
+    # 갈라져야 하는 것이 갈리는가. 같은 색을 셋에 주면 고친 것이 아닙니다.
+    assert len(set(colors)) >= 3, (
+        f"고대비에서 세 갈래가 같은 색입니다: {colors} — 읽음·안읽음·지연이 "
+        "구별되지 않습니다"
+    )
