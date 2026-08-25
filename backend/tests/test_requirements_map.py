@@ -401,3 +401,99 @@ def test_the_finding_screen_tables_agree_with_the_detectors():
     assert ordered == detected, (
         f"`KIND_ORDER` 와 `DETECTED` 가 다릅니다: {sorted(detected ^ ordered)}"
     )
+
+
+def test_the_summary_table_does_not_claim_more_than_the_detail_rows():
+    """⭐ 요약표의 ✅ 가 **상세표와 어긋나지 않는가** (결함 383).
+
+    ## ⛔ 앞 결함들이 상세만 고치고 요약을 두고 갔습니다
+
+    `docs/20` 은 두 층입니다 — 맨 위 **절 요약표**(§6 채널 관리 …)와
+    아래 **요구 하나하나의 상세표**. 결함 377·378 이 채널 셋을
+    `⚠️ 서버만` 으로 내렸는데(화면에 컨트롤이 0개), 요약표는 그대로
+    **맨몸 `✅`** 였습니다.
+
+        요약   | §6 채널 관리 | CHANNEL-001~005 | ✅ |
+        상세   | CHANNEL-003 이름 변경 | ⚠️ 서버만 | …
+               | CHANNEL-004 삭제      | ⚠️ 서버만 | …
+               | CHANNEL-005 순서 변경 | ⚠️ 서버만 | …
+
+    문서를 펴면 **요약이 먼저** 보입니다 — 「채널은 다 됐구나」로 읽고
+    아래를 안 봅니다. 이 저장소의 「한 갈래만 고치고 옆 갈래를 그대로 둔
+    것」(결함 298·301)이 **문서에서** 난 것입니다.
+
+    ## 자
+
+    요약이 `✅` 면 그 절의 상세에 **`⚠️`·`❌`·`⛔` 가 하나도 없어야**
+    합니다. `🟡` 은 허용합니다 — 요약이 `✅ (GitHub 은 원문 제외)` 처럼
+    **단서를 달아** 그 하나를 정확히 가리키는 자리가 실제로 있습니다
+    (SEARCH-005). 단서 없는 맨몸 ✅ 로 딱딱한 상태를 덮는 것만 막습니다.
+
+    ⚠️ **이 자가 못 보는 것**: 🟡 을 덮는 단서가 **맞는 말인지**는 안
+    잽니다. SEARCH 는 손으로 읽어 확인했습니다.
+    """
+    import re
+
+    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text(encoding="utf-8")
+    lines = doc.splitlines()
+
+    HARD = ("⛔", "❌", "⚠️")
+    SYMBOLS = (*HARD, "🟡", "✅")
+
+    def mark(cell: str) -> str:
+        for symbol in SYMBOLS:
+            if symbol in cell:
+                return symbol
+        return "?"
+
+    summary: list[tuple[str, int, int, str]] = []
+    detail: dict[str, list[str]] = {}
+    for line in lines:
+        head = re.match(
+            r"\|\s*§\d+[^|]*\|\s*([A-Z]{3,}(?:-[A-Z]+)?)-(\d{3})~?(\d{3})?\s*\|\s*(.+?)\s*\|",
+            line,
+        )
+        if head:
+            summary.append(
+                (head.group(1), int(head.group(2)), int(head.group(3) or head.group(2)),
+                 head.group(4))
+            )
+        row = re.match(
+            r"\|\s*([A-Z]{3,}(?:-[A-Z]+)?)-(\d{3})([^|]*)\|\s*([^|]+?)\s*\|", line
+        )
+        if row:
+            detail.setdefault(f"{row.group(1)}-{row.group(2)}", []).append(row.group(4).strip())
+
+    assert len(summary) > 10, f"요약표를 {len(summary)}줄밖에 못 찾았습니다 — 검사가 낡았습니다"
+    assert len(detail) > 50, f"상세표를 {len(detail)}줄밖에 못 찾았습니다 — 검사가 낡았습니다"
+
+    unknown = [
+        f"{key}: {cell}"
+        for key, cells in detail.items()
+        for cell in cells
+        if mark(cell) == "?"
+    ]
+    assert not unknown, (
+        "상세표에서 표시를 못 읽은 줄이 있습니다 — 새 기호가 생겼으면 "
+        "`SYMBOLS` 에 넣으세요:\n  " + "\n  ".join(unknown)
+    )
+
+    lying = []
+    for prefix, low, high, claim in summary:
+        if mark(claim) != "✅":
+            continue
+        harsh = [
+            key
+            for number in range(low, high + 1)
+            for key in [f"{prefix}-{number:03d}"]
+            for cell in detail.get(key, [])
+            if mark(cell) in HARD
+        ]
+        if harsh:
+            names = ", ".join(sorted(set(harsh)))
+            lying.append(f"§{prefix}: 요약은 ✅ 인데 {names} 이(가) 아닙니다")
+
+    assert not lying, (
+        "요약표가 상세표보다 더 됐다고 말합니다 — 문서를 펴면 요약이 먼저 "
+        "보입니다 (결함 383):\n  " + "\n  ".join(lying)
+    )
