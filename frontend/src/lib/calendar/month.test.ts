@@ -239,7 +239,28 @@ describe('비어 있을 때 할 말 (결함 294)', () => {
   it('격자가 통째로 비었을 때만 「만드세요」 가 참이다', () => {
     const note = emptyNote(monthGrid(2026, 8, []), null);
     strictEqual(note.why, '일정은 자동으로 생기지 않습니다 — 업무 마감일이나 회의에서 옵니다.');
-    strictEqual(note.how, '아래에서 회의 일정을 잡거나, 칸반에서 업무에 마감일을 주세요.');
+    strictEqual(note.how, '아래에서 회의 일정을 잡으세요. 업무 마감일은 업무 후보를 승인할 때 정해집니다.');
+  });
+
+  it('⭐ 빈 상자가 **없는 자리**로 보내지 않는다 (결함 389)', () => {
+    // 칸반에는 마감일을 주는 자리가 없습니다 — 업무 PATCH 에 `deadline` 을
+    // 싣는 화면이 두 뿌리 다 0곳입니다. 결함 386 이 이 화면 **머리줄**에서
+    // 걷어낸 주장이 빈 상자에 그대로 남아 있었습니다.
+    const everywhere = [
+      emptyNote(monthGrid(2026, 8, []), null),
+      emptyNote(monthGrid(2026, 9, [at('meeting_held', '2026-08-31T10:00:00Z', '지난 회의')]), null),
+      emptyNote(monthGrid(2026, 9, [at('meeting_held', '2026-09-10T10:00:00Z', '회의')]),
+        monthGrid(2026, 9, [at('meeting_held', '2026-09-10T10:00:00Z', '회의')])
+          .find((cell) => cell.date === '2026-09-04')!),
+    ];
+    for (const note of everywhere) {
+      const flat = `${note.what} ${note.why} ${note.how}`;
+      strictEqual(
+        /칸반[^.]{0,40}마감일/.test(flat),
+        false,
+        `칸반에서 마감일을 준다고 말합니다: ${note.how}`,
+      );
+    }
   });
 
   it('앞쪽 이웃 칸이면 [지난달] 을 가리킨다', () => {

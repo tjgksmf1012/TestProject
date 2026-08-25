@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -1200,3 +1201,68 @@ def test_live_documents_do_not_misstate_what_the_seed_makes(seeded, engine):
                     )
 
     assert not bad, "씨앗이 만드는 개수를 틀리게 적은 곳이 있습니다:\n  " + "\n  ".join(bad)
+
+
+def test_the_demo_never_says_a_future_meeting_already_happened(seeded: dict):
+    """⭐ 씨앗의 회의는 **전부 과거**여야 한다 (결함 388).
+
+    `started_at` 은 회의가 **시작할 때** 찍힙니다 — 미래일 수 없습니다.
+    그런데 씨앗이 고정 날짜(`2026-09-01`)를 쓰고 있어서, 그 날짜 **이전에**
+    시연을 열면 미래인 회의 다섯이 `needs_review`·`processing`·`confirmed`·
+    `failed` 를 달고 있었습니다. 달력이 그대로 드러냈습니다 —
+
+        1일  연 회의  1주차 정기회의      ← 그날은 8월 25일이었습니다
+
+    `calendar_service` 의 `ItemKind` 주석이 막으려던 바로 그것입니다:
+    「"이미 한 것" 과 "앞으로 할 것" 을 같은 모양으로 그리면 달력에서 제일
+    알고 싶은 것이 지워진다.」
+
+    ⚠️ **낱말이 아니라 요구를 잽니다** — 상수를 읽지 않고, 씨앗이 실제로
+    만든 행의 시각을 지금과 견줍니다.
+    """
+    now = datetime.now(UTC)
+    with db_session.session_scope() as session:
+        rows = [
+            (meeting.id, meeting.status, meeting.started_at)
+            for meeting in session.query(m.Meeting).order_by(m.Meeting.id).all()
+        ]
+    assert rows, "씨앗에 회의가 없습니다 — 이 검사가 낡았습니다"
+    future = [
+        f"회의{mid}({status}) started_at={started.isoformat()[:16]}"
+        for mid, status, started in rows
+        if started is not None and started.replace(tzinfo=UTC) > now
+    ]
+    assert future == [], (
+        "시작한 적 있는 회의의 시각이 **미래**입니다 — 제품이 만들 수 없는 "
+        f"상태이고, 달력이 「연 회의」로 그립니다 (결함 388): {future}"
+    )
+
+
+def test_the_pending_candidate_can_still_be_approved(seeded: dict):
+    """⭐ 시연의 대표 장면이 **실제로 돌아야** 한다 (결함 388).
+
+    회의를 과거로 옮기면 그 회의에서 나온 마감일도 같이 과거가 됩니다.
+    그런데 서버는 **과거 마감을 거절합니다**(`DEADLINE_IN_PAST` — 결함 386
+    회차에 확인). 승인 대기 후보의 마감이 과거면 시연자가 그 후보를 승인할
+    수 없고, 그건 이 저장소가 「대표 주장을 눈으로 확인하는 순간」이라고
+    적어 둔 자리입니다.
+
+    ⚠️ 상수를 읽지 않고 **승인 판단을 실제로 물어** 봅니다.
+    """
+    now = datetime.now(UTC)
+    with db_session.session_scope() as session:
+        pending = [
+            candidate
+            for candidate in session.query(m.MeetingTaskCandidate).all()
+            if candidate.deadline is not None and candidate.created_task_id is None
+        ]
+        assert pending, "승인 대기 후보에 마감일이 하나도 없습니다 — 이 검사가 낡았습니다"
+        stale = [
+            f"후보{c.id}({c.title}) 마감={c.deadline.date()}"
+            for c in pending
+            if c.deadline.replace(tzinfo=UTC) <= now
+        ]
+    assert stale == [], (
+        "승인 대기 후보의 마감이 과거입니다 — 서버가 「마감일이 과거입니다」로 "
+        f"막아 시연의 승인 장면이 안 돕니다 (결함 388): {stale}"
+    )

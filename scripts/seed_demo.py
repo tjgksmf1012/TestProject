@@ -55,9 +55,51 @@ PROJECT_TITLE = "TeamFlow 시연 프로젝트"
 # 시연 계정 비밀번호. 운영에 쓸 값이 아니고, 이 파일은 시연 데이터 전용이다.
 DEMO_PASSWORD = "teamflow-demo"
 
-#: 회의 시작 시각. 마감일 해석("금요일까지")의 기준이 되므로 요일이 중요하다.
-#: 2026-09-01 은 화요일 — "금요일까지" 는 09-04 로 풀린다.
-MEETING_START = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
+def _next_friday() -> datetime:
+    """오늘 **뒤**의 가장 가까운 금요일. 회의록의 "금요일까지" 와 짝입니다.
+
+    ⚠️ 오늘이 금요일이면 **다음 주** 금요일입니다 — 오늘로 잡으면 시연
+    도중에 지나가 승인이 막힙니다(결함 388).
+    """
+    today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return today + timedelta(days=(4 - today.weekday()) % 7 or 7)
+
+
+def _recent_tuesday(*, at_least_days_ago: int) -> datetime:
+    """`at_least_days_ago` 일보다 더 전인, 가장 가까운 **화요일** 10:00 UTC.
+
+    ## ⚠️ 왜 고정 날짜가 아닌가 (결함 388)
+
+    예전에는 `datetime(2026, 9, 1, ...)` 이었습니다. 시연을 **그 날짜 이후에
+    본다**는 것을 말없이 전제한 값입니다. 그 전제가 깨지면 씨앗은 제품이
+    만들 수 없는 상태가 됩니다 — `started_at` 은 회의가 **시작할 때** 찍히므로
+    미래일 수 없는데, 미래인 회의 다섯이 `needs_review`·`processing`·
+    `confirmed`·`failed` 를 달고 있었습니다.
+
+    화면에서 그대로 드러났습니다. 달력 9월 목록이 이렇게 나왔습니다 —
+
+        1일  연 회의  1주차 정기회의      ← 오늘은 8월 25일입니다
+        2일  연 회의  중간발표 리허설
+        3일  연 회의  제목 없는 회의 #4
+
+    `calendar_service` 의 `ItemKind` 주석이 바로 이것을 막으려던 것입니다:
+    「화면이 "이미 한 것" 과 "앞으로 할 것" 을 같은 모양으로 그리고, 그건
+    달력에서 제일 알고 싶은 것을 지우는 것입니다.」
+
+    ⚠️ **요일은 화요일이어야 합니다.** 회의록의 "금요일까지" 가 사흘 뒤로
+    풀리는 것이 이 시연의 전제입니다 — 요일이 바뀌면 그 숫자가 어긋납니다.
+    """
+    anchor = datetime.now(UTC).replace(hour=10, minute=0, second=0, microsecond=0)
+    anchor -= timedelta(days=at_least_days_ago)
+    # 화요일 = weekday() 1. 뒤로 걸어 가장 가까운 화요일을 찾는다.
+    return anchor - timedelta(days=(anchor.weekday() - 1) % 7)
+
+
+#: 회의 시작 시각. 마감일 해석("금요일까지")의 기준이 되므로 **요일**이 중요하다.
+#:
+#: ⚠️ 아흐레를 뒤로 잡는 이유: 회의는 `MEETING_START + 0~7일`에 흩어져
+#: 있습니다. 마지막 회의(+7)까지 **과거**가 되려면 그만큼 물러나야 합니다.
+MEETING_START = _recent_tuesday(at_least_days_ago=9)
 
 MEMBERS = [
     ("김민수", "minsu@example.com", "minsu-dev", {"developer": 1.0}),
@@ -121,7 +163,12 @@ def build_candidates(utterance_ids: list[int], user_ids: list[int]) -> list[dict
             "title": "로그인 API 구현",
             "assignee_hint": "민수",
             "assignee_id": user_ids[0],
-            "deadline": datetime(2026, 9, 4, tzinfo=UTC),
+            # ⚠️ **이 하나만 미래입니다** (결함 388). 이 후보는 시연자가
+            #    승인하는 그 후보이고, 서버는 **과거 마감을 거절합니다**
+            #    (`ApprovalError.DEADLINE_IN_PAST` — 결함 386 회차에 확인).
+            #    회의는 지난주인데 마감은 다음 금요일 — 실기에서 흔한
+            #    모양이고, 이렇게 두어야 시연의 대표 장면이 실제로 돕니다.
+            "deadline": _next_friday(),
             "confidence": 0.92,
             "evidence": [utterance_ids[0], utterance_ids[2]],
             "warnings": [],
@@ -145,7 +192,11 @@ def build_candidates(utterance_ids: list[int], user_ids: list[int]) -> list[dict
             "title": "DB 스키마 정리",
             "assignee_hint": "저",
             "assignee_id": user_ids[2],
-            "deadline": datetime(2026, 9, 8, tzinfo=UTC),
+            # ⚠️ 이 후보는 **이미 승인**돼 칸반 업무와 이어져 있습니다
+            #    (`_seed_tasks`). 승인이 막힐 일이 없으므로 회의 기준으로
+            #    둡니다 — 고정 날짜로 두면 앵커가 움직일 때 업무의 마감과
+            #    갈라집니다(결함 388 을 고치다 하마터면 그럴 뻔했습니다).
+            "deadline": MEETING_START + timedelta(days=7),
             "confidence": 0.88,
             "evidence": [utterance_ids[3]],
             "warnings": [],
