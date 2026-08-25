@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
@@ -113,5 +113,41 @@ describe('찾을 수 있는가', () => {
 
   it('아무것도 안 적었으면 조용하다 — 설명할 것이 없다', () => {
     strictEqual(blockedReason('', none), null);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 거를 칸이 없는 화면 (채팅의 대화 찾기) — 결함 375
+// ══════════════════════════════════════════════════════════════
+
+describe('거를 칸이 없는 화면', () => {
+  it('⭐ 두 글자면 찾을 수 있다', () => {
+    strictEqual(canSearch('로그', null), true);
+  });
+
+  it('⭐ 필터가 없으면 필터로 열리지 않는다', () => {
+    /* `null` 은 「이 화면에는 거를 칸이 없다」는 뜻입니다. 빈 필터 객체와
+       달리, 없는 칸으로 게이트가 열리는 일이 없어야 합니다. */
+    strictEqual(canSearch('로', null), false);
+    strictEqual(canSearch('', null), false);
+  });
+
+  it('⭐ **한 글자**일 때만 말한다 — 빈 칸에는 placeholder 가 이미 있다', () => {
+    strictEqual(blockedReason('', null), null);
+    strictEqual(blockedReason('로', null), '두 글자 이상 적어 주세요.');
+    strictEqual(blockedReason('로그', null), null);
+  });
+
+  it('⭐ **없는 칸을 하라고 시키지 않는다** — 담당자·상태를 말하지 않는다', () => {
+    /* 채팅에는 담당자·상태 칸이 없습니다. 찾기 화면의 문장을 그대로
+       쓰면 화면에 없는 것을 하라고 시킵니다(결함 313 의 모양). */
+    const said = blockedReason('로', null) ?? '';
+    ok(!said.includes('담당자'), `없는 칸을 말합니다: ${said}`);
+    ok(!said.includes('상태'), `없는 칸을 말합니다: ${said}`);
+  });
+
+  it('⭐ 거를 칸이 **있는** 화면은 그 칸을 말한다', () => {
+    const none = { assignee: '', status: '' };
+    strictEqual(blockedReason('로', none), '두 글자 이상 적거나, 담당자·상태를 고르세요.');
   });
 });

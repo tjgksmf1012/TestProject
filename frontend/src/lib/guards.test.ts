@@ -9664,6 +9664,67 @@ describe('화면이 덧칠한 버튼도 **막힌 모양**을 갖는다 (결함 3
   });
 });
 
+describe('찾기 게이트는 **두 화면이 한 벌**을 쓴다 (결함 375)', () => {
+  /* 같은 「두 글자 이상」 규칙이 두 곳에 있었습니다. 찾기 화면은 `@lib` 의
+     `blockedReason` 으로 이유를 말하는데, 채팅은 `query.trim().length < 2`
+     를 손으로 적고 **아무 말도 안 했습니다.** 빈 칸일 때는 placeholder
+     (「두 글자 이상」)가 가려 주지만, **한 글자를 적는 순간** placeholder 가
+     사라지면서 이유가 화면에서 통째로 없어집니다.
+
+     ⚠️ 이 자가 **못 보는 것**: 문장이 **맞는 말인가**는 안 봅니다 —
+     그건 `view.test.ts` 가 봅니다(없는 칸을 시키지 않는가). */
+
+  const SCREENS: Array<[string, string]> = [
+    ['채팅', join(DEMO, 'chat.tsx')],
+    ['찾기', join(DEMO, 'search.tsx')],
+  ];
+
+  it('⭐ 두 화면을 **둘 다** 보고 있다', () => {
+    const missing = SCREENS.filter(([, f]) => !existsSync(f)).map(([n]) => n);
+    deepStrictEqual(missing, [], `찾기가 있는 화면을 못 찾았습니다: ${missing.join(', ')}`);
+  });
+
+  it('⭐ 규칙을 화면이 **다시 적지 않는다**', () => {
+    const offenders: string[] = [];
+    for (const [name, file] of SCREENS) {
+      if (!existsSync(file)) continue;
+      const code = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+        .replace(/(?<![:\w])\/\/[^\n]*/g, ' ');
+      /* 「두 글자」라는 **숫자를 화면이 아는 것** 자체가 사본입니다. */
+      if (/\.trim\(\)\.length\s*[<>=]+\s*2/.test(code)) {
+        offenders.push(`${name}: 「두 글자」 규칙을 화면이 다시 적습니다`);
+      }
+      if (!/canSearch\(/.test(code)) {
+        offenders.push(`${name}: canSearch 를 안 씁니다`);
+      }
+      if (!/blockedReason\(/.test(code)) {
+        offenders.push(`${name}: 막힌 이유를 안 말합니다`);
+      }
+      /* 진짜 `disabled` 는 초점을 못 받아 사유를 못 들려줍니다 (결함 234·373).
+         ⚠️ 한 화면만 고치고 옆 화면을 두는 것이 이 저장소에서 제일 흔한
+         재발 모양이라(결함 298·301), 둘 다 봅니다. */
+      const tag = /<button\b[\s\S]{0,600}?>\s*찾기/.exec(code)?.[0] ?? '';
+      if (tag === '') {
+        offenders.push(`${name}: 찾기 단추를 못 찾았습니다 — 가드가 낡았습니다`);
+      } else {
+        if (/(?<!aria-)\bdisabled=\{/.test(tag)) {
+          offenders.push(`${name}: 찾기 단추가 진짜 disabled 입니다 — 키보드가 못 닿습니다`);
+        }
+        if (!/aria-describedby=\{/.test(tag)) {
+          offenders.push(`${name}: 찾기 단추가 사유를 가리키지 않습니다`);
+        }
+      }
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      `한 글자를 적으면 이유가 화면에서 사라집니다:\n  ${offenders.join('\n  ')}`,
+    );
+  });
+});
+
 describe('로비의 녹음·통화 게이트는 **닿을 수 있다** (결함 374)', () => {
   /* 레거시는 `disabled={!affordance.enabled}` 였습니다. 씨앗의 다섯 회의
      **전부**에서 이 단추는 막혀 있고, Tab 으로는 한 번도 안 닿았습니다 —

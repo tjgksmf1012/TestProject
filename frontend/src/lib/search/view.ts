@@ -76,11 +76,19 @@ export function hrefFor(hit: Hit, projectId: number): string | null {
 }
 
 /** 지금 조건으로 찾을 수 있는가. */
+/**
+ * 찾을 수 있는가.
+ *
+ * ⚠️ `filters` 가 `null` 이면 **그 화면에는 거를 칸이 없다**는 뜻입니다
+ * (채팅의 대화 찾기). 없는 칸을 있는 것처럼 세면 「담당자·상태를
+ * 고르세요」라고 말해 놓고 그 칸이 화면에 없습니다(결함 313 의 모양).
+ */
 export function canSearch(
   query: string,
-  filters: { assignee: string; status: string },
+  filters: { assignee: string; status: string } | null,
 ): boolean {
-  return query.trim().length >= 2 || filters.assignee !== '' || filters.status !== '';
+  if (query.trim().length >= 2) return true;
+  return filters !== null && (filters.assignee !== '' || filters.status !== '');
 }
 
 /**
@@ -90,10 +98,18 @@ export function canSearch(
  */
 export function blockedReason(
   query: string,
-  filters: { assignee: string; status: string },
+  filters: { assignee: string; status: string } | null,
 ): string | null {
   if (canSearch(query, filters)) return null;
-  if (query.trim().length === 1) return '두 글자 이상 적거나, 담당자·상태를 고르세요.';
+  /* ⚠️ **빈 칸일 때는 `null` 입니다** — 그때는 placeholder(「두 글자 이상」)
+     가 이미 말하고 있고, 열자마자 빨간 줄이 서 있으면 잔소리입니다.
+     문제는 **한 글자를 적은 순간**입니다: placeholder 가 사라지는데 단추는
+     그대로 막혀 있어, 화면 어디에도 이유가 없습니다(결함 375). */
+  if (query.trim().length === 1) {
+    return filters === null
+      ? '두 글자 이상 적어 주세요.'
+      : '두 글자 이상 적거나, 담당자·상태를 고르세요.';
+  }
   return null;
 }
 

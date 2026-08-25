@@ -190,10 +190,28 @@ function App() {
         </span>
       </div>
 
-      {/* ⚠️ 버튼만 흐려 두면 왜 안 되는지 모른 채 계속 누릅니다. */}
-      {why !== null && <p className="cwhy">{why}</p>}
+      {/* ⚠️ 버튼만 흐려 두면 왜 안 되는지 모른 채 계속 누릅니다.
+          ⚠️ **id 가 있어야 단추가 이 줄을 가리킬 수 있습니다** — 없는 동안
+          눈으로만 읽혔고, 진짜 `disabled` 라 키보드는 단추에 닿지도 못했습니다
+          (결함 375, 373 과 같은 모양). */}
+      {why !== null && (
+        <p className="cwhy" id="find-why">
+          {why}
+        </p>
+      )}
       <NoteLine note={note} id="search-note" />
-      <button type="submit" id="find" disabled={!canSearch(query, filters)}>
+      <button
+        type="submit"
+        id="find"
+        aria-disabled={!canSearch(query, filters)}
+        aria-describedby={why !== null ? 'find-why' : undefined}
+        onClick={(event) => {
+          if (!canSearch(query, filters)) {
+            event.preventDefault();
+            document.getElementById('q')?.focus();
+          }
+        }}
+      >
         찾기
       </button>
     </form>

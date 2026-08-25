@@ -55,6 +55,7 @@ import {
 } from '../lib/chat/view.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
+import { blockedReason, canSearch } from '../lib/search/view.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
@@ -345,6 +346,11 @@ function App() {
   const [kinds, setKinds] = useState<ChannelKindChoice[]>([]);
   const [newKind, setNewKind] = useState('text');
   const [query, setQuery] = useState('');
+  /* 찾기 게이트는 `@lib` 한 벌입니다 — 이 화면에는 거를 칸이 없으므로
+     `filters` 는 `null` 입니다(결함 375). 규칙을 여기서 다시 적으면
+     찾기 화면과 갈라집니다(대표 실패 ②). */
+  const canFind = canSearch(query, null);
+  const searchBlocked = blockedReason(query, null);
   const [found, setFound] = useState<{ channel_name: string; message: ChatMessage }[] | null>(
     null,
   );
@@ -669,7 +675,8 @@ function App() {
   }, [newName, loadChannels]);
 
   const runSearch = useCallback(async (): Promise<void> => {
-    if (query.trim().length < 2) {
+    // ⚠️ 그리는 자리와 **같은 판단**을 씁니다 (결함 375).
+    if (!canSearch(query, null)) {
       setFound(null);
       return;
     }
@@ -821,11 +828,35 @@ function App() {
               id="q"
               value={query}
               placeholder="두 글자 이상"
+              aria-describedby={searchBlocked !== null ? 'q-why' : undefined}
               onChange={(event) => setQuery(event.target.value)}
             />
-            <button type="submit" id="search" disabled={query.trim().length < 2}>
+            {/* ⚠️ **한 글자를 적는 순간 placeholder 가 사라집니다** — 그때
+                단추는 그대로 막혀 있는데 화면 어디에도 이유가 없었습니다
+                (결함 375). 찾기 화면은 같은 규칙을 `@lib` 의
+                `blockedReason` 으로 이미 말하고 있었고, 이 화면만 규칙을
+                손으로 다시 적고 있었습니다(대표 실패 ②).
+                ⚠️ 그리고 진짜 `disabled` 가 아니라 `aria-disabled` 입니다
+                (결함 234·373·374) — 닿지 못하면 사유를 들려줄 수 없습니다. */}
+            <button
+              type="submit"
+              id="search"
+              aria-disabled={!canFind}
+              aria-describedby={searchBlocked !== null ? 'q-why' : undefined}
+              onClick={(event) => {
+                if (!canFind) {
+                  event.preventDefault();
+                  document.getElementById('q')?.focus();
+                }
+              }}
+            >
               찾기
             </button>
+            {searchBlocked !== null && (
+              <p id="q-why" className="status plain">
+                {searchBlocked}
+              </p>
+            )}
           </form>
         </aside>
 
