@@ -3860,6 +3860,23 @@ def _blanked_ts(source: str) -> str:
 
     길이를 지키는 이유는 `_blanked` 와 같습니다 — 창을 잘라 보는 자가
     엉뚱한 자리를 가리키지 않게.
+
+    ## ⚠️ 이 자가 못 보는 것 — **문자열 안의 `//`**
+
+    문자열을 안 가리므로 `'http://127.0.0.1:8811/home.html'` 같은 주소를
+    **줄 주석으로 먹습니다.** 두 뿌리를 세어 보니 걸리는 줄이 아홉인데
+    여덟은 이미 주석 안이라 결과가 같고, 진짜는 하나입니다 —
+    `lib/desktop/server.ts` 의 `DEFAULT_SERVER`.
+
+    지금 이 함수를 쓰는 가드 중에 그 줄을 보는 것은 없어서 **고치지
+    않았습니다.** 제대로 고치려면 `'`·`"`·백틱과 **정규식 리터럴**까지
+    갈라야 하는데(`lib/html.ts` 의 `/[&<>"']/g` 가 정확히 그 함정입니다),
+    그 자가 틀리면 이 함수를 쓰는 가드 전부가 조용히 어긋납니다. 잘못
+    고치는 것이 안 고치는 것보다 나쁜 자리라 **재서 적어만 둡니다.**
+
+    ⚠️ 방향은 **fail-open** 입니다 — 주석으로 먹힌 코드는 안 보이므로
+    가드가 「0건」쪽으로 틀립니다. 새 가드를 이 함수 위에 얹을 때는
+    「내가 보려는 것이 문자열 안에 있나」를 먼저 세십시오.
     """
 
     def blank(match: re.Match[str]) -> str:
@@ -3987,3 +4004,213 @@ def test_the_integrity_flag_table_says_whether_the_flag_can_fire() -> None:
             "있습니다. 그 플래그가 세는 이벤트를 만들 길이 화면에 0곳이라 "
             "영원히 뜨지 않습니다 (결함 386)"
         )
+
+
+# ══════════════════════════════════════════════════════════════
+# 사람이 적은 글자가 **마크업으로** 새는가
+# ══════════════════════════════════════════════════════════════
+#
+# 이 저장소에서 제일 무거운 부류입니다. 데스크톱 셸은 **서버가 준 화면을
+# 띄우고**(`AGENTS.md` — 「서버의 XSS 가 곧 사용자 PC 의 코드 실행」),
+# 레거시 화면 열넷은 문자열로 HTML 을 지어 `innerHTML` 에 넣습니다.
+#
+# `lib/html.ts` 는 이 위험을 알고 만들어졌습니다 — 그 머리말이 「제목에
+# 따옴표가 하나 들어가면 속성이 거기서 끝나고 그 뒤가 마크업으로
+# 해석됩니다」라고 적고 실제 사고를 인용합니다. 그런데 **「그래서 지금 전부
+# 거치고 있는가」를 세는 자는 없었습니다.**
+
+def _ts_template_literals(source: str) -> list[tuple[int, str]]:
+    """TS/TSX 에서 **템플릿 리터럴**만 골라 (줄번호, 본문) 로 돌려줍니다.
+
+    ## ⚠️ 왜 정규식으로 안 하는가 — 처음에 그렇게 했다가 눈을 감았습니다
+
+    처음 자는 `` `[^`]*<[a-zA-Z/][^`]*` `` 였습니다. 백틱을 **앞에서부터
+    둘씩 짝지어** 가는데, 주석이나 따옴표 문자열 안에 백틱이 하나라도 있으면
+    그 뒤의 짝이 통째로 어긋납니다. 실제로 `call.ts` 에서 그랬습니다 —
+    116~119줄의 `<li>` 템플릿이 **아예 안 걸려**, 그 안의 `${'${capture.tone}'}`
+    가 자의 눈 밖이었습니다. 「0건」이 그 자리에서만 참이었습니다.
+
+    그래서 문자 하나씩 걸으며 줄 주석 · 블록 주석 · `'`/`"` 문자열 · 템플릿을
+    갈라 봅니다. `${'${…}'}` 안에 다시 템플릿이 오는 것도 셉니다.
+
+    ⚠️ **정규식 리터럴은 안 가릅니다** — JS 에서 `/` 가 나눗셈인지 정규식
+    시작인지는 앞 토큰을 봐야 압니다. 정규식 안에 백틱을 쓰는 코드가 이
+    저장소에 없어서 안 하고, 생기면 이 주석이 단서입니다.
+    """
+    out: list[tuple[int, str]] = []
+    i, n = 0, len(source)
+    line = 1
+    stack: list[int] = []  # 열린 템플릿의 시작 위치
+    depth: list[int] = []  # 그 템플릿 안 `${` 중괄호 깊이
+    while i < n:
+        ch = source[i]
+        if ch == "\n":
+            line += 1
+            i += 1
+            continue
+        if not stack and source.startswith("//", i):
+            while i < n and source[i] != "\n":
+                i += 1
+            continue
+        if not stack and source.startswith("/*", i):
+            end = source.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            line += source.count("\n", i, end)
+            i = end
+            continue
+        if (not stack or depth[-1] > 0) and ch in "'\"":
+            quote, i = ch, i + 1
+            while i < n and source[i] != quote:
+                i += 2 if source[i] == "\\" else 1
+            i += 1
+            continue
+        if ch == "\\" and stack:
+            i += 2
+            continue
+        if ch == "`":
+            if stack and depth[-1] == 0:
+                start = stack.pop()
+                depth.pop()
+                out.append((source.count("\n", 0, start) + 1, source[start : i + 1]))
+            else:
+                stack.append(i)
+                depth.append(0)
+            i += 1
+            continue
+        if stack and depth[-1] >= 0:
+            if source.startswith("${", i):
+                depth[-1] += 1
+                i += 2
+                continue
+            if ch == "{" and depth[-1] > 0:
+                depth[-1] += 1
+            elif ch == "}" and depth[-1] > 0:
+                depth[-1] -= 1
+        i += 1
+    return out
+
+
+_HTML_TAG = re.compile(r"<[a-zA-Z/]")
+_INTERPOLATION = re.compile(r"\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
+_ESCAPING_CALL = re.compile(r"^\s*(escapeHtml\(|attr\(|iconSvg\(|String\()")
+#: `const x = … escapeHtml(…)` — 묶는 자리에서 이스케이프하고 쓰는 자리에서는
+#: 변수만 쓰는 모양. `byline.ts` 가 그렇습니다.
+_BOUND_TO_ESCAPE = re.compile(
+    r"\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*[^;]*?(?:escapeHtml\(|attr\()"
+)
+_NUMERIC = re.compile(r"^[\w.()\[\]\s+*/%?:'\"-]*\.(toFixed|repeat|length)\b|^\d")
+#: 두 갈래가 **둘 다 글자 리터럴**인 삼항 — 조건이 무엇이든 나오는 값은 리터럴.
+_LITERAL_TERNARY = re.compile(
+    r"""^[^?]*\?\s*(?:'[^']*'|"[^"]*"|`[^`$]*`)\s*:\s*(?:'[^']*'|"[^"]*"|`[^`$]*`)\s*$"""
+)
+
+#: 자가 못 가리는 자리 — **왜 안전한지**를 값에 적습니다.
+#:
+#: ⚠️ 이 표는 **정확해야** 합니다. 낡은 줄이 남아 있으면 다음 사람이
+#:    「여기는 봐준 자리」로 읽습니다 (결함 306 의 「예외가 낡는 것도
+#:    같이 재십시오」). 아래 검사가 남는 줄을 실패로 잡습니다.
+_ESCAPE_EXEMPT: dict[tuple[str, str], str] = {
+    ("frontend/src/demo/call.ts", "capture.tone"): (
+        "`Tone` 은 'ok'|'warn'|'bad' 유니언 — 값이 전부 `mesh.ts` 의 리터럴"
+    ),
+    ("frontend/src/demo/call.ts", "p.tone"): "위와 같음",
+    ("frontend/src/demo/main.ts", "w.severity"): (
+        "'critical'|'warning'|'info' — `recording/capture.ts` 가 리터럴로 만듭니다"
+    ),
+    ("frontend/src/demo/main.ts", "note?.tone ?? 'gap'"): "위와 같음",
+    ("frontend/src/demo/nav.ts", "disabled"): (
+        "`const disabled = tab.enabled ? '' : ' aria-disabled=\"true\"'` — 리터럴 둘"
+    ),
+    ("frontend/src/demo/nav.ts", "marked"): "`marked` 도 리터럴 둘",
+    ("frontend/src/demo/nav.ts", "current"): (
+        "`const current = … ? ' aria-current=\"page\"' : ''` — 리터럴 둘 (레일·채널 두 곳)"
+    ),
+    ("frontend/src/lib/ui/skeleton.ts", "width"): "`bar(width: number, …)` — 숫자입니다",
+    ("frontend/src/lib/ui/skeleton.ts", "kind ? ` sk-${kind}` : ''"): (
+        "`kind` 는 부르는 자리가 전부 리터럴('btn'·'line'·'track'·'title'). "
+        "⚠️ 이 줄은 **정규식 자가 못 보던 자리**입니다 — 템플릿 안의 템플릿이라 "
+        "백틱 짝이 어긋났습니다. 스캐너로 바꾸고서야 보였습니다"
+    ),
+    ("frontend/src/lib/ui/skeleton.ts", "inner"): (
+        "`wrap(inner: string)` 이 받는 것은 `bar()` 가 만든 **이미 조립된** HTML"
+    ),
+}
+
+
+def _unescaped_interpolations() -> list[tuple[str, int, str]]:
+    """HTML 을 만드는 템플릿에서 **이스케이프를 안 거친** 자리.
+
+    ⚠️ 이 자가 **못 보는 것** (결함 316 의 「자가 못 보는 것을 같이
+    적으십시오」):
+
+    - 값이 **여러 함수를 거쳐** 오는 경우. 한 파일 안의 리터럴만 봅니다
+    - `innerHTML` 에 **변수를 통째로** 넣는 경우 (`el.innerHTML = html`)
+    - JSX 는 스스로 이스케이프하므로 안 봅니다. `dangerouslySetInnerHTML`
+      의 **인자**는 결국 이 자가 보는 템플릿에서 옵니다
+    - 서버가 만든 문자열. 서버는 HTML 을 안 만들지만, 만들기 시작하면
+      이 자는 조용합니다
+    """
+    found: list[tuple[str, int, str]] = []
+    for base in (REPO_ROOT / "frontend" / "src", REPO_ROOT / "webapp" / "src"):
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.ts")) + sorted(base.rglob("*.tsx")):
+            if ".test." in path.name:
+                continue
+            text = path.read_text(encoding="utf-8")
+            safe_vars = set(_BOUND_TO_ESCAPE.findall(_blanked_ts(text)))
+            local_fns = set(re.findall(r"\bfunction\s+([A-Za-z_$][\w$]*)", text)) | set(
+                re.findall(r"\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*\(", text)
+            )
+            for line, body in _ts_template_literals(text):
+                if not _HTML_TAG.search(body):
+                    continue
+                for hit in _INTERPOLATION.finditer(body):
+                    expr = hit.group(1).strip()
+                    if _ESCAPING_CALL.match(expr) or _NUMERIC.match(expr):
+                        continue
+                    if _LITERAL_TERNARY.match(expr):
+                        continue
+                    head = re.match(r"^([A-Za-z_$][\w$]*)", expr)
+                    if head and head.group(1) in safe_vars:
+                        continue
+                    if head and head.group(1) in local_fns and expr.startswith(head.group(1) + "("):
+                        continue
+                    found.append((str(path.relative_to(REPO_ROOT)), line, expr))
+    return found
+
+
+def test_nothing_puts_unescaped_text_into_markup() -> None:
+    """⭐ 사람이 적은 글자가 **마크업으로** 새지 않는다.
+
+    브라우저로도 재 봤습니다 — 프로젝트 이름·자기소개·회의 이름·채널
+    이름·채팅 메시지에 `<img src=x onerror=…>"'<b>` 를 제품이 보내는 모양
+    그대로 심고 화면 열여섯을 열었을 때 실행 0건 · 심은 요소 0건이었습니다.
+    이 검사는 **그 상태가 유지되는지**를 브라우저 없이 봅니다.
+
+    ⚠️ 「글자로 보이는 것」은 정상입니다 — 이스케이프가 됐다는 뜻입니다.
+    """
+    leaks = [
+        (path, line, expr)
+        for path, line, expr in _unescaped_interpolations()
+        if (path, expr) not in _ESCAPE_EXEMPT
+    ]
+    assert leaks == [], (
+        "HTML 을 만드는 템플릿에 이스케이프를 안 거친 값이 들어갑니다. "
+        "사람이 적은 글자면 그대로 마크업이 됩니다 — 데스크톱 셸에서는 "
+        f"사용자 PC 의 코드 실행입니다: {leaks}"
+    )
+
+
+def test_the_escape_exemptions_are_all_still_used() -> None:
+    """⭐ 예외 표에 **낡은 줄**이 없다.
+
+    자리를 고쳐 이스케이프를 거치게 되면 예외 줄이 남습니다. 남아 있으면
+    다음 사람이 「여기는 봐준 자리」로 읽습니다 — 결함 306 이 라우트 예외
+    표에서 겪은 그것입니다.
+    """
+    live = {(path, expr) for path, _, expr in _unescaped_interpolations()}
+    stale = sorted(key for key in _ESCAPE_EXEMPT if key not in live)
+    assert stale == [], (
+        f"예외 표에 이제 안 걸리는 줄이 있습니다 — 지우세요: {stale}"
+    )
