@@ -1055,6 +1055,102 @@ def test_status_columns_are_compared_against_their_own_vocabulary():
     )
 
 
+#: 행을 **만드는 코드가 0곳**인 표. `(모델, 왜 비어 있나 · 무엇이 딸려 죽나)`.
+#:
+#: ⚠️ 이 표는 **손으로 고른 목록이 아닙니다** — 아래 검사가 모델 전수를
+#: 세어 이 표와 **똑같은지** 봅니다. 새로 생기면 빨개지고, 채우기
+#: 시작해도 빨개집니다(결함 306 의 「예외가 낡는 것도 재라」).
+TABLES_NOBODY_FILLS: dict[str, str] = {
+    "TaskDependency": (
+        "선행/후행 관계를 넣는 라우트·화면·씨앗이 0곳. `blocked_by_late`"
+        "(ANALYTICS-005)가 이 표만 보므로 그 신호는 **언제나 `None`** 입니다"
+        " — `docs/20` 은 오래도록 ✅ 였습니다 (결함 382)."
+    ),
+    "PeerReview": (
+        "동료평가를 제출하는 길이 0곳. 신뢰도의 `peer_completion` 은 분모가"
+        " 0이면 **계산에서 빠지도록** 설계돼 있어(`compute_confidence`) 조용히"
+        " 틀리지 않습니다. `docs/20` 에 ✅ 로 주장하는 줄도 없습니다."
+    ),
+    "ScoringProfileRow": (
+        "가중치 프로파일을 행으로 저장하는 길이 0곳 — 지금은 코드의 "
+        "`profiles.Role` 이 그 일을 합니다. 주장하는 ✅ 줄이 없습니다."
+    ),
+    "Voiceprint": (
+        "성문을 만드는 코드가 0곳. `docs/07` §2.3 이 「멀티트랙이면 애초에 "
+        "불필요」라고 적어 둔 **기록된 결정**입니다 — `db/vocab.py` 도 같은 "
+        "말을 합니다."
+    ),
+}
+
+
+def test_tables_nobody_fills_are_written_down_and_not_claimed_done():
+    """⭐ **행을 만드는 코드가 0곳인 표**를 적어 두고, ✅ 로 주장하지 않는다.
+
+    ## ⛔ 대조표가 ✅ 라고 했는데 입력이 영영 안 들어옵니다 (결함 382)
+
+    `ANALYTICS-005 선행 지연 병목` 이 ✅ 였습니다. 계산은 멀쩡히 있습니다 —
+    `find_blocked_by_late(tasks, edges, …)`. 그런데 `edges` 는
+
+        select(m.TaskDependency.predecessor_id, m.TaskDependency.successor_id)
+
+    하나에서만 오고, `TaskDependency(` 를 **만드는 코드가 저장소 전체에
+    0곳**입니다(라우트·화면·씨앗 전부). 그래서 `blocked` 는 언제나 비고
+    함수는 **언제나 `None`** 입니다.
+
+    결함 377 이 `CHANNEL-005` 에서 겪은 것과 같은 모양인데, 그때는
+    「서버는 있고 화면이 없다」였고 이번은 **「입력이 아예 안 들어온다」**
+    입니다.
+
+    ⚠️ **손으로 고른 목록이 아니라 기준으로 셉니다** (결함 329). 모델
+    전수에서 「만드는 코드가 0곳」인 것을 찾아 위 표와 대조하므로,
+    새 표가 생겨도 · 표가 채워지기 시작해도 빨개집니다.
+    """
+    import re
+
+    models_src = _blanked(
+        (REPO_ROOT / "backend" / "teamflow" / "db" / "models.py").read_text(encoding="utf-8")
+    )
+    classes = re.findall(r"class\s+([A-Z]\w+)\(Base\)", models_src)
+    assert len(classes) > 20, f"모델을 {len(classes)}개밖에 못 찾았습니다 — 가드가 헛돕니다"
+
+    sources: list[tuple[str, str]] = []
+    for path in [
+        *REPO_ROOT.glob("backend/teamflow/**/*.py"),
+        *REPO_ROOT.glob("scripts/*.py"),
+    ]:
+        if "__pycache__" in str(path) or path.name == "models.py":
+            continue
+        sources.append((str(path), _blanked(path.read_text(encoding="utf-8"))))
+
+    empty = set()
+    for name in classes:
+        #: `m.Voiceprint(` 도 `Voiceprint(` 도 만드는 것입니다. 선언은
+        #: `models.py` 를 아예 빼서 셈에서 제외했습니다.
+        rx = re.compile(rf"(?<![A-Za-z_])(?:m\.)?{name}\(")
+        if not any(rx.search(code) for _, code in sources):
+            empty.add(name)
+
+    written = set(TABLES_NOBODY_FILLS)
+    assert empty == written, (
+        "「행을 만드는 코드가 0곳인 표」 목록이 실제와 다릅니다.\n"
+        f"  새로 생김: {sorted(empty - written) or '없음'}\n"
+        f"  이제 채워짐(표에서 빼세요): {sorted(written - empty) or '없음'}"
+    )
+
+    #: 그런 표에 기대는 요구는 **✅ 로 주장하면 안 됩니다.**
+    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text(encoding="utf-8")
+    lying = []
+    for model, reason in TABLES_NOBODY_FILLS.items():
+        for req in re.findall(r"\b([A-Z]{3,}-\d{3})\b", reason):
+            for line in doc.splitlines():
+                if line.startswith(f"| {req} ") and re.search(r"\|\s*✅\s*\|", line):
+                    lying.append(f"{req} — {model} 은 아무도 안 채우는데 ✅ 입니다")
+    assert not lying, (
+        "입력이 영영 안 들어오는 요구를 `docs/20` 이 ✅ 라고 합니다 "
+        "(결함 382):\n  " + "\n  ".join(lying)
+    )
+
+
 def test_every_pipeline_stage_has_words_a_person_can_read():
     """⭐ 파이프라인 단계마다 **사람의 말**이 있는가 (결함 106).
 
