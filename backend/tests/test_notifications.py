@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 from teamflow.db.vocab import NOTIFICATION_DERIVED, NOTIFICATION_STORED, NotificationKind
+from teamflow.services.notification_service import MAX_ITEMS
 
 from .conftest import assign, login_as
 from .test_api import client, engine, seeded  # noqa: F401  (픽스처)
@@ -425,3 +426,87 @@ def test_a_channel_with_a_blank_name_says_the_old_word(seeded):
             channel_id=channel.id, author_id=seeded["user_ids"][0], body="x"
         )
         assert notification_service._which_channel(session, message) == "대화"
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 398 — 목록이 꽉 차면 **마감·지연이 밀려나던 것**
+# ══════════════════════════════════════════════════════════════
+
+
+def test_a_noisy_channel_does_not_push_out_the_overdue_notice(
+    client: TestClient, seeded, channel
+):
+    """⭐ 채팅이 아무리 와도 **지연 알림은 남습니다** (결함 398).
+
+    ## ⚠️ 재현
+
+    `collect` 는 저장된 사건과 마감 알림을 합쳐 시각 내림차순으로 정렬한
+    뒤 `[:MAX_ITEMS]` 했습니다. 그런데 두 갈래의 `at` 은 **뜻이 다릅니다**
+    (결함 331) — 저장된 사건은 「일어난 때」, 마감 알림은 **「마감일」**.
+    지난 마감은 과거라 맨 아래로 가라앉고, 부름이 50통 오면 **통째로**
+    잘려 나갔습니다. 실제로 재니 마감/지연이 **0줄**이었습니다.
+
+    ## ⚠️ 왜 그냥 잘리면 안 되는가
+
+    이 화면은 머리말에서 「다가오는 마감과 회의입니다」라고 **약속**하고,
+    바로 다음 문장에서 「마감일을 미루거나 업무를 끝내면 그 자리에서
+    사라집니다」라고 **사라지는 조건까지 가르칩니다.** 채팅 때문에
+    사라지면 사람은 그 규칙을 믿고 「누가 끝냈나 보다」라고 읽습니다.
+    """
+    make_task(seeded, days=-3, who=1)  # 이하늘의 지난 마감
+
+    login_as(client, seeded["user_ids"][0])
+    for i in range(MAX_ITEMS + 10):
+        client.post(f"/api/channels/{channel}/messages", json={"body": f"@이하늘 {i}"})
+
+    login_as(client, seeded["user_ids"][1])
+    mine = notices(client, seeded["project_id"])
+    kinds = {n["kind"] for n in mine}
+    assert "overdue" in kinds, (
+        f"부름 {MAX_ITEMS + 10}통에 지연 알림이 밀려났습니다 — {sorted(kinds)}"
+    )
+    assert len(mine) == MAX_ITEMS, len(mine)
+
+
+def test_the_list_still_stops_at_the_cap(client: TestClient, seeded, channel):
+    """⚠️ 자리를 먼저 준다고 **상한이 늘어나면 안 됩니다.**
+
+    마감에 자리를 주는 고침이 `MAX_ITEMS` 를 넘겨 버리면, 화면은 끝없이
+    길어지고 이 상한을 둔 이유가 사라집니다.
+    """
+    make_task(seeded, days=-3, who=1)
+    login_as(client, seeded["user_ids"][0])
+    for i in range(MAX_ITEMS + 10):
+        client.post(f"/api/channels/{channel}/messages", json={"body": f"@이하늘 {i}"})
+
+    login_as(client, seeded["user_ids"][1])
+    assert len(notices(client, seeded["project_id"])) == MAX_ITEMS
+
+
+def test_when_deadlines_alone_overflow_the_most_overdue_survive(seeded):
+    """⚠️ 마감만으로 넘칠 때는 **급한 것부터** 남깁니다.
+
+    ⚠️ 그리는 순서(새것부터)와 **자르는 순서**(오래 지난 것부터)는 다릅니다.
+    안 가르면 「가장 오래 지난 것」이 잘려 나갑니다 — 제일 급한 것입니다.
+    """
+    from teamflow.services import notification_service
+
+    for days in range(1, MAX_ITEMS + 6):
+        make_task(seeded, days=-days, who=1)
+
+    with db_session.session_scope() as session:
+        got = notification_service.collect(
+            session, seeded["user_ids"][1], seeded["project_id"], now=datetime.now(UTC)
+        )
+    assert len(got) == MAX_ITEMS
+    # ⚠️ 처음에 이 줄을 `n["kind"] if isinstance(...) else n.kind == "overdue"`
+    #    로 썼습니다 — 우연히 맞았을 뿐 dict 갈래는 **글자를 돌려주는**
+    #    참값이라 아무것도 안 잽니다. 자는 단순해야 읽힙니다.
+    assert {n.kind for n in got} == {"overdue"}
+    # 가장 오래 지난 것 = `at` 이 가장 작은 것. 남아 있어야 합니다.
+    oldest = min(n.at for n in got)
+    with db_session.session_scope() as session:
+        every = notification_service.deadline_notices(
+            session, seeded["user_ids"][1], seeded["project_id"], now=datetime.now(UTC)
+        )
+    assert oldest == min(n.at for n in every), "제일 오래 지난 마감이 잘려 나갔습니다"

@@ -430,9 +430,33 @@ def collect(
             )
         )
 
-    notices.extend(deadline_notices(session, user_id, project_id, now=now))
-    notices.sort(key=lambda n: as_utc(n.at), reverse=True)
-    return notices[:MAX_ITEMS]
+    # ⚠️ **마감·지연에 자리를 먼저 줍니다** (결함 398).
+    #
+    # 예전에는 저장된 사건과 그냥 합쳐서 시각 내림차순으로 자른 뒤
+    # `[:MAX_ITEMS]` 했습니다. 그런데 두 갈래의 `at` 은 **뜻이 다릅니다**
+    # (결함 331 이 적어 둔 그것) — 저장된 사건은 「일어난 때」이고
+    # 마감 알림은 **「마감일」**입니다. 지난 마감은 과거라 목록 맨 아래로
+    # 가라앉고, 채팅이 50통 오면 **통째로 잘려 나갔습니다.**
+    #
+    # 재현: 조용할 때 「마감일이 지났습니다 — 접근성 점검」이 보이던 사람에게
+    # 부름 60통을 보내니 마감/지연이 **0줄**이 됐습니다.
+    #
+    # ⚠️ 이 화면은 머리말에서 「다가오는 마감과 회의입니다」라고 약속하고,
+    # 바로 다음 문장에서 **「마감일을 미루거나 업무를 끝내면 그 자리에서
+    # 사라집니다」**라고 사라지는 조건까지 가르칩니다. 채팅 때문에 사라지면
+    # 사람은 그 규칙을 믿고 **「누가 끝냈나 보다」**라고 읽습니다.
+    #
+    # 마감 알림의 개수는 **그 사람이 맡은, 안 끝난, 마감일 있는 업무**로
+    # 묶여 있어 저절로 작습니다. 저장된 사건(채팅)만 무한히 늘어납니다.
+    # 그러니 자리를 다투게 두지 않습니다.
+    deadlines = deadline_notices(session, user_id, project_id, now=now)
+    # ⚠️ 마감이 그 자체로 넘칠 때는 **급한 것부터** 남깁니다(오래 지난 것 =
+    #    `at` 이 작은 것). 화면에 그리는 순서와 자르는 순서는 다릅니다.
+    deadlines.sort(key=lambda n: as_utc(n.at))
+    room = max(0, MAX_ITEMS - len(deadlines))
+    merged = [*deadlines[:MAX_ITEMS], *notices[:room]]
+    merged.sort(key=lambda n: as_utc(n.at), reverse=True)
+    return merged
 
 
 def deadline_notices(
