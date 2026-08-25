@@ -24,6 +24,7 @@ import { describeMissingSummary } from './review/phase.ts';
 import { meetingLabel } from './ui/naming.ts';
 import { appRailHref } from './nav/rail.ts';
 import { withJosa } from './text/josa.ts';
+import { EVIDENCE_CHIPS_SHOWN, splitEvidenceChips } from './review/evidence.ts';
 import { describeMeetingWhen, meetingWhen } from './home/next.ts';
 import { EXTRA_CONSENTS, memberStatuses } from './lobby/room.ts';
 import {
@@ -7207,7 +7208,14 @@ describe('근거 칩은 **자기** 원문으로 간다 (결함 223)', () => {
     // 칩 이름은 「근거 #14 원문 보기」인데 `select(candidate)` 만 부르면
     // 언제나 **첫** 근거(#1)로 갔습니다. 근거를 #1·#14 로 벌려 놓고 재서
     // 확인했습니다 — 고치기 전 두 칩 모두 scrollTop 57.
-    const block = /candidate\.evidence_utterance_ids\.map\([\s\S]*?\n {22}\/>/.exec(review)?.[0] ?? '';
+    /* ⚠️ **자리를 찾는 표지가 낡았었습니다** (결함 364). 예전에는
+       `candidate.evidence_utterance_ids.map(` 이 여기 있었는데, 접는
+       래퍼(`EvidenceChips`)로 감싸면서 그 글자가 사라졌습니다. **요구는
+       안 바뀌었고 표지만 옮긴 것**이라 자를 고쳤습니다 — 결함 335·362 와
+       같은 부류입니다. */
+    const block =
+      /<EvidenceChips\s+ids=\{candidate\.evidence_utterance_ids\}[\s\S]*?\n {20}\/>/.exec(review)?.[0] ??
+      '';
     ok(block !== '', '후보 카드의 근거 칩을 못 찾았습니다');
     ok(
       /rowRefs\.current\.get\(id\)\?\.scrollIntoView/.test(block),
@@ -9187,5 +9195,85 @@ describe('점수에 안 들어가는 발언 유형이 실제로 다르게 그려
         `${name} 화면이 0점 여부를 안 쓰고 있습니다`,
       );
     }
+  });
+});
+
+describe('근거 칩을 그리는 자리는 **전부** 접는 판단을 거친다 (결함 364)', () => {
+  /* `splitEvidenceChips` 는 「근거가 열둘이면 숫자가 회의 내용보다 먼저
+     보인다」를 막으려고 만든 판단이고, 그 머리말이 해악을 그대로 적어
+     뒀습니다. 그런데 SPA 검토 화면에서 **부르는 곳이 관찰 줄 하나**였고,
+     후보 카드는 `evidence_utterance_ids.map(...)` 으로 전부 그렸습니다.
+
+     근거 열둘짜리 후보를 창 반쪽(720px)에서 열면 맨 숫자가 **세 줄**로
+     깔려 제목 바로 아래 제일 넓은 자리를 먹었습니다 — 1440px 에서는 한
+     줄에 들어가서 **넓은 창만 보면 안 보입니다.**
+
+     ⚠️ **낱말이 아니라 요구를 잽니다.** 「`EvidenceChips` 라는 글자가
+     있는가」가 아니라 **「`EvidenceChip` 을 직접 늘어놓는 자리가 없는가」**
+     를 봅니다 — 그래야 다음 사람이 새 자리에서 또 `map` 을 써도 잡힙니다. */
+
+  const WEBAPP2 = join(ROOT, '..', 'webapp', 'src');
+
+  const stripJsx = (source: string): string =>
+    source
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
+      .replace(/(?<![:\w])\/\/[^\n]*/g, '');
+
+  it('⭐ `EvidenceChip` 을 **직접** 늘어놓는 자리가 없다', () => {
+    /* 접는 래퍼(`EvidenceChips`) 안에서만 낱개 칩을 씁니다. 화면이 직접
+       `.map(... <EvidenceChip` 을 쓰면 그 자리는 안 접힙니다. */
+    const roots: Array<[string, string]> = [
+      ['SPA', join(WEBAPP2, 'screens', 'Review.tsx')],
+      ['SPA(컴포넌트)', join(WEBAPP2, 'components', 'EvidenceChip.tsx')],
+    ];
+    const offenders: string[] = [];
+    for (const [name, file] of roots) {
+      if (!existsSync(file)) continue;
+      let source = stripJsx(readFileSync(file, 'utf8'));
+      /* ⚠️ **접는 래퍼 자신은 빼고 셉니다.** `EvidenceChips` 안의 `map` 은
+         **맞는** 자리입니다 — 그것까지 세면 고쳐 놓고도 빨갛습니다(실제로
+         한 번 그렇게 잡혔고, 「왜 빨간지」를 읽어서 알았습니다). */
+      source = source.replace(
+        /function EvidenceChips[\s\S]*?\n\}\n/,
+        '',
+      );
+      // `…map(` 과 `<EvidenceChip` 이 같은 식 안에 있으면 낱개 나열입니다.
+      for (const hit of source.matchAll(/\.map\(\s*\(?[^)]*\)?\s*=>\s*\(?\s*<EvidenceChip\b/g)) {
+        offenders.push(`${name}: ${hit[0].replace(/\s+/g, ' ').slice(0, 60)}`);
+      }
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      `근거 칩을 접지 않고 전부 그리는 자리가 있습니다:\n  ${offenders.join('\n  ')}`,
+    );
+  });
+
+  it('⭐ 접는 래퍼가 `@lib` 의 판단을 부른다', () => {
+    /* 래퍼가 자기 숫자를 들고 있으면 `@lib` 을 고쳐도 안 따라옵니다
+       (결함 363 이 상수에서 겪은 그것). */
+    const source = readFileSync(join(WEBAPP2, 'screens', 'Review.tsx'), 'utf8');
+    ok(
+      /splitEvidenceChips\(/.test(source),
+      '접는 래퍼가 `splitEvidenceChips` 를 안 부릅니다 — 문턱을 화면이 따로 들고 있습니다',
+    );
+    ok(
+      !/EVIDENCE_CHIPS_SHOWN\s*=/.test(source),
+      '화면이 문턱을 다시 적고 있습니다 — 값은 `@lib` 한 곳에만',
+    );
+  });
+
+  it('⭐ 문턱을 넘으면 접고, 넘지 않으면 그대로 둔다', () => {
+    /* 요구 자체를 `@lib` 에서 확인합니다 — 화면이 어떻게 부르든 이
+       성질이 깨지면 접기가 무의미해집니다. */
+    const many = splitEvidenceChips([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    strictEqual(many.head.length, EVIDENCE_CHIPS_SHOWN);
+    strictEqual(many.rest.length, 7);
+
+    // 하나 남는 것은 접지 않습니다 — 「+1」이 칩보다 넓습니다.
+    const justOver = splitEvidenceChips([1, 2, 3, 4, 5, 6]);
+    strictEqual(justOver.rest.length, 0);
+    strictEqual(justOver.head.length, 6);
   });
 });

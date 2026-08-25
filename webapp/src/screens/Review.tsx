@@ -696,10 +696,11 @@ export default function Review() {
                     </span>
                   </div>
                   <h3 className="cand__title">{candidate.title}</h3>
-                  <div className="cand__chips">
-                    {noEvidence ? (
+                  {noEvidence ? (
+                    <div className="cand__chips">
                       <span className="chip chip--unknown">⚠ 근거 없음 — 등록할 수 없습니다</span>
-                    ) : (
+                    </div>
+                  ) : (
                       /* ⚠️ **어느 칩을 눌러도 첫 근거로 갔습니다** (결함 223).
                          `select(candidate)` 는 `evidence_utterance_ids[0]`
                          으로 스크롤합니다 — 근거가 #1·#3 인 후보에서
@@ -716,11 +717,16 @@ export default function Review() {
 
                          아래 관찰 줄의 칩은 처음부터 자기 발화로 갔습니다.
                          같은 화면 안에서 둘이 달랐던 것입니다. */
-                      candidate.evidence_utterance_ids.map((id) => (
-                        <EvidenceChip
-                          key={id}
-                          id={`#${id}`}
-                          onOpen={() => {
+                    /* ⚠️ **`EvidenceChips` 로 감쌉니다** (결함 364). 예전에는
+                       여기서 `map` 으로 **전부** 그렸습니다 — 근거가 열둘인
+                       후보를 창 반쪽(720px)에서 열면 맨 숫자가 **세 줄**로
+                       깔려 제목 바로 아래 제일 넓은 자리를 먹었습니다.
+                       접는 판단은 `@lib` 의 `splitEvidenceChips` 에 있고
+                       그 머리말이 바로 이 해악을 적어 뒀는데, 부르는 곳이
+                       아래 관찰 줄 하나뿐이었습니다. */
+                    <EvidenceChips
+                      ids={candidate.evidence_utterance_ids}
+                      onOpen={(id) => {
                             select(candidate);
                             /* ⚠️ **다음 프레임에 해야 먹습니다.** `select` 가
                                먼저 자기 스크롤(첫 근거)을 시작하는데, 같은
@@ -733,12 +739,10 @@ export default function Review() {
                                 behavior: reduceMotion ? 'auto' : 'smooth',
                                 block: 'center',
                               });
-                            });
-                          }}
-                        />
-                      ))
-                    )}
-                  </div>
+                        });
+                      }}
+                    />
+                  )}
                   {/* 점선 아래 — 여기부터 사람의 몫 */}
                   <hr className="cand__divider" />
                   <div
