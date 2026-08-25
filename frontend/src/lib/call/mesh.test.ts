@@ -145,6 +145,65 @@ describe('describeCall', () => {
     const text = describeCall([view(2, 'connected'), view(3, 'connecting')]);
     strictEqual(text.includes('2명 중 1명'), true);
   });
+
+  /*
+   * 결함 401 — 「나머지」를 한 덩어리로 세지 않는가.
+   *
+   * ⚠️ 바로 위 검사가 `connecting` 하나로 쟀습니다. 그 갈래는 「연결 중」이
+   *    **참인 유일한 갈래**라, 옛 코드도 통과합니다. UDP 를 막아 재 보니
+   *    카드는 「연결 실패」인데 머리줄은 「나머지는 연결 중입니다」였습니다.
+   *
+   * ⚠️ 어휘를 여기 베끼지 않습니다 — `mesh.ts` 의 `PeerState` 유니언을 읽어
+   *    **하나라도 안 재는 갈래가 있으면 실패**입니다(결함 306 의 방법).
+   *
+   * ⚠️ `closed` 만 예외입니다. `mesh.ts` 가 브라우저로 재서 적어 둔 대로
+   *    `close()` 는 `connectionstatechange` 를 안 쏘고, `demo/call.ts` 에서
+   *    살아 있는 상대를 닫는 자리는 `states.delete` 와 **짝으로만** 있습니다.
+   *    그 짝이 깨지면 아래 「예외가 낡는가」 검사가 웁니다.
+   */
+  const REMAINDER_WORD: Record<string, string> = {
+    new: '연결 중',
+    connecting: '연결 중',
+    disconnected: '신호가 불안정',
+    failed: '연결 실패',
+  };
+  const CLOSED_IS_UNREACHABLE = 'closed';
+
+  it('⭐ 남은 사람을 「연결 중」으로 뭉개지 않는다 (갈래 전수)', () => {
+    const src = readFileSync(join(ROOT, 'src', 'lib', 'call', 'mesh.ts'), 'utf8');
+    const union = src.match(/export type PeerState =([\s\S]*?);/)?.[1] ?? '';
+    const states = [...union.matchAll(/'([a-z]+)'/g)].map((m) => m[1] as string);
+    ok(states.length >= 6, `PeerState 를 못 읽었습니다: ${states.length}개`);
+
+    const measured = new Set(['connected', CLOSED_IS_UNREACHABLE, ...Object.keys(REMAINDER_WORD)]);
+    const unseen = states.filter((s) => !measured.has(s));
+    deepStrictEqual(unseen, [], `안 재는 갈래가 있습니다: ${unseen.join(', ')}`);
+
+    for (const [state, word] of Object.entries(REMAINDER_WORD)) {
+      const text = describeCall([view(2, 'connected'), view(3, state as never)]);
+      ok(text.includes('2명 중 1명 연결됨'), `${state}: 인원수를 안 말합니다 — ${text}`);
+      ok(text.includes(word), `${state}: 카드는 「${word}」인데 머리줄은 「${text}」`);
+      if (word !== '연결 중') {
+        ok(!text.includes('연결 중'), `${state}: 「연결 중」이라고 부릅니다 — ${text}`);
+      }
+    }
+  });
+
+  it('⭐ 제일 나쁜 갈래를 부른다 — 실패가 불안정보다 앞선다', () => {
+    const text = describeCall([view(2, 'failed'), view(3, 'disconnected')]);
+    ok(text.includes('연결 실패'), text);
+    ok(!text.includes('신호가 불안정'), text);
+  });
+
+  it('예외가 낡는가 — 살아 있는 상대를 닫을 때 states 도 같이 지우는가', () => {
+    // `closed` 를 안 재는 근거입니다. 이 짝이 깨지면 그 갈래가 화면에 나옵니다.
+    const src = readFileSync(join(ROOT, 'src', 'demo', 'call.ts'), 'utf8');
+    // ⚠️ `[^)]*` 로 쓰면 `String(...)` 의 닫는 괄호에서 멈춰 **0곳**이 나옵니다.
+    const closes = [...src.matchAll(/peers\.get\([\s\S]{0,80}?\.close\(\)/g)];
+    strictEqual(closes.length, 1, `살아 있는 상대를 닫는 자리가 ${closes.length}곳입니다`);
+    const after = src.slice((closes[0]?.index ?? 0), (closes[0]?.index ?? 0) + 220);
+    ok(after.includes('states.delete('), `닫기 옆에 states.delete 가 없습니다:\n${after}`);
+  });
 });
 
 describe('callWarnings', () => {

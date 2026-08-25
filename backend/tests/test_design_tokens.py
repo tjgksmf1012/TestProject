@@ -1198,6 +1198,61 @@ def test_the_unread_bar_survives_forced_colors() -> None:
     )
 
 
+def test_the_mic_level_survives_forced_colors() -> None:
+    """⭐ 고대비에서도 **내 소리가 들어가는지** 보여야 한다 (결함 402).
+
+    통화 화면의 마이크 레벨은 `채움 폭` 하나로만 값을 말합니다 — 그 값을
+    글자로 적는 자리가 화면에 **0곳**입니다(`describeMic` 는 마이크가
+    켜졌는지·설정이 어떤지를 말할 뿐 지금 소리가 들어오는지는 안 말합니다).
+    `forced-colors: active` 는 `background-color` 를 시스템 색으로 덮으므로
+    채움(`--ok`)과 홈통(`--sunken`)이 **같은 색**이 됩니다. 가짜 마이크로
+    소리를 넣고 브라우저로 재서 확인했습니다:
+
+        고대비      채움 rgb(255,255,255) · 홈통 rgb(255,255,255)  → 같음
+        고대비+다크  채움 rgb(0,0,0)       · 홈통 rgb(0,0,0)        → 같음
+        보통        채움 rgb(31,107,69)   · 홈통 rgb(240,241,244)  → 다름
+
+    즉 고대비 사용자에게는 레벨이 **언제나 0** 으로 보입니다. 이 제품에서
+    마이크가 죽은 채로 회의를 하면 그 사람의 발언은 하나도 기록되지
+    않으므로(`callWarnings`), 그것을 확인할 유일한 창이 사라지는 것입니다.
+
+    ⚠️ 이 검사가 **못 보는 것**: 이 화면의 다른 색-전용 자리. 참가자 카드의
+    `.state.ok/.warn/.bad` 도 고대비에서 한 색으로 뭉개지지만, **갈래마다
+    글자가 다르므로**(연결됨 / 신호가 불안정합니다 / 연결 실패 — …) 사실이
+    안 없어집니다 — 재서 확인했고 결함으로 안 셌습니다(결함 393 의 기준).
+    """
+    html = (
+        Path(__file__).resolve().parents[2] / "frontend" / "public" / "call.html"
+    ).read_text(encoding="utf-8")
+
+    assert ".meter span" in html, "레벨 채움 규칙이 없습니다 — 이 검사가 낡았습니다"
+    forced = re.search(
+        r"@media\s*\(\s*forced-colors:\s*active\s*\)\s*\{(?P<body>(?:[^{}]*\{[^{}]*\})+[^{}]*)\}",
+        html,
+    )
+    assert forced is not None, (
+        "고대비 규칙이 없습니다 — 레벨은 채움 **색** 하나로만 값을 말하는데 "
+        "고대비는 채움을 홈통과 같은 색으로 덮습니다 (결함 402)"
+    )
+    body = forced.group("body")
+    assert ".meter span" in body, f"고대비 규칙에 `.meter span` 이 없습니다: {body[:160]}"
+
+    fill = re.search(r"\.meter span\s*\{([^}]*)\}", body)
+    assert fill is not None
+    values = [v.strip() for v in re.findall(r"background(?:-color)?:\s*([^;]+);?", fill.group(1))]
+    allowed = {"Canvas", "CanvasText", "Highlight", "LinkText", "GrayText"}
+    assert values, f"고대비 규칙이 채움을 안 정합니다: {fill.group(1)!r}"
+    assert set(values) <= allowed, (
+        f"고대비 규칙이 시스템 색이 아닌 값을 씁니다: {sorted(set(values) - allowed)} — "
+        "`var(--ok)` 나 hex 는 그 모드에서 다시 덮입니다"
+    )
+    # 홈통은 `Canvas` 로 덮입니다. 채움에 `Canvas` 를 주면 고친 것이 아닙니다.
+    assert "Canvas" not in values, (
+        "채움에 `Canvas` 를 줬습니다 — 홈통이 덮이는 색과 같아서 여전히 "
+        "레벨이 0 으로 보입니다"
+    )
+
+
 def test_the_calendar_today_survives_forced_colors() -> None:
     """⭐ 고대비에서도 **오늘이 어느 칸인지** 보여야 한다 (결함 400).
 

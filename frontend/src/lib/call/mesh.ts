@@ -167,12 +167,30 @@ export function describePeer(
  *
  * ⚠️ 혼자 있을 때 "연결됨" 이라고 하면 안 됩니다 — 아무도 없는데 통화가
  * 되고 있다고 읽힙니다.
+ *
+ * ⚠️⚠️ **「나머지」를 한 덩어리로 세지 마십시오** (결함 401). 예전에는
+ * `연결된 사람 수` 를 빼고 남은 전부를 「연결 중」이라고 불렀습니다. 그
+ * 자루에는 `connecting`(기다리면 붙는다)뿐 아니라 `disconnected`(붙었다가
+ * 끊겼다)와 `failed`(안 붙는다 · 내 목소리가 그 사람에게 안 간다)가 같이
+ * 들어 있습니다. UDP 를 막고 재 보니 아래 카드는 「연결 실패 — 네트워크가
+ * 막고 있을 수 있습니다」인데 **같은 화면 머리줄이 「나머지는 연결
+ * 중입니다」**였습니다 — 머리줄을 먼저 읽는 사람은 기다립니다.
+ *
+ * 그래서 남은 사람 중 **제일 나쁜 갈래를 개수와 함께** 부릅니다. 낱말은
+ * `STATE_TEXT` 의 카드 글자와 같은 말을 씁니다 — 같은 사실을 두 자리가
+ * 다르게 부르면 어느 쪽을 믿어야 할지 알 수 없습니다(결함 290).
  */
 export function describeCall(peers: readonly PeerView[]): string {
   if (peers.length === 0) return '혼자 있습니다. 다른 팀원이 들어오면 자동으로 연결됩니다.';
   const connected = peers.filter((p) => p.state === 'connected').length;
   if (connected === peers.length) return `${peers.length}명과 통화 중입니다.`;
-  return `${peers.length}명 중 ${connected}명 연결됨 — 나머지는 연결 중입니다.`;
+
+  const head = `${peers.length}명 중 ${connected}명 연결됨`;
+  const failed = peers.filter((p) => p.state === 'failed').length;
+  if (failed) return `${head} — ${failed}명은 연결 실패했습니다.`;
+  const unstable = peers.filter((p) => p.state === 'disconnected').length;
+  if (unstable) return `${head} — ${unstable}명은 신호가 불안정합니다.`;
+  return `${head} — 나머지는 연결 중입니다.`;
 }
 
 /**
