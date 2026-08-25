@@ -35,6 +35,35 @@ SOURCE_PATTERNS = (
 )
 
 
+
+#: 화면이 **전체 경로로는 안 잡는** 서버 갈래 — 왜인지 같이 적습니다.
+#:
+#: ⚠️ 이 표는 **두 곳이 읽습니다**: 아래 라우트 가드와,
+#: `test_the_requirements_table_does_not_claim_unwired_things` 입니다.
+#: 사본을 만들면 「서버만 있다」와 「✅ 다 됐다」가 갈라집니다 — 실제로
+#: `docs/20` 의 CHANNEL-005 가 ✅ 인 채로 그렇게 갈라져 있었습니다(결함 377).
+SERVER_ONLY_OR_ASSEMBLED: dict[str, str] = {
+        "POST /api/github/webhook": "GitHub 이 부릅니다 — 화면이 부르는 갈래가 아닙니다",
+        "PUT /api/meetings/{meeting_id}/tracks/{track_id}/chunks/{seq}": (
+            "`browser-adapter.ts` 가 `${trackUrl}/chunks/${seq}` 로 이어 붙입니다"
+        ),
+        "GET /api/meetings/{meeting_id}/tracks/{track_id}/chunks": (
+            "`demo/main.ts` 가 `${trackUrl}/chunks` 로 이어 붙입니다"
+        ),
+        "POST /api/meetings/{meeting_id}/tracks/{track_id}/complete": (
+            "`demo/main.ts` 가 `${trackUrl}/complete` 로 이어 붙입니다"
+        ),
+        # ⚠️ 아래 둘은 **진짜로 아무도 안 부릅니다.** 숨기지 않고 적어 둡니다 —
+        #    만들어 놓고 화면에 안 이은 것이고(실패 ①), 붙일 때 이 줄을 지웁니다.
+        "PUT /api/projects/{project_id}/channels/order": (
+            "CHANNEL-005 채널 순서 — 서버만 있고 화면에 아직 안 이었습니다"
+        ),
+        "GET /api/projects/{project_id}/mentions": (
+            "멘션 자동완성 — 서버만 있고 화면에 아직 안 이었습니다 "
+            "(멘션 자체는 서버가 본문에서 찾아 내므로 동작합니다)"
+        ),
+    }
+
 def _source_files() -> list[Path]:
     found: set[Path] = set()
     for pattern in SOURCE_PATTERNS:
@@ -2915,28 +2944,7 @@ def test_every_server_route_has_a_caller() -> None:
     """
     import re
 
-    # 예외 — **왜** 화면에서 전체 경로로 안 잡히는지 적습니다.
-    EXCUSED = {
-        "POST /api/github/webhook": "GitHub 이 부릅니다 — 화면이 부르는 갈래가 아닙니다",
-        "PUT /api/meetings/{meeting_id}/tracks/{track_id}/chunks/{seq}": (
-            "`browser-adapter.ts` 가 `${trackUrl}/chunks/${seq}` 로 이어 붙입니다"
-        ),
-        "GET /api/meetings/{meeting_id}/tracks/{track_id}/chunks": (
-            "`demo/main.ts` 가 `${trackUrl}/chunks` 로 이어 붙입니다"
-        ),
-        "POST /api/meetings/{meeting_id}/tracks/{track_id}/complete": (
-            "`demo/main.ts` 가 `${trackUrl}/complete` 로 이어 붙입니다"
-        ),
-        # ⚠️ 아래 둘은 **진짜로 아무도 안 부릅니다.** 숨기지 않고 적어 둡니다 —
-        #    만들어 놓고 화면에 안 이은 것이고(실패 ①), 붙일 때 이 줄을 지웁니다.
-        "PUT /api/projects/{project_id}/channels/order": (
-            "CHANNEL-005 채널 순서 — 서버만 있고 화면에 아직 안 이었습니다"
-        ),
-        "GET /api/projects/{project_id}/mentions": (
-            "멘션 자동완성 — 서버만 있고 화면에 아직 안 이었습니다 "
-            "(멘션 자체는 서버가 본문에서 찾아 내므로 동작합니다)"
-        ),
-    }
+    EXCUSED = SERVER_ONLY_OR_ASSEMBLED
 
     routes: list[tuple[str, str, str]] = []
     for path in sorted((REPO_ROOT / "backend" / "teamflow" / "api").rglob("*.py")):
@@ -3263,4 +3271,65 @@ def test_meeting_summary_fields_agree_across_the_three_places() -> None:
     assert lib <= server, (
         "`@lib` 이 서버가 안 보내는 칸을 읽습니다 — 언제나 `undefined` 입니다.\n"
         f"  없는 칸: {sorted(lib - server)}"
+    )
+
+
+def test_the_requirements_table_does_not_claim_unwired_things() -> None:
+    """⛔ **「서버만 있다」와 「✅ 다 됐다」가 갈라져 있었습니다** (결함 377).
+
+    라우트 가드의 예외 표는 두 갈래를 **진짜로 아무도 안 부릅니다** 라고
+    적어 두고 있습니다 — 「만들어 놓고 화면에 안 이은 것이고(실패 ①),
+    붙일 때 이 줄을 지웁니다」. 그런데 같은 저장소의 요구사항 대조표는
+    그중 하나를 **✅** 로 적고 있었습니다:
+
+        docs/20  | CHANNEL-005 순서 변경 | ✅ | `reorder_channels` … |
+        가드     | "CHANNEL-005 채널 순서 — 서버만 있고 화면에 아직 안 이었습니다"
+
+    ✅ 는 「다 됐다」로 읽힙니다. 대조표를 읽는 사람은 채널 순서를 바꿀 수
+    있다고 믿습니다 — 채팅 화면에는 순서를 바꾸는 컨트롤이 **0개**입니다.
+
+    ## 왜 표를 고치고 기능을 안 만드는가
+
+    그 예외는 **근거를 적어 둔 기록**입니다(「붙일 때 이 줄을 지웁니다」).
+    없는 기능을 지어내는 대신 **대조표가 사실을 말하게** 합니다 —
+    결함 317 이 `docs/00` 에서 한 것과 같습니다.
+
+    ## ⚠️ 이 자가 못 보는 것
+
+    예외 사유에 **요구사항 번호가 적혀 있는 것만** 짝을 잽니다. 번호가
+    없는 예외(멘션 자동완성)는 여기서 안 걸립니다 — 그 줄은 대조표에서
+    이미 정직하게 적고 있습니다(「서버가 본문에서 뽑습니다」).
+    """
+    import re
+
+    table = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text(encoding="utf-8")
+
+    #: 예외 사유에서 요구사항 번호를 뽑습니다 (`CHANNEL-005` 같은 것).
+    claimed: dict[str, str] = {}
+    for route, why in SERVER_ONLY_OR_ASSEMBLED.items():
+        for req in re.findall(r"\b([A-Z]+-\d{3})\b", why):
+            claimed[req] = route
+
+    assert claimed, (
+        "예외 사유에서 요구사항 번호를 하나도 못 뽑았습니다 — 이 검사가 낡았습니다"
+    )
+
+    offenders: list[str] = []
+    for req, route in sorted(claimed.items()):
+        rows = [line for line in table.splitlines() if req in line and line.startswith("|")]
+        if not rows:
+            offenders.append(f"{req}: 대조표에 그 줄이 없습니다 (`{route}`)")
+            continue
+        for row in rows:
+            cells = [c.strip() for c in row.split("|")]
+            #: 상태 칸은 두 번째입니다. 순수한 `✅` 는 「다 됐다」로 읽힙니다.
+            status = cells[2] if len(cells) > 2 else ""
+            if status == "✅":
+                offenders.append(
+                    f"{req}: 대조표는 ✅ 인데 `{route}` 를 부르는 화면이 0곳입니다"
+                )
+
+    assert offenders == [], (
+        "요구사항 대조표가 안 이어진 것을 「다 됐다」로 적고 있습니다:\n  "
+        + "\n  ".join(offenders)
     )
