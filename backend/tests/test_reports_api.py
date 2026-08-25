@@ -638,3 +638,88 @@ def test_the_service_counts_failed_meetings_separately(
 
     flat = str(content)
     assert "다시 처리해야 들어갑니다" in flat, "무엇을 해야 하는지 안 말합니다"
+
+
+def test_every_line_that_ignores_the_window_says_so(
+    client: TestClient, seeded, db: Session
+):
+    """⭐ 「이 기간에 **일어난** 일」 안에서 기간을 안 보는 줄은 이름표를 단다
+    (결함 371).
+
+    ⚠️ 손으로 고른 목록을 믿지 않습니다. **창을 비워서** 실제로 안 변하는
+    값이 무엇인지 재고, 그 집합이 이름표를 단 집합과 같은지 봅니다 —
+    서버가 새 값을 창 없이 세기 시작하면 그 자리에서 빨개집니다.
+    """
+    project_id = seeded["project_id"]
+    # ⚠️ **씨앗에 안 끝난 업무가 없으면 이 검사는 아무것도 안 잽니다.**
+    #    처음에 그대로 돌렸다가 「창을 비워도 안 변하는 값이 하나도 없습니다」
+    #    로 스스로 걸렸습니다 — 자가 헛돌면 그것도 실패여야 합니다.
+    db.add(m.Task(project_id=project_id, title="아직 안 끝난 일", status="todo"))
+    db.add(
+        m.Task(
+            project_id=project_id,
+            title="끝낸 일",
+            status="done",
+            completed_at=NOW,
+        )
+    )
+    db.add(
+        m.GithubEvent(
+            project_id=project_id,
+            repo="team/repo",
+            event_type="pull_request",
+            actor_login="minsu-dev",
+            payload={},
+            occurred_at=NOW,
+        )
+    )
+    db.commit()
+
+    def facts(**payload) -> dict[str, tuple[str, str]]:
+        content = client.post(
+            f"/api/projects/{project_id}/reports", json=payload
+        ).json()["content"]
+        for block in content["blocks"]:
+            if block["kind"] == "facts":
+                return {i["label"]: (i["value"], i.get("note", "")) for i in block["items"]}
+        raise AssertionError("사실 칸이 없습니다 — 검사가 낡았습니다")
+
+    # 이 팀의 활동이 하나도 안 들어오는 창.
+    far = facts(
+        report_type="weekly",
+        period_start="2020-01-06T00:00:00Z",
+        period_end="2020-01-12T00:00:00Z",
+    )
+    # 전부 들어오는 창.
+    wide = facts(
+        report_type="weekly",
+        period_start="2020-01-01T00:00:00Z",
+        period_end="2030-01-01T00:00:00Z",
+    )
+
+    # ⚠️ **모든 줄이 실제로 재어졌는가** 부터 봅니다. 양쪽 창에서 다 `0건`
+    #    인 줄은 이 자가 **못 보는 줄**입니다 — 그런 줄이 하나라도 있으면
+    #    검사 데이터를 늘려야 합니다(처음에 GitHub 줄이 그래서 심기 하나를
+    #    놓쳤습니다).
+    blind = sorted(
+        label
+        for label, (value, _) in wide.items()
+        if value == "0건" and far[label][0] == "0건"
+    )
+    assert not blind, f"이 검사가 못 보는 줄이 있습니다 — 데이터를 늘리세요: {blind}"
+
+    ignores_window = {
+        label for label, (value, _) in far.items() if value == wide[label][0]
+    }
+    assert ignores_window, "창을 비워도 안 변하는 값이 하나도 없습니다 — 검사가 헛돕니다"
+
+    unlabelled = sorted(label for label in ignores_window if not far[label][1])
+    assert not unlabelled, (
+        "기간을 안 보는 줄인데 이름표가 없습니다 — 읽는 사람은 「이번 주에 그랬다」로 읽습니다:\n"
+        f"  {unlabelled}"
+    )
+
+    # 최종 보고서에는 기간이 없으므로 그 이름표를 안 답니다.
+    final = facts(report_type="final")
+    for label in ignores_window:
+        assert not final[label][1], f"기간이 없는 문서에 기간 이름표를 답니다: {label}"

@@ -68,6 +68,27 @@ class PeriodInput:
     skipped_categories: list[str] = field(default_factory=list)
 
 
+#: 「이 기간에 일어난 일」 안에서 **기간과 무관한** 값들의 이름.
+#:
+#: ⚠️ 기간이 있는 보고서(주간)에서는 이 줄들에 **이름표**를 답니다 —
+#: 안 달면 읽는 사람이 「이번 주에 그랬다」로 읽습니다(결함 371 · 332).
+#:
+#: ⚠️ 손으로 고른 목록이 아닙니다. `test_reports.py` 가 **창을 비워서**
+#: 실제로 안 변하는 값이 무엇인지 재고, 그 집합이 이것과 같은지 봅니다 —
+#: 서버가 새 값을 창 없이 세기 시작하면 그 자리에서 빨개집니다.
+SNAPSHOT_FACTS: frozenset[str] = frozenset({"남은 업무"})
+
+
+def _snapshot_note(label: str, report_type: ReportType) -> str:
+    """기간과 무관한 줄에 다는 **이름표**.
+
+    기간이 없는 최종 보고서에는 헷갈릴 것이 없으므로 안 답니다.
+    """
+    if label not in SNAPSHOT_FACTS or report_type is not ReportType.WEEKLY:
+        return ""
+    return "이 기간이 아니라 지금 남아 있는 것입니다"
+
+
 def _not_counted(waiting: int, failed: int) -> str:
     """기여도에 **안 들어간** 회의를 갈래별로 한 줄에.
 
@@ -127,7 +148,24 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
                     note=_not_counted(waiting, failed),
                 ),
                 blocks.fact("완료한 업무", f"{data.tasks_done}건"),
-                blocks.fact("남은 업무", f"{data.tasks_open}건"),
+                blocks.fact(
+                    "남은 업무",
+                    f"{data.tasks_open}건",
+                    # ⛔ **이 줄만 기간 밖입니다** (결함 371). 나머지 넷은
+                    #    기간으로 걸러 오는데, 「남은 업무」는 아직 안 끝난
+                    #    것이라 걸러 올 날짜 자체가 없습니다 — 언제나 **지금**
+                    #    값입니다.
+                    #
+                    #    머리말이 「이 기간에 **일어난** 일」이라, 회의 0 ·
+                    #    완료 0 인 주간 보고서에서 「남은 업무 3건」만 서
+                    #    있으면 읽는 사람은 **이번 주에 3건이 밀렸다**고
+                    #    읽습니다. 프로젝트 전체의 잔량인데요.
+                    #
+                    #    결함 332 가 사람별 기여 판에서 내린 판단과 같습니다 —
+                    #    **한 문서가 두 범위를 말하면 각 범위에 이름을 붙입니다.**
+                    #    기간이 없는 최종 보고서에는 헷갈릴 것이 없으므로 안 붙입니다.
+                    note=_snapshot_note("남은 업무", report_type),
+                ),
                 blocks.fact(
                     "GitHub 활동",
                     f"{data.github_events}건",
