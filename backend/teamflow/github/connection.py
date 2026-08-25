@@ -260,8 +260,18 @@ def can_backfill(facts: ConnectionFacts) -> bool:
 def describe_coverage(facts: ConnectionFacts) -> str:
     """"이 수치는 언제부터의 활동인가" 를 한 줄로.
 
-    기여도 화면이 그대로 씁니다. 범위를 안 밝힌 숫자는 **전부를 센 것처럼**
-    읽힙니다.
+    범위를 안 밝힌 숫자는 **전부를 센 것처럼** 읽힙니다.
+
+    ⚠️ **오래도록 「기여도 화면이 그대로 씁니다」라고 적혀 있었는데
+    아닙니다.** 그리는 곳은 설정의 저장소 연결 **둘뿐**이고(레거시·SPA),
+    기여도 화면은 두 뿌리 다 `/api/projects/{id}/github` 를 **안
+    부릅니다**(네트워크를 찍어 확인).
+
+    기여도 화면에서 그 범위를 말해 주는 것은 이 줄이 아니라 **신뢰도
+    사유**입니다 — `confidence._REASON_TEXT["github_coverage"]` 의
+    「GitHub 연결 이전 기간의 활동이 누락되었습니다」. 레거시는 본문에,
+    SPA 는 `Why` 팝오버 안에 그립니다. 즉 **사람에게 닿기는 하는데
+    다른 길로** 닿습니다.
     """
     if not facts.repo:
         return "GitHub 활동은 이 계산에 들어 있지 않습니다."
