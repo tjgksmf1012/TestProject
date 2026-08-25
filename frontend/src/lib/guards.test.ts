@@ -19,7 +19,14 @@ import { describe, it } from 'node:test';
 
 import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
 import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contribution/ribbon.ts';
-import { attentionAbout } from './review/candidates.ts';
+import {
+  attentionAbout,
+  canSubmit,
+  summarize,
+  whyCannotSubmitBatch,
+  type ReviewContext,
+  type ReviewSummary,
+} from './review/candidates.ts';
 import { describeMissingSummary } from './review/phase.ts';
 import { meetingLabel } from './ui/naming.ts';
 import { appRailHref } from './nav/rail.ts';
@@ -150,8 +157,40 @@ function locksDeclaratively(code: string): boolean {
     const suffix = m[1] as string;
     const flag = suffix[0]?.toLowerCase() + suffix.slice(1);
     if (!new RegExp(`\\bset${suffix}\\(false\\)`).test(code)) continue;
-    if (!new RegExp(`disabled=\\{[^}]*\\b${flag}\\b`).test(code)) continue;
-    return true;
+    // ① 진짜 `disabled` 로 잠그거나 …
+    if (new RegExp(`disabled=\\{[^}]*\\b${flag}\\b`).test(code)) return true;
+    // ② … 이 저장소가 **더 좋아하는 모양**으로 잠그거나.
+    if (locksByAriaDisabled(code, flag)) return true;
+  }
+  return false;
+}
+
+/**
+ * `aria-disabled` 로 잠그는 것도 **잠그는 것**입니다 (결함 365).
+ *
+ * ⚠️ 이 자는 원래 `disabled=\{…flag…\}` 라는 **글자**만 봤습니다. 결함 365
+ * 에서 레거시 검토의 「제출」을 결함 234 의 모양(`aria-disabled` — 초점을
+ * 받고, 눌리고, 사유를 말함)으로 바꾸자 **요구는 하나도 안 바뀌었는데**
+ * 이 자만 빨개졌습니다. 「가드가 「글자 자리」를 재고 있어서 내가 공용으로
+ * 올리자 터진 것」(결함 335)과 같은 부류입니다.
+ *
+ * 요구는 「누르는 동안 두 번째 요청이 안 나간다」이므로 **둘 다** 봅니다 —
+ * 화면이 그 값으로 `aria-disabled` 를 그리는가, 그리고 **누르는 손이 그
+ * 값을 보고 되돌아가는가.** 그리는 것만 있고 되돌아가지 않으면
+ * `aria-disabled` 는 낭독기에게 하는 말일 뿐이고 요청은 두 번 나갑니다.
+ *
+ * 플래그를 그대로 쓰지 않고 **한 번 감싼 이름**(`const submitBlocked =
+ * whyCannotSubmitBatch(summary, \{ sending \})`)도 따라갑니다.
+ */
+function locksByAriaDisabled(code: string, flag: string): boolean {
+  const carriers = new Set<string>([flag]);
+  for (const m of code.matchAll(/\bconst (\w+)\s*=([^;]*);/g)) {
+    if (new RegExp(`\\b${flag}\\b`).test(m[2] as string)) carriers.add(m[1] as string);
+  }
+  for (const name of carriers) {
+    const drawn = new RegExp(`aria-disabled=\\{[^}]*\\b${name}\\b`).test(code);
+    const refuses = new RegExp(`if\\s*\\([^)]*\\b${name}\\b[^)]*\\)\\s*return`).test(code);
+    if (drawn && refuses) return true;
   }
   return false;
 }
@@ -9275,5 +9314,99 @@ describe('근거 칩을 그리는 자리는 **전부** 접는 판단을 거친�
     const justOver = splitEvidenceChips([1, 2, 3, 4, 5, 6]);
     strictEqual(justOver.rest.length, 0);
     strictEqual(justOver.head.length, 6);
+  });
+});
+
+describe('막힌 단추는 **모든** 막는 길에서 이유를 말한다 (결함 365)', () => {
+  /* 레거시 검토 화면의 「제출」이 두 가지로 막힙니다 —
+       ① 승인 표시한 것 중 조건이 안 찬 것이 있다 (`blocked > 0`)
+       ② 아직 아무것도 안 정했다 (`approving + rejecting === 0`)
+     화면은 ①만 적고 ②에는 **빈 문자열**을 그렸습니다. ②는 검토 화면을
+     연 사람이 **맨 처음 보는 상태**입니다 — 후보 열둘을 앞에 두고 단추가
+     죽어 있는데 왜인지는 화면 어디에도 없었습니다.
+
+     게다가 그 단추는 **진짜 `disabled`** 였습니다. Tab 으로 문서를 한
+     바퀴(146번) 돌아도 한 번도 안 닿았고, 닿지 못하니 `aria-describedby`
+     로 사유를 들려줄 수도 없습니다 — 결함 234 가 설정의 「저장」 넷에서
+     이미 고친 모양이 이 자리에 남아 있었습니다.
+
+     ⚠️ 여기서 재는 것은 **낱말이 아니라 요구**입니다:
+       · 화면이 사유를 `@lib` 에서 가져오는가 (화면 코드에는 검사가 없음)
+       · 막는 길마다 문장이 있는가 (`@lib` 에서 전수로)
+       · 단추가 초점을 받는 모양인가 (`aria-disabled`) */
+
+  const reviewScreen = (): string => {
+    const source = demoSource('review');
+    ok(source !== null, '레거시 검토 화면을 못 찾았습니다');
+    return source as string;
+  };
+
+  it('⭐ 레거시 검토 화면이 사유를 `@lib` 에서 가져온다', () => {
+    const code = reviewScreen();
+    ok(
+      /whyCannotSubmitBatch\(/.test(code),
+      '「왜 제출이 안 되나」를 화면이 직접 짜고 있습니다 — 판단은 `@lib` 에 (`whyCannotSubmitBatch`)',
+    );
+    /* ⚠️ 사유를 화면이 **다시** 적으면 두 벌입니다(실패 ②). `@lib` 이
+       고쳐져도 화면은 옛 문장을 그립니다. */
+    ok(
+      !/건에 빠진 정보가 있어/.test(code),
+      '화면이 사유 문장을 다시 적고 있습니다 — 문장은 `@lib` 한 곳에만',
+    );
+  });
+
+  it('⭐ 「제출」이 초점을 받는 모양이다 (결함 234 의 규칙)', () => {
+    const code = reviewScreen();
+    const button = /<button\b[^>]*\bid="submit"[^>]*>/.exec(code);
+    ok(button !== null, '`id="submit"` 단추를 못 찾았습니다');
+    const tag = (button as RegExpExecArray)[0];
+    ok(
+      /aria-disabled=\{/.test(tag),
+      '「제출」이 `aria-disabled` 가 아닙니다 — 진짜 `disabled` 는 초점을 못 받아 사유가 안 들립니다',
+    );
+    ok(
+      !/(?<!aria-)\bdisabled=\{/.test(tag),
+      '「제출」에 진짜 `disabled` 가 남아 있습니다 — Tab 으로 한 바퀴 돌아도 못 닿습니다',
+    );
+    ok(
+      /aria-describedby=\{/.test(tag),
+      '「제출」이 사유 칸을 안 가리킵니다 — 낭독기에는 이유 없이 「사용 불가」로만 들립니다',
+    );
+  });
+
+  it('⭐ `canSubmit` 이 거짓인 **모든** 길에 문장이 있다', () => {
+    /* 낱개 사례를 늘리는 대신 **막는 길을 전수로** 만듭니다 (결함 326 ·
+       289 의 방법 — 「어휘의 값 집합과 문구의 키 집합이 같은가」). */
+    const context: ReviewContext = { memberIds: [1, 2, 3], today: '2026-09-01' };
+    const base = {
+      id: 1,
+      title: '무엇을 한다',
+      assignee_hint: null,
+      assignee_id: 1,
+      deadline: '2026-09-04',
+      confidence: 0.8,
+      evidence_utterance_ids: [1],
+      review_status: 'pending',
+      warnings: [],
+    };
+    const paths: Array<[string, ReviewSummary]> = [
+      ['후보가 0건', summarize([], new Map(), context)],
+      ['아무것도 안 정함', summarize([base], new Map(), context)],
+      [
+        '승인했는데 조건 미충족',
+        summarize(
+          [{ ...base, assignee_id: null, deadline: null }],
+          new Map([[1, { decision: 'approve' as const }]]),
+          context,
+        ),
+      ],
+    ];
+    const silent: string[] = [];
+    for (const [name, summary] of paths) {
+      strictEqual(canSubmit(summary), false, `${name}: 이 사례가 안 막혀 있습니다`);
+      const why = whyCannotSubmitBatch(summary);
+      if (why === null || why.trim() === '') silent.push(name);
+    }
+    deepStrictEqual(silent, [], `막혔는데 아무 말도 안 하는 길: ${silent.join(', ')}`);
   });
 });

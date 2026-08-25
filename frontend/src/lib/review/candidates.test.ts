@@ -11,6 +11,7 @@ import {
   buildReviewPayload,
   canApprove,
   canSubmit,
+  whyCannotSubmitBatch,
   describeBlocker,
   describeSubmitResult,
   effectiveDeadline,
@@ -23,6 +24,7 @@ import {
   type Candidate,
   type Draft,
   type ReviewContext,
+  type ReviewSummary,
 } from './candidates.ts';
 
 const CONTEXT: ReviewContext = { memberIds: [1, 2, 3], today: '2026-09-01' };
@@ -342,6 +344,64 @@ describe('canSubmit', () => {
   it('전부 거절이어도 제출할 수 있다', () => {
     const summary = summarize([candidate()], drafts([10, { decision: 'reject' }]), CONTEXT);
     assert.equal(canSubmit(summary), true);
+  });
+});
+
+describe('whyCannotSubmitBatch', () => {
+  /* ⭐ 결함 365. `canSubmit` 이 거짓이 되는 **모든** 길에 문장이 있어야
+     합니다 — 화면은 오래도록 `blocked > 0` 하나만 적고 나머지에는 빈
+     문자열을 그렸습니다(결함 326 의 모양). */
+  it('⭐ 막는 길마다 문장이 있다 — 하나도 빈 문자열이 아니다', () => {
+    const cases: ReviewSummary[] = [
+      // 아직 아무것도 안 정했다
+      summarize([candidate({ id: 1 })], drafts(), CONTEXT),
+      // 승인 표시했는데 조건이 안 찼다
+      summarize(
+        [candidate({ id: 2, assignee_id: null, deadline: null })],
+        drafts([2, { decision: 'approve' }]),
+        CONTEXT,
+      ),
+      // 후보가 0건
+      summarize([], drafts(), CONTEXT),
+    ];
+    for (const summary of cases) {
+      assert.equal(canSubmit(summary), false, '이 사례는 막혀 있어야 합니다');
+      const why = whyCannotSubmitBatch(summary);
+      assert.notEqual(why, null, `막혔는데 이유가 null 입니다: ${JSON.stringify(summary)}`);
+      assert.ok(
+        typeof why === 'string' && why.trim().length > 0,
+        `막혔는데 이유가 빈 글자입니다: ${JSON.stringify(summary)}`,
+      );
+    }
+  });
+
+  it('제출할 수 있으면 null 이다', () => {
+    const summary = summarize([candidate()], drafts([10, { decision: 'approve' }]), CONTEXT);
+    assert.equal(canSubmit(summary), true);
+    assert.equal(whyCannotSubmitBatch(summary), null);
+  });
+
+  it('보내는 중이 맨 앞이다', () => {
+    const summary = summarize([candidate()], drafts([10, { decision: 'approve' }]), CONTEXT);
+    assert.match(whyCannotSubmitBatch(summary, { sending: true }) ?? '', /제출하는 중/);
+  });
+
+  it('후보가 0건인 것과 안 정한 것은 다른 말이다', () => {
+    const none = whyCannotSubmitBatch(summarize([], drafts(), CONTEXT));
+    const undecided = whyCannotSubmitBatch(summarize([candidate()], drafts(), CONTEXT));
+    assert.notEqual(none, undecided);
+    assert.match(none ?? '', /후보가 없습니다/);
+    assert.match(undecided ?? '', /등록하거나 거절해야/);
+  });
+
+  /* ⚠️ SPA 의 「검토 끝내기」와 **규칙이 다릅니다**(결함 365). 이쪽은
+     하나만 정해도 열립니다 — 합치면 안 됩니다. */
+  it('열둘 중 하나만 정해도 열린다 — SPA 와 다른 규칙이다', () => {
+    const list = Array.from({ length: 12 }, (_, i) => candidate({ id: i + 1 }));
+    const summary = summarize(list, drafts([1, { decision: 'reject' }]), CONTEXT);
+    assert.equal(summary.pending, 11);
+    assert.equal(canSubmit(summary), true);
+    assert.equal(whyCannotSubmitBatch(summary), null);
   });
 });
 

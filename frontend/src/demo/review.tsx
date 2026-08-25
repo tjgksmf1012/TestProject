@@ -25,7 +25,6 @@ import {
   attentionReasons,
   blockerLine,
   buildReviewPayload,
-  canSubmit,
   describeBlocker,
   describeSubmitResult,
   effectiveAssignee,
@@ -36,6 +35,7 @@ import {
   reviewLane,
   sortForReview,
   summarize,
+  whyCannotSubmitBatch,
   type Candidate,
   type Draft,
   type Lane,
@@ -972,6 +972,9 @@ function Review() {
 
   const { candidates, members, meeting, context } = screen.data;
   const summary = summarize(candidates, drafts, context);
+  /* ⚠️ 「왜 지금 제출이 안 되나」는 `@lib` 이 정합니다 (결함 365) —
+     화면 코드에는 자동 검사가 안 붙습니다. */
+  const submitBlocked = whyCannotSubmitBatch(summary, { sending });
   const counts = laneCounts(candidates, drafts);
   const shown = candidates.filter(
     (candidate) => lane === 'all' || reviewLane(candidate, draftOf(candidate.id)) === lane,
@@ -1037,17 +1040,26 @@ function Review() {
           {/* 제출 결과와 "빠진 정보" 안내가 같이 오는 자리입니다.
               `role="status"` — 사람이 방금 누른 것의 결과라 들려야 합니다. */}
           <div id="result" role="status" className={result?.tone ?? ''}>
-            {result !== null
-              ? result.text
-              : summary.blocked > 0
-                ? `${summary.blocked}건에 빠진 정보가 있어 제출할 수 없습니다`
-                : ''}
+            {result !== null ? result.text : (submitBlocked ?? '')}
           </div>
+          {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 (결함 234 · 365).
+              진짜 `disabled` 는 초점을 못 받아서, Tab 으로 문서를 한 바퀴
+              돌아도 이 단추에 **한 번도 안 닿습니다** — 재 보니 146번을
+              눌러도 못 닿았고, 닿지 못하니 `aria-describedby` 로 사유를
+              들려줄 방법도 없습니다. */}
           <button
             id="submit"
+            /* ⚠️ `btn--unmet` 을 붙이지 않습니다 — 그 클래스는 SPA 팔레트에만
+               있고 `frontend/public/app.css` 에는 없어서, 붙여도 **아무 일도
+               안 일어납니다**(결함 164). 이쪽은 `button[aria-disabled="true"]`
+               가 이미 「덜 채운 모양」을 그립니다. */
             className="primary"
-            disabled={!canSubmit(summary) || sending}
-            onClick={() => void submit()}
+            aria-disabled={submitBlocked !== null}
+            aria-describedby={submitBlocked !== null ? 'result' : undefined}
+            onClick={() => {
+              if (submitBlocked !== null) return;
+              void submit();
+            }}
           >
             제출
           </button>
