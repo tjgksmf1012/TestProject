@@ -1155,6 +1155,15 @@ class GithubHealthOut(BaseModel):
     backfilled_at: UtcDatetime | None
     backfilled_to: UtcDatetime | None
 
+    #: 지난 활동 가져오기가 **지금 실제로** 될 것인가 (결함 380).
+    #:
+    #: ⚠️ 화면이 이걸 스스로 판단하면 안 됩니다 — 서버 설정과 App 설치
+    #: 여부는 화면이 알 수 없고, 모른 채로 그리면 「누르면 채웁니다」라고
+    #: 약속해 놓고 409 를 받습니다.
+    can_backfill: bool
+    #: 못 한다면 무엇이 막고 있는가. 할 수 있으면 None.
+    backfill_blocked: str | None
+
 
 @app.get("/api/projects/{project_id}/github", response_model=GithubHealthOut)
 def github_health(
@@ -1196,6 +1205,15 @@ def github_health(
         coverage=gh_connection.describe_coverage(facts),
         backfilled_at=facts.backfilled_at,
         backfilled_to=facts.backfilled_to,
+        # ⚠️ **화면이 「누르면 채웁니다」라고 약속하고 있었습니다** (결함 380).
+        # 백필이 될지 안 될지는 서버만 아는데(설정·설치 여부) 안 보내고
+        # 있었고, 화면은 배달 수만 보고 단추를 그렸습니다.
+        can_backfill=gh_connection.can_backfill(facts),
+        backfill_blocked=gh_connection.backfill_blocked_because(
+            repo=facts.repo,
+            app_credentials_present=facts.app_credentials_present,
+            installation_present=facts.installation_present,
+        ),
     )
 
 
@@ -1294,23 +1312,22 @@ def start_github_backfill(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
 
-    if not project.github_repo:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "저장소가 연결되지 않았습니다. 먼저 owner/repo를 저장하세요.",
-        )
     # 자격 증명이 없으면 워커가 아무것도 못 합니다. 202 로 받아 두고
     # 조용히 아무 일도 안 일어나면, 사람은 화면만 보고 기다립니다.
-    if not (
-        getattr(settings, "github_app_id", None)
-        and getattr(settings, "github_private_key", None)
-        and project.github_installation_id
-    ):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "서버에 GitHub App 자격 증명이 없거나 App이 아직 이 저장소에 "
-            "설치되지 않았습니다. 지난 활동을 가져오려면 그것부터 필요합니다.",
-        )
+    #
+    # ⚠️ **판단은 한 벌입니다** (결함 380). 예전에는 이 조건이 여기에만
+    # 있어서, 화면은 「누르면 채웁니다」라고 약속하고 단추까지 그렸는데
+    # 서버는 409 를 줬습니다. 같은 함수를 진단 갈래도 부릅니다.
+    blocked = gh_connection.backfill_blocked_because(
+        repo=project.github_repo,
+        app_credentials_present=bool(
+            getattr(settings, "github_app_id", None)
+            and getattr(settings, "github_private_key", None)
+        ),
+        installation_present=bool(project.github_installation_id),
+    )
+    if blocked is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, blocked)
 
     limit = gh_backfill.clamp_limit(body.limit)
     _enqueue_backfill_after_commit(session, project_id, limit)

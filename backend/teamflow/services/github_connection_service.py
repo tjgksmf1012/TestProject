@@ -186,6 +186,9 @@ def collect_facts(
         near_misses=_near_misses(session, project.github_repo),
         backfilled_at=project.github_backfilled_at,
         backfilled_to=project.github_backfilled_to,
+        #: ⚠️ 서버에 열쇠가 있어도 **이 저장소에 App 이 안 깔렸으면**
+        #: 지난 활동은 못 가져옵니다 — 백필 갈래가 셋을 다 봅니다(결함 380).
+        installation_present=bool(project.github_installation_id),
     )
 
 

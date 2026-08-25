@@ -1065,7 +1065,16 @@ function ProjectSettings() {
           </p>
         )}
         {/* ⚠️ 배달이 0건일 때는 안 보입니다. 연결도 안 됐는데 "가져오기" 를
-            누르면 아무 일이 없고, 사람은 그게 고장인 줄 압니다. */}
+            누르면 아무 일이 없고, 사람은 그게 고장인 줄 압니다.
+
+            ⛔ **막혀 있으면 이유를 말합니다** (결함 380). 예전에는 서버가
+            409 로 거절할 상태에서도 단추가 멀쩡히 그려졌고, 바로 위 경고
+            줄은 「누르면 채웁니다」라고 **약속**하고 있었습니다. */}
+        {health !== null && health.backfillBlocked !== '' && (
+          <p id="gh-backfill-why" className="sub">
+            {health.backfillBlocked}
+          </p>
+        )}
         {health !== null && health.canBackfill && (
           <button id="gh-backfill" type="button" disabled={busy} onClick={startBackfill}>
             지난 활동 가져오기

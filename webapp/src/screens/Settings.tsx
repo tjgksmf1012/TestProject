@@ -597,6 +597,14 @@ function RepoSection({
               )}
             </Problem>
           )}
+          {/* ⛔ **막혀 있으면 이유를 말합니다** (결함 380). 예전에는 서버가
+              409 로 거절할 상태에서도 단추가 그려졌고, 위 경고 줄은
+              「누르면 채웁니다」라고 약속하고 있었습니다. */}
+          {view.backfillBlocked !== '' && (
+            <p className="t12 muted" id="repo-backfill-why">
+              {view.backfillBlocked}
+            </p>
+          )}
           {view.canBackfill && (
             <button
               type="button"

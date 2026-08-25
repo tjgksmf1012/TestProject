@@ -40,6 +40,15 @@ export interface GithubHealth {
   coverage?: string;
   /** 백필을 마지막으로 돌린 시각. null 이면 **한 번도 안 돌렸습니다.** */
   backfilled_at?: string | null;
+  /**
+   * 지난 활동 가져오기가 **지금 실제로** 될 것인가. 서버가 정합니다.
+   *
+   * ⚠️ 화면이 스스로 재면 안 됩니다 — 서버 설정과 App 설치 여부는
+   * 화면이 알 수 없습니다(결함 380).
+   */
+  can_backfill?: boolean;
+  /** 못 한다면 무엇이 막고 있는가. 할 수 있으면 null. */
+  backfill_blocked?: string | null;
 }
 
 /** 화면이 그리는 데 필요한 것만. */
@@ -64,8 +73,20 @@ export interface HealthView {
    * 배달이 온 적이 있는데 백필을 한 적이 없을 때만입니다. 배달이 0건인
    * 상태에서 보이면, 연결도 안 됐는데 "가져오기" 를 누르게 만듭니다 —
    * 눌러도 아무 일이 없고, 사람은 그게 고장인 줄 압니다.
+   *
+   * ⛔ **그 해악이 다른 문으로 그대로 났습니다** (결함 380). 이 값은
+   * 배달 수와 백필 이력만 보고 있었는데, 서버는 그 둘 말고도 **자격
+   * 증명과 App 설치**를 봅니다. 시연 상태가 정확히 그랬습니다 —
+   * 경고 줄은 「누르면 채웁니다」라고 약속하고 단추도 그려지는데
+   * 누르면 **409** 였습니다. 이제 서버가 정합니다.
    */
   canBackfill: boolean;
+  /**
+   * 지난 활동 가져오기가 막혀 있다면 그 이유. 없으면 빈 문자열.
+   *
+   * ⚠️ 버튼만 흐려 두면 사람은 **왜 안 되는지** 모른 채 계속 누릅니다.
+   */
+  backfillBlocked: string;
 }
 
 const TONES = new Set(['ok', 'warn', 'bad']);
@@ -115,7 +136,12 @@ export function describeHealth(health: GithubHealth, now: Date): HealthView {
     warnings: health.warnings ?? [],
     activity: describeActivity(health, now),
     coverage: health.coverage ?? '',
-    canBackfill: health.delivery_count > 0 && !health.backfilled_at,
+    // ⚠️ **서버가 정합니다** (결함 380). 이 파일 머리말이 적어 둔
+    // 그것입니다 — 같은 판단을 두 벌 가지고 있으면 갈라지고, 그때
+    // 사람은 화면 쪽을 믿습니다. 옛 응답(칸이 없는 것)은 「모른다」이니
+    // 보수적으로 안 그립니다.
+    canBackfill: health.can_backfill === true,
+    backfillBlocked: health.backfill_blocked ?? '',
   };
 }
 
@@ -136,6 +162,7 @@ export function describeHealthFailure(status: number): HealthView {
       activity: '',
       coverage: '',
       canBackfill: false,
+      backfillBlocked: '',
     };
   }
   if (status === 0) {
@@ -148,6 +175,7 @@ export function describeHealthFailure(status: number): HealthView {
       activity: '',
       coverage: '',
       canBackfill: false,
+      backfillBlocked: '',
     };
   }
   return {
@@ -159,5 +187,6 @@ export function describeHealthFailure(status: number): HealthView {
     activity: '',
     coverage: '',
     canBackfill: false,
+    backfillBlocked: '',
   };
 }

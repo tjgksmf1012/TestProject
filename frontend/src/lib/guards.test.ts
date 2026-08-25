@@ -10043,3 +10043,64 @@ describe('「이 값으로 확정」은 **두 뿌리 다** 게이트를 거친�
     );
   });
 });
+
+describe('결함 380 — 「누르면 채웁니다」는 서버가 될 때만 (지난 활동 가져오기)', () => {
+  /* ## ⛔ 화면이 못 지킬 약속을 하고 단추까지 그렸습니다
+   *
+   * 설정 → 저장소 연결의 경고 상자가 이렇게 끝났습니다.
+   *
+   *     … 아래 '지난 활동 가져오기'를 누르면 채웁니다.
+   *
+   * 그 아래 단추도 멀쩡히 그려집니다. 눌러 보면 **409** 입니다 —
+   * 서버는 그 순간 이미 자격 증명이 없다는 것을 **알고 있습니다.**
+   *
+   * 화면이 못 판단한 이유는 `canBackfill` 이 **배달 수와 백필 이력만**
+   * 보고 있었기 때문입니다. 그 필드의 주석은 「눌러도 아무 일이 없고,
+   * 사람은 그게 고장인 줄 압니다」라고 **정확히 이 해악을 적어 두고**
+   * 한쪽 길만 막고 있었습니다(결함 295 의 「막는 길을 하나만 막은 것」).
+   *
+   * ⚠️ **결함 300 과 다른 자리입니다** — 300 은 눌렀을 때 나오는 **말**을
+   * 고쳤고, 이것은 **누르기 전**입니다.
+   */
+
+  it('⭐ `canBackfill` 을 화면 쪽에서 다시 계산하지 않는다', () => {
+    /* 이 파일(`github/health.ts`) 머리말이 스스로 적어 둔 규칙입니다 —
+       「화면과 서버가 같은 판단을 두 벌 가지고 있으면 언젠가 갈라지고,
+       그때 사람은 화면 쪽을 믿습니다.」 그 판단이 바로 여기 있었습니다. */
+    const code = readFileSync(join(ROOT, 'src', 'lib', 'github', 'health.ts'), 'utf8');
+    const body = /export function describeHealth[\s\S]*?\n}/.exec(code)?.[0] ?? '';
+    ok(body !== '', 'describeHealth 를 못 찾았습니다 — 가드가 낡았습니다');
+
+    const line = /canBackfill:([^,\n]*)/.exec(body)?.[1] ?? '';
+    ok(line !== '', 'describeHealth 가 canBackfill 을 안 정합니다');
+    ok(
+      /can_backfill/.test(line),
+      `canBackfill 이 서버 값에서 안 옵니다 — 화면이 다시 재고 있습니다: ${line.trim()}`,
+    );
+    ok(
+      !/delivery_count/.test(line),
+      `canBackfill 이 배달 수로 다시 계산되고 있습니다: ${line.trim()}`,
+    );
+  });
+
+  /* ⚠️ **뿌리마다 따로 셉니다.** 한 자루에 담으면 한쪽만 고쳐도 초록입니다
+     — 이 저장소가 열여섯 번 당한 모양입니다(231·306·320·321·333·334·335·
+     337·345·348·352·365·367·372·373·374). */
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'project.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Settings.tsx')],
+  ];
+
+  for (const [rootName, path] of ROOTS) {
+    it(`⭐ ${rootName} — 막혀 있으면 **왜인지** 그린다`, () => {
+      /* 버튼만 안 그리면 사람은 기능이 없는 줄 압니다. 서버는 정확한
+         문장을 보내고 있으므로(`backfill_blocked`) 그것을 그립니다 —
+         결함 316 이 「버튼을 지우지 말고 이유를 말하라」로 적어 둔 그것. */
+      const code = readFileSync(path, 'utf8');
+      ok(
+        /backfillBlocked/.test(code),
+        `${rootName} 가 backfillBlocked 를 한 번도 안 그립니다 — 막힌 이유가 화면에서 사라집니다`,
+      );
+    });
+  }
+});
