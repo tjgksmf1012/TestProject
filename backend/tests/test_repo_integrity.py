@@ -44,6 +44,12 @@ SOURCE_PATTERNS = (
 #: `docs/20` 의 CHANNEL-005 가 ✅ 인 채로 그렇게 갈라져 있었습니다(결함 377).
 SERVER_ONLY_OR_ASSEMBLED: dict[str, str] = {
         "POST /api/github/webhook": "GitHub 이 부릅니다 — 화면이 부르는 갈래가 아닙니다",
+    "GET /health": (
+        "컨테이너·배포가 살아 있는지 묻는 갈래입니다 — 화면이 부르는 것이 "
+        "아닙니다. ⚠️ 오래도록 「불린다」로 잡혀 있었는데, 그건 `/health` 가 "
+        "`../lib/github/health.ts` 라는 **import 경로 안**에 걸린 것이었습니다"
+        "(결함 379)"
+    ),
         "PUT /api/meetings/{meeting_id}/tracks/{track_id}/chunks/{seq}": (
             "`browser-adapter.ts` 가 `${trackUrl}/chunks/${seq}` 로 이어 붙입니다"
         ),
@@ -2985,7 +2991,18 @@ def test_every_server_route_has_a_caller() -> None:
     #: 주소 한 조각에 올 수 있는 글자 — `/` 와 따옴표·백틱·공백은 경계입니다.
     SEG = "[^/`'\"\\s]+"
 
-    def called(route_path: str) -> bool:
+    #: 쓰기 갈래는 화면이 **메서드를 글자로 적어야** 부를 수 있습니다.
+    #: `GET` 은 `fetch(url)`·`get(url)`·`<audio src>` 처럼 적는 방식이 여럿이라
+    #: 안 봅니다 — 재 보니 `GET` 넷이 전부 그런 자리였고 **거짓 양성만**
+    #: 나옵니다(결함 379).
+    METHOD_MARK: dict[str, str] = {
+        "POST": r"POST|\.post\b",
+        "PUT": r"PUT|\.put\b",
+        "PATCH": r"PATCH|\.patch\b",
+        "DELETE": r"DELETE|\.delete\b",
+    }
+
+    def called(route_path: str, method: str = "") -> bool:
         """이 갈래를 부르는 화면이 있는가.
 
         ⚠️ **자가 두 곳에서 헐거웠습니다** (결함 378):
@@ -3007,14 +3024,29 @@ def test_every_server_route_has_a_caller() -> None:
         `GET` 과 `DELETE` 가 있으면 하나만 불려도 둘 다 초록입니다.
         """
         pattern = re.sub(r"\\\{[a-z_]+\\\}", lambda _: f"(?>{SEG})", re.escape(route_path))
-        rx = re.compile(pattern + r"(?![A-Za-z0-9_/-])")
-        return any(rx.search(code) for code in screens)
+        #: ⚠️ **앞도 막습니다** (결함 379). 짧은 주소는 **남의 파일 경로
+        #: 안**에서 걸립니다 — `GET /health` 가 `../lib/github/health.ts`
+        #: 라는 import 경로에 걸려 「불린다」로 잡혔고, 그 갈래를 부르는
+        #: 화면은 **0곳**이었습니다.
+        rx = re.compile(r"(?<![A-Za-z0-9_.-])" + pattern + r"(?![A-Za-z0-9_/-])")
+        mark = METHOD_MARK.get(method)
+        for code in screens:
+            for hit in rx.finditer(code):
+                if mark is None:
+                    return True
+                #: 주소 **둘레**에서 메서드를 찾습니다 — `sendJson(url, 'PATCH', …)`
+                #: 도 `fetch(url, { method: 'DELETE' })` 도 `api.patch(url, …)` 도
+                #: 이 창 안에 있습니다.
+                around = code[max(0, hit.start() - 200) : hit.end() + 200]
+                if re.search(mark, around):
+                    return True
+        return False
 
     orphans: list[str] = []
     stale: list[str] = []
     for method, route_path, where in routes:
         key = f"{method} {route_path}"
-        if called(route_path):
+        if called(route_path, method):
             if key in EXCUSED:
                 stale.append(f"{key}  — 예외에 적힌 사유가 낡았습니다: {EXCUSED[key]}")
         elif key not in EXCUSED:
