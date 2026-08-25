@@ -736,28 +736,61 @@ def test_the_seed_writes_gaps_in_the_same_shape_production_does():
 #: 예전에는 앞엣것만 지켰고, `lobby/room.ts` 가 `MIN_USABLE_COVERAGE` 를
 #: **따로 들고** 있어도 검사 전부가 초록이었습니다(결함 363). 아래
 #: `test_the_paired_numbers_live_in_exactly_one_place` 가 그것을 셉니다.
+#: ⚠️ **프런트 파일을 줄마다 적습니다.** 예전에는 `FRONT_CONSTANTS` 하나로
+#: 못 박혀 있어서, 표에 넣을 수 있는 것이 `recording/timeline.ts` 의
+#: 상수뿐이었습니다. 그래서 **다른 파일에 있는 짝 넷**이 통째로 표 밖에
+#: 있었습니다(`CODE_LENGTH`·`MAX_BIO`·`MAX_BODY`·`MIN_PASSWORD_LENGTH`).
 PAIRED_CONSTANTS = [
     (
         "이보다 짧은 공백은 보고하지 않는다",
         "backend/teamflow/audio/assembly.py",
         "MIN_REPORTED_GAP_MS",
+        "frontend/src/lib/recording/timeline.ts",
         "MIN_REPORTED_GAP_MS",
     ),
     (
         "이만큼까지의 지연은 정상 지터로 본다",
         "backend/teamflow/audio/assembly.py",
         "STALL_TOLERANCE_MS",
+        "frontend/src/lib/recording/timeline.ts",
         "DEFAULT_STALL_TOLERANCE_MS",
     ),
     (
         "이 아래면 트랙을 쓰지 않는다",
         "backend/teamflow/services/recording_service.py",
         "MIN_USABLE_COVERAGE",
+        "frontend/src/lib/recording/timeline.ts",
         "MIN_USABLE_COVERAGE",
     ),
+    (
+        "초대 코드 길이 — 갈라지면 멀쩡한 코드를 화면이 거절합니다",
+        "backend/teamflow/projects/invites.py",
+        "CODE_LENGTH",
+        "frontend/src/lib/project/setup.ts",
+        "CODE_LENGTH",
+    ),
+    (
+        "자기소개 길이 — 갈라지면 화면은 받아 놓고 서버가 거절합니다",
+        "backend/teamflow/users/profile.py",
+        "MAX_BIO",
+        "frontend/src/lib/profile/edit.ts",
+        "MAX_BIO",
+    ),
+    (
+        "메시지 길이 — 갈라지면 두 화면이 서로 다른 숫자를 말합니다",
+        "backend/teamflow/services/message_service.py",
+        "MAX_BODY",
+        "frontend/src/lib/chat/view.ts",
+        "MAX_BODY",
+    ),
+    (
+        "비밀번호 최소 길이 — 갈라지면 가입이 화면 통과 후 실패합니다",
+        "backend/teamflow/auth/passwords.py",
+        "MIN_PASSWORD_LENGTH",
+        "frontend/src/lib/auth/session.ts",
+        "MIN_PASSWORD_LENGTH",
+    ),
 ]
-
-FRONT_CONSTANTS = "frontend/src/lib/recording/timeline.ts"
 
 
 def _number_after(source: str, name: str) -> str | None:
@@ -791,18 +824,17 @@ def test_the_same_number_on_both_sides_really_is_the_same():
 
     셋 다 **오류 없이** 숫자만 어긋납니다. 이 저장소의 대표 실패 방식입니다.
     """
-    front = (REPO_ROOT / FRONT_CONSTANTS).read_text()
-
     problems = []
-    for meaning, rel, back_name, front_name in PAIRED_CONSTANTS:
+    for meaning, rel, back_name, front_rel, front_name in PAIRED_CONSTANTS:
         back = (REPO_ROOT / rel).read_text()
+        front = (REPO_ROOT / front_rel).read_text()
         back_value = _number_after(back, back_name)
         front_value = _number_after(front, front_name)
         if back_value is None:
             problems.append(f"{rel} 에서 {back_name} 을 못 찾았습니다")
             continue
         if front_value is None:
-            problems.append(f"{FRONT_CONSTANTS} 에서 {front_name} 을 못 찾았습니다")
+            problems.append(f"{front_rel} 에서 {front_name} 을 못 찾았습니다")
             continue
         if float(back_value) != float(front_value):
             problems.append(
@@ -836,7 +868,7 @@ def test_the_paired_numbers_live_in_exactly_one_place():
 
     lib = REPO_ROOT / "frontend" / "src" / "lib"
     problems = []
-    for _, _, _, front_name in PAIRED_CONSTANTS:
+    for _, _, _, front_rel, front_name in PAIRED_CONSTANTS:
         # 정의인 자리만 셉니다 — 다시 내보내는 것(`export { X }`)은 정의가
         # 아닙니다. ⚠️ **`export` 를 요구하면 안 됩니다** — 이 표의 셋 중
         # 둘은 모듈 안에서만 쓰는 `const` 입니다(처음에 그렇게 썼다가
@@ -855,9 +887,9 @@ def test_the_paired_numbers_live_in_exactly_one_place():
             problems.append(
                 f"{front_name}: 정의가 {len(where)}곳입니다 — {', '.join(where) or '(0곳)'}"
             )
-        elif where[0] != FRONT_CONSTANTS:
+        elif where[0] != front_rel:
             problems.append(
-                f"{front_name}: {where[0]} 에 있습니다 — 짝 검사는 {FRONT_CONSTANTS} 를 읽습니다"
+                f"{front_name}: {where[0]} 에 있습니다 — 표는 {front_rel} 라고 적었습니다"
             )
 
     assert not problems, (
@@ -867,32 +899,104 @@ def test_the_paired_numbers_live_in_exactly_one_place():
 
 
 def test_the_paired_constant_table_is_not_stale():
-    """표가 낡지 않았는가 — 주석이 &#34;같은 값&#34; 이라고 말하면 표에 있어야 한다.
+    """⭐ 표가 낡지 않았는가 — **기준으로 전수를 재서** 확인한다.
 
-    ⚠️ 이 검사가 없으면 다음 사람이 상수를 하나 더 만들면서 같은 주석을
-    달고, 그건 아무도 안 지킵니다. 표를 늘리는 것이 규칙이 되게 합니다.
+    ## ⛔ 이 검사가 스스로 경고한 일이 스스로에게 났습니다
+
+    예전 판은 이렇게 적어 두었습니다.
+
+        이 검사가 없으면 다음 사람이 상수를 하나 더 만들면서 같은 주석을
+        달고, 그건 아무도 안 지킵니다. 표를 늘리는 것이 규칙이 되게 합니다.
+
+    그런데 그 판은 **파이썬만** 걷고, **하드코딩한 두 파일**만 읽고,
+    **「와 같은 값」이라는 한 가지 표현**만 찾았습니다. 그래서 프런트에
+    적힌 「서버 … 와 같아야 한다」 다섯 줄이 통째로 눈 밖이었습니다.
+
+        auth/session.ts   MIN_PASSWORD_LENGTH  ← 표에 없었음
+        profile/edit.ts   MAX_BIO              ← 표에 없었음
+        project/setup.ts  CODE_LENGTH          ← 표에 없었음
+        chat/view.ts      MAX_BODY             ← 주석조차 없이 두 벌
+
+    (재 보니 넷 다 값은 **같았습니다** — 갈라진 것이 아니라 **안 보고 있던
+    것**입니다. 그래서 결함 번호는 안 붙였습니다.)
+
+    ## 그래서 이제 손으로 고른 목록이 아니라 **기준**을 잽니다
+
+    ⚠️ 결함 329 의 「**손으로 고른 목록을 그 기준으로 전부 재 보십시오**」
+    입니다. 기준은 둘입니다.
+
+    1. 서버와 `@lib` **양쪽에 같은 이름의 숫자 상수**가 있으면 표에 있어야
+       한다 — 주석이 있든 없든(`MAX_BODY` 가 그랬습니다)
+    2. 어느 쪽이든 주석이 **「같아야/같은 값」**이라고 말하면 표에 있어야
+       한다 — **파이썬과 타입스크립트 둘 다** 걷습니다
     """
     import re
 
-    declared = []
-    for rel in {rel for _, rel, _, _ in PAIRED_CONSTANTS} | {
-        "backend/teamflow/audio/assembly.py",
-        "backend/teamflow/services/recording_service.py",
-    }:
-        source = (REPO_ROOT / rel).read_text()
-        # `… 와 같은 값…` 주석 **바로 뒤**에 오는 상수 이름
-        for hit in re.finditer(
-            r"#[^\n]*(?:와|과) 같은 값[^\n]*\n([A-Z_][A-Z0-9_]*)\s*=", source
-        ):
-            declared.append((rel, hit.group(1)))
+    def blanked(source: str) -> str:
+        return _blanked(source)
 
-    known = {(rel, name) for _, rel, name, _ in PAIRED_CONSTANTS}
-    missing = [f"{rel} 의 {name}" for rel, name in declared if (rel, name) not in known]
-    assert not missing, (
-        "주석이 '같은 값' 이라고 말하는데 표에 없습니다 — "
-        "`PAIRED_CONSTANTS` 에 넣으세요:\n  " + "\n  ".join(missing)
+    #: ── 기준 ① 양쪽에 같은 이름의 숫자 상수가 있는가 ──────────────
+    def numbers(paths, pattern: str) -> dict[str, list[str]]:
+        found: dict[str, list[str]] = {}
+        for path in paths:
+            if ".test." in path.name or "__pycache__" in str(path):
+                continue
+            for hit in re.finditer(pattern, blanked(path.read_text(encoding="utf-8")), re.M):
+                found.setdefault(hit.group(1), []).append(str(path.relative_to(REPO_ROOT)))
+        return found
+
+    server = numbers(
+        REPO_ROOT.glob("backend/teamflow/**/*.py"),
+        r"^([A-Z][A-Z0-9_]{2,})\s*(?::\s*[\w\[\], ]+)?\s*=\s*-?[0-9][0-9_.]*\s*$",
     )
-    assert declared, "'같은 값' 주석을 하나도 못 찾았습니다 — 이 검사가 헛돌고 있습니다"
+    lib = numbers(
+        REPO_ROOT.glob("frontend/src/lib/**/*.ts"),
+        r"^\s*(?:export\s+)?const\s+([A-Z][A-Z0-9_]{2,})"
+        r"\s*(?::\s*[\w<>\[\]]+)?\s*=\s*-?[0-9][0-9_.]*\s*;",
+    )
+    assert server and lib, "상수를 한쪽에서도 못 찾았습니다 — 이 검사가 헛돕니다"
+
+    tabled_back = {name for _, _, name, _, _ in PAIRED_CONSTANTS}
+    tabled_front = {name for _, _, _, _, name in PAIRED_CONSTANTS}
+    on_both = sorted(set(server) & set(lib))
+    assert on_both, "양쪽에 같은 이름인 상수를 하나도 못 찾았습니다 — 자가 낡았습니다"
+
+    missing = [
+        f"{name}  (서버 {', '.join(server[name])} ↔ @lib {', '.join(lib[name])})"
+        for name in on_both
+        if name not in tabled_back or name not in tabled_front
+    ]
+
+    #: ── 기준 ② 주석이 「같아야/같은 값」이라고 말하는가 ────────────
+    #: ⚠️ **두 언어를 다 걷습니다.** 예전 판은 파이썬만 봤습니다.
+    CLAIM = re.compile(r"(?:와|과)\s*같(?:아야|은\s*값)")
+    claimed: list[str] = []
+    for path in [
+        *REPO_ROOT.glob("backend/teamflow/**/*.py"),
+        *REPO_ROOT.glob("frontend/src/lib/**/*.ts"),
+    ]:
+        if ".test." in path.name or "__pycache__" in str(path):
+            continue
+        source = path.read_text(encoding="utf-8")
+        for line_no, line in enumerate(source.splitlines(), 1):
+            if not CLAIM.search(line):
+                continue
+            #: 그 주석이 **가리키는 상수 이름**만 셉니다. 이름이 안 적힌
+            #: 문장(「규칙은 서버와 같아야 합니다」)은 상수가 아니라 규칙이라
+            #: 표의 대상이 아닙니다 — 세면 거짓 양성만 납니다.
+            for name in re.findall(r"[A-Z][A-Z0-9_]{2,}", line):
+                if name in tabled_back or name in tabled_front:
+                    continue
+                if name in server or name in lib:
+                    rel = path.relative_to(REPO_ROOT)
+                    claimed.append(f"{name}  ({rel}:{line_no})")
+
+    problems = sorted(set(missing) | set(claimed))
+    assert not problems, (
+        "서버와 화면에 같은 숫자가 두 벌 있는데 `PAIRED_CONSTANTS` 에 없습니다.\n"
+        "  갈라지면 오류 없이 숫자만 어긋납니다 — 표에 넣으세요:\n  "
+        + "\n  ".join(problems)
+    )
 
 
 def test_every_pipeline_stage_has_words_a_person_can_read():
