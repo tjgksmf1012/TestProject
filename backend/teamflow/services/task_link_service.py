@@ -164,12 +164,17 @@ def _tell_the_assignee(
             #    같은 방식으로 거릅니다 — `record()` 자체는 누가 했는지 모릅니다.
             if user_id == actor_id:
                 continue
+            # ⚠️ **사건까지 넘깁니다** (결함 396). `task_id` 만 넘기면 한
+            #    업무에 PR 이 둘 붙었을 때 두 줄이 글자·시각·링크까지
+            #    똑같아지고, 둘 중 하나가 브랜치로 **추정**된 연결이어도
+            #    확정과 한 자도 안 달라집니다.
             notification_service.record(
                 session,
                 user_id=user_id,
                 project_id=task.project_id,
                 kind=vocab.NotificationKind.GITHUB,
                 task_id=task.id,
+                github_event_id=event.id,
             )
 
 

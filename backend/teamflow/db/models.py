@@ -865,6 +865,18 @@ class Notification(Base):
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"))
     meeting_id: Mapped[int | None] = mapped_column(ForeignKey("meetings.id"))
     message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"))
+    #: 어느 GitHub 사건인가 (결함 396).
+    #:
+    #: ⚠️ **`task_id` 만으로는 모자랍니다.** 한 업무에 PR 이 둘 붙으면
+    #: 알림이 두 줄인데 글자·시각·링크가 **한 자도 안 달라** 어느
+    #: PR 인지 알 방법이 없었습니다. 게다가 둘 중 하나가 `branch` 로
+    #: **추정된** 연결이어도 확정과 똑같이 그려졌습니다.
+    #:
+    #: ⚠️ **확정/추정을 여기 적지 않습니다.** 사람이 나중에 확인해서
+    #: 확정으로 바꾸면 그 글자만 옛말이 됩니다 — 이 표가 문장을 저장하지
+    #: 않는 이유 그대로입니다. 읽을 때 `task_github_links.relevance` 를
+    #: 봅니다.
+    github_event_id: Mapped[int | None] = mapped_column(ForeignKey("github_events.id"))
     created_at: Mapped[datetime] = _now()
     #: 읽은 시각. ⚠️ **행을 지우지 않습니다** — 지우면 "언제 알렸는가" 가
     #: 사라지고, 기여도 분쟁에서 그게 확인할 거리가 됩니다.

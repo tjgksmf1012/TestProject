@@ -373,3 +373,136 @@ def test_every_notification_kind_is_produced_somewhere():
         "어휘에만 있고 만드는 코드가 없는 알림 종류가 있습니다: "
         f"{sorted(vocab.NOTIFICATION_NOT_PRODUCED_YET)}"
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 396 — 알림이 **어느 PR 인지** 가리키는가, 그리고 추정을 추정이라 하는가
+# ══════════════════════════════════════════════════════════════
+
+
+def _notice_texts(user_id: int, project_id: int) -> list[str]:
+    """그 사람이 실제로 읽는 문장들. **API 가 내보내는 값**으로 잽니다."""
+    from teamflow.services import notification_service
+
+    with db_session.session_scope() as s:
+        return [
+            n.text
+            for n in notification_service.collect(s, user_id, project_id, now=NOW)
+            if n.kind == "github"
+        ]
+
+
+def test_two_pulls_on_one_task_do_not_read_the_same(client: TestClient, seeded):
+    """⭐ 한 업무에 PR 이 둘 붙으면 **두 줄이 서로 달라야** 합니다.
+
+    ## ⚠️ 재현 (결함 396)
+
+    `notifications` 는 「무엇을 가리키는지」만 담고 GitHub 알림은
+    `task_id` 만 채웠습니다. 그래서 서명한 웹훅 둘을 보내니 담당자
+    화면에 **글자·시각·링크가 한 자도 안 다른 두 줄**이 나왔습니다 —
+    어느 PR 인지 알 방법이 없습니다.
+
+    결함 357 이 `vocab.LINKED_TO_TASKS` 옆에 「집합이 하나뿐이면 그 하나의
+    이름을 말할 수 있다」고 적으면서 **⛔ 둘 이상으로 늘리면 알림 행이
+    사건을 가리키게 만들어야 한다**고 남겨 뒀습니다. 집합은 안 늘었는데
+    **같은 종류의 사건이 둘** 오면 똑같은 일이 납니다 — 그 자가 재던 것은
+    「집합 크기」이지 「두 줄을 가릴 수 있는가」가 아니었습니다.
+    """
+    task_id = make_task(seeded["project_id"])
+    assign(task_id, seeded["user_ids"][1])
+
+    # ⚠️ `delivery` 를 갈라야 합니다. 기본값이 같으면 두 번째가 **중복**으로
+    #    걸러져서(`delivery_id` 검사) 이 검사가 아무것도 안 잽니다.
+    post_webhook(
+        client, pr_payload(number=41, body=f"TASK-{task_id} 하나"), delivery="d-41"
+    )
+    post_webhook(
+        client,
+        pr_payload(number=42, title="같은 업무 다른 PR", body=f"TASK-{task_id} 둘"),
+        delivery="d-42",
+    )
+
+    texts = _notice_texts(seeded["user_ids"][1], seeded["project_id"])
+    assert len(texts) == 2, texts
+    assert len(set(texts)) == 2, f"두 줄이 똑같습니다 — 어느 PR 인지 알 수 없습니다: {texts}"
+    assert any("#41" in t for t in texts), texts
+    assert any("#42" in t for t in texts), texts
+
+
+def test_a_guessed_link_says_it_is_a_guess(client: TestClient, seeded):
+    """⭐ **추정을 확정처럼 말하지 않습니다** (결함 396 · 불변식 ④).
+
+    브랜치 이름의 숫자로 이은 것은 `relevance 0.6` 짜리 **추정**입니다.
+    같은 저장소의 `sortLinks` 주석이 그 해악을 적어 뒀습니다 — 「추정이
+    위에 있으면 그게 사실로 보이고, "이 업무는 이 PR 로 끝났다" 를 틀리게
+    믿습니다」. 칸반은 「PR 1건 (전부 추정 — 확인 필요)」라고 말하는데
+    알림만 안 말하고 있었습니다.
+    """
+    task_id = make_task(seeded["project_id"])
+    assign(task_id, seeded["user_ids"][1])
+
+    # ⚠️ 본문·제목에 `TASK-` 표식이 **없어야** 추정입니다. 있으면 확정으로
+    #    잡혀서 이 검사가 아무것도 안 재게 됩니다.
+    post_webhook(
+        client,
+        pr_payload(number=41, title="관련 손보기", body="설명만", branch=f"chore/{task_id}-fix"),
+    )
+
+    with db_session.session_scope() as s:
+        link = s.scalars(select(m.TaskGithubLink)).one()
+        assert float(link.relevance) < 1.0, "씨앗이 추정이 아닙니다 — 검사가 헛돕니다"
+        assert link.link_source == "branch"
+
+    (text,) = _notice_texts(seeded["user_ids"][1], seeded["project_id"])
+    assert "추정" in text, f"추정을 추정이라 안 합니다: {text}"
+    assert "확인 필요" in text, text
+
+
+def test_a_confirmed_link_is_not_called_a_guess(client: TestClient, seeded):
+    """⭐ 반대 방향. **확정에 「추정」을 붙이면** 사람이 멀쩡한 근거를 의심합니다.
+
+    ⚠️ 두 방향을 같이 두는 이유 — 한 방향만 재면 「언제나 추정이라고 적는」
+    고침도 통과합니다.
+    """
+    task_id = make_task(seeded["project_id"])
+    assign(task_id, seeded["user_ids"][1])
+
+    post_webhook(client, pr_payload(number=42, body=f"TASK-{task_id} 완료"))
+
+    (text,) = _notice_texts(seeded["user_ids"][1], seeded["project_id"])
+    assert "#42" in text, text
+    assert "추정" not in text, f"확정인데 추정이라고 합니다: {text}"
+
+
+def test_an_old_notification_without_the_event_says_nothing_extra(seeded):
+    """⚠️ **옛 알림은 이 칸이 비어 있습니다** — 그때는 아무 말도 안 붙입니다.
+
+    마이그레이션 전에 쌓인 행은 `github_event_id` 가 `NULL` 입니다. 어느
+    PR 이었는지 알 방법이 없고, **모르는 것을 지어내지 않습니다**
+    (불변식 ③ 이 문장에 걸린 모양입니다).
+    """
+    from teamflow.services import notification_service
+
+    task_id = make_task(seeded["project_id"])
+    with db_session.session_scope() as s:
+        s.add(
+            m.Notification(
+                user_id=seeded["user_ids"][1],
+                project_id=seeded["project_id"],
+                kind="github",
+                task_id=task_id,
+                github_event_id=None,
+            )
+        )
+
+    with db_session.session_scope() as s:
+        notices = [
+            n
+            for n in notification_service.collect(
+                s, seeded["user_ids"][1], seeded["project_id"], now=NOW
+            )
+            if n.kind == "github"
+        ]
+    (notice,) = notices
+    assert "#" not in notice.text, notice.text
+    assert "추정" not in notice.text, notice.text

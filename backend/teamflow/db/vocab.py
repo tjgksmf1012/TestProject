@@ -497,8 +497,15 @@ class GithubEventKind(StrEnum):
 #: 「연결된 PR 상태가 바뀌었습니다」처럼 뭉뚱그릴 필요가 없습니다.
 #:
 #: ⛔ **둘 이상으로 늘리려면 알림 쪽을 같이 고쳐야 합니다.** 늘리는 순간
-#: 「어느 사건인가」를 알 수 없게 되고, 그때는 알림 행이 사건을 가리키게
-#: (`github_event_id`) 만드는 것이 맞습니다. 가드가 잡습니다.
+#: 「어느 사건인가」를 알 수 없게 되고 문장이 뭉뚱그려집니다. 가드가
+#: 잡습니다(`test_the_notification_stops_naming_the_event_when_more_than_one…`).
+#:
+#: ⚠️ **그 가드가 재는 것은 「낱말」뿐입니다** (결함 396). 집합이 하나여도
+#: **같은 종류의 사건이 둘** 오면 알림이 두 줄인데 글자·시각·링크가 한 자도
+#: 안 달라서 어느 PR 인지 알 수 없었습니다. 그래서 알림 행은 이제
+#: `github_event_id` 로 **사건을 가리킵니다** — 위 문단이 「늘어나면 그렇게
+#: 하라」고 적어 둔 그것을, 안 늘어난 채로 하게 됐습니다.
+#: 그 축은 `test_task_pr_link.py` 의 「두 줄이 서로 다른가」가 잽니다.
 LINKED_TO_TASKS: frozenset[GithubEventKind] = frozenset({GithubEventKind.PR_MERGED})
 
 

@@ -34,6 +34,7 @@ from teamflow.clock import as_utc
 from teamflow.db import assignees, live, vocab
 from teamflow.db import models as m
 from teamflow.db.vocab import NotificationKind
+from teamflow.github import linking as gh_linking
 from teamflow.github import presenting
 from teamflow.services.naming import meeting_label
 
@@ -73,11 +74,16 @@ def record(
     task_id: int | None = None,
     meeting_id: int | None = None,
     message_id: int | None = None,
+    github_event_id: int | None = None,
 ) -> m.Notification | None:
     """사건 하나를 남긴다.
 
     ⚠️ **자기가 한 일은 자기에게 안 알립니다.** 부르는 쪽에서 걸러도 되지만,
     부르는 자리가 늘수록 한 곳이 빠집니다. 여기서 막습니다.
+
+    ⚠️ GitHub 알림은 `github_event_id` **까지** 넘겨야 합니다 (결함 396).
+    `task_id` 만 넘기면 한 업무에 PR 이 둘 붙었을 때 두 줄이 글자·시각·
+    링크까지 똑같아져 어느 PR 인지 알 방법이 없습니다.
 
     돌려주는 값이 `None` 이면 안 남긴 것입니다.
     """
@@ -88,6 +94,7 @@ def record(
         task_id=task_id,
         meeting_id=meeting_id,
         message_id=message_id,
+        github_event_id=github_event_id,
     )
     session.add(notice)
     session.flush()
@@ -311,10 +318,50 @@ def _text_for(session: Session, row: m.Notification) -> str:
         task = session.get(m.Task, row.task_id)
         if task is None:
             return "연결된 업무를 찾을 수 없습니다"
-        return f"{github_event_word()} — {task.title}"
+        return f"{github_event_word()} — {task.title}{_which_pull(session, row)}"
 
     # ⚠️ 모르는 종류를 그럴듯한 문장으로 지어내지 않습니다.
     return "알림"
+
+
+def _which_pull(session: Session, row: m.Notification) -> str:
+    """어느 PR 인가, 그리고 그 연결이 **확정인가 추정인가** (결함 396).
+
+    ## ⚠️ 왜 필요한가
+
+    한 업무에 PR 이 둘 붙으면 알림이 두 줄인데, `task_id` 만 있으면
+    글자·시각·링크가 **한 자도 안 달랐습니다.** 재현했습니다 — 서명한
+    웹훅 둘(하나는 본문에 `TASK-4`, 하나는 브랜치 `chore/4-a11y`)을 보내니
+    담당자 화면에 「PR 병합 — 접근성 점검」이 **두 번** 똑같이 나왔습니다.
+
+    ## ⚠️ 추정을 확정처럼 말하지 않습니다
+
+    둘 중 하나는 브랜치 이름의 숫자로 **추정**한 연결이었습니다
+    (`link_source=branch` · `relevance=0.6`). 같은 저장소의 `sortLinks`
+    주석이 그 해악을 이미 적어 뒀습니다 — 「추정이 위에 있으면 그게
+    사실로 보이고, "이 업무는 이 PR 로 끝났다" 를 틀리게 믿습니다」.
+    칸반은 「PR 1건 (전부 추정 — 확인 필요)」라고 말하는데 알림만
+    안 말하고 있었습니다.
+
+    ⚠️ **확정/추정을 알림 행에 적어 두지 않습니다.** 사람이 확인해서
+    확정으로 바꾸면 그 글자만 옛말이 됩니다 — 지금 읽습니다.
+
+    ⚠️ **옛 알림은 이 칸이 비어 있습니다.** 그때는 아무 말도 안 붙입니다.
+    모르는 것을 지어내지 않습니다.
+    """
+    if row.github_event_id is None:
+        return ""
+    event = session.get(m.GithubEvent, row.github_event_id)
+    if event is None:
+        return ""
+    pull = (event.payload or {}).get("pull_request") or {}
+    number = pull.get("number")
+    where = f"{event.repo}#{number}" if number is not None else event.repo
+
+    link = session.get(m.TaskGithubLink, (row.task_id, row.github_event_id))
+    if link is not None and float(link.relevance) < gh_linking.CONFIRMED_THRESHOLD:
+        return f" · {where} (추정 — 확인 필요)"
+    return f" · {where}"
 
 
 def collect(
