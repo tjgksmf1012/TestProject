@@ -45,6 +45,17 @@ export interface Meeting {
    */
   utterance_count?: number;
   pending_candidates: number;
+  /**
+   * 이 회의에서 **끝난 트랙들의 평균 커버리지**. 서버가 언제나 보냅니다.
+   *
+   * ⚠️ `coverage` 는 `complete_track` 에서만 채워집니다 — 그래서 값이
+   * 있다는 것은 **누군가 녹음을 마쳤다**는 뜻입니다(결함 405). 아직
+   * 아무도 안 마쳤으면 `null` 입니다.
+   *
+   * ⚠️ 못 받았으면(`undefined`) **아무 말도 하지 않는 쪽**으로 둡니다 —
+   * `?? 0` 을 적으면 「모른다」와 「잰 0」이 같아집니다.
+   */
+  coverage?: number | null;
 }
 
 /**
@@ -195,6 +206,26 @@ export function nextStepFor(meeting: Meeting, projectId: number): NextStep {
           label: '회의 열기',
           reason: '잡아 둔 회의입니다 — 로비에서 동의를 받고 시작합니다',
           actionable: false,
+        };
+      }
+      /* ⚠️ **녹음이 이미 끝난 사람이 있는데 「시작합니다」라고 했습니다**
+         (결함 405). 위 주석이 세 국면이라고 적어 놓고 코드는 두 갈래만
+         갈랐습니다 — 둘이 녹음을 마치고 커버리지 100% 가 찍힌 회의에서
+         홈은 「동의를 받고 녹음을 시작합니다」였고, 같은 순간 로비는
+         「1명이 참가하지 않아 회의가 끝나지 않습니다 — 강제 종료할 수
+         있습니다」였습니다. 브라우저로 나란히 놓고 쟀습니다(결함 290).
+
+         `coverage` 는 `complete_track` 에서만 채워지므로 값이 있으면
+         **누군가 마쳤다**는 뜻이고, 그런데도 `pending` 이라는 것은
+         서버가 아직 큐에 안 넣었다는 뜻입니다 — 그 조건은 「아직 녹음
+         중인 사람」이나 「참가 안 한 사람」이 남은 것뿐입니다
+         (`finalize_meeting`). 누가 남았는지는 로비가 말합니다. */
+      if (meeting.coverage !== null && meeting.coverage !== undefined) {
+        return {
+          href: `/lobby.html?meeting=${id}`,
+          label: '회의 로비로',
+          reason: '녹음을 마친 사람이 있습니다 — 로비에서 남은 사람을 확인하세요',
+          actionable: true,
         };
       }
       return {

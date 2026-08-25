@@ -354,6 +354,42 @@ describe('meetingWhen · describeMeetingWhen — 이 회의는 언제인가 (결
     strictEqual(step.actionable, true);
     strictEqual(step.label, '회의 로비로');
   });
+
+  /*
+   * 결함 405 — `pending` 의 세 국면.
+   *
+   * 위 주석은 「잡아만 둔 것 · 녹음 전 · 녹음 중」 셋이라고 적어 놓고 코드는
+   * 두 갈래만 갈랐습니다. 둘이 녹음을 마치고 커버리지 100% 가 찍힌 회의에서
+   * 홈이 「동의를 받고 녹음을 시작합니다」라고 했습니다 — 같은 순간 로비는
+   * 「1명이 참가하지 않아 회의가 끝나지 않습니다」였습니다.
+   */
+  it('⭐ 녹음을 마친 사람이 있으면 「시작합니다」라고 하지 않는다', () => {
+    const step = nextStepFor(meeting({
+      status: 'pending', started_at: '2026-09-01T01:00:00Z', scheduled_at: null,
+      coverage: 1.0,
+    }), 4);
+    strictEqual(/시작합니다/.test(step.reason), false, step.reason);
+    ok(/마친|남은/.test(step.reason), step.reason);
+    strictEqual(step.actionable, true);
+    strictEqual(step.label, '회의 로비로');
+  });
+
+  it('⭐ 아직 아무도 안 마쳤으면 그대로 「동의를 받고 시작합니다」', () => {
+    for (const coverage of [null, undefined]) {
+      const step = nextStepFor(meeting({
+        status: 'pending', started_at: '2026-09-01T01:00:00Z', scheduled_at: null, coverage,
+      }), 4);
+      ok(/시작합니다/.test(step.reason), `coverage=${String(coverage)} — ${step.reason}`);
+    }
+  });
+
+  it('⚠️ 잡아만 둔 회의가 먼저다 — 커버리지가 있어도 「예정」이 이긴다', () => {
+    // 실기에서는 안 나오는 조합이지만, 갈래 순서를 못 박아 둡니다.
+    const step = nextStepFor(meeting({
+      status: 'pending', started_at: null, scheduled_at: '2026-09-30T01:00:00Z', coverage: 1.0,
+    }), 4);
+    strictEqual(step.label, '회의 열기');
+  });
 });
 
 describe('sectionMeetings', () => {
