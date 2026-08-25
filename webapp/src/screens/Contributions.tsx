@@ -27,6 +27,7 @@ import {
   orderForDisplay,
   readBeforeTheNumber,
   roleOf,
+  teamConfidenceLine,
   teamWarnings,
   uncertaintySpans,
   describeWidth,
@@ -321,7 +322,14 @@ export default function Contributions() {
                 // 사유는 **지우지 않고 한 자리에 모읍니다** — 팝오버 안에서
                 // 원문 그대로 나옵니다. 요약하면 그게 곧 정보 손실입니다.
                 const whyLines = [
-                  `신뢰도 ${member.confidence_label} · ${describeWidthNote(points)}`,
+                  /* ⚠️ **두 줄입니다** (결함 384). 앞은 팀 하나를 잰 값이고
+                     (세 사람이 소수점까지 같습니다) 뒤는 이 사람의 값입니다
+                     (23 · 14 · 18%p). 한 줄에 이으면 둘 다 이 사람 것으로
+                     읽히고, 커버리지 100% 인 사람이 「신뢰도 낮음」을 자기
+                     탓으로 읽습니다 — 끊긴 트랙의 주인은 다른 사람입니다.
+                     글자는 `@lib` 한 벌: 레거시도 같은 함수를 부릅니다. */
+                  teamConfidenceLine(member.confidence_label),
+                  describeWidthNote(points),
                   ...readBeforeTheNumber(member),
                   ...integrityNotes(member),
                   ...(hasNoEvidence(member)

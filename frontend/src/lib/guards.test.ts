@@ -3766,6 +3766,94 @@ describe('문서 참조', () => {
   });
 });
 
+describe('신뢰도 한 줄은 **누구를 잰 값인지** 말한다 (결함 384)', () => {
+  /*
+   * ## 왜 이 검사가 있나
+   *
+   * `confidence` 는 **팀당 한 번** 계산됩니다 — 시연 데이터에서 세 사람의
+   * 값이 소수점까지 같습니다(0.446). 그것을 **사람 이름 밑에** 그리면서
+   * 범위를 안 적으면, 커버리지 100% 인 사람이 「신뢰도 낮음」을 자기 것으로
+   * 읽습니다. 끊긴 트랙의 주인은 다른 사람입니다.
+   *
+   * 결함 344 는 이것을 **보고서**에서 고쳤고, 그 가드는 `reports/view.ts`
+   * 한 파일만 봅니다. 그래서 SPA 기여도가 화면 파일 안에서 손으로 만드는
+   * `신뢰도 ${label}` 은 **아무도 안 보고 있었습니다** — 세 자리 중 하나만
+   * 범위를 안 적고 있었습니다(결함 384).
+   *
+   * ⚠️ **낱말이 아니라 자리를 셉니다.** `confidence_label` 을 **읽는** 곳을
+   * 뿌리마다 따로 census 하고, 그 자리마다 범위가 붙었는지 봅니다. 새 화면이
+   * 그 값을 읽기 시작하면 이 검사가 그 자리도 같이 셉니다.
+   */
+  const roots: { name: string; base: string }[] = [
+    { name: '레거시 frontend/src', base: join(ROOT, 'src') },
+    { name: 'SPA webapp/src', base: join(ROOT, '..', 'webapp', 'src') },
+  ];
+
+  /** `confidence_label` 을 읽는 소스 전부 — 검사 파일과 타입 선언은 뺍니다. */
+  const readers = (base: string): { rel: string; code: string }[] => {
+    const out: { rel: string; code: string }[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+          const code = codeOf(readFileSync(full, 'utf8'));
+          // 타입 선언(`confidence_label: string;`)은 「그리는 것」이 아닙니다.
+          if (/confidence_label(?!\s*:)/.test(code))
+            out.push({ rel: full.slice(base.length + 1), code });
+        }
+      }
+    };
+    if (existsSync(base)) walk(base);
+    return out;
+  };
+
+  it('⭐ 그 값을 그리는 **모든** 자리가 「팀」이라고 적는다 — 뿌리마다', () => {
+    let total = 0;
+    const bare: string[] = [];
+    for (const root of roots) {
+      const found = readers(root.base);
+      // 한쪽 뿌리가 통째로 0곳이면 그건 자가 눈을 감은 것입니다 (결함 286).
+      ok(found.length > 0, `${root.name} 에서 confidence_label 을 읽는 자리를 하나도 못 찾았습니다 — 자가 낡았습니다`);
+      total += found.length;
+      for (const f of found) {
+        // 범위를 다는 길은 둘: `@lib` 의 한 벌을 부르거나, 보고서처럼
+        // 자기 형식이 필요하면 문장에 「팀」을 직접 답니다.
+        const viaLib = /teamConfidenceLine\s*\(/.test(f.code);
+        const spelled = /팀\s*신뢰도/.test(f.code);
+        if (!viaLib && !spelled) bare.push(`${root.name}/${f.rel}`);
+      }
+    }
+    ok(total >= 3, `confidence_label 을 그리는 자리가 ${total}곳뿐입니다 — 셋(레거시 기여도·SPA 기여도·보고서)보다 적으면 자가 낡은 것입니다`);
+    strictEqual(
+      bare.join(', '),
+      '',
+      '신뢰도 한 줄이 **누구를 잰 값인지** 안 말합니다 — 이 값은 팀 하나를 잰 것인데 ' +
+        '사람 이름 밑에 그려집니다 (결함 384). `teamConfidenceLine()` 을 부르세요',
+    );
+  });
+
+  it('⭐ 팀 값과 사람 값을 **한 줄에 잇지 않는다**', () => {
+    /* 「신뢰도 낮음 · 모르는 폭 23%p」 — 앞은 팀, 뒤는 사람입니다. 한 줄에
+       이으면 둘 다 같은 범위로 읽힙니다(결함 331·332 의 모양). 두 함수가
+       하나의 템플릿 안에서 만나는 것을 막습니다. */
+    const glued: string[] = [];
+    for (const root of roots)
+      for (const f of readers(root.base)) {
+        for (const line of f.code.split('\n')) {
+          const hasTeam = /teamConfidenceLine\s*\(|팀\s*신뢰도/.test(line);
+          const hasMine = /describeWidthNote\s*\(|uncertaintyDotsNote\s*\(|모르는\s*폭/.test(line);
+          if (hasTeam && hasMine) glued.push(`${root.name}/${f.rel}: ${line.trim().slice(0, 70)}`);
+        }
+      }
+    strictEqual(
+      glued.join(' | '),
+      '',
+      '팀 값과 사람 값이 한 줄에 있습니다 — 범위가 둘인데 이름표가 하나입니다 (결함 384)',
+    );
+  });
+});
+
 describe('SPA 의 「안 됩니다」 는 들려야 한다 (docs/22 · WCAG 4.1.3)', () => {
   /** `webapp/src` 아래 화면·컴포넌트 소스 전부. */
   const spaSources = (): { rel: string; code: string }[] => {

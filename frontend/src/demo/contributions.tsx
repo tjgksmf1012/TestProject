@@ -26,6 +26,7 @@ import {
   orderForDisplay,
   readBeforeTheNumber,
   roleOf,
+  teamConfidenceLine,
   teamWarnings,
   uncertaintyDots,
   uncertaintyDotsNote,
@@ -197,7 +198,7 @@ function MemberRow({
         {/* ⚠️ 「신뢰도」는 **팀 값**입니다 — 팀당 한 번 계산돼(`scoring.py`)
             모두에게 같은 값이 실립니다. 이름 아래에 그냥 두면 「이 사람의
             데이터가 부실하다」로 읽힙니다 (결함 248). 임자를 적습니다. */}
-        <p className="conf">팀 신뢰도 {member.confidence_label}</p>
+        <p className="conf">{teamConfidenceLine(member.confidence_label)}</p>
         {/* ⭐ **막대에서 셀 수 있는 점으로** (docs/19 §25). 위치가 아니라
             **개수**로만 씁니다 — 축 위에 뿌리면 순위표가 됩니다.
             폭 0 은 "완전히 확정" 이라 그릴 것이 없습니다. 0px 막대를
