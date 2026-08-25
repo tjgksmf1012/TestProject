@@ -291,12 +291,15 @@ def _text_for(session: Session, row: m.Notification) -> str:
         message = session.get(m.Message, row.message_id)
         if message is None:
             return "부른 메시지를 찾을 수 없습니다"
+        where = _which_channel(session, message)
         if message.deleted_at is not None:
             # ⚠️ 지운 글의 본문을 알림으로 되살리면 지운 것이 지운 것이 아닙니다.
-            return "나를 부른 메시지가 지워졌습니다"
+            #    ⚠️ **이 갈래에도 자리를 적습니다** (결함 397) — 안 적으면
+            #    지워진 부름이 둘일 때 또 똑같은 두 줄이 됩니다.
+            return f"{where}에서 나를 부른 메시지가 지워졌습니다"
         author = session.get(m.User, message.author_id)
         who = author.name if author is not None else "누군가"
-        return f"{who} 님이 대화에서 나를 불렀습니다"
+        return f"{who} 님이 {where}에서 나를 불렀습니다"
 
     if kind == NotificationKind.ASSIGNED and row.task_id is not None:
         task = session.get(m.Task, row.task_id)
@@ -322,6 +325,37 @@ def _text_for(session: Session, row: m.Notification) -> str:
 
     # ⚠️ 모르는 종류를 그럴듯한 문장으로 지어내지 않습니다.
     return "알림"
+
+
+def _which_channel(session: Session, message: m.Message) -> str:
+    """이 부름이 **어느 채널**에서 왔는가 (결함 397).
+
+    ## ⚠️ 왜 필요한가
+
+    한 사람이 나를 두 번 부르면 알림이 두 줄인데 예전에는 글자가
+    「김민수 님이 **대화**에서 나를 불렀습니다」로 **똑같았습니다.** 링크도
+    둘 다 `/chat.html?project=N` 이라 **아무것도 안 갈렸습니다** — 결함 396
+    이 GitHub 알림에서 겪은 그 모양입니다.
+
+    ⚠️ 다른 점은 **가리킬 것이 이미 있었다**는 것입니다. 행에 `message_id`
+    가 들어 있는데 문장도 링크도 그걸 안 썼습니다. `hrefFor` 의 옆 갈래는
+    회의 번호를 `?meeting=N` 으로 **들고 가는데** 이 갈래만 버립니다.
+
+    ## ⚠️ `#` 을 여기서 붙이지 않습니다
+
+    `@lib/chat/view.ts` 의 `channelTitle` 이 「`#` 은 **여기서** 붙입니다」
+    라고 적어 두고 그 이유까지 답니다. 서버가 같은 규칙을 다시 적으면
+    두 벌이 되고, 두 벌은 갈라집니다(실패 ②). 그래서 이 제품의 **서버
+    산문이 이미 쓰는 모양**을 그대로 씁니다 — `channel_service` 의
+    「`{이름}` 채널이 이미 있습니다」와 같은 「이름 + 채널」입니다.
+
+    ⚠️ **모르면 옛 낱말로 돌아갑니다.** 채널이 지워졌거나 못 찾으면
+    「대화」입니다 — 없는 이름을 지어내지 않습니다.
+    """
+    channel = session.get(m.Channel, message.channel_id)
+    if channel is None or not (channel.name or "").strip():
+        return "대화"
+    return f"{channel.name.strip()} 채널"
 
 
 def _which_pull(session: Session, row: m.Notification) -> str:

@@ -80,7 +80,9 @@ def test_a_mention_notifies_the_person_called(client: TestClient, seeded, channe
     login_as(client, seeded["user_ids"][1])
     mine = notices(client, seeded["project_id"])
     assert [n["kind"] for n in mine] == ["mention"]
-    assert mine[0]["text"] == "김민수 님이 대화에서 나를 불렀습니다"
+    # ⚠️ 예전에는 「김민수 님이 **대화**에서」였습니다 (결함 397) — 한 사람이
+    #    나를 두 번 부르면 두 줄이 글자·링크까지 똑같았습니다.
+    assert mine[0]["text"] == "김민수 님이 일반 채널에서 나를 불렀습니다"
     assert mine[0]["read"] is False
 
 
@@ -101,7 +103,10 @@ def test_a_deleted_message_does_not_resurrect_its_text(
 
     login_as(client, seeded["user_ids"][1])
     mine = notices(client, seeded["project_id"])
-    assert mine[0]["text"] == "나를 부른 메시지가 지워졌습니다"
+    # ⚠️ **이 갈래에도 자리를 적습니다** (결함 397). 안 적으면 지워진 부름이
+    #    둘일 때 또 똑같은 두 줄이 됩니다 — 본문은 여전히 안 되살립니다.
+    assert mine[0]["text"] == "일반 채널에서 나를 부른 메시지가 지워졌습니다"
+    assert "비밀번호" not in mine[0]["text"]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -324,3 +329,99 @@ def test_the_periodic_task_is_registered_and_frequent_enough():
     entry = celery_app.conf.beat_schedule["announce-upcoming-meetings"]
     assert entry["task"] == "teamflow.tasks.maintenance.announce_upcoming_meetings_task"
     assert str(entry["schedule"].minute) != "0", "하루 한 번이면 회의를 놓칩니다"
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 397 — 두 부름이 **서로 다른 줄**로 보이는가
+# ══════════════════════════════════════════════════════════════
+
+
+def test_two_mentions_in_different_channels_do_not_read_the_same(
+    client: TestClient, seeded, channel
+):
+    """⭐ 한 사람이 나를 두 번 부르면 **두 줄이 서로 달라야** 합니다.
+
+    ## ⚠️ 재현 (결함 397)
+
+    예전 문장은 「김민수 님이 **대화**에서 나를 불렀습니다」였습니다. 부른
+    사람이 같으면 글자가 똑같고, `hrefFor` 도 `message_id` 를 버리고
+    `/chat.html?project=N` 만 만들어서 **링크까지 똑같았습니다.**
+
+    ⚠️ 결함 396(GitHub 알림)과 **다른 점은 가리킬 것이 이미 있었다**는
+    것입니다. 행에 `message_id` 가 들어 있는데 문장도 링크도 안 썼습니다 —
+    같은 함수의 옆 갈래는 회의 번호를 `?meeting=N` 으로 들고 갑니다.
+    """
+    second = int(
+        client.post(
+            f"/api/projects/{seeded['project_id']}/channels",
+            json={"kind": "text", "name": "개발"},
+        ).json()["id"]
+    )
+    client.post(f"/api/channels/{channel}/messages", json={"body": "@이하늘 첫째"})
+    client.post(f"/api/channels/{second}/messages", json={"body": "@이하늘 둘째"})
+
+    login_as(client, seeded["user_ids"][1])
+    texts = [n["text"] for n in notices(client, seeded["project_id"]) if n["kind"] == "mention"]
+    assert len(texts) == 2, texts
+    assert len(set(texts)) == 2, f"두 줄이 똑같습니다 — 어디서 불렀는지 알 수 없습니다: {texts}"
+    assert any("일반" in t for t in texts), texts
+    assert any("개발" in t for t in texts), texts
+
+
+def test_the_mention_line_does_not_build_the_hash_itself(
+    client: TestClient, seeded, channel
+):
+    """⛔ `#` 은 **서버가 붙이지 않습니다.**
+
+    `@lib/chat/view.ts` 의 `channelTitle` 이 「`#` 은 **여기서** 붙입니다」
+    라고 적어 두고 이유까지 답니다(이름에 넣어 저장하면 이름을 바꿀 때 `#`
+    이 남거나 겹칩니다). 서버가 같은 규칙을 다시 적으면 **두 벌**이 되고,
+    두 벌은 갈라집니다 — 이 저장소의 대표 실패 ②.
+
+    그래서 서버 산문이 이미 쓰는 「이름 + 채널」을 씁니다
+    (`channel_service` 의 「`{이름}` 채널이 이미 있습니다」와 같은 모양).
+    """
+    client.post(f"/api/channels/{channel}/messages", json={"body": "@이하늘 봐주세요"})
+
+    login_as(client, seeded["user_ids"][1])
+    (text,) = [n["text"] for n in notices(client, seeded["project_id"]) if n["kind"] == "mention"]
+    assert "#" not in text, f"서버가 `#` 을 붙였습니다 — 규칙이 두 벌입니다: {text}"
+    assert "일반 채널" in text, text
+
+
+def test_a_mention_from_a_missing_channel_says_the_old_word(seeded):
+    """⚠️ **모르면 지어내지 않습니다** — 채널을 못 찾으면 「대화」입니다.
+
+    ⚠️ 이 갈래는 실기에서 잘 안 나옵니다(채널을 지워도 메시지는 남습니다).
+    그래서 **손으로 만들어** 잽니다 — 안 그러면 「모를 때 무엇을 말하는가」가
+    영영 미검증입니다.
+
+    ⚠️ 처음에 이 검사는 이름과 **다른 것**을 재고 있었습니다(`message_id`
+    가 없는 행). 이름이 재는 것과 다르면 다음 사람은 이 갈래가 검증됐다고
+    믿습니다 — 이 저장소가 짝 검사에서 여러 번 당한 모양입니다.
+    """
+    from teamflow.services import notification_service
+
+    with db_session.session_scope() as session:
+        # 있지도 않은 채널을 가리키는 메시지. 세션에 넣지 않습니다 —
+        # 재려는 것은 `_which_channel` 의 「못 찾으면」 갈래 하나입니다.
+        orphan = m.Message(channel_id=999_999, author_id=seeded["user_ids"][0], body="x")
+        assert notification_service._which_channel(session, orphan) == "대화"
+
+
+def test_a_channel_with_a_blank_name_says_the_old_word(seeded):
+    """⚠️ 이름이 비었으면 「 채널」이라고 적지 않습니다 — 「대화」입니다.
+
+    서버가 빈 이름을 거절하므로 실기에서는 안 나옵니다. 그래도 재는 이유는
+    **빈 글자를 문장에 끼우면 「김민수 님이  채널에서」**가 되기 때문입니다.
+    """
+    from teamflow.services import notification_service
+
+    with db_session.session_scope() as session:
+        channel = m.Channel(project_id=seeded["project_id"], kind="text", name="   ")
+        session.add(channel)
+        session.flush()
+        message = m.Message(
+            channel_id=channel.id, author_id=seeded["user_ids"][0], body="x"
+        )
+        assert notification_service._which_channel(session, message) == "대화"
