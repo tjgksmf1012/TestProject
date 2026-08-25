@@ -1,11 +1,16 @@
-import { deepStrictEqual, strictEqual } from 'node:assert';
+import { deepStrictEqual, ok as ok2, strictEqual } from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   adjustmentsToRestore,
   describeFinals,
   problemsWith,
   toPayload,
+  firstGapOf,
+  whyCannotConfirm,
   type Draft,
   type FinalRow,
   systemLabel,
@@ -319,5 +324,116 @@ describe('안 잰 사람이 직접 적은 값은 **접히지 않는다** (결함
     const drafts = [{ user_id: 7, final_value: 12, reason: '' }];
     const payload = toPayload(drafts, new Map([[7, 12]]), new Set());
     strictEqual(payload[0]?.final_value, undefined);
+  });
+});
+
+describe('⛔ 빈 칸을 「시스템 값 그대로」로 확정할 수 있었습니다 (결함 372)', () => {
+  /* v2 F1-4 — **확정값은 시스템이 아니라 팀이 적습니다.** 빈 칸은
+     「아직 안 정함」이고, 다 정해야 확정이 열립니다. SPA 는 그 결정대로
+     막고 있었는데 레거시는 게이트가 없어서, 손대지 않은 화면에서 한 번
+     누르면 201 이 떨어지고 「시스템 값 그대로입니다」로 기록됐습니다. */
+
+  const ok = { memberCount: 3, unfilled: 0, problems: [], blind: false };
+
+  it('⭐ 빈 칸이 있으면 확정이 안 열린다', () => {
+    strictEqual(whyCannotConfirm({ ...ok, unfilled: 3 }), '3칸 남음');
+    strictEqual(whyCannotConfirm({ ...ok, unfilled: 1 }), '1칸 남음');
+  });
+
+  it('⭐ 다 적었고 문제가 없어야 열린다', () => {
+    strictEqual(whyCannotConfirm(ok), null);
+  });
+
+  it('⭐ 막는 길마다 **다른** 말이 있다 — 하나도 빈 글자가 아니다', () => {
+    const paths: Array<[string, Parameters<typeof whyCannotConfirm>[0]]> = [
+      ['보내는 중', { ...ok, sending: true }],
+      ['팀원 0명', { ...ok, memberCount: 0 }],
+      ['빈 칸', { ...ok, unfilled: 2 }],
+      ['합·안 잰 사람', { ...ok, problems: ['합이 100 이 아닙니다 (지금 90)'] }],
+      ['저장된 확정을 못 읽음', { ...ok, blind: true }],
+    ];
+    /* ⚠️ 손으로 고른 목록은 **만들 때 있던 것만** 들어 있습니다(결함 329).
+       그래서 소스에서 갈래 수를 세어 이 목록과 맞춥니다 — 여섯째 갈래를
+       더하면 여기 한 줄을 쓰기 전까지 빨간불입니다(결함 351 의 방법). */
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), 'final.ts'),
+      'utf8',
+    );
+    const body = src.slice(src.indexOf('export function confirmBlockOf'));
+    const branches = body.slice(0, body.indexOf('return null')).match(/\breturn\b/g) ?? [];
+    strictEqual(
+      paths.length,
+      branches.length,
+      `막는 길이 ${branches.length} 인데 ${paths.length} 개만 재고 있습니다`,
+    );
+
+    const said = new Map<string, string>();
+    for (const [name, gate] of paths) {
+      const why = whyCannotConfirm(gate);
+      ok2(why !== null && why.trim() !== '', `${name}: 막혔는데 아무 말도 안 합니다`);
+      ok2(!said.has(why as string), `${name} 와 ${said.get(why as string)} 가 같은 말을 합니다`);
+      said.set(why as string, name);
+    }
+  });
+
+  it('⭐ 빈 칸이 **맨 앞**이다 — 안 적은 사람에게 「고쳐라」부터 시키지 않는다', () => {
+    strictEqual(
+      whyCannotConfirm({ ...ok, unfilled: 2, problems: ['합이 100 이 아닙니다'] }),
+      '2칸 남음',
+    );
+  });
+
+  /* 막힌 단추를 누르면 **할 일이 있는 자리로** 데려갑니다. 알려만 주고
+     갈 곳이 없는 것이 이 저장소의 대표 실패 ③ 이고, 두 화면이 각자
+     `find` 사슬을 짜면 그 순간 두 벌입니다. */
+  const SYS = new Map([
+    [1, 40],
+    [2, 30],
+    [3, 30],
+  ]);
+
+  it('⭐ 데려갈 자리는 **빈 값 칸이 먼저**다 — 막는 순서와 같다', () => {
+    const drafts: Draft[] = [
+      { user_id: 1, final_value: 55, reason: '' },
+      { user_id: 2, final_value: null, reason: '' },
+      { user_id: 3, final_value: 30, reason: '' },
+    ];
+    deepStrictEqual(firstGapOf(drafts, SYS, () => ''), { userId: 2, field: 'value' });
+  });
+
+  it('⭐ 값이 다 찼으면 **사유가 빈 조정**으로 데려간다', () => {
+    const drafts: Draft[] = [
+      { user_id: 1, final_value: 40, reason: '' },
+      { user_id: 2, final_value: 45, reason: '' },
+      { user_id: 3, final_value: 15, reason: '적었음' },
+    ];
+    deepStrictEqual(firstGapOf(drafts, SYS, (id) => drafts.find((d) => d.user_id === id)!.reason), {
+      userId: 2,
+      field: 'reason',
+    });
+  });
+
+  it('⭐ 시스템 값 그대로면 사유를 안 물으니 데려갈 곳도 없다', () => {
+    const drafts: Draft[] = [
+      { user_id: 1, final_value: 40, reason: '' },
+      { user_id: 2, final_value: 30, reason: '' },
+      { user_id: 3, final_value: 30, reason: '' },
+    ];
+    strictEqual(firstGapOf(drafts, SYS, () => ''), null);
+  });
+
+  it('⭐ 「사유가 필요한가」를 두 자가 **같은 규칙**으로 본다', () => {
+    /* ⚠️ `problemsWith`(무엇이 문제인가)와 `firstGapOf`(어디로 데려갈까)가
+       갈라지면, 「이유를 적으라」고 해 놓고 엉뚱한 칸으로 데려갑니다. */
+    for (const value of [40, 40.0000000001, 41, 0, 100]) {
+      const draft: Draft = { user_id: 1, final_value: value, reason: '' };
+      const complains = problemsWith([draft], SYS).some((p) => p.includes('이유를 적어야'));
+      const leadsThere = firstGapOf([draft], SYS, () => '')?.field === 'reason';
+      strictEqual(
+        complains,
+        leadsThere,
+        `${value}: 문제는 ${complains} 인데 데려가기는 ${leadsThere} 입니다`,
+      );
+    }
   });
 });

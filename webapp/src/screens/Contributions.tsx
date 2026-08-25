@@ -37,10 +37,13 @@ import {
 import {
   adjustmentsToRestore,
   BLIND_CONFIRM,
+  confirmBlockOf,
+  firstGapOf,
   describeFinals,
   problemsWith,
   sameValue,
   toPayload,
+  type ConfirmBlock,
   type Draft,
 } from '@lib/contribution/final.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -178,30 +181,37 @@ export default function Contributions() {
   // 저장된 확정을 모르는 채로 확정하면 남의 조정을 지울 수 있습니다.
   const blind = finals.isError;
 
-  // 확정이 막혀 있다면 **무엇 때문인지** — 값은 아래 사유 문단의 id 입니다.
-  // ⚠️ 순서가 곧 우선순위입니다. 빈 칸이 있으면 그것부터 말합니다.
-  const confirmBlocked: string | null =
-    !allFilled && members.length > 0
-      ? 'confirm-unfilled'
-      : problems.length > 0
-        ? 'confirm-problems'
-        : blind
-          ? 'confirm-blind'
-          : null;
+  // 확정이 막혀 있다면 **무엇 때문인지**. ⚠️ 판단은 `@lib` 한 벌이고
+  // (`confirmBlockOf`), 여기서는 그 갈래를 **사유 문단의 id** 로 옮기기만
+  // 합니다 — 레거시는 같은 갈래를 문장으로 옮깁니다(결함 372). 여기서
+  // 다시 `if` 사슬을 쓰면 그 순간 두 벌입니다(대표 실패 ②).
+  const confirmBlock = confirmBlockOf({
+    memberCount: members.length,
+    unfilled,
+    problems,
+    blind,
+    sending: confirm.isPending,
+  });
+
+  /** 갈래 → 사유 문단의 id. `Record` 라 갈래가 늘면 **여기가 컴파일
+   *  오류**가 되어, 새 갈래에 할 말을 정하기 전에는 못 지나갑니다.
+   *  `null` 인 둘은 사유 문단이 아니라 버튼 상태로 알리는 것들입니다. */
+  const CONFIRM_REASON_ID: Record<ConfirmBlock, string | null> = {
+    sending: null,
+    'no-members': null,
+    unfilled: 'confirm-unfilled',
+    problems: 'confirm-problems',
+    blind: 'confirm-blind',
+  };
+  const confirmBlocked = confirmBlock === null ? null : CONFIRM_REASON_ID[confirmBlock];
 
   /** 막힌 버튼을 눌렀을 때 **데려갈 자리**. 알려만 주고 갈 곳이 없으면
    *  이 저장소의 실패 ③(할 일을 알려 주고 그 일을 할 자리를 안 줌)입니다. */
   const focusFirstGap = () => {
-    const emptyValue = drafts.find(
-      (d) => d.final_value === null || Number.isNaN(d.final_value),
-    );
-    const target =
-      emptyValue !== undefined
-        ? `final-${emptyValue.user_id}`
-        : (() => {
-            const noReason = changed.find((d) => (reasons[d.user_id] ?? '').trim() === '');
-            return noReason !== undefined ? `reason-${noReason.user_id}` : null;
-          })();
+    // ⚠️ **어느 칸인가**는 `@lib` 이 정합니다 — 레거시도 같은 답을 씁니다.
+    // 여기서 다시 `find` 사슬을 쓰면 두 벌입니다(결함 372).
+    const gap = firstGapOf(drafts, systemValues, (id) => reasons[id] ?? '');
+    const target = gap === null ? null : `${gap.field === 'value' ? 'final' : 'reason'}-${gap.userId}`;
     if (target === null) return;
     const el = document.getElementById(target);
     if (el instanceof HTMLInputElement) {
@@ -414,12 +424,14 @@ export default function Contributions() {
                   누르면 아직 안 채운 첫 칸으로 데려다 줍니다. */}
               <button
                 type="button"
-                className={`btn btn--primary${confirmBlocked !== null ? ' btn--unmet' : ''}`}
-                aria-disabled={confirmBlocked !== null || confirm.isPending}
+                className={`btn btn--primary${
+                  confirmBlock !== null && confirmBlock !== 'sending' ? ' btn--unmet' : ''
+                }`}
+                aria-disabled={confirmBlock !== null}
                 aria-describedby={confirmBlocked ?? undefined}
                 onClick={() => {
-                  if (confirm.isPending) return;
-                  if (confirmBlocked !== null) {
+                  if (confirmBlock === 'sending') return;
+                  if (confirmBlock !== null) {
                     focusFirstGap();
                     return;
                   }

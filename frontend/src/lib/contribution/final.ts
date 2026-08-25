@@ -47,6 +47,21 @@ export function sameValue(a: number, b: number): boolean {
  * 말하기 위해서**입니다 — 서버가 400 을 돌려준 뒤에 알려 주면, 그때는
  * 이미 다른 사람의 확정까지 같이 실패한 뒤입니다.
  */
+/** 이 조정에 **사유가 필요한가.** 시스템 값과 다르게 정했으면 필요합니다.
+ *
+ *  ⚠️ `problemsWith`(무엇이 문제인가)와 `firstGapOf`(어디로 데려갈까)가
+ *  **같은 규칙**을 봐야 합니다 — 따로 적으면 「이유를 적으라」고 해 놓고
+ *  엉뚱한 칸으로 데려갑니다(대표 실패 ②). */
+export function needsReasonFor(
+  draft: Draft,
+  systemValues: ReadonlyMap<number, number>,
+): boolean {
+  if (draft.final_value === null || Number.isNaN(draft.final_value)) return false;
+  const system = systemValues.get(draft.user_id);
+  if (system === undefined) return false;
+  return !sameValue(draft.final_value, system);
+}
+
 export function problemsWith(
   drafts: Draft[],
   systemValues: Map<number, number>,
@@ -92,9 +107,7 @@ export function problemsWith(
       problems.push('기여도는 0~100 사이여야 합니다 — 음수나 100 초과는 몫이 될 수 없습니다');
       continue;
     }
-    const system = systemValues.get(draft.user_id);
-    if (system === undefined) continue;
-    if (!sameValue(draft.final_value, system) && !draft.reason.trim()) {
+    if (needsReasonFor(draft, systemValues) && !draft.reason.trim()) {
       /* ⚠️ 뒤의 "사유 없는 조정은…" 은 **화면이 목록 전체에 붙이고
          있었습니다.** 문제가 하나뿐일 때는 읽혔는데, 범위 문제가 생기자
          「기여도는 0~100 사이여야 합니다 … — 사유 없는 조정은 근거 없는
@@ -216,6 +229,106 @@ export function adjustmentsToRestore(finals: FinalRow[]): Map<number, Restore> {
 export const BLIND_CONFIRM =
   '지금 저장된 확정을 불러오지 못했습니다 — 이대로 확정하면 이전에 조정한 값이 지워질 수 있습니다. 새로고침한 뒤 다시 해 주세요.';
 
+/** 확정이 **지금 막혀 있는 이유**. 막힌 게 없으면 `null`. */
+export interface ConfirmGate {
+  /** 팀원이 몇 명인가. 0명이면 확정할 것 자체가 없습니다. */
+  memberCount: number;
+  /** 아직 값을 안 적은 칸 수. */
+  unfilled: number;
+  /** `problemsWith` 가 찾은 것들 (합·안 잰 사람 등). */
+  problems: readonly string[];
+  /** 저장된 확정을 **못 불러온** 상태인가. */
+  blind: boolean;
+  /** 지금 보내는 중인가. */
+  sending?: boolean;
+}
+
+/**
+ * 「이 값으로 확정」이 **지금 안 되는 이유**.
+ *
+ * ## ⛔ 빈 칸을 「시스템 값 그대로」로 확정할 수 있었습니다 (결함 372)
+ *
+ * v2 F1-4 는 이렇게 정했습니다 — **확정값은 시스템이 아니라 팀이
+ * 적습니다.** 빈 칸은 「시스템 값 그대로」가 아니라 「아직 안 정함」이고,
+ * 다 정해야 확정이 열립니다.
+ *
+ * SPA 는 그 결정대로 막고 있었는데(`3칸 남음`), **레거시는 아무 게이트도
+ * 없었습니다.** 손대지 않은 화면에서 한 번 누르면 `201` 이 떨어지고
+ * 기록이 이렇게 남습니다 —
+ *
+ *     08-25 14:24에 이하늘님이 확정했습니다 — 시스템 값 그대로입니다.
+ *
+ * 이 제품의 불변식 ④ 는 **시스템은 판정하지 않습니다** 입니다. 사람이
+ * 아무 값도 안 적었는데 시스템 값이 팀의 확정으로 굳고, 그 기록에는
+ * 사람 이름이 붙습니다 — 시스템의 판정에 사람 얼굴을 씌운 것입니다.
+ *
+ * ⚠️ 순서가 곧 우선순위입니다. 빈 칸이 있으면 그것부터 말합니다 —
+ * 합이 안 맞는다고 먼저 말하면, 아직 안 적은 사람에게 「고쳐라」부터
+ * 시키는 셈입니다(`whyCannotSave` 와 같은 뜻).
+ */
+/** 확정을 막는 **갈래**. 판단은 여기 한 벌이고, 화면은 각자 필요한
+ *  모양으로 투영합니다 — 레거시는 문장(`whyCannotConfirm`)을, SPA 는
+ *  사유 문단의 id 를 고릅니다. ⚠️ 두 화면이 각자 `if` 사슬을 쓰면 그
+ *  순간 갈라집니다(대표 실패 ②). 갈래를 하나 더하면 SPA 의
+ *  `Record<ConfirmBlock, …>` 이 **컴파일 오류**로 알려 줍니다. */
+export type ConfirmBlock = 'sending' | 'no-members' | 'unfilled' | 'problems' | 'blind';
+
+/** ⚠️ 순서가 곧 우선순위입니다 — 아직 안 적은 사람에게 「고쳐라」부터
+ *  시키지 않습니다. */
+export function confirmBlockOf(gate: ConfirmGate): ConfirmBlock | null {
+  if (gate.sending === true) return 'sending';
+  if (gate.memberCount === 0) return 'no-members';
+  if (gate.unfilled > 0) return 'unfilled';
+  if (gate.problems.length > 0) return 'problems';
+  if (gate.blind) return 'blind';
+  return null;
+}
+
+/** 막힌 버튼을 눌렀을 때 **데려갈 자리**. 알려만 주고 갈 곳이 없으면
+ *  이 저장소의 대표 실패 ③ 입니다.
+ *
+ *  ⚠️ 순서는 `confirmBlockOf` 와 **같습니다** — 빈 칸이 먼저입니다. 두
+ *  화면이 각자 `find` 사슬을 쓰면 그 순간 두 벌이고, 한쪽만 고쳐집니다.
+ *  DOM 은 화면이 만집니다 — 여기서는 **어느 사람의 어느 칸인가**만
+ *  정합니다. */
+export interface ConfirmGap {
+  userId: number;
+  field: 'value' | 'reason';
+}
+
+export function firstGapOf(
+  drafts: readonly Draft[],
+  systemValues: ReadonlyMap<number, number>,
+  reasonOf: (userId: number) => string,
+): ConfirmGap | null {
+  const empty = drafts.find((d) => d.final_value === null || Number.isNaN(d.final_value));
+  if (empty !== undefined) return { userId: empty.user_id, field: 'value' };
+  const noReason = drafts.find(
+    (d) => needsReasonFor(d, systemValues) && reasonOf(d.user_id).trim() === '',
+  );
+  if (noReason !== undefined) return { userId: noReason.user_id, field: 'reason' };
+  return null;
+}
+
+export function whyCannotConfirm(gate: ConfirmGate): string | null {
+  switch (confirmBlockOf(gate)) {
+    case 'sending':
+      return '확정하는 중입니다';
+    case 'no-members':
+      return '확정할 팀원이 없습니다';
+    case 'unfilled':
+      return `${gate.unfilled}칸 남음`;
+    case 'problems':
+      return gate.problems.join(' · ');
+    case 'blind':
+      return BLIND_CONFIRM;
+    default:
+      return null;
+  }
+}
+
+/**
+ * 이름 + `님`.
 /**
  * 이름 + `님`.
  *

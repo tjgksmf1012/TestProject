@@ -37,9 +37,10 @@ import {
 } from '../lib/contribution/view.ts';
 import {
   adjustmentsToRestore,
-  BLIND_CONFIRM,
   describeFinals,
+  firstGapOf,
   problemsWith,
+  whyCannotConfirm,
   systemLabel,
   toPayload,
   type Draft,
@@ -364,38 +365,25 @@ function Contributions() {
 
   const saveFinal = async (): Promise<void> => {
     if (screen.k !== 'ok') return;
-    // ⚠️ 저장된 확정을 못 읽었으면 여기서 멈춥니다 (결함 97). 입력칸이
-    // 비어 있는 것이 "시스템 값 그대로" 인지 "못 불러온 것" 인지 화면도
-    // 구분 못 하는 상태라, 그대로 보내면 남의 조정을 지웁니다.
-    if (!finalsKnown) {
-      setMessage({ text: BLIND_CONFIRM, tone: 'bad' });
+    /* ⚠️ **그리는 자리와 같은 판단을 씁니다.** 여기서 다시 짜면 두 벌이
+       되고, 언젠가 한쪽만 고쳐집니다(대표 실패 ②). 막힌 이유에는
+       「저장된 확정을 못 읽었다」(결함 97)와 「안 잰 사람을 시스템 값
+       그대로 확정」(결함 307)이 그대로 들어 있습니다. */
+    if (confirmBlocked !== null) {
+      /* ⚠️ **막힌 이유를 `message` 에 담지 않습니다.** 담았더니 사유를
+         적어 게이트가 열린 뒤에도 「이유를 적어야 합니다」가 화면에 그대로
+         남아, **열린 단추 밑에서 하라고 이미 한 일을 시켰습니다.**
+         `#final-message` 는 막혀 있는 동안 `confirmBlocked` 를 그대로
+         그리므로(결함 365 — 누르기 전에도 서 있어야 합니다) 여기서 다시
+         담을 필요가 없고, 담으면 **파생값이 저장값에 가려집니다.**
+         대신 **할 일이 있는 자리로 데려갑니다** — 알려만 주고 갈 곳을 안
+         주는 것이 이 저장소의 대표 실패 ③ 이고, SPA 는 이미 그렇게
+         합니다(`focusFirstGap`). */
+      focusFirstGap();
       return;
     }
-
-    const drafts: Draft[] = orderForDisplay(screen.score.members, screen.people).map((ms) => {
-      const mine = typed.get(ms.user_id);
-      const raw = (mine?.value ?? '').trim();
-      return {
-        user_id: ms.user_id,
-        // 빈 칸은 **0 이 아니라 "안 건드렸다"** 입니다. `Number('')` 가 0 이라
-        // 여기서 안 가르면 아무것도 안 적은 사람이 0점으로 확정됩니다.
-        final_value: raw === '' ? null : Number(raw),
-        reason: mine?.reason ?? '',
-      };
-    });
-
-    /* ⛔ 안 잰 사람은 「시스템 값 그대로」 확정할 수 없습니다 (결함 307) —
-       받아들일 값 자체가 없습니다. 판정은 `@lib` 의 `nothingMeasured` 하나로
-       하고, 거절은 서버가 합니다. */
-    const unmeasured = new Set(shown.filter(nothingMeasured).map((ms) => ms.user_id));
-    const problems = problemsWith(drafts, systemValues, unmeasured);
-    if (problems.length > 0) {
-      // ⚠️ 서버도 같은 규칙으로 거절합니다. 여기서 먼저 말하는 이유는,
-      // 서버가 400 을 돌려준 뒤에 알려 주면 그때는 이미 다른 사람의
-      // 확정까지 같이 실패한 뒤이기 때문입니다.
-      setMessage({ text: problems.join(' · '), tone: 'bad' });
-      return;
-    }
+    const drafts = draftsNow;
+    const unmeasured = unmeasuredNow;
 
     setSaving(true);
     try {
@@ -524,6 +512,49 @@ function Contributions() {
   // 정할 수 없습니다. 그래서 목록 전체로 한 번에 계산합니다.
   const spans = new Map(uncertaintySpans(shown).map((s) => [s.userId, s]));
   const typedOf = (userId: number): Typed => typed.get(userId) ?? { value: '', reason: '' };
+
+  /* ⛔ **눌러 봐야 아는 것이 아닙니다** (결함 372). 예전에는 확정 단추가
+     `disabled={saving}` 뿐이라, 손대지 않은 화면에서 한 번 누르면 201 이
+     떨어지고 「시스템 값 그대로입니다」로 기록이 남았습니다 — 사람이 아무
+     값도 안 적었는데 시스템 값이 팀의 확정으로 굳는 것이고, 그 기록에는
+     사람 이름이 붙습니다(불변식 ④ — 시스템은 판정하지 않습니다).
+
+     SPA 는 v2 F1-4 대로 이미 막고 있었습니다. 판단은 `@lib` 한 벌
+     (`whyCannotConfirm`)로 두고 두 뿌리가 같이 씁니다. */
+  const draftsNow: Draft[] = shown.map((ms) => {
+    const mine = typed.get(ms.user_id);
+    const raw = (mine?.value ?? '').trim();
+    return {
+      user_id: ms.user_id,
+      // 빈 칸은 **0 이 아니라 「안 정함」** 입니다 — `Number('')` 는 0 입니다.
+      final_value: raw === '' ? null : Number(raw),
+      reason: mine?.reason ?? '',
+    };
+  });
+  const unmeasuredNow = new Set(shown.filter(nothingMeasured).map((ms) => ms.user_id));
+  const confirmBlocked = whyCannotConfirm({
+    memberCount: draftsNow.length,
+    unfilled: draftsNow.filter(
+      (d) => d.final_value === null || Number.isNaN(d.final_value),
+    ).length,
+    problems: problemsWith(draftsNow, systemValues, unmeasuredNow),
+    blind: !finalsKnown,
+    sending: saving,
+  });
+  /** 막힌 단추를 눌렀을 때 **데려갈 자리**. 어느 칸인가는 `@lib` 이
+   *  정하고(`firstGapOf` — SPA 와 같은 답), 여기서는 DOM 만 만집니다.
+   *  이 화면의 칸에는 id 가 없어 행의 `data-user` 로 찾습니다. */
+  const focusFirstGap = (): void => {
+    const gap = firstGapOf(draftsNow, systemValues, (id) => typedOf(id).reason);
+    if (gap === null) return;
+    const row = document.querySelector(`.final-row[data-user="${gap.userId}"]`);
+    const box = row?.querySelector(gap.field === 'value' ? 'input.val' : 'input.reason');
+    if (box instanceof HTMLInputElement) {
+      box.scrollIntoView({ block: 'center' });
+      box.focus();
+    }
+  };
+
   const setTypedFor = (userId: number, patch: Partial<Typed>): void => {
     setTyped((prev) => {
       const next = new Map(prev);
@@ -633,13 +664,27 @@ function Contributions() {
           })}
         </div>
         <div className="row" style={{ marginTop: '.75rem' }}>
-          <button id="confirm" className="primary" disabled={saving} onClick={() => void saveFinal()}>
+          {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 (결함 234·365) —
+              진짜 `disabled` 는 초점을 못 받아 사유가 안 들립니다. */}
+          <button
+            id="confirm"
+            className="primary"
+            aria-disabled={confirmBlocked !== null}
+            aria-describedby={confirmBlocked !== null ? 'final-message' : undefined}
+            onClick={() => void saveFinal()}
+          >
             이 값으로 확정
           </button>
         </div>
-        {message !== null && (
-          <p className={message.tone === 'plain' ? 'status plain' : 'status'} id="final-message">
-            {message.text}
+        {/* ⚠️ 누르기 **전에도** 왜 막혔는지 서 있어야 합니다 (결함 365 의
+            모양) — 눌러야 알려 주면 그건 이미 늦습니다. */}
+        {(message ?? (confirmBlocked !== null ? { text: confirmBlocked, tone: 'bad' } : null)) !==
+          null && (
+          <p
+            className={message?.tone === 'plain' ? 'status plain' : 'status'}
+            id="final-message"
+          >
+            {message?.text ?? confirmBlocked}
           </p>
         )}
         <p className="note">

@@ -19,6 +19,7 @@ import { describe, it } from 'node:test';
 
 import { bundle, chunkFiles, entryPoints, shellFiles } from '../../build.mts';
 import { confidenceRibbon, describeTeamRibbon, sharedConfidence } from './contribution/ribbon.ts';
+import { whyCannotConfirm } from './contribution/final.ts';
 import {
   attentionAbout,
   canSubmit,
@@ -193,7 +194,12 @@ function locksByAriaDisabled(code: string, flag: string): boolean {
   }
   for (const name of carriers) {
     const drawn = new RegExp(`aria-disabled=\\{[^}]*\\b${name}\\b`).test(code);
-    const refuses = new RegExp(`if\\s*\\([^)]*\\b${name}\\b[^)]*\\)\\s*return`).test(code);
+    /* ⚠️ 되돌아가기가 **블록 안**에 있어도 되돌아가는 것입니다 —
+       `if (x !== null) { setMessage(…); return; }` (결함 372). 처음 이 자는
+       `) return` 만 봐서, 요구는 하나도 안 바뀌었는데 빨개졌습니다. */
+    const refuses = new RegExp(
+      `if\\s*\\([^)]*\\b${name}\\b[^)]*\\)\\s*\\{?[\\s\\S]{0,200}?\\breturn\\b`,
+    ).test(code);
     if (drawn && refuses) return true;
   }
   return false;
@@ -9601,6 +9607,90 @@ describe('회의 줄이 응답을 **통째로** 판단에 넘긴다 (결함 368)
     ok(
       !silent.reason.includes('업무가 나오지 않았습니다'),
       '소리가 안 잡힌 회의에게 「업무가 나오지 않았습니다」라고 합니다',
+    );
+  });
+});
+
+describe('「이 값으로 확정」은 **두 뿌리 다** 게이트를 거친다 (결함 372)', () => {
+  /* v2 F1-4 — **확정값은 시스템이 아니라 팀이 적습니다.** 빈 칸은
+     「시스템 값 그대로」가 아니라 「아직 안 정함」입니다.
+
+     SPA 는 그 결정대로 막고 있었고(`3칸 남음`), 레거시는 단추가
+     `disabled={saving}` 뿐이었습니다. 팀원 계정으로 **손대지 않은
+     화면에서 한 번 누르니** `201 POST /contributions/final` 이 나가고
+     기록이 「시스템 값 그대로입니다」로 남았습니다 — 이 제품의 불변식 ④
+     (**시스템은 판정하지 않습니다**)가 사람 이름을 쓴 채 깨진 것입니다.
+
+     ⚠️ 이 자가 못 보는 것: 게이트를 **다른 이름**으로 다시 짜면
+     (`whyCannotConfirm` 을 안 부르고 손으로) 첫 항목이 잡습니다. 그러나
+     `@lib` 을 부르되 **그 값을 안 쓰는** 경우는 두 번째 항목이 봅니다. */
+
+  const SCREENS: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'contributions.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Contributions.tsx')],
+  ];
+
+  const stripped = (file: string): string =>
+    readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+      .replace(/(?<![:\w])\/\/[^\n]*/g, ' ');
+
+  it('⭐ 두 뿌리의 기여도 화면을 **둘 다** 보고 있다', () => {
+    const missing = SCREENS.filter(([, f]) => !existsSync(f)).map(([n]) => n);
+    deepStrictEqual(missing, [], `기여도 화면을 못 찾았습니다: ${missing.join(', ')}`);
+  });
+
+  it('⭐ 확정 단추가 **막힌 이유**를 보고 그린다', () => {
+    const offenders: string[] = [];
+    for (const [name, file] of SCREENS) {
+      if (!existsSync(file)) continue;
+      const code = stripped(file);
+      /* ⚠️ 창을 넉넉히 잡습니다 — SPA 는 `onClick` 본문이 길어 400자로는
+         **단추를 못 찾고** 「가드가 낡았습니다」로 헛돌았습니다(결함 298 이
+         적어 둔 「내 가드의 창이 좁아 내 고침을 잡은 것」과 같은 부류). */
+      const tag = /<button\b[\s\S]{0,900}?이 값으로 확정/.exec(code)?.[0] ?? '';
+      if (tag === '') {
+        offenders.push(`${name}: 확정 단추를 못 찾았습니다 — 가드가 낡았습니다`);
+        continue;
+      }
+      /* 막힌 이유를 보고 그리는가. ⚠️ **이름을 세지 않습니다** — 처음엔
+         `aria-disabled={…Blocked…}` 라는 **글자**를 봤고, SPA 를 공용
+         갈래(`confirmBlock`)로 옮기자 요구는 한 자도 안 바뀌었는데 자만
+         빨개졌습니다(결함 335 의 부류). 재는 것은 **그 값이 `@lib` 의
+         게이트에서 나왔는가**입니다. ⚠️ 창은 `;` 를 **안 넘습니다** —
+         넘겼더니 SPA 가 손으로 짠 갈래를 쓰면서 옆 줄의 `confirmBlockOf(`
+         를 앞 변수 것으로 붙여 **심어도 초록**이었습니다. */
+      const bound = /aria-disabled=\{([^}]*)\}/.exec(tag)?.[1] ?? '';
+      const names = bound.match(/[A-Za-z_$][\w$]*/g) ?? [];
+      const fromGate = names.some((n) =>
+        new RegExp(`\\b${n}\\b[^\\n]{0,80}=[^;]{0,200}?(whyCannotConfirm|confirmBlockOf)\\(`).test(
+          code,
+        ),
+      );
+      if (!fromGate) {
+        offenders.push(`${name}: 확정 단추가 막힌 이유를 안 봅니다`);
+      }
+      // 진짜 `disabled` 는 초점을 못 받습니다 (결함 234).
+      if (/(?<!aria-)\bdisabled=\{/.test(tag)) {
+        offenders.push(`${name}: 확정 단추에 진짜 disabled 가 남아 있습니다`);
+      }
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      `손대지 않은 화면에서 한 번 눌러 팀 전체가 확정될 수 있습니다:\n  ${offenders.join('\n  ')}`,
+    );
+  });
+
+  it('⭐ 빈 칸이 있으면 `@lib` 이 확정을 막는다', () => {
+    /* 요구 자체를 `@lib` 에서 확인합니다 — 화면이 어떻게 부르든. */
+    const base = { memberCount: 3, unfilled: 0, problems: [], blind: false };
+    strictEqual(whyCannotConfirm(base), null);
+    ok(whyCannotConfirm({ ...base, unfilled: 1 }) !== null, '빈 칸이 있는데 확정이 열립니다');
+    ok(
+      (whyCannotConfirm({ ...base, unfilled: 3 }) ?? '').includes('3'),
+      '몇 칸 남았는지 안 말합니다',
     );
   });
 });
