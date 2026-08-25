@@ -14,6 +14,7 @@ import {
   lobbyPhase,
   meetingTitleProblem,
   memberStatuses,
+  roomLine,
   roomStatus,
   savedExtraConsents,
   startBlockers,
@@ -777,6 +778,42 @@ describe('따로 받는 동의 ②③ 의 글 (결함 335)', () => {
         !/(더 잘|정확(도|하게)|잘 알아).*(화자|목소리)|화자.*(더 잘|정확)/.test(item.hint),
         `${item.label} 가 이 제품이 하지 않는 일을 약속합니다 → ${item.hint}`,
       );
+    }
+  });
+});
+
+describe('⛔ 끝난 회의에게 「회의 처리가 시작됩니다」 (결함 367)', () => {
+  /* 씨앗의 회의 1(`needs_review`)에서 그대로 재현됐습니다 — 처리는 한참
+     전에 끝났고 후보 셋이 사람을 기다리는데, 레거시 로비는 「전원
+     종료했습니다. 회의 처리가 시작됩니다」라고 했습니다. */
+  const consented = ROSTER.map((r) => ({ ...r, recording: true }));
+  const allDone = roomStatus(
+    memberStatuses(
+      consented,
+      ROSTER.map((r) => track(r.user_id, { status: 'completed', coverage: 1 })),
+    ),
+  );
+
+  it('⭐ 시작 전에는 방 소식을 그대로 쓴다', () => {
+    // `lobbyPhase` 가 모르는 상태를 「시작 전」으로 두므로 그 갈래도 같습니다.
+    for (const status of [null, undefined, 'scheduled', 'recording']) {
+      strictEqual(roomLine(status, allDone), allDone.message);
+    }
+  });
+
+  it('⭐ 시작할 수 없는 국면에서는 **회의가 어느 국면인가**를 말한다', () => {
+    const wrong: string[] = [];
+    for (const status of ['queued', 'processing', 'needs_review', 'confirmed', 'failed']) {
+      const line = roomLine(status, allDone);
+      strictEqual(line, lobbyPhase(status).note, `${status}: 국면 문장이 아닙니다`);
+      if (line.includes('시작됩니다')) wrong.push(status);
+    }
+    deepStrictEqual(wrong, [], `끝난 회의에게 「시작됩니다」라고 합니다: ${wrong.join(', ')}`);
+  });
+
+  it('⭐ 어떤 국면에서도 빈 줄을 돌려주지 않는다', () => {
+    for (const status of [null, 'queued', 'processing', 'needs_review', 'confirmed', 'failed', '뭔지 모를 값']) {
+      ok(roomLine(status, allDone).trim().length > 0, `${status}: 빈 줄입니다`);
     }
   });
 });

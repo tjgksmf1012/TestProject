@@ -37,7 +37,7 @@ import { appRailHref } from './nav/rail.ts';
 import { withJosa } from './text/josa.ts';
 import { EVIDENCE_CHIPS_SHOWN, splitEvidenceChips } from './review/evidence.ts';
 import { describeMeetingWhen, meetingWhen } from './home/next.ts';
-import { EXTRA_CONSENTS, memberStatuses } from './lobby/room.ts';
+import { EXTRA_CONSENTS, memberStatuses, roomLine } from './lobby/room.ts';
 import {
   blockers,
   initialState,
@@ -9449,5 +9449,86 @@ describe('막힌 단추는 **모든** 막는 길에서 이유를 말한다 (결�
       if (why === null || why.trim() === '') silent.push(name);
     }
     deepStrictEqual(silent, [], `막혔는데 아무 말도 안 하는 길: ${silent.join(', ')}`);
+  });
+});
+
+describe('끝난 회의에게 「회의 처리가 시작됩니다」라고 하지 않는다 (결함 367)', () => {
+  /* `roomStatus().message` 의 마지막 갈래는 「전원 종료했습니다. 회의
+     처리가 시작됩니다」입니다. **녹음이 방금 끝난** 회의에게만 참인데,
+     레거시 로비는 국면과 상관없이 언제나 그렸습니다 — 씨앗의 회의 1
+     (`needs_review`, 후보 셋이 대기)에서 그대로 재현됐습니다.
+
+     SPA 는 `phase.canStart` 로 이미 가르고 있었습니다. 「한쪽 뿌리만」의
+     그 모양이라, 여기서는 **뿌리마다 따로** 걷습니다(결함 286). */
+
+  const LOBBIES: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'lobby.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx')],
+  ];
+
+  const stripComments = (source: string): string =>
+    source
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+      .replace(/(?<![:\w])\/\/[^\n]*/g, ' ');
+
+  it('⭐ 두 뿌리의 로비 화면을 **둘 다** 보고 있다', () => {
+    /* 안 보고 있는 상태 자체가 실패여야 합니다 — 파일을 옮기면 자가
+       조용히 눈을 감습니다(결함 286). */
+    const missing = LOBBIES.filter(([, file]) => !existsSync(file)).map(([name]) => name);
+    deepStrictEqual(missing, [], `로비 화면을 못 찾았습니다: ${missing.join(', ')}`);
+  });
+
+  it('⭐ 방 소식을 그리는 자리는 **국면으로 가린다**', () => {
+    /* ⚠️ 이 자가 못 보는 것: 게이트를 **다른 이름의 지역 변수**로 두면
+       (`stillStartable ? room.message : …`) 거짓 양성이 납니다. 그때는
+       요구가 아니라 자가 좁은 것이니 자를 넓히십시오 — 지금 두 뿌리는
+       `roomLine(` 아니면 `canStart` 를 씁니다. */
+    const offenders: string[] = [];
+    for (const [name, file] of LOBBIES) {
+      if (!existsSync(file)) continue;
+      const source = stripComments(readFileSync(file, 'utf8'));
+      if (/\broomLine\(/.test(source)) continue; // `@lib` 이 가려 줍니다
+      for (const hit of source.matchAll(/\broom\.message\b/g)) {
+        const before = source.slice(Math.max(0, hit.index - 200), hit.index);
+        if (!/canStart/.test(before)) {
+          offenders.push(`${name}: room.message 가 국면 없이 그려집니다`);
+        }
+      }
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      `끝난 회의에게 「처리가 시작됩니다」라고 할 수 있습니다:\n  ${offenders.join('\n  ')}`,
+    );
+  });
+
+  it('⭐ 시작할 수 없는 국면에서는 「시작됩니다」라는 말이 안 나온다', () => {
+    /* 요구 자체를 `@lib` 에서 확인합니다 — 화면이 어떻게 부르든 이
+       성질이 깨지면 문장이 거짓이 됩니다. */
+    const room = {
+      recording: 0,
+      notJoined: 0,
+      broken: 0,
+      needsForceFinish: false,
+      message: '전원 종료했습니다. 회의 처리가 시작됩니다',
+    };
+    const wrong: string[] = [];
+    for (const status of ['queued', 'processing', 'needs_review', 'confirmed', 'failed']) {
+      const line = roomLine(status, room);
+      if (line.includes('시작됩니다') || line.trim() === '') wrong.push(`${status}: ${line}`);
+    }
+    deepStrictEqual(wrong, [], `끝난 회의에게 하는 말이 틀립니다:\n  ${wrong.join('\n  ')}`);
+  });
+
+  it('⭐ 레거시도 `lobbyPhase().note` 를 **그린다** — 만들어 놓고 안 부르던 자리', () => {
+    /* 고치기 전 레거시는 `lobbyPhase` 의 `canStart` 만 쓰고 `note` 는
+       한 곳에서도 안 그렸습니다(실패 ①). 끝난 회의가 무슨 국면인지
+       말해 주는 문장이 그쪽에는 아예 없었습니다. */
+    const legacy = stripComments(readFileSync(join(DEMO, 'lobby.tsx'), 'utf8'));
+    ok(
+      /\broomLine\(/.test(legacy) || /\bphase\.note\b/.test(legacy),
+      '레거시 로비가 국면 문장을 한 곳에서도 안 그립니다',
+    );
   });
 });

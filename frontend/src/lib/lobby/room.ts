@@ -641,6 +641,33 @@ export function lobbyPhase(status: string | null | undefined): LobbyPhase {
 }
 
 /**
+ * 참가자 판 아래에 설 **한 줄** — 지금 이 방의 소식.
+ *
+ * ## ⛔ 끝난 회의에게 「회의 처리가 시작됩니다」 (결함 367)
+ *
+ * `roomStatus().message` 의 마지막 갈래는 「전원 종료했습니다. 회의
+ * 처리가 시작됩니다」입니다. 그 문장은 **녹음이 방금 끝난** 회의에게만
+ * 참인데, 레거시 로비는 그것을 **국면과 상관없이 언제나** 그렸습니다.
+ * 씨앗의 회의 1(`needs_review`)에서 그대로 재현됩니다 — 처리는 한참
+ * 전에 끝났고 후보 셋이 사람을 기다리는데, 화면은 「이제 시작됩니다」
+ * 라고 합니다. 읽은 사람은 기다립니다.
+ *
+ * ⚠️ **SPA 는 이미 갈라 놓고 있었습니다** — `phase.canStart` 가 거짓이면
+ * `room.message` 를 안 씁니다. 「한쪽 뿌리만」의 그 모양입니다.
+ *
+ * ⚠️ 그리고 레거시는 `lobbyPhase().note` 를 **한 곳에서도 안 그렸습니다**
+ * (실패 ① — 만들어 놓고 아무도 안 부름). 끝난 회의가 무슨 국면인지
+ * 말해 주는 문장이 그쪽에는 아예 없었습니다.
+ *
+ * `note` 는 `canStart` 가 거짓일 때 **언제나 문장**입니다(`lobbyPhase`
+ * 참조) — 그래서 이 함수는 빈 줄을 돌려주지 않습니다.
+ */
+export function roomLine(status: string | null | undefined, room: RoomStatus): string {
+  const phase = lobbyPhase(status);
+  return phase.canStart ? room.message : (phase.note ?? room.message);
+}
+
+/**
  * 참가자 한 줄이 쓸 낱말과 문장.
  *
  * ⚠️ **국면이 바뀌면 같은 판정이 다른 뜻이 됩니다.** `not_joined` 는 녹음

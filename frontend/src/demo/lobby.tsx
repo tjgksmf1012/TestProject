@@ -29,6 +29,7 @@ import {
   lobbyPhase,
   memberStatuses,
   recordAffordance,
+  roomLine,
   roomStatus,
   savedExtraConsents,
   startBlockers,
@@ -747,8 +748,12 @@ function Lobby() {
             );
           })}
         </ul>
+        {/* ⚠️ `room.message` 를 **그대로** 쓰면 안 됩니다 (결함 367) —
+            「회의 처리가 시작됩니다」는 녹음이 방금 끝난 회의에게만 참인데,
+            여기는 국면과 상관없이 그리고 있었습니다. 어느 문장이 소식인지는
+            `@lib` 의 `roomLine` 이 정합니다. */}
         <p className="status" id="room-message">
-          {room.message}
+          {roomLine(meetingStatus, room)}
         </p>
         <p className="status" id="progress">
           {progressLine}
