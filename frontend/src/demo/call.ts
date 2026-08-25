@@ -31,6 +31,7 @@ import {
   type RosterPeer,
 } from '../lib/call/mesh.ts';
 import { escapeHtml } from '../lib/html.ts';
+import type { TrackHealth } from '../lib/lobby/room.ts';
 import { tryGet, unreachableText } from '../lib/http/send.ts';
 import { showNote } from '../lib/ui/failure.ts';
 import { bootApp } from './pwa.ts';
@@ -57,7 +58,12 @@ let micReady = false;
 /** 내가 껐는가. `micReady` 와 **다른 값**입니다 — 켰는데 끈 상태가 있습니다. */
 let micMuted = false;
 /** 내 트랙의 서버 상태. `undefined` 는 "아직 녹음 안 함" 입니다 (결함 216). */
-let myTrackStatus: string | undefined;
+/* ⚠️ **칸을 골라 들고 있지 않습니다** (결함 404·368). 예전에는 `status`
+   문자열만 들고 있어서, 서버가 같은 응답에 실어 보내는 `chunk_count`·
+   `silent_ms` 를 화면이 **볼 수가 없었습니다** — 녹음 화면을 열기만 한
+   사람에게 초록 「녹음 중입니다」를 띄운 이유입니다. 응답 줄을 통째로
+   들고 판단은 `@lib` 이 합니다. */
+let myTrack: TrackHealth | undefined;
 /** 마이크 설정이 권장과 다른 것들. 토글할 때 다시 계산하지 않게 들고 있습니다. */
 let micProblems: string[] = [];
 let socket: WebSocket | null = null;
@@ -110,9 +116,7 @@ function render(): void {
           /* ⚠️ 여기 「이 기기에서 녹음됩니다」 가 **조건 없이** 박혀
              있었습니다 (결함 216). 통화에 있는 것과 녹음이 도는 것은 다른
              일이고, 아무것도 안 남는데 남는다고 말하고 있었습니다. */
-          const capture = describeMyCapture(
-            myTrackStatus === undefined ? undefined : { status: myTrackStatus },
-          );
+          const capture = describeMyCapture(myTrack);
           return `<li><span class="face me">${escapeHtml(mine.name.slice(0, 1))}</span>
            <span class="who"><span class="name">${escapeHtml(mine.name)} (나)</span>
            <span class="state ${capture.tone}">${escapeHtml(capture.label)}</span></span>
@@ -387,11 +391,13 @@ async function pollMyTrack(): Promise<void> {
   if (!meetingId || !me) return;
   const response = await tryGet(`${apiBase}/api/meetings/${meetingId}/tracks`);
   if (response === null || !response.ok) return;
-  const body = (await response.json()) as { tracks?: { user_id: number; status: string }[] };
+  const body = (await response.json()) as { tracks?: TrackHealth[] };
   const mine = (body.tracks ?? []).find((t) => t.user_id === me);
-  const next = mine?.status;
-  if (next === myTrackStatus) return;
-  myTrackStatus = next;
+  // ⚠️ 다시 그릴지는 **화면이 읽는 값**으로 정합니다. `status` 만 비교하면
+  //    조각이 끊긴 것(`silent_ms` 만 자람)이 영영 안 그려집니다.
+  const before = JSON.stringify(describeMyCapture(myTrack));
+  myTrack = mine;
+  if (JSON.stringify(describeMyCapture(myTrack)) === before) return;
   render();
 }
 

@@ -1,4 +1,5 @@
 
+import { isSilentTooLong, type TrackHealth } from '../lobby/room.ts';
 import { withJosa } from '../text/josa.ts';
 /**
  * 브라우저 통화 — 메시 연결을 누가 언제 만드는가.
@@ -404,15 +405,36 @@ export interface CaptureNote {
  * 알려 주지 않습니다 — 다른 기기로 녹음 중일 수도 있습니다. 모르는 것을
  * 덧붙이지 않습니다.
  *
+ * ⚠️⚠️ **`status` 하나만 보면 안 됩니다** (결함 404). 서버의 트랙은 녹음
+ * 화면을 **열기만 해도** 만들어지고 그 순간부터 `status` 가 `recording`
+ * 입니다(`join_track`) — 「참가했다」는 뜻이지 「소리가 들어온다」가
+ * 아닙니다. 그래서 시작 버튼을 한 번도 안 누른 사람에게 이 카드가 초록
+ * 「녹음 중입니다」를 띄우고 있었습니다. 같은 순간 **로비는 팀에게**
+ * 「2분째 녹음이 한 조각도 안 왔습니다 — 그 폰에서 녹음을 시작했는지
+ * 확인해 주세요」라고 말하고 있었습니다. 브라우저로 나란히 놓고
+ * 쟀습니다(결함 290) — 정작 확인해야 할 본인만 괜찮다는 말을 들었습니다.
+ *
+ * 판단은 로비가 이미 하고 있으므로 **베끼지 않고 부릅니다**
+ * (`isSilentTooLong`). 문장은 갈라 둡니다 — 로비는 남에게 하는 말이고
+ * 여기는 자기 화면입니다(결함 344·358).
+ *
  * @param track `GET /api/meetings/{id}/tracks` 에서 **내 user_id** 로 찾은 것.
  *              없으면 `undefined` — 그건 "아직 녹음 안 함" 입니다.
+ *              ⚠️ 칸을 골라 넘기지 말고 **그대로** 넘기십시오(결함 368).
  */
-export function describeMyCapture(track: { status: string } | undefined): CaptureNote {
+export function describeMyCapture(track: TrackHealth | undefined): CaptureNote {
   if (track === undefined) {
     return { label: '아직 녹음 중이 아닙니다', tone: 'warn' };
   }
   switch (track.status) {
     case 'recording':
+      if (isSilentTooLong(track)) {
+        /* 조각이 **한 개도** 안 온 것과 오다가 끊긴 것은 할 일이 다릅니다
+           — 로비가 갈라 둔 그대로입니다. */
+        return (track.chunk_count ?? 0) === 0
+          ? { label: '녹음이 한 조각도 안 올라갔습니다 — 녹음 화면을 확인하세요', tone: 'bad' }
+          : { label: '녹음이 안 올라옵니다 — 녹음 화면을 확인하세요', tone: 'bad' };
+      }
       return { label: '녹음 중입니다', tone: 'ok' };
     case 'completed':
       return { label: '녹음이 끝났습니다', tone: 'ok' };

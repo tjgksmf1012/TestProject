@@ -1,6 +1,8 @@
 import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { readFileSync } from 'node:fs';
+
+import { WARN_GAP_MS, type TrackHealth } from '../lobby/room.ts';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -336,6 +338,26 @@ describe('내 마이크 — 껐으면 껐다고 말한다 (결함 216)', () => {
 });
 
 describe('내 타일의 녹음 상태 — 안 묻고 단언하던 것 (결함 216)', () => {
+  /**
+   * 서버가 `GET /api/meetings/{id}/tracks` 로 주는 한 줄.
+   *
+   * ⚠️ 예전에는 검사가 `{ status }` 만 넘겼습니다. 그 모양으로는 **화면이
+   *    못 보던 칸**(`chunk_count`·`silent_ms`)이 검사에도 없어서, 결함 404
+   *    가 구조적으로 안 잡혔습니다(결함 368 의 모양).
+   */
+  const track = (status: string, extra: Partial<TrackHealth> = {}): TrackHealth => ({
+    track_id: 1,
+    user_id: 1,
+    status,
+    coverage: null,
+    total_gap_ms: null,
+    capture_confidence: null,
+    stop_reason: null,
+    chunk_count: 3,
+    silent_ms: 0,
+    ...extra,
+  });
+
   it('⭐ 트랙이 없으면 「녹음 중」이라고 말하지 않는다', () => {
     // 여기 「이 기기에서 녹음됩니다」 가 **조건 없이** 박혀 있었습니다.
     // 아무것도 안 남는데 남는다고 말했고, 이 제품에서 녹음이 한 번
@@ -346,21 +368,74 @@ describe('내 타일의 녹음 상태 — 안 묻고 단언하던 것 (결함 21
   });
 
   it('⭐ 녹음 중일 때만 「녹음 중」', () => {
-    strictEqual(describeMyCapture({ status: 'recording' }).label, '녹음 중입니다');
-    strictEqual(describeMyCapture({ status: 'completed' }).label, '녹음이 끝났습니다');
+    strictEqual(describeMyCapture(track('recording')).label, '녹음 중입니다');
+    strictEqual(describeMyCapture(track('completed')).label, '녹음이 끝났습니다');
   });
 
   it('⚠️ 못 쓰는 트랙은 「0」 이 아니라 「못 씀」', () => {
     for (const status of ['unusable', 'aborted']) {
-      strictEqual(describeMyCapture({ status }).label, '녹음을 쓸 수 없습니다');
-      strictEqual(describeMyCapture({ status }).tone, 'warn');
+      strictEqual(describeMyCapture(track(status)).label, '녹음을 쓸 수 없습니다');
+      strictEqual(describeMyCapture(track(status)).tone, 'warn');
     }
   });
 
   it('⛔ 「이 기기에서」 라고 말하지 않는다 — 서버는 어느 기기인지 안 알려 준다', () => {
-    for (const track of [undefined, { status: 'recording' }, { status: 'completed' }]) {
-      strictEqual(/이 기기/.test(describeMyCapture(track).label), false);
+    for (const one of [undefined, track('recording'), track('completed')]) {
+      strictEqual(/이 기기/.test(describeMyCapture(one).label), false);
     }
+  });
+
+  /*
+   * 결함 404 — 녹음 화면을 **열기만** 해도 서버 트랙은 `recording` 입니다
+   * (`join_track`). 그 한 칸만 보면 시작 버튼을 한 번도 안 누른 사람에게
+   * 초록 「녹음 중입니다」가 나갑니다. 같은 순간 로비는 팀에게 「녹음이 한
+   * 조각도 안 왔습니다」라고 말하고 있었습니다 — 브라우저로 나란히 놓고
+   * 쟀습니다.
+   */
+  it('⭐ `recording` 인데 한 조각도 안 왔으면 「녹음 중」이라고 하지 않는다', () => {
+    const idle = describeMyCapture(track('recording', { chunk_count: 0, silent_ms: 120_000 }));
+    strictEqual(/녹음 중입니다/.test(idle.label), false, idle.label);
+    ok(/한 조각도/.test(idle.label), idle.label);
+    strictEqual(idle.tone, 'bad');
+  });
+
+  it('⭐ 오다가 끊긴 것과 한 조각도 안 온 것을 가른다 — 할 일이 다르다', () => {
+    const stalled = describeMyCapture(track('recording', { chunk_count: 7, silent_ms: 120_000 }));
+    ok(/안 올라옵니다/.test(stalled.label), stalled.label);
+    strictEqual(/한 조각도/.test(stalled.label), false, stalled.label);
+  });
+
+  it('⭐ 로비와 **같은 문턱**으로 가른다 — 숫자를 새로 만들지 않는다', () => {
+    // `WARN_GAP_MS` 아래에서는 아직 「녹음 중」입니다(로비도 그렇습니다).
+    const fresh = describeMyCapture(track('recording', { chunk_count: 0, silent_ms: WARN_GAP_MS - 1 }));
+    strictEqual(fresh.label, '녹음 중입니다');
+    const late = describeMyCapture(track('recording', { chunk_count: 0, silent_ms: WARN_GAP_MS }));
+    strictEqual(/녹음 중입니다/.test(late.label), false, late.label);
+  });
+
+  it('⚠️ 모르면 경고하지 않는다 — `silent_ms` 가 없는 서버', () => {
+    strictEqual(describeMyCapture(track('recording', { silent_ms: null })).label, '녹음 중입니다');
+  });
+
+  it('⭐ 화면이 응답 줄을 **통째로** 넘긴다 — 칸을 골라 넘기지 않는다', () => {
+    /*
+     * 결함 404 의 뿌리입니다. `call.ts` 가 `status` **문자열만** 들고
+     * 있어서, 서버가 같은 응답에 실어 보내는 `chunk_count`·`silent_ms` 를
+     * 화면이 볼 수가 없었습니다 — 판단을 고쳐도 값이 안 와서 아무 일도
+     * 안 일어납니다(결함 368: 「응답을 통째로 안 넘기고 칸을 골라 넘기면
+     * 조용히 낡습니다」).
+     */
+    const src = readFileSync(join(ROOT, 'src', 'demo', 'call.ts'), 'utf8');
+    ok(/describeMyCapture\(/.test(src), '통화 화면이 이 판단을 안 부릅니다');
+    strictEqual(
+      /describeMyCapture\(\s*\{/.test(src),
+      false,
+      '화면이 인자를 **손으로 조립**합니다 — 서버가 칸을 늘려도 이 화면만 옛 갈래로 떨어집니다',
+    );
+    ok(
+      /let myTrack:\s*TrackHealth\s*\|\s*undefined/.test(src),
+      '폴링이 응답 줄을 통째로 들고 있지 않습니다 (`TrackHealth`)',
+    );
   });
 
   it('⛔ 낱말이 `call.html` 의 규칙에 **실제로 있는** 것이어야 한다', () => {
@@ -368,7 +443,8 @@ describe('내 타일의 녹음 상태 — 안 묻고 단언하던 것 (결함 21
     // (`.state.warn` 이 흙빛입니다). 오류가 안 나고 **색만 안 칠해집니다.**
     const css = readFileSync(join(ROOT, 'public', 'call.html'), 'utf8');
     const tones = new Set(
-      [undefined, { status: 'recording' }, { status: 'completed' }, { status: 'unusable' }].map(
+      [undefined, track('recording'), track('completed'), track('unusable'),
+        track('recording', { chunk_count: 0, silent_ms: 120_000 })].map(
         (t) => describeMyCapture(t).tone,
       ),
     );
