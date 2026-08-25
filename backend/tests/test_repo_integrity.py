@@ -3002,6 +3002,34 @@ def test_every_server_route_has_a_caller() -> None:
         "DELETE": r"DELETE|\.delete\b",
     }
 
+    #: ⚠️ **`{id}` 자리는 형제 갈래의 「글자 그대로」도 삼킵니다.**
+    #:
+    #: `/api/projects/{project_id}` 의 자는 그 자리를 아무 글자로 채우므로,
+    #: 화면이 형제인 `/api/projects/join` 을 부르는 것만으로 초록이 됩니다.
+    #: 지금은 두 자리가 그렇고(`join` · `me`) **둘 다 진짜 호출이 따로
+    #: 있어서** 거짓 초록은 0건입니다 — 하지만 진짜 호출이 사라지는 날
+    #: 아무도 못 봅니다. 형제의 글자가 채운 hit 는 **증거로 안 셉니다.**
+    all_paths = sorted({path for _, path, _ in routes})
+
+    def sibling_literals(route_path: str) -> dict[int, set[str]]:
+        """`{id}` 자리마다 「같은 자리에 글자를 박은 형제 갈래」를 모읍니다."""
+        parts = route_path.split("/")
+        found: dict[int, set[str]] = {}
+        for i, seg in enumerate(parts):
+            if not seg.startswith("{"):
+                continue
+            literals = {
+                other.split("/")[i]
+                for other in all_paths
+                if other != route_path
+                and len(other.split("/")) == len(parts)
+                and other.split("/")[:i] == parts[:i]
+                and not other.split("/")[i].startswith("{")
+            }
+            if literals:
+                found[i] = literals
+        return found
+
     def called(route_path: str, method: str = "") -> bool:
         """이 갈래를 부르는 화면이 있는가.
 
@@ -3020,8 +3048,15 @@ def test_every_server_route_has_a_caller() -> None:
         붙는 자리(찾기·달력)를 전부 「안 불린다」로 잡습니다. 막을 것은
         **경로가 더 이어지는 것**뿐입니다.
 
-        ⚠️ 이 자가 **못 보는 것**: HTTP 메서드는 안 봅니다. 같은 주소에
-        `GET` 과 `DELETE` 가 있으면 하나만 불려도 둘 다 초록입니다.
+        ⚠️ 이 자가 **못 보는 것**: `GET` 갈래는 메서드를 **안 봅니다**
+        (`METHOD_MARK` 에 없습니다). 같은 주소에 `GET` 과 쓰기 갈래가
+        있으면, 화면이 쓰기만 불러도 `GET` 은 초록입니다.
+
+        그런 자리가 **열 곳**이라 하나씩 세어 봤고 — `/api/projects` ·
+        `/api/projects/{project_id}`(+`/meetings` `/contributions/final`
+        `/reports` `/channels`) · `/api/meetings/{meeting_id}`(+`/consent`
+        `/tracks`) · `/api/channels/{channel_id}/messages` — **열 곳 다
+        진짜 `GET` 호출이 따로 있었습니다.** 지금은 거짓 초록이 0건입니다.
         """
         pattern = re.sub(r"\\\{[a-z_]+\\\}", lambda _: f"(?>{SEG})", re.escape(route_path))
         #: ⚠️ **앞도 막습니다** (결함 379). 짧은 주소는 **남의 파일 경로
@@ -3030,8 +3065,17 @@ def test_every_server_route_has_a_caller() -> None:
         #: 화면은 **0곳**이었습니다.
         rx = re.compile(r"(?<![A-Za-z0-9_.-])" + pattern + r"(?![A-Za-z0-9_/-])")
         mark = METHOD_MARK.get(method)
+        siblings = sibling_literals(route_path)
         for code in screens:
             for hit in rx.finditer(code):
+                #: 형제 갈래의 **글자 그대로**가 `{id}` 자리를 채운 것은
+                #: 이 갈래를 부른 것이 아닙니다 — 증거로 안 셉니다.
+                got = hit.group(0).split("/")
+                if any(
+                    i < len(got) and got[i] in literals
+                    for i, literals in siblings.items()
+                ):
+                    continue
                 if mark is None:
                     return True
                 #: 주소 **둘레**에서 메서드를 찾습니다 — `sendJson(url, 'PATCH', …)`
