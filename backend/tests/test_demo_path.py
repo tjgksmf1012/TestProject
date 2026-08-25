@@ -376,6 +376,101 @@ def test_seeded_events_do_not_squat_on_real_task_ids(client: TestClient, seeded:
     assert squatted == [], f"합성 이벤트가 선점한 업무: {squatted}"
 
 
+def test_a_seeded_completion_carries_its_schedule_verdict(seeded: dict):
+    """⭐ 완료 이벤트는 **혼자 오지 않는다** — 마감 판정이 짝이다 (결함 385).
+
+    실기의 `task_service.complete` 는 `TASK_COMPLETED` 를 쓴 바로 다음에
+    마감 준수를 판정해 `DEADLINE_MET` / `DEADLINE_MISSED` 를 **같은
+    `source_id`** 로 씁니다. 건너뛰는 경우는 **마감일이 없을 때뿐**입니다.
+    즉 「완료는 있는데 판정이 없다」는 이 제품이 만들 수 없는 상태입니다.
+
+    씨앗은 오래도록 완료만 손으로 적었습니다. `schedule` 이 팀 전체 0건이면
+    화면이 그 범주를 통째로 빼기 때문에 **아무 표시가 안 났고**, 카드를
+    하나 완료로 옮기는 순간 범주가 살아나 박지원이 「일정 준수 0건 ·
+    팀의 0%」로 나왔습니다 — 완료한 것으로 적혀 있는 사람인데도.
+
+    ⚠️ **낱개 사례를 세지 않습니다.** 완료 이벤트를 전수로 돌면서 짝을
+    찾습니다. 다음 사람이 완료를 하나 더 넣으면 그 줄이 이 검사를 깨웁니다.
+    """
+    SCHEDULE_VERDICTS = {"deadline_met", "deadline_missed"}
+    with db_session.session_scope() as s:
+        rows = s.scalars(select(m.ContributionEventRow)).all()
+        completions = {
+            (r.user_id, r.source_kind, r.source_id)
+            for r in rows
+            if r.event_type == "task_completed"
+        }
+        verdicts = {
+            (r.user_id, r.source_kind, r.source_id)
+            for r in rows
+            if r.event_type in SCHEDULE_VERDICTS
+        }
+    # 자가 아무것도 안 보고 있으면 그것 자체가 실패다 (결함 286).
+    assert completions, "씨앗에 완료 이벤트가 하나도 없습니다 — 이 검사가 낡았습니다"
+    orphans = sorted(completions - verdicts)
+    assert orphans == [], (
+        f"완료 이벤트에 마감 판정이 없습니다: {orphans} — 실기는 둘을 같이 씁니다. "
+        "이 상태에서는 누가 업무를 하나 완료하는 순간 나머지 사람이 "
+        "「일정 준수 0건」으로 그려집니다 (결함 385)"
+    )
+
+
+def test_the_seed_draws_both_sides_of_the_deadline(seeded: dict):
+    """⭐ 「제때」만 있으면 「늦음」 갈래는 한 번도 안 그려진다.
+
+    셋 다 `deadline_met` 이면 준수율이 전원 1.0 이라 `_schedule_raw` 의
+    분자·분모가 같아지고, 그 갈래를 아무도 검수하지 못합니다 — 「갈라지는
+    데이터로 재십시오」가 씨앗에도 걸립니다(결함 327·348).
+    """
+    with db_session.session_scope() as s:
+        kinds = {
+            r.event_type
+            for r in s.scalars(select(m.ContributionEventRow)).all()
+            if r.event_type in {"deadline_met", "deadline_missed"}
+        }
+    assert kinds == {"deadline_met", "deadline_missed"}, (
+        f"씨앗이 만드는 마감 판정: {sorted(kinds)} — 한쪽만 있으면 반대 갈래가 "
+        "미검증입니다"
+    )
+
+
+def test_the_seeds_schedule_scores_actually_diverge(seeded: dict):
+    """⭐ 「양쪽 갈래가 다 있다」와 「점수가 갈린다」는 다른 말이다.
+
+    `_schedule_raw` 는 `10 * 비율 * min(1, 건수/5)` 입니다. 처음 고른 값에서
+    셋의 raw 가 **전부 2.0** 이었습니다 — `1.0 × 0.2` 와 `0.5 × 0.4` 가
+    정확히 상쇄합니다. 그 상태로는 `missed` 항을 통째로 지워도 씨앗이
+    아무것도 못 잡습니다: 갈래는 그려지는데 **값이 안 갈립니다.**
+
+    「이름 순과 번호 순이 같은 명단으로 정렬을 잰 것」과 같은 함정이라,
+    갈래가 아니라 **값**을 봅니다.
+    """
+    from teamflow.contribution.events import EventType
+
+    FLOOR = 5
+
+    def schedule_raw(met: int, missed: int) -> float:
+        total = met + missed
+        if total == 0:
+            return 0.0
+        return 10.0 * (met / total) * min(1.0, total / FLOOR)
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(select(m.ContributionEventRow)).all()
+    per_user: dict[int, list[int]] = {}
+    for r in rows:
+        if r.event_type == EventType.DEADLINE_MET.value:
+            per_user.setdefault(r.user_id, [0, 0])[0] += 1
+        elif r.event_type == EventType.DEADLINE_MISSED.value:
+            per_user.setdefault(r.user_id, [0, 0])[1] += 1
+    assert len(per_user) >= 2, "일정 판정을 가진 사람이 둘도 안 됩니다 — 이 검사가 낡았습니다"
+    raws = {u: schedule_raw(met, missed) for u, (met, missed) in per_user.items()}
+    assert len(set(raws.values())) > 1, (
+        f"씨앗의 일정 준수 점수가 전원 같습니다: {raws} — 갈래는 둘인데 값이 "
+        "안 갈리면 missed 항이 사라져도 아무도 못 봅니다"
+    )
+
+
 # ══════════════════════════════════════════════════════════════
 # 3. 가짜 ASR — GPU 없이 회의 처리가 도는가
 # ══════════════════════════════════════════════════════════════

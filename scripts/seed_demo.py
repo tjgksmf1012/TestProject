@@ -453,20 +453,58 @@ def seed(*, reset: bool) -> dict:
 # 기여도가 통째로 내려가는데, 그건 측정이 아니라 오답이다 (docs/04 §2.6).
 # 시연 데이터에 그 경우가 없으면 "측정 불가는 0점이 아니다" 를 주장할
 # 거리가 없다 — 승인 화면에서 확신도 0.34 짜리를 넣어 둔 것과 같은 이유다.
-_EVENTS: list[tuple[int, str, str, float, int]] = [
-    # (팀원 index, event_type, source_kind, magnitude, 회의 시작 후 며칠)
-    (0, "pr_merged", "github_event", 180.0, 1),
-    (0, "pr_merged", "github_event", 240.0, 3),
-    (0, "review_given", "github_event", 1.0, 2),
-    (0, "review_given", "github_event", 1.0, 4),
-    (0, "task_completed", "task", 1.0, 3),
-    (1, "pr_merged", "github_event", 90.0, 2),
-    (1, "review_given", "github_event", 1.0, 3),
-    (1, "task_completed", "task", 1.0, 2),
-    (1, "task_completed", "task", 1.0, 5),
-    (2, "pr_merged", "github_event", 120.0, 4),
-    (2, "review_given", "github_event", 1.0, 5),
-    (2, "task_completed", "task", 1.0, 4),
+# ⚠️ **`task_completed` 는 혼자 오지 않습니다** (결함 385).
+#
+# 실기의 `task_service.complete` 는 완료 이벤트를 쓴 **바로 다음에**
+# 마감 준수를 판정해 `deadline_met` / `deadline_missed` 를 같은
+# `source_id` 로 씁니다. 마감일이 없을 때만 판정을 건너뜁니다. 즉
+# 「완료 이벤트는 있는데 일정 판정이 없다」는 상태는 이 제품이
+# **만들 수 없습니다.**
+#
+# 그런데 이 표는 오래도록 완료만 손으로 적고 판정을 안 적었습니다.
+# 씨앗 그대로는 `schedule` 범주가 팀 전체 0건이라 화면이 그 범주를
+# 통째로 빼서 티가 안 났는데, **누가 카드를 하나 완료로 옮기는 순간**
+# 범주가 살아나고 박지원이 「일정 준수 0건 · 팀의 0%」로 나왔습니다 —
+# 이 사람도 업무를 완료한 것으로 적혀 있는데도. 불변식 ③이 말하는
+# 「안 잰 것」이 「쟀는데 0」으로 그려진 것입니다.
+#
+# 그래서 완료마다 판정을 짝지어 둡니다. **같은 슬롯 = 같은 업무**라서
+# `source_id` 를 공유합니다 (실기가 `source_id=task.id` 로 둘 다 쓰는
+# 것과 같은 모양입니다). 유니크 키는 event_type 까지 보므로 부딪히지
+# 않습니다.
+#
+# ⚠️ 김민수의 완료는 **일부러 `deadline_missed`** 입니다. 셋 다 「제때」면
+# 준수율이 전원 1.0 이라 그 갈래가 한 번도 안 그려집니다 — 「갈라지는
+# 데이터로 재십시오」가 씨앗에도 걸립니다.
+#
+# ⚠️ **어느 사람에게 붙이는지까지 재서 골랐습니다.** 처음에는 이하늘에게
+# 붙였는데, `_schedule_raw = 10 * 비율 * min(1, 건수/5)` 라서 셋의 raw 가
+# **전부 2.0** 으로 같아졌습니다 — 1.0×0.2 와 0.5×0.4 가 정확히 상쇄
+# 합니다. 그러면 「양쪽 갈래가 다 있다」는 참인데 **점수는 갈리지
+# 않아서**, missed 항이 통째로 사라져도 씨앗이 아무것도 못 잡습니다.
+# 지금 값은 갈립니다 — 김민수 0.0 · 이하늘 4.0 · 박지원 2.0.
+#
+# ⚠️ 김민수의 **0.0 은 「못 잰 것」이 아니라 「쟀는데 0」** 입니다
+# (결함 191 이 근거를 적어 내린 결정 — 그대로 0% 로 그립니다).
+_EVENTS: list[tuple[int, str, str, float, int, int]] = [
+    # (팀원 index, event_type, source_kind, magnitude, 회의 시작 후 며칠, 슬롯)
+    #                                                  ↑ 같은 슬롯 = 같은 업무
+    (0, "pr_merged", "github_event", 180.0, 1, 0),
+    (0, "pr_merged", "github_event", 240.0, 3, 1),
+    (0, "review_given", "github_event", 1.0, 2, 2),
+    (0, "review_given", "github_event", 1.0, 4, 3),
+    (0, "task_completed", "task", 1.0, 3, 4),
+    (0, "deadline_missed", "task", 1.0, 3, 4),
+    (1, "pr_merged", "github_event", 90.0, 2, 5),
+    (1, "review_given", "github_event", 1.0, 3, 6),
+    (1, "task_completed", "task", 1.0, 2, 7),
+    (1, "deadline_met", "task", 1.0, 2, 7),
+    (1, "task_completed", "task", 1.0, 5, 8),
+    (1, "deadline_met", "task", 1.0, 5, 8),
+    (2, "pr_merged", "github_event", 120.0, 4, 9),
+    (2, "review_given", "github_event", 1.0, 5, 10),
+    (2, "task_completed", "task", 1.0, 4, 11),
+    (2, "deadline_met", "task", 1.0, 4, 11),
     # ⚠️ `utt_*` 는 **여기 없습니다.** 예전에는 손으로 넣었는데, 이제
     # 회의 발화에서 진짜로 만들어집니다(`meeting_contribution_service`).
     #
@@ -495,7 +533,7 @@ _SEED_SOURCE_BASE = 900_000
 
 
 def _seed_contribution_events(session, project_id: int, user_ids: list[int]) -> None:
-    for seq, (index, event_type, source_kind, magnitude, day) in enumerate(_EVENTS):
+    for index, event_type, source_kind, magnitude, day, slot in _EVENTS:
         session.add(
             m.ContributionEventRow(
                 project_id=project_id,
@@ -504,10 +542,15 @@ def _seed_contribution_events(session, project_id: int, user_ids: list[int]) -> 
                 category=CATEGORY_OF[EventType(event_type)].value,
                 event_type=event_type,
                 source_kind=source_kind,
-                # `(source_kind, source_id, event_type)` 이 유니크다 — 웹훅이
-                # 같은 이벤트를 두 번 보내도 한 번만 세도록 만든 중복 제거 키다.
-                # 전부 0 으로 두면 두 번째 이벤트부터 IntegrityError 가 난다.
-                source_id=_SEED_SOURCE_BASE + seq,
+                # 유니크 키는 **네 칸**이다 — `(source_kind, source_id,
+                # event_type, user_id)`. 웹훅이 같은 이벤트를 두 번 보내도
+                # 한 번만 세도록 만든 중복 제거 키다. 전부 0 으로 두면 두
+                # 번째 이벤트부터 IntegrityError 가 난다.
+                #
+                # ⚠️ 그래서 **같은 슬롯에 완료와 마감 판정을 같이 둘 수
+                # 있습니다** — `event_type` 이 다르기 때문이다. 실기도
+                # 둘 다 `source_id=task.id` 로 쓴다 (결함 385).
+                source_id=_SEED_SOURCE_BASE + slot,
                 magnitude=magnitude,
                 # 실제 PR·업무 행을 가리키지 않는 합성 이벤트라고 남긴다.
                 # 남기지 않으면 "화면의 숫자는 원본 이벤트로 역추적된다"
