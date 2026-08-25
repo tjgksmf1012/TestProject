@@ -10,6 +10,7 @@ import {
   problemsWith,
   toPayload,
   firstGapOf,
+  needsReasonFor,
   whyCannotConfirm,
   type Draft,
   type FinalRow,
@@ -435,5 +436,59 @@ describe('⛔ 빈 칸을 「시스템 값 그대로」로 확정할 수 있었�
         `${value}: 문제는 ${complains} 인데 데려가기는 ${leadsThere} 입니다`,
       );
     }
+  });
+});
+
+describe('⭐ 화면이 보여 준 값을 그대로 적으면 「그대로」다 (결함 391)', () => {
+  /* 확정 칸의 placeholder 는 `systemLabel` 의 **한 자리 반올림**인데
+     「같은가」는 정확 비교였습니다. 시스템 36.87 인 사람에게 화면은
+     `36.9%` 를 보여 주고, 그걸 그대로 적으면 「다르게 정했다」가 됐습니다.
+
+     ⚠️ 이 제품은 불변식 ②(단일 점수 금지) 때문에 정확한 값을 어디에도
+     안 그립니다 — placeholder 가 유일한 자리입니다. */
+  const SYSTEM = new Map([[1, 36.87]]);
+  const draft = (final_value: number | null, reason = ''): Draft => ({
+    user_id: 1,
+    final_value,
+    reason,
+  });
+
+  it('placeholder 와 같은 글자가 되는 값은 사유가 필요 없다', () => {
+    strictEqual(systemLabel(36.87, true), '36.9%', '이 검사가 기대는 표시 정밀도');
+    strictEqual(needsReasonFor(draft(36.9), SYSTEM), false);
+    deepStrictEqual(problemsWith([draft(36.9)], new Map(SYSTEM)), []);
+  });
+
+  it('정확한 값도 당연히 사유가 필요 없다', () => {
+    strictEqual(needsReasonFor(draft(36.87), SYSTEM), false);
+  });
+
+  it('⛔ 진짜로 다르게 정하면 여전히 사유가 필요하다', () => {
+    strictEqual(needsReasonFor(draft(40), SYSTEM), true);
+    strictEqual(problemsWith([draft(40)], new Map(SYSTEM)).length, 1);
+    deepStrictEqual(problemsWith([draft(40, '발표를 도맡았습니다')], new Map(SYSTEM)), []);
+  });
+
+  it('⭐ 표시 한 칸 차이는 갈린다 — 자가 너무 넓어지지 않았는가', () => {
+    // 36.9% 로 보이는 값과 37.0% 로 보이는 값은 **다릅니다.**
+    strictEqual(systemLabel(37.0, true), '37.0%');
+    strictEqual(needsReasonFor(draft(37.0), SYSTEM), true);
+  });
+
+  it('⭐ 게이트와 보내는 값이 **같은 자**를 쓴다', () => {
+    /* 한쪽만 고치면 「이유가 필요 없다」고 해 놓고 값은 조정으로 실려
+       나가, 서버가 사유 없는 조정을 400 으로 거절합니다. */
+    const payload = toPayload([draft(36.9)], new Map(SYSTEM));
+    deepStrictEqual(payload, [{ user_id: 1 }], '안 건드린 칸은 값을 안 보냅니다');
+    const changed = toPayload([draft(40, '발표를 도맡았습니다')], new Map(SYSTEM));
+    deepStrictEqual(changed, [
+      { user_id: 1, final_value: 40, reason: '발표를 도맡았습니다' },
+    ]);
+  });
+
+  it('⭐ 안 잰 사람이 일부러 적은 0 은 여전히 조정이다 (결함 307)', () => {
+    const zero = new Map([[1, 0]]);
+    const payload = toPayload([draft(0, '참여가 없었습니다')], zero, new Set([1]));
+    deepStrictEqual(payload, [{ user_id: 1, final_value: 0, reason: '참여가 없었습니다' }]);
   });
 });

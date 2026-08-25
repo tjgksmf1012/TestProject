@@ -35,9 +35,46 @@ export interface Payload {
   reason?: string;
 }
 
-/** 두 값이 실질적으로 같은가. 부동소수 비교를 한 곳에 모은다. */
+/** 두 값이 실질적으로 같은가. 부동소수 비교를 한 곳에 모은다.
+ *
+ * ⚠️ **저장된 값끼리** 견줄 때 씁니다. 사람이 **적은** 값과 견줄 때는
+ * 아래 `matchesSystemAsShown` 입니다 — 이유는 그쪽에 적었습니다. */
 export function sameValue(a: number, b: number): boolean {
   return Math.abs(a - b) < 1e-9;
+}
+
+/**
+ * 팀이 적은 값이 **화면이 보여 준 시스템 값과 같은가** (결함 391).
+ *
+ * ## ⛔ 화면이 보여 준 값을 그대로 적었는데 「다르게 정했다」가 됐습니다
+ *
+ * 확정 칸의 placeholder 는 `systemLabel` 이 만든 **한 자리 반올림**
+ * (`36.9%`)입니다. 그런데 「같은가」는 `sameValue` 로 **정확히** 쟀습니다.
+ * 시스템 값이 `36.87` 이면 화면이 보여 준 `36.9` 를 그대로 적어도
+ * 「시스템 값과 다르게 확정하려면 이유를 적어야 합니다」로 막혔습니다.
+ *
+ * 재현 —
+ *
+ *     placeholder 그대로 (36.9 · 26.0 · 37.1)  → 막힘, 이유 요구
+ *     서버의 정확한 값 (36.87 · 26.03 · 37.1)  → 열림
+ *
+ * 뒤엣값은 **화면 어디에도 없습니다.** 이 제품은 불변식 ②(단일 점수 금지)
+ * 때문에 사람의 몫을 단일 숫자로 안 그립니다 — 확정 칸의 placeholder 가
+ * 유일한 자리이고, 그것이 반올림돼 있습니다. 그래서 팀은 **시스템 값을
+ * 그대로 받아들이려면 하지도 않은 조정에 사유를 지어내야** 했습니다.
+ * 불변식 ④가 사유를 요구하는 것은 **실제 조정**에 근거를 남기라는
+ * 뜻인데, 지어낸 사유가 섞이면 그 기록 자체가 값을 잃습니다.
+ *
+ * ⚠️ 고침은 **재는 자를 보여 주는 자에 맞추는 것**입니다 — 화면의 정밀도를
+ * 바꾸면 이 판단도 같이 따라옵니다(글자를 두 곳에 적지 않습니다).
+ *
+ * ⚠️ **v2 F1-4 와 결함 372 를 뒤집지 않습니다** — 빈 칸은 여전히 「아직 안
+ * 정함」이고 팀이 값을 적어야 확정이 열립니다. 바뀐 것은 「적은 값이
+ * 시스템과 같은가」를 재는 방법뿐입니다.
+ */
+export function matchesSystemAsShown(typed: number, system: number): boolean {
+  if (sameValue(typed, system)) return true;
+  return systemLabel(typed, true) === systemLabel(system, true);
 }
 
 /**
@@ -59,7 +96,7 @@ export function needsReasonFor(
   if (draft.final_value === null || Number.isNaN(draft.final_value)) return false;
   const system = systemValues.get(draft.user_id);
   if (system === undefined) return false;
-  return !sameValue(draft.final_value, system);
+  return !matchesSystemAsShown(draft.final_value, system);
 }
 
 export function problemsWith(
@@ -167,7 +204,10 @@ export function toPayload(
       draft.final_value === null ||
       (!unmeasured.has(draft.user_id) &&
         system !== undefined &&
-        sameValue(draft.final_value, system));
+        /* ⚠️ 게이트와 **같은 자**를 씁니다 (결함 391). 여기만 정확 비교로
+           두면 「이유가 필요 없다」고 해 놓고 값은 조정으로 실려 나가,
+           서버가 사유 없는 조정을 400 으로 거절합니다. */
+        matchesSystemAsShown(draft.final_value, system));
     if (untouched) return { user_id: draft.user_id };
     return {
       user_id: draft.user_id,
