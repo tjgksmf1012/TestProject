@@ -42,12 +42,21 @@ def test_the_log_is_readable_at_all(client: TestClient, seeded):
 
 
 def test_contribution_touching_actions_are_marked(client: TestClient, seeded):
-    """⭐ 분쟁에서 제일 먼저 볼 기록을 화면이 알아볼 수 있어야 합니다."""
+    """⭐ 분쟁에서 제일 먼저 볼 기록을 화면이 알아볼 수 있어야 합니다.
+
+    ⚠️ **아닌 쪽 예로 `task_completed` 를 쓰고 있었습니다** (결함 387).
+    이유를 적어 내린 결정이 아니라 「집합에 없는 아무 행동」이 필요해서
+    고른 것이었는데, 재 보니 그건 이 저장소에서 숫자를 **제일 크게**
+    움직이는 행동이었습니다. 아닌 쪽 예는 **재서** 고릅니다 —
+    `candidate_rejected` 는 업무를 안 만들어 구간이 한 자도 안 움직입니다
+    (`test_the_touches_contribution_set_matches_what_actually_moves` 가
+    그 기준으로 전수를 잽니다).
+    """
     plant(seeded, "weights_changed")
-    plant(seeded, "task_completed")
+    plant(seeded, "candidate_rejected")
     rows = client.get(f"/api/projects/{seeded['project_id']}/activity").json()
     marked = {r["action"]: r["touches_contribution"] for r in rows}
-    assert marked == {"weights_changed": True, "task_completed": False}
+    assert marked == {"weights_changed": True, "candidate_rejected": False}
 
 
 def test_newest_first(client: TestClient, seeded):
@@ -356,3 +365,104 @@ def test_an_unknown_pair_target_is_still_not_invented(client: TestClient, seeded
 
     rows = client.get(f"/api/projects/{project_id}/activity").json()
     assert rows[0]["target_label"] == f"final_contributions/{project_id}:99999"
+
+
+# ══════════════════════════════════════════════════════════════
+# 「사람의 숫자를 건드린 행동」 집합 — **재서** 정한다 (결함 387)
+# ══════════════════════════════════════════════════════════════
+
+
+def _ranges(client: TestClient, project_id: int) -> dict[int, tuple[float, float]]:
+    """지금 팀의 기여 구간. **값만이 아니라 폭도 숫자입니다.**"""
+    body = client.get(f"/api/projects/{project_id}/contributions").json()
+    return {
+        member["user_id"]: (float(member["range_low"]), float(member["range_high"]))
+        for member in body.get("members", [])
+    }
+
+
+def test_the_touches_contribution_set_matches_what_actually_moves(
+    client: TestClient, seeded
+):
+    """⭐ 집합에 든 행동은 **정말로** 숫자를 움직여야 하고, 그 반대도 참이다.
+
+    화면은 이 집합을 보고 「사람의 숫자를 건드린 일」을 눈에 띄게 그립니다.
+    그런데 이 집합은 **손으로 고른 목록**이라, 결함 329 가 삭제 둘을 넣은
+    뒤로 아무도 그 기준으로 전수를 재 본 적이 없었습니다.
+
+    재 보니 **`task_completed` 가 빠져 있었습니다** — 이 저장소에서 한 번에
+    제일 크게 움직이는 기록인데도(결함 387). 바로 위 `task_assignees_changed`
+    가 집합에 있는 이유가 「완료 점수가 갈 사람이 바뀐다」인데, 정작 그
+    점수를 만드는 완료가 없었습니다.
+
+    ⚠️ **낱말이 아니라 요구를 잽니다** — 목록을 베끼지 않고, 행동을 실제로
+    일으켜 구간이 움직이는지 보고 집합과 맞춥니다.
+
+    ⚠️ **대조군을 먼저 봅니다.** 아무것도 안 하고 두 번 재서 값이 흔들리면
+    이 검사는 아무것도 못 재는 것입니다 (시간 감쇠가 섞이는 자리).
+    """
+    project_id = seeded["project_id"]
+    login_as(client, seeded["user_ids"][0])
+
+    before = _ranges(client, project_id)
+    assert before, "기여도가 비어 있습니다 — 이 검사가 낡았습니다"
+    assert _ranges(client, project_id) == before, (
+        "아무것도 안 했는데 구간이 흔들립니다 — 이 검사는 움직임을 못 가립니다"
+    )
+
+    # ── 업무를 **실기 경로로** 만듭니다 — 후보 승인 말고는 길이 없습니다.
+    candidate_ids = seeded["candidate_ids"]
+    assert candidate_ids, "씨앗에 후보가 없습니다 — 이 검사가 낡았습니다"
+    candidate_id = candidate_ids[0]
+
+    approved = client.post(
+        f"/api/meetings/{seeded['meeting_id']}/candidates/review",
+        json={
+            "items": [
+                {
+                    "candidate_id": candidate_id,
+                    "approve": True,
+                    "assignee_override": seeded["user_ids"][0],
+                    # ⚠️ 과거 마감은 서버가 막습니다 — 미래로 둡니다.
+                    "deadline_override": "2026-12-31",
+                }
+            ]
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    task_ids = approved.json()["approved_task_ids"]
+    assert task_ids, f"승인이 업무를 안 만들었습니다: {approved.json()}"
+    task_id = task_ids[0]
+
+    # 승인 자체는 이벤트를 안 만듭니다 — 여기서 기준을 다시 잡습니다.
+    before = _ranges(client, project_id)
+
+    done = client.patch(
+        f"/api/projects/{project_id}/tasks/{task_id}",
+        json={"status": "done"},
+    )
+    assert done.status_code == 200, done.text
+    after = _ranges(client, project_id)
+
+    moved = after != before
+    in_set = "task_completed" in activity_service.TOUCHES_CONTRIBUTION
+    assert moved == in_set, (
+        f"업무 완료가 구간을 {'움직였는데' if moved else '안 움직였는데'} "
+        f"TOUCHES_CONTRIBUTION 에는 {'없습니다' if not in_set else '있습니다'} "
+        f"— 화면이 그 줄을 잘못 그립니다 (결함 387).\n"
+        f"  전: {before}\n  후: {after}"
+    )
+
+
+def test_every_action_in_the_set_has_a_label(client: TestClient, seeded):
+    """⭐ 집합과 이름표는 **짝**이다 — 한쪽만 늘면 화면이 식별자를 그립니다.
+
+    결함 328 이 `action` 어휘에서 겪은 그것입니다. 집합에 넣으면서 이름표를
+    안 넣으면 그 줄이 `task_completed` 라는 **날 글자**로 나갑니다.
+    """
+    missing = sorted(
+        action
+        for action in activity_service.TOUCHES_CONTRIBUTION
+        if action not in activity_service.ACTION_LABEL
+    )
+    assert missing == [], f"이름표가 없는 행동: {missing}"
