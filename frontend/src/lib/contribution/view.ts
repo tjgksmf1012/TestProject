@@ -86,6 +86,12 @@ export interface Person {
    * (「남의 아이디를 적으면 그 사람의 PR이 내 기여가 됩니다」).
    */
   github_login?: string | null;
+  /**
+   * 프로젝트 안의 **등급**(`owner`·`admin`·`member`). 서버의 `/members`
+   * 가 이미 보냅니다 — 기여도 확정이 관리자·소유자만인지 화면이 알아야
+   * 해서 여기 적습니다 (결함 392).
+   */
+  project_role?: string | null;
 }
 
 /**

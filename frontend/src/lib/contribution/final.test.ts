@@ -334,7 +334,11 @@ describe('⛔ 빈 칸을 「시스템 값 그대로」로 확정할 수 있었�
      막고 있었는데 레거시는 게이트가 없어서, 손대지 않은 화면에서 한 번
      누르면 201 이 떨어지고 「시스템 값 그대로입니다」로 기록됐습니다. */
 
-  const ok = { memberCount: 3, unfilled: 0, problems: [], blind: false };
+  /* ⚠️ `myRole` 이 있어야 합니다 (결함 392). 확정은 관리자·소유자만이고,
+     **모르면 잠그는** 것이 이 게이트의 규칙이라 안 주면 「권한 없음」에
+     걸립니다 — 「누가 보고 있는가」를 안 적은 씨앗은 이제 아무것도 안
+     재는 씨앗입니다. */
+  const ok = { myRole: 'owner', memberCount: 3, unfilled: 0, problems: [], blind: false };
 
   it('⭐ 빈 칸이 있으면 확정이 안 열린다', () => {
     strictEqual(whyCannotConfirm({ ...ok, unfilled: 3 }), '3칸 남음');
@@ -347,6 +351,7 @@ describe('⛔ 빈 칸을 「시스템 값 그대로」로 확정할 수 있었�
 
   it('⭐ 막는 길마다 **다른** 말이 있다 — 하나도 빈 글자가 아니다', () => {
     const paths: Array<[string, Parameters<typeof whyCannotConfirm>[0]]> = [
+      ['권한 없음', { ...ok, myRole: 'member' }],
       ['보내는 중', { ...ok, sending: true }],
       ['팀원 0명', { ...ok, memberCount: 0 }],
       ['빈 칸', { ...ok, unfilled: 2 }],
@@ -382,6 +387,28 @@ describe('⛔ 빈 칸을 「시스템 값 그대로」로 확정할 수 있었�
       whyCannotConfirm({ ...ok, unfilled: 2, problems: ['합이 100 이 아닙니다'] }),
       '2칸 남음',
     );
+  });
+
+  it('⭐ 권한이 **그보다도 앞**이다 (결함 392)', () => {
+    /* 확정할 수 없는 사람에게 「3칸 남음」부터 말하면, 셋을 다 채우고
+       눌렀을 때야 403 을 만납니다. */
+    const said = whyCannotConfirm({ ...ok, myRole: 'member', unfilled: 3 });
+    ok2(said !== null && !said.includes('칸 남음'), said ?? '(아무 말도 안 함)');
+    ok2(said!.includes('관리자'), said!);
+  });
+
+  it('⭐ 아직 **모르는** 것은 「권한 없음」이 아니다 (결함 254)', () => {
+    /* 명단이 오기 전 몇 초. 잠그는 것은 그대로이되 말이 다릅니다. */
+    const said = whyCannotConfirm({ ...ok, myRole: undefined });
+    ok2(said !== null, '모르는 동안에도 잠급니다');
+    ok2(!said!.includes('관리자에게 요청'), said!);
+  });
+
+  it('⭐ 관리자와 소유자는 열린다 — 팀원만 막힙니다', () => {
+    strictEqual(whyCannotConfirm({ ...ok, myRole: 'owner' }), null);
+    strictEqual(whyCannotConfirm({ ...ok, myRole: 'admin' }), null);
+    ok2(whyCannotConfirm({ ...ok, myRole: 'member' }) !== null);
+    ok2(whyCannotConfirm({ ...ok, myRole: null }) !== null, '구성원이 아니면 막힙니다');
   });
 
   /* 막힌 단추를 누르면 **할 일이 있는 자리로** 데려갑니다. 알려만 주고

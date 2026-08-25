@@ -104,13 +104,24 @@ def seeded(engine, client: TestClient) -> dict[str, int]:
             {"designer": 1.0},
             {"developer": 0.6, "planner": 0.4},
         ]
-        for user, login, role in zip(users, logins, roles, strict=True):
+        for index, (user, login, role) in enumerate(zip(users, logins, roles, strict=True)):
             s.add(
                 m.Member(
                     project_id=project.id,
                     user_id=user.id,
                     role_shares=role,
                     github_login=login,
+                    # ⚠️ **만든 사람은 소유자입니다** — `create_project` 가
+                    #    그렇게 만듭니다. 이 씨앗은 오래도록 그 칸을 비워
+                    #    두어 **셋 다 `member`** 였습니다. 실기가 만들 수
+                    #    없는 상태라, 등급을 보는 갈래가 여기서는 통째로
+                    #    엉뚱하게 돌았습니다 (결함 288 의 모양 · 392 에서
+                    #    확정 권한을 좁히다 드러났습니다).
+                    project_role=(
+                        str(vocab.ProjectRole.OWNER)
+                        if index == 0
+                        else str(vocab.ProjectRole.MEMBER)
+                    ),
                 )
             )
 
@@ -1195,6 +1206,36 @@ def test_nothing_is_confirmed_until_a_person_confirms_it(client: TestClient, see
     body = client.get(_final_url(seeded)).json()
     assert body["finals"] == []
     assert body["run_id"] == 0
+
+
+def test_only_admins_confirm_the_whole_teams_contribution(client: TestClient, seeded):
+    """⭐ 팀 **전원의** 숫자를 쓰는 일은 관리자·소유자만 (결함 392).
+
+    이 라우트는 오래도록 `_require_project_member` 만 봤습니다. 평범한
+    팀원이 자기 몫을 90%, 나머지를 5%씩으로 확정할 수 있었고 `201` 이
+    떨어졌으며 기록에는 그 사람 이름이 붙었습니다 — 브라우저로
+    재현했습니다.
+
+    ⚠️ **뒤집은 것이 아니라 적어만 두고 간 숙제입니다.** 라우트 주석이
+    「지금은 구성원 누구나 … 역할이 생기면 여기부터 좁혀야 합니다」라고
+    조건을 달아 두었고, 그 뒤에 역할이 생겼습니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    body = {"finals": [{"user_id": users[0], "final_value": 90.0, "reason": "제가 정합니다"}]}
+
+    # 팀원 — 막힙니다.
+    login_as(client, users[1])
+    blocked = client.post(_final_url(seeded), json=body)
+    assert blocked.status_code == 403, blocked.text
+
+    # 아무것도 안 남아야 합니다 — 막았는데 값이 들어가면 막은 것이 아닙니다.
+    login_as(client, users[0])
+    assert client.get(_final_url(seeded)).json()["finals"] == []
+
+    # 소유자 — 됩니다.
+    ok = client.post(_final_url(seeded), json=body)
+    assert ok.status_code == 201, ok.text
 
 
 def test_confirming_pins_the_calculation_it_was_based_on(client: TestClient, seeded):

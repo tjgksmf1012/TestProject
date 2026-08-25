@@ -1,4 +1,5 @@
 
+import { canManage, manageBlockedBecause } from '../project/roles.ts';
 import { teamDateTime } from '../time/calendar.ts';
 import { withJosa } from '../text/josa.ts';
 /**
@@ -271,6 +272,13 @@ export const BLIND_CONFIRM =
 
 /** 확정이 **지금 막혀 있는 이유**. 막힌 게 없으면 `null`. */
 export interface ConfirmGate {
+  /**
+   * 지금 보는 사람의 **프로젝트 등급** (결함 392).
+   *
+   * ⚠️ `undefined` 는 「아직 모름」입니다 — 명단이 오기 전 몇 초.
+   * 그때는 잠그되 **「권한이 없다」고 단언하지 않습니다**(결함 254).
+   */
+  myRole?: string | null;
   /** 팀원이 몇 명인가. 0명이면 확정할 것 자체가 없습니다. */
   memberCount: number;
   /** 아직 값을 안 적은 칸 수. */
@@ -311,11 +319,21 @@ export interface ConfirmGate {
  *  사유 문단의 id 를 고릅니다. ⚠️ 두 화면이 각자 `if` 사슬을 쓰면 그
  *  순간 갈라집니다(대표 실패 ②). 갈래를 하나 더하면 SPA 의
  *  `Record<ConfirmBlock, …>` 이 **컴파일 오류**로 알려 줍니다. */
-export type ConfirmBlock = 'sending' | 'no-members' | 'unfilled' | 'problems' | 'blind';
+export type ConfirmBlock =
+  | 'not-allowed'
+  | 'sending'
+  | 'no-members'
+  | 'unfilled'
+  | 'problems'
+  | 'blind';
 
 /** ⚠️ 순서가 곧 우선순위입니다 — 아직 안 적은 사람에게 「고쳐라」부터
  *  시키지 않습니다. */
 export function confirmBlockOf(gate: ConfirmGate): ConfirmBlock | null {
+  /* ⚠️ **맨 앞입니다** (결함 392). 확정할 수 없는 사람에게 「3칸 남음」부터
+     말하면, 다 채우고 눌렀을 때야 403 을 만납니다 — 순서가 곧
+     우선순위라는 이 함수의 규칙 그대로입니다. */
+  if (!canManage(gate.myRole)) return 'not-allowed';
   if (gate.sending === true) return 'sending';
   if (gate.memberCount === 0) return 'no-members';
   if (gate.unfilled > 0) return 'unfilled';
@@ -352,6 +370,11 @@ export function firstGapOf(
 
 export function whyCannotConfirm(gate: ConfirmGate): string | null {
   switch (confirmBlockOf(gate)) {
+    case 'not-allowed':
+      /* 문장은 `@lib/project/roles.ts` 한 곳에서 옵니다 — 설정 화면의
+         관리자 전용 단추들이 쓰는 그 문장입니다(결함 225·254·316).
+         「아직 모름」과 「권한 없음」을 그 함수가 갈라 줍니다. */
+      return manageBlockedBecause(gate.myRole, '기여도 확정');
     case 'sending':
       return '확정하는 중입니다';
     case 'no-members':

@@ -7,7 +7,7 @@ import { TrackRibbon } from '../components/TrackRibbon.tsx';
 import { Chain, type ChainLink } from '../components/Chain.tsx';
 import { Stat } from '../components/Stat.tsx';
 import { Why } from '../components/Why.tsx';
-import { useConfirmFinals, useContributions, useFinals, useMembers } from '../api/hooks.ts';
+import { useConfirmFinals, useContributions, useFinals, useMe, useMembers } from '../api/hooks.ts';
 import { ApiError } from '../api/client.ts';
 import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
 import {
@@ -39,6 +39,7 @@ import {
   adjustmentsToRestore,
   BLIND_CONFIRM,
   confirmBlockOf,
+  whyCannotConfirm,
   firstGapOf,
   describeFinals,
   problemsWith,
@@ -99,6 +100,7 @@ export default function Contributions() {
   const score = useContributions(projectId);
   const finals = useFinals(projectId);
   const membersQuery = useMembers(projectId);
+  const { data: me } = useMe();
 
   const people: Person[] = useMemo(
     () =>
@@ -106,9 +108,17 @@ export default function Contributions() {
         user_id: m.user_id,
         name: m.name,
         role_shares: m.role_shares,
+        project_role: m.project_role,
       })),
     [membersQuery.data],
   );
+
+  /* 확정은 **관리자·소유자만**입니다 (결함 392). ⚠️ `?? null` 이 아니라
+     `undefined` 를 살립니다 — 명단이 오기 전에 「권한이 없다」고 단언하지
+     않기 위해서입니다(결함 254). 문장은 `@lib` 이 고릅니다. */
+  const myRole = membersQuery.isSuccess
+    ? (membersQuery.data?.find((m) => m.user_id === me?.user_id)?.project_role ?? null)
+    : undefined;
 
   // 입력 상태 — 칸을 안 건드리면 null(시스템 값 그대로).
   const [values, setValues] = useState<Record<number, string>>({});
@@ -187,6 +197,7 @@ export default function Contributions() {
   // 합니다 — 레거시는 같은 갈래를 문장으로 옮깁니다(결함 372). 여기서
   // 다시 `if` 사슬을 쓰면 그 순간 두 벌입니다(대표 실패 ②).
   const confirmBlock = confirmBlockOf({
+    myRole,
     memberCount: members.length,
     unfilled,
     problems,
@@ -198,6 +209,7 @@ export default function Contributions() {
    *  오류**가 되어, 새 갈래에 할 말을 정하기 전에는 못 지나갑니다.
    *  `null` 인 둘은 사유 문단이 아니라 버튼 상태로 알리는 것들입니다. */
   const CONFIRM_REASON_ID: Record<ConfirmBlock, string | null> = {
+    'not-allowed': 'confirm-not-allowed',
     sending: null,
     'no-members': null,
     unfilled: 'confirm-unfilled',
@@ -470,7 +482,22 @@ export default function Contributions() {
                 })}
               </div>
             )}
-            {!allFilled && members.length > 0 && (
+            {/* ⚠️ **맨 앞입니다** (결함 392) — 확정할 수 없는 사람에게 「3칸
+                남음」부터 말하면 다 채우고 눌렀을 때야 403 을 만납니다.
+                문장은 `@lib` 이 고릅니다(설정 화면의 관리자 전용 단추들이
+                쓰는 그 문장). 버튼은 **지우지 않습니다** — 관리자에게
+                부탁하면 되는 일인데 사라지면 「원래 없는 기능」으로
+                읽힙니다(결함 316). */}
+            {confirmBlock === 'not-allowed' && (
+              <Problem id="confirm-not-allowed">{whyCannotConfirm({
+                myRole,
+                memberCount: members.length,
+                unfilled,
+                problems,
+                blind,
+              })}</Problem>
+            )}
+            {confirmBlock !== 'not-allowed' && !allFilled && members.length > 0 && (
               <Problem id="confirm-unfilled" tone="incomplete">{unfilled}칸 남음</Problem>
             )}
             {/* ⚠️ **꼬리를 여기 붙이지 마십시오.** 여기에 「— 사유 없는

@@ -533,7 +533,15 @@ function Contributions() {
     };
   });
   const unmeasuredNow = new Set(shown.filter(nothingMeasured).map((ms) => ms.user_id));
+  /* ⚠️ `?? null` 이 아니라 **`undefined` 를 살립니다** (결함 254) — 명단이
+     아직 안 왔을 때 `null` 로 뭉개면 소유자에게도 「관리자에게 요청하세요」
+     라고 말합니다. `manageBlockedBecause` 가 그 둘을 갈라 씁니다. */
+  const myRole =
+    people.length === 0
+      ? undefined
+      : people.find((person) => person.user_id === me?.user_id)?.project_role;
   const confirmBlocked = whyCannotConfirm({
+    myRole,
     memberCount: draftsNow.length,
     unfilled: draftsNow.filter(
       (d) => d.final_value === null || Number.isNaN(d.final_value),

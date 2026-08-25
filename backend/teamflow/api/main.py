@@ -4094,16 +4094,34 @@ def confirm_contributions(
       안 그러면 확정 뒤에 이벤트가 하나 더 들어오는 것만으로 확정값이
       가리키던 근거가 달라집니다
 
-    ⚠️ **누가 확정할 수 있는가** — 지금은 **구성원 누구나**입니다. 이
-    저장소에 팀장·교수 역할 개념이 아직 없습니다. 남의 업무를 옮기는 것도
-    같은 규칙이고(그리고 감사 로그에 남고), 여기도 `adjusted_by` 로
-    남습니다. 역할이 생기면 여기부터 좁혀야 합니다.
+    ## ⚠️ 누가 확정할 수 있는가 — **관리자와 소유자** (결함 392)
+
+    이 자리에는 오래도록 이렇게 적혀 있었습니다 —
+
+    > 지금은 **구성원 누구나**입니다. 이 저장소에 팀장·교수 역할 개념이
+    > 아직 없습니다. … **역할이 생기면 여기부터 좁혀야 합니다.**
+
+    그 뒤에 역할이 생겼습니다(`ProjectRole` 셋 · `_ALLOWED` 일곱 갈래).
+    **조건이 붙은 결정이었고 그 조건이 충족된 것**이라, 그 문장이 스스로
+    시킨 대로 좁힙니다 — 뒤집는 것이 아니라 적어만 두고 간 숙제입니다.
+
+    좁히기 전 상태는 재현했습니다: 평범한 팀원(이하늘)이 자기 몫을 90%,
+    나머지 둘을 5%씩으로 확정했고 `201` 이 떨어졌으며 기록은
+    「이하늘님이 확정했습니다」였습니다.
+
+    쓰기 라우트 44개를 세어 보니 「팀원 누구나」이면서 **남의 숫자**를
+    쓰는 것은 이것 하나입니다(나머지 셋은 경로가 `/me`). 그리고 이
+    저장소는 **더 작은 일**을 이미 반대로 정해 뒀습니다 — `set_my_role`
+    의 「남이 내 역할을 바꿀 수 있으면 그건 남의 점수를 바꾸는 일입니다」.
+
+    ⚠️ **불변식 ④를 뒤집는 것이 아닙니다.** 「팀이 합의해 확정한다」는
+    그대로이고, 정하는 것은 **합의를 기록으로 남기는 손**뿐입니다.
     """
     from teamflow.services import scoring_service
 
     if session.get(m.Project, project_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
-    _require_project_member(session, project_id, user)
+    _require_can(session, project_id, user, permissions.Action.CONFIRM_CONTRIBUTIONS)
 
     result = scoring_service.compute(session, project_id)
     if not result.members:

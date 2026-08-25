@@ -10122,7 +10122,9 @@ describe('「이 값으로 확정」은 **두 뿌리 다** 게이트를 거친�
 
   it('⭐ 빈 칸이 있으면 `@lib` 이 확정을 막는다', () => {
     /* 요구 자체를 `@lib` 에서 확인합니다 — 화면이 어떻게 부르든. */
-    const base = { memberCount: 3, unfilled: 0, problems: [], blind: false };
+    // ⚠️ 보는 사람의 등급이 있어야 합니다 — 확정은 관리자·소유자만이고 모르면
+    //    잠급니다(결함 392). 안 주면 이 검사는 「권한 없음」만 재게 됩니다.
+    const base = { myRole: 'owner', memberCount: 3, unfilled: 0, problems: [], blind: false };
     strictEqual(whyCannotConfirm(base), null);
     ok(whyCannotConfirm({ ...base, unfilled: 1 }) !== null, '빈 칸이 있는데 확정이 열립니다');
     ok(
@@ -10254,6 +10256,73 @@ describe('결함 390 — 업무에만 걸리는 거르개는 **이름과 결과�
     ok(
       /filterScopeNote\(\s*askedFilters/.test(drawn),
       'filterScopeNote 에 지금 고른 값을 그대로 넘깁니다 — 누르기 전에 말이 바뀝니다',
+    );
+  });
+});
+
+describe('결함 392 — 팀 전원의 숫자를 쓰는 일은 **두 뿌리 다** 등급을 본다', () => {
+  /* ## ⛔ 평범한 팀원이 자기 몫을 90% 로 확정했습니다
+   *
+   * `POST /contributions/final` 은 오래도록 `_require_project_member` 만
+   * 봤습니다. 브라우저로 재현했습니다 — 이하늘(팀원)이 김민수 5% ·
+   * 박지원 5% · 이하늘 90% 로 확정했고 `201` 이 떨어졌으며 기록은
+   * 「이하늘님이 확정했습니다」였습니다.
+   *
+   * ⚠️ **뒤집은 것이 아니라 적어만 두고 간 숙제입니다.** 라우트 주석이
+   * 「지금은 구성원 누구나 … **역할이 생기면 여기부터 좁혀야 합니다**」
+   * 라고 조건을 달아 두었고, 그 뒤에 역할이 생겼습니다.
+   *
+   * ⚠️ 서버만 고치면 화면은 다 채우고 누른 **뒤에야** 403 을 만납니다.
+   * 두 뿌리가 게이트에 **등급을 넘기는지**를 여기서 잽니다.
+   */
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'contributions.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Contributions.tsx')],
+  ];
+
+  for (const [rootName, path] of ROOTS) {
+    it(`⭐ ${rootName} — 확정 게이트에 **보는 사람의 등급**을 넘긴다`, () => {
+      const code = readFileSync(path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+      /* ⚠️ **부르는 자리를 전부** 봅니다. 처음에는 「어딘가 한 곳에
+         `myRole` 이 실려 있는가」로 쟀는데, SPA 는 사유 문단에서도 같은
+         함수를 부르기 때문에 **정작 단추를 잠그는 호출에서 빼도 초록**
+         이었습니다 — 심어 보고 알았습니다(결함 306 의 「부르는 곳을
+         세라」를 한 파일 안에 댄 것). */
+      const calls = [...code.matchAll(/(whyCannotConfirm|confirmBlockOf)\(\{/g)];
+      ok(calls.length > 0, `${rootName} 가 확정 게이트를 한 번도 안 부릅니다`);
+      for (const call of calls) {
+        // 그 호출의 객체 리터럴 구간만 — 다음 `})` 까지.
+        const from = call.index ?? 0;
+        const window = code.slice(from, code.indexOf('})', from));
+        ok(
+          /\bmyRole\b/.test(window),
+          `${rootName} 의 ${call[1]} 호출 하나가 등급을 안 넘깁니다 — ` +
+            '그 자리는 팀원에게도 열립니다: ' + window.replace(/\s+/g, ' ').slice(0, 90),
+        );
+      }
+      /* 넘기는 값이 **명단에서 온 것**이어야 합니다 — 안 그러면 언제나
+         `undefined` 라 모두가 잠깁니다. */
+      ok(
+        /project_role/.test(code),
+        `${rootName} 가 명단에서 등급을 안 읽습니다 — 넘기는 값이 언제나 undefined 입니다`,
+      );
+    });
+  }
+
+  it('⭐ 서버가 **그 행동을 어휘로** 가지고 있다', () => {
+    /* 화면만 막으면 API 를 직접 부르는 길이 그대로 열려 있습니다. */
+    const perms = readFileSync(
+      join(ROOT, '..', 'backend', 'teamflow', 'projects', 'permissions.py'),
+      'utf8',
+    );
+    ok(/CONFIRM_CONTRIBUTIONS/.test(perms), '권한 어휘에 확정이 없습니다');
+    const main = readFileSync(
+      join(ROOT, '..', 'backend', 'teamflow', 'api', 'main.py'),
+      'utf8',
+    );
+    ok(
+      /_require_can\([^)]*Action\.CONFIRM_CONTRIBUTIONS/.test(main),
+      '확정 라우트가 그 어휘를 안 씁니다 — 팀원이 API 로 바로 부를 수 있습니다',
     );
   });
 });
