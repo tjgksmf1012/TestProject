@@ -9664,6 +9664,100 @@ describe('화면이 덧칠한 버튼도 **막힌 모양**을 갖는다 (결함 3
   });
 });
 
+describe('보내는 값은 **지금 값**이다 — useCallback 이 안 쥔 state (결함 376)', () => {
+  /* 채널 만들기 폼은 종류(텍스트·음성)를 고르게 합니다. 그런데
+     `addChannel` 의 deps 가 `[newName, loadChannels]` 라, 콜백은 **이름이
+     바뀔 때만** 다시 만들어집니다. 사람은 대개 **이름을 먼저 적고 종류를
+     고르므로**, 클로저가 쥔 `newKind` 는 옛 값(`'text'`)입니다.
+
+       이름먼저 → 종류  →  {"kind":"text","name":"음성A"}   ← 고른 값이 버려짐
+       종류먼저 → 이름  →  {"kind":"voice","name":"음성B"}
+
+     서버는 그 값을 받아 **201** 을 주고 화면에는 아무 오류도 안 납니다.
+     즉 「음성 채널」은 사실상 만들 수 없었습니다.
+
+     ⚠️ 이 자가 **못 보는 것**: `sendJson` 의 **본문 리터럴**만 봅니다.
+     값을 헬퍼로 감싸 보내거나(`toPayload(...)`) URL 에 실어 보내면 안
+     보입니다. 그리고 **함수형 갱신**(`setX((prev) => …)`)만 쓰는 state 는
+     deps 가 필요 없는데 여기서는 본문에 안 나오므로 자연히 빠집니다. */
+
+  const SCREENS = readdirSync(DEMO).filter((f) => f.endsWith('.tsx'));
+
+  /** 짝이 맞는 닫는 괄호/중괄호까지. */
+  const spanFrom = (text: string, at: number, open: string, close: string): string => {
+    let depth = 0;
+    for (let i = at; i < text.length; i += 1) {
+      if (text[i] === open) depth += 1;
+      else if (text[i] === close) {
+        depth -= 1;
+        if (depth === 0) return text.slice(at, i + 1);
+      }
+    }
+    return text.slice(at);
+  };
+
+  it('⭐ `sendJson` 본문에 실리는 state 는 **모두 deps 에 있다**', () => {
+    const offenders: string[] = [];
+    for (const file of SCREENS) {
+      const code = readFileSync(join(DEMO, file), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+        .replace(/(?<![:\w])\/\/[^\n]*/g, ' ');
+      const states = [...code.matchAll(/const \[(\w+), set\w+\] = useState/g)].map((m) => m[1]!);
+      if (states.length === 0) continue;
+
+      for (const cb of code.matchAll(/useCallback\(\s*(?:async\s*)?\([^)]*\)\s*(?::[^=]*)?=>\s*\{/g)) {
+        const bodyStart = cb.index! + cb[0].length - 1;
+        const body = spanFrom(code, bodyStart, '{', '}');
+        const after = code.slice(bodyStart + body.length, bodyStart + body.length + 400);
+        const deps = /^\s*,\s*\[([^\]]*)\]/.exec(after);
+        if (deps === null) continue;
+        const listed = new Set(
+          (deps[1] ?? '').split(',').map((d) => d.trim()).filter((d) => d !== ''),
+        );
+
+        /* `sendJson(url, METHOD, {본문})` 의 **본문만** 봅니다 — URL 을 같이
+           보면 `/channels` 같은 경로 글자가 state 이름과 겹쳐 **맞는 자리**를
+           잡습니다(실제로 `channels` 가 그렇게 걸렸습니다). */
+        for (const call of body.matchAll(/sendJson\s*\(/g)) {
+          const args = spanFrom(body, call.index! + call[0].length - 1, '(', ')');
+          /* ⚠️ **첫 `{` 를 본문 시작으로 삼으면 안 됩니다** — URL 이
+             `` `/api/projects/${'${projectId}'}/channels` `` 라 그 안의 `${'${'}` 가
+             먼저 걸리고, 그러면 경로 글자(`channels`)가 state 이름과 겹쳐
+             **맞는 자리**를 잡습니다. 최상위 쉼표로 인자를 갈라 **세 번째**
+             인자만 봅니다. */
+          const inner = args.slice(1, -1);
+          const parts: string[] = [];
+          let depth = 0;
+          let last = 0;
+          for (let k = 0; k < inner.length; k += 1) {
+            const ch = inner[k];
+            if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+            else if (ch === ')' || ch === ']' || ch === '}') depth -= 1;
+            else if (ch === ',' && depth === 0) {
+              parts.push(inner.slice(last, k));
+              last = k + 1;
+            }
+          }
+          parts.push(inner.slice(last));
+          const payload = parts.slice(2).join(',');
+          if (payload.trim() === '') continue;
+          for (const name of states) {
+            if (listed.has(name)) continue;
+            if (!new RegExp(`\\b${name}\\b`).test(payload)) continue;
+            offenders.push(`${file}: \`${name}\` 를 보내면서 deps 에 안 넣었습니다`);
+          }
+        }
+      }
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      `고른 값이 조용히 버려지고 서버는 201 을 줍니다:\n  ${[...new Set(offenders)].join('\n  ')}`,
+    );
+  });
+});
+
 describe('찾기 게이트는 **두 화면이 한 벌**을 쓴다 (결함 375)', () => {
   /* 같은 「두 글자 이상」 규칙이 두 곳에 있었습니다. 찾기 화면은 `@lib` 의
      `blockedReason` 으로 이유를 말하는데, 채팅은 `query.trim().length < 2`

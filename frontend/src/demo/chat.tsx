@@ -672,7 +672,12 @@ function App() {
     } finally {
       setSending(false);
     }
-  }, [newName, loadChannels]);
+    /* ⚠️ **`newKind` 가 여기 없으면 고른 종류가 조용히 버려집니다**
+       (결함 376). 이 콜백은 `newName` 이 바뀔 때만 다시 만들어지는데,
+       사람은 대개 **이름을 먼저 적고 종류를 고릅니다** — 그러면 클로저가
+       쥔 `newKind` 는 이름을 마지막으로 친 시점의 값(`'text'`)이고, 서버는
+       그 값을 받아 **201** 을 줍니다. 화면에는 아무 오류도 안 납니다. */
+  }, [newName, newKind, loadChannels]);
 
   const runSearch = useCallback(async (): Promise<void> => {
     // ⚠️ 그리는 자리와 **같은 판단**을 씁니다 (결함 375).
