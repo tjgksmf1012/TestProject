@@ -509,6 +509,25 @@ const EMPTY_FIELD: Partial<Record<BlockerCode, string>> = {
   missing_deadline: '마감일',
 };
 
+/** 막힌 「업무로 등록」을 눌렀을 때 **데려갈 칸.**
+ *
+ *  ⚠️ **막는 이유에서 뽑습니다** — 두 화면이 각자 `assignee ?? deadline`
+ *  사슬을 짜면 「담당자·마감을 채우라」고 해 놓고 엉뚱한 칸으로 데려가는
+ *  날이 옵니다(대표 실패 ②). 그리고 **첫 칸으로 보내면 안 됩니다** —
+ *  담당자는 정했고 마감만 빈 경우가 흔한데, 그때 담당자로 데려가면 사람은
+ *  「여긴 이미 했는데?」가 됩니다(결함 192).
+ *
+ *  ⚠️ 채울 칸이 **없는** 이유(근거 0건 · 이미 결정됨)는 `null` 입니다 —
+ *  데려갈 데가 없으면 데려가지 않습니다. */
+export type ApprovalGap = 'assignee' | 'deadline';
+
+export function firstApprovalGap(blockers: readonly Blocker[]): ApprovalGap | null {
+  const codes = blockers.map((b) => b.code);
+  if (codes.includes('missing_assignee') || codes.includes('unknown_assignee')) return 'assignee';
+  if (codes.includes('missing_deadline') || codes.includes('deadline_in_past')) return 'deadline';
+  return null;
+}
+
 export function blockerLine(blockers: readonly Blocker[]): BlockerLine {
   const empty: string[] = [];
   const hard: string[] = [];

@@ -34,6 +34,7 @@ import {
 } from '../api/hooks.ts';
 import {
   approvalBlockers,
+  firstApprovalGap,
   approvalConditions,
   canUndoDecision,
   attentionAbout,
@@ -820,12 +821,10 @@ export default function Review() {
                           //    정했고 마감만 빈 경우가 흔한데, 그때 담당자로
                           //    데려가면 사람은 "여긴 이미 했는데?" 가 됩니다.
                           //    **비어 있는 칸**으로 갑니다.
-                          const gap =
-                            effectiveAssignee(candidate, draft) === null
-                              ? 'assignee'
-                              : effectiveDeadline(candidate, draft) === null
-                                ? 'deadline'
-                                : null;
+                          //    ⚠️ 어느 칸인가는 `@lib` 이 **막는 이유에서**
+                          //    뽑습니다 — 레거시도 같은 답을 씁니다(결함 373).
+                          //    여기서 다시 사슬을 짜면 두 벌입니다.
+                          const gap = firstApprovalGap(blockers);
                           if (gap !== null) {
                             document
                               .getElementById(`cand-${gap}-${candidate.id}`)

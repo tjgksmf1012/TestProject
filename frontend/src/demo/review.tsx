@@ -28,6 +28,7 @@ import {
   describeBlocker,
   describeSubmitResult,
   effectiveAssignee,
+  firstApprovalGap,
   effectiveDeadline,
   effectiveTitle,
   emptyDraft,
@@ -269,6 +270,7 @@ function CandidateCard({
           <span className="visually-hidden">담당자</span>
           <select
             className="assignee"
+            id={`cand-assignee-${candidate.id}`}
             disabled={decided}
             value={assignee === null ? '' : String(assignee)}
             onChange={(e) =>
@@ -296,6 +298,7 @@ function CandidateCard({
           <span className="visually-hidden">마감일</span>
           <input
             className="deadline"
+            id={`cand-deadline-${candidate.id}`}
             type="date"
             value={deadline}
             disabled={decided}
@@ -322,9 +325,12 @@ function CandidateCard({
         </p>
       )}
 
-      {/* ⭐ 막는 이유는 한 줄 (브리프 §13). 안 채운 칸은 흙빛. */}
+      {/* ⭐ 막는 이유는 한 줄 (브리프 §13). 안 채운 칸은 흙빛.
+          ⚠️ **id 가 있어야 단추가 이 줄을 가리킬 수 있습니다** — 없는
+          동안 눈으로만 읽혔고, 진짜 `disabled` 라 키보드는 단추에 닿지도
+          못했습니다(결함 373). */}
       {check.tone !== 'none' && (
-        <p className="check" data-tone={check.tone}>
+        <p className="check" data-tone={check.tone} id={`check-${candidate.id}`}>
           {check.text}
         </p>
       )}
@@ -349,10 +355,36 @@ function CandidateCard({
       ) : (
         <>
           <div className="acts">
+            {/* ⚠️ 진짜 `disabled` 가 아니라 `aria-disabled` 입니다
+                (결함 234·365·373). 진짜 `disabled` 는 **초점을 못 받아**
+                왜 막혔는지 들려줄 수가 없습니다 — 문서를 한 바퀴(56번) 돌아도
+                막힌 카드의 이 단추에는 **한 번도 안 닿았습니다.** 사유 줄은
+                눈에 이미 있었으므로 `aria-describedby` 로 이어 줍니다.
+                그리고 누르면 **빈 칸으로 데려갑니다** — 알려만 주고 갈 곳을
+                안 주면 대표 실패 ③ 입니다. */}
             <button
               className={draft.decision === 'approve' ? 'approve on' : 'approve'}
-              disabled={blockers.length > 0}
-              onClick={() => onChange({ decision: 'approve' })}
+              aria-disabled={blockers.length > 0}
+              aria-describedby={
+                blockers.length > 0 && check.tone !== 'none'
+                  ? `check-${candidate.id}`
+                  : undefined
+              }
+              onClick={() => {
+                if (blockers.length > 0) {
+                  const gap = firstApprovalGap(blockers);
+                  if (gap !== null) {
+                    /* 칸 이름은 SPA 와 **같은 규칙**입니다 (`cand-<칸>-<id>`)
+                       — 이름을 지어내면 그 이름에 임자가 있거나 아무것도
+                       안 잡힙니다. */
+                    const box = document.getElementById(`cand-${gap}-${candidate.id}`);
+                    box?.scrollIntoView({ block: 'center' });
+                    box?.focus();
+                  }
+                  return;
+                }
+                onChange({ decision: 'approve' });
+              }}
             >
               업무로 등록
             </button>

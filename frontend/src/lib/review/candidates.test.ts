@@ -15,6 +15,7 @@ import {
   describeBlocker,
   describeSubmitResult,
   effectiveDeadline,
+  firstApprovalGap,
   emptyDraft,
   isBeforeIsoDate,
   laneCounts,
@@ -823,5 +824,67 @@ describe('decisionPressed (결함 267)', () => {
     assert.equal(decisionPressed({ decision: 'pending' }, 'approve'), false);
     assert.equal(decisionPressed(undefined, 'approve'), false);
     assert.equal(decisionPressed({}, 'reject'), false);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 막힌 「업무로 등록」을 눌렀을 때 데려갈 칸 (결함 373)
+// ══════════════════════════════════════════════════════════════
+
+describe('firstApprovalGap', () => {
+  const gap = (c: Candidate, d: Draft = emptyDraft()) =>
+    firstApprovalGap(approvalBlockers(c, d, CONTEXT));
+
+  it('⭐ 막힌 것이 없으면 데려갈 곳도 없다', () => {
+    assert.equal(gap(candidate()), null);
+  });
+
+  it('⭐ 담당자가 비었으면 담당자 칸', () => {
+    assert.equal(gap(candidate({ assignee_id: null })), 'assignee');
+  });
+
+  it('⭐ **담당자는 정했고 마감만 빈** 흔한 경우 — 마감 칸으로 (결함 192)', () => {
+    assert.equal(gap(candidate({ deadline: null })), 'deadline');
+  });
+
+  it('⭐ 둘 다 비었으면 담당자가 먼저다', () => {
+    assert.equal(gap(candidate({ assignee_id: null, deadline: null })), 'assignee');
+  });
+
+  it('⭐ 「비었다」만이 아니라 **틀린 값**도 그 칸으로 데려간다', () => {
+    // 명단에 없는 담당자 · 지난 마감 — 채워는 있지만 고쳐야 합니다.
+    assert.equal(gap(candidate({ assignee_id: 99 })), 'assignee');
+    assert.equal(gap(candidate({ deadline: '2026-08-01' })), 'deadline');
+  });
+
+  it('⭐ 채울 칸이 **없는** 이유면 null 이다 — 데려갈 데가 없다', () => {
+    assert.equal(gap(candidate({ evidence_utterance_ids: [] })), null);
+    assert.equal(gap(candidate({ review_status: 'approved' })), null);
+  });
+
+  it('⭐ 막는 이유가 있으면 **데려갈 칸이 있거나, 못 채우는 것이거나** 둘 중 하나다', () => {
+    /* ⚠️ 「막혔는데 데려갈 곳도 없고 못 채우는 것도 아니다」가 생기면
+       화면은 「채우세요」라고 하면서 아무 데도 안 갑니다(결함 192). */
+    const UNFILLABLE = ['no_evidence', 'already_approved', 'already_rejected'];
+    const cases: Candidate[] = [
+      candidate({ assignee_id: null }),
+      candidate({ deadline: null }),
+      candidate({ assignee_id: null, deadline: null }),
+      candidate({ assignee_id: 99 }),
+      candidate({ deadline: '2026-08-01' }),
+      candidate({ evidence_utterance_ids: [] }),
+      candidate({ review_status: 'approved' }),
+      candidate({ review_status: 'rejected' }),
+    ];
+    for (const c of cases) {
+      const blockers = approvalBlockers(c, emptyDraft(), CONTEXT);
+      if (blockers.length === 0) continue;
+      const where = firstApprovalGap(blockers);
+      const unfillable = blockers.every((b) => UNFILLABLE.includes(b.code));
+      assert.ok(
+        where !== null || unfillable,
+        `막혔는데(${blockers.map((b) => b.code).join(',')}) 데려갈 곳이 없습니다`,
+      );
+    }
   });
 });

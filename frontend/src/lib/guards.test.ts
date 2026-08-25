@@ -9611,6 +9611,143 @@ describe('회의 줄이 응답을 **통째로** 판단에 넘긴다 (결함 368)
   });
 });
 
+describe('화면이 덧칠한 버튼도 **막힌 모양**을 갖는다 (결함 373)', () => {
+  /* `app.css` 는 `button[aria-disabled="true"]` 로 「덜 채운 모양」을
+     정합니다 (0,1,1). 그런데 화면의 `<style>` 이 `.acts .approve` (0,2,0)
+     로 채움을 덧칠하면 **그 규칙이 이깁니다** — 막힌 등록 단추가 눌리는
+     것과 **똑같이 진한 남색**이었습니다(결함 250 과 같은 자리).
+
+     ⚠️ 이 자가 **못 보는 것**: 색이 실제로 다른지는 안 봅니다(브라우저가
+     없습니다). 재는 것은 **막힌 갈래를 위한 규칙이 있는가**입니다 —
+     같은 토큰을 다시 적어도 통과합니다. 색은 렌더해서 봅니다. */
+
+  /* ⚠️ 경로를 지어내지 않습니다 — 이 파일에 `PUBLIC` 이 이미 있습니다.
+     처음엔 `join(ROOT, '..', 'public')` 이라고 써서 `ENOENT` 로 터졌습니다. */
+  it('⭐ 화면이 채움을 덧칠한 버튼 중 **막힐 수 있는 것**은 짝 규칙이 있다', () => {
+    const offenders: string[] = [];
+    for (const file of readdirSync(PUBLIC).filter((f) => f.endsWith('.html'))) {
+      const html = readFileSync(join(PUBLIC, file), 'utf8');
+      const screen = join(DEMO, `${file.replace(/\.html$/, '')}.tsx`);
+      if (!existsSync(screen)) continue;
+      const code = readFileSync(screen, 'utf8');
+
+      for (const style of html.match(/<style>[\s\S]*?<\/style>/g) ?? []) {
+        const css = style.replace(/\/\*[\s\S]*?\*\//g, ' ');
+        const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+          sel: (m[1] ?? '').replace(/\s+/g, ' ').trim(),
+          body: m[2] ?? '',
+        }));
+        for (const { sel, body } of rules) {
+          if (!/\bbackground\s*:/.test(body)) continue;
+          if (/:hover|:focus|:active|::|aria-disabled/.test(sel)) continue;
+          const cls = sel.match(/\.([\w-]+)\s*$/)?.[1];
+          if (cls === undefined) continue;
+          // 화면이 이 클래스를 가진 버튼을 **막을 수 있는가**.
+          const canBlock = new RegExp(
+            `className=\\{[^}]*'${cls}[^}]*\\}[\\s\\S]{0,300}?aria-disabled=|aria-disabled=[\\s\\S]{0,300}?className=\\{[^}]*'${cls}`,
+          ).test(code);
+          if (!canBlock) continue;
+          const paired = rules.some(
+            (r) => r.sel.includes(`.${cls}`) && r.sel.includes('aria-disabled') && /\bbackground\s*:/.test(r.body),
+          );
+          if (!paired) {
+            offenders.push(`${file}: \`${sel}\` 가 채움을 덧칠하는데 막힌 갈래 규칙이 없습니다`);
+          }
+        }
+      }
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      `막힌 단추가 눌리는 것과 똑같이 보입니다:\n  ${offenders.join('\n  ')}`,
+    );
+  });
+});
+
+describe('막힌 「업무로 등록」은 **닿을 수 있고 왜인지 말한다** (결함 373)', () => {
+  /* 레거시는 `disabled={blockers.length > 0}` 이었습니다. 진짜 `disabled`
+     는 **초점을 못 받습니다** — 문서를 한 바퀴(Tab 56번) 돌아도 막힌
+     카드의 이 단추에는 **한 번도 안 닿았고**, 사유 줄은 눈에만 있었지
+     단추와 이어져 있지 않았습니다(`aria-describedby` 없음). SPA 는 같은
+     화면에서 `aria-disabled` + `conds-N` 으로 이미 제대로 하고 있었습니다.
+
+     ⚠️ 이 자가 **못 보는 것**: 사유 줄이 **화면에 그려지는지**는 여기서
+     안 봅니다(`check.tone !== 'none'` 갈래). 그건 `blockerLine` 의
+     검사가 봅니다. */
+
+  const SCREENS: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'review.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Review.tsx')],
+  ];
+
+  const stripped = (file: string): string =>
+    readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+      .replace(/(?<![:\w])\/\/[^\n]*/g, ' ');
+
+  it('⭐ 두 뿌리의 검토 화면을 **둘 다** 보고 있다', () => {
+    const missing = SCREENS.filter(([, f]) => !existsSync(f)).map(([n]) => n);
+    deepStrictEqual(missing, [], `검토 화면을 못 찾았습니다: ${missing.join(', ')}`);
+  });
+
+  it('⭐ 등록 단추가 **진짜 `disabled` 가 아니고** 사유를 가리킨다', () => {
+    const offenders: string[] = [];
+    for (const [name, file] of SCREENS) {
+      if (!existsSync(file)) continue;
+      const code = stripped(file);
+      /* ⚠️ 창은 **재 보고** 정합니다 — SPA 는 `onClick` 본문이 길어
+         여는 태그에서 라벨까지 1500자입니다. 좁게 잡으면 단추를 못 찾고
+         「가드가 낡았습니다」로 헛돕니다(결함 285·372 회차). */
+      const tag =
+        /<button\b[\s\S]{0,2000}?(업무로 등록|>\s*등록\s*<)/.exec(code)?.[0] ?? '';
+      if (tag === '') {
+        offenders.push(`${name}: 등록 단추를 못 찾았습니다 — 가드가 낡았습니다`);
+        continue;
+      }
+      // 진짜 `disabled` 는 초점을 못 받아 사유를 못 들려줍니다 (결함 234).
+      if (/(?<!aria-)\bdisabled=\{/.test(tag)) {
+        offenders.push(`${name}: 등록 단추가 진짜 disabled 입니다 — 키보드가 못 닿습니다`);
+      }
+      if (!/aria-disabled=\{/.test(tag)) {
+        offenders.push(`${name}: 등록 단추가 막힘을 안 그립니다`);
+      }
+      if (!/aria-describedby=\{/.test(tag)) {
+        offenders.push(`${name}: 등록 단추가 사유를 가리키지 않습니다`);
+      }
+      // 알려만 주고 갈 곳이 없으면 대표 실패 ③ 입니다.
+      if (!/firstApprovalGap\(/.test(code)) {
+        offenders.push(`${name}: 막힌 단추를 눌러도 데려가지 않습니다`);
+      }
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      `막힌 등록 단추에 키보드가 못 닿거나 사유가 안 들립니다:\n  ${offenders.join('\n  ')}`,
+    );
+  });
+
+  it('⭐ 데려갈 칸은 **막는 이유에서** 나온다 — 두 화면이 같은 답', () => {
+    /* 화면이 각자 `assignee ?? deadline` 사슬을 짜면 갈라집니다.
+       ⚠️ 첫 판은 `effectiveAssignee(…) === null ?` 를 찾았는데, 그건
+       Radix `Picker` 의 `value` 를 만드는 **맞는 자리**도 잡았습니다 —
+       「잡혔다」는 「맞다」가 아닙니다(결함 298). 재는 것은 **화면이
+       칸 이름을 스스로 만드는가**입니다. */
+    for (const [name, file] of SCREENS) {
+      if (!existsSync(file)) continue;
+      const code = stripped(file);
+      /* ⚠️ 파일 전체에서 `'assignee'` 를 찾으면 **맞는 자리**가 걸립니다 —
+         `className="assignee"` 는 CSS 이름이지 칸 이름이 아닙니다. 재는
+         자리를 **막힌 단추의 `onClick` 안**으로 좁힙니다. */
+      const click = /onClick=\{\(\)\s*=>\s*\{[\s\S]{0,1200}?firstApprovalGap\(/.exec(code);
+      ok(
+        click !== null,
+        `${name}: 막힌 단추의 onClick 이 firstApprovalGap 을 안 씁니다 — 칸을 스스로 고르고 있습니다`,
+      );
+    }
+  });
+});
+
 describe('「이 값으로 확정」은 **두 뿌리 다** 게이트를 거친다 (결함 372)', () => {
   /* v2 F1-4 — **확정값은 시스템이 아니라 팀이 적습니다.** 빈 칸은
      「시스템 값 그대로」가 아니라 「아직 안 정함」입니다.
