@@ -29,6 +29,7 @@
  * 「다 끝났다」고 말해 버리면, 아직 올 것이 남았는데 사람이 떠납니다.
  */
 import type { EmptyState } from '../ui/empty.ts';
+import { canSubmit, type Lane, type ReviewSummary } from './candidates.ts';
 
 export interface ReviewPhase {
   /** 지금 후보를 결정할 수 있는 국면인가. */
@@ -112,6 +113,82 @@ export function reviewPhase(status: string | null | undefined): ReviewPhase {
  */
 export function describeReviewDone(status: string | null | undefined): string | null {
   return status === 'confirmed' ? '검토를 마쳤습니다' : null;
+}
+
+/**
+ * 「검토 끝내기」가 **지금 안 되는 이유** — 하나도 남기지 않고 다 처리해야
+ * 열리는 SPA 쪽 규칙입니다.
+ *
+ * ## ⛔ 후보가 **처음부터 0건**인 회의에게 「결정한 후보가 없습니다」 (결함 366)
+ *
+ * 회의에서 아무도 일을 맡지 않으면 파이프라인이 후보를 하나도 안 만듭니다
+ * (`validate_analysis` 가 `candidates = []`). 그 회의의 검토 화면이
+ * 이랬습니다 —
+ *
+ *     스프린트 2 계획 · 업무 후보 0건    결정한 후보가 없습니다  [검토 끝내기]
+ *     …
+ *     이 회의에서는 업무 후보가 나오지 않았습니다.
+ *
+ * **같은 화면이 같은 사실을 두 번 말하는데 위엣것은 사람을 탓합니다.**
+ * 결정을 안 한 것이 아니라 **결정할 것이 없었습니다.** 아래 문장은
+ * `reviewPhase` 가 이미 정확히 갈라 놓은 것이고, 위 문장만 그 판단을
+ * 안 물었습니다 — 결함 290 의 「같은 사실을 말하는 두 자리를 나란히
+ * 놓으십시오」입니다.
+ *
+ * ⚠️ 결함 232 는 `confirmed` 갈래만 갈랐습니다(`describeReviewDone`).
+ * `needs_review` + 0건은 **일반 문장으로 떨어졌습니다.**
+ *
+ * ⚠️ 그리고 그 상태는 **영영 안 바뀝니다.** 서버는 후보가 처음부터 0건인
+ * 회의를 **일부러** `confirmed` 로 안 옮깁니다(결함 84 —
+ * `_confirm_if_all_reviewed` 의 `if not total: return`). 즉 「없는 것을
+ * 결정하라」고 시키는 문장이고, 시키는 대로 할 자리가 화면에 없습니다
+ * (실패 ③).
+ *
+ * ⚠️ **레거시의 `whyCannotSubmitBatch` 와 규칙이 다릅니다** — 그쪽은
+ * 「정한 것만 올리고 나머지는 나중에」라 하나만 정해도 열립니다. 합치면
+ * 없던 요구가 생깁니다(결함 353·365).
+ */
+export function whyCannotFinishReview(input: {
+  status: string | null | undefined;
+  lanes: Record<Lane | 'all', number>;
+  summary: ReviewSummary;
+}): string | null {
+  const { status, lanes, summary } = input;
+  if (lanes.pending > 0) {
+    return `${lanes.all}건 중 ${lanes.pending}건이 아직 처리되지 않았습니다`;
+  }
+  if (canSubmit(summary)) return null;
+  if (summary.blocked > 0) return '승인 표시된 후보 중 조건이 안 채워진 것이 있습니다';
+  // 끝난 회의에서는 **막힌 게 아니라 끝난** 것입니다 (결함 232).
+  const done = describeReviewDone(status);
+  if (done !== null) return done;
+  /* ⛔ **목록이 통째로 비었으면 「결정한 후보가 없습니다」가 아닙니다**
+     (결함 366). 왜 비었는지는 `reviewPhase` 가 상태별로 갈라 뒀습니다 —
+     그것을 그대로 씁니다. 서버(`pending_candidates`)가 대기 중인 것만
+     내려보내므로 `lanes.all === 0` 은 실제로 「지금 결정할 것이 없다」와
+     같은 뜻입니다. */
+  if (lanes.all === 0) return reviewPhase(status).emptyNote;
+  return '결정한 후보가 없습니다';
+}
+
+/**
+ * 「검토 끝내기」를 **그릴 것인가.**
+ *
+ * ⚠️ **결함 316 과 다른 경우입니다** (결함 366). 저기는 「할 수 있는 일이
+ * 막힌 것」이라 단추를 두고 이유를 말해야 하고, 이쪽은 **처음부터 없는
+ * 것**입니다 — 결함 362 가 등급 선택칸에서 내린 판단과 같습니다.
+ *
+ * 후보가 하나도 없는 회의에서는 끝낼 검토가 없습니다. 서버도 그 회의를
+ * **일부러** `confirmed` 로 안 옮기므로(결함 84), 단추를 그려 두면 눌러도
+ * 영영 아무 일이 안 일어납니다. 게다가 그 단추의 사유(`aria-describedby`)와
+ * 후보 칸의 빈 상자가 **같은 문장을 두 번** 그리게 됩니다 — 렌더해서
+ * 보고 알았습니다.
+ *
+ * 왜 비었는지는 후보 칸의 빈 상자가 말합니다(`reviewPhase` ·
+ * `reviewEmptyState`). 단추만 안 그립니다 — **말은 그대로 남습니다.**
+ */
+export function showsFinishReview(lanes: Record<Lane | 'all', number>): boolean {
+  return lanes.all > 0;
 }
 
 /**

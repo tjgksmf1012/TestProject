@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
-import { describeMissingSummary, describeReviewDone, reviewPhase } from '@lib/review/phase.ts';
+import {
+  describeMissingSummary,
+  reviewPhase,
+  showsFinishReview,
+  whyCannotFinishReview,
+} from '@lib/review/phase.ts';
 import { pendingNote, typeCounts } from '@lib/review/labels.ts';
 import { plainText } from '@lib/ui/plain.ts';
 import {
@@ -37,7 +42,6 @@ import {
   buildReviewPayload,
   effectiveAssignee,
   effectiveDeadline,
-  canSubmit,
   describeSubmitResult,
   emptyDraft,
   laneCounts,
@@ -284,15 +288,14 @@ export default function Review() {
   const phase = reviewPhase(meeting.data?.status);
   const lanes = laneCounts(candidates, drafts);
   const summary = summarize(candidates, drafts, context);
-  const submitBlockedReason =
-    lanes.pending > 0
-      ? `${lanes.all}건 중 ${lanes.pending}건이 아직 처리되지 않았습니다`
-      : !canSubmit(summary)
-        ? summary.blocked > 0
-          ? '승인 표시된 후보 중 조건이 안 채워진 것이 있습니다'
-          // 끝난 회의에서는 **막힌 게 아니라 끝난** 것입니다 (결함 232).
-          : (describeReviewDone(meeting.data?.status) ?? '결정한 후보가 없습니다')
-        : null;
+  /* ⚠️ 「왜 지금 못 끝내나」는 `@lib` 이 정합니다 (결함 366) — 화면 코드에는
+     자동 검사가 없어서, 여기서 짜면 후보가 **처음부터 0건**인 회의에게
+     「결정한 후보가 없습니다」라고 하는 것 같은 문장이 조용히 남습니다. */
+  const submitBlockedReason = whyCannotFinishReview({
+    status: meeting.data?.status,
+    lanes,
+    summary,
+  });
 
   const onSubmit = () => {
     try {
@@ -346,7 +349,7 @@ export default function Review() {
       projectId={meeting.data?.project_id}
       actions={
         <div className="appbar__actions">
-          {cannotLoad !== null ? null : (
+          {cannotLoad !== null || !showsFinishReview(lanes) ? null : (
           <>
           {/* v2 F10 — 일괄 승인 기능은 **만들지 않습니다.** 이 버튼은
               후보를 하나씩 다 처리한 뒤에야 열리는 마무리 버튼이고,

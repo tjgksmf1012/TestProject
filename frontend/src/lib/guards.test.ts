@@ -27,7 +27,11 @@ import {
   type ReviewContext,
   type ReviewSummary,
 } from './review/candidates.ts';
-import { describeMissingSummary } from './review/phase.ts';
+import {
+  describeMissingSummary,
+  reviewPhase,
+  whyCannotFinishReview,
+} from './review/phase.ts';
 import { meetingLabel } from './ui/naming.ts';
 import { appRailHref } from './nav/rail.ts';
 import { withJosa } from './text/josa.ts';
@@ -6590,6 +6594,43 @@ describe('⛔ 검토 화면이 **회의 상태를 본다** (결함 232)', () => 
     ok(
       !/결정한 후보가 없습니다['"`]/.test(review) || /describeReviewDone\(/.test(review),
       '끝난 회의에도 「결정한 후보가 없습니다」라고 합니다',
+    );
+    /* ⚠️ **위 두 줄은 「문장을 안 적었는가」만 봅니다** — 화면이 그 판단을
+       **부르기는 하는가**는 안 봤습니다. 그래서 「검토 끝내기」가 막힌
+       사유를 화면이 직접 짜고 있었고, 후보가 **처음부터 0건**인 회의에게
+       「결정한 후보가 없습니다」라고 하는 갈래가 그 안에 조용히 남아
+       있었습니다(결함 366). 부르는 것까지 봅니다. */
+    ok(
+      /whyCannotFinishReview\(/.test(review),
+      '「왜 못 끝내나」를 화면이 직접 짜고 있습니다 — 판단은 `@lib` 에 (`whyCannotFinishReview`)',
+    );
+    ok(
+      !/건이 아직 처리되지 않았습니다/.test(review),
+      '화면이 사유 문장을 다시 적고 있습니다 — 문장은 `@lib` 한 곳에만',
+    );
+    /* 끝낼 검토가 없는 회의에서는 단추를 **안 그립니다** (결함 366 · 362).
+       그리면 사유 칸과 빈 상자가 같은 문장을 두 번 그립니다. */
+    ok(
+      /showsFinishReview\(lanes\)/.test(review),
+      '끝낼 검토가 없어도 「검토 끝내기」를 그립니다 — 판단은 `@lib` 의 `showsFinishReview`',
+    );
+  });
+
+  it('⭐ 빈 목록의 사유는 **상태마다 다르다** — 「결정한 후보가 없습니다」가 아니라', () => {
+    /* 서버는 후보가 처음부터 0건인 회의를 **일부러** `confirmed` 로 안
+       옮깁니다(결함 84). 그 상태는 영영 안 바뀌므로, 「결정하라」고 하면
+       할 자리가 없는 일을 시키는 것입니다(실패 ③). */
+    const EMPTY = { total: 0, pending: 0, approving: 0, rejecting: 0, blocked: 0, needsAttention: 0 };
+    const NO_LANES = { all: 0, pending: 0, approve: 0, reject: 0 };
+    const blaming: string[] = [];
+    for (const status of ['pending', 'queued', 'processing', 'needs_review', 'failed']) {
+      const why = whyCannotFinishReview({ status, lanes: NO_LANES, summary: EMPTY });
+      if (why !== reviewPhase(status).emptyNote) blaming.push(`${status}: ${why}`);
+    }
+    deepStrictEqual(
+      blaming,
+      [],
+      `빈 목록인데 「왜 비었는지」를 안 말하는 상태가 있습니다:\n  ${blaming.join('\n  ')}`,
     );
   });
 

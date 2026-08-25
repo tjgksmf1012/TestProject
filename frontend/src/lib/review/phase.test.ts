@@ -6,7 +6,10 @@ import {
   describeReviewDone,
   reviewEmptyState,
   reviewPhase,
+  showsFinishReview,
+  whyCannotFinishReview,
 } from './phase.ts';
+import type { ReviewSummary } from './candidates.ts';
 
 describe('⛔ 검토를 끝낸 회의가 「아직 아무것도 없다」고 말하던 것 (결함 232)', () => {
   it('⭐ 끝난 회의는 **끝났다고** 말하고, 업무가 간 곳을 가리킨다', () => {
@@ -190,6 +193,87 @@ describe('줄에 서 있는 회의를 「하고 있다」고 하지 않는다 (�
       group((s) => reviewPhase(s).emptyNote),
       group((s) => reviewEmptyState(s, 1, 3).why),
       '두 함수가 상태를 다르게 묶습니다 — 한쪽에만 갈래가 생기면 화면 둘이 갈라집니다',
+    );
+  });
+});
+
+describe('⛔ 후보가 **처음부터 0건**인 회의에게 「결정한 후보가 없습니다」 (결함 366)', () => {
+  /* 회의에서 아무도 일을 맡지 않으면 파이프라인이 후보를 하나도 안
+     만듭니다. 그 회의의 검토 화면이 위에서는 「결정한 후보가 없습니다」,
+     스무 줄 아래에서는 「이 회의에서는 업무 후보가 나오지 않았습니다」
+     라고 했습니다 — 같은 사실인데 **위엣것은 사람을 탓합니다.** */
+
+  const EMPTY: ReviewSummary = {
+    total: 0,
+    pending: 0,
+    approving: 0,
+    rejecting: 0,
+    blocked: 0,
+    needsAttention: 0,
+  };
+  const NO_LANES = { all: 0, pending: 0, approve: 0, reject: 0 };
+
+  it('⭐ 목록이 비면 **왜 비었는지**를 말한다 — 상태마다 다른 말로', () => {
+    for (const status of ['pending', 'queued', 'processing', 'needs_review', 'failed']) {
+      const why = whyCannotFinishReview({ status, lanes: NO_LANES, summary: EMPTY });
+      strictEqual(
+        why,
+        reviewPhase(status).emptyNote,
+        `${status}: 빈 목록의 사유가 reviewPhase 와 다릅니다`,
+      );
+      strictEqual(
+        why?.includes('결정한 후보가 없습니다'),
+        false,
+        `${status}: 결정할 것이 없던 사람을 탓합니다`,
+      );
+    }
+  });
+
+  it('⭐ 끝난 회의는 그대로 「검토를 마쳤습니다」', () => {
+    strictEqual(
+      whyCannotFinishReview({ status: 'confirmed', lanes: NO_LANES, summary: EMPTY }),
+      '검토를 마쳤습니다',
+    );
+  });
+
+  it('⭐ 남은 것이 있으면 개수를 말한다', () => {
+    strictEqual(
+      whyCannotFinishReview({
+        status: 'needs_review',
+        lanes: { all: 12, pending: 5, approve: 4, reject: 3 },
+        summary: { ...EMPTY, total: 12, pending: 5, approving: 4, rejecting: 3 },
+      }),
+      '12건 중 5건이 아직 처리되지 않았습니다',
+    );
+  });
+
+  it('⭐ 다 처리했고 막힌 것이 없으면 null — 그때만 열립니다', () => {
+    strictEqual(
+      whyCannotFinishReview({
+        status: 'needs_review',
+        lanes: { all: 3, pending: 0, approve: 2, reject: 1 },
+        summary: { ...EMPTY, total: 3, approving: 2, rejecting: 1 },
+      }),
+      null,
+    );
+  });
+
+  it('⭐ 끝낼 검토가 없으면 단추를 안 그린다 — 「막힌 것」이 아니라 「없는 것」', () => {
+    /* 결함 316(할 수 있는 일이 막힌 것 — 단추를 두고 이유를 말한다)과
+       **다른 경우**입니다. 결함 362 와 같습니다. */
+    strictEqual(showsFinishReview(NO_LANES), false);
+    strictEqual(showsFinishReview({ all: 3, pending: 3, approve: 0, reject: 0 }), true);
+    strictEqual(showsFinishReview({ all: 3, pending: 0, approve: 2, reject: 1 }), true);
+  });
+
+  it('⭐ 승인 표시한 것이 막혀 있으면 그것부터 말한다', () => {
+    strictEqual(
+      whyCannotFinishReview({
+        status: 'needs_review',
+        lanes: { all: 2, pending: 0, approve: 2, reject: 0 },
+        summary: { ...EMPTY, total: 2, approving: 2, blocked: 1 },
+      }),
+      '승인 표시된 후보 중 조건이 안 채워진 것이 있습니다',
     );
   });
 });
