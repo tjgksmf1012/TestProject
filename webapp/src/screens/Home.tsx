@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
 import { StatusChip } from '../components/StatusChip.tsx';
+import { Why } from '../components/Why.tsx';
 import {
   useMeetings,
   useProjects,
@@ -125,6 +126,18 @@ function MeetingRow({
       <span className="mrow__cov num">
         {hasLane(coverage) ? coverageReading(coverage as number) : ''}
       </span>
+      {/* ⭐ **이유는 `?` 아래에 둡니다 — `title` 이 아니라** (결함 406).
+          `docs/22` 의 처방 ③ 이 「문장을 지우지 않고 `?` 한 겹 아래로
+          (`Why`)」이고, 같은 문서가 `Why` 를 WCAG 1.4.13 세 조건으로 재
+          두었습니다(ESC 로 닫힘 · 위로 옮겨도 안 사라짐 · 2.5초 뒤에도
+          떠 있음 · **키보드로도 열림**).
+
+          그런데 이 화면만 그 문장을 `title=` 에 넣고 있었습니다 — 다섯
+          줄 전부. 렌더해서 재니 본문에 그 문장이 **0곳**, 홈의 `Why` 도
+          **0개**, 링크에 `aria-label`·`aria-describedby` 도 없어서
+          **마우스를 쓰는 사람에게만** 보였습니다. 같은 사실을 레거시 홈은
+          눈에 보이는 글로 적고 있습니다(결함 290). SPA 의 다른 화면 넷은
+          이미 `Why` 를 열 곳에서 씁니다 — 여기만 예외였습니다. */}
       <span className="mrow__action">
         {step.href !== null ? (
           /* ⚠️ **primary 는 「검토 필요」 줄에만** (v2 F9). 예전에는
@@ -137,19 +150,20 @@ function MeetingRow({
           <Link
             className={`btn btn--sm btn--${emphasisFor(step, waiting)}`}
             to={spaHref(step.href, projectId)}
-            title={step.reason}
           >
             {step.label}
           </Link>
         ) : (
-          /* 갈 곳이 없는 상태(처리 중)입니다. 이유는 상태 칩이 이미 말하고
-             있으므로 여기서 되풀이하지 않습니다. 자리는 비워 두지 않고
+          /* 갈 곳이 없는 상태(처리 중)입니다. 자리는 비워 두지 않고
              `—` 로 예약합니다 — 행마다 우측 끝이 어긋나면 세로 스캔이
              죽습니다. */
-          <span className="mrow__none" title={step.reason}>
-            —
-          </span>
+          <span className="mrow__none">—</span>
         )}
+        <Why
+          about={`${meetingLabel(meeting.title, meeting.meeting_id)} — 다음에 할 일`}
+          lines={[step.reason]}
+          countsAs="안내"
+        />
       </span>
     </div>
   );

@@ -3855,6 +3855,54 @@ describe('신뢰도 한 줄은 **누구를 잰 값인지** 말한다 (결함 384
   });
 });
 
+describe('홈의 「다음에 할 일」 은 마우스 밖에서도 닿아야 한다 (결함 406)', () => {
+  /*
+   * `docs/22` 처방 ③ 은 「이유는 부르면 온다 — 문장을 **지우지 않고** `?`
+   * 한 겹 아래로(`Why`)」이고, 같은 문서가 `Why` 를 WCAG 1.4.13 세 조건과
+   * 키보드로 재 두었습니다. 그런데 SPA 홈만 그 문장을 `title=` 에 넣고
+   * 있었습니다 — 다섯 줄 전부. 렌더해서 재니 본문에 0곳, 홈의 `Why` 0개,
+   * `aria-label`·`aria-describedby` 도 없어 **마우스에만** 있었습니다.
+   * 같은 사실을 레거시 홈은 눈에 보이는 글로 적습니다(결함 290).
+   *
+   * ⚠️ 뿌리마다 따로 잽니다(결함 321) — 한쪽만 지켜도 초록이면 이 부류는
+   *    구조적으로 안 보입니다.
+   */
+  const spaHome = () =>
+    readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Home.tsx'), 'utf8');
+  const legacyHome = () => readFileSync(join(ROOT, 'src', 'demo', 'home.tsx'), 'utf8');
+
+  it('⭐ SPA 홈이 이유를 `title=` 에 담지 않는다', () => {
+    const code = spaHome();
+    const inTitle = [...code.matchAll(/title=\{([^}]*)\}/g)]
+      .map((m) => m[1] as string)
+      .filter((expr) => /reason/.test(expr));
+    deepStrictEqual(
+      inTitle,
+      [],
+      `이유가 툴팁에만 있습니다 — 키보드·터치·낭독기에는 안 옵니다: ${inTitle.join(' · ')}`,
+    );
+  });
+
+  it('⭐ SPA 홈이 이유를 `Why` 로 내보낸다 — 지우는 것이 아니라 옮기는 것', () => {
+    const code = spaHome();
+    ok(/<Why\b/.test(code), 'SPA 홈에 `Why` 가 없습니다 — 이유가 어디로도 안 나갑니다');
+    const why = code.slice(code.indexOf('<Why'));
+    ok(
+      /lines=\{\[[^\]]*reason/.test(why),
+      `\`Why\` 는 있는데 이유를 안 넘깁니다: ${why.slice(0, 160)}`,
+    );
+  });
+
+  it('⭐ 레거시 홈은 그 문장을 **눈에 보이는 글**로 적는다', () => {
+    // 두 뿌리가 서로 다른 방법으로 같은 사실을 말합니다 — 어느 한쪽이
+    // 조용해지면 그때가 갈라진 것입니다.
+    ok(
+      /\{step\.reason\}/.test(legacyHome()),
+      '레거시 홈이 이유를 안 그립니다',
+    );
+  });
+});
+
 describe('SPA 의 「안 됩니다」 는 들려야 한다 (docs/22 · WCAG 4.1.3)', () => {
   /** `webapp/src` 아래 화면·컴포넌트 소스 전부. */
   const spaSources = (): { rel: string; code: string }[] => {
