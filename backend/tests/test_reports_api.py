@@ -604,3 +604,37 @@ def test_the_service_counts_the_utterances_it_hands_the_builder(
     heard = client.post(f"/api/meetings/{seeded['meeting_id']}/minutes").json()["content"]
     heard_facts = next(b for b in heard["blocks"] if b["kind"] == "facts")
     assert any(f["label"] == "기록된 발화" for f in heard_facts["items"]), heard_facts["items"]
+
+
+def test_the_service_counts_failed_meetings_separately(
+    client: TestClient, seeded, db: Session
+):
+    """⭐ 실패한 회의가 **API 를 통과한 뒤에도** 「아직 처리 전」이 아닌가
+    (결함 370).
+
+    ⚠️ builder 만 재면 놓칩니다 — 결함 369 에서 실제로 놓쳤습니다.
+    builder 가 갈래를 제대로 갈라도 **서비스가 안 세면** 문서는 그대로
+    입니다(대표 실패 ①).
+    """
+    db.add(
+        m.Meeting(
+            project_id=seeded["project_id"],
+            title="처리에 실패한 회의",
+            started_at=NOW,
+            duration_sec=600,
+            status=m.MeetingStatus.FAILED.value,
+            started_by=seeded["user_ids"][0],
+        )
+    )
+    db.commit()
+
+    content = client.post(
+        f"/api/projects/{seeded['project_id']}/reports",
+        json={"report_type": "final"},
+    ).json()["content"]
+
+    note = _note(content, "처리된 회의")
+    assert "처리에 실패" in note, f"서비스가 실패한 회의를 안 셌습니다: {note!r}"
+
+    flat = str(content)
+    assert "다시 처리해야 들어갑니다" in flat, "무엇을 해야 하는지 안 말합니다"

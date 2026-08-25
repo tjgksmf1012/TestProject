@@ -310,6 +310,12 @@ def _counts(
         "meetings_processed": sum(
             1 for x in meetings if x.status in m.PROCESSED_MEETING_STATUSES
         ),
+        # ⚠️ **실패한 것을 따로 셉니다** (결함 370). 안 세면 builder 가
+        #    「나머지 = 아직 처리 전」으로 뭉개고, 팀이 제출하는 문서가
+        #    「기다리면 들어옵니다」라고 거짓말을 합니다.
+        "meetings_failed": sum(
+            1 for x in meetings if x.status == m.MeetingStatus.FAILED.value
+        ),
         "tasks_done": int(tasks_done or 0),
         "tasks_open": int(tasks_open or 0),
         "github_events": int(github or 0),

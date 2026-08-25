@@ -49,6 +49,13 @@ class PeriodInput:
     period_end: datetime | None = None
     meetings_total: int = 0
     meetings_processed: int = 0
+    #: 처리를 **시도했다가 실패한** 회의 수.
+    #:
+    #: ⚠️ 「아직 처리 전」과 **다릅니다** (결함 370). 앞엣것은 기다리면
+    #: 들어오고, 이쪽은 **사람이 다시 돌려야** 들어옵니다. 옆 파일
+    #: (`minutes.py` 의 `state_of`)이 이미 셋으로 가르고 있었는데
+    #: 여기만 「처리됨 / 나머지」 둘이었습니다.
+    meetings_failed: int = 0
     tasks_done: int = 0
     tasks_open: int = 0
     github_events: int = 0
@@ -59,6 +66,26 @@ class PeriodInput:
     #: **팀 전체의 활동량이 0이라** 아예 계산에서 빠진 영역 (결함 311).
     #: 가중치와는 무관합니다 — 만드는 자는 `scoring.py` 의 `team_totals`.
     skipped_categories: list[str] = field(default_factory=list)
+
+
+def _not_counted(waiting: int, failed: int) -> str:
+    """기여도에 **안 들어간** 회의를 갈래별로 한 줄에.
+
+    ⚠️ 갈래마다 말이 달라야 합니다 — 두 갈래가 같은 글자를 받으면 읽는
+    사람은 「기다리면 되는 것」과 「내가 다시 돌려야 하는 것」을 구별할
+    방법이 없습니다 (결함 370 · 326 · 365 와 같은 모양).
+
+    ⚠️ 짧게 적습니다. 이 줄은 사실 칸 안에 들어가고, 밖으로 나가는
+    문서에서 한 줄이 두 줄이 되면 표가 흐트러집니다.
+    """
+    parts: list[str] = []
+    if waiting:
+        parts.append(f"{waiting}건은 아직 처리 전")
+    if failed:
+        parts.append(f"{failed}건은 처리에 실패")
+    if not parts:
+        return ""
+    return " · ".join(parts) + " — 그 회의의 발언은 기여도에 안 들어갔습니다"
 
 
 def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
@@ -84,7 +111,11 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
     body: list[dict[str, Any]] = []
 
     # ── 무슨 일이 있었나 ──────────────────────────────────
-    unprocessed = data.meetings_total - data.meetings_processed
+    # ⛔ **「나머지」를 한 덩어리로 세면 안 됩니다** (결함 370).
+    #    실패한 회의를 「아직 처리 전」이라고 하면, 읽는 사람은 기다리면
+    #    들어온다고 믿습니다 — 안 들어옵니다.
+    failed = data.meetings_failed
+    waiting = data.meetings_total - data.meetings_processed - failed
     body.append(blocks.heading("이 기간에 일어난 일"))
     body.append(
         blocks.facts(
@@ -93,12 +124,7 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
                 blocks.fact(
                     "처리된 회의",
                     f"{data.meetings_processed}건",
-                    note=(
-                        f"{unprocessed}건은 아직 처리 전이라 그 회의의 발언은 "
-                        "기여도에 안 들어갔습니다"
-                        if unprocessed
-                        else ""
-                    ),
+                    note=_not_counted(waiting, failed),
                 ),
                 blocks.fact("완료한 업무", f"{data.tasks_done}건"),
                 blocks.fact("남은 업무", f"{data.tasks_open}건"),
@@ -194,8 +220,11 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
     #    측정 불가는 0점이 아니라 **모르는 것**이고, 읽는 사람은 그 차이를
     #    알아야 숫자를 제대로 씁니다.
     holes: list[str] = []
-    if unprocessed:
-        holes.append(f"처리하지 않은 회의 {unprocessed}건 — 그 발언은 안 들어갔습니다")
+    if waiting:
+        holes.append(f"아직 처리하지 않은 회의 {waiting}건 — 그 발언은 안 들어갔습니다")
+    if failed:
+        # ⚠️ **다음에 할 일이 다릅니다.** 기다리는 것이 아니라 다시 돌리는 것.
+        holes.append(f"처리에 실패한 회의 {failed}건 — 다시 처리해야 들어갑니다")
     if not data.github_backfilled:
         holes.append("GitHub 연결 전 활동 — 아직 훑지 않아 보이지 않습니다")
     if data.skipped_categories:

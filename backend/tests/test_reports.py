@@ -969,3 +969,95 @@ def test_every_processed_branch_has_its_own_sentence():
         key = tuple(_empty_notes(content))
         assert key not in seen, f"{name} 와 {seen[key]} 가 같은 문장을 받습니다: {key}"
         seen[key] = name
+
+
+# ══════════════════════════════════════════════════════════════
+# 「아직 처리 전」과 「처리에 실패」는 다릅니다 (결함 370)
+# ══════════════════════════════════════════════════════════════
+
+
+def _period(**over):
+    base = dict(project_name="시연", people=[], meetings_total=5, meetings_processed=3)
+    base.update(over)
+    return period.build(period.PeriodInput(**base), ReportType.FINAL)
+
+
+def _fact_note(content, label: str) -> str:
+    for block in content["blocks"]:
+        if block["kind"] == "facts":
+            for item in block["items"]:
+                if item["label"] == label:
+                    return item.get("note", "")
+    raise AssertionError(f"{label} 칸이 없습니다 — 검사가 낡았습니다")
+
+
+def _holes(content) -> list[str]:
+    for block in content["blocks"]:
+        if block["kind"] == "list" and any("회의" in str(i) for i in block["items"]):
+            return [str(i) for i in block["items"]]
+    return []
+
+
+def test_a_failed_meeting_is_not_called_not_yet_processed():
+    """⭐ 실패한 회의를 「아직 처리 전」이라고 하면 안 된다.
+
+    앞엣것은 **기다리면** 들어오고 뒤엣것은 **사람이 다시 돌려야** 들어
+    옵니다. 다음에 할 일이 정반대인데 한 문장으로 뭉개고 있었습니다 —
+    그리고 이 문서는 **팀 밖으로 나갑니다.**
+    """
+    note = _fact_note(_period(meetings_failed=1), "처리된 회의")
+    assert "처리에 실패" in note, note
+    # 「1건은 아직 처리 전」이 실패한 그 한 건을 가리키면 안 됩니다.
+    assert note.count("건은") == 2, f"두 갈래가 따로 서야 합니다: {note}"
+
+
+def test_the_two_kinds_get_different_next_steps():
+    """⭐ 못 잰 것 목록이 **무엇을 해야 하는지**까지 갈라 말한다."""
+    holes = _holes(_period(meetings_failed=1))
+    waiting = [h for h in holes if "아직 처리하지 않은" in h]
+    failed = [h for h in holes if "실패" in h]
+    assert waiting and failed, holes
+    assert "다시 처리" in failed[0], failed[0]
+    assert waiting[0] != failed[0]
+
+
+def test_all_processed_says_nothing():
+    """⭐ 다 처리했으면 아무 말도 안 한다 — 없는 구멍을 만들지 않습니다."""
+    content = _period(meetings_total=3, meetings_processed=3, meetings_failed=0)
+    assert _fact_note(content, "처리된 회의") == ""
+    assert not [h for h in _holes(content) if "회의" in h]
+
+
+def test_only_failed_does_not_invent_a_waiting_one():
+    """⭐ 실패만 있으면 「아직 처리 전 0건」 같은 말을 만들지 않는다."""
+    content = _period(meetings_total=4, meetings_processed=3, meetings_failed=1)
+    note = _fact_note(content, "처리된 회의")
+    assert "아직 처리 전" not in note, note
+    assert note.count("건은") == 1, note
+
+
+def test_the_report_and_the_minutes_group_statuses_the_same_way():
+    """⭐ 같은 패키지의 **두 builder 가 상태를 같은 셋으로 가르는가.**
+
+    `minutes.state_of` 는 오래전부터 「아직 처리 전 · 처리 실패 · 처리를
+    마침」 셋으로 갈랐고, 그 이유까지 적어 두고 있었습니다. 기간 보고서만
+    「처리됨 / 나머지」 둘이었습니다 (결함 370).
+
+    새 상태가 하나 생겼을 때 한쪽만 고치면 같은 회의를 두 문서가 다르게
+    셉니다 — 그 순간 빨개져야 합니다.
+    """
+    from teamflow.db import models as md
+
+    disagree: list[str] = []
+    for status in md.MeetingStatus:
+        by_report = (
+            "processed"
+            if status in md.PROCESSED_MEETING_STATUSES
+            else "failed"
+            if status is md.MeetingStatus.FAILED
+            else "unprocessed"
+        )
+        by_minutes = minutes.state_of(status.value)
+        if by_report != by_minutes:
+            disagree.append(f"{status.value}: 보고서={by_report} · 회의록={by_minutes}")
+    assert not disagree, "두 builder 가 상태를 다르게 가릅니다:\n  " + "\n  ".join(disagree)
