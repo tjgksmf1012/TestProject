@@ -1196,3 +1196,55 @@ def test_the_unread_bar_survives_forced_colors() -> None:
         f"고대비에서 세 갈래가 같은 색입니다: {colors} — 읽음·안읽음·지연이 "
         "구별되지 않습니다"
     )
+
+
+def test_the_calendar_today_survives_forced_colors() -> None:
+    """⭐ 고대비에서도 **오늘이 어느 칸인지** 보여야 한다 (결함 400).
+
+    `.cell` 은 이미 `border: 1px solid var(--line)` 을 가지고 있고 오늘은
+    그 **색만** 바꿉니다. `forced-colors: active` 는 테두리를 전부 같은
+    시스템 색으로 덮으므로 오늘 칸이 옆 칸과 **한 자도 안 달라집니다** —
+    브라우저로 재서 확인했습니다:
+
+        고대비      오늘 rgb(0,0,0)      · 보통 rgb(0,0,0)      · 이웃달 rgb(0,0,0)
+        고대비+다크  오늘 rgb(255,255,255) · 보통 rgb(255,255,255) · 이웃달 같음
+
+    테두리·배경·글자색·무게가 전부 같았습니다. 이웃 달 칸도 같습니다 —
+    `border-color: transparent` 가 **보이는 테두리로 바뀌어** 지난달 27일이
+    이 달 27일과 같아 보입니다.
+
+    ⚠️ 이 검사가 **못 보는 것**: 귀 쪽. 그건 `month.test.ts` 의
+    「오늘은 귀로도 오늘이다」가 잽니다 — 색이 아니라 **이름표**입니다.
+    """
+    html = (
+        Path(__file__).resolve().parents[2] / "frontend" / "public" / "calendar.html"
+    ).read_text(encoding="utf-8")
+
+    assert ".cell.today" in html, "오늘 규칙이 없습니다 — 이 검사가 낡았습니다"
+    forced = re.search(
+        r"@media\s*\(\s*forced-colors:\s*active\s*\)\s*\{(?P<body>(?:[^{}]*\{[^{}]*\})+[^{}]*)\}",
+        html,
+    )
+    assert forced is not None, (
+        "고대비 규칙이 없습니다 — 오늘은 테두리 **색** 하나로만 말하는데 "
+        "고대비는 모든 칸의 테두리를 같은 색으로 덮습니다 (결함 400)"
+    )
+    body = forced.group("body")
+    for needed in (".cell.today", ".cell.out"):
+        assert needed in body, f"고대비 규칙에 `{needed}` 가 없습니다: {body[:160]}"
+
+    colors = [v.strip() for v in re.findall(r"(?:border-)?color:\s*([^;]+);", body)]
+    allowed = {"Canvas", "CanvasText", "Highlight", "LinkText", "GrayText"}
+    assert colors, f"고대비 규칙이 색을 하나도 안 정합니다: {body[:160]}"
+    assert set(colors) <= allowed, (
+        f"고대비 규칙이 시스템 색이 아닌 값을 씁니다: {sorted(set(colors) - allowed)} — "
+        "`var(--primary)` 나 hex 는 그 모드에서 다시 덮입니다"
+    )
+    # 오늘은 **보통 칸과 달라야** 합니다. 보통 칸은 `CanvasText` 로 덮이므로,
+    # 오늘에 `CanvasText` 를 주면 고친 것이 아닙니다.
+    today_rule = re.search(r"\.cell\.today\s*\{([^}]*)\}", body)
+    assert today_rule is not None
+    assert "CanvasText" not in today_rule.group(1), (
+        "오늘에 `CanvasText` 를 줬습니다 — 보통 칸이 덮이는 색과 같아서 "
+        "여전히 구별되지 않습니다"
+    )

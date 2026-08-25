@@ -62,6 +62,23 @@
   .cell.today { border-color: var(--primary); }
   .cell.picked { border-color: var(--primary); background: var(--primary-tint); }
 
+  /* ⛔ **고대비에서는 「오늘」도 「이웃 달」도 사라집니다** (결함 400).
+
+     `.cell` 은 이미 `border: 1px solid var(--line)` 을 가지고 있고 오늘은
+     그 **색만** 바꿉니다. `forced-colors: active` 는 테두리를 전부 같은
+     시스템 색으로 덮으므로, 오늘 칸이 옆 칸과 **한 자도 안 달라집니다** —
+     테두리·배경·글자색·무게가 전부 같습니다(재서 확인).
+
+     이웃 달 칸도 같습니다. `border-color: transparent` 가 **보이는 테두리로
+     바뀌고** 흐린 글자색도 덮여, 지난달 27일이 이 달 27일과 같아 보입니다.
+
+     시스템 색 이름은 안 덮입니다(결함 393·399 의 방법). */
+  @media (forced-colors: active) {
+    .cell.today { border-color: Highlight; }
+    .cell.picked { border-color: Highlight; }
+    .cell.out { color: GrayText; border-color: GrayText; }
+  }
+
   .dnum { font-variant-numeric: tabular-nums; }
 
   /* 그 날의 건수. ⚠️ **글자**입니다 — 점을 개수만큼 찍으면 그게 곧

@@ -223,9 +223,17 @@ export function isOverdue(item: CalendarItem, today: string): boolean {
  * ⚠️ 칸 안의 점·색은 **눈으로만 읽히는 표시**입니다. 그것뿐이면 낭독기
  * 사용자에게는 숫자만 남습니다.
  */
-export function dayAriaLabel(cell: DayCell): string {
-  if (cell.items.length === 0) return `${cell.day}일`;
-  return `${cell.day}일, ${cell.items.length}건 — ${cell.items
+export function dayAriaLabel(cell: DayCell, today: string): string {
+  /* ⛔ **「오늘」을 색 하나에만 싣지 마십시오** (결함 400).
+     `.cell.today` 는 테두리 **색**만 바꿉니다. `forced-colors: active` 는
+     모든 칸의 테두리를 같은 시스템 색으로 덮으므로 오늘 칸이 옆 칸과
+     **한 자도 안 달라집니다** — 재서 확인했습니다. 그리고 귀로는 원래부터
+     알 수 없었습니다: 이 이름표가 「26일」이라 「1일」과 모양이 같았습니다.
+     같은 파일이 **고른 날**에는 `aria-current="date"` 를 붙이고 있었으니,
+     안 붙어 있던 것은 오늘 쪽입니다. */
+  const day = cell.date === today ? `${cell.day}일, 오늘` : `${cell.day}일`;
+  if (cell.items.length === 0) return day;
+  return `${day}, ${cell.items.length}건 — ${cell.items
     .map((item) => `${describeKind(item.kind)} ${item.title}`)
     .join(', ')}`;
 }

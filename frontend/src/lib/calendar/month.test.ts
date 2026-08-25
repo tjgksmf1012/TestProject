@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
@@ -187,12 +187,38 @@ describe('한 칸 안의 것', () => {
   it('낭독기가 그 날 무엇이 있는지 듣는다', () => {
     const cells = monthGrid(2026, 9, [item()]);
     const day = cells.find((c) => c.date === '2026-09-10');
-    strictEqual(dayAriaLabel(day!), '10일, 1건 — 마감 로그인 API');
+    strictEqual(dayAriaLabel(day!, '2026-09-01'), '10일, 1건 — 마감 로그인 API');
   });
 
   it('빈 날은 숫자만 읽는다', () => {
     const cells = monthGrid(2026, 9, []);
-    strictEqual(dayAriaLabel(cells.find((c) => c.date === '2026-09-10')!), '10일');
+    strictEqual(dayAriaLabel(cells.find((c) => c.date === '2026-09-10')!, '2026-09-01'), '10일');
+  });
+
+  it('⭐ 오늘은 **귀로도** 오늘이다 (결함 400)', () => {
+    /* 「오늘」은 테두리 **색** 하나에만 실려 있었습니다. 고대비에서는 모든
+       칸의 테두리가 같은 시스템 색으로 덮여 옆 칸과 한 자도 안 달라지고,
+       낭독기에게는 **원래부터** 「26일」이라 「1일」과 모양이 같았습니다.
+       같은 파일이 **고른 날**에는 `aria-current="date"` 를 붙이고 있었으니
+       안 붙어 있던 것은 오늘 쪽입니다. */
+    const cells = monthGrid(2026, 9, []);
+    strictEqual(dayAriaLabel(cells.find((c) => c.date === '2026-09-10')!, '2026-09-10'), '10일, 오늘');
+  });
+
+  it('⭐ 오늘이면서 일정이 있으면 **둘 다** 읽는다', () => {
+    /* ⚠️ 한 갈래만 고치면 옆 갈래가 그대로 남습니다(결함 298·301) —
+       일정이 있는 날은 다른 문장을 만드므로 따로 잽니다. */
+    const cells = monthGrid(2026, 9, [item()]);
+    strictEqual(
+      dayAriaLabel(cells.find((c) => c.date === '2026-09-10')!, '2026-09-10'),
+      '10일, 오늘, 1건 — 마감 로그인 API',
+    );
+  });
+
+  it('⚠️ 오늘이 아닌 날에 「오늘」을 붙이지 않는다', () => {
+    /* 반대 방향. 한 방향만 재면 「언제나 오늘이라고 적는」 고침도 통과합니다. */
+    const cells = monthGrid(2026, 9, []);
+    ok(!dayAriaLabel(cells.find((c) => c.date === '2026-09-11')!, '2026-09-10').includes('오늘'));
   });
 });
 

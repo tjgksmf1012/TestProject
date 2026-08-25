@@ -87,7 +87,7 @@ function Cell({
     <button
       type="button"
       className={classes.join(' ')}
-      aria-label={dayAriaLabel(cell)}
+      aria-label={dayAriaLabel(cell, today)}
       {...(picked ? { 'aria-current': 'date' as const } : {})}
       onClick={() => onPick(cell.date)}
     >
