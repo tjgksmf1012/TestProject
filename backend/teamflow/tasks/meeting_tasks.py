@@ -96,7 +96,7 @@ def process_meeting_task(self: Task, meeting_id: int) -> dict:
             return {"meeting_id": meeting_id, "status": "not_found"}
 
         # 이미 끝난 회의를 다시 처리하지 않는다 (멱등성).
-        if meeting.status == "confirmed":
+        if meeting.status == m.MeetingStatus.CONFIRMED:
             return {"meeting_id": meeting_id, "status": "already_done"}
 
         meeting.status = "processing"

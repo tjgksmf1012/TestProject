@@ -30,7 +30,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
-from teamflow.db import assignees, live
+from teamflow.db import assignees, live, vocab
 from teamflow.db import models as m
 from teamflow.services.naming import meeting_label
 
@@ -114,7 +114,7 @@ def collect(
     who_of = assignees.names_of_tasks(session, [t.id for t in tasks])
     for task in tasks:
         who = who_of.get(task.id)
-        done = task.status == "done"
+        done = task.status in vocab.TASK_FINISHED
         if within(task.start_date):
             items.append(
                 CalendarItem(
@@ -178,7 +178,9 @@ def collect(
                 kind="project_due",
                 at=project.deadline,
                 title=project.title,
-                done=project.status == "done",
+                # ⚠️ 예순네 줄 위의 **업무** 갈래에서 `"done"` 을 베껴 왔었습니다.
+                # 프로젝트에는 그런 값이 없습니다 — 어휘를 쓰십시오.
+                done=project.status in vocab.PROJECT_FINISHED,
             )
         )
 

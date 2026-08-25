@@ -999,6 +999,62 @@ def test_the_paired_constant_table_is_not_stale():
     )
 
 
+def test_status_columns_are_compared_against_their_own_vocabulary():
+    """⭐ 상태 칸을 **자기 어휘**로만 재는가 (결함 381).
+
+    ## ⛔ 달력이 프로젝트를 **업무의 말**로 쟀습니다
+
+    `calendar_service.collect` 안에서 예순네 줄 차이로 이렇게 있었습니다.
+
+        done = task.status == "done"           ← 업무. 맞습니다
+        done = project.status == "done"        ← 프로젝트. **그런 값이 없습니다**
+
+    `"done"` 은 `TaskStatus.DONE` 이고, `projects.status` 의 값이 아닙니다.
+    같은 칸을 읽는 다른 자리는 `"finished"` 를 봅니다
+    (`tasks/maintenance.py`) — **한 칸에 두 어휘**였고, 쓰는 코드가
+    0곳이라 둘 다 영원히 거짓이었습니다.
+
+    ⚠️ **낱말이 아니라 요구를 잽니다.** 「`"done"` 을 쓰지 마라」가 아니라
+    **「상태 칸을 날 글자와 비교하지 마라」**입니다 — 그래야 다음 사람이
+    `"complete"` 라고 적어도 잡힙니다(결함 295 의 「막는 길을 하나만 막은
+    것」).
+    """
+    import re
+
+    #: 어휘가 있는 상태 칸. `(모델 속성, 어휘 이름)`.
+    STATUS_COLUMNS = {
+        "project.status": "ProjectStatus",
+        "task.status": "TaskStatus",
+        "meeting.status": "MeetingStatus",
+    }
+
+    offenders: list[str] = []
+    for path in sorted(REPO_ROOT.glob("backend/teamflow/**/*.py")):
+        if "__pycache__" in str(path):
+            continue
+        code = _blanked(path.read_text(encoding="utf-8"))
+        for attr, vocab_name in STATUS_COLUMNS.items():
+            #: `project.status == "…"` · `Project.status == "…"` 둘 다.
+            noun = attr.split(".")[0]
+            pattern = re.compile(
+                rf"\b[A-Za-z_.]*{noun}\.status\s*(?:==|!=)\s*(['\"])([^'\"]*)\1",
+                re.IGNORECASE,
+            )
+            for hit in pattern.finditer(code):
+                line = code[: hit.start()].count(chr(10)) + 1
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{line}  {noun}.status == "
+                    f"{hit.group(1)}{hit.group(2)}{hit.group(1)}"
+                    f"  → `vocab.{vocab_name}` 을 쓰세요"
+                )
+
+    assert not offenders, (
+        "상태 칸을 **날 글자**와 비교하고 있습니다. 어휘가 아닌 값을 적으면 "
+        "오류 없이 영원히 거짓이 됩니다 — 달력이 프로젝트를 업무의 말로 재고 "
+        "있었습니다(결함 381):\n  " + "\n  ".join(offenders)
+    )
+
+
 def test_every_pipeline_stage_has_words_a_person_can_read():
     """⭐ 파이프라인 단계마다 **사람의 말**이 있는가 (결함 106).
 

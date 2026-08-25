@@ -924,7 +924,7 @@ def try_finalize_meeting(
                 f"{len(missing)}명이 아직 참가하지 않았습니다",
             )
 
-    if meeting.status != "pending":
+    if meeting.status != m.MeetingStatus.PENDING:
         # 이미 누가 먼저 확정했다. 상태만 알려주고 큐에는 넣지 않는다.
         return FinalizeResult(
             True, False, len(tracks), len(finished), f"이미 처리 중입니다 ({meeting.status})"

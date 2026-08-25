@@ -370,7 +370,7 @@ def deadline_notices(
             m.Task.project_id == project_id,
             m.Task.id.in_(assignees.task_ids_of(user_id)),
             m.Task.deadline.is_not(None),
-            m.Task.status != "done",
+            m.Task.status != vocab.TaskStatus.DONE,
         )
     ).all()
 

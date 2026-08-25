@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from teamflow.config import get_settings
 from teamflow.db import models as m
+from teamflow.db import vocab
 from teamflow.db.session import session_scope
 from teamflow.jobs.retention import purge_expired_audio, revoke_project_voiceprints
 from teamflow.services import notification_service
@@ -56,7 +57,7 @@ def revoke_finished_project_voiceprints_task() -> dict:
     revoked = 0
     with session_scope() as session:
         finished = session.scalars(
-            select(m.Project.id).where(m.Project.status == "finished")
+            select(m.Project.id).where(m.Project.status == vocab.ProjectStatus.FINISHED)
         ).all()
         for project_id in finished:
             report = revoke_project_voiceprints(session, project_id)

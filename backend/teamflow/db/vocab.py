@@ -610,6 +610,43 @@ def notification_values() -> tuple[str, ...]:
 # ⚠️ **순서가 곧 칸반 열 순서입니다.** 선언 순서를 바꾸면 화면이 바뀝니다.
 
 
+class ProjectStatus(StrEnum):
+    """프로젝트가 살아 있는가, 끝났는가.
+
+    ## ⛔ 이 어휘가 없어서 **달력이 업무의 말로 프로젝트를 쟀습니다**
+
+    `projects.status` 는 `String(20)` 에 기본값 `"active"` 뿐이고 어휘가
+    없었습니다. 그래서 읽는 자리 둘이 **서로 다른 글자**를 봤습니다.
+
+        calendar_service.py   done = project.status == "done"       ← 업무의 값
+        tasks/maintenance.py  where(Project.status == "finished")   ← 이쪽
+
+    `"done"` 은 `TaskStatus.DONE` 입니다 — 예순네 줄 위의 업무 갈래에서
+    베껴 온 글자이고, 프로젝트에는 그런 값이 **없습니다.** 둘 중 많아야
+    하나가 맞고, 지금은 **쓰는 코드가 0곳**이라 둘 다 영원히 거짓입니다.
+
+    ⚠️ **`FINISHED` 를 쓰는 코드는 아직 0곳입니다.** 없는 기능을 만들지
+    않았습니다 — 프로젝트를 끝내는 길(화면·라우트)은 이 저장소에 없고,
+    `projects.deadline` 도 읽기만 하고 쓰는 곳이 0곳입니다. 그래서
+    달력의 `project_due` 는 **한 번도 그려진 적이 없습니다.**
+
+    그 길을 만드는 사람에게: 여기 값을 쓰기 시작하면 그 순간
+    **달력의 지연 표시**(`calendar/month.ts` 의 `isOverdue`)와
+    **성문 폐기**(`docs/07` §2.4)가 같이 살아납니다. 둘 다 이미 이
+    어휘를 봅니다.
+    """
+
+    ACTIVE = "active"  # 기본값 — 만들면 이 상태입니다
+    FINISHED = "finished"  # 끝남 — 아직 이 값을 **쓰는 코드는 없습니다**
+
+
+#: `projects.status` 가 받는 값 전부.
+PROJECT_STATUSES: tuple[ProjectStatus, ...] = tuple(ProjectStatus)
+
+#: 끝난 것으로 세는 상태. 달력의 「지연」과 성문 폐기가 같이 봅니다.
+PROJECT_FINISHED: frozenset[ProjectStatus] = frozenset({ProjectStatus.FINISHED})
+
+
 class TaskStatus(StrEnum):
     """업무가 지금 어느 열에 있는가.
 
