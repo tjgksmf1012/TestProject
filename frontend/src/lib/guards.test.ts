@@ -36,7 +36,7 @@ import { meetingLabel } from './ui/naming.ts';
 import { appRailHref } from './nav/rail.ts';
 import { withJosa } from './text/josa.ts';
 import { EVIDENCE_CHIPS_SHOWN, splitEvidenceChips } from './review/evidence.ts';
-import { describeMeetingWhen, meetingWhen } from './home/next.ts';
+import { describeMeetingWhen, meetingWhen, nextStepFor } from './home/next.ts';
 import { EXTRA_CONSENTS, memberStatuses, roomLine } from './lobby/room.ts';
 import {
   blockers,
@@ -9529,6 +9529,78 @@ describe('끝난 회의에게 「회의 처리가 시작됩니다」라고 하�
     ok(
       /\broomLine\(/.test(legacy) || /\bphase\.note\b/.test(legacy),
       '레거시 로비가 국면 문장을 한 곳에서도 안 그립니다',
+    );
+  });
+});
+
+describe('회의 줄이 응답을 **통째로** 판단에 넘긴다 (결함 368)', () => {
+  /* `nextStepFor` 는 응답의 칸을 보고 다음에 할 일을 정합니다. 화면이
+     칸을 골라 새 객체를 만들어 넘기면, 서버에 칸이 하나 늘 때 **그 화면만
+     조용히 옛 갈래**로 떨어집니다 — 오류도 안 나고 글자도 그럴듯합니다.
+
+     결함 368 에서 실제로 그럴 뻔했습니다: `utterance_count` 를 SPA 의
+     응답 타입에만 안 넣었는데, 값은 JSON 이라 런타임에는 흘러가고 타입만
+     거짓말을 했습니다. 칸 집합은 `test_repo_integrity.py` 가 세 자리에서
+     맞춰 보고, 여기서는 **넘기는 모양**을 봅니다.
+
+     ⚠️ 이 자가 못 보는 것: `const m = {...meeting}; nextStepFor(m, p)` 처럼
+     한 번 거쳐 가면 못 봅니다. 그때는 자를 넓히십시오. */
+
+  const HOMES: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'home.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Home.tsx')],
+  ];
+
+  it('⭐ 두 뿌리의 홈 화면을 **둘 다** 보고 있다', () => {
+    const missing = HOMES.filter(([, file]) => !existsSync(file)).map(([name]) => name);
+    deepStrictEqual(missing, [], `홈 화면을 못 찾았습니다: ${missing.join(', ')}`);
+  });
+
+  it('⭐ 칸을 골라 새로 만들어 넘기지 않는다', () => {
+    const offenders: string[] = [];
+    for (const [name, file] of HOMES) {
+      if (!existsSync(file)) continue;
+      const source = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\{\/\*[\s\S]*?\*\/\}/g, ' ')
+        .replace(/(?<![:\w])\/\/[^\n]*/g, ' ');
+      const calls = [...source.matchAll(/nextStepFor\(\s*([^,]+),/g)];
+      if (calls.length === 0) {
+        offenders.push(`${name}: nextStepFor 를 안 부릅니다`);
+        continue;
+      }
+      for (const call of calls) {
+        const arg = (call[1] as string).trim();
+        // 그대로 넘기거나(`meeting`), 펼쳐서 넘기거나(`{ ...meeting`).
+        if (!/^[\w.]+$/.test(arg) && !/^\{\s*\.\.\./.test(arg)) {
+          offenders.push(`${name}: ${arg.replace(/\s+/g, ' ').slice(0, 50)}`);
+        }
+      }
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      `응답을 통째로 안 넘기는 자리가 있습니다 — 칸이 늘면 이 화면만 옛 갈래로 떨어집니다:\n  ${offenders.join('\n  ')}`,
+    );
+  });
+
+  it('⭐ 「후보 0건」의 두 이유가 서로 다른 말과 **다른 자리**로 간다', () => {
+    /* 요구 자체를 `@lib` 에서 확인합니다 — 화면이 어떻게 부르든. */
+    const base = {
+      meeting_id: 7,
+      title: '회의',
+      status: 'needs_review',
+      started_at: '2026-09-01T01:00:00Z',
+      scheduled_at: null,
+      pending_candidates: 0,
+    };
+    const spoke = nextStepFor({ ...base, utterance_count: 12 }, 4);
+    const silent = nextStepFor({ ...base, utterance_count: 0 }, 4);
+    ok(spoke.reason !== silent.reason, '두 이유가 같은 문장을 받습니다');
+    ok(spoke.href !== silent.href, '두 이유가 같은 곳으로 보냅니다');
+    ok(
+      !silent.reason.includes('업무가 나오지 않았습니다'),
+      '소리가 안 잡힌 회의에게 「업무가 나오지 않았습니다」라고 합니다',
     );
   });
 });

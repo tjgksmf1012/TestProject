@@ -16,6 +16,7 @@ import {
   meetingWhen,
   hasLane,
   homeProject,
+  hasTranscript,
   nextStepFor,
   orderProjects,
   requestedProjectId,
@@ -73,6 +74,40 @@ describe('nextStepFor', () => {
     strictEqual((step.href ?? '').includes('review.html'), false);
     strictEqual(step.actionable, false);
     strictEqual(step.reason.includes('업무가 나오지 않았습니다'), true);
+  });
+
+  it('⭐ 「후보 0건」의 **두 이유**를 가른다 (결함 368)', () => {
+    /* 사람들이 이야기했는데 업무가 안 나온 것과, **소리가 하나도 안 잡힌
+       것**은 다음에 할 일이 정반대입니다 — 앞은 넘어가면 되고 뒤는 트랙을
+       확인해야 합니다. 오래도록 한 문장으로 뭉개고 있었습니다. */
+    const spoke = nextStepFor(
+      meeting({ status: 'needs_review', pending_candidates: 0, utterance_count: 12 }),
+      4,
+    );
+    strictEqual(spoke.reason.includes('업무가 나오지 않았습니다'), true);
+    strictEqual((spoke.href ?? '').includes('kanban.html'), true);
+
+    const silent = nextStepFor(
+      meeting({ status: 'needs_review', pending_candidates: 0, utterance_count: 0 }),
+      4,
+    );
+    strictEqual(silent.reason.includes('업무가 나오지 않았습니다'), false);
+    strictEqual(silent.reason.includes('기록되지 않았습니다'), true);
+    // 확인할 것이 있는 자리로 보냅니다 — 칸반에는 볼 것이 없습니다.
+    strictEqual((silent.href ?? '').includes('lobby.html'), true);
+    // ⚠️ 이유를 **지어내지 않습니다** (결함 311·318).
+    strictEqual(/마이크|소리가 작|꺼져/.test(silent.reason), false);
+  });
+
+  it('⭐ 못 받은 칸은 「0건」이 아니다 — 옛 응답에서는 옛 문장 그대로', () => {
+    /* 불변식 셋째(**측정 불가 ≠ 0점**). `?? 0` 으로 읽으면 못 받은 것이
+       「소리가 안 잡혔다」가 되어 없는 사고를 만듭니다. */
+    strictEqual(hasTranscript(meeting({ utterance_count: undefined })), true);
+    strictEqual(hasTranscript(meeting({ utterance_count: 0 })), false);
+    strictEqual(hasTranscript(meeting({ utterance_count: 1 })), true);
+
+    const old = nextStepFor(meeting({ status: 'needs_review', pending_candidates: 0 }), 4);
+    strictEqual(old.reason.includes('업무가 나오지 않았습니다'), true);
   });
 
   it('⭐ 처리 중이면 버튼을 만들지 않는다', () => {

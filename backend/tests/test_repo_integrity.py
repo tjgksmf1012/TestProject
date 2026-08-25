@@ -3194,3 +3194,73 @@ def test_meeting_actions_reach_both_roots() -> None:
         "회의 로비의 동작이 **한쪽 뿌리에만** 있습니다. 같은 회의를 그리는 두\n"
         "  화면인데 들어온 주소로 할 수 있는 일이 갈립니다:\n  " + "\n  ".join(missing)
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 회의 요약 응답의 칸이 **세 자리에서 같은가** (결함 368)
+# ══════════════════════════════════════════════════════════════
+#
+# 이 응답(`GET /api/projects/{id}/meetings`)의 모양이 세 곳에 적혀 있습니다:
+#
+#   · 서버   `MeetingSummary` (`api/main.py`)      — 실제로 내보내는 것
+#   · `@lib` `Meeting` (`home/next.ts`)            — 판단이 **읽는** 부분집합
+#   · SPA    `MeetingSummary` (`api/types.ts`)     — 화면이 받는다고 적은 것
+#
+# ⚠️ 결함 368 에서 서버에 `utterance_count` 를 더할 때 **SPA 타입에만 안
+# 넣을 뻔했습니다.** 값은 JSON 이라 런타임에는 그대로 흘러가고 타입만
+# 거짓말을 합니다 — 오류도 안 나고 화면도 멀쩡해서, 다음 사람이 그 칸이
+# 없다고 믿고 코드를 씁니다.
+#
+# 그래서 **낱말이 아니라 짝을 셉니다**: 화면이 받는다고 적은 칸 집합은
+# 서버가 내보내는 것과 **같아야** 하고, `@lib` 이 읽는 칸은 그 **안에**
+# 있어야 합니다.
+
+
+def _pydantic_fields(source: str, class_name: str) -> set[str]:
+    body = re.search(
+        rf"^class {class_name}\(BaseModel\):\n(.*?)(?=\n\n@|\n\nclass |\n\ndef )",
+        source,
+        re.S | re.M,
+    )
+    assert body is not None, f"{class_name} 을 못 찾았습니다 — 가드가 낡았습니다"
+    text = re.sub(r"^\s*#.*$", "", body.group(1), flags=re.M)
+    return set(re.findall(r"^\s{4}(\w+)\s*:", text, flags=re.M))
+
+
+def _ts_interface_fields(source: str, name: str) -> set[str]:
+    body = re.search(rf"(?:interface|type) {name}\b[^{{]*\{{(.*?)\n\}}", source, re.S)
+    assert body is not None, f"{name} 을 못 찾았습니다 — 가드가 낡았습니다"
+    text = re.sub(r"/\*[\s\S]*?\*/", "", body.group(1))
+    text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
+    return set(re.findall(r"^\s{2}(\w+)\??\s*:", text, flags=re.M))
+
+
+def test_meeting_summary_fields_agree_across_the_three_places() -> None:
+    server = _pydantic_fields(
+        (REPO_ROOT / "backend/teamflow/api/main.py").read_text(encoding="utf-8"),
+        "MeetingSummary",
+    )
+    lib = _ts_interface_fields(
+        (REPO_ROOT / "frontend/src/lib/home/next.ts").read_text(encoding="utf-8"),
+        "Meeting",
+    )
+    spa = _ts_interface_fields(
+        (REPO_ROOT / "webapp/src/api/types.ts").read_text(encoding="utf-8"),
+        "MeetingSummary",
+    )
+
+    # 세 자리를 **전부** 봤는지부터 (빈 집합이면 자가 헛돈 것입니다).
+    assert len(server) >= 5 and len(lib) >= 5 and len(spa) >= 5, (
+        f"칸을 제대로 못 읽었습니다 — 서버 {sorted(server)} · lib {sorted(lib)} · SPA {sorted(spa)}"
+    )
+
+    assert spa == server, (
+        "화면이 받는다고 적은 칸이 서버와 다릅니다 — 값은 런타임에 흘러가고\n"
+        "  타입만 거짓말을 합니다 (결함 368).\n"
+        f"  서버에만: {sorted(server - spa)}\n"
+        f"  SPA 에만: {sorted(spa - server)}"
+    )
+    assert lib <= server, (
+        "`@lib` 이 서버가 안 보내는 칸을 읽습니다 — 언제나 `undefined` 입니다.\n"
+        f"  없는 칸: {sorted(lib - server)}"
+    )

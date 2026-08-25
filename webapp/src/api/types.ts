@@ -29,6 +29,15 @@ export interface MeetingSummary {
   scheduled_at: string | null;
   pending_candidates: number;
   /**
+   * 기록된 발화 수. **0 은 「못 잰 것」이 아니라 「잰 0」** 입니다 —
+   * 「후보 0건」의 두 이유를 가르는 값입니다(결함 368).
+   *
+   * ⚠️ 이 타입은 `@lib/home/next.ts` 의 `Meeting` 과 **같은 응답**을
+   * 적고 있습니다. 한쪽에만 칸이 생기면 값은 런타임에 흘러가는데 타입만
+   * 거짓말을 합니다 — 그래서 짝 가드가 둘을 나란히 셉니다.
+   */
+  utterance_count?: number;
+  /**
    * 트랙 커버리지 평균. **`null` 은 0 이 아니라 「못 쟀다」** 입니다
    * (docs/05 불변식 셋째). 아직 회의가 안 끝났으면 잰 적이 없습니다.
    */

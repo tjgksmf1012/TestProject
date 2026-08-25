@@ -2004,6 +2004,19 @@ class MeetingSummary(BaseModel):
     scheduled_at: UtcDatetime | None
     #: 이 회의에서 사람이 아직 결정하지 않은 업무 후보 수
     pending_candidates: int
+    #: 이 회의에서 **기록된 발화 수**.
+    #:
+    #: ⚠️ 이 칸이 없어서 홈은 「후보 0건」의 두 가지 이유를 못 갈랐습니다
+    #: (결함 368). 사람들이 이야기했는데 업무가 안 나온 것과, **소리가
+    #: 하나도 안 잡힌 것**은 다음에 할 일이 정반대입니다 — 앞은 그냥
+    #: 넘어가면 되고 뒤는 트랙을 확인해야 합니다.
+    #:
+    #: 같은 제품이 검토 화면에서는 이미 그 말을 합니다(「처리는 끝났는데
+    #: 기록된 발화가 없습니다」). 홈만 그 값을 못 받고 있었습니다.
+    #:
+    #: ⚠️ 개수를 그대로 보냅니다. 「기록이 있는가」라는 **판단**은 화면이
+    #: 아니라 `@lib` 이 합니다 — 0 은 못 잰 것이 아니라 **잰 0** 입니다.
+    utterance_count: int = 0
     #: 트랙 커버리지의 평균. **못 잰 것은 `None`** 이고 0.0 이 아니다.
     #:
     #: ⚠️ 이 구분이 이 제품의 불변식이다 (docs/05 · "측정 불가 ≠ 0점").
@@ -2056,6 +2069,15 @@ def list_project_meetings(
     #    안 끝난 트랙 하나가 회의 전체의 커버리지를 끌어내리고, 화면은
     #    "녹음이 반만 됐다" 를 그린다 — 잰 적이 없는데.
     #    한 개도 없으면 행이 안 나오고, 그래서 `None` 이다 (0.0 이 아니라).
+    # ⚠️ 회의마다 따로 세지 않습니다 — 회의 서른이면 요청이 서른 번
+    #    도는 것이 아니라 여기서 한 번에 묶어 셉니다(`coverage` 와 같은 방식).
+    utterances = dict(
+        session.execute(
+            select(m.Utterance.meeting_id, func.count())
+            .where(m.Utterance.meeting_id.in_(meeting_ids))
+            .group_by(m.Utterance.meeting_id)
+        ).all()
+    )
     coverage = dict(
         session.execute(
             select(m.MeetingTrack.meeting_id, func.avg(m.MeetingTrack.coverage))
@@ -2075,6 +2097,7 @@ def list_project_meetings(
             started_at=meeting.started_at,
             scheduled_at=meeting.scheduled_at,
             pending_candidates=pending.get(meeting.id, 0),
+            utterance_count=utterances.get(meeting.id, 0),
             coverage=(
                 float(coverage[meeting.id]) if coverage.get(meeting.id) is not None else None
             ),

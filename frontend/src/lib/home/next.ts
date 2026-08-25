@@ -36,6 +36,14 @@ export interface Meeting {
   started_at: string | null;
   /** 잡아 둔 시각. 이미 연 회의는 `null`. */
   scheduled_at: string | null;
+  /**
+   * 이 회의에서 **기록된 발화 수**.
+   *
+   * ⚠️ 서버가 언제나 보냅니다. 옛 응답을 읽는 자리가 있을 수 있어
+   * 물음표를 달아 두지만, **판단은 `hasTranscript` 한 곳**에서 합니다 —
+   * 화면이 `?? 0` 을 적으면 「모른다」와 「잰 0」이 같아집니다.
+   */
+  utterance_count?: number;
   pending_candidates: number;
 }
 
@@ -136,6 +144,18 @@ export function waitsForPeople(meeting: Meeting): boolean {
 }
 
 /**
+ * 이 회의에 **기록된 말이 있는가.**
+ *
+ * ⚠️ 못 받은 것(`undefined`)은 「없다」가 아닙니다 — 이 제품의 불변식
+ * (**측정 불가 ≠ 0점**)이 여기에도 걸립니다. 못 받았으면 **아무 말도
+ * 하지 않는 쪽**으로 둡니다: 참을 돌려주면 화면은 옛 문장을 그대로
+ * 쓰고, 그건 고치기 전과 같은 글자입니다.
+ */
+export function hasTranscript(meeting: Meeting): boolean {
+  return meeting.utterance_count === undefined || meeting.utterance_count > 0;
+}
+
+/**
  * 이 회의에서 **다음에 할 일**.
  *
  * ## ⚠️ `projectId` 를 받는 이유 (결함 355)
@@ -207,6 +227,22 @@ export function nextStepFor(meeting: Meeting, projectId: number): NextStep {
 
     case 'needs_review':
       if (!waitsForPeople(meeting)) {
+        /* ⛔ **「후보 0건」의 이유는 둘입니다** (결함 368).
+           사람들이 이야기했는데 업무가 안 나온 것과, **소리가 하나도 안
+           잡힌 것.** 다음에 할 일이 정반대인데 한 문장으로 뭉개고
+           있었습니다 — 뒤엣것에게 「회의에서 업무가 나오지 않았습니다」는
+           헛다리를 짚게 합니다. 진짜 소식은 다시 녹음해야 한다는 것입니다. */
+        if (!hasTranscript(meeting)) {
+          return {
+            href: `/lobby.html?meeting=${id}`,
+            label: '트랙 상태 보기',
+            /* ⚠️ **이유는 지어내지 않습니다** (결함 311·318). 마이크가
+               꺼져 있었는지 소리가 작았는지는 여기서 알 수 없습니다 —
+               아는 것만 적고, 가릴 수 있는 자리로 보냅니다. */
+            reason: '오간 말이 하나도 기록되지 않았습니다 — 로비에서 트랙을 확인하세요',
+            actionable: false,
+          };
+        }
         // 승인 화면으로 보내면 빈 목록이 뜬다. 고장이 아니라 결과다.
         return {
           href: kanban,
