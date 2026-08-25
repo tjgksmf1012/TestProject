@@ -2862,6 +2862,140 @@ def test_the_activity_log_never_starts_receiving_meetings_or_chat() -> None:
     )
 
 
+def _blanked(source: str) -> str:
+    """주석·docstring 을 **같은 길이의 공백**으로 덮는다 — 지우지 않는다.
+
+    ⚠️ 지우면 뒤의 offset 이 전부 밀려 **줄 번호가 틀립니다.** 처음에는
+    지웠다가 23줄, 개행만 맞췄다가 3줄 어긋났습니다. 길이를 보존하면
+    원본과 offset 이 **정확히** 같습니다.
+
+    ⚠️ `^\\s*#` 으로 주석을 지우지 마십시오 — `\\s` 가 개행을 먹어 **앞줄까지**
+    지웁니다.
+    """
+
+    def blank(match: re.Match[str]) -> str:
+        return "".join("\n" if ch == "\n" else " " for ch in match.group(0))
+
+    code = re.sub(r'"""[\s\S]*?"""', blank, source)
+    return re.sub(r"#[^\n]*", blank, code)
+
+
+def test_the_activity_log_only_carries_decisions_a_person_made() -> None:
+    """⭐ 활동 화면이 주장하는 범위의 **나머지 절반**.
+
+    바로 위 `test_the_activity_log_never_starts_receiving_meetings_or_chat`
+    은 그 문장의 **뒷부분**만 잽니다 — 「회의를 열거나 녹음하거나 이야기
+    나눈 것은 여기 안 남습니다」. 앞부분은 아무도 안 보고 있었습니다.
+
+        **이 기록에는 사람이 손으로 내린 결정만 쌓입니다** — …
+
+    ⚠️ 결함 328 이 적어 둔 「**같은 표의 옆 칸은 따로 재야 합니다**」입니다.
+
+    ## 지금은 참인데, **두 우연** 위에 서 있습니다
+
+    감사 기록을 쓰는 자리는 열다섯이고, 그중 사람이 없는 것(`actor_id=None`)
+    은 셋입니다.
+
+        audio_deleted       project_id=None   ← 프로젝트 목록에 안 뜹니다
+        audio_deleted       project_id=None   ←   (질의가 project_id 로 거릅니다)
+        voiceprint_revoked  project_id=…      ← **뜹니다.** 다만 갈래가 죽어 있습니다
+
+    `voiceprint_revoked` 는 `Voiceprint` 행이 있어야 나는데, **그것을 만드는
+    프로덕션 코드가 0곳**입니다(`db/vocab.py` 가 적어 둔 그대로 — 세어서
+    확인했습니다). 그래서 화면 문장은 **오늘은** 참입니다.
+
+    ⚠️ 누가 성문을 만들기 시작하면 그 순간 화면이 조용히 거짓말을 합니다 —
+    종료된 프로젝트의 활동 기록에 **사람 없는 줄**이 뜹니다
+    (`tasks/maintenance.revoke_finished_project_voiceprints_task` 는 Celery
+    정기 작업이라 아무도 안 누릅니다). 그래서 **예외가 낡는 것도 같이
+    잽니다**(결함 306 의 방법).
+    """
+    import re
+
+    #: 사람 없이 써도 되는 갈래 — **왜** 괜찮은지와 **언제까지** 괜찮은지.
+    ALLOWED_WITHOUT_ACTOR = {
+        "voiceprint_revoked": (
+            "종료된 프로젝트의 성문 폐기(docs/07 §2.4). 지금은 `Voiceprint` 를 "
+            "만드는 프로덕션 코드가 0곳이라 이 줄이 뜰 수 없습니다."
+        ),
+    }
+
+    sites: list[tuple[str, str, str, str]] = []
+    for path in sorted(REPO_ROOT.glob("backend/teamflow/**/*.py")):
+        source = path.read_text(encoding="utf-8")
+        code = _blanked(source)
+        for hit in re.finditer(r"m\.AuditLog\(", code):
+            #: ⚠️ 「다음 `)`」로 자르면 중첩 dict(`before=`·`after=`)에서 틀립니다.
+            #: 괄호를 세어 블록을 잡습니다.
+            i, depth = hit.end(), 1
+            while i < len(code) and depth:
+                if code[i] == "(":
+                    depth += 1
+                elif code[i] == ")":
+                    depth -= 1
+                i += 1
+            block = code[hit.end() : i]
+            project = re.search(r"project_id\s*=\s*([^,\n]+)", block)
+            actor = re.search(r"actor_id\s*=\s*([^,\n]+)", block)
+            action = re.search(r'action\s*=\s*"([a-z_]+)"', block)
+            sites.append(
+                (
+                    action.group(1) if action else "(변수)",
+                    (project.group(1).strip() if project else "(없음)"),
+                    (actor.group(1).strip() if actor else "(없음)"),
+                    f"{path.relative_to(REPO_ROOT)}:{code[: hit.start()].count(chr(10)) + 1}",
+                )
+            )
+
+    assert len(sites) > 10, (
+        f"감사 기록을 쓰는 자리를 {len(sites)}곳밖에 못 찾았습니다 — 가드가 헛돕니다"
+    )
+
+    #: 프로젝트 활동 목록에 뜨는 줄(= `project_id` 가 있는 줄) 중 사람이 없는 것.
+    actorless = [
+        (action, where)
+        for action, project, actor, where in sites
+        if project != "None" and actor == "None"
+    ]
+    unexpected = [(a, w) for a, w in actorless if a not in ALLOWED_WITHOUT_ACTOR]
+    assert not unexpected, (
+        "활동 화면이 「이 기록에는 **사람이 손으로 내린 결정만** 쌓입니다」라고 "
+        "말합니다. 사람 없이 쓰는 줄이 프로젝트 목록에 뜨면 그 문장이 거짓이 "
+        "됩니다 — `@lib/activity/empty.ts` 를 같이 고치거나, 그 줄을 "
+        "`project_id=None` 으로 쓰세요:\n  "
+        + "\n  ".join(f"{a}  ({w})" for a, w in unexpected)
+    )
+
+    #: ⚠️ **예외가 낡는 것도 잽니다** (결함 306). 성문을 만들기 시작하면
+    #: 위 예외의 전제가 깨지므로, 그때는 화면 문장을 같이 정해야 합니다.
+    makers = []
+    for path in sorted(REPO_ROOT.glob("backend/teamflow/**/*.py")):
+        source = path.read_text(encoding="utf-8")
+        code = _blanked(source)
+        #: ⚠️ **자가 두 번 틀렸습니다.**
+        #: ① `class Voiceprint(Base)` 라는 **선언**을 만드는 것으로 셌습니다
+        #:    (결함 240 의 부류).
+        #: ② 그것을 막으려고 `(?<![A-Za-z_.])` 를 달았더니 이번엔 **`.` 를
+        #:    막아** 이 저장소가 실제로 쓰는 `m.Voiceprint(` 를 못 봤습니다 —
+        #:    심어도 초록이었습니다. 막을 것은 `class` 뿐입니다.
+        for hit in re.finditer(r"(?<![A-Za-z_])Voiceprint\(", code):
+            before = code[max(0, hit.start() - 20) : hit.start()]
+            if before.rstrip().rstrip(".").endswith("class"):
+                continue
+            if before.endswith("."):
+                #: `m.Voiceprint(` · `models.Voiceprint(` 는 만드는 것입니다.
+                pass
+            makers.append(
+                f"{path.relative_to(REPO_ROOT)}:{code[: hit.start()].count(chr(10)) + 1}"
+            )
+    assert not makers, (
+        "성문을 만드는 코드가 생겼습니다. 그러면 종료된 프로젝트에서 "
+        "`voiceprint_revoked` 가 **사람 없이** 활동 기록에 뜹니다 — 활동 화면의 "
+        "「사람이 손으로 내린 결정만 쌓입니다」를 같이 정하세요:\n  "
+        + "\n  ".join(makers)
+    )
+
+
 def test_the_product_description_does_not_promise_hand_made_tasks() -> None:
     """⛔ **사용자가 읽는 문서**가 없는 길을 약속했습니다 (결함 317).
 
