@@ -216,8 +216,16 @@ export function callWarnings(
   const failed = peers.filter((p) => p.state === 'failed');
   if (failed.length) {
     const names = failed.map((p) => p.name).join(', ');
+    /* ⚠️ **되받는 말이 인원수와 맞아야 합니다** (결함 403). 예전에는 몇
+       명이든 「그 사람에게는」이었습니다. 셋이 통화하다 하나가 끊기는
+       상황을 처음 만들어 보니 「김민수, 이하늘과 연결하지 못했습니다.
+       **그 사람에게는** 내 목소리가 가지 않습니다.」였습니다 — 이름은
+       둘인데 받는 이가 하나라, 둘 중 하나만 못 듣는 것으로 읽힙니다.
+       옆의 같은 모양(`contribution/view.ts` 의 나간 사람 안내)은 되받는
+       말을 아예 안 쓰거나 「남은 사람들」로 씁니다. */
+    const them = failed.length === 1 ? '그 사람에게는' : '그 사람들에게는';
     problems.push(
-      `${withJosa(names, '과와')} 연결하지 못했습니다. 그 사람에게는 내 목소리가 가지 않습니다.`,
+      `${withJosa(names, '과와')} 연결하지 못했습니다. ${them} 내 목소리가 가지 않습니다.`,
     );
   }
   return problems;

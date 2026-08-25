@@ -207,6 +207,27 @@ describe('describeCall', () => {
 });
 
 describe('callWarnings', () => {
+  /*
+   * 결함 403 — 되받는 말이 인원수와 맞는가.
+   *
+   * ⚠️ 셋이 통화하다 하나가 끊기는 상황을 이 저장소에서 처음 만들어 보고
+   *    나왔습니다. 씨앗은 늘 둘이라 `failed` 가 둘 이상인 갈래가 한 번도
+   *    안 그려져 있었습니다.
+   */
+  it('⭐ 못 붙은 사람이 여럿이면 「그 사람」이라고 되받지 않는다', () => {
+    const many = callWarnings([], [view(2, 'failed'), view(3, 'failed')], true);
+    const line = many.find((t) => t.includes('연결하지 못했습니다'));
+    ok(line, `못 붙었다는 말이 없습니다: ${JSON.stringify(many)}`);
+    ok(!/그 사람에게는/.test(line as string), `둘인데 하나로 되받습니다 — ${line}`);
+    ok(/그 사람들에게는/.test(line as string), line as string);
+  });
+
+  it('한 사람이면 그대로 「그 사람」이다', () => {
+    const one = callWarnings([], [view(2, 'failed')], true);
+    const line = one.find((t) => t.includes('연결하지 못했습니다'));
+    ok(/그 사람에게는/.test(line as string), line as string);
+  });
+
   it('⭐ 마이크가 없으면 내 발언이 하나도 기록되지 않는다', () => {
     const problems = callWarnings([], [], false);
     strictEqual(problems.length, 1);
