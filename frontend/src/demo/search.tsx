@@ -27,6 +27,7 @@ import {
   canSearch,
   describeKind,
   excerpt,
+  filterScopeNote,
   groupByKind,
   hrefFor,
   type Hit,
@@ -74,6 +75,13 @@ function App() {
    *  자릅니다 — 안 그러면 타자를 칠 때마다 이미 찾은 결과의 하이라이트가
    *  따라 움직입니다. */
   const [asked, setAsked] = useState('');
+  /** 무엇으로 걸러 찾은 결과인가. ⚠️ `asked` 와 **같은 이유**로 따로
+   *  둡니다 — 고르기만 하고 안 누른 값으로 「업무에만 걸렸습니다」라고
+   *  말하면 그 줄이 결과보다 앞서 갑니다 (결함 390). */
+  const [askedFilters, setAskedFilters] = useState<{
+    assignee: string;
+    status: string;
+  } | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -121,6 +129,7 @@ function App() {
     }
     setFailure(null);
     setAsked(query.trim());
+    setAskedFilters(filters);
     setHits((await response.json()) as Hit[]);
   }, [query, assignee, taskStatus]);
 
@@ -157,8 +166,13 @@ function App() {
 
       <div className="filters">
         <span className="fitem">
+          {/* ⚠️ 「업무」가 붙어 있어야 합니다 (결함 390). 이 칸은 서버의
+              **업무 검색 조건**이고(`search_tasks` — SEARCH-002) 회의·회의
+              내용·GitHub 은 낱말만 봅니다. 옆 칸이 「업무 상태」라고 적는
+              동안 이 칸만 안 적어서, 김민수로 걸러 놓고 박지원의 발언이
+              나왔습니다. */}
           <label className="clabel" htmlFor="who">
-            담당자
+            업무 담당자
           </label>
           <select id="who" value={assignee} onChange={(event) => setAssignee(event.target.value)}>
             <option value="">누구든</option>
@@ -239,11 +253,17 @@ function App() {
           html={emptyHtml({
             what: '찾는 것이 없습니다',
             why: '이 프로젝트 안에서만 찾습니다 — 다른 팀 자료는 나오지 않습니다.',
-            how: '다른 낱말로 찾거나, 담당자·상태만으로 찾아보세요.',
+            how: '다른 낱말로 찾거나, 업무 담당자·상태만으로 찾아보세요.',
           })}
         />
       ) : (
-        groupByKind(hits).map((group) => (
+        <>
+          {/* ⚠️ 걸린 데까지만 말합니다 — 안 걸린 묶음이 **실제로 있을 때만**
+              나옵니다 (결함 390 · 294 의 방법). */}
+          {filterScopeNote(askedFilters, groupByKind(hits)) !== null && (
+            <p className="cwhy scope-note">{filterScopeNote(askedFilters, groupByKind(hits))}</p>
+          )}
+          {groupByKind(hits).map((group) => (
           <section key={group.kind} className="kgroup">
             {/* ⚠️ 종류 순서는 **고정**입니다 — 건수 순으로 세우면 그게 곧
                 순위표이고, 새로고침마다 자리가 바뀝니다. */}
@@ -272,7 +292,8 @@ function App() {
               })}
             </ul>
           </section>
-        ))
+          ))}
+        </>
       )}
     </>
   );
