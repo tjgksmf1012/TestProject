@@ -10326,3 +10326,58 @@ describe('결함 392 — 팀 전원의 숫자를 쓰는 일은 **두 뿌리 다*
     );
   });
 });
+
+describe('결함 394 — 끊긴 자리는 **글자로도** 있다 (마우스 전용이 아니다)', () => {
+  /* ## ⛔ 「22~23분 · 마이크가 꺼져 있었습니다」에 닿는 길이 마우스뿐이었습니다
+   *
+   * 레거시 로비의 트랙 그림은 구멍마다 8px 짜리 `<i>` 를 그리고, 그 값을
+   * **`title` 에만** 넣었습니다. 그 요소는 글자도 초점도 없습니다 —
+   *
+   *   · 키보드: 포커스 가능 목록에 없어 **닿지 못합니다**
+   *   · 터치:   hover 가 없습니다
+   *   · 고대비: 채움이 배경색으로 덮여 **표시 자체가 안 보입니다**(결함 393)
+   *
+   * 그런데 바로 위 줄은 「커버리지 42% — 이 사람의 발언량은 측정할 수
+   * 없습니다」이고, 홈은 이 화면으로 보내며 「트랙이 온전한지 확인하세요」
+   * 라고 합니다. 확인할 값이 마우스 뒤에 있으면 그 지시가 반쪽입니다.
+   *
+   * SPA 는 같은 값을 「?」 팝오버 안에 **글자로** 그리고 있었습니다 —
+   * 판단(`describeGap`)은 이미 `@lib` 한 벌이고 갈린 것은 **그리는 방법**
+   * 뿐이었습니다. 「한쪽 뿌리만」의 되풀이입니다.
+   *
+   * ⚠️ 이 가드가 못 보는 것: **다른 화면**의 `title` 전용 값. 같은 부류를
+   * 화면 전체로 세는 자는 아직 없습니다.
+   */
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'lobby.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx')],
+  ];
+
+  for (const [rootName, path] of ROOTS) {
+    it(`⭐ ${rootName} — describeGap 을 **글자 자리**에도 그린다`, () => {
+      const code = readFileSync(path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+      const calls = [...code.matchAll(/describeGap\(/g)];
+      ok(calls.length > 0, `${rootName} 가 describeGap 을 한 번도 안 부릅니다`);
+      /* `title={describeGap(...)}` 뿐인가, 아니면 자식으로도 그리는가.
+         ⚠️ 「부르는가」만 세면 `title` 하나로 초록입니다 — 결함 306 이
+         라우트에서 겪은 그것을 한 파일 안에 댄 것입니다. */
+      const asTitle = [...code.matchAll(/title=\{\s*describeGap\(/g)].length;
+      ok(
+        calls.length > asTitle,
+        `${rootName} 의 describeGap 이 ${asTitle}곳 전부 title 입니다 — ` +
+          '키보드·터치·고대비에서 그 값에 닿는 길이 없습니다',
+      );
+    });
+  }
+
+  it('⭐ `@lib` 의 주석이 「툴팁 전용」이라고 말하지 않는다', () => {
+    /* 주석은 아무것도 안 막지만, **다음 사람이 그 말을 믿습니다** —
+       레거시가 `title` 에만 넣은 이유가 정확히 그 한 줄이었습니다. */
+    const lib = readFileSync(join(ROOT, 'src', 'lib', 'track', 'diagram.ts'), 'utf8');
+    const head = lib.slice(lib.indexOf('describeGap') - 700, lib.indexOf('export function describeGap'));
+    ok(
+      !/툴팁에 씁니다\s*\./.test(head) || /툴팁 전용이 아닙니다/.test(head),
+      '`describeGap` 주석이 아직 「툴팁에 씁니다」로 끝납니다 — 그 말이 결함 394 를 만들었습니다',
+    );
+  });
+});

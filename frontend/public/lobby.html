@@ -39,6 +39,15 @@
   li .warn { grid-column: 1 / -1; margin: 0; padding-left: 1.1em; }
   li .warn li { display: list-item; grid-template-columns: none; padding: 0; }
 
+  /* 끊긴 자리를 **글자로** (결함 394). 트랙 그림은 위에 그대로 있고,
+     여기서는 같은 값을 읽을 수 있게 적습니다 — 그림에만 있으면 키보드·
+     터치·고대비에서 닿는 길이 없습니다.
+     ⚠️ `.warn` 과 **같은 칸**을 씁니다. 안 걸면 첫 칸(7rem)에 떨어져 한
+     줄에 한두 낱말씩 쪼개집니다 — 바로 위 주석이 겪은 그것입니다. */
+  li .gaps { grid-column: 2; margin: 0; padding-left: 1.1em;
+             font-size: var(--fs-caption); color: var(--text-subtle); }
+  li .gaps li { display: list-item; grid-template-columns: none; padding: 0; }
+
   /* 시간축 — 트랙과 같은 격자에 맞춘다. 안 맞으면 눈금이 가리키는
      시각이 트랙의 그 자리와 어긋난다. */
   .axis { display: grid; grid-template-columns: 7rem 1fr; gap: 0 var(--sp-3);
