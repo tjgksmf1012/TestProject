@@ -50,10 +50,12 @@ import {
   offerableReactions,
   sendBlockedReason,
   streamClosedNote,
+  quoteFor,
   voiceChannelNote,
   type ChatChannel,
   type ChatMessage,
   type ReactionChoice,
+  type QuoteView,
 } from '../lib/chat/view.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
@@ -257,7 +259,7 @@ function Reactions({
 
 function Row({
   message,
-  parent,
+  quote,
   runOn,
   meId,
   busy,
@@ -270,7 +272,7 @@ function Row({
   choices,
 }: {
   message: ChatMessage;
-  parent: ChatMessage | undefined;
+  quote: QuoteView | null;
   runOn: boolean;
   meId: number | null;
   busy: boolean;
@@ -284,14 +286,20 @@ function Row({
 }) {
   return (
     <li className={runOn ? 'msg run' : 'msg'}>
-      {parent !== undefined && (
-        // ⚠️ 답글이 무엇에 달렸는지 **여기 보여 줍니다.** 안 보이면
-        //    "근거 #5" 라고 적어 놓고 원문을 볼 방법이 없던 그 실패입니다.
-        <p className="mquote">
-          <span className="qwho">{parent.author_name}</span>
-          <span className="qbody">{parent.deleted ? DELETED_TEXT : parent.body}</span>
-        </p>
-      )}
+      {/* ⚠️ 답글이 무엇에 달렸는지 **여기 보여 줍니다.** 안 보이면
+          "근거 #5" 라고 적어 놓고 원문을 볼 방법이 없던 그 실패입니다.
+          ⚠️ 원글이 **아직 안 불러온 앞쪽**에 있으면 예전에는 이 자리를
+          통째로 비웠고, 그러면 답글이 평범한 글로 보였습니다(결함 419).
+          판단은 `@lib` 의 `quoteFor` 가 합니다. */}
+      {quote !== null &&
+        (quote.kind === 'quote' ? (
+          <p className="mquote">
+            <span className="qwho">{quote.who}</span>
+            <span className="qbody">{quote.body}</span>
+          </p>
+        ) : (
+          <p className="mquote">{quote.note}</p>
+        ))}
       {!runOn && (
         <p className="mhead">
           <span className="mwho">{message.author_name}</span>
@@ -973,11 +981,7 @@ function App() {
                       <Row
                         key={message.id}
                         message={message}
-                        parent={
-                          message.reply_to_id === null
-                            ? undefined
-                            : messages.find((m) => m.id === message.reply_to_id)
-                        }
+                        quote={quoteFor(message.reply_to_id, messages)}
                         runOn={continuesRun(group.messages[i - 1], message)}
                         meId={me?.user_id ?? null}
                         busy={sending}

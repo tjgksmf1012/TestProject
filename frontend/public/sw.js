@@ -63,7 +63,7 @@ const SHELL = [
   '/chunk-4BXKYMUD.js',
   '/chunk-4EUAFZWM.js',
   '/chunk-4N2WSGUL.js',
-  '/chunk-5ZZG3XHU.js',
+  '/chunk-6FCXZ5PF.js',
   '/chunk-6XLEMQOB.js',
   '/chunk-FKLUUZLM.js',
   '/chunk-FLPN24SJ.js',

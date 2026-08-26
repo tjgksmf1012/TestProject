@@ -14,10 +14,12 @@ import {
   dayGroups,
   describeDay,
   describeTime,
+  DELETED_TEXT,
   mentionSegments,
   reactionAriaLabel,
   reactionIcon,
   offerableReactions,
+  quoteFor,
   sendBlockedReason,
   type ChatChannel,
   type ChatMessage,
@@ -412,5 +414,55 @@ describe('⛔ `@이름` 을 고르는 규칙이 **서버와 같다** (결함 411
   it('⚠️ 사례가 **양쪽 답을 다 만든다** — 전부 빈 목록이면 아무것도 안 잰다', () => {
     const empties = new Set(cases().map((c) => c.picked.length === 0));
     deepStrictEqual([...empties].sort(), [false, true]);
+  });
+});
+
+describe('답글이 **무엇에 달렸는지** (결함 419)', () => {
+  const msg = (over: Partial<ChatMessage> = {}): ChatMessage =>
+    ({
+      id: 1,
+      channel_id: 2,
+      author_id: 3,
+      author_name: '이하늘',
+      body: '원글입니다',
+      reply_to_id: null,
+      created_at: '2026-08-26T05:00:00Z',
+      edited_at: null,
+      deleted: false,
+      mentions: [],
+      reactions: [],
+      my_reaction: null,
+      ...over,
+    }) as ChatMessage;
+
+  it('답글이 아니면 아무것도 안 그린다', () => {
+    strictEqual(quoteFor(null, [msg()]), null);
+  });
+
+  it('⭐ 원글이 창 안에 있으면 **인용**한다', () => {
+    deepStrictEqual(quoteFor(1, [msg()]), {
+      kind: 'quote',
+      who: '이하늘',
+      body: '원글입니다',
+    });
+  });
+
+  it('⛔ 원글이 **아직 안 불러온 앞쪽**이면 그렇게 말한다 — 조용히 비우지 않는다', () => {
+    // 서버는 최신 50개만 줍니다(`MESSAGE_PAGE`). 55개짜리 채널에서
+    // 앞쪽 글에 단 답글이 **평범한 글처럼** 보였습니다.
+    const view = quoteFor(99, [msg()]);
+    strictEqual(view?.kind, 'older');
+    ok(
+      view.kind === 'older' && view.note.includes('이전 대화 더 보기'),
+      '갈 자리를 안 가리킵니다 — 말만 하고 문을 안 주면 실패 ③ 입니다',
+    );
+  });
+
+  it('⚠️ 지워진 원글은 **본문을 되살리지 않는다**', () => {
+    deepStrictEqual(quoteFor(1, [msg({ deleted: true })]), {
+      kind: 'quote',
+      who: '이하늘',
+      body: DELETED_TEXT,
+    });
   });
 });

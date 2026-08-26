@@ -320,6 +320,48 @@ export function mentionSegments(body: string, names: readonly string[]): Segment
 }
 
 // ══════════════════════════════════════════════════════════════
+// 답글이 무엇에 달렸는가
+// ══════════════════════════════════════════════════════════════
+
+/** 답글 위에 그릴 것. `null` 이면 답글이 아닙니다. */
+export type QuoteView =
+  | { kind: 'quote'; who: string; body: string }
+  /** 원글이 **아직 안 불러온 앞쪽**에 있습니다. */
+  | { kind: 'older'; note: string };
+
+/**
+ * 답글 한 줄이 **무엇에 달렸는지** 어떻게 보여 줄 것인가.
+ *
+ * ⚠️ 예전에는 화면이 `messages.find(m => m.id === reply_to_id)` 로 찾고
+ * **못 찾으면 아무것도 안 그렸습니다.** 서버는 최신 50개만 주므로
+ * (`MESSAGE_PAGE`), 앞쪽 글에 단 답글은 **평범한 글처럼** 보였습니다 —
+ * 55개짜리 채널에서 재현했습니다(결함 419). 답글인 줄도 모르니 「무엇에
+ * 단 거지」를 물을 수조차 없습니다.
+ *
+ * ⚠️ **원글을 따로 가져오지 않습니다.** 화면에는 이미 「이전 대화 더 보기」가
+ * 있고(결함 315), 그걸 누르면 원글이 올라와 인용이 그대로 그려집니다.
+ * 없는 기능을 만드는 대신 **모른다고 말하고 갈 자리를 가리킵니다.**
+ */
+export function quoteFor(
+  replyToId: number | null,
+  loaded: readonly ChatMessage[],
+): QuoteView | null {
+  if (replyToId === null) return null;
+  const parent = loaded.find((m) => m.id === replyToId);
+  if (parent === undefined) {
+    return {
+      kind: 'older',
+      note: '이전 대화의 글에 단 답글입니다 — 위의 「이전 대화 더 보기」로 찾을 수 있습니다',
+    };
+  }
+  return {
+    kind: 'quote',
+    who: parent.author_name,
+    body: parent.deleted ? DELETED_TEXT : parent.body,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
 // 실시간 통로가 끊겼을 때
 // ══════════════════════════════════════════════════════════════
 
