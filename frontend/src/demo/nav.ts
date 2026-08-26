@@ -112,19 +112,46 @@ function paint(context: NavContext, shell: ShellData = {}): void {
     const name = shellHeading(shell.projectTitle);
     const heading = `<p class="chan-project" title="${escapeHtml(name)}">${escapeHtml(name)}</p>`;
 
-    tabHost.innerHTML = navTabs(context)
+    const tabs = navTabs(context);
+
+    // ⚠️ **막힌 탭의 이유가 `title` 에만 있었습니다** (결함 413).
+    //    `<a>` 는 `href` 가 없으면 **초점을 아예 못 받습니다** — 재 보니
+    //    `focus()` 를 직접 불러도 안 잡혔고, 이유는 본문 글자에 0회라
+    //    마우스를 올릴 수 있는 사람만 알 수 있었습니다. SPA 레일은
+    //    결함 219 에서 이미 고쳐 뒀습니다(`tabIndex` + `aria-describedby`
+    //    + 숨은 문단 한 벌) — 여기만 옛 모양이었습니다.
+    //
+    // ⚠️ 이유가 **같은 문장이면 문단 한 벌**만 둡니다. 항목마다 되풀이하면
+    //    낭독기가 같은 말을 세 번 읽습니다. 지금은 `links.ts` 가 한 문장만
+    //    주지만 늘어날 수 있으므로 **다른 문장마다** 하나씩 만듭니다.
+    const reasons: string[] = [];
+    for (const tab of tabs) {
+      if (tab.blockedReason !== null && !reasons.includes(tab.blockedReason)) {
+        reasons.push(tab.blockedReason);
+      }
+    }
+    const whyId = (reason: string): string => `tab-blocked-why-${reasons.indexOf(reason)}`;
+
+    tabHost.innerHTML = tabs
       .map((tab) => {
         // 못 가는 탭은 `<a href>` 를 주지 않는다. 주면 눌렸을 때
         // `?project=null` 로 가고, 서버는 404 를 주고, 사람은 화면이
         // 고장 났다고 읽는다.
         const href = tab.enabled ? ` href="${escapeHtml(tab.href)}"` : '';
-        const disabled = tab.enabled ? '' : ' aria-disabled="true"';
+        // ⚠️ 주소가 없으면 **초점도 없습니다** — 손으로 넣어 줍니다.
+        //    막힌 표시와 한 덩어리로 둡니다: 셋은 언제나 같이 붙고,
+        //    나누면 이스케이프 예외만 하나 더 늘어납니다.
+        const disabled = tab.enabled
+          ? ''
+          : ' role="link" tabindex="0" aria-disabled="true"';
         const marked = tab.current ? ' aria-current="page"' : '';
-        const title = tab.blockedReason
-          ? ` title="${escapeHtml(tab.blockedReason)}"`
-          : '';
+        const why =
+          tab.blockedReason === null
+            ? ''
+            : ` title="${escapeHtml(tab.blockedReason)}"` +
+              ` aria-describedby="${escapeHtml(whyId(tab.blockedReason))}"`;
         return (
-          `<a${href}${disabled}${marked}${title}>` +
+          `<a${href}${disabled}${marked}${why}>` +
           // ⚠️ `iconSvg` 는 **이스케이프하지 않습니다.** `icons.ts` 의
           // 상수 마크업이라 안전하고, 이스케이프하면 태그가 글자로
           // 나옵니다. 그 파일이 상수만 담는지는 테스트가 고정합니다.
@@ -134,6 +161,19 @@ function paint(context: NavContext, shell: ShellData = {}): void {
         );
       })
       .join('');
+
+    // 막힌 탭들이 가리키는 자리. 눈에는 탭이 흐린 것으로 이미 보이므로
+    // 글자를 더하지 않고 낭독기에만 답니다.
+    tabHost.insertAdjacentHTML(
+      'beforeend',
+      reasons
+        .map(
+          (reason) =>
+            `<p id="${escapeHtml(whyId(reason))}" class="visually-hidden">` +
+            `${escapeHtml(reason)}</p>`,
+        )
+        .join(''),
+    );
 
     // ⚠️ 머리말은 탭 **앞**에 넣습니다. `innerHTML` 에 같이 이어 붙이지
     // 않는 이유는 위 `.map` 이 탭만 만드는 자리이기 때문입니다 — 거기에

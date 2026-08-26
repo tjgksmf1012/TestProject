@@ -4119,7 +4119,9 @@ _ESCAPE_EXEMPT: dict[tuple[str, str], str] = {
     ),
     ("frontend/src/demo/main.ts", "note?.tone ?? 'gap'"): "위와 같음",
     ("frontend/src/demo/nav.ts", "disabled"): (
-        "`const disabled = tab.enabled ? '' : ' aria-disabled=\"true\"'` — 리터럴 둘"
+        "`const disabled = tab.enabled ? '' : ' role=\"link\" tabindex=\"0\" "
+        "aria-disabled=\"true\"'` — 리터럴 둘. ⚠️ 셋을 한 덩어리로 두는 이유는 "
+        "언제나 같이 붙기 때문입니다 (결함 413)"
     ),
     ("frontend/src/demo/nav.ts", "marked"): "`marked` 도 리터럴 둘",
     ("frontend/src/demo/nav.ts", "current"): (

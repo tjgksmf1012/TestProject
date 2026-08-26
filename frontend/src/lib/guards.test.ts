@@ -7407,17 +7407,24 @@ describe('막힌 것에 **키보드로 닿는다** (결함 219)', () => {
    * 읽습니다.** 약속이 그 사람들에게만 거짓이었습니다.
    */
   it('⭐ `aria-disabled` 를 단 것은 초점을 받을 수 있어야 한다', () => {
-    const base = join(ROOT, '..', 'webapp', 'src');
+    // ⚠️ **두 뿌리를 다 걷습니다** (결함 413). 이 가드는 오래도록
+    //    `webapp/src` 만 걸었고, 그동안 레거시 셸의 막힌 탭 셋이
+    //    `href` 도 `tabindex` 도 없이 **초점을 아예 못 받는** 채였습니다
+    //    — `focus()` 를 직접 불러도 안 잡혔습니다. 결함 286 이 적어 둔
+    //    「걷는 자리가 한쪽뿐인지 보십시오」 그대로입니다.
+    const roots = [join(ROOT, '..', 'webapp', 'src'), join(ROOT, 'src', 'demo')];
     const offenders: string[] = [];
+    const seen: Record<string, number> = {};
 
-    const walk = (dir: string) => {
+    const walk = (base: string, dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) {
-          walk(full);
+          walk(base, full);
           continue;
         }
         if (!entry.name.endsWith('.tsx')) continue;
+        if (entry.name.endsWith('.test.tsx')) continue;
         // ⚠️ **주석을 먼저 걷어냅니다.** 안 걷으면 여는 태그 사이에 낀
         //    주석의 `<a>` 같은 글자에서 `>` 를 만나 **태그가 잘립니다** —
         //    고친 코드를 위반이라고 했습니다. 규칙이 아니라 재는 법이
@@ -7433,15 +7440,57 @@ describe('막힌 것에 **키보드로 닿는다** (결함 219)', () => {
           if (m[1] === 'a' && /href=["'{][^>]*/.test(tag) && !/undefined/.test(tag)) continue;
           offenders.push(`${full.slice(base.length + 1)} — <${m[1]} aria-disabled …>`);
         }
+        seen[base] = (seen[base] ?? 0) + [...code.matchAll(/aria-disabled/g)].length;
       }
     };
-    walk(base);
+    for (const base of roots) walk(base, base);
+
+    // ⚠️ **안 보고 있는 상태 자체가 실패입니다** (결함 286). 한 뿌리에서
+    //    한 건도 못 봤으면 자가 낡은 것입니다.
+    for (const base of roots) {
+      ok((seen[base] ?? 0) > 0, `${base} 에서 aria-disabled 를 하나도 못 봤습니다 — 자가 낡았습니다`);
+    }
 
     strictEqual(
       offenders.join('\n  '),
       '',
       '막혔는데 탭으로 닿을 수 없습니다 — 사유가 있어도 낭독기가 못 읽습니다',
     );
+  });
+
+  /*
+   * ⚠️ **자가 못 보는 것**: 위 검사는 JSX 여는 태그를 정규식으로 읽으므로
+   *    레거시 셸(`demo/nav.ts`)처럼 **문자열을 이어 붙여** 만드는 마크업은
+   *    구조적으로 못 봅니다. 그 자리는 아래에서 요구로 잽니다.
+   */
+  describe('레거시 셸의 막힌 탭 (결함 413)', () => {
+    const nav = () =>
+      codeOf(readFileSync(join(ROOT, 'src', 'demo', 'nav.ts'), 'utf8'));
+
+    it('⭐ 막힌 탭에 **초점을 준다** — `<a>` 는 `href` 가 없으면 못 받는다', () => {
+      const code = nav();
+      ok(
+        /aria-disabled="true"/.test(code),
+        '막힌 탭을 못 찾았습니다 — 가드가 낡았습니다',
+      );
+      ok(
+        /tabindex="0"/.test(code),
+        '막힌 탭이 초점을 못 받습니다 — 키보드로는 있는지도 모릅니다',
+      );
+    });
+
+    it('⛔ 사유가 `title` **에만** 있지 않다 — 가리키는 자리도 실제로 그린다', () => {
+      const code = nav();
+      ok(
+        /aria-describedby="\$\{escapeHtml\(whyId\(/.test(code),
+        '막힌 탭이 사유를 가리키지 않습니다 — 마우스에만 남습니다',
+      );
+      // 가리키기만 하고 안 그리면 낭독기는 아무 말도 안 읽습니다.
+      ok(
+        /<p id="\$\{escapeHtml\(whyId\(/.test(code),
+        '가리키는 자리를 안 그립니다 — `aria-describedby` 가 허공을 가리킵니다',
+      );
+    });
   });
 
   it('⚠️ 사유가 `title` **에만** 있지 않다 — 마우스를 올릴 수 있는 사람만 본다', () => {
