@@ -49,6 +49,7 @@ import {
   reactionIcon,
   offerableReactions,
   sendBlockedReason,
+  streamClosedNote,
   voiceChannelNote,
   type ChatChannel,
   type ChatMessage,
@@ -520,6 +521,17 @@ function App() {
     } catch {
       return;
     }
+    // ⚠️ 우리가 닫는 것과 저쪽이 끊는 것을 갈라야 합니다 — 채널을
+    //    옮길 때마다 「끊겼습니다」가 뜨면 그 말이 닳습니다.
+    let onPurpose = false;
+
+    socket.onclose = () => {
+      const say = streamClosedNote(onPurpose);
+      // ⚠️ 이 화면의 `Note` 는 `'bad' | 'plain'` 둘뿐입니다 — 세 번째를
+      //    만들지 않습니다. 서버에 못 닿는 다른 문구들과 같은 부류이므로
+      //    같은 톤을 씁니다.
+      if (say !== null) setNote({ text: say, tone: 'bad' });
+    };
     socket.onmessage = (event: MessageEvent<string>) => {
       let payload: { kind?: string; message?: ChatMessage };
       try {
@@ -541,7 +553,10 @@ function App() {
         return merged;
       });
     };
-    return () => socket.close();
+    return () => {
+      onPurpose = true;
+      socket.close();
+    };
   }, [openId]);
 
   useEffect(() => {

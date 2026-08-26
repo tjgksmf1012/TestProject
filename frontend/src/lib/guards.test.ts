@@ -3855,6 +3855,55 @@ describe('신뢰도 한 줄은 **누구를 잰 값인지** 말한다 (결함 384
   });
 });
 
+describe('소켓이 끊기면 **화면이 말한다** (결함 416)', () => {
+  /*
+   * 이 저장소의 WebSocket 은 둘입니다 — 통화(`call.ts`)와 채팅(`chat.tsx`).
+   * 통화는 `onclose` 에서 「통화가 끊겼습니다 · 새로고침하면 다시 붙습니다」
+   * 라고 말하고 그 위에 이유까지 적어 뒀습니다: 「⚠️ 조용히 닫히면 화면은
+   * 통화 중인 줄 안다.」 채팅에는 `onclose` 가 **아예 없었습니다.**
+   *
+   * 재현: 브라우저 둘로 같은 채널을 열고 서버를 다시 띄우면, 지켜보던
+   * 사람의 화면은 아무 말도 안 하고 그 뒤에 온 글이 **영영 안 옵니다**
+   * (줄 수 7 → 7). 새로고침하면 8 줄입니다.
+   *
+   * ⚠️ **「안 붙는 것」은 그대로 조용합니다** — 기록된 결정입니다(화면이
+   *    방금 HTTP 로 읽어 와 최신이라 사람이 할 일이 없습니다). 여기서
+   *    재는 것은 **붙었다가 끊긴** 갈래뿐입니다.
+   */
+  const sockets: [string, string][] = [
+    ['통화', join(ROOT, 'src', 'demo', 'call.ts')],
+    ['채팅', join(ROOT, 'src', 'demo', 'chat.tsx')],
+  ];
+
+  it('⭐ `new WebSocket` 을 여는 화면은 **전부** `onclose` 를 단다', () => {
+    const missing = sockets
+      .filter(([, path]) => {
+        const code = codeOf(readFileSync(path, 'utf8'));
+        return /new WebSocket\(/.test(code) && !/\.onclose\s*=/.test(code);
+      })
+      .map(([name]) => name);
+    deepStrictEqual(
+      missing,
+      [],
+      '소켓이 조용히 닫힙니다 — 화면은 살아 있는 줄 알고 사람은 낡은 것을 봅니다',
+    );
+  });
+
+  it('⛔ 채팅은 **우리가 닫은 것**과 저쪽이 끊은 것을 가른다', () => {
+    // 채널을 옮길 때마다 「끊겼습니다」가 뜨면 그 말이 닳습니다.
+    const code = codeOf(readFileSync(join(ROOT, 'src', 'demo', 'chat.tsx'), 'utf8'));
+    ok(
+      /streamClosedNote\(/.test(code),
+      '채팅이 `@lib` 의 판단을 안 거칩니다 — 화면이 문장을 직접 짜면 검사 밖입니다',
+    );
+    const cleanup = /return \(\) => \{([\s\S]{0,200}?)\};/.exec(code)?.[1] ?? '';
+    ok(
+      /onPurpose\s*=\s*true/.test(cleanup),
+      '치울 때 「우리가 닫았다」를 안 적습니다 — 채널만 옮겨도 끊겼다고 합니다',
+    );
+  });
+});
+
 describe('설정 탭의 **묶음 이름**은 `title=` 에만 있으면 안 된다 (결함 412)', () => {
   /*
    * SPA 설정의 탭은 `내 설정`(역할과 가중치·GitHub 계정·내 정보)과
