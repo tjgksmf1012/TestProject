@@ -3950,6 +3950,114 @@ describe('근거 발화를 **세었으면 볼 문**도 준다 (결함 418)', () 
   });
 });
 
+describe('셸마다 **본문 표지**가 있다 (결함 421)', () => {
+  /*
+   * 이 제품에는 셸이 셋입니다 — 레거시 React 화면 열셋(`demo/nav.ts` 가
+   * 셸을 그립니다) · SPA 의 `AppShell` · SPA 밖 정적 화면 둘(녹음 · 통화).
+   * 표지(`<main id="main-content">`)를 **레거시만** 안 그리고 있었습니다.
+   *
+   * 재현(브라우저): 레거시 홈은 컨트롤 스물 중 **열여섯이 어느 표지에도
+   * 안 들어** 있었고, 낭독기의 표지 목록에는 내비 둘만 있고 본문이
+   * 없었습니다. `#main-content` 는 화면 열셋 전부에서 **0개**였습니다.
+   *
+   * ⚠️ **「건너뛰기 링크가 없다」는 결함이 아닙니다 — 재 보고 갈랐습니다.**
+   * WCAG 2.4.1 이 요구하는 것은 되풀이되는 덩어리를 **지나갈 수 있을 것**
+   * 이고, 그 내비를 본문 **뒤에** 두는 것도 같은 요구를 만족시킵니다.
+   * Tab 순서를 재니 레거시는 `Tab 1 = 본문 · 67 = #nav · 72 = #tabs`,
+   * SPA 는 `Tab 1 = 건너뛰기 · 2~6 = 레일 · 7 = 본문` 이었습니다. 레거시에
+   * 링크를 달면 모든 키보드 사용자에게 Tab 한 번을 더 물리면서 아무 데도
+   * 안 데려갑니다. 그래서 안 달았고, **왜 안 달았는지**를 `skip.ts` 와
+   * `nav.ts` 에 적어 두었습니다.
+   *
+   * ⛔ **이 자가 못 보는 것**: 「지나갈 수 있는가」 자체는 Tab 순서라
+   * 브라우저 없이 못 잽니다. `docs/24` 에 재는 방법을 적어 두었습니다.
+   */
+  const libSkip = () => readFileSync(join(LIB, 'nav', 'skip.ts'), 'utf8');
+  const idOf = (code: string): string => {
+    const m = /export const MAIN_LANDMARK_ID = '([^']+)'/.exec(code);
+    ok(m !== null, '`MAIN_LANDMARK_ID` 를 못 찾았습니다 — 자가 낡았습니다');
+    return (m as RegExpExecArray)[1] ?? '';
+  };
+  const textOf = (code: string): string => {
+    const m = /export const SKIP_TEXT = '([^']+)'/.exec(code);
+    ok(m !== null, '`SKIP_TEXT` 를 못 찾았습니다 — 자가 낡았습니다');
+    return (m as RegExpExecArray)[1] ?? '';
+  };
+
+  it('⭐ 레거시 셸이 본문 표지를 그린다', () => {
+    const code = codeOf(readFileSync(join(DEMO, 'nav.ts'), 'utf8'));
+    ok(
+      /createElement\('main'\)/.test(code),
+      '레거시 셸에 `main` 표지가 없습니다 — 본문이 어느 표지에도 안 들어갑니다',
+    );
+    ok(
+      /\.id = MAIN_LANDMARK_ID/.test(code),
+      '표지 id 를 `@lib` 에서 안 가져옵니다 — 사본은 갈라집니다',
+    );
+    // 표지로 건너뛴 초점을 받을 수 있어야 합니다.
+    ok(/\.tabIndex = -1/.test(code), '표지가 초점을 못 받습니다 — 건너뛰어도 앉을 자리가 없습니다');
+  });
+
+  it('⭐ SPA 셸이 본문 표지를 그린다 — 같은 이름으로', () => {
+    const code = codeOf(
+      readFileSync(join(ROOT, '..', 'webapp', 'src', 'components', 'AppShell.tsx'), 'utf8'),
+    );
+    ok(
+      /<main[^>]*id=\{MAIN_LANDMARK_ID\}/.test(code),
+      'SPA 표지가 `@lib` 의 이름을 안 씁니다',
+    );
+    ok(/href=\{SKIP_HREF\}/.test(code), 'SPA 건너뛰기 링크가 주소를 손으로 적습니다');
+    ok(/\{SKIP_TEXT\}/.test(code), 'SPA 건너뛰기 링크가 글자를 손으로 적습니다');
+  });
+
+  it('⭐ 정적 화면 둘도 **같은 글자**를 쓴다 — TS 를 못 부르므로 자가 짝을 잰다', () => {
+    /* `index.html`(녹음)·`call.html`(통화)은 React 밖이라 `@lib` 를 부를 수
+       없습니다. 그러면 사본이 셋이 되므로, 여기서 **글자가 같은지**를
+       잽니다(결함 345 의 방법). */
+    const code = libSkip();
+    const id = idOf(code);
+    const text = textOf(code);
+    const missing: string[] = [];
+    for (const name of ['index.html', 'call.html']) {
+      const html = readFileSync(join(PUBLIC, name), 'utf8');
+      if (!new RegExp(`<main id="${id}"[^>]*tabindex="-1"`).test(html)) {
+        missing.push(`${name}: 표지(<main id="${id}" tabindex="-1">)`);
+      }
+      if (!new RegExp(`<a class="skip" href="#${id}">${text}</a>`).test(html)) {
+        missing.push(`${name}: 건너뛰기 링크`);
+      }
+    }
+    deepStrictEqual(missing, [], '정적 화면이 `@lib` 와 다른 글자를 씁니다 — 갈라집니다');
+  });
+
+  it('⛔ 아무도 표지 이름을 **손으로** 적지 않는다', () => {
+    /* ⚠️ 정적 HTML 둘은 예외입니다 — TS 를 못 부르므로 위 검사가 짝을
+       잽니다. 여기서 보는 것은 **코드**입니다. */
+    const id = idOf(libSkip());
+    const roots: { name: string; base: string }[] = [
+      { name: '레거시', base: DEMO },
+      { name: 'SPA', base: join(ROOT, '..', 'webapp', 'src') },
+    ];
+    const hand: string[] = [];
+    for (const { name, base } of roots) {
+      const walk = (dir: string) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) walk(full);
+          else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+            const code = codeOf(readFileSync(full, 'utf8'));
+            if (new RegExp(`['"\`#]${id}['"\`]`).test(code)) {
+              hand.push(`${name} ${entry.name}`);
+            }
+          }
+        }
+      };
+      walk(base);
+    }
+    deepStrictEqual(hand, [], '표지 이름을 손으로 적은 자리가 있습니다 — `@lib` 를 부르십시오');
+  });
+});
+
 describe('미해결 사안의 근거도 **문**이다 (결함 420)', () => {
   /*
    * 서버 `UnresolvedIssueOut` 의 docstring 이 왜 번호를 싣는지 적어 뒀습니다:

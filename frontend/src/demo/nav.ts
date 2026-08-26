@@ -42,6 +42,7 @@ import {
   type RailProject,
 } from '../lib/nav/rail.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
+import { MAIN_LANDMARK_ID } from '../lib/nav/skip.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { tryGet } from '../lib/http/send.ts';
 import { safeApiBase } from '../lib/auth/session.ts';
@@ -100,7 +101,40 @@ interface ShellData {
   projects?: readonly RailProject[];
 }
 
+/**
+ * 본문 표지 (`<main id="main-content">`) — 결함 421.
+ *
+ * 레거시 화면 열셋에는 `main` 이 하나도 없었습니다. 재 보니 레거시 홈은
+ * 컨트롤 스물 중 **열여섯이 어느 표지에도 안 들어** 있었고, 낭독기의 표지
+ * 목록에는 내비 둘만 있고 본문이 없었습니다. SPA·정적 둘은 처음부터
+ * `<main id="main-content">` 입니다.
+ *
+ * ⛔ **건너뛰기 링크는 안 답니다.** 이 셸은 되풀이되는 내비를 본문 **뒤**에
+ * 둡니다(Tab 1 = 본문 · 67 = `#nav`) — 지나갈 것이 앞에 없으므로 링크는
+ * 모든 키보드 사용자에게 Tab 한 번을 더 물리면서 아무 데도 안 데려갑니다.
+ * 자세한 것은 `@lib/nav/skip.ts` 머리말.
+ *
+ * ⚠️ `#app` 을 **감쌉니다.** 그 id 는 화면 열셋이 이름으로 집는 자리라
+ * 바꿀 수 없습니다. `body` 는 격자도 플렉스도 아니라 껍질 한 겹이 배치를
+ * 안 바꿉니다 — 감싸기 전후로 상자를 재서 확인했습니다(결함 313 의 함정:
+ * 채팅의 `.side`·`.cols`·`form.cnew`·채널 60개가 **한 픽셀도** 안 움직임).
+ */
+function paintMainLandmark(): void {
+  const app = document.getElementById('app');
+  if (app === null || document.getElementById(MAIN_LANDMARK_ID) !== null) return;
+
+  const main = document.createElement('main');
+  main.id = MAIN_LANDMARK_ID;
+  // 표지로 건너뛴 초점을 **받을 수 있어야** 합니다. `-1` 은 Tab 순서에
+  // 안 들어가면서 프로그램으로는 초점을 받는 값입니다.
+  main.tabIndex = -1;
+  app.parentNode?.insertBefore(main, app);
+  main.append(app);
+}
+
 function paint(context: NavContext, shell: ShellData = {}): void {
+  paintMainLandmark();
+
   const tabHost = document.getElementById('tabs');
   if (tabHost) {
     const chan = tabHost.querySelector('.chan') ?? document.createElement('div');

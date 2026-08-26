@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { MAIN_LANDMARK_ID, SKIP_HREF, SKIP_TEXT } from '@lib/nav/skip.ts';
 import type { ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useProjects } from '../api/hooks.ts';
@@ -174,8 +175,8 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
           닿습니다 (WCAG 2.4.1, 수준 A). 평소에는 안 보이고 탭으로 초점이
           오면 나타납니다 — **`display: none` 으로 감추면 초점도 못 받아
           아무 일도 안 합니다.** */}
-      <a className="skip" href="#main-content">
-        본문으로 건너뛰기
+      <a className="skip" href={SKIP_HREF}>
+        {SKIP_TEXT}
       </a>
       <nav className="rail" aria-label="주 메뉴">
         <div className="rail__brand">TF</div>
@@ -262,7 +263,7 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
           라는 이동 수단을 잃습니다 — 건너뛰기 링크가 닿을 자리이기도 합니다.
           `tabIndex={-1}` 은 링크로 왔을 때 **초점이 실제로 여기 앉게** 하려는
           것입니다. 없으면 스크롤만 되고 초점은 링크에 남습니다. */}
-      <main className="main" id="main-content" tabIndex={-1}>
+      <main className="main" id={MAIN_LANDMARK_ID} tabIndex={-1}>
         {/* 로그아웃이 실패하면 **레일이 아니라 본문 위**에 말합니다 —
             72px 열에는 문장이 세로로 쪼개집니다. */}
         <Problem>{logoutProblem}</Problem>
