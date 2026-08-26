@@ -20,6 +20,8 @@ export interface Notice {
   task_id: number | null;
   meeting_id: number | null;
   message_id: number | null;
+  /** 그 부름이 있던 채널. 없으면 어느 대화를 열지 모릅니다 (결함 417). */
+  channel_id: number | null;
   /** 저장된 알림만 번호가 있습니다. 마감은 `null`. */
   notification_id: number | null;
   read: boolean;
@@ -97,7 +99,16 @@ export function hrefFor(notice: Notice, projectId: number): string | null {
     return `/lobby.html?meeting=${notice.meeting_id}&project=${projectId}`;
   }
   if (notice.task_id !== null) return `/kanban.html?project=${projectId}`;
-  if (notice.message_id !== null) return `/chat.html?project=${projectId}`;
+  if (notice.message_id !== null) {
+    // ⚠️ **채널을 들고 갑니다** (결함 417). 예전에는 `?project=` 만
+    //    붙여서, 「디자인 채널에서 나를 불렀습니다」를 눌렀는데 채팅이
+    //    **첫 채널**(`#공지`)을 열고 부른 글은 화면에 없었습니다 —
+    //    문장은 자리를 말하는데 링크는 딴 데로 데려갔습니다.
+    //    ⚠️ 채널이 하나뿐이면 기본값이 언제나 맞아서 안 보입니다
+    //    (결함 355 의 함정) — 둘로 만들고서야 드러났습니다.
+    if (notice.channel_id === null) return `/chat.html?project=${projectId}`;
+    return `/chat.html?project=${projectId}&channel=${notice.channel_id}`;
+  }
   return null;
 }
 

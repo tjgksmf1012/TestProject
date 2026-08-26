@@ -20,6 +20,7 @@ function notice(over: Partial<Notice> = {}): Notice {
     task_id: null,
     meeting_id: null,
     message_id: 7,
+    channel_id: 4,
     notification_id: 3,
     read: false,
     ...over,
@@ -43,7 +44,7 @@ describe('보이는 모양', () => {
   });
 
   it('종류마다 갈 곳이 다르다', () => {
-    strictEqual(hrefFor(notice(), 3), '/chat.html?project=3');
+    strictEqual(hrefFor(notice(), 3), '/chat.html?project=3&channel=4');
     strictEqual(
       hrefFor(notice({ message_id: null, task_id: 5 }), 3),
       '/kanban.html?project=3',
@@ -56,6 +57,17 @@ describe('보이는 모양', () => {
 
   it('갈 데가 없으면 `null` — 못 누를 것을 버튼으로 그리지 않는다', () => {
     strictEqual(hrefFor(notice({ message_id: null }), 3), null);
+  });
+
+  it('⭐ 부름은 **그 채널로** 데려간다 — 문장이 말한 자리와 같은 곳 (결함 417)', () => {
+    // 「디자인 채널에서 나를 불렀습니다」를 눌렀는데 `#공지` 가 열렸습니다.
+    // ⚠️ 채널이 하나뿐이면 기본값이 언제나 맞아서 안 보입니다(결함 355).
+    strictEqual(hrefFor(notice({ channel_id: 9 }), 3), '/chat.html?project=3&channel=9');
+    strictEqual(hrefFor(notice({ channel_id: 2 }), 3), '/chat.html?project=3&channel=2');
+  });
+
+  it('⚠️ 채널을 모르면 **지어내지 않는다** — 채팅 화면까지만', () => {
+    strictEqual(hrefFor(notice({ channel_id: null }), 3), '/chat.html?project=3');
   });
 });
 

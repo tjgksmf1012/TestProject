@@ -229,3 +229,50 @@ def test_the_viewer_fields_list_is_not_stale() -> None:
         "`MessageOut` 에 보는 사람 기준으로 보이는 새 칸이 있습니다 — "
         f"`VIEWER_FIELDS` 에 넣을지 정하십시오: {sorted(looks_personal - set(VIEWER_FIELDS))}"
     )
+
+
+# ══════════════════════════════════════════════════════════════
+# 알림이 **어느 대화**로 데려가는가 (결함 417)
+# ══════════════════════════════════════════════════════════════
+
+NOTIFY = REPO_ROOT / "backend" / "teamflow" / "services" / "notification_service.py"
+NOTIFY_VIEW = REPO_ROOT / "frontend" / "src" / "lib" / "notifications" / "view.ts"
+
+
+def test_the_mention_notice_carries_the_channel_number() -> None:
+    """⭐ `Notice.channel_id` 를 **채우는 곳**이 있다.
+
+    ⚠️ 그 칸은 처음부터 있었는데 **아무도 안 채웠습니다.** 상태만 만들고
+    안 채우면 영영 「모름」이고, 「모름」 갈래는 대개 고치기 전과 같은
+    글자입니다(결함 312). 「칸이 있는가」가 아니라 **「채우는가」**를 잽니다.
+    """
+    code = _blanked_py(NOTIFY.read_text(encoding="utf-8"))
+    assert "channel_id=_channel_of(" in code, (
+        "알림 목록이 `channel_id` 를 안 채웁니다 — 화면이 어느 대화를 열지 모릅니다"
+    )
+    assert "def _channel_of(" in code, "채널 번호를 찾는 자리가 없습니다"
+
+    main = _blanked_py(MAIN.read_text(encoding="utf-8"))
+    start = main.index("class NoticeOut(BaseModel):")
+    block = main[start : main.index("\n\n\n", start)]
+    assert "channel_id" in block, (
+        "`NoticeOut` 에 `channel_id` 가 없습니다 — 서버가 알아도 화면에 안 갑니다"
+    )
+    assert "channel_id=n.channel_id" in main, (
+        "응답을 만들 때 `channel_id` 를 안 옮깁니다 — 타입만 있고 값이 안 갑니다"
+    )
+
+
+def test_the_screen_link_uses_the_channel() -> None:
+    """⭐ 화면의 링크가 그 번호를 **쓴다**.
+
+    ⚠️ 서버가 보내도 화면이 안 쓰면 그대로입니다(결함 315 의 모양 —
+    라우트는 불리는데 인자가 안 불림).
+    """
+    code = _blanked_ts(NOTIFY_VIEW.read_text(encoding="utf-8"))
+    start = code.index("export function hrefFor(")
+    body = code[start : code.index("\n}", start)]
+    assert "channel=" in body, (
+        "부름 알림의 링크가 채널을 안 들고 갑니다 — 문장은 자리를 말하는데 "
+        "링크는 첫 채널로 데려갑니다"
+    )

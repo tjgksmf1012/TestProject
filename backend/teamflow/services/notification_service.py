@@ -327,6 +327,25 @@ def _text_for(session: Session, row: m.Notification) -> str:
     return "알림"
 
 
+def _channel_of(session: Session, row: m.Notification) -> int | None:
+    """이 부름이 **어느 채널**의 것인가 — 번호로 (결함 417).
+
+    ⚠️ `_which_channel` 은 사람이 읽을 **이름**을 만듭니다. 화면이 그
+    채널을 **열려면** 번호가 필요합니다. `Notice` 에는 `channel_id` 칸이
+    처음부터 있었는데 **아무도 안 채웠고**, 그래서 알림의 링크가
+    `/chat.html?project=N` 뿐이었습니다 — 「디자인 채널에서 나를
+    불렀습니다」를 눌렀는데 **#공지**가 열렸습니다(결함 312 의 모양:
+    칸만 있고 채우는 곳이 없음).
+
+    ⚠️ 지워진 글도 채널은 있습니다 — 그 대화로 데려가는 것은 여전히
+    맞습니다(무엇이 지워졌는지는 그 자리에서 보입니다).
+    """
+    if row.kind != NotificationKind.MENTION or row.message_id is None:
+        return None
+    message = session.get(m.Message, row.message_id)
+    return None if message is None else message.channel_id
+
+
 def _which_channel(session: Session, message: m.Message) -> str:
     """이 부름이 **어느 채널**에서 왔는가 (결함 397).
 
@@ -425,6 +444,7 @@ def collect(
                 task_id=row.task_id,
                 meeting_id=row.meeting_id,
                 message_id=row.message_id,
+                channel_id=_channel_of(session, row),
                 notification_id=row.id,
                 read=row.read_at is not None,
             )

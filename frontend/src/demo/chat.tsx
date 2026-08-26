@@ -80,6 +80,13 @@ const params = new URLSearchParams(location.search);
 // 바뀝니다. 채널에는 팀 내부 이야기가 쌓입니다.
 const apiBase = safeApiBase(params.get('api'), location.origin);
 const projectId = Number(params.get('project') ?? '1');
+/**
+ * 알림에서 넘어올 때 **어느 대화를 열 것인가** (결함 417).
+ *
+ * ⚠️ 없으면 지금까지처럼 첫 텍스트 채널을 엽니다. 이 값이 없던 동안
+ * 「디자인 채널에서 나를 불렀습니다」를 눌러도 `#공지` 가 열렸습니다.
+ */
+const wantedChannel = Number(params.get('channel') ?? '') || null;
 
 const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
 
@@ -408,6 +415,10 @@ function App() {
     setChannels(rows);
     setOpenId((current) => {
       if (current !== null && rows.some((c) => c.id === current)) return current;
+      // ⚠️ 알림이 데려온 채널이 먼저입니다 — 없거나 내가 못 보는
+      //    채널이면 지금까지처럼 첫 텍스트 채널로 떨어집니다.
+      const asked = rows.find((c) => c.id === wantedChannel);
+      if (asked !== undefined) return asked.id;
       return rows.find(carriesMessages)?.id ?? rows[0]?.id ?? null;
     });
   }, []);

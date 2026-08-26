@@ -5164,6 +5164,10 @@ class NoticeOut(BaseModel):
     task_id: int | None
     meeting_id: int | None
     message_id: int | None
+    #: 그 부름이 있던 채널. ⚠️ 이게 없으면 화면이 **어느 대화를 열지**
+    #: 모릅니다 — 「디자인 채널에서 불렀습니다」를 눌렀는데 첫 채널이
+    #: 열렸습니다(결함 417).
+    channel_id: int | None
     #: 저장된 알림만 번호가 있습니다. 파생(마감)은 `null` —
     #: ⚠️ 읽었다고 마감이 사라지지 않습니다.
     notification_id: int | None
@@ -5191,6 +5195,7 @@ def read_notifications(
             task_id=n.task_id,
             meeting_id=n.meeting_id,
             message_id=n.message_id,
+            channel_id=n.channel_id,
             notification_id=n.notification_id,
             read=n.read,
         )
