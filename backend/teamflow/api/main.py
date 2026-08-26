@@ -4558,6 +4558,25 @@ class MessageOut(BaseModel):
     my_reaction: str | None
 
 
+def _for_everyone(out: MessageOut) -> dict[str, Any]:
+    """소켓으로 **뿌릴** 몸통. 보는 사람마다 다른 칸은 뺍니다 (결함 415).
+
+    ⚠️ `MessageOut` 은 **부른 사람 기준**으로 만들어집니다 — `my_reaction`
+    은 「내가 단 반응」입니다. 그대로 뿌리면 남의 화면에 **내가 누른 것이
+    자기가 누른 것으로** 그려집니다. 실제로 그랬습니다: 글쓴이가 자기 글에
+    반응을 달고 그 글을 고치면, 지켜보던 사람의 칩이
+    `aria-pressed="true"` · 「내가 누름 — 다시 누르면 뗍니다」로 바뀌었습니다.
+
+    ⚠️ 반응 갈래만 이 처리를 손으로 하고 있었고 **고치기·지우기는 안
+    했습니다.** 그래서 네 자리가 전부 이 함수를 지나게 했습니다 — 다음에
+    갈래가 하나 더 생겨도 손으로 다시 적을 일이 없습니다. 가드가 `publish(`
+    를 세어 **전부 여기를 지나는지** 봅니다.
+    """
+    body = out.model_dump(mode="json")
+    body["my_reaction"] = None
+    return body
+
+
 class MessageIn(BaseModel):
     body: str = Field(min_length=1, max_length=message_service.MAX_BODY)
     reply_to_id: int | None = None
@@ -4825,7 +4844,7 @@ async def send_message(
     # ⚠️ 커밋 **뒤에** 흘립니다. 앞에서 흘리면 롤백된 메시지가 남의 화면에
     #    남고, 그 사람이 새로고침하기 전까지는 있는 말로 보입니다.
     await chat_hub.hub.publish(
-        channel_id, {"kind": "message", "message": out.model_dump(mode="json")}
+        channel_id, {"kind": "message", "message": _for_everyone(out)}
     )
     return out
 
@@ -4847,7 +4866,7 @@ async def edit_message(
     out = _messages_out(session, [message], user.id)[0]
     session.commit()
     await chat_hub.hub.publish(
-        message.channel_id, {"kind": "edit", "message": out.model_dump(mode="json")}
+        message.channel_id, {"kind": "edit", "message": _for_everyone(out)}
     )
     return out
 
@@ -4867,7 +4886,7 @@ async def delete_message(
     out = _messages_out(session, [message], user.id)[0]
     session.commit()
     await chat_hub.hub.publish(
-        message.channel_id, {"kind": "delete", "message": out.model_dump(mode="json")}
+        message.channel_id, {"kind": "delete", "message": _for_everyone(out)}
     )
     return out
 
@@ -4888,11 +4907,12 @@ async def set_reaction(
 
     out = _messages_out(session, [message], user.id)[0]
     session.commit()
-    # ⚠️ 남에게 보낼 때 `my_reaction` 은 **내 것**입니다. 그대로 뿌리면
-    #    남의 화면에 내가 누른 것이 자기가 누른 것으로 그려집니다.
-    body = out.model_dump(mode="json")
-    body["my_reaction"] = None
-    await chat_hub.hub.publish(message.channel_id, {"kind": "reaction", "message": body})
+    # ⚠️ 남에게 보낼 때 `my_reaction` 은 **내 것**입니다 — `_for_everyone`
+    #    이 뺍니다. 예전에는 이 갈래만 손으로 뺐고 고치기·지우기는 안
+    #    뺐습니다(결함 415).
+    await chat_hub.hub.publish(
+        message.channel_id, {"kind": "reaction", "message": _for_everyone(out)}
+    )
     return out
 
 
