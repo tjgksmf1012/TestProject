@@ -3950,6 +3950,86 @@ describe('근거 발화를 **세었으면 볼 문**도 준다 (결함 418)', () 
   });
 });
 
+describe('SPA 화면은 쓰기를 **한 자리로** 보낸다 (결함 426)', () => {
+  /*
+   * `main.tsx` 머리말: 「그래서 실패를 **한 자리에서** 받습니다. 화면
+   * 다섯이 각자 로그인 링크를 그리게 하면 반드시 몇 곳이 빠집니다.」
+   * 그 한 자리는 `queryCache`/`mutationCache` 의 `onError`
+   * (`endSessionIfOver`)입니다 — **거기를 지나갈 때만** 참입니다.
+   *
+   * 홈의 「프로젝트 시작하기」 대화상자는 `api.post(...)` 를 **직접**
+   * 불렀습니다. 그래서 세션이 죽은 채 「만들기」를 누르면:
+   *
+   *     401 POST /api/projects
+   *     → 대화상자가 「로그인이 필요합니다」라고 말하고
+   *     → 그 대화상자에 로그인으로 가는 자리는 **없습니다**
+   *     → 주소는 `/app/` 그대로, 뒤쪽 앱은 전부 401 인 껍데기
+   *
+   * 결함 227 이 고친 바로 그 병입니다. 재현했습니다(`clearCookies` 로
+   * 화면을 열어 둔 채 세션을 끊고 누르기) — 고친 뒤에는 `/app/login`.
+   *
+   * ⚠️ **질의 쪽은 멀쩡했습니다** — 같은 상태에서 레일로 옮기면 곧장
+   * 로그인으로 갑니다. 읽기만 재고 「SPA 는 괜찮다」로 넘길 뻔했습니다.
+   *
+   * ⛔ **이 자가 못 보는 것**: 「세션이 죽은 뒤 누르면 로그인으로 가는가」
+   * 자체는 브라우저로만 잽니다. 재는 방법은 `docs/24`.
+   */
+  const WEBAPP = join(ROOT, '..', 'webapp', 'src');
+
+  /** 왜 직접 불러도 되는가 — 이유 없이는 예외를 못 둡니다. */
+  const DIRECT_OK: { file: string; why: string }[] = [
+    {
+      file: 'components/AppShell.tsx',
+      why: '로그아웃입니다. 401 은 「이미 끊겼다」라 세션을 끝낼 것이 없고, 어차피 로그인으로 갑니다',
+    },
+    {
+      file: 'screens/Login.tsx',
+      why: '로그인·가입입니다. 여기서 401 은 「비밀번호가 틀렸다」이고, 끝낼 세션이 없습니다',
+    },
+  ];
+
+  const sources = (): { rel: string; code: string }[] => {
+    const out: { rel: string; code: string }[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+          out.push({ rel: full.slice(WEBAPP.length + 1), code: codeOf(readFileSync(full, 'utf8')) });
+        }
+      }
+    };
+    walk(WEBAPP);
+    return out;
+  };
+
+  const WRITES = /\bapi\.(post|patch|put|del|delete)\b/;
+
+  it('⭐ 화면·컴포넌트는 `api.post/patch/put/del` 을 **직접** 부르지 않는다', () => {
+    const files = sources();
+    ok(files.length > 0, 'SPA 소스가 0개입니다 — 자가 눈을 감았습니다');
+    const direct = files
+      // `api/hooks.ts` 는 `useMutation` 이 사는 곳입니다 — 거기가 그 한 자리입니다.
+      .filter(({ rel }) => rel !== 'api/hooks.ts' && !rel.startsWith('api/client'))
+      .filter(({ code }) => WRITES.test(code))
+      .filter(({ rel }) => !DIRECT_OK.some((x) => x.file === rel))
+      .map(({ rel }) => rel);
+    deepStrictEqual(
+      direct,
+      [],
+      '쓰기가 `mutationCache` 를 안 거칩니다 — 세션이 죽어도 로그인으로 못 갑니다',
+    );
+  });
+
+  it('⛔ 예외 표가 낡지 않았다 — 적어 둔 파일이 아직 직접 부른다', () => {
+    const stale = DIRECT_OK.filter(({ file }) => {
+      const found = sources().find(({ rel }) => rel === file);
+      return found === undefined || !WRITES.test(found.code);
+    }).map(({ file }) => file);
+    deepStrictEqual(stale, [], '예외에 적힌 자리가 사라졌습니다 — 표를 지우십시오');
+  });
+});
+
 describe('401 을 **조용히 삼키지** 않는다 (결함 424)', () => {
   /*
    * 로그아웃한 채로 화면을 열면 이 제품은 로그인으로 보냅니다 — 브라우저로
@@ -7959,7 +8039,19 @@ describe('보낸 것이 실패하면 **화면이 말한다** (결함 218)', () =
           //    괄호를 세서 **그 호출의 인자 안**만 봅니다.
           const hasOnError = callArgsOf(code, caller).some((args) => /onError/.test(args));
           const shows = code.includes(`${caller}.isError`) || code.includes(`${caller}.error`);
-          if (!hasOnError && !shows) {
+          /* ⚠️ **셋째 길** (결함 426 회차에 넓혔습니다). `mutateAsync` 는
+             던지므로 `try { … } catch { setError(…) }` 로도 말할 수
+             있습니다 — 요구(실패하면 화면이 말한다)는 그대로 지켜집니다.
+             자가 그 길을 몰라서, 홈의 대화상자를 `useMutation` 으로
+             옮기자 **요구는 한 자도 안 바뀌었는데** 빨개졌습니다.
+             ⚠️ 「`catch` 가 파일 어딘가 있는가」로 재면 옆 호출의 것으로
+             통과합니다 — **그 호출을 감싸는 `try` 의 `catch`** 만 봅니다. */
+          const caught = new RegExp(
+            `try\\s*\\{[\\s\\S]{0,400}?\\b${caller.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` +
+              `\\.mutateAsync\\([\\s\\S]{0,400}?\\}\\s*catch[\\s\\S]{0,200}?` +
+              `(setError|setNote|setProblem|setMessage|setFailure|showNote)\\(`,
+          ).test(code);
+          if (!hasOnError && !shows && !caught) {
             offenders.push(`${full.slice(base.length + 1)} — ${caller}`);
           }
         }

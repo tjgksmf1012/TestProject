@@ -122,6 +122,33 @@ export function useFinals(projectId: number | undefined) {
   });
 }
 
+/**
+ * 프로젝트 만들기 · 초대 코드로 참가 (결함 426).
+ *
+ * ⚠️ **왜 여기 있나** — 이 둘은 화면(`Home.tsx`)에서 `api.post(...)` 를
+ * **직접** 부르고 있었습니다. 그러면 `main.tsx` 의 `mutationCache.onError`
+ * (`endSessionIfOver`)를 **안 거칩니다.** 세션이 죽은 채 「만들기」를
+ * 누르면 401 이 나고 대화상자가 「로그인이 필요합니다」라고 말하는데,
+ * 그 대화상자에 로그인으로 가는 자리는 **없습니다** — 결함 227 이 고친
+ * 바로 그 병이 `useMutation` 을 안 거치는 자리에서 살아 있었습니다.
+ *
+ * 실패를 **한 자리에서** 받는다는 결정(`main.tsx` 머리말)은 그 한 자리를
+ * 지나갈 때만 참입니다.
+ */
+export function useCreateProject() {
+  return useMutation({
+    mutationFn: (title: string) =>
+      api.post<{ project_id: number }>('/api/projects', { title }),
+  });
+}
+
+export function useJoinProject() {
+  return useMutation({
+    mutationFn: (inviteCode: string) =>
+      api.post<{ project_id: number }>('/api/projects/join', { invite_code: inviteCode }),
+  });
+}
+
 export function useConfirmFinals(projectId: number | undefined) {
   const queryClient = useQueryClient();
   return useMutation({

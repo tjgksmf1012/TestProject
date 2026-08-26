@@ -7,11 +7,13 @@ import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
 import { StatusChip } from '../components/StatusChip.tsx';
 import { Why } from '../components/Why.tsx';
 import {
+  useCreateProject,
+  useJoinProject,
   useMeetings,
   useProjects,
   useSettingsMutations,
 } from '../api/hooks.ts';
-import { api, ApiError } from '../api/client.ts';
+import { ApiError } from '../api/client.ts';
 import type { MeetingSummary } from '../api/types.ts';
 import {
   coverageReading,
@@ -208,6 +210,15 @@ function StartDialog({
     onClose();
   };
 
+  /* ⚠️ **`useMutation` 을 거칩니다** (결함 426). 예전에는 여기서
+     `api.post(...)` 를 직접 불렀고, 그러면 `main.tsx` 의
+     `mutationCache.onError` 를 **안 거칩니다** — 세션이 죽은 채 누르면
+     대화상자가 「로그인이 필요합니다」라고 말하는데 **로그인으로 가는
+     자리가 없습니다**(결함 227 이 고친 그 병). 실패를 한 자리에서 받는다는
+     결정은 그 한 자리를 지나갈 때만 참입니다. */
+  const createProject = useCreateProject();
+  const joinProject = useJoinProject();
+
   const create = async () => {
     const bad = titleProblem(title);
     if (bad !== null) {
@@ -216,7 +227,7 @@ function StartDialog({
     }
     setBusy(true);
     try {
-      const made = await api.post<{ project_id: number }>('/api/projects', { title: title.trim() });
+      const made = await createProject.mutateAsync(title.trim());
       await land(made.project_id);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : '만들지 못했습니다');
@@ -231,9 +242,7 @@ function StartDialog({
     }
     setBusy(true);
     try {
-      const joined = await api.post<{ project_id: number }>('/api/projects/join', {
-        invite_code: normalizeCode(code),
-      });
+      const joined = await joinProject.mutateAsync(normalizeCode(code));
       await land(joined.project_id);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : '참가하지 못했습니다');
