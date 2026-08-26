@@ -3855,6 +3855,73 @@ describe('신뢰도 한 줄은 **누구를 잰 값인지** 말한다 (결함 384
   });
 });
 
+describe('설정 탭의 **묶음 이름**은 `title=` 에만 있으면 안 된다 (결함 412)', () => {
+  /*
+   * SPA 설정의 탭은 `내 설정`(역할과 가중치·GitHub 계정·내 정보)과
+   * `프로젝트`(팀원·저장소 연결·이름과 초대) 둘로 나뉘고, 그 경계는
+   * `aria-hidden` 인 구분선 하나입니다. 묶음 이름은 `title=` 에만
+   * 있었고 주석은 「낭독기와 마우스에는 전해집니다」라고 단언했습니다 —
+   * **낭독기 쪽이 거짓**입니다. 링크에 글자가 있으면 접근 이름은 그
+   * 글자에서 나오고 `title` 은 안 쓰입니다.
+   *
+   * 렌더해서 재니 탭 여섯의 접근 이름이 눈에 보이는 글자 그대로였고
+   * (`역할과 가중치`·`팀원`…), 「내 설정」은 화면 본문에 **0회**
+   * 였습니다. 즉 「이건 나만 고치는 것」과 「이건 팀 것」의 구분이
+   * 마우스를 올릴 수 있는 사람에게만 있었습니다 — 이 저장소가
+   * `WHY_ONLY_ME` 로 못 박아 둔 바로 그 구분입니다.
+   *
+   * ⚠️ 고침은 **글자를 더하는 것이 아닙니다.** 바로 위 주석이 「탭 줄에
+   *    머리말을 넣으면 누를 수 없는 글자가 탭처럼 보입니다」라고 이유를
+   *    적어 둔 기록된 결정이라 그대로 둡니다. 이름은 묶음 자신에 답니다
+   *    (`role="group" aria-label`) — `activity.tsx` 의 거르개가 이미
+   *    쓰는 방법입니다.
+   */
+  const settings = () =>
+    readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Settings.tsx'), 'utf8');
+
+  /** `.tabs__group` 여는 태그. 주석은 미리 걷습니다. */
+  function groupTag(): string {
+    const code = codeOf(settings());
+    const at = code.indexOf('className="tabs__group"');
+    ok(at !== -1, '`.tabs__group` 을 못 찾았습니다 — 가드가 낡았습니다');
+    const open = code.lastIndexOf('<', at);
+    const close = code.indexOf('>', at);
+    ok(open !== -1 && close !== -1, '여는 태그를 못 읽었습니다');
+    return code.slice(open, close + 1);
+  }
+
+  it('⭐ 묶음이 **스스로 이름을 가진다** — `title=` 말고', () => {
+    const tag = groupTag();
+    ok(
+      /aria-label=\{group\}/.test(tag),
+      `묶음 이름이 접근성 트리에 없습니다 — 마우스에만 남습니다:\n  ${tag}`,
+    );
+    ok(/role="group"/.test(tag), `묶음이 묶음으로 안 읽힙니다:\n  ${tag}`);
+  });
+
+  it('⛔ 묶음 이름이 **`title=` 에만** 있지 않다', () => {
+    // ⚠️ 낱말이 아니라 요구를 잽니다 — `group` 을 쓰는 자리를 전부 세어
+    //    그중 **사람에게 닿는** 자리가 `title=` 밖에 하나라도 있는지
+    //    봅니다. `title` 은 그대로 둡니다(마우스에는 유용합니다) — 재는
+    //    것은 **거기에만** 있는가입니다.
+    //
+    // ⚠️ `key={group}` 은 빼야 합니다. React 내부용이라 사람에게 아무것도
+    //    안 전하는데, 안 빼면 고침을 통째로 걷어내도 이 검사가 초록입니다
+    //    — 심어 보고 알았습니다.
+    const code = codeOf(settings());
+    const uses = [...code.matchAll(/\{group\}|\$\{group\}/g)].map((m) => m.index as number);
+    ok(uses.length > 0, '`group` 을 쓰는 자리가 0곳입니다 — 가드가 낡았습니다');
+    const hidden = [
+      ...code.matchAll(/title=\{`[^`]*`\}|title=\{[^}]*\}|key=\{[^}]*\}/g),
+    ].map((m) => [m.index as number, (m.index as number) + m[0].length] as const);
+    const reaches = uses.filter((i) => !hidden.some(([from, to]) => i >= from && i < to));
+    ok(
+      reaches.length > 0,
+      '묶음 이름이 `title=`(과 `key=`) 안에만 있습니다 — 마우스 밖에서는 사라집니다',
+    );
+  });
+});
+
 describe('홈의 「다음에 할 일」 은 마우스 밖에서도 닿아야 한다 (결함 406)', () => {
   /*
    * `docs/22` 처방 ③ 은 「이유는 부르면 온다 — 문장을 **지우지 않고** `?`

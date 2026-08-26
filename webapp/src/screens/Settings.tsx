@@ -912,10 +912,18 @@ export default function Settings() {
 
             묶음 이름(`내 설정`·`프로젝트`)은 **탭 사이 구분선**이 됩니다 —
             탭 줄에 머리말을 넣으면 누를 수 없는 글자가 탭처럼 보입니다.
-            대신 `title` 로 남겨 낭독기와 마우스에는 전해집니다. */}
+
+            ⚠️ 예전에는 「대신 `title` 로 남겨 **낭독기와 마우스에는**
+            전해집니다」라고 적혀 있었는데 **낭독기 쪽이 거짓**이었습니다
+            (결함 412). 링크에 글자가 있으면 접근 이름은 그 글자에서
+            나오고 `title` 은 안 쓰입니다 — 재 보니 접근 이름이 여섯 다
+            눈에 보이는 글자 그대로였고, 「내 설정」은 화면 본문에 **0회**
+            였습니다. 구분선도 `aria-hidden` 이라 낭독기는 묶음이 있다는
+            것조차 몰랐습니다. 이름은 **묶음 자신**에 답니다 — 이 저장소가
+            `activity.tsx` 의 거르개에서 이미 쓰는 방법입니다. */}
         <nav className="tabs" aria-label="설정 구역">
           {groups.map((group, gi) => (
-            <span className="tabs__group" key={group}>
+            <span className="tabs__group" key={group} role="group" aria-label={group}>
               {gi > 0 && <span className="tabs__sep" aria-hidden="true" />}
               {SECTIONS.filter((s) => s.group === group).map((s) => (
                 <NavLink
