@@ -3950,6 +3950,50 @@ describe('근거 발화를 **세었으면 볼 문**도 준다 (결함 418)', () 
   });
 });
 
+describe('고정 컨트롤 막대도 **표지 안**이다 (결함 423)', () => {
+  /*
+   * 통화 화면의 하단 막대는 `position: fixed` 라 `<main>` 밖 body 자식입니다.
+   * 그래서 이 화면의 **주된 컨트롤 셋**(마이크 켜기 · 녹음 화면으로 ·
+   * 통화 나가기)이 어느 표지에도 안 들어갔습니다 — 브라우저로 세니 컨트롤
+   * 아홉 중 **넷**이 표지 밖이었고(하나는 설계상 밖인 건너뛰기 링크),
+   * 낭독기로 「본문」에 건너뛴 사람은 그 셋을 못 만납니다.
+   *
+   * 결함 421 이 셸에 `main` 을 준 **다음 칸**입니다 — 표지를 만들고 나서야
+   * 「그럼 표지 밖에 뭐가 남았나」를 셀 수 있었습니다.
+   *
+   * ⚠️ 자리는 안 옮깁니다. `role` 은 배치를 한 픽셀도 안 바꾸고, 옮기면
+   * `position: fixed` 막대가 `main` 의 스택 맥락에 들어갑니다.
+   *
+   * ⛔ **이 자가 못 보는 것**: 「모든 컨트롤이 표지 안인가」는 렌더해야
+   * 재는 것이라 여기서 못 잽니다(브라우저가 필요합니다). 재는 방법은
+   * `docs/24` 에 적어 두었습니다 — 여기서는 **이 저장소에 하나뿐인
+   * body 자식 컨트롤 상자**를 못 박습니다.
+   */
+  const bars = () =>
+    readdirSync(PUBLIC)
+      .filter((name) => name.endsWith('.html'))
+      .map((name) => ({ name, html: readFileSync(join(PUBLIC, name), 'utf8') }))
+      .filter(({ html }) => /<div class="actionbar"/.test(html));
+
+  it('⭐ `.actionbar` 는 이름 붙은 표지다', () => {
+    const found = bars();
+    // 안 보고 있는 상태 자체가 실패입니다 (결함 286).
+    ok(found.length > 0, '`.actionbar` 를 쓰는 화면이 0개입니다 — 자가 낡았습니다');
+    const bad = found
+      .filter(
+        ({ html }) =>
+          !/<div class="actionbar"[^>]*\brole="(region|navigation|complementary)"/.test(html) ||
+          !/<div class="actionbar"[^>]*\baria-label="[^"]+"/.test(html),
+      )
+      .map(({ name }) => name);
+    deepStrictEqual(
+      bad,
+      [],
+      '고정 막대가 표지가 아닙니다 — 그 안의 컨트롤이 어느 표지에도 안 들어갑니다',
+    );
+  });
+});
+
 describe('셸마다 **본문 표지**가 있다 (결함 421)', () => {
   /*
    * 이 제품에는 셸이 셋입니다 — 레거시 React 화면 열셋(`demo/nav.ts` 가
