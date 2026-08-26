@@ -58,8 +58,15 @@ def find_mentions(body: str, candidates: list[str]) -> list[str]:
     for match in _AFTER_AT.finditer(body):
         tail = match.group(1)
         for name in by_length:
-            if tail.startswith(name) and name not in found:
-                found.append(name)
+            if tail.startswith(name):
+                # ⚠️ `break` 는 **중복 판정 밖**입니다. 안에 두면 이미 부른
+                #    사람을 또 부를 때 그 자리에서 멈추지 않고 **더 짧은
+                #    이름으로 흘러내립니다** — 팀에 `한동희` 와 `한동` 이
+                #    같이 있을 때 `@한동희` 를 두 번 쓰면 `한동` 이 딸려
+                #    나왔습니다(결함 411). 본문에 `@한동` 은 한 번도 없는데
+                #    한동에게 "불렸습니다" 알림이 갔습니다.
+                if name not in found:
+                    found.append(name)
                 break
     return found
 

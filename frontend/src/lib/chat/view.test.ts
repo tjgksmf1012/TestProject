@@ -1,5 +1,8 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   canEdit,
@@ -325,5 +328,57 @@ describe('대화의 앞부분에 닿는 길 (결함 315)', () => {
   it('⚠️ 서버 한 쪽 크기와 **짝**이다 — 어긋나면 단추가 영영 안 뜨거나 영영 뜬다', () => {
     // backend/teamflow/services/message_service.py 의 MAX_PAGE.
     strictEqual(MESSAGE_PAGE, 50);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 서버와 같은 규칙인가 — 공용 사례 (결함 411)
+// ══════════════════════════════════════════════════════════════
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+describe('⛔ `@이름` 을 고르는 규칙이 **서버와 같다** (결함 411)', () => {
+  interface MentionCase {
+    왜: string;
+    names: string[];
+    body: string;
+    picked: string[];
+  }
+
+  function cases(): MentionCase[] {
+    const data = JSON.parse(readFileSync(join(HERE, 'mention_cases.json'), 'utf8')) as {
+      cases: MentionCase[];
+    };
+    return data.cases;
+  }
+
+  /** 강조 조각에서 이름만 — 본문 순서 · 중복 없음. */
+  function picked(body: string, names: string[]): string[] {
+    const out: string[] = [];
+    for (const segment of mentionSegments(body, names)) {
+      if (!segment.mention) continue;
+      const name = segment.text.slice(1);
+      if (!out.includes(name)) out.push(name);
+    }
+    return out;
+  }
+
+  it('⭐ 화면이 **사례대로** 고른다 — 서버와 같은 파일을 읽는다', () => {
+    const rows = cases();
+    ok(rows.length >= 5, '사례가 너무 적습니다 — 검사가 낡았습니다');
+    const wrong = rows
+      .map((c) => {
+        const got = picked(c.body, c.names);
+        return JSON.stringify(got) === JSON.stringify(c.picked)
+          ? null
+          : `${c.왜}: 화면 ${JSON.stringify(got)} · 사례 ${JSON.stringify(c.picked)}`;
+      })
+      .filter((x): x is string => x !== null);
+    deepStrictEqual(wrong, [], `공용 사례와 다릅니다:\n  ${wrong.join('\n  ')}`);
+  });
+
+  it('⚠️ 사례가 **양쪽 답을 다 만든다** — 전부 빈 목록이면 아무것도 안 잰다', () => {
+    const empties = new Set(cases().map((c) => c.picked.length === 0));
+    deepStrictEqual([...empties].sort(), [false, true]);
   });
 });
