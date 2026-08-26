@@ -349,7 +349,32 @@ export function reactionIcon(mark: string): 'check' | 'thumb' | 'ask' | 'heart' 
 }
 
 /** 이 화면이 고를 수 있는 반응. ⚠️ 서버의 `ReactionMark` 와 같은 순서입니다. */
-export const REACTION_MARKS = ['agree', 'ok', 'question', 'thanks'] as const;
+/**
+ * `GET /api/chat/reactions` 한 줄. **서버가 어휘의 주인입니다.**
+ *
+ * ⚠️ 예전에는 화면이 `REACTION_MARKS = ['agree','ok','question','thanks']`
+ * 라는 **자기 표**를 들고 고를 것을 정했습니다(결함 414). 그 엔드포인트는
+ * 「화면이 이 표를 자기 안에 두면 안 됩니다」라고 적으면서 **순서까지**
+ * 어휘 순서로 못 박아 두는데, 화면은 받아 놓고 이름표만 꺼내 쓰고 집합과
+ * 순서를 버렸습니다 — 서버는 `ok·agree·…`, 화면은 `agree·ok·…` 였습니다.
+ */
+export interface ReactionChoice {
+  mark: string;
+  label: string;
+}
+
+/**
+ * 이 메시지에 **아직 안 달린** 반응들. 순서는 서버가 준 순서 그대로.
+ *
+ * ⚠️ 여기서 다시 세우지 마십시오 — 개수 순으로 세우면 그 순간 순위표이고,
+ * 이름 순으로 세우면 서버가 정한 어휘 순서가 화면마다 달라집니다.
+ */
+export function offerableReactions(
+  choices: readonly ReactionChoice[],
+  attached: readonly { mark: string }[],
+): ReactionChoice[] {
+  return choices.filter((choice) => !attached.some((r) => r.mark === choice.mark));
+}
 
 /**
  * 반응 버튼을 낭독기에 뭐라고 읽어 줄 것인가.

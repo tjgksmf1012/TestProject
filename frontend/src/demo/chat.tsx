@@ -47,11 +47,12 @@ import {
   mentionSegments,
   reactionAriaLabel,
   reactionIcon,
-  REACTION_MARKS,
+  offerableReactions,
   sendBlockedReason,
   voiceChannelNote,
   type ChatChannel,
   type ChatMessage,
+  type ReactionChoice,
 } from '../lib/chat/view.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
@@ -169,20 +170,24 @@ function Reactions({
   busy,
   picking,
   onTogglePicker,
-  labels,
+  choices,
 }: {
   message: ChatMessage;
   onPick: (mark: string | null) => void;
   busy: boolean;
   picking: boolean;
   onTogglePicker: () => void;
-  /** 반응 이름 → 사람 말. **서버가 줍니다** — 화면이 두 번째 표를 만들지 않습니다. */
-  labels: Record<string, string>;
+  /**
+   * 고를 수 있는 반응 전부 — **서버가 줍니다**(`GET /api/chat/reactions`).
+   *
+   * ⚠️ 이름표만 꺼내 쓰고 **집합과 순서를 화면이 다시 정하면 안 됩니다**
+   *    (결함 414). 못 받았으면 빈 배열이고, 그러면 고르는 자리를 안
+   *    그립니다 — 채널 종류가 결함 360 에서 내린 결정과 같습니다.
+   */
+  choices: readonly ReactionChoice[];
 }) {
   if (message.deleted) return null;
-  const unused = REACTION_MARKS.filter(
-    (mark) => !message.reactions.some((r) => r.mark === mark),
-  );
+  const unused = offerableReactions(choices, message.reactions);
   return (
     <div className="rrow">
       {message.reactions.map((reaction) => {
@@ -219,20 +224,20 @@ function Reactions({
       )}
 
       {picking &&
-        unused.map((mark) => {
-          const icon = reactionIcon(mark);
+        unused.map((choice) => {
+          const icon = reactionIcon(choice.mark);
           if (icon === null) return null;
           return (
             <button
               type="button"
-              key={mark}
+              key={choice.mark}
               className="rchip add"
               disabled={busy}
               // ⚠️ 아이콘뿐이라 낭독기에게는 **이름밖에 없습니다.** 서버가
               //    주는 사람 말(`label`)은 이미 달린 반응에만 오므로, 아직
               //    안 단 것은 여기서 말을 붙입니다.
-              aria-label={`${labels[mark] ?? mark} 반응 달기`}
-              onClick={() => onPick(mark)}
+              aria-label={`${choice.label} 반응 달기`}
+              onClick={() => onPick(choice.mark)}
             >
               <Icon name={icon} />
             </button>
@@ -254,7 +259,7 @@ function Row({
   onReact,
   picking,
   onTogglePicker,
-  labels,
+  choices,
 }: {
   message: ChatMessage;
   parent: ChatMessage | undefined;
@@ -267,7 +272,7 @@ function Row({
   onReact: (message: ChatMessage, mark: string | null) => void;
   picking: boolean;
   onTogglePicker: () => void;
-  labels: Record<string, string>;
+  choices: readonly ReactionChoice[];
 }) {
   return (
     <li className={runOn ? 'msg run' : 'msg'}>
@@ -299,7 +304,7 @@ function Row({
             onPick={(mark) => onReact(message, mark)}
             picking={picking}
             onTogglePicker={onTogglePicker}
-            labels={labels}
+            choices={choices}
           />
           <div className="mtools">
             <button type="button" disabled={busy} onClick={() => onReply(message)}>
@@ -358,7 +363,7 @@ function App() {
    *  펴지면 처음 상태로 되돌아갑니다(줄마다 네모 넷). */
   const [picking, setPicking] = useState<number | null>(null);
   /** 반응 이름 → 사람 말. **서버가 줍니다.** */
-  const [labels, setLabels] = useState<Record<string, string>>({});
+  const [choices, setChoices] = useState<ReactionChoice[]>([]);
 
   const open = channels?.find((c) => c.id === openId) ?? null;
   const foot = useRef<HTMLDivElement>(null);
@@ -475,12 +480,12 @@ function App() {
       if (response.ok) setMe((await response.json()) as Me);
     })();
     void (async () => {
-      // 반응 이름표. ⚠️ 못 받아도 화면은 돕니다 — 낭독기 라벨이 이름
-      //    그대로 나올 뿐이고, 여기서 빨간 줄을 띄울 일은 아닙니다.
+      // 고를 수 있는 반응. ⚠️ 못 받으면 **고르는 자리를 안 그립니다** —
+      //    화면이 집합을 지어내면 서버의 어휘와 두 벌이 됩니다(결함 414).
+      //    이미 달린 반응은 메시지에 `label` 이 딸려 오므로 그대로 보입니다.
       const response = await get('/api/chat/reactions');
       if (response === null || !response.ok) return;
-      const rows = (await response.json()) as { mark: string; label: string }[];
-      setLabels(Object.fromEntries(rows.map((r) => [r.mark, r.label])));
+      setChoices((await response.json()) as ReactionChoice[]);
     })();
     void (async () => {
       // 채널 종류. ⚠️ 못 받으면 **고르는 칸을 안 그립니다** — 종류를
@@ -972,7 +977,7 @@ function App() {
                         onTogglePicker={() =>
                           setPicking((current) => (current === message.id ? null : message.id))
                         }
-                        labels={labels}
+                        choices={choices}
                       />
                     ))}
                   </ul>

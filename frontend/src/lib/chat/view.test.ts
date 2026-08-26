@@ -17,6 +17,7 @@ import {
   mentionSegments,
   reactionAriaLabel,
   reactionIcon,
+  offerableReactions,
   sendBlockedReason,
   type ChatChannel,
   type ChatMessage,
@@ -221,6 +222,37 @@ describe('반응', () => {
 
   it('⭐ 모르는 반응에 아무 아이콘이나 붙이지 않는다', () => {
     strictEqual(reactionIcon('rage'), null);
+  });
+
+  it('⭐ 고를 것은 **서버가 준 순서 그대로** — 다시 세우지 않는다 (결함 414)', () => {
+    // 서버는 어휘 순서(`ok · agree · question · thanks`)로 내려보냅니다.
+    // 화면이 자기 배열을 들고 있던 동안 `agree` 가 맨 앞이었습니다.
+    const fromServer = [
+      { mark: 'ok', label: '확인했어요' },
+      { mark: 'agree', label: '동의해요' },
+      { mark: 'question', label: '궁금해요' },
+      { mark: 'thanks', label: '고마워요' },
+    ];
+    deepStrictEqual(
+      offerableReactions(fromServer, []).map((c) => c.mark),
+      ['ok', 'agree', 'question', 'thanks'],
+    );
+  });
+
+  it('⛔ 이미 달린 것은 고를 목록에서 빠진다 — 순서는 그대로', () => {
+    const fromServer = [
+      { mark: 'ok', label: '확인했어요' },
+      { mark: 'agree', label: '동의해요' },
+      { mark: 'question', label: '궁금해요' },
+    ];
+    deepStrictEqual(
+      offerableReactions(fromServer, [{ mark: 'agree' }]).map((c) => c.mark),
+      ['ok', 'question'],
+    );
+  });
+
+  it('⚠️ 서버가 못 오면 고를 것이 **없다** — 화면이 지어내지 않는다', () => {
+    deepStrictEqual(offerableReactions([], []), []);
   });
 
   it('낭독기가 개수와 "내가 눌렀는지" 를 듣는다', () => {
