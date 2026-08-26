@@ -3950,6 +3950,106 @@ describe('근거 발화를 **세었으면 볼 문**도 준다 (결함 418)', () 
   });
 });
 
+describe('레거시 **쓰기**도 세션 만료를 본다 (결함 427)', () => {
+  /*
+   * 결함 424·425 는 레거시의 **읽기**를 쟀습니다. 쓰기는 다른 길입니다 —
+   * 결함 426 이 SPA 에서 그 둘을 갈랐고, 여기서 레거시를 갈랐습니다.
+   *
+   * 재현: 채팅에 채널과 글을 만들고, 화면을 **열어 둔 채** 쿠키를 지우고
+   * 「지우기」를 누릅니다.
+   *
+   *     401 DELETE /api/messages/2
+   *     → 화면: 「로그인이 필요합니다」   ← 말은 합니다
+   *     → 주소는 /chat.html 그대로. **그 말을 들을 자리가 없습니다**
+   *     → 글도 그대로 남아 있습니다
+   *
+   * 결함 227 이 SPA 에서 고친 그 병이 레거시 쓰기에 있었습니다.
+   *
+   * ⚠️ **같은 파일 안에서 갈려 있었습니다** — `chat.tsx` 의 쓰기 다섯 중
+   * 보내기·고치기 **둘**만 보고, 반응·지우기·채널 만들기 **셋**은 안
+   * 봤습니다. 부르는 쪽마다 적으면 반드시 몇 곳이 빠집니다(대표 실패 ②).
+   *
+   * ⚠️ **처음 쓴 자가 열한 곳을 헛짚었습니다.** 「부르는 블록 안에
+   * `isSessionExpired` 가 있는가」로 쟀더니 설정 화면(`project.tsx`)의
+   * 쓰기 열둘 중 열하나가 걸렸는데, 그 화면은 `call()` 이라는 **공용
+   * 헬퍼**에서 한 번 봅니다 — 그게 이 저장소가 고른 옳은 모양입니다.
+   * 그래서 자를 **`trySend(` 를 감싸는 함수**로 바꿨습니다: 헬퍼에서 보든
+   * 자리에서 보든 통과하고, **아무 데서도 안 보면** 잡힙니다.
+   *
+   * ⛔ **이 자가 못 보는 것**: 「세션이 죽은 뒤 눌렀을 때 로그인으로
+   * 가는가」 자체는 브라우저로만 잽니다. 재는 방법은 `docs/24`.
+   */
+  const enclosingBlock = (code: string, at: number): string | null => {
+    let depth = 0;
+    let start = -1;
+    for (let i = at - 1; i >= 0; i--) {
+      if (code[i] === '}') depth++;
+      else if (code[i] === '{') {
+        if (depth === 0) {
+          start = i;
+          break;
+        }
+        depth--;
+      }
+    }
+    if (start < 0) return null;
+    depth = 0;
+    for (let j = start; j < code.length; j++) {
+      if (code[j] === '{') depth++;
+      else if (code[j] === '}') {
+        depth--;
+        if (depth === 0) return code.slice(start, j + 1);
+      }
+    }
+    return null;
+  };
+
+  /** 세션을 안 봐도 되는 자리 — **왜 그런지**를 같이 적습니다. */
+  const NO_SESSION_YET: { file: string; why: string }[] = [
+    {
+      file: 'login.tsx',
+      why: '로그인·가입입니다. 여기서 401 은 「비밀번호가 틀렸다」이고, 끝낼 세션이 없습니다',
+    },
+    {
+      file: 'logout.ts',
+      why: '로그아웃입니다. 401 은 「이미 끊겼다」이고 어차피 로그인으로 갑니다',
+    },
+  ];
+
+  it('⭐ `trySend` 를 감싸는 함수는 401 을 보고 로그인으로 보낸다', () => {
+    const files = readdirSync(DEMO)
+      .filter((name) => SCREEN_EXT.test(name) && !name.endsWith('.test.ts'))
+      .map((name) => ({ name, code: codeOf(readFileSync(join(DEMO, name), 'utf8')) }));
+    const bad: string[] = [];
+    let looked = 0;
+    for (const { name, code } of files) {
+      for (const m of code.matchAll(/\btrySend\(/g)) {
+        const body = enclosingBlock(code, m.index as number);
+        // 못 읽은 것을 「0건」으로 넘기면 자가 조용히 눈을 감습니다.
+        ok(body !== null, `${name}: 쓰기 자리를 못 읽었습니다 — 자가 낡았습니다`);
+        looked++;
+        if (/\bisSessionExpired\b/.test(body as string)) continue;
+        if (NO_SESSION_YET.some((x) => x.file === name)) continue;
+        bad.push(`${name}: ${code.slice(0, m.index as number).split('\n').length}행`);
+      }
+    }
+    ok(looked > 0, '쓰기 자리가 0개입니다 — 자가 눈을 감았습니다');
+    deepStrictEqual(
+      bad,
+      [],
+      '세션이 죽어도 로그인으로 안 보냅니다 — 「로그인이 필요합니다」라고 말할 뿐입니다',
+    );
+  });
+
+  it('⛔ 예외 표가 낡지 않았다 — 적어 둔 파일이 아직 쓰기를 한다', () => {
+    const stale = NO_SESSION_YET.filter(({ file }) => {
+      const code = codeOf(readFileSync(join(DEMO, file), 'utf8'));
+      return !/\btrySend\(/.test(code);
+    }).map(({ file }) => file);
+    deepStrictEqual(stale, [], '예외에 적힌 자리가 사라졌습니다 — 표를 지우십시오');
+  });
+});
+
 describe('SPA 화면은 쓰기를 **한 자리로** 보낸다 (결함 426)', () => {
   /*
    * `main.tsx` 머리말: 「그래서 실패를 **한 자리에서** 받습니다. 화면

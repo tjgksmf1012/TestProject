@@ -92,12 +92,26 @@ const wantedChannel = Number(params.get('channel') ?? '') || null;
 
 const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
 
-const sendJson = (
+/**
+ * 쓰기 한 번.
+ *
+ * ⚠️ **세션 만료는 여기서 봅니다** (결함 427). 예전에는 부르는 쪽 다섯 중
+ * **둘**만 봤습니다 — 보내기·고치기는 로그인으로 갔고, **반응·지우기·
+ * 채널 만들기**는 그냥 문장만 띄웠습니다. 세션이 죽은 채 「지우기」를
+ * 누르면 `401 DELETE /api/messages/2` 가 나고 화면은 「로그인이
+ * 필요합니다」라고 말하는데, **그 말을 들을 자리가 없습니다** — 결함 227
+ * 이 고친 그 병입니다. 재현했습니다.
+ *
+ * 부르는 쪽마다 적으면 반드시 몇 곳이 빠집니다(대표 실패 ②). 설정
+ * 화면(`project.tsx`)이 `call()` 에서 같은 판단을 하고 있고, 그래서 쓰기
+ * **열둘이 전부** 지켜집니다 — 그 모양을 그대로 씁니다.
+ */
+const sendJson = async (
   path: string,
   method: 'POST' | 'PATCH' | 'PUT' | 'DELETE',
   body?: unknown,
-): Promise<Response | null> =>
-  trySend(() =>
+): Promise<Response | null> => {
+  const response = await trySend(() =>
     fetch(`${apiBase}${path}`, {
       method,
       credentials: 'same-origin',
@@ -106,6 +120,9 @@ const sendJson = (
         : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
     }),
   );
+  if (response !== null && isSessionExpired(response.status)) goToLogin();
+  return response;
+};
 
 /**
  * 실패한 응답을 **사람이 읽을 한 줄**로.

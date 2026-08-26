@@ -110,6 +110,13 @@ function App() {
         setNote({ text: unreachableText('읽음 표시를 못 보냈습니다'), tone: 'bad' });
         return;
       }
+      /* ⚠️ **세션부터 봅니다** (결함 427 과 같은 모양). 이 화면의 로드는
+         이미 `isSessionExpired` → `goToLogin` 인데 **쓰기만** 빠져
+         있었습니다 — 읽기와 쓰기가 다른 길이었습니다. */
+      if (isSessionExpired(response.status)) {
+        goToLogin();
+        return;
+      }
       if (!response.ok) {
         setNote({
           /* 서버가 쓴 문장이 먼저입니다 (결함 301) — `describeHttpStatus`
