@@ -90,13 +90,31 @@ UNREAD_FIELDS: dict[str, str] = {
         "`EvidenceChip`(「칩은 언제나 원문으로 이어져야 합니다」)을 보십시오"
     ),
     # ── **안 쟀습니다** — 다음 사람이 열어 보고 사유를 채우십시오 ──
-    "FinalsOut.run_id": "⚠️ 안 쟀습니다",
-    "GithubHealthOut.verified_at": "⚠️ 안 쟀습니다 (결함 380 이 그 화면을 다뤘습니다)",
-    "GithubHealthOut.backfilled_at": "⚠️ 안 쟀습니다",
-    "GithubHealthOut.backfilled_to": "⚠️ 안 쟀습니다",
-    "MeetingOut.consent_url": "⚠️ 안 쟀습니다",
-    "ProjectOut.member_ids": "⚠️ 안 쟀습니다",
-    "TaskOriginOut.candidate_id": "⚠️ 안 쟀습니다",
+    "FinalsOut.run_id": (
+        "계산 회차 번호입니다 — 사람에게 번호를 보여 주지 않습니다(결함 293). "
+        "화면은 값과 사유를 그립니다"
+    ),
+    "GithubHealthOut.verified_at": (
+        "서버가 `headline`·`detail`·`coverage` **문장**을 지어 보내고 화면은 "
+        "그것을 그립니다(결함 300·347 의 방법)"
+    ),
+    "GithubHealthOut.backfilled_at": "위와 같음 — `coverage` 한 줄이 범위를 말합니다",
+    "GithubHealthOut.backfilled_to": "위와 같음",
+    "MeetingOut.consent_url": (
+        "`f\"/api/meetings/{id}/consent\"` — 화면이 `meeting_id` 로 **같은 주소를 "
+        "직접** 만듭니다. 이 칸은 그 사본입니다"
+    ),
+    "ProjectOut.member_ids": (
+        "만든 직후라 언제나 **만든 사람 하나**입니다(`member_ids=[user.id]`). "
+        "팀원 목록은 `/members` 로 따로 받습니다. ⚠️ 요청 **본문**의 "
+        "`member_ids` 를 믿던 것이 결함이었고(main.py 755줄) 이 칸은 그 모양의 "
+        "잔재입니다"
+    ),
+    "TaskOriginOut.candidate_id": (
+        "화면은 회의 이름과 **근거 발화**로 갑니다 — 후보 번호는 안 씁니다. "
+        "⚠️ 이 줄을 따라가다 결함 418 이 나왔습니다: 칸반 카드가 근거 발화를 "
+        "세어 놓고 볼 문이 없었습니다"
+    ),
 }
 
 

@@ -317,7 +317,7 @@ function CandidateCard({
         {evidence.length === 0 ? (
           <span className="src none">근거 없음</span>
         ) : (
-          <button type="button" className="src" onClick={() => openEvidence(evidence, title)}>
+          <button type="button" className="src" onClick={() => openEvidence(meetingId, evidence, title)}>
             근거 #{evidence.join(', #')}
           </button>
         )}
@@ -570,7 +570,7 @@ function Findings({ findings }: { findings: Finding[] }) {
               <button
                 type="button"
                 className="src"
-                onClick={() => openEvidence(view.evidence, view.title)}
+                onClick={() => openEvidence(meetingId, view.evidence, view.title)}
               >
                 근거 #{view.evidence.join(', #')}
               </button>
@@ -1112,7 +1112,7 @@ if (host === null) throw new Error('요소 없음: app');
 createRoot(host).render(<Review />);
 
 // 근거 발화 상자를 한 번 붙인다.
-mountEvidence(apiBase, meetingId);
+mountEvidence(apiBase);
 
 renderNav('review');
 

@@ -66,6 +66,7 @@ import { Byline, RawHtml } from './parts.tsx';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 import { meetingLabel } from '../lib/ui/naming.ts';
+import { mountEvidence, openEvidence } from './evidence.tsx';
 
 interface Member {
   user_id: number;
@@ -143,19 +144,38 @@ type Screen =
  */
 function Drawer({ task, warnings }: { task: Task; warnings: readonly string[] }) {
   const links = task.github ?? [];
+  const origin = task.origin ?? null;
   return (
     <details className="more">
       <summary>자세히</summary>
       <div className="more-body">
-        {task.origin === null || task.origin === undefined ? (
+        {origin === null ? (
           /* ⛔ 예전에는 「손으로 만든 업무입니다」였습니다 (결함 317) —
              313 이 고친 곳의 **셋째 자리**이고, 이 제품에 그 길은
              없습니다. 모르는 것은 모른다고 적습니다. */
           <p>{unknownOriginNote()}</p>
         ) : (
           <p>
-            {meetingLabel(task.origin.meeting_title, task.origin.meeting_id)}에서 나온 업무입니다 · 근거 발화{' '}
-            {task.origin.evidence_utterance_ids.length}건
+            {meetingLabel(origin.meeting_title, origin.meeting_id)}에서 나온 업무입니다{' '}
+            {/* ⛔ **개수만 적고 문을 안 줬습니다** (결함 418). `evidence.ts` 의
+                머리말이 「이 제품의 대표 주장은 기여도 숫자에서 출발해 어느
+                회의 몇 번째 발언까지 거슬러 올라갈 수 있다는 것」이라고 적어
+                두고, 오래도록 화면은 `근거 #5` 라고 **적기만** 했다고
+                했습니다 — 검토 화면은 고쳤는데 이 카드가 그 모양으로
+                남아 있었습니다. 상자는 같은 것을 씁니다. */}
+            <button
+              type="button"
+              className="src"
+              onClick={() =>
+                openEvidence(
+                  origin.meeting_id,
+                  origin.evidence_utterance_ids,
+                  task.title,
+                )
+              }
+            >
+              근거 발화 {origin.evidence_utterance_ids.length}건
+            </button>
           </p>
         )}
         {/* 카드 표면에서는 색으로만 말한 것(확정/추정)을 여기서는 글로 남깁니다. */}
@@ -972,6 +992,10 @@ function Kanban() {
 const host = document.getElementById('app');
 if (host === null) throw new Error('요소 없음: app');
 createRoot(host).render(<Kanban />);
+
+// ⛔ **근거 상자를 붙입니다** (결함 418). 안 붙이면 카드의 「근거 발화 N건」
+//    이 눌려도 아무 일이 안 납니다 — 대표 실패 ③ 의 모양입니다.
+mountEvidence(apiBase);
 
 renderNav('kanban');
 

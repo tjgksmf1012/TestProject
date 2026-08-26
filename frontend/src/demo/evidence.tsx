@@ -35,6 +35,16 @@ import {
 import { tryGet } from '../lib/http/send.ts';
 
 interface Request {
+  /**
+   * 어느 회의의 발화인가.
+   *
+   * ⚠️ 예전에는 **상자를 붙일 때** 회의를 정했습니다(`mountEvidence(apiBase,
+   * meetingId)`). 그러면 회의 하나짜리 화면(검토)에서만 쓸 수 있고, 칸반처럼
+   * **카드마다 회의가 다른** 화면에서는 붙일 수가 없습니다 — 그래서 칸반은
+   * 「근거 발화 3건」이라고 **개수만 적고** 원문으로 가는 문이 없었습니다
+   * (결함 418). 회의는 **부를 때** 정합니다.
+   */
+  meetingId: number;
   ids: number[];
   title: string;
 }
@@ -50,11 +60,16 @@ let setAsk: (ask: Ask) => void = () => {};
  * ⚠️ 인자로 **제목까지** 받습니다. 상자만 띄우면 사람이 "이게 어느
  * 후보의 근거였지" 를 잊습니다 — 상자는 카드를 덮으니까요.
  */
-export function openEvidence(ids: readonly number[], title: string): void {
-  setAsk({ ids: [...ids], title });
+export function openEvidence(
+  meetingId: number,
+  ids: readonly number[],
+  title: string,
+): void {
+  setAsk({ meetingId, ids: [...ids], title });
 }
 
-function Body({ apiBase, meetingId, ask }: { apiBase: string; meetingId: number; ask: Request }) {
+function Body({ apiBase, ask }: { apiBase: string; ask: Request }) {
+  const meetingId = ask.meetingId;
   const [state, setState] = useState<
     { kind: 'loading' } | { kind: 'done'; rows: Utterance[] } | { kind: 'unreachable' }
   >({ kind: 'loading' });
@@ -127,7 +142,7 @@ function Body({ apiBase, meetingId, ask }: { apiBase: string; meetingId: number;
   );
 }
 
-function EvidenceDialog({ apiBase, meetingId }: { apiBase: string; meetingId: number }) {
+function EvidenceDialog({ apiBase }: { apiBase: string }) {
   const [ask, set] = useState<Ask>(null);
   setAsk = set;
 
@@ -149,7 +164,7 @@ function EvidenceDialog({ apiBase, meetingId }: { apiBase: string; meetingId: nu
           <Dialog.Description className="mt-1 mb-5 text-[12px] text-text-subtle">
             {ask?.title ?? ''}
           </Dialog.Description>
-          {ask !== null && <Body apiBase={apiBase} meetingId={meetingId} ask={ask} />}
+          {ask !== null && <Body apiBase={apiBase} ask={ask} />}
           <div className="mt-6 flex justify-end">
             <Dialog.Close className="min-h-0 rounded-ctrl border border-line-strong bg-bg
                                      px-4 py-2 text-[13px] font-medium text-text-muted">
@@ -169,8 +184,8 @@ function EvidenceDialog({ apiBase, meetingId }: { apiBase: string; meetingId: nu
  * 건드리지 않으므로, 옮기지 않은 화면이 깨지지 않습니다 — 스택을
  * 하나씩 옮기는 동안 이 성질이 중요합니다.
  */
-export function mountEvidence(apiBase: string, meetingId: number): void {
+export function mountEvidence(apiBase: string): void {
   const host = document.createElement('div');
   document.body.appendChild(host);
-  createRoot(host).render(<EvidenceDialog apiBase={apiBase} meetingId={meetingId} />);
+  createRoot(host).render(<EvidenceDialog apiBase={apiBase} />);
 }

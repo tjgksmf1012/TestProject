@@ -3855,6 +3855,61 @@ describe('신뢰도 한 줄은 **누구를 잰 값인지** 말한다 (결함 384
   });
 });
 
+describe('근거 발화를 **세었으면 볼 문**도 준다 (결함 418)', () => {
+  /*
+   * `lib/review/evidence.ts` 머리말: 「이 제품의 **대표 주장**은 "기여도
+   * 숫자에서 출발해 어느 회의 몇 번째 발언까지 거슬러 올라갈 수 있다" …
+   * 오랫동안 화면은 `근거 #5` 라고 **적기만** 했습니다 — 눌러도 아무 데도
+   * 못 갔습니다.」
+   *
+   * 검토 화면은 고쳤는데 **칸반 카드의 서랍**이 그 모양으로 남아 있었습니다:
+   * `evidence_utterance_ids` 를 손에 들고 「근거 발화 1건」이라고 개수만
+   * 적고, 원문으로 가는 컨트롤은 0개였습니다(렌더해서 셌습니다).
+   *
+   * ⚠️ 상자는 **원래 있었습니다** — `demo/evidence.tsx`. 회의를 붙일 때
+   *    정하게 돼 있어서(`mountEvidence(apiBase, meetingId)`) 카드마다 회의가
+   *    다른 칸반에는 붙일 수가 없었을 뿐입니다. 회의를 **부를 때** 정하게
+   *    바꿔 두 화면이 같은 상자를 씁니다.
+   */
+  const screens = () =>
+    readdirSync(DEMO)
+      .filter((name) => SCREEN_EXT.test(name) && !name.endsWith('.test.ts'))
+      .map((name) => ({ name, code: codeOf(readFileSync(join(DEMO, name), 'utf8')) }));
+
+  it('⭐ `evidence_utterance_ids` 를 그리는 화면은 **원문으로 가는 문**이 있다', () => {
+    const blind = screens()
+      .filter(({ code }) => /evidence_utterance_ids/.test(code))
+      .filter(({ code }) => !/openEvidence\(/.test(code))
+      .map(({ name }) => name);
+    deepStrictEqual(
+      blind,
+      [],
+      '근거 발화를 세어 놓고 볼 자리를 안 줍니다 — 대표 실패 ③',
+    );
+  });
+
+  it('⛔ `openEvidence` 를 부르는 화면은 상자를 **붙이기도** 한다', () => {
+    // 가리키기만 하고 안 그리면 눌러도 아무 일이 안 납니다(결함 239 의 모양).
+    const dangling = screens()
+      .filter(({ code }) => /openEvidence\(/.test(code))
+      .filter(({ name, code }) => name !== 'evidence.tsx' && !/mountEvidence\(/.test(code))
+      .map(({ name }) => name);
+    deepStrictEqual(dangling, [], '근거 상자를 안 붙였습니다 — 눌러도 아무 일이 안 납니다');
+  });
+
+  it('⚠️ 상자는 회의를 **부를 때** 받는다 — 붙일 때가 아니라', () => {
+    const code = codeOf(readFileSync(join(DEMO, 'evidence.tsx'), 'utf8'));
+    ok(
+      /export function openEvidence\(\s*meetingId: number/.test(code),
+      '`openEvidence` 가 회의를 안 받습니다 — 카드마다 회의가 다른 화면에서는 못 씁니다',
+    );
+    ok(
+      /export function mountEvidence\(apiBase: string\): void/.test(code),
+      '`mountEvidence` 가 아직 회의를 붙듭니다 — 한 화면에 회의 하나만 됩니다',
+    );
+  });
+});
+
 describe('소켓이 끊기면 **화면이 말한다** (결함 416)', () => {
   /*
    * 이 저장소의 WebSocket 은 둘입니다 — 통화(`call.ts`)와 채팅(`chat.tsx`).
