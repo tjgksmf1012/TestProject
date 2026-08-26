@@ -231,7 +231,23 @@ def _people(session: Session, project_id: int) -> list[period_builder.Person]:
         # ⚠️ 못 잰 영역이 있다고 "못 잰 사람" 이 되는 것은 아닙니다. 남은
         #    영역으로 재정규화해 구간을 냅니다 (docs/05). 아무것도 못 쟀을
         #    때만 구간을 비웁니다 — 그때 0 을 적으면 그건 오답입니다.
-        measured = score.confidence.value > 0 and bool(score.evidence_ids)
+        #
+        # ⚠️⚠️ **가르는 것은 범주 칸이 있는가 하나입니다** (결함 410).
+        #    예전에는 `confidence > 0 and evidence_ids` 였습니다. 팀원 20명을
+        #    실기 경로(가입 + 초대 코드)로 만들어 최종 보고서를 읽어 보니,
+        #    막 들어와 활동이 0인 사람 열일곱에게 **「측정하지 못했습니다」**
+        #    라고 적혀 나갔습니다. 같은 순간 기여도 화면은 같은 사람을
+        #    **`0%`** 로 그립니다 — `@lib` 의 `nothingMeasured` 가 결함 191
+        #    에서 「팀에 살아 있는 범주가 있고 이 사람만 0건인 것은 **쟀는데
+        #    0건**」이라고 못 박았기 때문입니다.
+        #
+        #    「측정하지 못했습니다」는 불변식 ③(측정 불가 ≠ 0점)이 쓰는
+        #    말입니다. 아는 값에 붙이면 그 말이 닳습니다(결함 358) — 그것도
+        #    **팀 밖으로 나가는 문서**에서.
+        #
+        #    같은 판단이 파이썬·TS 두 벌이라 `contribution/measured_cases.json`
+        #    을 두 검사가 같이 읽습니다(결함 345 의 방법).
+        measured = bool(score.categories)
         people.append(
             period_builder.Person(
                 name=names.get(user_id, f"#{user_id}"),

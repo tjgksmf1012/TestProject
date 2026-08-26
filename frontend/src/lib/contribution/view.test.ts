@@ -1,5 +1,11 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+/** 이 파일이 있는 폴더 — 공용 사례 파일이 옆에 있습니다 (결함 410). */
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 import {
   LOW_CONFIDENCE,
@@ -554,6 +560,33 @@ describe('아무것도 안 잰 사람 (결함 191)', () => {
     // 이 아니라 **계산이 접힌 것**입니다.
     const [span] = uncertaintySpans([아직안한사람(2)]);
     strictEqual(span?.points, null);
+  });
+
+  /*
+   * 결함 410 — 이 판단이 **보고서에도** 있습니다(파이썬).
+   *
+   * 팀원 20명을 실기 경로로 만들어 최종 보고서를 읽어 보니, 막 들어와
+   * 활동이 0인 사람 열일곱에게 「측정하지 못했습니다」라고 적혀 나갔습니다.
+   * 같은 순간 이 화면은 같은 사람을 `0%` 로 그립니다 — 위 191 의 결정입니다.
+   *
+   * 언어가 달라 합칠 수가 없으므로(결함 363 의 「사본을 없애라」가 안 되는
+   * 자리) 사례를 **한 파일**에 두고 두 검사가 같이 읽습니다(결함 345).
+   */
+  it('⭐ 공용 사례 — 보고서(파이썬)와 **같은 답**을 낸다 (결함 410)', () => {
+    const cases = JSON.parse(
+      readFileSync(join(HERE, 'measured_cases.json'), 'utf8'),
+    ) as { cases: { 왜: string; category_count: number; measured: boolean }[] };
+    ok(cases.cases.length >= 3, '사례가 너무 적습니다 — 검사가 낡았습니다');
+    const wrong = cases.cases
+      .map((c) => {
+        const member = 아직안한사람(2);
+        const one = member.categories[0] as (typeof member.categories)[number];
+        const categories = Array.from({ length: c.category_count }, () => ({ ...one }));
+        const measured = !nothingMeasured({ ...member, categories });
+        return measured === c.measured ? null : `${c.왜}: 화면 ${measured} · 사례 ${c.measured}`;
+      })
+      .filter((x): x is string => x !== null);
+    deepStrictEqual(wrong, [], `공용 사례와 다릅니다:\n  ${wrong.join('\n  ')}`);
   });
 
   it('⚠️ `hasNoEvidence` 와 다르다 — 그쪽은 빈 배열도 참이라 "안 쟀다"를 못 묻는다', () => {

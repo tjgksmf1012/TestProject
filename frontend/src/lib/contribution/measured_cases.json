@@ -1,0 +1,33 @@
+{
+  "_": "결함 410 — 「쟀는데 0건」과 「안 잰」을 가르는 판단이 파이썬(backend/teamflow/services/report_service.py)과 TS(contribution/view.ts 의 nothingMeasured) 두 벌입니다. 두 검사가 이 파일을 같이 읽습니다 — 한쪽만 고치면 양쪽 다 빨개집니다. 판단의 원본은 결함 191 입니다.",
+  "cases": [
+    {
+      "왜": "갓 만든 팀 — 팀 전체에 활동이 하나도 없으면 범주 칸 자체가 안 생깁니다 (결함 307)",
+      "category_count": 0,
+      "evidence_count": 0,
+      "confidence": 0.0,
+      "measured": false
+    },
+    {
+      "왜": "활동 중인 팀에서 **이 사람만** 아직 아무것도 안 한 경우 — 팀에 살아 있는 범주가 있어 칸이 생기고 개수가 0 입니다 (결함 191 의 결정)",
+      "category_count": 4,
+      "evidence_count": 0,
+      "confidence": 0.446,
+      "measured": true
+    },
+    {
+      "왜": "재서 근거가 있는 사람",
+      "category_count": 6,
+      "evidence_count": 12,
+      "confidence": 0.446,
+      "measured": true
+    },
+    {
+      "왜": "범주는 있는데 신뢰도가 0 — 그래도 「안 잰」은 아닙니다. 가르는 것은 **범주 칸이 있는가** 하나입니다",
+      "category_count": 3,
+      "evidence_count": 0,
+      "confidence": 0.0,
+      "measured": true
+    }
+  ]
+}

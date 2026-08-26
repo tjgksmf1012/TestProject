@@ -159,6 +159,11 @@ export function describeRange(person: Person): string {
   if (!person.measured || person.range_low === null || person.range_high === null) {
     return '측정하지 못했습니다';
   }
+  /* ⚠️ **폭이 0 이면 한 번만 적습니다** (결함 410). 「쟀는데 0건」인 사람은
+     구간이 `0 ~ 0` 이고, 그대로 적으면 「0% ~ 0%」라는 이상한 글자가
+     팀 밖으로 나가는 문서에 실립니다. 기여도 화면은 같은 값을 이미
+     `0%` 로 적고 있습니다 — 같은 사실은 같은 말로(결함 290). */
+  if (person.range_low === person.range_high) return `${person.range_low}%`;
   return `${person.range_low}% ~ ${person.range_high}%`;
 }
 

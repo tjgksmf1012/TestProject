@@ -94,6 +94,14 @@ describe('구간과 결측', () => {
     strictEqual(describeRange(person()), '40% ~ 52%');
   });
 
+  it('⭐ 폭이 0 이면 한 번만 적는다 — 「0% ~ 0%」는 이상한 글자다 (결함 410)', () => {
+    /* 「쟀는데 0건」인 사람의 구간은 `0 ~ 0` 입니다. 기여도 화면은 같은
+       값을 `0%` 로 적습니다 — 팀 밖으로 나가는 문서가 다른 말을 하면
+       어느 쪽을 믿어야 할지 알 수 없습니다(결함 290). */
+    strictEqual(describeRange(person({ range_low: 0, range_high: 0 })), '0%');
+    strictEqual(describeRange(person({ range_low: 12, range_high: 12 })), '12%');
+  });
+
   it('못 쟀으면 신뢰도라는 말 자체가 안 나온다', () => {
     strictEqual(describeConfidence(person({ measured: false, confidence: null })), null);
     // 결함 344 — 「팀」이 붙습니다. 이 값은 팀 하나를 잰 것인데 보고서는
