@@ -86,7 +86,18 @@ function App() {
   useEffect(() => {
     void (async () => {
       const response = await get(`/api/projects/${projectId}/members`);
-      if (response === null || !response.ok) return;
+      if (response === null) return;
+      /* ⚠️ **세션이 끊겼으면 로그인으로 보냅니다** (결함 424).
+         예전에는 `|| !response.ok` 로 401 을 **조용히 삼켰습니다.** 그래서
+         로그아웃한 사람에게 이 화면만 멀쩡한 찾기 폼으로 열렸고(레거시
+         열넷 중 열셋은 바로 로그인으로 갑니다), 담당자·상태를 고르고
+         「찾기」를 누른 **뒤에야** 튕겼습니다 — 적은 말은 주소에 없으니
+         돌아와도 빈 칸입니다. */
+      if (isSessionExpired(response.status)) {
+        goToLogin();
+        return;
+      }
+      if (!response.ok) return;
       setMembers((await response.json()) as Member[]);
     })();
   }, []);

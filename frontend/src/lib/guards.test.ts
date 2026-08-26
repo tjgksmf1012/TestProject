@@ -3950,6 +3950,161 @@ describe('근거 발화를 **세었으면 볼 문**도 준다 (결함 418)', () 
   });
 });
 
+describe('401 을 **조용히 삼키지** 않는다 (결함 424)', () => {
+  /*
+   * 로그아웃한 채로 화면을 열면 이 제품은 로그인으로 보냅니다 — 브라우저로
+   * 세니 레거시 **열넷 중 열셋**이 그랬고, `search.html` 하나만 멀쩡한
+   * 찾기 폼으로 열렸습니다. 담당자·상태를 고르고 「찾기」를 누른 **뒤에야**
+   * 튕겼고, 적은 말은 주소에 없으니 돌아와도 빈 칸입니다.
+   *
+   * 원인은 첫 로드 한 줄이었습니다:
+   *
+   *     const response = await get(`…/members`);
+   *     if (response === null || !response.ok) return;   // ← 401 이 여기서 사라짐
+   *
+   * ⚠️ **자를 두 번 좁혔습니다.** 처음엔 「`get(` 마다 세션을 본다」로 쟀는데
+   * 화면 여섯의 **맞는 자리** 열한 곳이 걸렸습니다(보조 로드는 앞선 로드가
+   * 이미 보냈습니다). 그다음 「`!ok` 로 조용히 돌아서는 자리」로 좁히니
+   * 아홉이었고, 하나씩 읽으니 다섯은 그 자리에서 `goToLogin()` 을 부르고
+   * 있었습니다. 진짜는 **하나**였습니다 — 「잡혔다」는 「맞다」가 아닙니다.
+   *
+   * ⛔ **이 자가 못 보는 것**: 「로그아웃하면 로그인으로 가는가」 자체는
+   * 브라우저로만 잽니다(화면을 열어 봐야 압니다). 재는 방법은 `docs/24`
+   * 에 적었습니다. 여기서는 **이 결함의 모양**만 못 박습니다.
+   */
+
+  /** `{` 로 시작하는 가장 가까운 바깥 블록. */
+  const enclosing = (code: string, at: number): string | null => {
+    let depth = 0;
+    let start = -1;
+    for (let i = at - 1; i >= 0; i--) {
+      if (code[i] === '}') depth++;
+      else if (code[i] === '{') {
+        if (depth === 0) {
+          start = i;
+          break;
+        }
+        depth--;
+      }
+    }
+    if (start < 0) return null;
+    depth = 0;
+    for (let j = start; j < code.length; j++) {
+      if (code[j] === '{') depth++;
+      else if (code[j] === '}') {
+        depth--;
+        if (depth === 0) return code.slice(start, j + 1);
+      }
+    }
+    return null;
+  };
+
+  /**
+   * 일부러 조용한 자리 — **왜 예외인지**를 같이 적습니다.
+   *
+   * ⚠️ 예외도 낡습니다(결함 306). 그래서 아래 검사가 **예외로 적은 화면이
+   * 실제로 다른 자리에서 로그인으로 보내는지**를 같이 잽니다 — 그 자리가
+   * 사라지면 예외는 구멍이 됩니다.
+   */
+  const QUIET: { file: string; url: string; why: string }[] = [
+    {
+      file: 'chat.tsx',
+      url: '/api/chat/reactions',
+      why: '어휘를 못 받으면 화면이 집합을 지어내면 안 됩니다 (결함 414)',
+    },
+    {
+      file: 'chat.tsx',
+      url: '/api/chat/channel-kinds',
+      why: '못 받으면 고르는 칸을 아예 안 그립니다 (결함 360)',
+    },
+  ];
+
+  const screens = () =>
+    readdirSync(DEMO)
+      .filter((name) => SCREEN_EXT.test(name) && !name.endsWith('.test.ts'))
+      .map((name) => ({ name, code: codeOf(readFileSync(join(DEMO, name), 'utf8')) }))
+      .filter(({ code }) => /\bisSessionExpired\b/.test(code));
+
+  it('⭐ `!response.ok` 로 돌아서는 자리는 **세션 만료를 먼저 본다**', () => {
+    const bad: string[] = [];
+    let looked = 0;
+    for (const { name, code } of screens()) {
+      for (const m of code.matchAll(/await (?:whileLoading\(\s*)?get\(/g)) {
+        const body = enclosing(code, m.index as number);
+        // 못 읽은 것을 「0건」으로 넘기면 자가 조용히 눈을 감습니다.
+        ok(body !== null, `${name}: 로드 자리를 못 읽었습니다 — 자가 낡았습니다`);
+        looked++;
+        const block = body as string;
+        if (/\bisSessionExpired\b/.test(block) || /\bgoToLogin\(\)/.test(block)) continue;
+        /* ⚠️ **맨 `return`** 만 봅니다. 중괄호를 열어 `setNote(...)` 같은 것을
+           하는 자리는 사람에게 **말은 합니다** — 처음엔 그것까지 잡아서
+           채팅의 글 찾기와 보고서 열기가 걸렸고, 읽어 보니 둘 다 실패를
+           화면에 적고 있었습니다. 삼키는 것은 **아무 말도 없이** 돌아서는
+           자리입니다. */
+        if (!/!\s*\w+\.ok\s*\)\s*return\s*;/.test(block)) continue;
+        const url = /get\(\s*[`'"]([^`'"]*)/.exec(block.slice(block.indexOf('get(')))?.[1] ?? '';
+        if (QUIET.some((q) => q.file === name && url.includes(q.url))) continue;
+        bad.push(`${name}: ${url}`);
+      }
+    }
+    ok(looked > 0, '로드 자리가 0개입니다 — 자가 눈을 감았습니다');
+    deepStrictEqual(bad, [], '401 을 조용히 삼킵니다 — 로그아웃한 사람에게 화면이 그대로 열립니다');
+  });
+
+  it('⭐ **실패를 사람에게 말하는** 로드 자리도 세션 만료를 먼저 본다 (결함 425)', () => {
+    /*
+     * 위 검사는 「아무 말도 없이 돌아서는」 자리만 봅니다. 말은 하는데
+     * **틀린 말**을 하는 자리가 따로 있었습니다 — 보고서 화면을 열어 둔 채
+     * 세션이 끊기고 보고서를 누르면 「보고서를 열지 못했습니다 (**HTTP
+     * 401**)」. 재현했습니다. 「HTTP 401」은 사람이 할 수 있는 것을 하나도
+     * 안 말합니다.
+     *
+     * ⚠️ **같은 파일 안에서 갈려 있었습니다** — `reports.tsx` 의 네 자리 중
+     * 셋(목록 로드 · `/auth/me` · 만들기)은 전부 `isSessionExpired` →
+     * `goToLogin` 이고 **열기만** 빠졌습니다(결함 298·301 의 모양).
+     *
+     * ⚠️ 결함 316 의 가드가 이걸 못 보는 것은 **맞습니다** — 그 자는
+     * 「보낸 뒤」만 재고, 「불러오기 실패는 다시 불러오기가 답」이라는
+     * 결함 301 의 예외를 답니다. 그 예외의 시야에 **401** 은 없었습니다.
+     * 다시 불러와도 401 은 그대로입니다.
+     */
+    const SAYS = /(setNote|setFailure|setProblem|showNote|setFeedFailure|setMessage)\(/;
+    const bad: string[] = [];
+    let looked = 0;
+    for (const { name, code } of screens()) {
+      for (const m of code.matchAll(/await (?:whileLoading\(\s*)?get\(/g)) {
+        const body = enclosing(code, m.index as number);
+        ok(body !== null, `${name}: 로드 자리를 못 읽었습니다 — 자가 낡았습니다`);
+        looked++;
+        const block = body as string;
+        if (/\bisSessionExpired\b/.test(block) || /\bgoToLogin\(\)/.test(block)) continue;
+        if (!SAYS.test(block)) continue;
+        const url = /get\(\s*[`'"]([^`'"]*)/.exec(block.slice(block.indexOf('get(')))?.[1] ?? '';
+        bad.push(`${name}: ${url}`);
+      }
+    }
+    ok(looked > 0, '로드 자리가 0개입니다 — 자가 눈을 감았습니다');
+    deepStrictEqual(bad, [], '401 을 「HTTP 401」이라고 말합니다 — 로그인하라고 해야 합니다');
+  });
+
+  it('⛔ 예외로 적은 화면도 **어딘가에서는** 로그인으로 보낸다', () => {
+    // 예외가 「그 화면은 아무 데서도 안 보낸다」를 덮으면 구멍입니다.
+    const holes = [...new Set(QUIET.map((q) => q.file))].filter((file) => {
+      const code = codeOf(readFileSync(join(DEMO, file), 'utf8'));
+      return !/\bisSessionExpired\([^)]*\)\s*\)?\s*\{?[\s\S]{0,120}?goToLogin\(\)/.test(code);
+    });
+    deepStrictEqual(holes, [], '예외로 적은 화면이 로그인으로 보내는 자리가 없습니다');
+  });
+
+  it('⛔ 예외 표가 낡지 않았다 — 적어 둔 자리가 아직 있다', () => {
+    const stale = QUIET.filter(({ file, url }) => {
+      const code = codeOf(readFileSync(join(DEMO, file), 'utf8'));
+      return !code.includes(url);
+    }).map(({ file, url }) => `${file}: ${url}`);
+    deepStrictEqual(stale, [], '예외에 적힌 자리가 사라졌습니다 — 표를 지우십시오');
+  });
+});
+
 describe('고정 컨트롤 막대도 **표지 안**이다 (결함 423)', () => {
   /*
    * 통화 화면의 하단 막대는 `position: fixed` 라 `<main>` 밖 body 자식입니다.

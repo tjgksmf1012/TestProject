@@ -275,6 +275,15 @@ function App() {
       setNote({ text: unreachableText('보고서를 열지 못했습니다'), tone: 'bad' });
       return;
     }
+    /* ⚠️ **세션부터 봅니다** (결함 425). 이 화면의 다른 세 자리(목록 로드 ·
+       `/auth/me` · 만들기)는 전부 `isSessionExpired` → `goToLogin` 인데
+       **열기만** 빠져 있었습니다. 화면을 열어 둔 채 세션이 끊기고 보고서를
+       누르면 「보고서를 열지 못했습니다 (HTTP 401)」이 떴습니다 — 재현했습니다.
+       「HTTP 401」은 사람이 할 수 있는 것을 하나도 안 말합니다. */
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
     if (!response.ok) {
       setNote({ text: `보고서를 열지 못했습니다 (HTTP ${response.status})`, tone: 'bad' });
       return;

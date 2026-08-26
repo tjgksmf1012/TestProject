@@ -731,6 +731,15 @@ function App() {
       setNote({ text: unreachableText('찾지 못했습니다'), tone: 'bad' });
       return;
     }
+    /* ⚠️ **세션부터 봅니다** (결함 425 와 같은 모양). 이 파일의 다른 자리는
+       전부 `isSessionExpired` → `goToLogin` 입니다. ⚠️ 이 자리는 화면으로
+       **재현하지 못했습니다**(글 찾기를 켜려면 채널과 글이 먼저 필요합니다)
+       — 결함으로 세지 않고, 같은 파일이 이미 지키는 규칙을 여기에도
+       적용했습니다. */
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
     if (!response.ok) {
       setNote({ text: await failureText(response, '찾지 못했습니다'), tone: 'bad' });
       return;
