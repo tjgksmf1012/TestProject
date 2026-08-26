@@ -11,6 +11,7 @@ import {
   shortTeamDate,
   teamDateOf,
   teamDateTime,
+  teamInstantOf,
   todayInTeamCalendar,
   WEEKDAY_LABELS,
 } from './calendar.ts';
@@ -198,5 +199,43 @@ describe('목록의 날짜·시각도 팀 달력이다 (결함 246)', () => {
     // 붙이게 고쳤고(결함 246), 여기서는 그 사실만 적어 둡니다.
     const naive = shortTeamDate('2026-09-01T22:00:00');
     strictEqual(typeof naive, 'string');
+  });
+});
+
+
+describe('teamInstantOf — 사람이 적어 넣은 시각 (결함 409)', () => {
+  /*
+   * `<input type="datetime-local">` 은 **시간대가 없는 글자**를 줍니다.
+   * 예전에는 화면이 `new Date(when).toISOString()` 으로 바꿨고, 그건
+   * **브라우저 달력**입니다 — 브라우저 시간대를 바꿔 가며 같은 「10:00」을
+   * 넣어 재니 팀 달력에 Seoul 10:00 · UTC 19:00 · New York 23:00 으로
+   * 나갔습니다.
+   */
+  it('⭐ 팀 달력의 10:00 은 브라우저가 어디에 있든 같은 순간이다', () => {
+    strictEqual(teamInstantOf('2026-10-05T10:00'), '2026-10-05T01:00:00.000Z');
+  });
+
+  it('⭐ 되읽으면 적어 넣은 그 시각이다 — 왕복', () => {
+    for (const wall of ['2026-10-05T10:00', '2026-01-01T00:00', '2026-07-15T23:59']) {
+      const instant = teamInstantOf(wall);
+      strictEqual(instant === null, false, wall);
+      strictEqual(teamDateTime(instant as string), wall.replace('T', ' ').slice(5), wall);
+    }
+  });
+
+  it('⭐ 자정을 넘는 순간 — 팀 달력의 00:30 은 UTC 로 **전날**이다', () => {
+    // 이 자를 안 대면 서울·UTC 가 같은 답을 내서 아무것도 안 재게 됩니다.
+    strictEqual(teamInstantOf('2026-10-05T00:30'), '2026-10-04T15:30:00.000Z');
+  });
+
+  it('⭐ 초를 적어도 읽는다', () => {
+    strictEqual(teamInstantOf('2026-10-05T10:00:30'), '2026-10-05T01:00:30.000Z');
+  });
+
+  it('⚠️ 못 읽는 글자는 `null` — 시각을 지어내지 않는다', () => {
+    for (const bad of ['', '2026-10-05', '10:00', '2026-13-01T10:00', '2026-10-05T25:00',
+                       '2026-02-31T10:00', '내일 10시']) {
+      strictEqual(teamInstantOf(bad), null, bad);
+    }
   });
 });

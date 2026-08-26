@@ -39,7 +39,7 @@ import {
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
-import { todayInTeamCalendar } from '../lib/time/calendar.ts';
+import { teamInstantOf, todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
@@ -206,6 +206,18 @@ function App() {
   );
 
   const schedule = useCallback(async (): Promise<void> => {
+    /* ⚠️ `datetime-local` 은 **시간대가 없는** 글자입니다. 예전에는
+       `new Date(when).toISOString()` — **브라우저 달력**으로 읽었습니다.
+       브라우저 시간대를 바꿔 가며 같은 「10:00」을 넣어 재 보니 팀 달력에
+       Seoul 10:00 · UTC **19:00** · New York **23:00** 으로 나갔습니다
+       (결함 409). 이 제품의 시각은 팀 달력입니다(결함 246) — 읽는 쪽은
+       그때 다 옮겼는데 **쓰는 쪽만 남아** 있었습니다. */
+    const instant = teamInstantOf(when);
+    if (instant === null) {
+      // 시각을 지어내지 않습니다. 무엇이 문제인지는 그 칸이 말합니다.
+      setNote({ text: '회의 시각을 읽지 못했습니다 — 날짜와 시각을 다시 골라 주세요.', tone: 'bad' });
+      return;
+    }
     setSending(true);
     try {
       const response = await trySend(() =>
@@ -213,10 +225,7 @@ function App() {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          // ⚠️ `datetime-local` 은 **시간대가 없는** 글자입니다. 그대로
-          //    보내면 서버가 UTC 로 읽어 9시간 어긋납니다. 브라우저의
-          //    시간대로 해석해 순간으로 바꿔 보냅니다.
-          body: JSON.stringify({ title, at: new Date(when).toISOString() }),
+          body: JSON.stringify({ title, at: instant }),
         }),
       );
       if (response === null) {

@@ -39,6 +39,36 @@ const FORMATTER = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 });
 
+const ZONED = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TEAM_TIMEZONE,
+  hour12: false,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+});
+
+/**
+ * 그 순간에 팀 달력이 UTC 보다 몇 밀리초 앞서 있는가.
+ *
+ * ⚠️ `hour12: false` 라도 로케일에 따라 자정이 `24` 로 나옵니다 — 그대로
+ * 쓰면 하루가 밀립니다.
+ */
+function teamOffsetAt(instant: number): number {
+  const parts = new Map(ZONED.formatToParts(new Date(instant)).map((p) => [p.type, p.value]));
+  const asUtc = Date.UTC(
+    Number(parts.get('year')),
+    Number(parts.get('month')) - 1,
+    Number(parts.get('day')),
+    Number(parts.get('hour')) % 24,
+    Number(parts.get('minute')),
+    Number(parts.get('second')),
+  );
+  return asUtc - instant;
+}
+
 /**
  * `Date` 하나를 팀 달력의 `YYYY-MM-DD` 로.
  *
@@ -59,6 +89,59 @@ export function teamDateOf(instant: string): string | null {
   const at = new Date(instant);
   if (Number.isNaN(at.getTime())) return null;
   return isoFrom(at);
+}
+
+/**
+ * `datetime-local` 이 준 **시간대 없는 글자**를 팀 달력으로 읽어 순간으로.
+ *
+ * ## ⛔ 왜 브라우저 달력으로 읽으면 안 되는가 (결함 409)
+ *
+ * `<input type="datetime-local">` 의 값은 `2026-10-05T10:00` 처럼
+ * **시간대가 없습니다.** 예전에는 일정 화면이 `new Date(when).toISOString()`
+ * 으로 바꿨는데, 그건 **브라우저의 달력**으로 읽는 것입니다. 브라우저
+ * 시간대를 바꿔 가며 같은 「10:00」을 넣어 재 봤습니다:
+ *
+ *     브라우저 Asia/Seoul       → 저장 01:00Z → 팀 달력 10:00  ✔
+ *     브라우저 UTC              → 저장 10:00Z → 팀 달력 **19:00**  ✘
+ *     브라우저 America/New_York → 저장 14:00Z → 팀 달력 **23:00**  ✘
+ *
+ * 이 제품의 날짜·시각은 **팀 달력**입니다(결함 246). 읽는 쪽은 그때 전부
+ * `teamDateOf`·`teamDateTime` 으로 옮겼는데 **쓰는 쪽이 남아 있었습니다** —
+ * 「막는 길을 하나만 막은 것」(결함 295)입니다. 옛 주석은 「브라우저의
+ * 시간대로 해석해 순간으로 바꿔 보냅니다」라고 **하는 일**만 적었고,
+ * 그 선택의 근거는 없었습니다. 노트북 시계가 팀과 다른 사람이 잡은 회의는
+ * 팀 전체에 다른 시각으로 나갑니다 — 아무도 그 사실을 못 봅니다.
+ *
+ * ⚠️ **서머타임이 있는 달력에서도 맞게** 두 번 재서 수렴시킵니다. 서울은
+ * 지금 서머타임이 없지만, 이 함수가 보는 것은 `TEAM_TIMEZONE` 이고 그
+ * 값은 서버 설정과 묶여 있습니다 — 바뀔 수 있는 값에 「+09:00 을 붙이면
+ * 된다」를 박아 두지 않습니다.
+ *
+ * 못 읽는 글자면 `null` — **시각을 지어내지 않습니다.**
+ */
+export function teamInstantOf(wallClock: string): string | null {
+  const hit = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(wallClock.trim());
+  if (hit === null) return null;
+  const year = Number(hit[1]);
+  const month = Number(hit[2]);
+  const day = Number(hit[3]);
+  const hour = Number(hit[4]);
+  const minute = Number(hit[5]);
+  const second = hit[6] === undefined ? 0 : Number(hit[6]);
+  // ⚠️ `Date.UTC` 는 넘치는 값을 **굴려 버립니다**(13월 → 이듬해 1월).
+  //    사람이 못 쓰는 글자를 조용히 다른 날로 바꾸지 않습니다.
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (hour > 23 || minute > 59 || second > 59) return null;
+
+  const naive = Date.UTC(year, month - 1, day, hour, minute, second);
+  let instant = naive - teamOffsetAt(naive);
+  instant = naive - teamOffsetAt(instant);
+  const at = new Date(instant);
+  if (Number.isNaN(at.getTime())) return null;
+  // 굴러간 날(2월 31일)은 팀 달력으로 되읽으면 안 맞습니다.
+  const back = new Map(ZONED.formatToParts(at).map((part) => [part.type, part.value]));
+  if (Number(back.get('day')) !== day || Number(back.get('month')) !== month) return null;
+  return at.toISOString();
 }
 
 /** 팀 달력의 오늘. 마감일과 비교하는 값이라 같은 달력이어야 한다. */

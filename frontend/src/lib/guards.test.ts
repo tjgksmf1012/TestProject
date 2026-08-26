@@ -5520,6 +5520,82 @@ describe('⛔ 달력은 **한 벌**이다 (결함 246)', () => {
   });
 });
 
+describe('⛔ 사람이 **적어 넣은 시각**도 팀 달력으로 읽는다 (결함 409)', () => {
+  /* 결함 246 은 **읽는** 쪽을 팀 달력으로 옮겼고, 결함 295 는 `slice(0,10)`
+     이라는 셋째 길을 막았습니다. **넷째 길**은 반대 방향이었습니다 —
+     `<input type="datetime-local">` 이 준 **시간대 없는 글자**를
+     `new Date(when).toISOString()` 로 바꾸면 **브라우저 달력**으로 읽습니다.
+
+     브라우저 시간대를 바꿔 가며 같은 「10:00」을 넣어 재 봤습니다:
+
+         Asia/Seoul       → 저장 01:00Z → 팀 달력 10:00  ✔
+         UTC              → 저장 10:00Z → 팀 달력 19:00  ✘
+         America/New_York → 저장 14:00Z → 팀 달력 23:00  ✘
+
+     노트북 시계가 팀과 다른 사람이 잡은 회의가 팀 전체에 다른 시각으로
+     나갑니다. 옛 주석은 「브라우저의 시간대로 해석해 순간으로 바꿔
+     보냅니다」라고 **하는 일**만 적었고 그 선택의 근거는 없었습니다. */
+  const screens = (): { label: string; rel: string; code: string }[] => {
+    const roots = [
+      { label: 'webapp', base: join(ROOT, '..', 'webapp', 'src') },
+      { label: 'demo', base: DEMO },
+      { label: 'lib', base: LIB },
+    ];
+    const out: { label: string; rel: string; code: string }[] = [];
+    const walk = (label: string, base: string, dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(label, base, full);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.includes('.test.')) {
+          out.push({ label, rel: full.slice(base.length + 1).replace(/\\/g, '/'), code: codeOf(readFileSync(full, 'utf8')) });
+        }
+      }
+    };
+    for (const { label, base } of roots) walk(label, base, base);
+    ok(out.length > 0, '화면 파일을 하나도 못 찾았습니다 — 가드가 헛돕니다');
+    for (const { label } of roots) {
+      ok(out.some((f) => f.label === label), `${label} 을 한 파일도 못 걷었습니다`);
+    }
+    return out;
+  };
+
+  it('⭐ 시간대 없는 글자를 받는 화면은 `new Date(…)` 를 안 쓴다', () => {
+    /* ⚠️ **처음엔 자를 넓게 잡아 거짓 양성을 냈습니다.**
+       `new Date(x).toISOString()` 을 전부 막았더니 `recording/complete.ts`
+       의 `new Date(serverTimeMs).toISOString()` 이 걸렸습니다 — 그건
+       **밀리초 순간**이라 시간대와 무관하고 맞는 코드입니다. 「잡혔다」는
+       「맞다」가 아닙니다.
+
+       그래서 자를 **위험이 있는 파일**로 좁힙니다: 시간대 없는 글자
+       (`datetime-local`)를 받는 화면에서는 `new Date(…)` 로 순간을 만들
+       일이 없습니다. 지금 시각(`new Date()`)은 예외입니다. */
+    const offenders = screens()
+      .filter((f) => /datetime-local/.test(f.code))
+      .filter((f) => /new Date\(\s*[^)\s]/.test(f.code))
+      .map((f) => `${f.label}/${f.rel}`);
+    deepStrictEqual(
+      offenders,
+      [],
+      '시간대 없는 글자를 브라우저 달력으로 읽고 있습니다 — `teamInstantOf` 를 쓰세요',
+    );
+  });
+
+  it('⭐ `datetime-local` 을 받는 화면은 `teamInstantOf` 를 거친다', () => {
+    /* ⚠️ 요구를 재는 쪽입니다. 위 검사는 **한 가지 길**만 막고, 이 검사는
+       「시간대 없는 입력을 받으면 팀 달력으로 읽어라」를 잽니다. */
+    const asking = screens().filter((f) => /datetime-local/.test(f.code));
+    ok(asking.length > 0, '`datetime-local` 을 받는 화면이 하나도 없습니다 — 가드가 낡았습니다');
+    const missing = asking
+      .filter((f) => !/teamInstantOf\s*\(/.test(f.code))
+      .map((f) => `${f.label}/${f.rel}`);
+    deepStrictEqual(
+      missing,
+      [],
+      '시간대 없는 입력을 팀 달력으로 안 읽습니다 — 브라우저 시계가 다른 사람이 잡으면 팀에 다른 시각으로 나갑니다',
+    );
+  });
+});
+
 describe('⛔ 서버가 준 순간을 **글자로 잘라** 날짜를 만들지 않는다 (결함 295)', () => {
   /* 결함 246 은 `new Date(iso).getMonth()` 를 막았습니다. 그런데 달력을
      갈라놓는 **세 번째 길**이 남아 있었습니다 — `instant.slice(0, 10)`.
