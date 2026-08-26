@@ -439,7 +439,32 @@ export default function Review() {
                           (<span className="num">{issue.at}</span>)
                         </>
                       )}{' '}
-                      · 근거 {issue.evidenceCount}건
+                      {/* ⭐ **칩으로 엽니다** (결함 420). 예전에는 「근거
+                          1건」이라고 **적기만** 했습니다 — 아래 관찰 줄과
+                          후보 카드는 같은 값을 처음부터 칩으로 열고
+                          있었으니, 같은 화면 안에서 셋 중 하나만 막힌
+                          것입니다. 서버가 번호를 싣는 이유가 바로 「사람이
+                          확인할 수 있게」입니다(`UnresolvedIssueOut`). */}
+                      {issue.evidence.length === 0 ? (
+                        <span className="muted">· 근거 없음</span>
+                      ) : (
+                        /* ⚠️ **축 이름을 눈에도 남깁니다** (결함 395). 칩만
+                           그리면 눈에는 맨 숫자 `#5` 뿐이고 「근거」는
+                           `aria-label` 에만 있습니다 — 귀가 눈보다 많이
+                           아는 상태입니다. */
+                        <>
+                          {'· 근거 '}
+                          <EvidenceChips
+                            ids={issue.evidence}
+                            onOpen={(id) =>
+                              rowRefs.current.get(id)?.scrollIntoView({
+                                behavior: reduceMotion ? 'auto' : 'smooth',
+                                block: 'center',
+                              })
+                            }
+                          />
+                        </>
+                      )}
                     </p>
                   ))}
                 </Disclosure>

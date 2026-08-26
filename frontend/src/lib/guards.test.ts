@@ -3950,6 +3950,186 @@ describe('근거 발화를 **세었으면 볼 문**도 준다 (결함 418)', () 
   });
 });
 
+describe('미해결 사안의 근거도 **문**이다 (결함 420)', () => {
+  /*
+   * 서버 `UnresolvedIssueOut` 의 docstring 이 왜 번호를 싣는지 적어 뒀습니다:
+   * 「근거 발화를 같이 싣습니다 — 근거 없이 "이게 미해결입니다" 라고만 하면
+   * 사람은 확인할 방법이 없고, 이 저장소는 그런 값을 화면에 올리지 않기로
+   * 했습니다.」
+   *
+   * 그런데 `@lib` 의 `describeIssue` 가 그 번호를 **버리고**
+   * `evidenceCount: number` 하나만 돌려줬고, 그래서 두 뿌리 다 「근거 발화
+   * 1건」이라고 **적기만** 했습니다 — 눌러도 아무 데도 못 갔습니다.
+   * 재현: 회의 1(씨앗)의 검토 화면. 미해결 사안의 근거는 발화 #5 인데,
+   * **같은 화면 아래 후보 카드**는 그 #5 를 `근거 #5` 라는 단추로 열고
+   * 있었습니다. 한 화면 안에서 같은 발화가 한 줄에서는 문이고 다른 줄에서는
+   * 죽은 숫자였습니다.
+   *
+   * ⚠️ **결함 418 의 가드가 이걸 못 봤습니다.** 그 자는 화면 파일에
+   * `evidence_utterance_ids` 라는 **글자**가 있는지 보는데, 이 값은
+   * `@lib` 이 파생 개수로 바꿔서 넘겨 주므로 화면에 그 글자가 없습니다.
+   * 게다가 판정이 **파일 단위**라, `openEvidence(` 를 다른 줄에서 부르는
+   * `review.tsx` 는 통째로 초록이었습니다(결함 392 회차의 「파일 어딘가
+   * 한 곳만 본 것」). 자(무엇을 찾나)와 판정 단위는 따로 낡습니다.
+   *
+   * 「옛 자 + 옛 코드 = 0건」의 증거는 **직전 커밋**입니다 — 결함이 그대로
+   * 있는 채로 pytest·프런트가 전부 초록이었습니다.
+   *
+   * ⛔ **이 자가 못 보는 것**: 근거 개수를 사람에게 적는 다른 자리
+   * (`reports.tsx` 의 「근거 N건」 · SPA 기여도의 범주 힌트)는 안 봅니다.
+   * 앞엣것은 서버가 **개수만** 싣고 번호를 안 주므로 화면이 문을 낼 수
+   * 없고(결함 312 의 모양), 뒤엣것은 `docs/24` 에 「결정이 필요한 자리」로
+   * 적혀 있습니다. 둘 다 이 결함과 **다른 축**입니다.
+   */
+  const libIssueView = () =>
+    codeOf(readFileSync(join(LIB, 'review', 'minutes.ts'), 'utf8'));
+
+  it('⭐ `@lib` 의 미해결 사안 뷰는 근거를 **번호로** 낸다 — 개수가 아니라', () => {
+    const code = libIssueView();
+    const view = /export interface IssueView \{([\s\S]*?)\n\}/.exec(code);
+    ok(view !== null, '`IssueView` 를 못 찾았습니다 — 자가 낡았습니다');
+    const body = (view as RegExpExecArray)[1] ?? '';
+    ok(
+      /\bevidence:\s*number\[\]/.test(body),
+      '`IssueView` 가 근거 **번호**를 안 냅니다 — 화면이 문을 낼 수가 없습니다',
+    );
+    ok(
+      !/\bevidenceCount\b/.test(body),
+      '파생 개수를 따로 들고 있습니다 — 사본은 갈라집니다(`evidence.length` 를 쓰십시오)',
+    );
+  });
+
+  /**
+   * 그 뷰를 **그리는** 파일들. 뿌리마다 따로 셉니다 — 한쪽만 고치고
+   * 통과하는 것이 이 저장소에서 제일 흔한 재발 모양입니다.
+   */
+  const drawers = (base: string): { rel: string; code: string }[] => {
+    const out: { rel: string; code: string }[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+          const code = codeOf(readFileSync(full, 'utf8'));
+          if (/\bissueViews\(/.test(code)) out.push({ rel: full.slice(base.length + 1), code });
+        }
+      }
+    };
+    walk(base);
+    return out;
+  };
+
+  /** `code[open]` 이 `(` 일 때 짝이 맞는 `)` 의 자리. 못 찾으면 -1. */
+  function closeOf(code: string, open: number): number {
+    let depth = 0;
+    for (let i = open; i < code.length; i++) {
+      if (code[i] === '(') depth++;
+      else if (code[i] === ')') {
+        depth--;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * 미해결 사안 **한 줄을 그리는 자리**와 그 줄의 이름.
+   *
+   * ⚠️ **파일 전체를 보면 안 됩니다.** 처음 쓴 자가 그랬고, 심어 보니
+   * 통과했습니다 — `review.tsx` 는 바로 아래 **관찰 줄**에서도
+   * `openEvidence(meetingId, view.evidence, …)` 를 부르므로, 미해결 사안의
+   * 문을 통째로 걷어내도 「파일 어딘가에 `.evidence` 를 여는 곳이 있다」로
+   * 초록이었습니다. 이 검사가 막으려던 바로 그 함정(결함 392 회차)에
+   * **자기가 빠진** 것입니다. 그래서 `issueViews(...)` 에서 시작해 그 줄을
+   * 그리는 `.map(...)` 의 **몸통만** 잘라 냅니다.
+   */
+  function issueRow(code: string): { param: string; body: string } | null {
+    /* ⚠️ **첫 번째를 집으면 안 됩니다.** SPA 의 첫 `issueViews(...)` 는
+       여닫이 머리말의 `…).length` 입니다 — 줄을 그리는 자리가 아닙니다.
+       그것만 보고 「못 읽었다」가 나왔고, 「못 읽은 것이 있으면 실패」를
+       넣어 뒀기에 조용히 지나가지 않았습니다. 그리는 자리를 찾을 때까지
+       전부 훑습니다. */
+    for (const call of code.matchAll(/\bissueViews\(/g)) {
+      const row = rowAt(code, call.index as number, call[0].length);
+      if (row !== null) return row;
+    }
+    return null;
+  }
+
+  function rowAt(code: string, at: number, len: number): { param: string; body: string } | null {
+    const open = at + len - 1;
+    const end = closeOf(code, open);
+    if (end < 0) return null;
+
+    // ① `issueViews(...).map(...)` — SPA 처럼 바로 이어 그리는 모양.
+    let mapOpen = -1;
+    const inline = /^\s*\.map\(/.exec(code.slice(end + 1));
+    if (inline !== null) {
+      mapOpen = end + inline[0].length;
+    } else {
+      // ② `const X = issueViews(...)` 로 받아 두고 `X.map(` — 레거시.
+      const before = code.slice(0, at);
+      const bound = /(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(before.trimEnd() + ' ');
+      const name = bound?.[1] ?? /(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(before)?.[1];
+      if (name === undefined) return null;
+      const use = new RegExp(`\\b${name}\\.map\\(`).exec(code);
+      if (use === null) return null;
+      mapOpen = (use.index as number) + use[0].length - 1;
+    }
+    const mapEnd = closeOf(code, mapOpen);
+    if (mapEnd < 0) return null;
+    const args = code.slice(mapOpen + 1, mapEnd);
+    const param = /^\s*\(?\s*([A-Za-z_$][\w$]*)/.exec(args)?.[1];
+    if (param === undefined) return null;
+    return { param, body: args };
+  }
+
+  /*
+   * ⚠️ **걷는 자리는 「화면」입니다.** 처음엔 `src` 통째로 걸었더니
+   * `lib/review/minutes.ts` 가 잡혔습니다 — 그 파일도 자기 안에서
+   * `issueViews(...)` 를 부릅니다(회의록이 비었는지 보려고). `@lib` 은
+   * 문을 낼 수 있는 자리가 아니므로 여기서 잴 것이 아닙니다.
+   */
+  const ROOTS: { name: string; base: string }[] = [
+    { name: '레거시 frontend/src/demo', base: join(DEMO) },
+    { name: 'SPA webapp/src', base: join(ROOT, '..', 'webapp', 'src') },
+  ];
+
+  for (const { name, base } of ROOTS) {
+    it(`⭐ ${name} — 미해결 사안을 그리는 화면은 근거를 **연다**`, () => {
+      const files = drawers(base);
+      // 안 보고 있는 상태 자체가 실패입니다 (결함 286).
+      ok(
+        files.length > 0,
+        `${name} 에 미해결 사안을 그리는 화면이 0개입니다 — 자가 눈을 감았습니다`,
+      );
+      const unreadable = files.filter(({ code }) => issueRow(code) === null).map(({ rel }) => rel);
+      // 못 읽은 것을 「0건」으로 넘기면 자가 조용히 눈을 감습니다.
+      deepStrictEqual(unreadable, [], `그리는 자리를 못 읽었습니다 (${name}) — 자가 낡았습니다`);
+
+      const blind = files
+        .filter(({ code }) => {
+          const row = issueRow(code) as { param: string; body: string };
+          /* 문이 둘 중 하나면 됩니다 — 레거시는 `openEvidence`(상자),
+             SPA 는 `EvidenceChips`(칩). 어느 쪽이든 **그 줄의 `evidence`**
+             가 인자로 들어가야 합니다. 다른 값을 넣고 통과하면 안 됩니다. */
+          const mine = new RegExp(`\\b${row.param}\\.evidence\\b`);
+          const opened = callArgs(row.body, 'openEvidence').some((a) => mine.test(a));
+          const chipped = new RegExp(
+            `<EvidenceChips[\\s\\S]{0,160}?ids=\\{${row.param}\\.evidence\\}`,
+          ).test(row.body);
+          return !opened && !chipped;
+        })
+        .map(({ rel }) => rel);
+      deepStrictEqual(
+        blind,
+        [],
+        `근거 발화를 세어 놓고 볼 자리를 안 줍니다 (${name}) — 대표 실패 ③`,
+      );
+    });
+  }
+});
+
 describe('소켓이 끊기면 **화면이 말한다** (결함 416)', () => {
   /*
    * 이 저장소의 WebSocket 은 둘입니다 — 통화(`call.ts`)와 채팅(`chat.tsx`).

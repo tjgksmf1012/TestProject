@@ -195,10 +195,21 @@ function Brief({ meeting }: { meeting: MeetingInfo }) {
                   <span className="what">{view.content}</span>
                   {/* ⚠️ 근거 0건도 적습니다. 감추면 근거 없는 사안이
                       근거 있는 것과 똑같아 보입니다. */}
-                  {view.evidenceCount === 0 ? (
+                  {/* ⭐ **누를 수 있습니다** (결함 420). 오랫동안 이 자리는
+                      개수만 적었습니다 — 같은 화면 아래 후보 카드는 같은
+                      발화(#5)를 `근거 #5` 라는 **단추**로 열고 있었는데,
+                      여기서는 「근거 발화 1건」이라 눌러도 아무 데도 못
+                      갔습니다. 상자는 `evidence.tsx` 로 이미 있습니다. */}
+                  {view.evidence.length === 0 ? (
                     <span className="why none">근거 발화 없음</span>
                   ) : (
-                    <span className="why">근거 발화 {view.evidenceCount}건</span>
+                    <button
+                      type="button"
+                      className="src"
+                      onClick={() => openEvidence(meetingId, view.evidence, view.content)}
+                    >
+                      근거 발화 {view.evidence.length}건
+                    </button>
                   )}
                 </li>
               ))}

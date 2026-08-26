@@ -57,20 +57,31 @@ export interface IssueView {
   /** `2:05` 또는 null. null 이면 화면이 시각 칸을 아예 안 그린다. */
   at: string | null;
   /**
-   * 근거 발화가 몇 건인가.
+   * 근거 발화 번호들.
    *
    * ⚠️ 0 건도 **보여줍니다.** 숨기면 근거 없는 미해결 사안이 근거 있는
    * 것과 똑같아 보입니다 — 이 저장소는 후보 승인에서 이미 같은 규칙을
    * 씁니다(근거 없는 후보는 승인 불가).
+   *
+   * ⛔ **개수만 돌려주지 마십시오** (결함 420). 오랫동안 이 칸은
+   * `evidenceCount: number` 였습니다. 서버는 `evidence_utterance_ids` 를
+   * 실어 보내고 그 docstring 이 이유까지 적어 뒀는데(「근거 없이 "이게
+   * 미해결입니다" 라고만 하면 사람은 확인할 방법이 없고, 이 저장소는
+   * 그런 값을 화면에 올리지 않기로 했습니다」), **여기서 번호를 버려서**
+   * 두 화면 다 「근거 발화 1건」이라고 적기만 했습니다 — 눌러도 아무
+   * 데도 못 갔습니다. 바로 옆 `findings.ts` 의 `FindingView` 는 처음부터
+   * `evidence: number[]` 를 들고 있고 두 뿌리가 그것을 엽니다.
+   *
+   * 개수가 필요하면 `evidence.length` 입니다 — 사본을 두면 갈라집니다.
    */
-  evidenceCount: number;
+  evidence: number[];
 }
 
 export function describeIssue(issue: UnresolvedIssue): IssueView {
   return {
     content: issue.content.trim(),
     at: atText(issue.start_ms),
-    evidenceCount: (issue.evidence_utterance_ids ?? []).length,
+    evidence: [...(issue.evidence_utterance_ids ?? [])],
   };
 }
 
