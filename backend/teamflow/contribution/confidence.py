@@ -112,19 +112,77 @@ _REASON_TEXT: dict[str, str] = {
     "peer_completion": "동료평가 미제출자가 있습니다",
 }
 
+#: 녹음했다는 회의에서 발언이 한 건도 안 나온 경우 (결함 428).
+#:
+#: 이때는 `_REASON_TEXT` 의 두 문장이 **거짓**입니다 — "화자가 확정되지
+#: 않은 발화가 있습니다" 라고 하려면 발화가 있어야 합니다. 낱말은 이
+#: 제품이 같은 상태를 부르는 말과 맞춥니다 (홈 `next.ts` · 회의록
+#: `minutes.py`).
+_SILENT_RECORDING_REASON = (
+    "오간 말이 하나도 기록되지 않은 회의가 있습니다 — 그 회의의 발언은 세지 못했습니다"
+)
+
+
+def silent_recordings(stats: CoverageStats) -> bool:
+    """녹음했다는 회의가 있는데 발언이 **한 건도** 안 나왔는가 (결함 428).
+
+    ⚠️ **분모 0 에는 두 뜻이 있습니다.**
+
+    `compute_confidence` 는 분모가 0 인 신호를 계산에서 뺍니다. 그 규칙은
+    **모듈을 안 쓰는 팀**을 위한 것입니다 — 동료평가를 안 하는 팀이 그
+    항목 때문에 깎이면 안 됩니다 (결함 105 가 같은 자리에서 정한 것).
+
+    그런데 `utterances_total == 0` 은 그 뜻이 아닐 수 있습니다. 녹음을
+    했다는 회의가 있는데 발언이 0 건이면 그건 **모듈 미사용이 아니라
+    측정 실패**입니다. 가르지 않으면 전사 품질을 재는 두 신호
+    (`speaker_certainty` · `utterance_classification`, 합쳐서 가중치 6.0 중
+    3.0) 가 **바로 그 실패에서만** 통째로 사라집니다:
+
+        녹음됐고 말도 잡힌 회의   신뢰도 0.7273 「보통」  · 조정 폭 10.9%p
+        녹음됐는데 말이 0 건      신뢰도 1.0000 「높음」  · 조정 폭  0.0%p · 사유 0건
+        회의가 아예 없음          신뢰도 0.0000 「매우 낮음」· 조정 폭 40.0%p
+
+    아무것도 못 들은 회의가 **완벽한 회의보다 높게** 나오고, 신뢰도 1.0 은
+    `adjustment_range` 를 **한 점으로 접습니다** — 불변식 ②(단일 점수 금지:
+    구간 + 신뢰도 + 사유 + 근거 건수)가 거기서 깨집니다. 사유도 빈 목록이라
+    팀은 왜인지도 못 봅니다.
+
+    ⚠️ 이 제품은 같은 상태를 **다른 두 곳에서 이미 알고 있습니다** — 홈은
+    「오간 말이 하나도 기록되지 않았습니다」(결함 368), 회의록은 「오간 말이
+    하나도 기록되지 않아 요약이 없습니다」(결함 369). 신뢰도만 그것을
+    「완벽히 쟀다」로 읽고 있었습니다.
+
+    ⚠️ **`utterances_scored == 0` 만으로는 판정하지 않습니다.** 발화는
+    있는데 전부 `social`·`other` 인 회의(잡담만 한 회의)는 분류가 맞게 된
+    것이라 깎으면 안 됩니다 — 그건 `utterance_classification` 의 주석이
+    이미 정해 둔 것입니다.
+    """
+    return stats.meetings_recorded > 0 and stats.utterances_total == 0
+
 
 def compute_confidence(stats: CoverageStats, *, threshold: float = 0.9) -> ConfidenceBreakdown:
     """커버리지 신호들의 가중 평균.
 
     데이터가 아예 없는 신호(분모 0)는 계산에서 제외한다.
     예를 들어 동료평가 모듈을 안 쓰는 팀은 그 항목 때문에 신뢰도가 깎이지 않는다.
+
+    ⚠️ **다만 「안 쓰는 것」과 「못 잰 것」은 다릅니다** — `silent_recordings`
+    를 보십시오 (결함 428).
     """
+    silent = silent_recordings(stats)
+
     raw: dict[str, float | None] = {
         "meeting_recording": _ratio(stats.meetings_recorded, stats.meetings_total),
-        "speaker_certainty": _ratio(stats.utterances_speaker_certain, stats.utterances_total),
+        # ⚠️ 녹음했다는데 발언이 0 건이면 **빼지 않고 0.0 으로 셉니다.**
+        # 근거가 없으면 신뢰도가 내려가는 것이 정직한 방향이고, 내려가면
+        # 조정 폭이 **넓어져** 팀이 정할 여지가 커집니다. 아무것도 없는
+        # 팀(위 세 번째 줄)에 대해 이 함수가 이미 하고 있는 일입니다.
+        "speaker_certainty": (
+            0.0 if silent else _ratio(stats.utterances_speaker_certain, stats.utterances_total)
+        ),
         "track_quality": _ratio(stats.tracks_usable, stats.tracks_total),
-        "utterance_classification": _ratio(
-            stats.utterances_model_classified, stats.utterances_scored
+        "utterance_classification": (
+            0.0 if silent else _ratio(stats.utterances_model_classified, stats.utterances_scored)
         ),
         "github_coverage": _ratio(stats.github_connected_days, stats.project_days),
         "peer_completion": _ratio(stats.peer_reviews_submitted, stats.peer_reviews_expected),
@@ -143,7 +201,17 @@ def compute_confidence(stats: CoverageStats, *, threshold: float = 0.9) -> Confi
     weight_total = sum(_WEIGHTS[k] for k in components)
     value = weighted_sum / weight_total
 
-    reasons = [_REASON_TEXT[k] for k, v in sorted(components.items()) if v < threshold]
+    # ⚠️ 두 신호가 0.0 인 이유가 「발화가 아예 없다」면 `_REASON_TEXT` 의
+    # 문장이 거짓입니다 — 없는 발화를 두고 「확정되지 않은 발화가 있습니다」
+    # 라고 할 수는 없습니다. 한 문장으로 갈음합니다.
+    quiet = {"speaker_certainty", "utterance_classification"}
+    reasons = [
+        _REASON_TEXT[k]
+        for k, v in sorted(components.items())
+        if v < threshold and not (silent and k in quiet)
+    ]
+    if silent:
+        reasons.insert(0, _SILENT_RECORDING_REASON)
 
     return ConfidenceBreakdown(value=value, components=components, reasons=reasons)
 

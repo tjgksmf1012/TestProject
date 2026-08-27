@@ -104,6 +104,110 @@ def test_track_quality_is_ignored_when_there_are_no_tracks():
     assert result.value == pytest.approx(compute_confidence(FULL_COVERAGE).value)
 
 
+# ══════════════════════════════════════════════════════════════
+# 결함 428 — 「안 쓰는 것」과 「못 잰 것」
+# ══════════════════════════════════════════════════════════════
+#
+# 분모 0 을 계산에서 빼는 규칙은 **모듈 미사용**을 위한 것입니다. 녹음을
+# 했다는 회의에서 발언이 0 건인 것은 모듈 미사용이 아니라 **측정 실패**
+# 인데, 가르지 않아 전사 품질 신호 둘이 바로 그 실패에서만 사라졌습니다.
+
+
+SILENT_RECORDING = CoverageStats(
+    meetings_total=1,
+    meetings_recorded=1,
+    utterances_total=0,
+    utterances_speaker_certain=0,
+    tracks_total=3,
+    tracks_usable=3,
+    utterances_scored=0,
+    utterances_model_classified=0,
+)
+
+#: 같은 회의인데 말이 잡힌 경우. `SILENT_RECORDING` 과 **갈라지는 데이터**
+#: 여야 합니다 — 둘이 같은 값을 내면 이 검사는 아무것도 안 잽니다.
+HEARD_RECORDING = CoverageStats(
+    **{
+        **vars_of(SILENT_RECORDING),
+        "utterances_total": 20,
+        "utterances_speaker_certain": 20,
+        "utterances_scored": 15,
+    }
+)
+
+
+def test_a_recording_that_captured_nothing_is_not_perfect_confidence():
+    """⭐ 아무것도 못 들은 회의가 **완벽한 회의보다 높게** 나오면 안 된다.
+
+    신뢰도 1.0 은 `adjustment_range` 를 한 점으로 접습니다 — 불변식 ②
+    (단일 점수 금지)가 거기서 깨집니다.
+    """
+    silent = compute_confidence(SILENT_RECORDING)
+    heard = compute_confidence(HEARD_RECORDING)
+
+    assert silent.value < heard.value, (
+        f"말이 하나도 안 잡힌 회의({silent.value:.4f} 「{silent.label}」)가 "
+        f"말이 잡힌 회의({heard.value:.4f} 「{heard.label}」)보다 높습니다"
+    )
+    assert silent.value < 1.0
+
+
+def test_less_evidence_means_a_wider_band_not_a_narrower_one():
+    """근거가 적을수록 조정 폭은 **넓어져야** 합니다 — 팀이 정할 여지입니다."""
+    from teamflow.contribution.confidence import adjustment_range
+
+    def width(stats: CoverageStats) -> float:
+        low, high = adjustment_range(40.0, compute_confidence(stats).value)
+        return high - low
+
+    nothing_at_all = width(CoverageStats())
+    silent = width(SILENT_RECORDING)
+    heard = width(HEARD_RECORDING)
+
+    assert nothing_at_all > silent > heard, (
+        f"회의 없음 {nothing_at_all:.1f}%p · 말이 0건 {silent:.1f}%p · 말이 잡힘 {heard:.1f}%p"
+    )
+
+
+def test_a_silent_recording_says_why_and_does_not_talk_about_absent_utterances():
+    """사유가 비어 있으면 팀은 왜 낮은지 못 봅니다 — 그리고 **참인** 말을 해야 합니다.
+
+    「화자가 확정되지 않은 발화가 있습니다」라고 하려면 발화가 있어야 합니다.
+    """
+    reasons = compute_confidence(SILENT_RECORDING).reasons
+
+    assert reasons, "말이 하나도 안 잡혔는데 사유가 한 줄도 없습니다"
+    assert any("기록되지 않은" in r for r in reasons), reasons
+    assert not any("발화가 있습니다" in r for r in reasons), reasons
+
+
+def test_chit_chat_only_meetings_are_still_not_penalised():
+    """⚠️ 반대 방향 — 발화는 있는데 **점수 대상이** 0 인 회의는 깎으면 안 됩니다.
+
+    잡담을 잡담으로 맞게 분류한 것이고, `utterance_classification` 의
+    주석이 이미 정해 둔 것입니다. 428 의 고침이 여기까지 번지면 안 됩니다.
+    """
+    chit_chat = CoverageStats(
+        **{
+            **vars_of(SILENT_RECORDING),
+            "utterances_total": 12,
+            "utterances_speaker_certain": 12,
+        }
+    )
+    result = compute_confidence(chit_chat)
+
+    assert "utterance_classification" not in result.components
+    assert not any("기록되지 않은" in r for r in result.reasons), result.reasons
+
+
+def test_a_team_with_no_meetings_at_all_is_unchanged():
+    """⚠️ 갓 만든 팀은 「측정 실패」가 아닙니다 — 아직 안 한 것입니다 (결함 307)."""
+    result = compute_confidence(CoverageStats())
+
+    assert result.components == {}
+    assert result.reasons == ["수집된 활동 데이터가 없습니다"]
+
+
 def test_track_quality_is_weighted_like_speaker_certainty():
     """둘 다 기여도로 직접 전파되는 오류라 무게가 같아야 한다."""
     lost_speakers = compute_confidence(
