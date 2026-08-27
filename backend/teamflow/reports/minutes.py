@@ -110,13 +110,19 @@ _PROCESSED = frozenset({"needs_review", "confirmed"})
 #: "처리를 마쳤습니다" 로 나갈 수 있습니다 — 보고서에서 그건 거짓말입니다.
 _STATE_LINE = {
     "unprocessed": "아직 처리하지 않았습니다",
-    "failed": "처리하다 실패했습니다 — 다시 처리해야 합니다",
+    "failed": "처리에 실패했습니다 — 다시 처리해야 합니다",
     "processed": "처리를 마쳤습니다",
 }
 
 
 def state_of(status: str) -> str:
-    """이 회의가 처리 면에서 **어디에 있는가**. 셋 중 하나."""
+    """이 회의가 처리 면에서 **어디에 있는가**. **넷** 중 하나.
+
+    ⚠️ 오래도록 「셋 중 하나」라고 적혀 있었습니다 (결함 429). 실제로는
+    `unknown` 을 더해 넷이고, `build` 의 `empty_note` 는 **둘**만 답니다 —
+    그래서 `failed` 와 `unknown` 이 제일 확신에 찬 문장으로 떨어졌습니다.
+    갈래 수를 글로 적을 때는 `return` 을 세십시오 (결함 405 와 같은 모양).
+    """
     if status in _UNPROCESSED:
         return "unprocessed"
     if status in _FAILED:
@@ -125,6 +131,24 @@ def state_of(status: str) -> str:
         return "processed"
     # 모르는 상태를 조용히 "마쳤다" 로 세지 않습니다. 모르면 모른다고 합니다.
     return "unknown"
+
+
+#: 국면 → 빈 목록 옆에 적을 말 (결함 429).
+#:
+#: `None` 은 「처리를 마쳤으니 **진짜로** 없다」는 뜻이라 부르는 쪽이 준
+#: 문장을 그대로 씁니다. 나머지 셋은 전부 **모르는** 상태입니다.
+#:
+#: ⚠️ **`failed` 와 `no_transcript` 가 같은 문장인 것은 일부러입니다.**
+#: 둘 다 「알 수 없다」이고, **왜** 알 수 없는지는 바로 위 사실 줄이
+#: 갈라 말합니다(「처리에 실패했습니다 — 다시 처리해야 합니다」 ↔
+#: 「기록된 발화 0건」). 여기서 또 적으면 같은 말을 세 번 합니다
+#: (결함 366 에서 렌더해 보고 정한 것).
+_EMPTY_NOTE_BY_STATE: dict[str, str | None] = {
+    "unprocessed": "아직 회의를 처리하지 않았습니다.",
+    "failed": "확인할 수 없습니다.",
+    "unknown": "확인할 수 없습니다.",
+    "processed": None,
+}
 
 
 #: 녹음 방식 → 사람 말.
@@ -171,9 +195,23 @@ def build(data: MinutesInput) -> dict[str, Any]:
     no_transcript = state == "processed" and data.utterance_count == 0
 
     def empty_note(when_processed: str) -> str:
-        """빈 목록 옆에 적을 말. **갈래 수만큼 문장이 있어야 합니다.**"""
-        if unprocessed:
-            return "아직 회의를 처리하지 않았습니다."
+        """빈 목록 옆에 적을 말. **갈래 수만큼 문장이 있어야 합니다.**
+
+        ⛔ 오래도록 갈래가 넷인데 문장이 둘이었습니다 (결함 429). 처리에
+           **실패한** 회의의 회의록이 「미해결로 남은 사안이 **없습니다**」
+           라고 단언했습니다 — 분석이 아예 안 돌았으므로 사안이 있었는지
+           **알 수 없습니다.** 바로 위 「요약」 자리는 같은 회의에 대해
+           「요약을 만들지 못했습니다」라고 제대로 말하고 있었습니다:
+           한 갈래만 고치고 옆 셋을 그대로 둔 것입니다(결함 298·301).
+
+        ⚠️ `_EMPTY_NOTE_BY_STATE[state]` 로 **집습니다**(`.get` 이 아닙니다).
+           `state_of` 에 국면이 하나 늘고 문장을 안 적으면 그 자리에서
+           `KeyError` 가 납니다 — 조용히 「없었습니다」로 나가는 것보다
+           낫습니다.
+        """
+        note = _EMPTY_NOTE_BY_STATE[state]
+        if note is not None:
+            return note
         if no_transcript:
             # 「없었다」가 아니라 **「알 수 없다」**입니다.
             #
@@ -276,10 +314,7 @@ def build(data: MinutesInput) -> dict[str, Any]:
     body.append(blocks.heading("업무 후보"))
     body.append(
         blocks.bullets(
-            [
-                f"{c.title} — {_DECISION_LABEL.get(c.decision, c.decision)}"
-                for c in data.candidates
-            ],
+            [f"{c.title} — {_DECISION_LABEL.get(c.decision, c.decision)}" for c in data.candidates],
             empty_note=empty_note("회의에서 뽑힌 업무 후보가 없습니다."),
         )
     )

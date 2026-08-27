@@ -326,7 +326,7 @@ describe('⭐ 글자로 옮길 때 문장을 잃지 않는다', () => {
         {
           kind: 'facts',
           items: [
-            { label: '처리', value: '처리하다 실패했습니다', gap: false },
+            { label: '처리', value: '처리에 실패했습니다', gap: false },
             { label: '커버리지', value: '', gap: true },
           ],
         },
@@ -334,7 +334,7 @@ describe('⭐ 글자로 옮길 때 문장을 잃지 않는다', () => {
     };
     const text = toPlainText(content);
     // 예전에는 `gap` 이 붙은 칸의 **문장이 통째로** 바뀌어 나갔습니다.
-    ok(text.includes('처리: 처리하다 실패했습니다'), text);
+    ok(text.includes('처리: 처리에 실패했습니다'), text);
     ok(text.includes('커버리지: 못 쟀습니다'), text);
   });
 });

@@ -548,7 +548,7 @@ def test_a_failed_meeting_is_not_reported_as_finished():
         )
     )
     text = json.dumps(failed, ensure_ascii=False)
-    assert "처리하다 실패했습니다" in text
+    assert "처리에 실패했습니다" in text
     assert "다시 처리해야 합니다" in text
     # 실패한 회의에서 "아직 처리하지 않았습니다" 로 안내하면 사람은 기다립니다.
     assert "아직 처리하지 않았습니다" not in text
@@ -589,7 +589,7 @@ def test_the_processing_line_keeps_its_sentence():
     facts = _find(content, "facts")[0]["items"]
     processing = next(f for f in facts if f["label"] == "처리")
     assert processing["gap"] is False
-    assert processing["value"] == "처리하다 실패했습니다 — 다시 처리해야 합니다"
+    assert processing["value"] == "처리에 실패했습니다 — 다시 처리해야 합니다"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -969,6 +969,88 @@ def test_every_processed_branch_has_its_own_sentence():
         key = tuple(_empty_notes(content))
         assert key not in seen, f"{name} 와 {seen[key]} 가 같은 문장을 받습니다: {key}"
         seen[key] = name
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 429 — 갈래를 **손으로** 적으면 새 갈래가 조용히 빠집니다
+# ══════════════════════════════════════════════════════════════
+#
+# 위 검사는 사례 **셋**을 손으로 적었고 `failed` 가 없었습니다. 그래서
+# 처리에 실패한 회의의 회의록이 「미해결로 남은 사안이 없습니다」라고
+# 단언하는 동안 초록이었습니다 (결함 329 의 모양이 검사에서 난 것).
+#
+# 아래는 `state_of` 가 낼 수 있는 국면을 **전수로** 훑습니다.
+
+
+def _all_meeting_states() -> set[str]:
+    """`state_of` 가 실제로 내는 국면 전부.
+
+    ⚠️ 목록을 여기 베끼지 않습니다 — 베끼면 그 순간 두 벌입니다.
+    어휘의 모든 회의 상태 + 어휘에 **없는** 값 하나를 먹여 봅니다.
+    """
+    from teamflow.db.models import MeetingStatus
+
+    states = {minutes.state_of(status.value) for status in MeetingStatus}
+    states.add(minutes.state_of("어휘에-없는-상태"))
+    return states
+
+
+def test_every_state_of_branch_has_an_empty_note():
+    """⭐ 국면이 하나 늘고 문장을 안 적으면 **그 자리에서** 터져야 합니다."""
+    missing = [st for st in _all_meeting_states() if st not in minutes._EMPTY_NOTE_BY_STATE]
+    assert not missing, (
+        f"국면 {missing} 에 빈 목록 문장이 없습니다 — "
+        f"그대로 두면 「없었습니다」로 단언하며 팀 밖으로 나갑니다"
+    )
+
+
+def _asserting_notes() -> set[str]:
+    """**처리를 마치고 말도 잡힌** 회의가 받는 문장들.
+
+    ⚠️ 「없었다」는 낱말로 재지 않습니다 — 정직한 답인 「확인할 수
+    **없습니다**」가 그 자에 걸립니다(처음 쓴 자가 그랬습니다). 재려는 것은
+    **「진짜로 없었다」고 단언하는 그 문장을 받는가**입니다. 그러니 단언해도
+    되는 갈래에서 실제로 나오는 문장을 뽑아 씁니다.
+    """
+    return set(_empty_notes(_minutes(status="needs_review", utterance_count=12)))
+
+
+def test_a_failed_meeting_does_not_assert_that_there_was_nothing():
+    """⭐ 처리에 실패한 회의는 사안이 있었는지 **알 수 없습니다**.
+
+    분석이 아예 안 돌았습니다. 바로 위 「요약」 자리는 같은 회의에 대해
+    「요약을 만들지 못했습니다」라고 제대로 말하고 있었습니다.
+    """
+    asserting = _asserting_notes()
+    notes = _empty_notes(_minutes(status="failed", utterance_count=0))
+
+    assert notes, "빈 목록이 하나도 없습니다 — 씨앗이 이 갈래를 안 만들고 있습니다"
+    assert asserting, "단언하는 갈래가 문장을 하나도 안 내놓습니다 — 자가 헛돕니다"
+    for note in notes:
+        assert note not in asserting, (
+            f"처리에 실패한 회의가 「{note}」라고 단언합니다 — 알 수 없는 것입니다"
+        )
+
+
+def test_an_unknown_status_does_not_assert_either():
+    """⚠️ 어휘가 늘었는데 분류를 안 하면 그때도 단언하면 안 됩니다."""
+    asserting = _asserting_notes()
+    for note in _empty_notes(_minutes(status="어휘에-없는-상태", utterance_count=0)):
+        assert note not in asserting, note
+
+
+def test_the_four_states_do_not_all_say_the_same_thing():
+    """⚠️ 반대 방향 — 전부 「확인할 수 없습니다」로 뭉개도 안 됩니다.
+
+    「아직 안 한 것」과 「해 봤는데 못 한 것」은 사람이 할 일이 다릅니다.
+    """
+    unprocessed = tuple(_empty_notes(_minutes(status="pending", utterance_count=0)))
+    failed = tuple(_empty_notes(_minutes(status="failed", utterance_count=0)))
+    heard = tuple(_empty_notes(_minutes(status="needs_review", utterance_count=12)))
+
+    assert len({unprocessed, failed, heard}) == 3, (
+        f"세 갈래가 같은 문장을 받습니다: {unprocessed} · {failed} · {heard}"
+    )
 
 
 # ══════════════════════════════════════════════════════════════
