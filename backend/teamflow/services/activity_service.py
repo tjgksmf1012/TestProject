@@ -177,13 +177,44 @@ def recent(session: Session, project_id: int, *, limit: int = MAX_ITEMS) -> list
             label=describe(row.action),
             who=who,
             target=row.target or "",
-            target_label=(
-                labels.get(row.target or "") or _remembered_name(row) or (row.target or "")
-            ),
+            target_label=_label_for(row, labels),
             touches_contribution=row.action in TOUCHES_CONTRIBUTION,
         )
         for row, who in rows
     ]
+
+
+#: **대상을 없애는** 행동. 이 기록에서는 살아 있는 행을 보면 안 됩니다.
+#:
+#: ⛔ `meetings.id` 는 `AUTOINCREMENT` 없는 SQLite ROWID 라 **맨 위 행을
+#: 지우면 다음 회의가 그 번호를 받습니다.** 「잘못 연 회의를 무르고 새로
+#: 연다」는 두 번 클릭이라 흔합니다 — 그러면 활동 기록이 방금 만든
+#: **살아 있는** 회의를 가리키며 「빈 회의 무름」이라고 적습니다(결함 430).
+#: 무른 것의 이름은 같은 행의 `before` 에 정확히 적혀 있습니다.
+#:
+#: ⚠️ `ACTION_LABEL` 의 두 번째 벌이 아닙니다 — 저쪽은 「뭐라고 부를까」이고
+#: 여기는 「이름을 어디서 찾을까」입니다. 짝 가드가 이 집합의 값이 전부
+#: `ACTION_LABEL` 에 있는지 봅니다.
+REMOVES_TARGET: frozenset[str] = frozenset(
+    {
+        "meeting_discarded",
+        "task_deleted",
+        "member_removed",
+    }
+)
+
+
+def _label_for(row: m.AuditLog, labels: dict[str, str]) -> str:
+    """이 기록의 대상을 **사람 이름으로** 부르는 법.
+
+    ⛔ **지우는 기록에서는 적어 둔 이름이 먼저입니다** (결함 430). 번호가
+    재사용되므로 살아 있는 행을 먼저 보면 **다른 것의 이름**을 답니다.
+    """
+    target = row.target or ""
+    if row.action in REMOVES_TARGET:
+        # 살아 있는 행은 **다른 것**입니다. 안 봅니다.
+        return _remembered_name(row) or target
+    return labels.get(target) or _remembered_name(row) or target
 
 
 def _remembered_name(row: m.AuditLog) -> str | None:
@@ -272,18 +303,24 @@ def _target_labels(session: Session, targets: list[str]) -> dict[str, str]:
         #    거칩니다 (`TASK-003`). 이름이 없으면 `target` 이 그대로 남고,
         #    그건 「그 업무는 지워졌다」는 정직한 답입니다. 여기서 조건을
         #    직접 적으면 다음 사람이 빠뜨립니다.
-        _fill("task", list(session.execute(
-            select(m.Task.id, m.Task.title)
-            .where(m.Task.id.in_(task_ids), live.not_deleted())
-        ).all()))
+        _fill(
+            "task",
+            list(
+                session.execute(
+                    select(m.Task.id, m.Task.title).where(
+                        m.Task.id.in_(task_ids), live.not_deleted()
+                    )
+                ).all()
+            ),
+        )
 
     # ⚠️ `members/1` 과 `users/1` 은 **같은 사람**을 다르게 가리킵니다
     #    (한쪽은 프로젝트 구성원, 한쪽은 계정 삭제 기록). 한 번에 찾습니다.
     people_ids = by_kind.get("members", set()) | by_kind.get("users", set())
     if people_ids:
-        people = list(session.execute(
-            select(m.User.id, m.User.name).where(m.User.id.in_(people_ids))
-        ).all())
+        people = list(
+            session.execute(select(m.User.id, m.User.name).where(m.User.id.in_(people_ids))).all()
+        )
         _fill("members", people)
         _fill("users", people)
 
@@ -291,58 +328,71 @@ def _target_labels(session: Session, targets: list[str]) -> dict[str, str]:
     if meeting_ids:
         # 회의 이름은 한 벌에서 옵니다 (결함 285) — 제목이 없는 회의도
         # 「제목 없는 회의 #4」로 부릅니다.
-        _fill("meetings", [
-            (mid, meeting_label(title, mid))
-            for mid, title in session.execute(
-                select(m.Meeting.id, m.Meeting.title).where(m.Meeting.id.in_(meeting_ids))
-            ).all()
-        ])
+        _fill(
+            "meetings",
+            [
+                (mid, meeting_label(title, mid))
+                for mid, title in session.execute(
+                    select(m.Meeting.id, m.Meeting.title).where(m.Meeting.id.in_(meeting_ids))
+                ).all()
+            ],
+        )
 
     # ⭐ 업무 후보 — 「업무 후보 승인」·「거절」·「AI 결과를 사람이 고침」
     #    셋이 이 종류를 가리킵니다 (결함 297). 셋 다 사람이 AI 의 판단을
     #    뒤집은 기록이라, 무엇을 뒤집었는지가 안 보이면 읽을 수가 없습니다.
     candidate_ids = by_kind.get("meeting_task_candidates", set())
     if candidate_ids:
-        _fill("meeting_task_candidates", list(session.execute(
-            select(m.MeetingTaskCandidate.id, m.MeetingTaskCandidate.title)
-            .where(m.MeetingTaskCandidate.id.in_(candidate_ids))
-        ).all()))
+        _fill(
+            "meeting_task_candidates",
+            list(
+                session.execute(
+                    select(m.MeetingTaskCandidate.id, m.MeetingTaskCandidate.title).where(
+                        m.MeetingTaskCandidate.id.in_(candidate_ids)
+                    )
+                ).all()
+            ),
+        )
 
     # 녹음 — 어느 회의의 것인가. ⚠️ 지운 뒤에도 행은 남습니다
     #    (`deleted_at` 만 찍습니다) 그래서 이름을 찾을 수 있습니다.
     asset_ids = by_kind.get("audio_assets", set())
     if asset_ids:
-        _fill("audio_assets", [
-            (aid, f"{meeting_label(title, mid)}의 녹음")
-            for aid, mid, title in session.execute(
-                select(m.AudioAsset.id, m.Meeting.id, m.Meeting.title)
-                .join(m.Meeting, m.Meeting.id == m.AudioAsset.meeting_id)
-                .where(m.AudioAsset.id.in_(asset_ids))
-            ).all()
-        ])
+        _fill(
+            "audio_assets",
+            [
+                (aid, f"{meeting_label(title, mid)}의 녹음")
+                for aid, mid, title in session.execute(
+                    select(m.AudioAsset.id, m.Meeting.id, m.Meeting.title)
+                    .join(m.Meeting, m.Meeting.id == m.AudioAsset.meeting_id)
+                    .where(m.AudioAsset.id.in_(asset_ids))
+                ).all()
+            ],
+        )
 
     # 성문 — 누구의 것인가. ⚠️ 폐기는 임베딩만 비우고 행은 남깁니다.
     print_ids = by_kind.get("voiceprints", set())
     if print_ids:
-        _fill("voiceprints", [
-            (vid, f"{name}의 성문")
-            for vid, name in session.execute(
-                select(m.Voiceprint.id, m.User.name)
-                .join(m.User, m.User.id == m.Voiceprint.user_id)
-                .where(m.Voiceprint.id.in_(print_ids))
-            ).all()
-        ])
+        _fill(
+            "voiceprints",
+            [
+                (vid, f"{name}의 성문")
+                for vid, name in session.execute(
+                    select(m.Voiceprint.id, m.User.name)
+                    .join(m.User, m.User.id == m.Voiceprint.user_id)
+                    .where(m.Voiceprint.id.in_(print_ids))
+                ).all()
+            ],
+        )
 
     # ⭐ `final_contributions/3:7` — 번호가 둘이라 위 자로는 안 읽힙니다.
     #    가리키는 것은 **그 사람의 확정 기여도**입니다.
     pairs = [(raw, hit) for raw in targets if (hit := _PAIR_TARGET.match(raw)) is not None]
-    user_ids = {
-        int(hit["right"]) for _, hit in pairs if hit["kind"] == "final_contributions"
-    }
+    user_ids = {int(hit["right"]) for _, hit in pairs if hit["kind"] == "final_contributions"}
     if user_ids:
-        names = dict(session.execute(
-            select(m.User.id, m.User.name).where(m.User.id.in_(user_ids))
-        ).all())
+        names = dict(
+            session.execute(select(m.User.id, m.User.name).where(m.User.id.in_(user_ids))).all()
+        )
         for raw, hit in pairs:
             if hit["kind"] != "final_contributions":
                 continue

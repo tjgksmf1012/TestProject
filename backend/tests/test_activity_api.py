@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from teamflow.db import models as m
 from teamflow.db import session as db_session
@@ -504,3 +506,78 @@ def test_every_action_in_the_set_has_a_label(client: TestClient, seeded):
         if action not in activity_service.ACTION_LABEL
     )
     assert missing == [], f"이름표가 없는 행동: {missing}"
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 430 — 번호가 재사용되면 살아 있는 행이 **다른 것**입니다
+# ══════════════════════════════════════════════════════════════
+#
+# `meetings.id` 는 `AUTOINCREMENT` 없는 SQLite ROWID 라 맨 위 행을 지우면
+# 다음 회의가 그 번호를 받습니다. 「잘못 연 회의를 무르고 새로 연다」는
+# 두 번 클릭이라 흔합니다.
+
+
+def test_a_discarded_meeting_is_named_from_the_record_not_the_live_row(
+    client: TestClient, seeded
+):
+    """⭐ 무른 회의의 이름은 **적어 둔 것**입니다 — 그 번호를 물려받은
+    회의의 이름이 아닙니다.
+    """
+    project_id = seeded["project_id"]
+    login_as(client, seeded["user_ids"][0])
+
+    made = client.post(f"/api/projects/{project_id}/meetings", json={"title": "무를 회의 A"})
+    assert made.status_code in (200, 201), made.text
+    discarded_id = made.json()["meeting_id"]
+    assert client.delete(f"/api/meetings/{discarded_id}").status_code == 204
+
+    # 같은 번호를 물려받게 만듭니다. 못 물려받으면 이 검사는 아무것도
+    # 안 재는 것이므로 그때는 건너뜁니다 — 조용히 통과시키지 않습니다.
+    again = client.post(f"/api/projects/{project_id}/meetings", json={"title": "새 회의 B"})
+    assert again.status_code in (200, 201), again.text
+    if again.json()["meeting_id"] != discarded_id:
+        pytest.skip(f"번호가 재사용되지 않았습니다({discarded_id} → {again.json()['meeting_id']})")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    discards = [r for r in rows if r["action"] == "meeting_discarded"]
+    assert discards, "무른 기록이 활동에 안 남았습니다"
+    for row in discards:
+        assert row["target_label"] != "새 회의 B", (
+            f"살아 있는 회의를 가리키며 「무름」이라고 적습니다: {row}"
+        )
+        assert row["target_label"] == "무를 회의 A", row
+
+
+def test_discarding_a_meeting_takes_its_notifications_with_it(client: TestClient, seeded):
+    """⭐ 지워진 회의를 가리키던 알림이 남으면 **다음 회의의 것**이 됩니다.
+
+    눌러 가면 엉뚱한 회의의 로비가 조용히 열립니다.
+    """
+    project_id = seeded["project_id"]
+    login_as(client, seeded["user_ids"][0])
+    made = client.post(f"/api/projects/{project_id}/meetings", json={"title": "알림 딸린 회의"})
+    meeting_id = made.json()["meeting_id"]
+
+    with db_session.session_scope() as session:
+        session.add(
+            m.Notification(
+                project_id=project_id,
+                user_id=seeded["user_ids"][0],
+                kind="meeting_soon",
+                meeting_id=meeting_id,
+            )
+        )
+
+    assert client.delete(f"/api/meetings/{meeting_id}").status_code == 204
+
+    with db_session.session_scope() as session:
+        left = session.scalars(
+            select(m.Notification).where(m.Notification.meeting_id == meeting_id)
+        ).all()
+    assert not left, f"무른 회의를 가리키는 알림이 {len(left)}건 남았습니다"
+
+
+def test_actions_that_remove_their_target_are_all_labelled(client: TestClient, seeded):
+    """⚠️ `REMOVES_TARGET` 이 `ACTION_LABEL` 밖으로 새지 않는지 (짝 가드)."""
+    unknown = activity_service.REMOVES_TARGET - set(activity_service.ACTION_LABEL)
+    assert not unknown, f"이름표가 없는 행동: {unknown}"

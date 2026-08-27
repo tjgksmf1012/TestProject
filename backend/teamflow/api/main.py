@@ -32,7 +32,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, PlainSerializer
-from sqlalchemy import event, func, select
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.orm import Session
 
 from teamflow.audio.chunk_store import ChunkStore
@@ -2340,6 +2340,25 @@ def discard_empty_meeting(meeting_id: int, session: DbSession, user: CurrentUser
             at=datetime.now(UTC),
         )
     )
+    # ⛔ **딸린 것을 같이 치웁니다** (결함 430).
+    #
+    #    `meetings.id` 는 `AUTOINCREMENT` 없는 SQLite ROWID 라 **맨 위 행을
+    #    지우면 다음 회의가 그 번호를 받습니다.** 「잘못 연 회의를 무르고
+    #    새로 연다」는 두 번 클릭이라 흔합니다.
+    #
+    #    치우지 않으면 지워진 회의를 가리키던 행이 **다음 회의의 것**이
+    #    됩니다. 재현했습니다 — 무른 회의의 30분 전 알림이 살아남아
+    #
+    #        곧 회의가 시작됩니다 — L2 한명 미참가        ← 예정된 적 없는 회의
+    #
+    #    라고 적고, 눌러 가면 **엉뚱한 회의의 로비**가 조용히 열렸습니다.
+    #
+    # ⚠️ 트랙이 0건인 것은 위에서 이미 막았으므로 여기 남는 것은
+    #    **소리와 무관한 딸림**뿐입니다 — 동의·알림·회의록. 소리에서
+    #    나오는 것(발화·후보·결정)은 트랙 없이는 생길 수 없습니다.
+    for dependent in (m.RecordingConsent, m.Notification, m.Report):
+        session.execute(delete(dependent).where(dependent.meeting_id == meeting.id))
+
     session.delete(meeting)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
