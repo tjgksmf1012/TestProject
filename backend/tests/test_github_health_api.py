@@ -492,5 +492,15 @@ def test_health_tells_the_truth_about_what_period_it_covers(
 
     assert body["backfilled_at"] is None
     assert "아직 가져오지 않았습니다" in body["coverage"]
-    # 그리고 무엇을 하라고 말해야 합니다.
-    assert any("가져오기" in w for w in body["warnings"]), body["warnings"]
+    # 그리고 **빠진 것이 있다는 사실**은 반드시 말해야 합니다.
+    assert any("연결하기 전의 PR" in w for w in body["warnings"]), body["warnings"]
+
+    # ⛔ **다음에 할 일은 「할 수 있을 때」만 말합니다** (결함 380).
+    #
+    # 이 검사 환경에는 GitHub App 자격 증명이 없습니다. 그러면 백필은
+    # 409 로 거절되는데, 예전에는 그 상태에서도 경고 줄이 「아래 '지난
+    # 활동 가져오기'를 누르면 채웁니다」라고 **약속**하고 화면은 단추까지
+    # 그렸습니다. 눌러 보면 409 였습니다.
+    assert body["can_backfill"] is False
+    assert body["backfill_blocked"] is not None
+    assert not any("누르면 채웁니다" in w for w in body["warnings"]), body["warnings"]

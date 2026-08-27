@@ -35,6 +35,29 @@
 
   @media (min-width: 60rem) {
     .cols { grid-template-columns: 15rem 1fr; gap: var(--sp-8); }
+
+    /* ⛔ **채널 목록이 대화와 함께 굴러갑니다** (결함 314).
+
+       채널 20개 · 메시지 60개인 프로젝트에서 재 봤습니다 —
+
+           aside.side  높이 1397px  position: static  overflow-y: visible
+           창 900px · 문서 4409px · 새 메시지로 자동 스크롤 3509px
+           → 채널 목록 top = -3400px, 화면 안에 든 채널 **0/22**
+
+       여섯째 채널에 닿으려면 페이지를 0까지 올려야 하고, 올리면 마지막
+       메시지가 안 보입니다. **두 열 화면인데 두 열을 같이 볼 수 없습니다.**
+
+       같은 저장소의 왼쪽 회의 목록은 이걸 제대로 하고 있습니다
+       (`div.chan { overflow-y: auto }`) — 채널 목록만 빠졌습니다.
+
+       ⚠️ **두 열일 때만** 붙입니다. 좁은 폭에서는 채널이 위·대화가 아래로
+       쌓이므로 (바로 위 주석) 거기서 붙이면 채널이 화면을 계속 먹습니다. */
+    .cols > .side {
+      position: sticky;
+      top: var(--sp-4);
+      max-height: calc(100vh - var(--sp-8));
+      overflow-y: auto;
+    }
   }
 
   .shead { font-size: var(--fs-item); letter-spacing: var(--ls-item);
@@ -64,6 +87,34 @@
   /* ── 만들기·찾기 ───────────────────────────────────── */
   .cnew { display: grid; gap: var(--sp-2); margin: 0 0 var(--sp-5); }
   .clabel { font-size: var(--fs-caption); color: var(--text-subtle); }
+
+  /* ── 채널 종류 고르기 (결함 360) ────────────────────────
+
+     ⚠️ **줄마다 44px 입니다.** 라디오 자체는 작아서, 줄 전체를 표적으로
+     만들지 않으면 터치·확대에서 못 누릅니다 (`docs/15` 의 손가락 표적).
+
+     ⚠️ 설명 줄(`khint`)은 이름 **아래**에 둡니다. 옆에 붙이면 이름이
+     길어질 때 두 줄로 접히면서 어느 설명이 어느 이름의 것인지 흐려집니다. */
+  .ckind { display: grid; gap: var(--sp-1); border: 0; padding: 0; margin: 0; min-width: 0; }
+  .ckind legend { font-size: var(--fs-caption); color: var(--text-subtle); padding: 0; }
+  /* ⚠️ **공용 규칙과 싸우지 않습니다.** `app.css` 의
+     `label:has(> input[type='radio'])` 가 (0,2,1)로 `.ckind label`(0,1,1)을
+     **이깁니다** — `display: grid` 를 줘도 안 먹습니다. 처음에 격자로
+     짰다가 렌더해서 잡았습니다: 「음성 채널」이 「음성 / 채널」 두 줄로
+     쪼개져 있었습니다(결함 250 과 같은 부류 — 클래스만 붙이고 안 재 본 것).
+
+     그 공용 규칙은 일부러 있는 것입니다 — 라벨 줄 전체가 **접촉면**이고
+     `min-height: var(--tap)` 로 44px 을 줍니다. 그래서 flex 를 그대로 쓰고
+     **줄바꿈만** 더합니다 (결함 348 이 칸반에서 쓴 방법). */
+  .ckind label { flex-wrap: wrap; align-items: center; }
+  .ckind .kname { font-size: var(--fs-body); color: var(--text); min-width: 0; }
+  /* 설명은 **다음 줄 전체**. 옆에 붙이면 이름이 접힙니다. */
+  .ckind .khint {
+    flex-basis: 100%;
+    font-size: var(--fs-caption);
+    color: var(--text-subtle);
+    min-width: 0;
+  }
 
   /* ── 대화 ─────────────────────────────────────────────
 
@@ -201,6 +252,11 @@
   <div id="app"></div>
 
   <script type="module" src="/chat.js"></script>
+
+  <!-- 탭 넷 **말고** 가는 곳. `src/demo/nav.ts` 가 `navLinks` 로 채운다.
+       ⛔ 이 자리를 지우면 채팅·일정·알림·활동·찾기·보고서로 **가는 길이
+       제품 전체에서 사라집니다** — 실제로 그랬습니다 (결함 305). -->
+  <nav id="nav" aria-label="더 보기"></nav>
 
   <nav id="tabs" aria-label="주요 화면"></nav>
 </body>

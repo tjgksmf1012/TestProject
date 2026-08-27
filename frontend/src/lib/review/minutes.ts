@@ -25,6 +25,8 @@
  */
 
 /** 서버 `UnresolvedIssueOut` 과 같은 모양. */
+import { evidenceMomentText } from './moment.ts';
+
 export interface UnresolvedIssue {
   content: string;
   /** 언제 나온 얘기인가. 근거가 없으면 둘 다 0 — 시각을 지어내지 않는다. */
@@ -39,34 +41,47 @@ export interface Minutes {
   unresolved_issues: UnresolvedIssue[];
 }
 
-/** `mm:ss`. 근거가 없어 0 인 것은 시각을 만들어 내지 않고 null. */
-export function atText(startMs: number): string | null {
-  if (!Number.isFinite(startMs) || startMs <= 0) return null;
-  const total = Math.floor(startMs / 1000);
-  const mm = Math.floor(total / 60);
-  const ss = total % 60;
-  return `${mm}:${String(ss).padStart(2, '0')}`;
-}
+/**
+ * `mm:ss`. 근거가 없어 0 인 것은 시각을 만들어 내지 않고 null.
+ *
+ * ⚠️ **`findings.ts` 에 글자까지 똑같은 사본이 있었습니다** (결함 353).
+ * 판단은 `moment.ts` 한 곳입니다.
+ *
+ * ⛔ **발화 한 줄에는 이걸 쓰지 마십시오** — 발화의 `0` 은 「모른다」가
+ * 아니라 「회의 시작과 동시에」입니다. 그쪽은 `momentText` 입니다.
+ */
+export const atText = evidenceMomentText;
 
 export interface IssueView {
   content: string;
   /** `2:05` 또는 null. null 이면 화면이 시각 칸을 아예 안 그린다. */
   at: string | null;
   /**
-   * 근거 발화가 몇 건인가.
+   * 근거 발화 번호들.
    *
    * ⚠️ 0 건도 **보여줍니다.** 숨기면 근거 없는 미해결 사안이 근거 있는
    * 것과 똑같아 보입니다 — 이 저장소는 후보 승인에서 이미 같은 규칙을
    * 씁니다(근거 없는 후보는 승인 불가).
+   *
+   * ⛔ **개수만 돌려주지 마십시오** (결함 420). 오랫동안 이 칸은
+   * `evidenceCount: number` 였습니다. 서버는 `evidence_utterance_ids` 를
+   * 실어 보내고 그 docstring 이 이유까지 적어 뒀는데(「근거 없이 "이게
+   * 미해결입니다" 라고만 하면 사람은 확인할 방법이 없고, 이 저장소는
+   * 그런 값을 화면에 올리지 않기로 했습니다」), **여기서 번호를 버려서**
+   * 두 화면 다 「근거 발화 1건」이라고 적기만 했습니다 — 눌러도 아무
+   * 데도 못 갔습니다. 바로 옆 `findings.ts` 의 `FindingView` 는 처음부터
+   * `evidence: number[]` 를 들고 있고 두 뿌리가 그것을 엽니다.
+   *
+   * 개수가 필요하면 `evidence.length` 입니다 — 사본을 두면 갈라집니다.
    */
-  evidenceCount: number;
+  evidence: number[];
 }
 
 export function describeIssue(issue: UnresolvedIssue): IssueView {
   return {
     content: issue.content.trim(),
     at: atText(issue.start_ms),
-    evidenceCount: (issue.evidence_utterance_ids ?? []).length,
+    evidence: [...(issue.evidence_utterance_ids ?? [])],
   };
 }
 

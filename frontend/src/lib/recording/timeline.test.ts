@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  MIN_USABLE_COVERAGE,
   buildTimeline,
+  describeGapReason,
   describeTimeline,
   judgeTrack,
   mergeIntervals,
+  MIN_USABLE_COVERAGE,
 } from './timeline.ts';
 import type { ChunkMeta } from './types.ts';
 
@@ -374,5 +375,16 @@ describe('buildTimeline — 입력 검증', () => {
       endedAtMs: START + 15_000,
     });
     assert.equal(timeline.gaps.length, 0);
+  });
+});
+
+describe('공백의 까닭을 사람의 말로 (결함 241)', () => {
+  it('⭐ 세 까닭 모두 한국어이고 내부 이름이 안 새어 나온다', () => {
+    for (const reason of ['recorder_stalled', 'track_muted', 'chunk_lost'] as const) {
+      const said = describeGapReason(reason);
+      assert.equal(said.length > 0, true, reason);
+      assert.equal(said.includes('_'), false, `${reason} → ${said}`);
+      assert.equal(/[a-z]{4,}/.test(said), false, `${reason} → ${said}`);
+    }
   });
 });

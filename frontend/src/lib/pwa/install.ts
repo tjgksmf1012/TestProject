@@ -73,7 +73,11 @@ export function installState(env: InstallEnvironment): InstallState {
 export function describeInstall(state: InstallState): string {
   switch (state) {
     case 'promptable':
-      return '앱으로 설치하면 주소창 없이 전체 화면으로 열리고, 홈 화면에서 바로 들어옵니다.';
+      /* ⚠️ **폰 이야기를 하지 않습니다** (결함 422). 예전에는 「…홈 화면에서
+         바로 들어옵니다」였습니다. 모바일은 2026-08-13 에 범위에서 뺐고
+         셸은 PC 웹·PC 앱 둘뿐인데, PC 에는 홈 화면이 없습니다 — 데스크톱
+         크롬도 「설치」라고 부릅니다. 실제로 데스크톱에서 재현했습니다. */
+      return '앱으로 설치하면 브라우저 탭이 아니라 창 하나로 열리고, 다음부터 바로 들어옵니다.';
     case 'manual-ios':
       // ⚠️ 예전에는 `⬆️` 를 넣었습니다. 그건 **색 이모지**라 기기마다 다르게
       // 그려지고, 정작 iOS 의 공유 버튼과 모양이 다릅니다. 자리와 생김새를
@@ -91,10 +95,21 @@ export function describeInstall(state: InstallState): string {
 /**
  * 왜 설치를 권하는가 — 이 앱에서는 이유가 하나 더 있습니다.
  *
- * 홈 화면에서 연 PWA 는 **화면 꺼짐 방지(Wake Lock)** 가 브라우저 탭보다
- * 잘 듣습니다(iOS 는 18.4+ 부터 설치형 PWA 에서만). 녹음이 끊기는 것이
- * 이 프로젝트의 1순위 위험이라, 설치는 겉모습 문제가 아닙니다.
+ * 설치한 PWA 는 **화면 꺼짐 방지(Wake Lock)** 가 브라우저 탭보다 잘
+ * 듣습니다. 녹음이 끊기는 것이 이 프로젝트의 1순위 위험이라, 설치는
+ * 겉모습 문제가 아닙니다.
  */
+/**
+ * 설치 단추 글자.
+ *
+ * ⚠️ `home.html` 이 이 글자를 **마크업에 그대로** 들고 있습니다(React 가
+ * 그리기 전에도 보여야 하므로). 사본 둘이 갈라지지 않게 가드가 짝을
+ * 잽니다 — 결함 421 이 정적 화면의 건너뛰기 링크에서 쓴 방법입니다.
+ */
+export function installButtonText(): string {
+  return '앱으로 설치';
+}
+
 export function whyInstall(): string {
   return (
     '설치하면 녹음 중에 화면이 꺼지는 것을 더 잘 막습니다 — ' +

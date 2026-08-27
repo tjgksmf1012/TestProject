@@ -163,6 +163,70 @@ export function checkAppliedSettings(settings: AppliedAudioSettings): CaptureWar
 }
 
 /**
+ * 우리가 **보는** 항목과 사람이 읽을 이름.
+ *
+ * `checkAppliedSettings` 가 이 넷을 봅니다. 목록이 여기 한 벌로 있어야
+ * 「무엇을 못 쟀는가」를 셀 수 있습니다.
+ */
+export const CHECKED_SETTINGS: { key: keyof AppliedAudioSettings; name: string }[] = [
+  { key: 'autoGainControl', name: '자동 게인' },
+  { key: 'noiseSuppression', name: '잡음 억제' },
+  { key: 'echoCancellation', name: '에코 제거' },
+  { key: 'sampleRate', name: '샘플레이트' },
+];
+
+export interface CaptureNote {
+  /** `gap` = 못 잼(흙빛). `ok` = 재 봤고 문제없음(초록). */
+  tone: 'ok' | 'gap';
+  text: string;
+}
+
+/**
+ * 캡처 설정에 대해 화면이 **말해도 되는 것**.
+ *
+ * ## ⛔ 이 함수가 생긴 이유 (결함 249)
+ *
+ * 녹음 화면의 ③ 칸은 경고 목록이 비면 초록으로 이렇게 적었습니다:
+ *
+ *     캡처 설정이 요청대로 적용됐습니다
+ *
+ * 그런데 경고 목록은 `requestMicrophone()` 이 **성공한 뒤에야** 채워집니다.
+ * 마이크를 아직 안 눌렀거나 **거부당했으면** 목록은 그냥 빈 채로 남습니다.
+ * 재 봤습니다 — `getUserMedia` 를 거부시키고 화면을 열었더니, 아무것도 안
+ * 쟀는데 초록 글씨로 「요청대로 적용됐습니다」가 떠 있었습니다.
+ *
+ * **못 잰 것을 만점으로 읽은 것**입니다 — 불변식 ③ 과 같은 자리입니다.
+ * 게다가 이 칸은 녹음의 품질을 사람이 미리 확인하라고 만든 칸이라, 거짓
+ * 초록은 「확인했다」는 착각까지 같이 줍니다.
+ *
+ * ⚠️ 얼굴이 하나 더 있습니다. 브라우저가 `getSettings()` 에서 항목을
+ * **빼고 줄 수도** 있습니다(Firefox·Safari 는 항목이 고르지 않습니다).
+ * 그러면 `checkAppliedSettings` 는 `undefined` 를 그냥 지나치므로 경고가
+ * 0건이고, 화면은 또 초록이 됩니다. **안 온 값은 좋은 값이 아닙니다.**
+ */
+export function describeCaptureCheck(
+  settings: AppliedAudioSettings | null,
+  warnings: readonly CaptureWarning[],
+): CaptureNote | null {
+  // 문제가 있으면 그 목록이 대신 섭니다 — 여기서 겹쳐 말하지 않습니다.
+  if (warnings.length > 0) return null;
+  if (settings === null) {
+    return { tone: 'gap', text: '캡처 설정은 아직 못 쟀습니다 — 마이크를 허용하면 잽니다' };
+  }
+  const unread = CHECKED_SETTINGS.filter((c) => settings[c.key] === undefined);
+  if (unread.length > 0) {
+    return {
+      tone: 'gap',
+      // 조사를 피해 적습니다 — 마지막 항목이 무엇이냐에 따라 은/는 이 갈립니다.
+      text: `이 브라우저가 값을 안 준 항목이 있습니다 — ${unread
+        .map((c) => c.name)
+        .join(' · ')}. 못 잰 것이지 괜찮은 것이 아닙니다`,
+    };
+  }
+  return { tone: 'ok', text: '캡처 설정이 요청대로 적용됐습니다' };
+}
+
+/**
  * 이 트랙을 그대로 써도 되는가.
  *
  * critical 이 있어도 **막지는 않는다.** 아이폰에서 AGC 가 안 꺼지는 건 흔한

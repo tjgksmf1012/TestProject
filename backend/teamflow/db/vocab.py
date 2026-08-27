@@ -73,6 +73,43 @@ NOT_STORED_YET: frozenset[SpeakerSource] = frozenset(
     }
 )
 
+#: `STORED` 중에서 **프로덕션 코드가 실제로 쓰는** 값.
+#:
+#: ⚠️ 이 파일의 머리말이 「만들어진다고 적은 값에 진짜 만드는 코드가
+#: 있는가」를 재려고 생겼는데, 정작 **이 칸에는 그 검사가 없었습니다**
+#: (결함 340). 옆 칸인 `MeetingEventType` 에는
+#: `EVENT_PRODUCED`/`EVENT_NOT_PRODUCED_YET` 과 그것을 대조하는 검사가
+#: 있습니다 — 같은 표의 옆 칸은 따로 재야 합니다.
+#:
+#: 세어 보니 `STORED` 는 넷을 주장하는데 `speaker_source=` 로 쓰는 자리는
+#: **`track` 하나뿐**이었습니다.
+WRITTEN: frozenset[SpeakerSource] = frozenset({SpeakerSource.TRACK})
+
+#: 저장은 **할 수 있는데** 지금 쓰는 코드가 없는 값과 **그 이유**.
+#:
+#: ⚠️ `NOT_STORED_YET` 과 다릅니다. 저쪽은 **DB 가 거절하는** 값이고,
+#: 이쪽은 DB 가 받아 주는데 **아무도 안 쓰는** 값입니다. 둘을 한 집합에
+#: 뭉치면 "왜 안 나오는가" 의 답이 달라집니다.
+#:
+#: · `voiceprint` — `Voiceprint(` 를 만드는 프로덕션 코드가 0곳입니다.
+#:   멀티트랙이면 성문이 필요 없기 때문이고, 그런데도 **동의는 먼저**
+#:   받습니다 (`docs/07` P3·§2.3, `docs/17` 의 닫은 결정).
+#: · `manual` — 사람이 화자를 지정하는 자리가 **서버 갈래 0곳 · 화면
+#:   0곳**입니다. `docs/07` §2.3 이 "③ 거부 → 수동 매핑. **멀티트랙
+#:   모드면 애초에 불필요**" 라고 적어 둔 그 이유입니다.
+#: · `diarization` — 단일 트랙·혼합 녹음 경로가 없어 나올 자리가 없습니다.
+#:
+#: ⚠️ **여기 있는 값에도 화면은 제 가지를 가집니다** (`review/evidence.ts`).
+#: 경로가 열리는 날 화면부터 만들지 않아도 되게 해 둔 것이지, "이미 되는
+#: 기능" 이라는 뜻이 아닙니다.
+NOT_WRITTEN_YET: frozenset[SpeakerSource] = frozenset(
+    {
+        SpeakerSource.VOICEPRINT,
+        SpeakerSource.MANUAL,
+        SpeakerSource.DIARIZATION,
+    }
+)
+
 #: 화자가 **확정된** 것으로 세는 값. 신뢰도의 입력입니다 (docs/06 §4).
 #:
 #: ⚠️ `voiceprint` 는 여기 없습니다. 유사도가 아무리 높아도 추정입니다 —
@@ -310,6 +347,11 @@ def event_values() -> tuple[str, ...]:
 # ⚠️ **둘 다 실제로 만들어집니다.** `speaker_source` 처럼 "아직 못 만드는
 #    값" 을 미리 열어 두지 않았고, `meeting_events` 처럼 주석으로만 선언
 #    하지도 않았습니다 — 두 종류 다 화면에서 만들 수 있고 목록에 뜹니다.
+#
+# ⚠️ **이 말이 한동안 거짓이었습니다** (결함 360). 서버는 둘 다 받고
+#    화면은 둘 다 그렸는데, **만드는 자리가 텍스트 하나로 박혀** 있었습니다.
+#    주석은 아무것도 안 막습니다 — 그래서 이제 짝 검사가 「어휘의 값 ==
+#    화면이 내놓는 선택지」를 잽니다.
 
 
 class ChannelKind(StrEnum):
@@ -317,12 +359,41 @@ class ChannelKind(StrEnum):
 
     ⚠️ **음성 채널은 회의를 대신하지 않습니다.** 음성 채널은 *방 이름*
     이고(`주간회의`·`개발회의`), 회의는 그 방에서 **열리는 사건**입니다.
-    `meetings.channel_id` 가 그 둘을 잇습니다. 방과 사건을 한 표에 뭉치면
-    "지난 주간회의" 를 가리킬 방법이 없어집니다.
+    방과 사건을 한 표에 뭉치면 "지난 주간회의" 를 가리킬 방법이 없어집니다.
+
+    ⚠️ **`meetings.channel_id` 는 아직 아무것도 잇지 않습니다.** 칸도 있고
+    `ScheduleIn.channel_id` 도 받고 `ScheduledOut` 이 돌려주기까지 하는데,
+    **화면이 한 번도 안 보냅니다** — 일정 폼의 컨트롤은 제목·시각·단추
+    셋뿐이고, 회의 6건 중 `channel_id` 가 있는 것은 0건입니다. 이 주석은
+    오래도록 "그 둘을 잇습니다" 라고 단언하고 있었습니다(결함 377).
+    ⚠️ 잇는 것은 **없는 기능**이라 여기서 만들지 않습니다 — 붙이려면
+    일정 폼에 방을 고르는 칸과, 회의를 보여 주는 자리에 방 이름이
+    같이 필요합니다.
     """
 
     TEXT = "text"  # #일반 · #공지 — 메시지가 쌓이는 곳
     VOICE = "voice"  # 주간회의 · 개발회의 — 회의가 열리는 방
+
+
+#: 종류 → 사람 말. **서버가 라벨을 만들어 내려보냅니다** — 화면에 두 번째
+#: 표를 만들지 마십시오 (`GITHUB_EVENT_LABEL`·`REACTION_LABEL` 과 같은 방식).
+#:
+#: ⚠️ 이게 없던 동안 화면은 종류를 **고를 수조차 없었습니다** (결함 360).
+#: 바로 위 주석이 「두 종류 다 화면에서 만들 수 있고」라고 단언했는데,
+#: 채팅 화면은 `kind: 'text'` 를 박아 두고 있었습니다 — 그 주석은 이
+#: 파일이 스스로에 대해 하는 말이었고 아무것도 안 막았습니다(결함 341 과
+#: 같은 자리).
+CHANNEL_LABEL: dict[ChannelKind, str] = {
+    ChannelKind.TEXT: "텍스트 채널",
+    ChannelKind.VOICE: "음성 채널",
+}
+
+#: 고를 때 옆에 붙는 한 줄. **무엇이 달라지는지**를 말합니다 — 이름만
+#: 다르면 사람은 아무거나 고릅니다.
+CHANNEL_HINT: dict[ChannelKind, str] = {
+    ChannelKind.TEXT: "메시지가 쌓입니다",
+    ChannelKind.VOICE: "회의를 여는 방입니다 — 대화는 텍스트 채널에서 합니다",
+}
 
 
 #: `channels.kind` 가 받는 값 전부. 둘 다 만들 수 있습니다.
@@ -417,6 +488,27 @@ class GithubEventKind(StrEnum):
     ISSUE_CLOSED = "issues.closed"
 
 
+#: **업무에 이을 수 있는 사건.** `task_link_service` 가 이 집합만 봅니다.
+#:
+#: ⚠️ 여기 모아 둔 이유는 **알림 문장이 이 집합에 기대기 때문**입니다
+#: (결함 357). `notifications` 표는 「무엇을 가리키는지」만 담고 글자는
+#: 안 담아서, GitHub 알림 행에는 **어느 사건인지가 없습니다.** 그런데
+#: 이 집합이 하나뿐이면 그 하나의 이름을 그대로 말할 수 있습니다 —
+#: 「연결된 PR 상태가 바뀌었습니다」처럼 뭉뚱그릴 필요가 없습니다.
+#:
+#: ⛔ **둘 이상으로 늘리려면 알림 쪽을 같이 고쳐야 합니다.** 늘리는 순간
+#: 「어느 사건인가」를 알 수 없게 되고 문장이 뭉뚱그려집니다. 가드가
+#: 잡습니다(`test_the_notification_stops_naming_the_event_when_more_than_one…`).
+#:
+#: ⚠️ **그 가드가 재는 것은 「낱말」뿐입니다** (결함 396). 집합이 하나여도
+#: **같은 종류의 사건이 둘** 오면 알림이 두 줄인데 글자·시각·링크가 한 자도
+#: 안 달라서 어느 PR 인지 알 수 없었습니다. 그래서 알림 행은 이제
+#: `github_event_id` 로 **사건을 가리킵니다** — 위 문단이 「늘어나면 그렇게
+#: 하라」고 적어 둔 그것을, 안 늘어난 채로 하게 됐습니다.
+#: 그 축은 `test_task_pr_link.py` 의 「두 줄이 서로 다른가」가 잽니다.
+LINKED_TO_TASKS: frozenset[GithubEventKind] = frozenset({GithubEventKind.PR_MERGED})
+
+
 #: 종류 → 사람 말. 서버가 라벨을 만들어 내려보냅니다 — 화면에 두 번째
 #: 표를 만들지 마십시오 (`activity` 의 `label` 과 같은 방식).
 GITHUB_EVENT_LABEL: dict[GithubEventKind, str] = {
@@ -444,9 +536,19 @@ GITHUB_EVENT_LABEL: dict[GithubEventKind, str] = {
 # 아래 두 집합이 그 경계이고, `test_column_vocabularies.py` 가 "저장한다고
 # 적은 값에 진짜 저장하는 코드가 있는지" 를 소스에서 셉니다.
 #
-# ⚠️ **`GITHUB` 은 아직 만드는 코드가 0곳입니다.** 웹훅에서 부를 자리를
-#    아직 안 잡았습니다 — `speaker_source` 처럼 "곧 온다" 를 미리 열어 두는
-#    것이고, 그 사실을 아래 집합과 테스트가 지킵니다.
+# ⚠️ **어느 값에 만드는 코드가 없는지는 여기 글로 적지 마십시오.**
+#    아래 `NOTIFICATION_NOT_PRODUCED_YET` 집합 하나만 보십시오 — 집합은
+#    테스트가 지키고, 글은 아무것도 안 막습니다.
+#
+#    실제로 갈라져 있었습니다 (결함 341). 여기에는 "`GITHUB` 은 아직
+#    만드는 코드가 0곳입니다. 웹훅에서 부를 자리를 아직 안 잡았습니다"
+#    라고 적혀 있었는데, **서른여덟 줄 아래**의 집합 주석은 같은 값에 대해
+#    "`task_link_service._tell_the_assignee` 가 만듭니다" 라고 했습니다.
+#    맞는 쪽은 아래이고 — 웹훅 엔드포인트(`api/main.py` 의
+#    `link_pull_request`)가 그 경로를 부릅니다.
+#
+#    이 파일은 "같은 값이 여러 곳에 따로 적혀 갈라지는 것" 을 막으려고
+#    생겼는데, **자기 자신이 그 방식으로 갈라져 있었습니다.**
 
 
 class NotificationKind(StrEnum):
@@ -513,6 +615,43 @@ def notification_values() -> tuple[str, ...]:
 #    사라진 것처럼 보입니다.
 #
 # ⚠️ **순서가 곧 칸반 열 순서입니다.** 선언 순서를 바꾸면 화면이 바뀝니다.
+
+
+class ProjectStatus(StrEnum):
+    """프로젝트가 살아 있는가, 끝났는가.
+
+    ## ⛔ 이 어휘가 없어서 **달력이 업무의 말로 프로젝트를 쟀습니다**
+
+    `projects.status` 는 `String(20)` 에 기본값 `"active"` 뿐이고 어휘가
+    없었습니다. 그래서 읽는 자리 둘이 **서로 다른 글자**를 봤습니다.
+
+        calendar_service.py   done = project.status == "done"       ← 업무의 값
+        tasks/maintenance.py  where(Project.status == "finished")   ← 이쪽
+
+    `"done"` 은 `TaskStatus.DONE` 입니다 — 예순네 줄 위의 업무 갈래에서
+    베껴 온 글자이고, 프로젝트에는 그런 값이 **없습니다.** 둘 중 많아야
+    하나가 맞고, 지금은 **쓰는 코드가 0곳**이라 둘 다 영원히 거짓입니다.
+
+    ⚠️ **`FINISHED` 를 쓰는 코드는 아직 0곳입니다.** 없는 기능을 만들지
+    않았습니다 — 프로젝트를 끝내는 길(화면·라우트)은 이 저장소에 없고,
+    `projects.deadline` 도 읽기만 하고 쓰는 곳이 0곳입니다. 그래서
+    달력의 `project_due` 는 **한 번도 그려진 적이 없습니다.**
+
+    그 길을 만드는 사람에게: 여기 값을 쓰기 시작하면 그 순간
+    **달력의 지연 표시**(`calendar/month.ts` 의 `isOverdue`)와
+    **성문 폐기**(`docs/07` §2.4)가 같이 살아납니다. 둘 다 이미 이
+    어휘를 봅니다.
+    """
+
+    ACTIVE = "active"  # 기본값 — 만들면 이 상태입니다
+    FINISHED = "finished"  # 끝남 — 아직 이 값을 **쓰는 코드는 없습니다**
+
+
+#: `projects.status` 가 받는 값 전부.
+PROJECT_STATUSES: tuple[ProjectStatus, ...] = tuple(ProjectStatus)
+
+#: 끝난 것으로 세는 상태. 달력의 「지연」과 성문 폐기가 같이 봅니다.
+PROJECT_FINISHED: frozenset[ProjectStatus] = frozenset({ProjectStatus.FINISHED})
 
 
 class TaskStatus(StrEnum):
@@ -725,11 +864,31 @@ class ProjectRole(StrEnum):
 
     ⚠️ **선언 순서 = 권한 크기 순**입니다. `ROLE_RANK` 가 이 순서를
     씁니다 — 값을 사이에 끼워 넣으면 조용히 위계가 바뀝니다.
+
+    ## ⛔ 등급마다 「무엇을 할 수 있다」를 여기 글로 적지 마십시오 (결함 351)
+
+    예전에는 값 옆에 이렇게 적혀 있었고, **둘 다 거짓이었습니다**:
+
+        OWNER  … 넘겨줄 수는 있어도 스스로 사라질 수 없음
+        ADMIN  … 프로젝트를 지우지는 못함
+
+    - **소유권은 넘길 수 없습니다.** `change_member_role` 이
+      `ROLE_RANK[wanted] >= ROLE_RANK[actor]` 를 403 으로 막고, 소유자가
+      가장 높으므로 `owner` 를 주는 길은 **누구에게도** 없습니다. 실제로
+      눌러 보면 「자기보다 높거나 같은 권한은 줄 수 없습니다」입니다.
+      `owner` 를 쓰는 자리는 **프로젝트를 만들 때 한 곳**뿐입니다.
+    - **프로젝트는 아무도 못 지웁니다.** `DELETE /api/projects/{id}` 가
+      없어서 405 입니다. 즉 그 문장은 관리자를 소유자와 **갈라 주지
+      않습니다** — 없는 능력으로 가른 것입니다.
+
+    할 수 있는 일의 원본은 **`projects/permissions.py` 의 `_ALLOWED`
+    하나**입니다. 여기서 다시 말하면 두 벌이 되고, 결함 341 이 이 파일
+    **자신**에서 겪은 그것이 되풀이됩니다 — 주석은 아무것도 안 막습니다.
     """
 
-    OWNER = "owner"  # 프로젝트를 만든 사람. 넘겨줄 수는 있어도 스스로 사라질 수 없음
-    ADMIN = "admin"  # 팀원·설정을 다룰 수 있음. 프로젝트를 지우지는 못함
-    MEMBER = "member"  # 자기 일을 함
+    OWNER = "owner"  # 프로젝트를 만든 사람
+    ADMIN = "admin"  # 팀원·설정을 다루는 사람
+    MEMBER = "member"  # 자기 일을 하는 사람
 
 
 #: `members.project_role` 이 받는 값 전부.

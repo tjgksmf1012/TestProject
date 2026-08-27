@@ -37,7 +37,7 @@ UTC 는 KST 보다 항상 뒤입니다. 그래서 이 오차는 **날짜를 앞�
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from teamflow.config import get_settings
@@ -68,6 +68,20 @@ def as_utc(at: datetime) -> datetime:
     return at if at.tzinfo is not None else at.replace(tzinfo=UTC)
 
 
+def local_time(at: datetime) -> datetime:
+    """이 순간을 **팀 달력의 시계**로 옮긴다.
+
+    ⚠️ 보고서가 `f"{started_at:%Y-%m-%d %H:%M}"` 로 **UTC 를 그대로** 찍고
+    있었습니다 (결함 290). 같은 회의를 홈 화면은 `09-08 19:00`, 회의록은
+    `2026-09-08 10:00` 이라고 했습니다 — 아홉 시간이 어긋난 쪽이 **밖으로
+    나가는 문서**였습니다.
+
+    `local_date` 가 날짜만 답하므로 시각을 물을 자리가 없었고, 그래서
+    보고서는 물어보지 않고 직접 찍었습니다.
+    """
+    return as_utc(at).astimezone(team_zone())
+
+
 def local_date(at: datetime) -> date:
     """이 순간이 팀 달력에서 며칠인가.
 
@@ -93,3 +107,32 @@ def today() -> date:
     "지금이 며칠인가" 라, 같은 이름으로 겹쳐 두면 안 됩니다.
     """
     return local_date(datetime.now(UTC))
+
+
+def team_week(at: datetime | None = None) -> tuple[datetime, datetime]:
+    """`at` 이 든 주 — **팀 달력의 월요일 00:00 부터 일요일 끝까지**. UTC 로.
+
+    ## ⚠️ 왜 「지난 7일」이 아닌가
+
+    보고서 화면은 「이번 주 보고서 만들기」라고 적어 두고 **지난 7일**을
+    보냈습니다. 그 창은 누를 때마다 굴러가므로 `scope_key` 가 날마다
+    달라지고, **하루에 한 벌씩 주간 보고서가 쌓였습니다**(결함 296).
+    사흘 눌러 세 벌이 나오는 것을 재현했고, 그중 둘은 제목까지 같아
+    사람 눈에는 구별이 안 됐습니다. `_upsert` 가 「쌓으면 안 됩니다 —
+    어느 것이 진짜인지 아무도 모릅니다」라고 적어 둔 바로 그 상태입니다.
+
+    이 제품에서 「이번 주」는 이미 **월~일**로 정해져 있습니다 —
+    `meeting/resolve.py` 가 「이번 주까지」를 일요일로 풀고(검사가
+    지킵니다), `lib/calendar/month.ts` 의 격자도 월요일에서 시작합니다.
+    한 제품 안에 「주」가 두 뜻이면 안 됩니다.
+
+    ⚠️ 끝을 **다음 월요일 00:00 이 아니라 일요일 23:59:59.999999** 로
+    둡니다. `_counts` 가 `<=` 로 걸고 제목도 이 값을 찍기 때문에, 자정을
+    쓰면 기간이 「~ 8월 24일」이라고 하루 더 길게 나갑니다.
+    """
+    zone = team_zone()
+    here = as_utc(at if at is not None else datetime.now(UTC)).astimezone(zone)
+    monday = here.date() - timedelta(days=here.weekday())
+    start = datetime.combine(monday, time.min, tzinfo=zone)
+    end = datetime.combine(monday + timedelta(days=6), time.max, tzinfo=zone)
+    return start.astimezone(UTC), end.astimezone(UTC)

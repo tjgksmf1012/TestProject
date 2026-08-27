@@ -158,6 +158,15 @@
   .notes-gap li { color: var(--gap); }
   .notes-gap li::before { background: var(--gap); }
 
+  /* 「팀 공통」 머리말 (결함 344). 이 목록은 사람마다 똑같아서, 이름 밑에
+     그대로 두면 네 줄이 그 사람에 대한 지적으로 읽힙니다. 목록보다 한 단계
+     조용하게 두되 글자 하한 아래로는 안 내립니다. */
+  .notes-head { margin: 0 0 var(--sp-1); font-size: var(--fs-caption);
+                color: var(--text-subtle); }
+  /* 두 목록이 잇달아 오면 사이를 벌립니다 — 붙여 두면 「이 사람」이 위
+     목록의 마지막 줄처럼 붙어 보입니다 (렌더해서 보고 알았습니다). */
+  .notes + .notes-head { margin-top: var(--sp-3); }
+
   /* 팀이 확정한 값. 계산 구간과 나란히 있어야 둘이 다르다는 것이 보입니다. */
   .final { margin: var(--sp-2) 0 0; font-size: var(--fs-caption);
            color: var(--text); }
@@ -180,6 +189,11 @@
   <div id="app"></div>
 
   <script type="module" src="/reports.js"></script>
+
+  <!-- 탭 넷 **말고** 가는 곳. `src/demo/nav.ts` 가 `navLinks` 로 채운다.
+       ⛔ 이 자리를 지우면 채팅·일정·알림·활동·찾기·보고서로 **가는 길이
+       제품 전체에서 사라집니다** — 실제로 그랬습니다 (결함 305). -->
+  <nav id="nav" aria-label="더 보기"></nav>
 
   <nav id="tabs" aria-label="주요 화면"></nav>
 </body>

@@ -27,10 +27,12 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
+from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-from sqlalchemy import event, func, select
+from pydantic import BaseModel, Field, PlainSerializer
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.orm import Session
 
 from teamflow.audio.chunk_store import ChunkStore
@@ -121,6 +123,90 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+# ══════════════════════════════════════════════════════════════
+# 압축 — 화면이 뜨기까지 사람이 흰 화면을 보는 시간
+# ══════════════════════════════════════════════════════════════
+#
+# 이 서버는 화면도 같이 내줍니다(같은 오리진). 그런데 SPA 번들을 **압축
+# 없이** 보내고 있었습니다:
+#
+#     GET /app/assets/index-*.js  →  content-length: 526215   (압축 없음)
+#     같은 파일을 gzip 하면            161KB
+#
+# 재 봤습니다 — 400kbps 회선에서 캐시를 비우고 처음 열면 **6초가 넘게 흰
+# 화면**이었습니다. 졸업작품 시연은 터널이나 학교 와이파이로 열립니다.
+#
+# ⚠️ `compresslevel` 은 9 가 아니라 6 입니다. 정적 파일은 **요청마다 다시
+#    압축**되므로(앞에 프록시가 없습니다) 9 는 매 요청 CPU 를 태우는데,
+#    줄어드는 양은 6 과 몇 % 차이입니다. nginx 기본값도 이 근처입니다.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+
+
+def _as_utc(value: datetime) -> str:
+    """응답에 나가는 시각은 **언제나 UTC 임을 글자로 말합니다** (결함 246).
+
+    ## 왜 필요한가
+
+    저장은 UTC 입니다(`datetime.now(UTC)`). 그런데 **SQLite 는 시간대를
+    돌려주지 않습니다** — `DateTime(timezone=True)` 라고 적어도 naive 로
+    돌아옵니다. 그대로 내보내면 이런 글자가 나갑니다:
+
+        "started_at": "2026-09-08T10:00:00"      ← 표시 없음
+        "computed_at": "2026-08-21T00:10:07Z"    ← 표시 있음
+
+    한 API 안에 규약이 둘입니다. 그리고 **표시 없는 쪽을 브라우저는 자기
+    시간대로 읽습니다**(JS 사양) — 서울 사람과 뉴욕 사람이 같은 회의를
+    다른 순간으로 봅니다. 자정 근처면 **날짜까지** 갈라집니다.
+
+    ⚠️ 지어내지 않습니다. 시간대가 붙어 있으면 그대로 두고, **없을 때만**
+    "이건 UTC 다" 를 붙입니다 — 저장이 UTC 라는 것은 이 저장소의 규약이고
+    `datetime.now(UTC)` 가 그 증거입니다.
+    """
+    at = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+#: 응답에 나가는 시각. `datetime` 대신 이걸 씁니다.
+UtcDatetime = Annotated[
+    datetime, PlainSerializer(_as_utc, return_type=str, when_used="json")
+]
+
+
+class _NoCompressionForAudio:
+    """⚠️ **소리는 압축하지 않습니다.**
+
+    webm 은 이미 압축된 형식이라 gzip 이 줄이는 양이 0에 가깝습니다. 그런데
+    회의 한 시간짜리 트랙은 수십 MB 이고, 그걸 매 재생마다 다시 압축하면
+    **재생이 끊깁니다** — 아무것도 얻지 못하면서.
+
+    끄는 방법으로 응답에 `Content-Encoding: identity` 를 적는 길도 있지만,
+    그 값은 규격이 쓰지 말라고 한 값입니다(RFC 9110 §8.4.1). 대신 **요청이
+    gzip 을 받겠다고 말하지 않게** 합니다 — 그러면 `GZipMiddleware` 가
+    스스로 지나갑니다.
+
+    ⚠️ 이 미들웨어는 `GZipMiddleware` **바깥**에 있어야 합니다. Starlette 은
+    나중에 더한 것이 바깥이므로 **아래에 더합니다.** 순서가 뒤집히면 이미
+    압축을 결정한 뒤라 아무 일도 안 일어납니다.
+    """
+
+    #: 소리를 흘리는 자리. 늘어나면 여기 적습니다.
+    AUDIO = re.compile(r"^/api/meetings/\d+/tracks/\d+/audio")
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http" and self.AUDIO.match(scope.get("path", "")):
+            scope = dict(scope)
+            scope["headers"] = [
+                (k, v) for (k, v) in scope["headers"] if k.lower() != b"accept-encoding"
+            ]
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_NoCompressionForAudio)
+
 DbSession = Annotated[Session, Depends(get_db)]
 AppSettings = Annotated[Settings, Depends(get_settings)]
 
@@ -134,6 +220,64 @@ AppSettings = Annotated[Settings, Depends(get_settings)]
 def health(settings: AppSettings) -> dict[str, Any]:
     # safe_dump 를 쓴다 — 시크릿이 헬스체크로 새는 사고가 흔하다
     return {"status": "ok", **safe_dump(settings)}
+
+
+# ══════════════════════════════════════════════════════════════
+# 브라우저에서 난 일 — 서버 로그가 볼 수 없는 절반
+# ══════════════════════════════════════════════════════════════
+#
+# `uvicorn.access` 는 요청만 남긴다. 화면이 렌더 중에 터지면 **요청은
+# 200 이고 로그는 조용하다.** 베타 체험에서 실제로 확인했다 — 화면 하나를
+# 터뜨렸더니 사람은 영문 스택을 봤고 서버 로그에는 한 줄도 안 남았다.
+#
+# ⚠️ **인증을 걸지 않는다.** 로그인 화면에서 터진 것이 가장 알고 싶은
+#    것인데, 인증을 걸면 그건 영영 안 들어온다.
+#
+# ⚠️ 그래서 **양을 막는다.** 인증이 없는 자리는 로그를 채우는 자리가 될 수
+#    있다. 렌더 루프 하나면 초당 수백 번이 들어온다. 길이는 스키마가,
+#    빈도는 아래 토큰 통이 막는다. 넘치면 조용히 204 를 준다 — 429 를
+#    주면 화면이 그걸 또 오류로 보고하려 든다.
+
+
+class ClientErrorIn(BaseModel):
+    """화면이 보내는 것. **사람이 친 글자는 없다** (docs/07 P4).
+
+    상한은 `frontend/src/lib/diag/report.ts` 의 `MAX_*` 와 같아야 한다 —
+    다르면 화면은 보냈다고 믿는데 서버가 422 로 버린다.
+    """
+
+    kind: str = Field(max_length=40)
+    message: str = Field(max_length=500)
+    stack: str | None = Field(default=None, max_length=4000)
+    #: `?…`·`#…` 를 뗀 경로만. 떼는 것은 화면이 한다.
+    route: str = Field(max_length=200)
+
+
+#: 분당 몇 줄까지 받아 줄 것인가. 사람 한 명이 화면을 열다 터지는 것은
+#: 분당 한둘이다. 60 은 "고장 난 화면 하나가 계속 터지는 것" 까지는
+#: 남기고, 그 이상은 같은 줄의 반복이라 버려도 잃는 것이 없다.
+_CLIENT_ERROR_PER_MINUTE = 60
+_client_error_window: list[float] = []
+
+
+@app.post("/api/client-errors", status_code=status.HTTP_204_NO_CONTENT)
+def report_client_error(payload: ClientErrorIn) -> Response:
+    now = time.monotonic()
+    cutoff = now - 60.0
+    while _client_error_window and _client_error_window[0] < cutoff:
+        _client_error_window.pop(0)
+    if len(_client_error_window) < _CLIENT_ERROR_PER_MINUTE:
+        _client_error_window.append(now)
+        # ⚠️ WARNING 이다. INFO 면 요청 로그에 묻히고, ERROR 면 서버가
+        #    고장 난 것처럼 보인다 — 고장 난 것은 화면이다.
+        logger.warning(
+            "client %s at %s: %s%s",
+            payload.kind,
+            payload.route,
+            payload.message,
+            f"\n{payload.stack}" if payload.stack else "",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -531,7 +675,7 @@ def _chunk_store(settings: Settings) -> ChunkStore:
 class TrackJoin(BaseModel):
     # `user_id` 는 없습니다. **트랙 = 사람**이 이 시스템의 화자 라벨 근거라,
     # 남의 번호로 트랙을 만들 수 있으면 기여도가 통째로 조작 가능해집니다.
-    started_at: datetime
+    started_at: UtcDatetime
     device_label: str | None = Field(default=None, max_length=100)
     sample_rate: int | None = Field(default=None, gt=0)
 
@@ -681,16 +825,35 @@ def list_my_projects(session: DbSession, user: CurrentUser) -> list[ProjectSumma
         ).all()
     )
     meeting_rows = session.execute(
-        select(m.Meeting.project_id, m.Meeting.status).where(
+        select(m.Meeting.project_id, m.Meeting.status, m.Meeting.id).where(
             m.Meeting.project_id.in_(project_ids)
         )
     ).all()
 
+    # ⛔ **「검토할 회의」는 상태가 아니라 남은 후보로 셉니다** (결함 252).
+    #
+    #    상태만 세면 후보를 사람이 **전부 검토한** 회의(서버가 `confirmed`
+    #    를 못 넣은 경우 · 회의에서 업무가 안 나온 경우)도 들어갑니다.
+    #    홈 머리말이 「검토할 회의 2」인데 바로 아래 덩어리는 「검토 필요
+    #    1」이라 두 숫자가 한 화면에서 어긋났습니다.
+    meeting_ids = [meeting_id for _, _, meeting_id in meeting_rows]
+    with_pending = {
+        meeting_id
+        for (meeting_id,) in session.execute(
+            select(m.MeetingTaskCandidate.meeting_id)
+            .where(
+                m.MeetingTaskCandidate.meeting_id.in_(meeting_ids),
+                m.MeetingTaskCandidate.review_status == "pending",
+            )
+            .distinct()
+        ).all()
+    }
+
     totals: dict[int, int] = {}
     reviews: dict[int, int] = {}
-    for project_id, meeting_status in meeting_rows:
+    for project_id, meeting_status, meeting_id in meeting_rows:
         totals[project_id] = totals.get(project_id, 0) + 1
-        if meeting_status == "needs_review":
+        if meeting_status == "needs_review" and meeting_id in with_pending:
             reviews[project_id] = reviews.get(project_id, 0) + 1
 
     return [
@@ -982,15 +1145,24 @@ class GithubHealthOut(BaseModel):
 
     repo: str | None
     #: 서명된 배달이 처음 도착한 시각. None 이면 **아직 확인되지 않았습니다.**
-    verified_at: datetime | None
+    verified_at: UtcDatetime | None
     delivery_count: int
-    last_delivery_at: datetime | None
+    last_delivery_at: UtcDatetime | None
 
     #: "이 수치는 언제부터의 활동인가" 한 줄. 범위를 안 밝힌 숫자는
     #: **전부를 센 것처럼** 읽힙니다.
     coverage: str
-    backfilled_at: datetime | None
-    backfilled_to: datetime | None
+    backfilled_at: UtcDatetime | None
+    backfilled_to: UtcDatetime | None
+
+    #: 지난 활동 가져오기가 **지금 실제로** 될 것인가 (결함 380).
+    #:
+    #: ⚠️ 화면이 이걸 스스로 판단하면 안 됩니다 — 서버 설정과 App 설치
+    #: 여부는 화면이 알 수 없고, 모른 채로 그리면 「누르면 채웁니다」라고
+    #: 약속해 놓고 409 를 받습니다.
+    can_backfill: bool
+    #: 못 한다면 무엇이 막고 있는가. 할 수 있으면 None.
+    backfill_blocked: str | None
 
 
 @app.get("/api/projects/{project_id}/github", response_model=GithubHealthOut)
@@ -1033,6 +1205,15 @@ def github_health(
         coverage=gh_connection.describe_coverage(facts),
         backfilled_at=facts.backfilled_at,
         backfilled_to=facts.backfilled_to,
+        # ⚠️ **화면이 「누르면 채웁니다」라고 약속하고 있었습니다** (결함 380).
+        # 백필이 될지 안 될지는 서버만 아는데(설정·설치 여부) 안 보내고
+        # 있었고, 화면은 배달 수만 보고 단추를 그렸습니다.
+        can_backfill=gh_connection.can_backfill(facts),
+        backfill_blocked=gh_connection.backfill_blocked_because(
+            repo=facts.repo,
+            app_credentials_present=facts.app_credentials_present,
+            installation_present=facts.installation_present,
+        ),
     )
 
 
@@ -1131,23 +1312,22 @@ def start_github_backfill(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
 
-    if not project.github_repo:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "저장소가 연결되지 않았습니다. 먼저 owner/repo를 저장하세요.",
-        )
     # 자격 증명이 없으면 워커가 아무것도 못 합니다. 202 로 받아 두고
     # 조용히 아무 일도 안 일어나면, 사람은 화면만 보고 기다립니다.
-    if not (
-        getattr(settings, "github_app_id", None)
-        and getattr(settings, "github_private_key", None)
-        and project.github_installation_id
-    ):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "서버에 GitHub App 자격 증명이 없거나 App이 아직 이 저장소에 "
-            "설치되지 않았습니다. 지난 활동을 가져오려면 그것부터 필요합니다.",
-        )
+    #
+    # ⚠️ **판단은 한 벌입니다** (결함 380). 예전에는 이 조건이 여기에만
+    # 있어서, 화면은 「누르면 채웁니다」라고 약속하고 단추까지 그렸는데
+    # 서버는 409 를 줬습니다. 같은 함수를 진단 갈래도 부릅니다.
+    blocked = gh_connection.backfill_blocked_because(
+        repo=project.github_repo,
+        app_credentials_present=bool(
+            getattr(settings, "github_app_id", None)
+            and getattr(settings, "github_private_key", None)
+        ),
+        installation_present=bool(project.github_installation_id),
+    )
+    if blocked is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, blocked)
 
     limit = gh_backfill.clamp_limit(body.limit)
     _enqueue_backfill_after_commit(session, project_id, limit)
@@ -1343,7 +1523,7 @@ def submit_consent(
     **철회는 소급하지 않는다.** `consented=false` 는 이후 청크만 막고,
     이미 받은 오디오는 보존기간까지 남는다. 삭제는 별도 절차다 (docs/07 P6).
     """
-    _load_meeting_for(session, meeting_id, user)
+    meeting = _load_meeting_for(session, meeting_id, user)
     try:
         recording_service.submit_consent(
             session,
@@ -1358,14 +1538,14 @@ def submit_consent(
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
+    # ⛔ **말은 회의 국면을 보고 짓는다** (결함 251). 여기서 조건문을
+    #    쓰면 「녹음이 끝난 회의에 녹음을 시작하라」가 다시 나옵니다.
     status_ = recording_service.consent_status(session, meeting_id)
     return ConsentOut(
         meeting_id=meeting_id,
         roster=recording_service.consent_roster(session, meeting_id),
         all_confirmed=status_.all_confirmed,
-        message="전원 동의했습니다. 녹음을 시작할 수 있습니다"
-        if status_.all_confirmed
-        else status_.describe(),
+        message=recording_service.describe_consent(status_, meeting.status),
     )
 
 
@@ -1375,15 +1555,13 @@ def read_consent(meeting_id: int, session: DbSession, user: CurrentUser) -> Cons
 
     동의 행이 있는 사람만 보여주면 기다려야 할 대상이 화면에서 사라진다.
     """
-    _load_meeting_for(session, meeting_id, user)
+    meeting = _load_meeting_for(session, meeting_id, user)
     status_ = recording_service.consent_status(session, meeting_id)
     return ConsentOut(
         meeting_id=meeting_id,
         roster=recording_service.consent_roster(session, meeting_id),
         all_confirmed=status_.all_confirmed,
-        message="전원 동의했습니다. 녹음을 시작할 수 있습니다"
-        if status_.all_confirmed
-        else status_.describe(),
+        message=recording_service.describe_consent(status_, meeting.status),
     )
 
 
@@ -1486,11 +1664,24 @@ async def put_chunk(
             "X-Client-At-Ms 헤더가 필요합니다 (동기화된 청크 도착 시각)",
         )
 
-    _own_track(session, meeting_id, track_id, user)
-
     data = await request.body()
-    try:
-        chunk = recording_service.store_chunk(
+
+    # ⛔ **여기부터는 이벤트 루프에서 돌리면 안 됩니다** (결함 279).
+    #
+    #    이 함수는 `async def` 인데(본문을 `await` 로 읽어야 해서) 그 아래는
+    #    전부 **막는 일**입니다 — DB 읽기·쓰기와 파일 쓰기. 그대로 두면
+    #    청크 하나를 처리하는 동안 서버 전체가 멈춥니다.
+    #
+    #    재현했습니다. 순차로 여섯 번은 **한 번에 10ms** 인데, 열둘을
+    #    **동시에** 올리면 둘만 200 이고 나머지 열은 20초 안에 응답이
+    #    아예 안 왔습니다. 같은 조건에서 읽기 열둘은 0.05초에 다 끝납니다 —
+    #    막히는 것은 이 자리뿐입니다.
+    #
+    #    사람 둘이 같이 녹음하는 것이 이 제품의 기본 상황입니다. 청크가
+    #    못 올라가면 그 구간의 소리는 영영 못 잽니다.
+    def _store() -> m.TrackChunk:
+        _own_track(session, meeting_id, track_id, user)
+        return recording_service.store_chunk(
             session,
             _chunk_store(settings),
             meeting_id=meeting_id,
@@ -1499,6 +1690,9 @@ async def put_chunk(
             client_at_ms=x_client_at_ms,
             data=data,
         )
+
+    try:
+        chunk = await run_in_threadpool(_store)
     except recording_service.ConsentError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except recording_service.TrackError as exc:
@@ -1542,7 +1736,9 @@ def list_chunks(
 
 
 class TrackComplete(BaseModel):
-    ended_at: datetime
+    #: 소리가 시작된 시각 (결함 230). 옛 클라이언트는 안 보낸다.
+    started_at: UtcDatetime | None = None
+    ended_at: UtcDatetime
     coverage: float = Field(ge=0, le=1)
     total_gap_ms: int = Field(ge=0)
     longest_gap_ms: int = Field(default=0, ge=0)
@@ -1592,6 +1788,7 @@ def complete_track(
             meeting_id=meeting_id,
             track_id=track_id,
             summary=recording_service.TrackSummary(
+                started_at=payload.started_at,
                 ended_at=payload.ended_at,
                 coverage=payload.coverage,
                 total_gap_ms=payload.total_gap_ms,
@@ -1676,16 +1873,25 @@ def revoke_my_data(
     한 사람의 요청으로 팀 전체의 회의 기록이 사라지면 안 됩니다.
     발화에서 화자 연결만 끊는 것은 별도 정책이고, 지금은 하지 않습니다.
 
-    ## ⚠️ 남은 문제 — 기여도 화면이 이 둘을 구분하지 못한다
+    ## 지워진 뒤 기여도는 — **「폰이 죽었다」와 구분해서 말합니다**
 
     원본이 지워지면 그 사람의 회의 기여는 **측정 불가**가 됩니다
-    (`docs/05` §5 — 측정 불가는 0점이 아니다). 그건 맞는 처리지만,
-    화면에서 이게 **"폰이 죽어서 못 쟀다" 와 똑같이 보입니다.**
+    (`docs/05` §5 — 측정 불가는 0점이 아니다). 삭제는 법적 권리라 막을 수
+    없고, 대신 **감사 로그에 남습니다** (`user_data_revoked`).
 
-    그래서 이론상 "회의에서 말을 안 했다" 를 감추는 데 쓸 수 있습니다.
-    삭제는 법적 권리라 막을 수 없고, 대신 **감사 로그에 남습니다**
-    (`user_data_revoked`). 화면이 그 둘을 구분해 말하도록 만드는 것은
-    아직 안 했습니다 — PR 본문 C 절에 적어 두었습니다.
+    ⚠️ **이 독스트링은 한동안 「화면이 그 둘을 구분하지 못한다 — 아직 안
+    했습니다」라고 적혀 있었습니다.** 실제로 눌러 보니 이미 구분하고
+    있었습니다 — 낡은 주석이 「안 고쳐진 구멍」을 있다고 말하고 있었던
+    것입니다 (docs/24 회차 기록).
+
+    측정 불가에는 **왜인지가 실려 나갑니다** (`measurement_gaps`) —
+
+        reason:  "본인 요청으로 녹음 원본을 삭제했습니다 (개인정보 삭제 요청).
+                  발언량을 측정할 수 없어 회의 기여도를 계산에서 제외했습니다"
+        detail:  {"deleted_reason": "user_request", "tracks_deleted": 1}
+
+    그래서 화면 둘 다 「녹음이 끊긴 트랙이 있습니다」와 **다른 문장**을
+    보여 줍니다 (레거시는 카드에, SPA 는 `?` 팝오버에).
     """
     _require_project_member(session, project_id, user)
 
@@ -1801,9 +2007,44 @@ class MeetingSummary(BaseModel):
     meeting_id: int
     title: str | None
     status: str
-    started_at: datetime
+    #: **아직 안 연 회의는 비어 있습니다** (결함 287).
+    #:
+    #: ⚠️ 예전에는 `UtcDatetime` 이라 비어 있을 수 없었습니다. 그런데
+    #: 달력에서 「회의 일정 잡기」로 잡은 회의는 `started_at` 이 없습니다 —
+    #: 일정을 하나 잡는 순간 이 목록 전체가 **500** 이 됐고, 회의 다섯이
+    #: 있는 팀의 홈이 「회의를 열면 여기에 나옵니다」로 바뀌었습니다.
+    #:
+    #: 시작하지 않은 회의에 시각을 지어 넣지 않습니다. 이 제품의 불변식
+    #: (**측정 불가 ≠ 0점**)이 시각에도 그대로 걸립니다.
+    started_at: UtcDatetime | None
+    #: 잡아 둔 시각. 이미 연 회의는 비어 있습니다.
+    scheduled_at: UtcDatetime | None
     #: 이 회의에서 사람이 아직 결정하지 않은 업무 후보 수
     pending_candidates: int
+    #: 이 회의에서 **기록된 발화 수**.
+    #:
+    #: ⚠️ 이 칸이 없어서 홈은 「후보 0건」의 두 가지 이유를 못 갈랐습니다
+    #: (결함 368). 사람들이 이야기했는데 업무가 안 나온 것과, **소리가
+    #: 하나도 안 잡힌 것**은 다음에 할 일이 정반대입니다 — 앞은 그냥
+    #: 넘어가면 되고 뒤는 트랙을 확인해야 합니다.
+    #:
+    #: 같은 제품이 검토 화면에서는 이미 그 말을 합니다(「처리는 끝났는데
+    #: 기록된 발화가 없습니다」). 홈만 그 값을 못 받고 있었습니다.
+    #:
+    #: ⚠️ 개수를 그대로 보냅니다. 「기록이 있는가」라는 **판단**은 화면이
+    #: 아니라 `@lib` 이 합니다 — 0 은 못 잰 것이 아니라 **잰 0** 입니다.
+    utterance_count: int = 0
+    #: 트랙 커버리지의 평균. **못 잰 것은 `None`** 이고 0.0 이 아니다.
+    #:
+    #: ⚠️ 이 구분이 이 제품의 불변식이다 (docs/05 · "측정 불가 ≠ 0점").
+    #: 0.0 으로 채우면 화면은 "녹음이 하나도 안 됐다" 를 그리는데, 실제로는
+    #: **아직 회의가 안 끝나서 잰 적이 없는** 것이다.
+    #:
+    #: ⚠️ 이 칸이 생기기 전, 홈은 회의 줄마다
+    #: `GET /api/meetings/{id}/tracks` 를 따로 불렀다. 회의 다섯짜리
+    #: 시연 데이터로 홈 한 번에 요청 7건이었고(재서 확인), 회의 서른인
+    #: 팀이면 33건이다. 브라우저는 호스트당 여섯 개씩만 동시에 연다.
+    coverage: float | None = None
 
 
 @app.get("/api/projects/{project_id}/meetings", response_model=list[MeetingSummary])
@@ -1818,22 +2059,50 @@ def list_project_meetings(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
     _require_project_member(session, project_id, user)
 
+    # ⚠️ 안 연 회의는 `started_at` 이 없습니다 (결함 287). 그것만으로
+    #    줄을 세우면 예정 회의가 NULL 자리에 몰려 시간 감각이 깨집니다 —
+    #    **그 회의가 언제인가**는 「연 시각 아니면 잡아 둔 시각」입니다.
+    when = func.coalesce(m.Meeting.started_at, m.Meeting.scheduled_at)
     meetings = session.scalars(
         select(m.Meeting)
         .where(m.Meeting.project_id == project_id)
-        .order_by(m.Meeting.started_at.desc(), m.Meeting.id.desc())
+        .order_by(when.desc(), m.Meeting.id.desc())
     ).all()
     if not meetings:
         return []
 
+    meeting_ids = [x.id for x in meetings]
     pending = dict(
         session.execute(
             select(m.MeetingTaskCandidate.meeting_id, func.count())
             .where(
-                m.MeetingTaskCandidate.meeting_id.in_([x.id for x in meetings]),
+                m.MeetingTaskCandidate.meeting_id.in_(meeting_ids),
                 m.MeetingTaskCandidate.review_status == "pending",
             )
             .group_by(m.MeetingTaskCandidate.meeting_id)
+        ).all()
+    )
+    # ⚠️ `coverage IS NULL` 인 트랙은 **빼고** 평균 낸다. 넣으면 아직
+    #    안 끝난 트랙 하나가 회의 전체의 커버리지를 끌어내리고, 화면은
+    #    "녹음이 반만 됐다" 를 그린다 — 잰 적이 없는데.
+    #    한 개도 없으면 행이 안 나오고, 그래서 `None` 이다 (0.0 이 아니라).
+    # ⚠️ 회의마다 따로 세지 않습니다 — 회의 서른이면 요청이 서른 번
+    #    도는 것이 아니라 여기서 한 번에 묶어 셉니다(`coverage` 와 같은 방식).
+    utterances = dict(
+        session.execute(
+            select(m.Utterance.meeting_id, func.count())
+            .where(m.Utterance.meeting_id.in_(meeting_ids))
+            .group_by(m.Utterance.meeting_id)
+        ).all()
+    )
+    coverage = dict(
+        session.execute(
+            select(m.MeetingTrack.meeting_id, func.avg(m.MeetingTrack.coverage))
+            .where(
+                m.MeetingTrack.meeting_id.in_(meeting_ids),
+                m.MeetingTrack.coverage.is_not(None),
+            )
+            .group_by(m.MeetingTrack.meeting_id)
         ).all()
     )
 
@@ -1843,7 +2112,12 @@ def list_project_meetings(
             title=meeting.title,
             status=meeting.status,
             started_at=meeting.started_at,
+            scheduled_at=meeting.scheduled_at,
             pending_candidates=pending.get(meeting.id, 0),
+            utterance_count=utterances.get(meeting.id, 0),
+            coverage=(
+                float(coverage[meeting.id]) if coverage.get(meeting.id) is not None else None
+            ),
         )
         for meeting in meetings
     ]
@@ -1890,7 +2164,11 @@ class MeetingDetail(BaseModel):
     project_id: int
     title: str | None
     status: str
-    started_at: datetime
+    #: 아직 안 연 회의는 비어 있습니다 (결함 287) — `MeetingSummary` 참조.
+    #: 예정 회의의 로비를 열면 여기서 **500** 이 났습니다.
+    started_at: UtcDatetime | None
+    #: 잡아 둔 시각. 이미 연 회의는 비어 있습니다.
+    scheduled_at: UtcDatetime | None
     capture_mode: str
     # 처리가 끝나기 전에는 None. 실패한 회의도 None 이다 —
     # 빈 문자열로 내려보내면 화면이 "요약이 없는 회의" 로 그린다.
@@ -1952,6 +2230,7 @@ def get_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Meeti
         title=meeting.title,
         status=meeting.status,
         started_at=meeting.started_at,
+        scheduled_at=meeting.scheduled_at,
         capture_mode=meeting.capture_mode,
         summary=meeting.summary,
         next_agenda=list(meeting.next_agenda or []),
@@ -2003,6 +2282,86 @@ class ReprocessOut(BaseModel):
     status: str
     #: 화면에 그대로 쓸 한 줄.
     message: str
+
+
+@app.delete("/api/meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+def discard_empty_meeting(meeting_id: int, session: DbSession, user: CurrentUser) -> Response:
+    """**아무것도 안 담긴** 회의를 무른다 (결함 320).
+
+    ## 왜 이 문이 생겼나
+
+    「회의 열기」는 누른 만큼 회의를 만듭니다. 세 번 누르니 회의가 5→8개가
+    됐고, **무르는 길이 아예 없었습니다** — 서버에도(405) 화면에도(단추
+    0개). 잘못 연 회의가 홈·회의 목록·왼쪽 레일에 영영 남았습니다.
+    결함 298 이 일정에서 잡은 것과 같은 모양입니다.
+
+    ## ⛔ 무엇을 지우는 게 **아닌지**가 더 중요합니다
+
+    이 문은 **녹음이 하나도 없는 회의**만 지웁니다. 트랙이 하나라도 있으면
+    409 로 거절합니다 — 소리는 다시 못 만들고, 그 소리가 발화·후보·업무·
+    기여도로 이어져 있습니다. 「녹음한 것을 지우기」는 **다른 문**이고
+    (`POST /api/projects/{id}/me/data`), 그건 개인정보 파기 절차입니다.
+
+    ⚠️ 그래서 판정은 상태 하나가 아니라 **트랙 수**입니다. 상태만 보면
+    `pending` 인데 이미 트랙이 붙은 회의(녹음 중 참가)가 새어 나갑니다.
+    """
+    meeting = _load_meeting(session, meeting_id)
+    _require_can(session, meeting.project_id, user, permissions.Action.DELETE_MEETING)
+
+    tracks = session.scalars(
+        select(m.MeetingTrack).where(m.MeetingTrack.meeting_id == meeting_id)
+    ).all()
+    if tracks:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"녹음이 {len(tracks)}건 담긴 회의는 무를 수 없습니다 — "
+            "소리는 다시 만들 수 없습니다. 내 녹음을 지우려면 설정의 "
+            "「내 녹음과 성문 지우기」를 쓰세요.",
+        )
+    if meeting.status not in ("pending", "recording"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"이미 처리에 들어간 회의는 무를 수 없습니다 (지금 {meeting.status})",
+        )
+
+    # ⚠️ **지운 것도 기록에 남깁니다.** 회의가 목록에서 사라지면 「내가
+    #    본 그 회의가 어디 갔지」가 남습니다 — 활동 기록이 그 답입니다.
+    session.add(
+        m.AuditLog(
+            project_id=meeting.project_id,
+            actor_id=user.id,
+            action="meeting_discarded",
+            # ⚠️ 이 저장소의 회의 target 은 `meetings/{id}` 입니다 — 처음에
+            #    `meeting:{id}` 라고 적었고 `KNOWN_TARGET_KINDS` 짝 가드가
+            #    잡았습니다(결함 297 이 둔 그 가드입니다).
+            target=f"meetings/{meeting.id}",
+            before={"title": meeting.title, "status": meeting.status},
+            after=None,
+            at=datetime.now(UTC),
+        )
+    )
+    # ⛔ **딸린 것을 같이 치웁니다** (결함 430).
+    #
+    #    `meetings.id` 는 `AUTOINCREMENT` 없는 SQLite ROWID 라 **맨 위 행을
+    #    지우면 다음 회의가 그 번호를 받습니다.** 「잘못 연 회의를 무르고
+    #    새로 연다」는 두 번 클릭이라 흔합니다.
+    #
+    #    치우지 않으면 지워진 회의를 가리키던 행이 **다음 회의의 것**이
+    #    됩니다. 재현했습니다 — 무른 회의의 30분 전 알림이 살아남아
+    #
+    #        곧 회의가 시작됩니다 — L2 한명 미참가        ← 예정된 적 없는 회의
+    #
+    #    라고 적고, 눌러 가면 **엉뚱한 회의의 로비**가 조용히 열렸습니다.
+    #
+    # ⚠️ 트랙이 0건인 것은 위에서 이미 막았으므로 여기 남는 것은
+    #    **소리와 무관한 딸림**뿐입니다 — 동의·알림·회의록. 소리에서
+    #    나오는 것(발화·후보·결정)은 트랙 없이는 생길 수 없습니다.
+    for dependent in (m.RecordingConsent, m.Notification, m.Report):
+        session.execute(delete(dependent).where(dependent.meeting_id == meeting.id))
+
+    session.delete(meeting)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/api/meetings/{meeting_id}/reprocess", response_model=ReprocessOut)
@@ -2192,6 +2551,16 @@ def _presence_of(session: Session, user_ids: list[int]) -> dict[int, str]:
     }
 
 
+def _display_name(session: Session, user_id: int) -> str:
+    """이름을 부른다. 못 찾으면 **번호로 부르지 않고** 그렇게 말한다.
+
+    ⚠️ 화면이 `사용자 #3` 을 띄우면 사람은 그게 누구인지 모릅니다. 기여도는
+    사람 이름 옆에 붙는 값이라 더욱 그렇습니다 (결함 222).
+    """
+    name = session.scalar(select(m.User.name).where(m.User.id == user_id))
+    return name or "이름을 알 수 없는 사람"
+
+
 def _project_members(session: Session, project_id: int) -> list[MemberOut]:
     rows = session.execute(
         select(m.Member, m.User)
@@ -2321,6 +2690,52 @@ def change_member_role(
     )
 
 
+def _remember_departure(
+    session: Session, project_id: int, member: m.Member, *, actor_id: int
+) -> None:
+    """나간 사람이 **어떤 역할이었는지**를 적어 둡니다 (결함 327·328).
+
+    ## 왜 적어야 하는가 — 안 적으면 점수가 움직입니다
+
+    `load_profiles` 는 `members` 행에서만 역할 비중을 읽습니다. 행이 사라지면
+    그 사람의 겸직(개발 60% · 디자인 40%)이 **기본 개발자 프로파일로 조용히
+    떨어지고**, 같은 순간에 다시 계산해도 몫이 달라집니다. 재 봤습니다 —
+    가중치 `task 0.5882 / code 0.4118` → `0.4615 / 0.5385`, 몫
+    `24.85% → 24.68%`, 그리고 그만큼을 **남은 두 사람이 나눠 가졌습니다.**
+
+    바로 이 함수를 부르는 자리의 주석이 막겠다고 적은 그 일입니다 —
+    「나갔다고 해서 그 사람이 한 일이 없던 일이 되면, **남은 팀의 기여도
+    비율이 조용히 부풀고** 회의록에 구멍이 납니다」.
+
+    ## 왜 감사 기록인가
+
+    `audit_logs` 는 이 저장소가 「사라진 것의 이름」을 이미 기억하는 자리
+    입니다(결함 320 의 무른 회의). 그리고 내보내기는 **되돌릴 수 없는
+    행동**인데 여태 한 줄도 안 남았습니다 — `member_removed` 는 모델
+    주석의 어휘에 있으면서 **쓰는 곳이 0곳**이었습니다(실패 ①).
+
+    ⛔ 지어내지 않습니다. `before` 에는 그 순간 행에 **실제로 있던 값**만
+    적습니다.
+    """
+    user = session.get(m.User, member.user_id)
+    session.add(
+        m.AuditLog(
+            project_id=project_id,
+            actor_id=actor_id,
+            action="member_removed",
+            target=f"members/{member.user_id}",
+            before={
+                "name": user.name if user is not None else None,
+                "project_role": member.project_role,
+                "role_shares": dict(member.role_shares or {}),
+                "github_login": member.github_login,
+            },
+            after=None,
+            at=datetime.now(UTC),
+        )
+    )
+
+
 @app.delete(
     "/api/projects/{project_id}/members/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -2351,6 +2766,7 @@ def remove_member(
             status.HTTP_403_FORBIDDEN, "나보다 높거나 같은 사람은 내보낼 수 없습니다"
         )
 
+    _remember_departure(session, project_id, target, actor_id=actor.user_id)
     session.delete(target)
     session.flush()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -2381,6 +2797,7 @@ def leave_project(
     if problem is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, problem)
 
+    _remember_departure(session, project_id, member, actor_id=member.user_id)
     session.delete(member)
     session.flush()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -3287,7 +3704,7 @@ class TaskGithubOut(BaseModel):
     number: int | None
     title: str | None
     actor_login: str
-    merged_at: datetime
+    merged_at: UtcDatetime
     #: 1.0 이면 확정, 그 아래는 추정.
     relevance: float
     confirmed: bool
@@ -3307,7 +3724,7 @@ class TaskOut(BaseModel):
     #: 무엇부터 볼 것인가. **작을수록 급합니다** (`vocab.TaskPriority`).
     priority: int
     deadline: date | None
-    completed_at: datetime | None
+    completed_at: UtcDatetime | None
     origin: TaskOriginOut | None
     #: 사람이 PR 에 적어야 하는 표식. 안 보여주면 아무도 안 적습니다.
     marker: str = ""
@@ -3318,6 +3735,16 @@ class TaskBoardOut(BaseModel):
     project_id: int
     statuses: list[str]
     tasks: list[TaskOut]
+    #: 이 보드에 **담당자로 남아 있지만 지금은 팀원이 아닌** 사람들.
+    #:
+    #: ⛔ 이게 없어서 나간 사람이 맡았던 카드가 「**사용자 #3**」으로
+    #:    떴습니다 (결함 308). 화면은 담당자 이름을 `/members` 로 찾는데
+    #:    그 목록은 **지금 구성원**뿐이라 나간 사람이 없습니다.
+    #:
+    #: ⚠️ `/members` 에 나간 사람을 섞지 **않습니다.** 그 목록은 담당자를
+    #:    고르는 자리에도 쓰여서, 섞으면 떠난 사람에게 새 일을 맡길 수
+    #:    있게 됩니다. 이름을 부르는 것과 고르는 것은 다른 일입니다.
+    former_assignees: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _github_for_tasks(
@@ -3361,6 +3788,18 @@ def list_tasks(project_id: int, session: DbSession, user: CurrentUser) -> TaskBo
     rows = task_service.list_tasks(session, project_id)
     github = _github_for_tasks(session, [row["id"] for row in rows])
 
+    # 담당자로 남아 있는데 지금 구성원이 아닌 사람의 **이름**을 같이 싣습니다
+    # (결함 308). 안 실으면 화면이 그 자리에 「사용자 #3」을 적습니다.
+    current = {
+        uid
+        for uid in session.scalars(
+            select(m.Member.user_id).where(m.Member.project_id == project_id)
+        ).all()
+    }
+    departed = sorted(
+        {uid for row in rows for uid in (row.get("assignee_ids") or [])} - current
+    )
+
     return TaskBoardOut(
         project_id=project_id,
         statuses=list(task_service.STATUSES),
@@ -3371,6 +3810,9 @@ def list_tasks(project_id: int, session: DbSession, user: CurrentUser) -> TaskBo
                 github=github.get(row["id"], []),
             )
             for row in rows
+        ],
+        former_assignees=[
+            {"user_id": uid, "name": _display_name(session, uid)} for uid in departed
         ],
     )
 
@@ -3472,8 +3914,17 @@ async def patch_task(
         )
         raise HTTPException(code, str(exc)) from exc
 
+    # ⚠️ **`next()` 에 기본값을 줍니다.**
+    #
+    # 없으면 `StopIteration` 이 나는데, 이 함수는 `async` 라 파이썬이
+    # 그것을 `RuntimeError: coroutine raised StopIteration` 으로 바꿉니다 —
+    # 즉 사람이 보는 것은 **500** 이고 로그에는 트레이스백입니다. 위에서
+    # 지운 업무를 막았으니 지금은 날 일이 없지만, 이 자리는 "못 찾으면
+    # 조용히 터진다" 라서 다시 같은 사고가 날 수 있습니다.
     rows = task_service.list_tasks(session, project_id)
-    updated = next(row for row in rows if row["id"] == task.id)
+    updated = next((row for row in rows if row["id"] == task.id), None)
+    if updated is None:  # pragma: no cover - 위 검사가 막고 있습니다
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "업무를 찾을 수 없습니다")
     return TaskOut(**updated)
 
 
@@ -3559,9 +4010,15 @@ class MemberScoreOut(BaseModel):
 
 class ScoreOut(BaseModel):
     algo_version: str
-    computed_at: datetime
+    computed_at: UtcDatetime
     members: list[MemberScoreOut]
     skipped_categories: list[str]
+    # ⚠️ 기여 기록은 있는데 **지금 구성원이 아닌** 사람들 (결함 222).
+    #    계산에는 **그대로 들어갑니다** — 빼면 남은 사람들의 몫이 조용히
+    #    부풀고, 그건 `remove_member` 가 기록을 남겨 두는 이유와 어긋납니다.
+    #    여기 이름까지 실어 보내는 것은 화면이 그 줄을 「사용자 #3」 으로
+    #    그리지 않게 하기 위해서입니다.
+    former_members: list[dict[str, Any]] = Field(default_factory=list)
     # ⚠️ 순위는 의도적으로 제공하지 않는다. docs/07 E2
     notice: str = (
         "이 수치는 활동 기록에 기반한 참고값입니다. 최종 기여도는 팀이 합의하여 확정합니다."
@@ -3590,7 +4047,7 @@ class FinalOut(BaseModel):
     final_value: float
     adjusted_by: int | None
     reason: str | None
-    confirmed_at: datetime
+    confirmed_at: UtcDatetime
 
 
 class FinalsOut(BaseModel):
@@ -3656,16 +4113,34 @@ def confirm_contributions(
       안 그러면 확정 뒤에 이벤트가 하나 더 들어오는 것만으로 확정값이
       가리키던 근거가 달라집니다
 
-    ⚠️ **누가 확정할 수 있는가** — 지금은 **구성원 누구나**입니다. 이
-    저장소에 팀장·교수 역할 개념이 아직 없습니다. 남의 업무를 옮기는 것도
-    같은 규칙이고(그리고 감사 로그에 남고), 여기도 `adjusted_by` 로
-    남습니다. 역할이 생기면 여기부터 좁혀야 합니다.
+    ## ⚠️ 누가 확정할 수 있는가 — **관리자와 소유자** (결함 392)
+
+    이 자리에는 오래도록 이렇게 적혀 있었습니다 —
+
+    > 지금은 **구성원 누구나**입니다. 이 저장소에 팀장·교수 역할 개념이
+    > 아직 없습니다. … **역할이 생기면 여기부터 좁혀야 합니다.**
+
+    그 뒤에 역할이 생겼습니다(`ProjectRole` 셋 · `_ALLOWED` 일곱 갈래).
+    **조건이 붙은 결정이었고 그 조건이 충족된 것**이라, 그 문장이 스스로
+    시킨 대로 좁힙니다 — 뒤집는 것이 아니라 적어만 두고 간 숙제입니다.
+
+    좁히기 전 상태는 재현했습니다: 평범한 팀원(이하늘)이 자기 몫을 90%,
+    나머지 둘을 5%씩으로 확정했고 `201` 이 떨어졌으며 기록은
+    「이하늘님이 확정했습니다」였습니다.
+
+    쓰기 라우트 44개를 세어 보니 「팀원 누구나」이면서 **남의 숫자**를
+    쓰는 것은 이것 하나입니다(나머지 셋은 경로가 `/me`). 그리고 이
+    저장소는 **더 작은 일**을 이미 반대로 정해 뒀습니다 — `set_my_role`
+    의 「남이 내 역할을 바꿀 수 있으면 그건 남의 점수를 바꾸는 일입니다」.
+
+    ⚠️ **불변식 ④를 뒤집는 것이 아닙니다.** 「팀이 합의해 확정한다」는
+    그대로이고, 정하는 것은 **합의를 기록으로 남기는 손**뿐입니다.
     """
     from teamflow.services import scoring_service
 
     if session.get(m.Project, project_id) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
-    _require_project_member(session, project_id, user)
+    _require_can(session, project_id, user, permissions.Action.CONFIRM_CONTRIBUTIONS)
 
     result = scoring_service.compute(session, project_id)
     if not result.members:
@@ -3705,7 +4180,56 @@ def confirm_contributions(
         # 계산 결과에 없는 구성원 = 활동 기록이 0건. 시스템 값은 0 이지만
         # 그건 "안 했다" 가 아니라 "이 계산에 잡힌 게 없다" 다.
         system_value = round(score.share, 3) if score else 0.0
+
+        # ⛔ **위 주석을 적어 놓고 0 을 그대로 확정하고 있었습니다** (결함 307).
+        #
+        #    갓 만든 프로젝트에서 [이 값으로 확정] 을 누르면 201 이 떨어지고
+        #    `final_value = 0` 이 남았습니다. 그리고 최종 보고서가 이렇게
+        #    나갔습니다 —
+        #
+        #        김민수  개발
+        #          측정하지 못했습니다
+        #          수집된 활동 데이터가 없습니다
+        #          팀 확정 0%            ← 두 줄 아래
+        #
+        #    한 문서가 "못 쟀다" 와 "0% 로 확정" 을 같이 말합니다. 불변식
+        #    ③(측정 불가 ≠ 0점)이 **팀 밖으로 나가는 문서**에서 깨진 것입니다.
+        #
+        #    ⚠️ 팀이 **직접 0 을 적는 것**은 막지 않습니다 — 그건 사람의
+        #    판단이고 사유와 함께 남습니다(불변식 ④). 막는 것은 **시스템
+        #    값을 그대로 받아들이는 것**입니다: 잰 것이 없으면 받아들일
+        #    값 자체가 없습니다.
+        #
+        #    ⚠️ 판정은 화면의 `nothingMeasured` 와 같은 것을 봅니다 —
+        #    범주가 하나도 없는가. 화면은 미리 말해 주기만 하고, 거절은
+        #    여기서 합니다(멘션과 같은 갈래 — 서버가 정합니다).
+        if item.final_value is None and (score is None or not score.categories):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "아직 잰 것이 없어 시스템 값이 없습니다 — 확정하려면 값을 "
+                f"직접 적고 이유를 남기세요 (user_id={item.user_id})",
+            )
+
         final_value = system_value if item.final_value is None else item.final_value
+
+        # ⚠️ **-5% · 999% 가 아무 검사 없이 201 이었습니다** (결함 215).
+        #    `-5 · -894 · 999` 로 넣으면 합이 정확히 100 이라 화면의 합계
+        #    경고도 조용했고, 그 값이 확정 기록으로 남았습니다.
+        #
+        #    ⛔ 이것은 불변식 넷째("시스템은 판정하지 않습니다")의 예외가
+        #    아닙니다. 팀이 시스템 값과 **다르게** 정하는 것은 얼마든지
+        #    되고(그건 사유로 남깁니다), 여기서 막는 것은 다른 의견이
+        #    아니라 **있을 수 없는 값**입니다 — 기여도는 전체에 대한 몫이라
+        #    음수도 100 초과도 뜻이 없습니다.
+        #
+        #    ⚠️ 합계가 100 이 아닌 것은 막지 않습니다. 팀 일부만 확정하는
+        #    경우가 있어 그건 화면이 경고만 하기로 정해져 있습니다.
+        if not 0.0 <= final_value <= 100.0:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"기여도는 0~100 사이여야 합니다 (user_id={item.user_id}, "
+                f"받은 값={final_value})",
+            )
 
         if abs(final_value - system_value) > 1e-9 and not (item.reason or "").strip():
             raise HTTPException(
@@ -3812,6 +4336,10 @@ def contributions(
             for ms in result.members.values()
         ],
         skipped_categories=[c.value for c in result.skipped_categories],
+        former_members=[
+            {"user_id": uid, "name": _display_name(session, uid)}
+            for uid in result.former_members
+        ],
     )
 
 
@@ -3824,9 +4352,9 @@ class ReportOut(BaseModel):
     id: int
     report_type: str
     meeting_id: int | None
-    period_start: datetime | None
-    period_end: datetime | None
-    generated_at: datetime
+    period_start: UtcDatetime | None
+    period_end: UtcDatetime | None
+    generated_at: UtcDatetime
     #: 블록 목록. 구조는 `teamflow/reports/__init__.py` 머리말에 있습니다.
     content: dict[str, Any]
 
@@ -3842,9 +4370,9 @@ class ReportSummary(BaseModel):
     report_type: str
     title: str
     meeting_id: int | None
-    period_start: datetime | None
-    period_end: datetime | None
-    generated_at: datetime
+    period_start: UtcDatetime | None
+    period_end: UtcDatetime | None
+    generated_at: UtcDatetime
 
 
 class GenerateReportIn(BaseModel):
@@ -3853,11 +4381,17 @@ class GenerateReportIn(BaseModel):
     ⚠️ `report_type` 을 문자열로 받되 **어휘 밖이면 거절**합니다. 여기서
     느슨하게 받으면 CHECK 제약이 500 으로 튀어나옵니다 — 사용자에게는
     "서버가 고장 났다" 로 보이는데 실제로는 잘못된 요청입니다.
+
+    ⚠️ **주간에 기간을 안 주면 「팀 달력의 이번 주」입니다** (결함 296).
+    예전에는 400 으로 거절했고, 그 바람에 화면이 「지난 7일」을 만들어
+    보내면서 **하루에 한 벌씩 주간 보고서가 쌓였습니다.** 기본값이 정해져
+    있으면 `scope_key` 가 주 안에서 안 변하고, 다른 주를 덮을 일도
+    없습니다 (`test_the_default_week_never_overwrites_another_week`).
     """
 
     report_type: str
-    period_start: datetime | None = None
-    period_end: datetime | None = None
+    period_start: UtcDatetime | None = None
+    period_end: UtcDatetime | None = None
 
     model_config = {"extra": "forbid"}
 
@@ -4034,13 +4568,32 @@ class MessageOut(BaseModel):
     #: 가리키는 곳이라서) — `deleted` 를 보고 화면이 "지워진 메시지" 라고 씁니다.
     body: str
     reply_to_id: int | None
-    created_at: datetime
-    edited_at: datetime | None
+    created_at: UtcDatetime
+    edited_at: UtcDatetime | None
     deleted: bool
     mentions: list[str]
     reactions: list[ReactionOut]
     #: 내가 단 반응. 없으면 `null`. 이게 없으면 누른 사람이 뗄 길을 못 찾습니다.
     my_reaction: str | None
+
+
+def _for_everyone(out: MessageOut) -> dict[str, Any]:
+    """소켓으로 **뿌릴** 몸통. 보는 사람마다 다른 칸은 뺍니다 (결함 415).
+
+    ⚠️ `MessageOut` 은 **부른 사람 기준**으로 만들어집니다 — `my_reaction`
+    은 「내가 단 반응」입니다. 그대로 뿌리면 남의 화면에 **내가 누른 것이
+    자기가 누른 것으로** 그려집니다. 실제로 그랬습니다: 글쓴이가 자기 글에
+    반응을 달고 그 글을 고치면, 지켜보던 사람의 칩이
+    `aria-pressed="true"` · 「내가 누름 — 다시 누르면 뗍니다」로 바뀌었습니다.
+
+    ⚠️ 반응 갈래만 이 처리를 손으로 하고 있었고 **고치기·지우기는 안
+    했습니다.** 그래서 네 자리가 전부 이 함수를 지나게 했습니다 — 다음에
+    갈래가 하나 더 생겨도 손으로 다시 적을 일이 없습니다. 가드가 `publish(`
+    를 세어 **전부 여기를 지나는지** 봅니다.
+    """
+    body = out.model_dump(mode="json")
+    body["my_reaction"] = None
+    return body
 
 
 class MessageIn(BaseModel):
@@ -4154,6 +4707,34 @@ def list_reaction_choices(user: CurrentUser) -> list[ReactionChoice]:
     return [
         ReactionChoice(mark=str(mark), label=vocab.REACTION_LABEL[mark])
         for mark in vocab.ReactionMark
+    ]
+
+
+class ChannelKindChoice(BaseModel):
+    kind: str
+    label: str
+    #: 무엇이 달라지는지 한 줄. 이름만 다르면 사람은 아무거나 고릅니다.
+    hint: str
+
+
+@app.get("/api/chat/channel-kinds", response_model=list[ChannelKindChoice])
+def list_channel_kind_choices(user: CurrentUser) -> list[ChannelKindChoice]:
+    """만들 수 있는 채널 종류 전부 (CHANNEL-001·002).
+
+    ⚠️ **화면이 이 표를 자기 안에 두면 안 됩니다** — `/api/chat/reactions`
+    와 같은 이유입니다. 두 벌이 되면 반드시 한쪽만 고쳐집니다.
+
+    ⚠️ 이 갈래가 없던 동안 **화면에는 종류를 고를 자리가 아예 없었고**
+    `kind: 'text'` 가 박혀 있었습니다 (결함 360). 서버는 처음부터 둘 다
+    받았고 화면은 둘 다 그렸는데, 만드는 자리만 하나였습니다.
+    """
+    return [
+        ChannelKindChoice(
+            kind=str(kind),
+            label=vocab.CHANNEL_LABEL[kind],
+            hint=vocab.CHANNEL_HINT[kind],
+        )
+        for kind in vocab.ChannelKind
     ]
 
 
@@ -4282,7 +4863,7 @@ async def send_message(
     # ⚠️ 커밋 **뒤에** 흘립니다. 앞에서 흘리면 롤백된 메시지가 남의 화면에
     #    남고, 그 사람이 새로고침하기 전까지는 있는 말로 보입니다.
     await chat_hub.hub.publish(
-        channel_id, {"kind": "message", "message": out.model_dump(mode="json")}
+        channel_id, {"kind": "message", "message": _for_everyone(out)}
     )
     return out
 
@@ -4304,7 +4885,7 @@ async def edit_message(
     out = _messages_out(session, [message], user.id)[0]
     session.commit()
     await chat_hub.hub.publish(
-        message.channel_id, {"kind": "edit", "message": out.model_dump(mode="json")}
+        message.channel_id, {"kind": "edit", "message": _for_everyone(out)}
     )
     return out
 
@@ -4324,7 +4905,7 @@ async def delete_message(
     out = _messages_out(session, [message], user.id)[0]
     session.commit()
     await chat_hub.hub.publish(
-        message.channel_id, {"kind": "delete", "message": out.model_dump(mode="json")}
+        message.channel_id, {"kind": "delete", "message": _for_everyone(out)}
     )
     return out
 
@@ -4345,11 +4926,12 @@ async def set_reaction(
 
     out = _messages_out(session, [message], user.id)[0]
     session.commit()
-    # ⚠️ 남에게 보낼 때 `my_reaction` 은 **내 것**입니다. 그대로 뿌리면
-    #    남의 화면에 내가 누른 것이 자기가 누른 것으로 그려집니다.
-    body = out.model_dump(mode="json")
-    body["my_reaction"] = None
-    await chat_hub.hub.publish(message.channel_id, {"kind": "reaction", "message": body})
+    # ⚠️ 남에게 보낼 때 `my_reaction` 은 **내 것**입니다 — `_for_everyone`
+    #    이 뺍니다. 예전에는 이 갈래만 손으로 뺐고 고치기·지우기는 안
+    #    뺐습니다(결함 415).
+    await chat_hub.hub.publish(
+        message.channel_id, {"kind": "reaction", "message": _for_everyone(out)}
+    )
     return out
 
 
@@ -4459,7 +5041,7 @@ class CalendarItemOut(BaseModel):
     kind: str
     #: ⚠️ **자르지 않은 순간**입니다. 어느 날인지는 화면이 팀 달력으로
     #: 정합니다 — 여기서 또 자르면 시간대 계산이 두 벌이 됩니다.
-    at: datetime
+    at: UtcDatetime
     title: str
     task_id: int | None
     meeting_id: int | None
@@ -4469,20 +5051,20 @@ class CalendarItemOut(BaseModel):
 
 class ScheduleIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
-    at: datetime
+    at: UtcDatetime
     channel_id: int | None = None
 
 
 class RescheduleIn(BaseModel):
     title: str | None = Field(default=None, max_length=200)
-    at: datetime | None = None
+    at: UtcDatetime | None = None
 
 
 class ScheduledOut(BaseModel):
     meeting_id: int
     title: str | None
-    scheduled_at: datetime | None
-    started_at: datetime | None
+    scheduled_at: UtcDatetime | None
+    started_at: UtcDatetime | None
     channel_id: int | None
 
 
@@ -4499,8 +5081,8 @@ def _scheduled_out(meeting: m.Meeting) -> ScheduledOut:
 @app.get("/api/projects/{project_id}/calendar", response_model=list[CalendarItemOut])
 def read_calendar(
     project_id: int,
-    since: datetime,
-    until: datetime,
+    since: UtcDatetime,
+    until: UtcDatetime,
     session: DbSession,
     user: CurrentUser,
 ) -> list[CalendarItemOut]:
@@ -4594,13 +5176,17 @@ def cancel_scheduled_meeting(
 
 class NoticeOut(BaseModel):
     kind: str
-    at: datetime
+    at: UtcDatetime
     #: ⚠️ 저장된 글자가 아니라 **지금 만든** 문장입니다. 업무 이름을 고치면
     #: 이 문장도 따라옵니다.
     text: str
     task_id: int | None
     meeting_id: int | None
     message_id: int | None
+    #: 그 부름이 있던 채널. ⚠️ 이게 없으면 화면이 **어느 대화를 열지**
+    #: 모릅니다 — 「디자인 채널에서 불렀습니다」를 눌렀는데 첫 채널이
+    #: 열렸습니다(결함 417).
+    channel_id: int | None
     #: 저장된 알림만 번호가 있습니다. 파생(마감)은 `null` —
     #: ⚠️ 읽었다고 마감이 사라지지 않습니다.
     notification_id: int | None
@@ -4628,6 +5214,7 @@ def read_notifications(
             task_id=n.task_id,
             meeting_id=n.meeting_id,
             message_id=n.message_id,
+            channel_id=n.channel_id,
             notification_id=n.notification_id,
             read=n.read,
         )
@@ -4674,12 +5261,16 @@ def mark_notifications_read(
 
 class ActivityOut(BaseModel):
     id: int
-    at: datetime
+    at: UtcDatetime
     action: str
     #: 사람 말. ⚠️ 서버가 줍니다 — 화면이 두 번째 표를 만들지 않습니다.
     label: str
     who: str | None
+    #: 안 변하는 참조 (`task:4`). 화면에 **그대로 그리지 마십시오**.
     target: str
+    #: 사람이 읽을 이름 (결함 293). 못 찾으면 `target` 그대로입니다 —
+    #: 지운 업무를 「(없음)」 이라고 지어내지 않습니다.
+    target_label: str
     #: 사람의 기여 숫자를 건드린 기록인가. 분쟁에서 제일 먼저 볼 것입니다.
     touches_contribution: bool
 
@@ -4702,6 +5293,7 @@ def read_activity(
             label=entry.label,
             who=entry.who,
             target=entry.target,
+            target_label=entry.target_label,
             touches_contribution=entry.touches_contribution,
         )
         for entry in activity_service.recent(session, project_id, limit=limit)
@@ -4728,7 +5320,7 @@ class HitOut(BaseModel):
     #: ⚠️ **자르지 않은 대목**입니다. 어디를 잘라야 뜻이 사는지는 화면이
     #: 폭을 알아야 정합니다 — 여기서 자르면 그 판단이 두 벌이 됩니다.
     body: str
-    at: datetime | None
+    at: UtcDatetime | None
     who: str | None
     status: str | None
 
@@ -4765,8 +5357,8 @@ def search_everything(
     #    잘못된 상태를 넣어 본 테스트가 잡았습니다 (결함 135).
     task_status: str | None = Query(default=None, alias="status"),
     priority: int | None = None,
-    since: datetime | None = None,
-    until: datetime | None = None,
+    since: UtcDatetime | None = None,
+    until: UtcDatetime | None = None,
 ) -> list[HitOut]:
     """SEARCH-002~005 — 업무·회의·회의 내용·GitHub.
 

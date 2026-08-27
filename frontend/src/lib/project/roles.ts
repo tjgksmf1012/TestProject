@@ -78,6 +78,35 @@ export function assignableRoles(myRole: string | null | undefined): ProjectRole[
   return (['owner', 'admin', 'member'] as ProjectRole[]).filter((r) => RANK[r] < mine);
 }
 
+/**
+ * 이 사람의 등급으로 **고를 수 있는 것들**. 고를 게 없으면 빈 배열.
+ *
+ * ⚠️ **`assignableRoles` 와 다릅니다** (결함 362). 저것은 「내가 줄 수
+ * 있는 등급」이고, 이것은 「이 사람에게 **지금과 다른** 등급을 줄 수
+ * 있는가」입니다. 관리자가 팀원을 볼 때 `assignableRoles('admin')` 은
+ * `['member']` 하나를 돌려주는데, 그 사람은 **이미 팀원**입니다 —
+ * 그대로 그리면 **선택지가 하나뿐인 select**, 즉 눌러도 아무 일도
+ * 일어나지 않는 칸이 나갑니다. 두 뿌리 다 그랬고, 관리자가 제품 전체에서
+ * 보는 select 는 그것 하나였습니다.
+ *
+ * ⚠️ **지금 등급을 목록에서 빼지는 않습니다.** select 는 현재 값을
+ * 보여 줘야 하므로 그 항목이 필요합니다. 빼는 것이 아니라, **다른
+ * 것이 하나도 없으면 아예 안 그리는** 것입니다.
+ *
+ * ⚠️ 이건 결함 316 의 「버튼을 지우지 말고 이유를 말하라」와 **다른
+ * 경우**입니다. 저기는 할 수 있는 일이 막힌 것이고, 여기는 **할 수 있는
+ * 일이 처음부터 없는** 것입니다. 등급은 옆에 글자로 그대로 남습니다.
+ */
+export function roleChoicesFor(
+  myRole: string | null | undefined,
+  targetRole: string | null | undefined,
+  { isMe }: { isMe: boolean },
+): ProjectRole[] {
+  if (!canChangeRoleOf(myRole, targetRole, { isMe })) return [];
+  const choices = assignableRoles(myRole);
+  return choices.some((r) => r !== targetRole) ? choices : [];
+}
+
 /** 이 사람을 내보낼 수 있는가. 권한 변경과 같은 규칙입니다. */
 export function canRemove(
   myRole: string | null | undefined,
@@ -101,6 +130,44 @@ export function leaveBlockedBecause(
   const owners = allRoles.filter((r) => r === 'owner').length;
   if (owners > 1) return null;
   return '마지막 소유자입니다. 다른 사람에게 소유자를 넘긴 뒤에 나갈 수 있습니다.';
+}
+
+/**
+ * **관리자만 되는 일**을 눌러도 되는가 — 안 되면 그 이유.
+ *
+ * ⚠️ `canManage` 는 처음부터 있었는데 **리디자인 SPA 에서 아무도 안
+ * 불렀습니다** (결함 225). 그래서 평범한 구성원에게도 「프로젝트 이름
+ * 저장」·「코드 새로 만들기」·「저장소 연결」 버튼이 멀쩡히 눌리는 상태로
+ * 떠 있었고, 누르면 서버가 403 을 주는데 **화면은 아무 말도 안 했습니다.**
+ * 사람은 자기가 뭘 잘못 눌렀는지, 됐는지 안 됐는지도 모릅니다.
+ *
+ * ⚠️ **버튼을 지우지 않습니다.** 이 저장소의 「아직 안 됨」 은 `aria-disabled`
+ * + 사유이고, 버튼이 사라지면 "원래 없는 기능" 으로 읽힙니다 — 관리자에게
+ * 부탁하면 되는 일인데요.
+ *
+ * @param what 무엇을 하려는 것인지. 문장에 그대로 들어갑니다.
+ */
+export function manageBlockedBecause(
+  myRole: string | null | undefined,
+  what: string,
+): string | null {
+  if (canManage(myRole)) return null;
+  /* ⛔ **모르는 것을 「없다」고 단언하지 않습니다** (결함 254).
+
+     `undefined` 는 「아직 모름」입니다 — 명단이 아직 안 온 몇 초. 그
+     동안 이 함수는 **소유자에게** 「팀의 관리자에게 요청하세요」라고
+     말했습니다. 재현했습니다: `/members` 를 4초 늦추고 설정 화면을
+     여니 그 문장이 떠 있었고, 명단이 오자 사라졌습니다.
+
+     불변식 ③ 과 같은 자리입니다 — **못 잰 것은 0이 아닙니다.** 잠그는
+     것은 그대로 둡니다(모르면 잠급니다. 관대하게 보면 없는 버튼이
+     생깁니다). 바뀌는 것은 **말**뿐입니다. */
+  if (myRole === undefined) {
+    return '권한을 아직 확인하지 못했습니다 — 명단을 불러오는 중입니다.';
+  }
+  // ⚠️ 조사는 앞말 받침을 보고 고릅니다 — 「코드 새로 만들기은」 이 되면
+  //    안 됩니다. 이 저장소가 확정 화면에서 이미 한 번 낸 결함(76번)입니다.
+  return `${withJosa(what, '은는')} 관리자와 소유자만 할 수 있습니다. 팀의 관리자에게 요청하세요.`;
 }
 
 /**

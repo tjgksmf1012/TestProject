@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from teamflow.db import models as m
 from teamflow.db import session as db_session
+from teamflow.db import vocab
 
 from .conftest import login_as, logout
 from .test_api import client, engine, seeded  # noqa: F401  (픽스처)
@@ -402,3 +403,52 @@ def test_a_one_letter_search_is_not_a_search(client: TestClient, seeded, channel
         f"/api/projects/{seeded['project_id']}/messages/search", params={"q": "가"}
     ).json()
     assert found == []
+
+
+# ══════════════════════════════════════════════════════════════
+# 채널 종류 — 화면이 고를 수 있어야 한다 (결함 360)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_the_screen_can_ask_what_kinds_exist(client: TestClient, seeded):
+    """⭐ 만들 수 있는 종류를 **서버가 내려보낸다** (CHANNEL-001·002).
+
+    이 갈래가 없던 동안 화면에는 종류를 고를 자리가 아예 없었고
+    `kind: 'text'` 가 박혀 있었습니다 (결함 360). 그런데 `vocab.py` 는
+    「두 종류 다 **화면에서 만들 수 있고**」라고, `docs/20` 은 CHANNEL-002
+    를 ✅ 라고 적어 두고 있었습니다 — 주석과 대조표가 코드보다 앞서
+    있었습니다.
+    """
+    rows = client.get("/api/chat/channel-kinds").json()
+    assert [r["kind"] for r in rows] == [str(k) for k in vocab.ChannelKind], rows
+
+
+def test_every_kind_has_a_name_and_a_hint(client: TestClient, seeded):
+    """⭐ 이름표와 설명이 **어휘의 값마다** 있다.
+
+    ⚠️ 이름만 다르고 설명이 없으면 사람은 아무거나 고릅니다 — 텍스트와
+    음성은 **되돌리기 어려운 차이**입니다(음성 채널에는 메시지를 못 씁니다).
+    """
+    rows = client.get("/api/chat/channel-kinds").json()
+    for row in rows:
+        assert row["label"].strip(), row
+        assert row["hint"].strip(), row
+        # 내부 식별자가 사람에게 나가지 않습니다 (결함 78·86).
+        assert row["kind"] not in row["label"], row
+
+
+def test_making_a_voice_channel_actually_works(client: TestClient, seeded):
+    """⭐ 화면이 고른 종류가 **그대로 저장된다**.
+
+    ⚠️ 서버는 처음부터 둘 다 받았습니다 — 없던 것은 **고를 자리**뿐이라,
+    이 검사는 「받는가」가 아니라 「받은 대로 저장하는가」를 잽니다.
+    """
+    made = client.post(
+        f"/api/projects/{seeded['project_id']}/channels",
+        json={"kind": "voice", "name": "주간회의"},
+    )
+    assert made.status_code == 201, made.text
+    assert made.json()["kind"] == "voice"
+
+    listed = client.get(f"/api/projects/{seeded['project_id']}/channels").json()
+    assert any(c["kind"] == "voice" and c["name"] == "주간회의" for c in listed), listed

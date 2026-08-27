@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -25,7 +26,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
+from teamflow.db import live
 from teamflow.db import models as m
+from teamflow.services.naming import meeting_label
 
 #: 한 번에 돌려주는 최대 건수. 없으면 프로젝트 한 해치가 한 번에 옵니다.
 MAX_ITEMS = 100
@@ -44,6 +47,8 @@ ACTION_LABEL: dict[str, str] = {
     "candidate_approved": "업무 후보 승인",
     "candidate_rejected": "업무 후보 거절",
     "github_login_changed": "GitHub 계정 연결 변경",
+    "meeting_discarded": "빈 회의 무름",
+    "member_removed": "팀원 내보내기",
     "meeting_reprocess_requested": "회의 재처리 요청",
     "score_adjusted": "기여도 확정값 조정",
     "task_assignees_changed": "업무 담당자 변경",
@@ -71,6 +76,45 @@ TOUCHES_CONTRIBUTION: frozenset[str] = frozenset(
         "weights_changed",
         "ai_output_corrected",
         "task_assignees_changed",
+        # ⚠️ 나가면 그 사람의 역할 비중이 `members` 행과 함께 사라집니다.
+        # 적어 둔 것으로 되살리지만(결함 327), **되돌릴 수 없는 행동이고
+        # 남은 팀의 몫이 움직이는 자리**라 눈에 띄게 그립니다.
+        "member_removed",
+        # ⚠️ **원본이 지워지면 그 사람의 회의 기여가 「측정 불가」가 되고,
+        # 그 범주가 가중치 재정규화에서 빠집니다** — 팀 전원의 몫이
+        # 움직입니다. 재 봤습니다(결함 329): 한 사람의 트랙 하나를 지우니
+        #
+        #     김민수 42.19% → 40.75%   (-1.45%p)
+        #     이하늘 32.95% → 35.25%   (+2.30%p)
+        #     박지원 24.85% → 24.00%   (-0.85%p)
+        #
+        # 이 저장소에서 한 번에 제일 크게 움직이는 기록인데 둘 다 빠져
+        # 있었습니다. `user_data_revoked` 는 사람이 권리를 행사한 것이고
+        # `audio_deleted` 는 보존기간·동의 거부로 시스템이 지운 것입니다 —
+        # 분쟁에서 제일 먼저 볼 줄이 바로 이 둘입니다.
+        "user_data_revoked",
+        "audio_deleted",
+        # ⚠️ **이 제품에서 사람의 숫자를 제일 크게 움직이는 기록입니다**
+        # (결함 387). 완료는 담당자마다 `TASK_COMPLETED` 를 만들고, 마감일이
+        # 있으면 `DEADLINE_MET`/`MISSED` 까지 같이 만듭니다. 재 봤습니다 —
+        # 담당자가 둘인 업무 하나를 완료로 옮기니
+        #
+        #     김민수 26.66~47.09% → 30.04~53.05%   (+3.38 ~ +5.96%p)
+        #     이하늘 26.82~47.37% → 26.51~46.82%   (-0.31 ~ -0.55%p)
+        #     박지원 18.82~33.24% → 15.75~27.82%   (-3.07 ~ -5.42%p)
+        #
+        # **담당자가 아닌 박지원까지** 움직입니다 — 범주 몫이 다시 나뉘기
+        # 때문입니다. 329 가 넣은 삭제 둘(-1.45 ~ +2.30%p)보다 큽니다.
+        #
+        # ⚠️ 바로 위 `task_assignees_changed` 가 이 집합에 있는 이유가
+        # 「**완료 점수가 갈 사람이 바뀐다**」인데, 정작 그 점수를 만드는
+        # 완료가 빠져 있었습니다.
+        "task_completed",
+        # ⚠️ 녹음 안 된 회의를 무르면 **팀 신뢰도가 올라갑니다**
+        # (0.446 → 0.462). 범주가 아니라 **구간의 폭**이 움직입니다 —
+        # 세 사람의 구간이 전부 좁아졌습니다(±0.20 ~ 0.29%p). 두 번 재서
+        # 같은 값을 확인했습니다. 「숫자」는 값만이 아니라 폭도 포함입니다.
+        "meeting_discarded",
     }
 )
 
@@ -90,7 +134,20 @@ class Entry:
     #: ⚠️ **"알 수 없음" 같은 글자를 여기서 만들지 않습니다.** 그건 화면이
     #: 할 말이고, 여기서 만들면 그 말이 두 벌이 됩니다.
     who: str | None
+    #: 기계가 가리키는 자리. `task:4` · `members/1` 처럼 **안 변하는 참조**라
+    #: 감사 기록의 값 그대로입니다. 화면에 그대로 그리면 안 됩니다.
     target: str
+    #: 사람이 읽을 이름 (결함 293).
+    #:
+    #: ⚠️ 화면이 `target` 을 그대로 그리고 있었습니다. 활동 기록은 스스로
+    #: 「누가 언제 **무엇을** 바꿨는지」라고 말하는데, 「누가」와 「언제」는
+    #: 맞고 **「무엇」만 `task:4`** 였습니다 — 그 업무 이름은 「접근성
+    #: 점검」이고, `members/1` 은 「김민수」입니다.
+    #:
+    #: ⚠️ **못 찾으면 지어내지 않습니다.** 지운 업무·모르는 종류는 `target`
+    #: 을 그대로 돌려줍니다 — 지어낸 한국어보다 식별자가 정직합니다
+    #: (`describe_category`·`role_label` 과 같은 규칙).
+    target_label: str
     #: 기여 숫자를 건드린 기록인가.
     touches_contribution: bool
 
@@ -110,6 +167,8 @@ def recent(session: Session, project_id: int, *, limit: int = MAX_ITEMS) -> list
         .limit(capped)
     ).all()
 
+    labels = _target_labels(session, [row.target or "" for row, _ in rows])
+
     return [
         Entry(
             id=row.id,
@@ -118,7 +177,227 @@ def recent(session: Session, project_id: int, *, limit: int = MAX_ITEMS) -> list
             label=describe(row.action),
             who=who,
             target=row.target or "",
+            target_label=_label_for(row, labels),
             touches_contribution=row.action in TOUCHES_CONTRIBUTION,
         )
         for row, who in rows
     ]
+
+
+#: **대상을 없애는** 행동. 이 기록에서는 살아 있는 행을 보면 안 됩니다.
+#:
+#: ⛔ `meetings.id` 는 `AUTOINCREMENT` 없는 SQLite ROWID 라 **맨 위 행을
+#: 지우면 다음 회의가 그 번호를 받습니다.** 「잘못 연 회의를 무르고 새로
+#: 연다」는 두 번 클릭이라 흔합니다 — 그러면 활동 기록이 방금 만든
+#: **살아 있는** 회의를 가리키며 「빈 회의 무름」이라고 적습니다(결함 430).
+#: 무른 것의 이름은 같은 행의 `before` 에 정확히 적혀 있습니다.
+#:
+#: ⚠️ `ACTION_LABEL` 의 두 번째 벌이 아닙니다 — 저쪽은 「뭐라고 부를까」이고
+#: 여기는 「이름을 어디서 찾을까」입니다. 짝 가드가 이 집합의 값이 전부
+#: `ACTION_LABEL` 에 있는지 봅니다.
+REMOVES_TARGET: frozenset[str] = frozenset(
+    {
+        "meeting_discarded",
+        "task_deleted",
+        "member_removed",
+    }
+)
+
+
+def _label_for(row: m.AuditLog, labels: dict[str, str]) -> str:
+    """이 기록의 대상을 **사람 이름으로** 부르는 법.
+
+    ⛔ **지우는 기록에서는 적어 둔 이름이 먼저입니다** (결함 430). 번호가
+    재사용되므로 살아 있는 행을 먼저 보면 **다른 것의 이름**을 답니다.
+    """
+    target = row.target or ""
+    if row.action in REMOVES_TARGET:
+        # 살아 있는 행은 **다른 것**입니다. 안 봅니다.
+        return _remembered_name(row) or target
+    return labels.get(target) or _remembered_name(row) or target
+
+
+def _remembered_name(row: m.AuditLog) -> str | None:
+    """사라진 것의 이름 — **기록에 적힌 것만** 씁니다.
+
+    ⚠️ `_target_labels` 는 **지금 DB 에 있는 것**만 찾습니다. 무른 회의처럼
+    행 자체가 사라지는 기록은 영영 못 찾아서 화면에 `meetings/8` 이 그대로
+    나갑니다 — 결함 293·297 이 고친 바로 그 모양(식별자가 사람에게 나감)
+    입니다. 지울 때 `before` 에 이름을 적어 두었으면 **그것이 답**입니다.
+
+    ⛔ 지어내지 않습니다. 적어 둔 게 없으면 `None` 이고, 부르는 쪽이
+    `target` 을 그대로 씁니다 — 지운 업무에서 이미 내린 결정입니다.
+    """
+    before = row.before
+    if not isinstance(before, dict):
+        return None
+    # ⚠️ 종류마다 이름이 담긴 칸이 다릅니다 — 회의는 `title`, 사람은 `name`.
+    # 하나만 보면 절반이 식별자 그대로 나갑니다 (결함 328 에서 `members/3`
+    # 이 그랬습니다).
+    for key in ("title", "name"):
+        name = before.get(key)
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return None
+
+
+#: `종류/번호` 또는 `종류:번호`. ⚠️ 이 저장소는 두 구분자를 **둘 다** 씁니다
+#: (`task:4` · `members/1`) — 하나만 보면 절반을 못 읽습니다.
+_TARGET = re.compile(r"^(?P<kind>[a-z_]+)[/:](?P<id>\d+)$")
+
+#: `final_contributions/3:7` — **번호가 둘**입니다 (프로젝트:사람).
+#: ⚠️ 위 정규식은 이 모양을 아예 못 읽습니다. 하나짜리 자로 재면 이
+#: 기록만 통째로 이름 없이 나갑니다 — 하필 「기여도 확정값 조정」,
+#: 분쟁에서 제일 먼저 볼 줄입니다.
+_PAIR_TARGET = re.compile(r"^(?P<kind>[a-z_]+)/(?P<left>\d+):(?P<right>\d+)$")
+
+#: 이름을 찾아 줄 수 있는 종류. ⚠️ **감사 기록에 쓰이는 종류와 짝**이어야
+#: 합니다 — `test_activity_target_kinds` 가 백엔드에서 `target=` 을 쓰는
+#: 곳을 전부 걷어서 여기 있는지 봅니다.
+#:
+#: 결함 293 은 씨앗 데이터에 있던 넷만 고쳤고, 실제로 「업무 후보 승인」을
+#: 눌러 보니 다섯째(`meeting_task_candidates`)가 식별자 그대로 나왔습니다
+#: (결함 297). 종류를 하나씩 더하는 대신 **짝을 재는 가드**를 뒀습니다.
+KNOWN_TARGET_KINDS: frozenset[str] = frozenset(
+    {
+        "task",
+        "members",
+        "users",
+        "meetings",
+        "meeting_task_candidates",
+        "final_contributions",
+        "audio_assets",
+        "voiceprints",
+    }
+)
+
+
+def _target_labels(session: Session, targets: list[str]) -> dict[str, str]:
+    """`task:4` → 「접근성 점검」. **한 번에** 찾습니다 (줄마다 질의 금지).
+
+    ⚠️ 못 찾은 것은 **넣지 않습니다.** 부르는 쪽이 원래 값을 그대로 씁니다 —
+    지운 업무를 「(없음)」 이라고 적으면 그건 지어낸 말이고, 감사 기록에서
+    지어낸 말은 제일 나쁩니다.
+    """
+    by_kind: dict[str, set[int]] = {}
+    for raw in targets:
+        hit = _TARGET.match(raw)
+        if hit is not None:
+            by_kind.setdefault(hit["kind"], set()).add(int(hit["id"]))
+
+    out: dict[str, str] = {}
+
+    def _fill(kind: str, rows: list[tuple[int, str]]) -> None:
+        found = dict(rows)
+        for raw in targets:
+            hit = _TARGET.match(raw)
+            if hit is None or hit["kind"] != kind:
+                continue
+            name = found.get(int(hit["id"]))
+            if name:
+                out[raw] = name
+
+    task_ids = by_kind.get("task", set())
+    if task_ids:
+        # ⚠️ **지운 업무는 이름이 안 나옵니다** — `db/live.py` 한 곳을
+        #    거칩니다 (`TASK-003`). 이름이 없으면 `target` 이 그대로 남고,
+        #    그건 「그 업무는 지워졌다」는 정직한 답입니다. 여기서 조건을
+        #    직접 적으면 다음 사람이 빠뜨립니다.
+        _fill(
+            "task",
+            list(
+                session.execute(
+                    select(m.Task.id, m.Task.title).where(
+                        m.Task.id.in_(task_ids), live.not_deleted()
+                    )
+                ).all()
+            ),
+        )
+
+    # ⚠️ `members/1` 과 `users/1` 은 **같은 사람**을 다르게 가리킵니다
+    #    (한쪽은 프로젝트 구성원, 한쪽은 계정 삭제 기록). 한 번에 찾습니다.
+    people_ids = by_kind.get("members", set()) | by_kind.get("users", set())
+    if people_ids:
+        people = list(
+            session.execute(select(m.User.id, m.User.name).where(m.User.id.in_(people_ids))).all()
+        )
+        _fill("members", people)
+        _fill("users", people)
+
+    meeting_ids = by_kind.get("meetings", set())
+    if meeting_ids:
+        # 회의 이름은 한 벌에서 옵니다 (결함 285) — 제목이 없는 회의도
+        # 「제목 없는 회의 #4」로 부릅니다.
+        _fill(
+            "meetings",
+            [
+                (mid, meeting_label(title, mid))
+                for mid, title in session.execute(
+                    select(m.Meeting.id, m.Meeting.title).where(m.Meeting.id.in_(meeting_ids))
+                ).all()
+            ],
+        )
+
+    # ⭐ 업무 후보 — 「업무 후보 승인」·「거절」·「AI 결과를 사람이 고침」
+    #    셋이 이 종류를 가리킵니다 (결함 297). 셋 다 사람이 AI 의 판단을
+    #    뒤집은 기록이라, 무엇을 뒤집었는지가 안 보이면 읽을 수가 없습니다.
+    candidate_ids = by_kind.get("meeting_task_candidates", set())
+    if candidate_ids:
+        _fill(
+            "meeting_task_candidates",
+            list(
+                session.execute(
+                    select(m.MeetingTaskCandidate.id, m.MeetingTaskCandidate.title).where(
+                        m.MeetingTaskCandidate.id.in_(candidate_ids)
+                    )
+                ).all()
+            ),
+        )
+
+    # 녹음 — 어느 회의의 것인가. ⚠️ 지운 뒤에도 행은 남습니다
+    #    (`deleted_at` 만 찍습니다) 그래서 이름을 찾을 수 있습니다.
+    asset_ids = by_kind.get("audio_assets", set())
+    if asset_ids:
+        _fill(
+            "audio_assets",
+            [
+                (aid, f"{meeting_label(title, mid)}의 녹음")
+                for aid, mid, title in session.execute(
+                    select(m.AudioAsset.id, m.Meeting.id, m.Meeting.title)
+                    .join(m.Meeting, m.Meeting.id == m.AudioAsset.meeting_id)
+                    .where(m.AudioAsset.id.in_(asset_ids))
+                ).all()
+            ],
+        )
+
+    # 성문 — 누구의 것인가. ⚠️ 폐기는 임베딩만 비우고 행은 남깁니다.
+    print_ids = by_kind.get("voiceprints", set())
+    if print_ids:
+        _fill(
+            "voiceprints",
+            [
+                (vid, f"{name}의 성문")
+                for vid, name in session.execute(
+                    select(m.Voiceprint.id, m.User.name)
+                    .join(m.User, m.User.id == m.Voiceprint.user_id)
+                    .where(m.Voiceprint.id.in_(print_ids))
+                ).all()
+            ],
+        )
+
+    # ⭐ `final_contributions/3:7` — 번호가 둘이라 위 자로는 안 읽힙니다.
+    #    가리키는 것은 **그 사람의 확정 기여도**입니다.
+    pairs = [(raw, hit) for raw in targets if (hit := _PAIR_TARGET.match(raw)) is not None]
+    user_ids = {int(hit["right"]) for _, hit in pairs if hit["kind"] == "final_contributions"}
+    if user_ids:
+        names = dict(
+            session.execute(select(m.User.id, m.User.name).where(m.User.id.in_(user_ids))).all()
+        )
+        for raw, hit in pairs:
+            if hit["kind"] != "final_contributions":
+                continue
+            name = names.get(int(hit["right"]))
+            if name:
+                out[raw] = f"{name}의 확정 기여도"
+
+    return out

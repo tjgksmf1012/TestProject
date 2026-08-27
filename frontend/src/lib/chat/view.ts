@@ -19,6 +19,64 @@
 
 import { teamDateOf, todayInTeamCalendar } from '../time/calendar.ts';
 
+/**
+ * 대화의 **앞부분에 닿는 길**.
+ *
+ * ## ⛔ 60개를 넣었는데 50개만 보이고, 나머지 열에 닿을 길이 없었습니다 (결함 315)
+ *
+ * 채널 하나에 메시지 60개를 넣고 열어 봤습니다 —
+ *
+ *     서버가 준 개수   50   (`message_service.MAX_PAGE`)
+ *     화면에 그린 수   50
+ *     첫 메시지        「메시지 11 …」
+ *     「더 보기」 단추   **0개**
+ *
+ * 대화의 처음 열 줄이 제품 안에서 **영영 안 보입니다.**
+ *
+ * ⚠️ **서버는 이미 할 수 있었습니다.** `message_service.history` 가
+ * `before_id` 를 받고, 그 옆에 「`before_id` 는 **번호**이지 시각이
+ * 아닙니다 — 시각으로 자르면 같은 초에 온 메시지가…」라고 근거까지
+ * 적혀 있습니다. 화면이 그 인자를 **한 번도 안 보냈습니다** (실패 ①,
+ * 결함 298·306 과 같은 부류).
+ *
+ * ⚠️ **결함 306 의 라우트 가드는 이걸 못 잡습니다** — 그 라우트는
+ * 불립니다. 안 불리는 것은 **인자**입니다. 낱말이 아니라 요구를
+ * 재려면 「받아 온 개수가 한 쪽 크기와 같으면 더 있을 수 있다」를
+ * 재야 합니다.
+ */
+
+/** 서버 한 쪽의 크기. `backend/teamflow/services/message_service.py` 의 `MAX_PAGE` 와 짝입니다. */
+export const MESSAGE_PAGE = 50;
+
+/**
+ * 더 옛 메시지가 **있을 수 있는가**.
+ *
+ * ⚠️ 「있다」가 아니라 「있을 수 있다」입니다 — 딱 50개인 채널도 참을
+ * 돌려줍니다. 눌러 보면 0개가 오고 그때 단추가 사라집니다. 반대로
+ * 하면(개수를 미리 세면) 요청이 한 번 더 늘고, 그 값은 곧 낡습니다.
+ */
+export function hasOlderMessages(loaded: number, page = MESSAGE_PAGE): boolean {
+  return loaded >= page;
+}
+
+/** 다음으로 물어볼 자리 — **가장 오래된 것의 번호**. 없으면 `null`. */
+export function olderCursor(messages: readonly { id: number }[]): number | null {
+  if (messages.length === 0) return null;
+  return messages.reduce((lowest, m) => (m.id < lowest ? m.id : lowest), messages[0]!.id);
+}
+
+/**
+ * 앞쪽을 이어 붙입니다. **번호로 겹치는 것을 걸러냅니다** — 누른 사이에
+ * 새 메시지가 오면 같은 것이 두 번 그려질 수 있습니다.
+ */
+export function prependOlder<T extends { id: number }>(
+  older: readonly T[],
+  current: readonly T[],
+): T[] {
+  const seen = new Set(current.map((m) => m.id));
+  return [...older.filter((m) => !seen.has(m.id)), ...current];
+}
+
 export interface Reaction {
   mark: string;
   /** 사람 말. ⚠️ **서버가 줍니다** — 화면에 두 번째 표를 만들지 않습니다. */
@@ -262,6 +320,74 @@ export function mentionSegments(body: string, names: readonly string[]): Segment
 }
 
 // ══════════════════════════════════════════════════════════════
+// 답글이 무엇에 달렸는가
+// ══════════════════════════════════════════════════════════════
+
+/** 답글 위에 그릴 것. `null` 이면 답글이 아닙니다. */
+export type QuoteView =
+  | { kind: 'quote'; who: string; body: string }
+  /** 원글이 **아직 안 불러온 앞쪽**에 있습니다. */
+  | { kind: 'older'; note: string };
+
+/**
+ * 답글 한 줄이 **무엇에 달렸는지** 어떻게 보여 줄 것인가.
+ *
+ * ⚠️ 예전에는 화면이 `messages.find(m => m.id === reply_to_id)` 로 찾고
+ * **못 찾으면 아무것도 안 그렸습니다.** 서버는 최신 50개만 주므로
+ * (`MESSAGE_PAGE`), 앞쪽 글에 단 답글은 **평범한 글처럼** 보였습니다 —
+ * 55개짜리 채널에서 재현했습니다(결함 419). 답글인 줄도 모르니 「무엇에
+ * 단 거지」를 물을 수조차 없습니다.
+ *
+ * ⚠️ **원글을 따로 가져오지 않습니다.** 화면에는 이미 「이전 대화 더 보기」가
+ * 있고(결함 315), 그걸 누르면 원글이 올라와 인용이 그대로 그려집니다.
+ * 없는 기능을 만드는 대신 **모른다고 말하고 갈 자리를 가리킵니다.**
+ */
+export function quoteFor(
+  replyToId: number | null,
+  loaded: readonly ChatMessage[],
+): QuoteView | null {
+  if (replyToId === null) return null;
+  const parent = loaded.find((m) => m.id === replyToId);
+  if (parent === undefined) {
+    return {
+      kind: 'older',
+      note: '이전 대화의 글에 단 답글입니다 — 위의 「이전 대화 더 보기」로 찾을 수 있습니다',
+    };
+  }
+  return {
+    kind: 'quote',
+    who: parent.author_name,
+    body: parent.deleted ? DELETED_TEXT : parent.body,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+// 실시간 통로가 끊겼을 때
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 소켓이 **닫혔을 때** 사람에게 할 말. 뜻 없이 닫힌 것이 아니면 `null`.
+ *
+ * ⚠️ **「안 붙는 것」과 「붙었다가 끊긴 것」은 다릅니다.** 안 붙으면 화면은
+ * 방금 HTTP 로 읽어 와서 **최신**이고, 사람이 할 수 있는 것이 없습니다 —
+ * 그래서 그 갈래는 조용히 둡니다(기록된 결정). 붙었다가 끊기면 그때부터
+ * 화면이 **낡기 시작하는데** 겉보기에는 살아 있는 대화 그대로입니다.
+ * 재현: 서버를 다시 띄운 뒤 남이 보낸 글이 안 오는데 화면은 아무 말도
+ * 안 했습니다(결함 416). 새로고침하면 옵니다 — 그 말을 해 주는 것입니다.
+ *
+ * ⚠️ 채널을 옮기거나 화면을 떠날 때도 소켓은 닫힙니다. 그건 **우리가**
+ * 닫은 것이라 할 말이 없습니다 — `onPurpose` 로 가릅니다.
+ *
+ * ⚠️ 통화 화면은 이미 같은 일을 합니다(`call.ts` 의 `onclose` —
+ * 「조용히 닫히면 화면은 통화 중인 줄 안다」). 이 저장소의 소켓 둘 중
+ * 하나만 하고 있었습니다.
+ */
+export function streamClosedNote(onPurpose: boolean): string | null {
+  if (onPurpose) return null;
+  return '실시간 연결이 끊겼습니다 — 새로고침하면 그동안 온 글이 함께 옵니다';
+}
+
+// ══════════════════════════════════════════════════════════════
 // 반응
 // ══════════════════════════════════════════════════════════════
 
@@ -291,7 +417,32 @@ export function reactionIcon(mark: string): 'check' | 'thumb' | 'ask' | 'heart' 
 }
 
 /** 이 화면이 고를 수 있는 반응. ⚠️ 서버의 `ReactionMark` 와 같은 순서입니다. */
-export const REACTION_MARKS = ['agree', 'ok', 'question', 'thanks'] as const;
+/**
+ * `GET /api/chat/reactions` 한 줄. **서버가 어휘의 주인입니다.**
+ *
+ * ⚠️ 예전에는 화면이 `REACTION_MARKS = ['agree','ok','question','thanks']`
+ * 라는 **자기 표**를 들고 고를 것을 정했습니다(결함 414). 그 엔드포인트는
+ * 「화면이 이 표를 자기 안에 두면 안 됩니다」라고 적으면서 **순서까지**
+ * 어휘 순서로 못 박아 두는데, 화면은 받아 놓고 이름표만 꺼내 쓰고 집합과
+ * 순서를 버렸습니다 — 서버는 `ok·agree·…`, 화면은 `agree·ok·…` 였습니다.
+ */
+export interface ReactionChoice {
+  mark: string;
+  label: string;
+}
+
+/**
+ * 이 메시지에 **아직 안 달린** 반응들. 순서는 서버가 준 순서 그대로.
+ *
+ * ⚠️ 여기서 다시 세우지 마십시오 — 개수 순으로 세우면 그 순간 순위표이고,
+ * 이름 순으로 세우면 서버가 정한 어휘 순서가 화면마다 달라집니다.
+ */
+export function offerableReactions(
+  choices: readonly ReactionChoice[],
+  attached: readonly { mark: string }[],
+): ReactionChoice[] {
+  return choices.filter((choice) => !attached.some((r) => r.mark === choice.mark));
+}
 
 /**
  * 반응 버튼을 낭독기에 뭐라고 읽어 줄 것인가.
@@ -332,4 +483,42 @@ export function canSend(body: string, channel: ChatChannel | null): boolean {
   if (channel === null || !carriesMessages(channel)) return false;
   const trimmed = body.trim();
   return trimmed !== '' && body.length <= MAX_BODY;
+}
+
+/**
+ * 채널이 비었을 때 할 말.
+ *
+ * ## ⛔ 「방금 만들어졌습니다」는 화면이 **모르는 것**이었습니다 (결함 304)
+ *
+ * 화면이 이렇게 적고 있었습니다.
+ *
+ *     아직 아무 말도 없습니다
+ *     **#공지 채널이 방금 만들어졌습니다.**
+ *
+ * 그런데 `GET /api/projects/{id}/channels` 가 돌려주는 것은 이것뿐입니다 —
+ *
+ *     {"id":1,"kind":"text","name":"공지","position":1}
+ *
+ * **만든 시각이 없습니다.** 표에는 `created_at` 이 있는데 화면까지 오지
+ * 않으므로, 화면은 「방금」인지 **알 수가 없습니다.** 지난달에 만들어 두고
+ * 아무도 안 쓴 채널도 똑같이 「방금 만들어졌습니다」라고 말합니다.
+ *
+ * 결함 304(활동 기록)와 같은 성질입니다 — **빈 상자의 「왜」가 화면이
+ * 확인하지 않은 것을 단언**했습니다. 같은 회차에 쓸다가 나왔습니다.
+ *
+ * ## 대신 무엇을 말하나
+ *
+ * 화면이 **아는 것**을 말합니다: 이야기는 채널마다 따로 쌓인다는 것. 그게
+ * 「바쁜 팀인데 왜 여기가 비었나」의 진짜 답이기도 합니다 — 사람들은 다른
+ * 채널에 있습니다.
+ *
+ * ⚠️ 만든 시각을 화면까지 내보내서 「어제 만들어졌습니다」라고 말하는 길도
+ * 있습니다. 안 고른 이유는 **그 값이 여기서 쓸모가 없기** 때문입니다 —
+ * 사람이 알고 싶은 것은 「언제 생겼나」가 아니라 「왜 비었나」입니다.
+ */
+export function describeEmptyChannel(): { why: string; how: string } {
+  return {
+    why: '이야기는 채널마다 따로 쌓입니다 — 다른 채널에서 오간 말은 여기 안 보입니다.',
+    how: '아래에 첫 마디를 적어 보세요.',
+  };
 }

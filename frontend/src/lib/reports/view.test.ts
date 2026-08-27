@@ -15,12 +15,15 @@ import {
   describeReportType,
   describeWhen,
   gapsOf,
+  personGapsHeading,
   subjectOf,
+  teamReasonsHeading,
   toPlainText,
   tooNewToRender,
   type Person,
   type ReportContent,
   type ReportSummary,
+  emptyReports,
 } from './view.ts';
 
 function person(over: Partial<Person> = {}): Person {
@@ -91,9 +94,19 @@ describe('구간과 결측', () => {
     strictEqual(describeRange(person()), '40% ~ 52%');
   });
 
+  it('⭐ 폭이 0 이면 한 번만 적는다 — 「0% ~ 0%」는 이상한 글자다 (결함 410)', () => {
+    /* 「쟀는데 0건」인 사람의 구간은 `0 ~ 0` 입니다. 기여도 화면은 같은
+       값을 `0%` 로 적습니다 — 팀 밖으로 나가는 문서가 다른 말을 하면
+       어느 쪽을 믿어야 할지 알 수 없습니다(결함 290). */
+    strictEqual(describeRange(person({ range_low: 0, range_high: 0 })), '0%');
+    strictEqual(describeRange(person({ range_low: 12, range_high: 12 })), '12%');
+  });
+
   it('못 쟀으면 신뢰도라는 말 자체가 안 나온다', () => {
     strictEqual(describeConfidence(person({ measured: false, confidence: null })), null);
-    strictEqual(describeConfidence(person()), '신뢰도 90% (높음)');
+    // 결함 344 — 「팀」이 붙습니다. 이 값은 팀 하나를 잰 것인데 보고서는
+    // 그것을 사람 이름 밑에 그립니다.
+    strictEqual(describeConfidence(person()), '팀 신뢰도 90% (높음)');
   });
 
   it('빈 사유는 걸러진다 — 빈 줄이 화면에 남지 않게', () => {
@@ -134,7 +147,9 @@ describe('⭐ 복사한 글자', () => {
     const text = toPlainText(CONTENT);
     ok(text.includes('박바다'));
     ok(text.includes('측정하지 못했습니다'));
-    ok(text.includes('못 잼: 녹음이 끊겨 회의 기여를 못 쟀습니다'));
+    // ⚠️ 글자를 박지 말고 **머리말을 만드는 곳**에서 가져옵니다 — 그래야
+    //    화면과 복사한 글이 같은 이름을 쓰는지 이 검사가 실제로 잽니다.
+    ok(text.includes(`${personGapsHeading()}: 녹음이 끊겨 회의 기여를 못 쟀습니다`));
   });
 
   it('못 잰 항목은 빈 칸이 아니라 "못 쟀습니다" 로 나간다', () => {
@@ -229,6 +244,75 @@ describe('⭐ 목록에서 같은 말이 두 번 나오지 않는다', () => {
   it('머리말이 없으면 제목을 그대로 둔다 — 지우지 않는다', () => {
     strictEqual(subjectOf(row({ title: '옛 형식 제목' })), '옛 형식 제목');
   });
+
+  // ⚠️ 위의 검사들은 전부 `T00:00:00Z` 입니다 — 서울에서는 **같은 날 09시**라
+  //    UTC 로 잘라도 팀 달력으로 잘라도 답이 같습니다. 그래서 결함 295 를
+  //    한 번도 못 봤습니다. 여기서는 **자정을 넘는** 시각을 씁니다.
+  const CROSSES = {
+    // 2026-08-15T17:25Z = 팀 달력 2026-08-16 02:25
+    period_start: '2026-08-15T17:25:00Z',
+    // 2026-08-21T17:25Z = 팀 달력 2026-08-22 02:25
+    period_end: '2026-08-21T17:25:00Z',
+  };
+
+  it('⭐ 서버가 지은 제목과 옆 칸이 **같은 글자**를 낸다 (결함 295)', () => {
+    // 서버(`reports/period.py`)가 팀 달력으로 짓는 바로 그 제목입니다.
+    const weekly = row({
+      report_type: 'weekly',
+      title: '주간 보고서 — 2026-08-16 ~ 2026-08-22',
+      ...CROSSES,
+    });
+    strictEqual(describeWhen(weekly), '2026-08-16 ~ 2026-08-22');
+    // 같은 말이 두 번 나오지 않습니다 — 갈라지면 이것부터 조용히 깨집니다.
+    strictEqual(subjectOf(weekly), '');
+  });
+});
+
+describe('목록의 때도 팀 달력이다 (결함 295)', () => {
+  it('⭐ 기간을 UTC 로 자르지 않는다', () => {
+    strictEqual(
+      describeWhen({
+        id: 1,
+        report_type: 'weekly',
+        title: '',
+        meeting_id: null,
+        period_start: '2026-08-15T17:25:00Z',
+        period_end: '2026-08-21T17:25:00Z',
+        generated_at: '2026-08-21T17:25:00Z',
+      }),
+      '2026-08-16 ~ 2026-08-22',
+    );
+  });
+
+  it('⭐ 만든 날도 팀 달력이다', () => {
+    strictEqual(
+      describeWhen({
+        id: 1,
+        report_type: 'final',
+        title: '',
+        meeting_id: null,
+        period_start: null,
+        period_end: null,
+        generated_at: '2026-08-21T17:25:00Z',
+      }),
+      '2026-08-22 만듦',
+    );
+  });
+
+  it('⚠️ 못 읽은 시각을 그럴듯한 날짜로 지어내지 않는다', () => {
+    strictEqual(
+      describeWhen({
+        id: 1,
+        report_type: 'final',
+        title: '',
+        meeting_id: null,
+        period_start: null,
+        period_end: null,
+        generated_at: '언제였더라',
+      }),
+      '언제 만든 것인지 모릅니다',
+    );
+  });
 });
 
 describe('⭐ 글자로 옮길 때 문장을 잃지 않는다', () => {
@@ -242,7 +326,7 @@ describe('⭐ 글자로 옮길 때 문장을 잃지 않는다', () => {
         {
           kind: 'facts',
           items: [
-            { label: '처리', value: '처리하다 실패했습니다', gap: false },
+            { label: '처리', value: '처리에 실패했습니다', gap: false },
             { label: '커버리지', value: '', gap: true },
           ],
         },
@@ -250,7 +334,83 @@ describe('⭐ 글자로 옮길 때 문장을 잃지 않는다', () => {
     };
     const text = toPlainText(content);
     // 예전에는 `gap` 이 붙은 칸의 **문장이 통째로** 바뀌어 나갔습니다.
-    ok(text.includes('처리: 처리하다 실패했습니다'), text);
+    ok(text.includes('처리: 처리에 실패했습니다'), text);
     ok(text.includes('커버리지: 못 쟀습니다'), text);
+  });
+});
+
+describe('보고서가 없을 때 어디로 보내는가 (결함 312)', () => {
+  it('⭐ 회의가 0개면 **로비로 보내지 않는다** — 갈 곳이 없다', () => {
+    /* 갓 만든 프로젝트에서 재서 확인한 것: `GET /api/projects/3/meetings`
+       가 0개인데 화면은 「회의 로비에서 회의록을 만드세요」라고 했습니다.
+       같은 화면 옆줄은 「아직 연 회의가 없습니다」였습니다. */
+    const empty = emptyReports(0);
+    ok(!/로비에서 회의록을 만드세요/.test(empty.how), empty.how);
+    ok(/아직 연 회의가 없습니다/.test(empty.how), empty.how);
+    // 「여기서 되는 것」은 남깁니다 — 막다른 길로 두지 않습니다.
+    ok(/최종 보고서 만들기/.test(empty.how), empty.how);
+  });
+
+  it('⭐ 회의가 있으면 로비로 보낸다 — 두 국면이 갈라진다', () => {
+    const some = emptyReports(3);
+    ok(/로비에서 회의록을 만드세요/.test(some.how), some.how);
+    ok(emptyReports(0).how !== some.how, '회의 수와 무관하게 같은 말을 합니다');
+  });
+
+  it('⚠️ **모르면 0 이라고 하지 않는다** — 아직 안 온 것과 없는 것은 다르다', () => {
+    // 불변식 ③ 의 화면판입니다. `null` 은 「아직 못 받았다」입니다.
+    strictEqual(emptyReports(null).how, emptyReports(3).how);
+  });
+
+  it('⭐ 「무엇이 비었나」·「왜」는 국면과 무관하다 — 거짓말은 「다음에 뭘」이었다', () => {
+    for (const n of [0, 3, null]) {
+      strictEqual(emptyReports(n).what, '아직 만든 보고서가 없습니다');
+      ok(/자동으로 생기지 않습니다/.test(emptyReports(n).why));
+    }
+  });
+});
+
+describe('⭐ 두 머리말은 화면과 복사한 글이 **한 벌**을 쓴다 (결함 344 회차)', () => {
+  /* 팀 것은 처음부터 `@lib` 을 거쳤는데 사람 것만 복사 경로에서
+     `'못 잼'` 이라는 **글자로 박혀** 있었습니다 — 화면은 「이 사람」,
+     복사한 글은 「못 잼」. 값이 틀린 것은 아니었지만 한쪽만 고치면
+     갈라지는 자리라 사본을 없앴습니다(결함 363 의 방법).
+
+     ⚠️ 이 검사는 **머리말을 바꿔도 통과해야** 합니다 — 글자가 아니라
+     「같은 곳에서 왔는가」를 재기 때문입니다. */
+  it('복사한 글의 두 머리말이 `@lib` 함수와 글자까지 같다', () => {
+    /* ⚠️ 공용 `CONTENT` 는 `reasons` 가 비어 있어 「팀 공통」 줄이 아예
+       안 나옵니다 — 그걸로 재면 이 검사는 아무것도 안 재는 자가 됩니다.
+       **둘 다 있는** 사람을 여기서 만듭니다. */
+    const text = toPlainText({
+      ...CONTENT,
+      blocks: [
+        {
+          kind: 'people',
+          people: [
+            person({
+              name: '한사람',
+              reasons: ['녹음되지 않은 회의가 있습니다'],
+              gaps: ['녹음이 끊겨 회의 기여를 못 쟀습니다'],
+            }),
+          ],
+        },
+      ],
+    });
+    ok(
+      text.includes(`· ${teamReasonsHeading()}: `),
+      `복사한 글에 「${teamReasonsHeading()}」 머리말이 없습니다`,
+    );
+    ok(
+      text.includes(`· ${personGapsHeading()}: `),
+      `복사한 글에 「${personGapsHeading()}」 머리말이 없습니다 — 화면과 다른 이름을 씁니다`,
+    );
+  });
+
+  it('두 머리말이 서로 다르다 — 같으면 팀 것과 사람 것이 안 갈립니다', () => {
+    ok(
+      teamReasonsHeading() !== personGapsHeading(),
+      '두 머리말이 같습니다 — 결함 344 가 가르려던 것이 다시 뭉개집니다',
+    );
   });
 });

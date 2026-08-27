@@ -77,6 +77,31 @@ export function labelOf(screen: ScreenId): string {
   return LABEL[screen];
 }
 
+/**
+ * SPA 주소 → 지금 있는 화면.
+ *
+ * ## 왜 화면 코드에 안 두는가
+ *
+ * "지금 어느 화면인가" 는 **판단**입니다. 프로젝트 레일이 어디로 보낼지,
+ * 어느 칸에 지금 표시를 붙일지가 여기서 갈립니다. 화면 코드(`webapp/src`)
+ * 에는 자동 테스트가 없으므로 거기 적으면 검증 밖으로 나갑니다.
+ *
+ * ⚠️ **basename(`/app`) 이 붙기 전의 주소**를 받습니다. React Router 의
+ *    `useLocation().pathname` 이 그렇습니다 — `/app/project/7/kanban` 이
+ *    아니라 `/project/7/kanban` 입니다. 앞에 `/app` 이 붙어 오면 그때도
+ *    맞게 읽도록 한 번 벗겨 냅니다(주소창을 그대로 넘기는 실수가
+ *    조용히 `home` 으로 떨어지지 않게).
+ */
+export function appScreenOf(pathname: string): ScreenId {
+  const path = (pathname || '/').replace(/^\/app(?=\/|$)/, '') || '/';
+  if (/^\/project\/\d+\/kanban/.test(path)) return 'kanban';
+  if (/^\/project\/\d+\/contributions/.test(path)) return 'contributions';
+  if (/^\/project\/\d+\/settings/.test(path)) return 'project';
+  if (/^\/meeting\/\d+\/lobby/.test(path)) return 'lobby';
+  if (/^\/meeting\/\d+\/review/.test(path)) return 'review';
+  return 'home';
+}
+
 function positive(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
@@ -89,6 +114,30 @@ function positive(value: number | null | undefined): number | null {
  *
  * 홈은 항상 있습니다. 어떤 id 도 필요 없고, **어디서든 빠져나올 곳이 하나는
  * 있어야** 하기 때문입니다.
+ */
+/**
+ * ⚠️ **부르는 뿌리가 하나입니다 — 그리고 그건 결정입니다** (2026-08-24).
+ *
+ * `demo/nav.ts` 만 이 함수를 부릅니다. SPA(`webapp/src`)의 셸은 탭 넷
+ * (홈·칸반·기여도·설정)과 프로젝트 레일뿐이라, 여기서 만드는 여섯
+ * (채팅·일정·알림·활동 기록·찾기·보고서)으로 가는 문이 `/app` 안에
+ * **없습니다.** `/app/` 에서 `<a href>` 를 따라 걸으면 주소 스물여섯에
+ * 닿는데 그 여섯은 하나도 없습니다 — 재서 확인했습니다.
+ *
+ * ⛔ **「한쪽 뿌리만」으로 보고 조용히 SPA 에 배선하지 마십시오.**
+ * `docs/22` §R8 이 「레거시 6화면은 라우트만 유지 · 내비에 새로 노출하지
+ * 않았습니다」라고 못 박은 자리입니다. 반대로 **결함 305** 는 「화면을
+ * 만들었으면 걸어서 닿는지 보라」를 못 박았고 그때 고친 것이 바로 이
+ * 여섯입니다(레거시 쪽).
+ *
+ * 두 기록이 같은 곳을 반대로 가리키므로 **여기서 고르지 않습니다.**
+ * 세 자리가 서로를 가리킵니다 — 이 주석 · `docs/22` §R8 ·
+ * `docs/24` 의 `/app` 크롤 측정치. 결정하려면 **`/app` 이 기본 문이
+ * 되는 시점**을 먼저 정해야 합니다(지금 로그인은 `/home.html` 로 갑니다).
+ *
+ * ⚠️ 다만 SPA 는 그 여섯으로 **가라고 말하지도 않습니다** — 화면 열다섯을
+ * 훑어 확인했습니다. 그래서 실패 ③(가라고 해 놓고 자리가 없음)은
+ * 아닙니다. 안내를 하나라도 넣는 순간 그때는 결함입니다.
  */
 export function navLinks(context: NavContext): NavLink[] {
   const project = positive(context.projectId);
@@ -172,23 +221,57 @@ export function navLinks(context: NavContext): NavLink[] {
 }
 
 /**
- * 이 화면에서 못 가는 곳과 그 이유.
+ * 셸이 **지금 열어 두고 있는 문**.
+ *
+ * `missingLinks` 는 「지금 못 가는 곳」을 말하는 자리인데, 셸이 같은
+ * 화면에서 그 곳으로 가는 문을 이미 그리고 있으면 그 말은 **거짓**이
+ * 됩니다. 그래서 이 사실을 받아서 판단합니다 (결함 343).
+ */
+export interface ShellDoors {
+  /**
+   * 셸의 **회의 목록**이 지금 그려지고 있는가.
+   *
+   * ⚠️ 「회의가 있는가」가 아닙니다. 목록이 비어 있어도 그 자리는
+   * 「아직 연 회의가 없습니다 — 설정에서 엽니다」라고 **더 정확한 말**을
+   * 합니다 — 그 옆에서 「회의를 지정하지 않아」라고 다시 말하면 한 화면이
+   * 같은 사실에 이유를 둘 답니다 (결함 290).
+   */
+  meetingListShown: boolean;
+}
+
+/**
+ * 이 화면에서 아직 못 가는 곳과 **무엇을 해야 열리는가**.
  *
  * 링크를 조용히 빼기만 하면 사용자는 **그 화면이 없는 줄** 압니다.
- * 왜 지금 갈 수 없는지 말해 주는 편이 낫습니다 — 대개 주소에 id 가 빠진
- * 것이고, 그건 고칠 수 있는 문제입니다.
+ * 무엇을 고르면 열리는지 말해 주는 편이 낫습니다.
+ *
+ * ## ⚠️ 「갈 수 없습니다」라고 적지 않습니다 (결함 343)
+ *
+ * 예전 문구는 「회의를 지정하지 않아 로비·검토 화면으로 **갈 수
+ * 없습니다**」였습니다. 그런데 셸의 왼쪽 회의 목록은 같은 화면에서
+ * `/lobby.html?meeting=N` **여섯 개**를 그리고 있었습니다 — 화면이
+ * 「갈 수 없다」고 적은 자리 200px 옆에 그 문이 여섯 개 있었습니다.
+ *
+ * 두 가지를 고쳤습니다:
+ *
+ * 1. **문이 이미 보이면 아무 말도 하지 않습니다** (`meetingListShown`).
+ * 2. 말할 때도 막다른 길이 아니라 **조건과 문**을 말합니다. 「홈」은
+ *    아래 탭바에 늘 있고 회의·프로젝트를 **모두** 늘어놓으므로, 창이
+ *    좁아 회의 목록이 접힌 때에도 참인 답입니다 (390px 에서 확인).
+ *
+ * ⚠️ **프로젝트를 모르면 회의 이야기는 하지 않습니다.** 회의는 프로젝트
+ * 안에 있어서 순서가 있고, 두 줄을 같이 내면 「무엇부터」가 사라집니다.
  */
-export function missingLinks(context: NavContext): string[] {
-  const notes: string[] = [];
-  if (positive(context.meetingId) === null && context.current !== 'home') {
-    notes.push('회의를 지정하지 않아 로비·검토 화면으로 갈 수 없습니다');
+export function missingLinks(context: NavContext, doors: ShellDoors): string[] {
+  if (context.current === 'home') return [];
+
+  if (positive(context.projectId) === null) {
+    return ['칸반·기여도·보고서·설정은 프로젝트를 고르면 열립니다 — 홈에서 고르세요'];
   }
-  if (positive(context.projectId) === null && context.current !== 'home') {
-    notes.push(
-      '프로젝트를 지정하지 않아 칸반·기여도·보고서·설정 화면으로 갈 수 없습니다',
-    );
+  if (positive(context.meetingId) === null && !doors.meetingListShown) {
+    return ['로비·검토는 회의를 고르면 열립니다 — 홈에서 고르세요'];
   }
-  return notes;
+  return [];
 }
 
 /**

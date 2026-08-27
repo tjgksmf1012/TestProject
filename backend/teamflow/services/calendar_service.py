@@ -26,12 +26,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from teamflow.clock import as_utc
-from teamflow.db import assignees, live
+from teamflow.db import assignees, live, vocab
 from teamflow.db import models as m
+from teamflow.services.naming import meeting_label
 
 #: 달력에 놓이는 것의 종류.
 #:
@@ -78,6 +79,15 @@ def collect(
     ⚠️ 날짜가 없는 업무는 **안 나옵니다.** 마감일이 없는 업무를 오늘에
     놓으면 "오늘까지" 라는 없던 사실이 생깁니다 (측정 불가 ≠ 0 과 같은 결).
     """
+    # ⚠️ **요청으로 들어온 값도 같이 맞춥니다** (결함 330). 아래 `within` 은
+    #    DB 에서 읽은 값만 `as_utc` 로 맞추고 이쪽은 그대로 썼습니다. 그래서
+    #    시간대 없이 온 요청(`since=2026-09-01`)이 비교에서 터졌습니다 —
+    #    `as_utc` 의 docstring 이 인용해 둔 바로 그 `TypeError` 이고, 사람에게는
+    #    **500** 으로 나갑니다. 막으려고 만든 함수를 **한쪽 피연산자에만**
+    #    걸어 둔 것입니다.
+    since = as_utc(since)
+    until = as_utc(until)
+
     if until < since:
         raise CalendarError("끝나는 날이 시작하는 날보다 앞섭니다")
 
@@ -104,7 +114,7 @@ def collect(
     who_of = assignees.names_of_tasks(session, [t.id for t in tasks])
     for task in tasks:
         who = who_of.get(task.id)
-        done = task.status == "done"
+        done = task.status in vocab.TASK_FINISHED
         if within(task.start_date):
             items.append(
                 CalendarItem(
@@ -138,7 +148,7 @@ def collect(
         )
     ).all()
     for meeting in meetings:
-        title = (meeting.title or "").strip() or f"회의 {meeting.id}"
+        title = meeting_label(meeting.title, meeting.id)
         # ⚠️ **연 회의는 연 시각으로** 놓습니다. 예정 시각으로 놓으면
         #    30분 늦게 시작한 회의가 달력에서는 제때 열린 것으로 보입니다.
         if within(meeting.started_at):
@@ -168,7 +178,9 @@ def collect(
                 kind="project_due",
                 at=project.deadline,
                 title=project.title,
-                done=project.status == "done",
+                # ⚠️ 예순네 줄 위의 **업무** 갈래에서 `"done"` 을 베껴 왔었습니다.
+                # 프로젝트에는 그런 값이 없습니다 — 어휘를 쓰십시오.
+                done=project.status in vocab.PROJECT_FINISHED,
             )
         )
 
@@ -259,5 +271,19 @@ def cancel_meeting(session: Session, meeting: m.Meeting) -> None:
     """
     if meeting.started_at is not None:
         raise CalendarError("이미 연 회의는 무를 수 없습니다")
+
+    # ⚠️ **이 회의로 만든 회의록도 같이 지웁니다** (결함 359).
+    #
+    # 위 문장이 「행을 지우면 그것들이 허공에 뜹니다」라고 적어 두고 연
+    # 회의를 막았는데, **안 연 회의에도 딸리는 것이 하나 있었습니다** —
+    # 로비의 「회의록 만들기」는 잡아만 둔 회의에도 있습니다. 일정을
+    # 무르면 회의는 홈·레일·달력에서 사라지는데 그 회의록만 보고서
+    # 목록에 남았고, **지울 방법이 저장소 어디에도 없었습니다**
+    # (`reports` 에는 DELETE 갈래가 0곳). 재서 확인했습니다.
+    #
+    # ⚠️ 「무르기」는 **없던 일로 하는 것**입니다. 남기려면 남기는 이유가
+    # 있어야 하는데, 안 연 회의의 회의록에는 지킬 내용이 없습니다 —
+    # 요약도 안건도 후보도 전부 「아직 처리하지 않았습니다」입니다.
+    session.execute(delete(m.Report).where(m.Report.meeting_id == meeting.id))
     session.delete(meeting)
     session.flush()

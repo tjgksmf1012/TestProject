@@ -28,7 +28,7 @@ from teamflow.contribution.confidence import (
     compute_confidence,
 )
 from teamflow.contribution.events import Category, ContributionEvent, EventType, deduplicate
-from teamflow.contribution.profiles import ScoringProfile
+from teamflow.contribution.profiles import DEFAULT_PROFILES, Role, ScoringProfile
 
 ALGO_VERSION = "scoring-v1"
 
@@ -278,12 +278,34 @@ class TeamScoreResult:
     algo_version: str
     members: dict[int, MemberScore]
     skipped_categories: list[Category] = field(default_factory=list)
+    #: 기여 기록은 있는데 **지금 이 프로젝트의 구성원이 아닌** 사람들.
+    #:
+    #: ⚠️ **계산에서 빼지 않습니다.** 빼면 남은 사람들의 몫이 조용히
+    #: 부풀고, 그건 `remove_member` 가 행을 안 지우는 이유 그 자체입니다
+    #: ("나갔다고 해서 그 사람이 한 일이 없던 일이 되면, 남은 팀의 기여도
+    #: 비율이 조용히 부풀고 회의록에 구멍이 납니다").
+    #:
+    #: 여기 남기는 것은 **화면이 그 줄을 이름 없이 그리지 않게** 하기
+    #: 위해서입니다 — 안 알려 주면 「사용자 #3」 이 뜹니다 (결함 222).
+    former_members: list[int] = field(default_factory=list)
 
     def ranked_ids(self) -> list[int]:
         """⚠️ 내부 검증·테스트 전용.
 
         **UI에 순위를 노출하지 말 것** (docs/05 §5, docs/07 E2).
         같은 데이터라도 순위로 보이는 순간 서비스의 성격이 바뀐다.
+
+        ## ⚠️ 오래 **아무도 안 불렀습니다** — 검사도 포함해서
+
+        「테스트 전용」이라고 적혀 있는데 쓰는 테스트가 없었습니다. 즉 그
+        말 자체가 참이 아니었고, 불변식 ①(순위·리더보드 금지)을 지키는
+        것은 **주석 한 줄**뿐이었습니다 — 주석은 아무것도 안 막습니다.
+
+        지우지는 않았습니다. `docs/05` 가 검증 방법으로 「팀 내부 순위와의
+        상관(Spearman)」을 적어 뒀고 그때 순위가 필요합니다. 대신 이제
+        **제 일을 합니다** — `test_scoring.py` 가 이것으로 「내려보내는
+        순서가 순위가 아니다」를 증명하고, 짝 검사가 **제품 코드에서
+        부르는 곳이 0곳**임을 잽니다.
         """
         return sorted(self.members, key=lambda uid: -self.members[uid].share)
 
@@ -380,6 +402,7 @@ def score_team(
     profiles: dict[int, ScoringProfile],
     coverage: CoverageStats,
     unmeasurable: dict[int, list[MeasurementGap]] | None = None,
+    former_profiles: dict[int, ScoringProfile] | None = None,
 ) -> TeamScoreResult:
     """팀 전체 기여도를 산정한다.
 
@@ -396,6 +419,35 @@ def score_team(
     """
     gaps: dict[int, list[MeasurementGap]] = unmeasurable or {}
     users = sorted(events_by_user)
+    # ⚠️ **프로파일이 없는 사람에서 터졌습니다** (결함 222). 예전에는
+    #    `profiles[uid]` 를 그냥 찾다 `KeyError` 가 났고, 그건 곧 **기여도
+    #    API 가 500** 이라는 뜻이었습니다 — 팀원 한 명을 내보내면 그
+    #    프로젝트의 기여도는 보는 것도 확정하는 것도 영영 안 됐습니다.
+    #
+    # ⛔ **계산에서 빼는 것으로 고치지 않습니다.** 빼면 남은 사람들의 몫이
+    #    조용히 부풀고, 그건 `remove_member` 가 그 사람의 기록을 일부러
+    #    남겨 두는 이유와 정면으로 어긋납니다. 기본 프로파일로 **계속
+    #    셉니다** — 그 사람이 한 일은 실제로 있었습니다.
+    #
+    # ⚠️ **「나간 사람」은 여기서만 정합니다** — `profiles` 에 없는 사람.
+    #    나갈 때 적어 둔 프로파일(`former_profiles`)을 `profiles` 에 미리
+    #    합쳐 버리면 이 줄이 아무도 못 찾고, 화면은 다시 「사용자 #3」 을
+    #    띄웁니다 (결함 222 가 반대 방향으로 되살아납니다). 실제로 결함 327
+    #    을 고치다 그렇게 됐고 검사 둘이 잡았습니다 — **누구인가**와
+    #    **무엇으로 재는가**는 다른 질문입니다.
+    former = sorted(uid for uid in users if uid not in profiles)
+    if former:
+        # 적어 둔 역할 비중이 있으면 **그것으로** 잽니다 (결함 327). 없으면
+        # 기본 프로파일 — 오늘까지의 동작 그대로이고, 모르는 것을 아는 척
+        # 하지 않습니다.
+        remembered = former_profiles or {}
+        profiles = {
+            **profiles,
+            **{
+                uid: remembered.get(uid, DEFAULT_PROFILES[Role.DEVELOPER])
+                for uid in former
+            },
+        }
     clean: dict[int, list[ContributionEvent]] = {
         uid: deduplicate(events_by_user[uid]) for uid in users
     }
@@ -475,4 +527,5 @@ def score_team(
         algo_version=ALGO_VERSION,
         members=members,
         skipped_categories=skipped,
+        former_members=former,
     )

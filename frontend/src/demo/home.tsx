@@ -24,7 +24,7 @@ import {
   describeMeetingStatus,
   describeProject,
   emptyProjectsMessage,
-  formatMeetingTime,
+  describeMeetingWhen,
   nextStepFor,
   orderProjects,
   type Meeting,
@@ -57,6 +57,7 @@ import { Byline, NoteLine, RawHtml, type Note } from './parts.tsx';
 import { renderNav } from './nav.ts';
 import { wireLogout } from './logout.ts';
 import { bootApp } from './pwa.ts';
+import { meetingLabel } from '../lib/ui/naming.ts';
 
 const params = new URLSearchParams(location.search);
 // ⚠️ 주소창의 `?api=` 를 그대로 쓰면 **비밀번호와 회의 음성이 어디로
@@ -87,14 +88,16 @@ type Screen =
 // 조각들
 // ══════════════════════════════════════════════════════════════
 
-function MeetingRow({ meeting }: { meeting: Meeting }) {
-  const step = nextStepFor(meeting);
+function MeetingRow({ meeting, projectId }: { meeting: Meeting; projectId: number }) {
+  /* ⚠️ **프로젝트를 같이 넘깁니다** (결함 355). 칸반 링크는 프로젝트가
+     없으면 1번으로 갑니다 — 프로젝트가 둘인 사람은 남의 보드를 봅니다. */
+  const step = nextStepFor(meeting, projectId);
   return (
     <li className={step.actionable ? 'meeting todo' : 'meeting'}>
       <div className="head">
         <span className="dot" data-state={channelState(meeting.status)} />
-        <span className="name">{meeting.title ?? '제목 없는 회의'}</span>
-        <span className="when">{formatMeetingTime(meeting.started_at)}</span>
+        <span className="name">{meetingLabel(meeting.title, meeting.meeting_id)}</span>
+        <span className="when">{describeMeetingWhen(meeting)}</span>
         {/* ⚠️ **화면 폭짜리 버튼을 다섯 개 쌓지 않습니다** (docs/19 §20).
             예전에는 회의마다 900px 짜리 초록 덩어리가 깔려서, 화면이
             "무엇을 할 차례인가" 가 아니라 **버튼 밭**이었습니다. 줄
@@ -135,7 +138,7 @@ function ProjectSection({ row }: { row: WithMeetings }) {
       ) : (
         <ul className="meetings">
           {row.meetings.map((m) => (
-            <MeetingRow key={m.meeting_id} meeting={m} />
+            <MeetingRow key={m.meeting_id} meeting={m} projectId={id} />
           ))}
         </ul>
       )}

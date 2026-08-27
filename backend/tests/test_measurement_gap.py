@@ -20,6 +20,8 @@ from teamflow.contribution.confidence import CoverageStats, compute_confidence
 from teamflow.contribution.events import Category, ContributionEvent, EventType, SourceKind
 from teamflow.contribution.profiles import DEFAULT_PROFILES, Role
 from teamflow.contribution.scoring import MeasurementGap, score_team
+from teamflow.jobs import retention
+from teamflow.services import scoring_service
 
 OCCURRED = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 
@@ -100,6 +102,110 @@ def test_track_quality_is_ignored_when_there_are_no_tracks():
 
     assert "track_quality" not in result.components
     assert result.value == pytest.approx(compute_confidence(FULL_COVERAGE).value)
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 428 — 「안 쓰는 것」과 「못 잰 것」
+# ══════════════════════════════════════════════════════════════
+#
+# 분모 0 을 계산에서 빼는 규칙은 **모듈 미사용**을 위한 것입니다. 녹음을
+# 했다는 회의에서 발언이 0 건인 것은 모듈 미사용이 아니라 **측정 실패**
+# 인데, 가르지 않아 전사 품질 신호 둘이 바로 그 실패에서만 사라졌습니다.
+
+
+SILENT_RECORDING = CoverageStats(
+    meetings_total=1,
+    meetings_recorded=1,
+    utterances_total=0,
+    utterances_speaker_certain=0,
+    tracks_total=3,
+    tracks_usable=3,
+    utterances_scored=0,
+    utterances_model_classified=0,
+)
+
+#: 같은 회의인데 말이 잡힌 경우. `SILENT_RECORDING` 과 **갈라지는 데이터**
+#: 여야 합니다 — 둘이 같은 값을 내면 이 검사는 아무것도 안 잽니다.
+HEARD_RECORDING = CoverageStats(
+    **{
+        **vars_of(SILENT_RECORDING),
+        "utterances_total": 20,
+        "utterances_speaker_certain": 20,
+        "utterances_scored": 15,
+    }
+)
+
+
+def test_a_recording_that_captured_nothing_is_not_perfect_confidence():
+    """⭐ 아무것도 못 들은 회의가 **완벽한 회의보다 높게** 나오면 안 된다.
+
+    신뢰도 1.0 은 `adjustment_range` 를 한 점으로 접습니다 — 불변식 ②
+    (단일 점수 금지)가 거기서 깨집니다.
+    """
+    silent = compute_confidence(SILENT_RECORDING)
+    heard = compute_confidence(HEARD_RECORDING)
+
+    assert silent.value < heard.value, (
+        f"말이 하나도 안 잡힌 회의({silent.value:.4f} 「{silent.label}」)가 "
+        f"말이 잡힌 회의({heard.value:.4f} 「{heard.label}」)보다 높습니다"
+    )
+    assert silent.value < 1.0
+
+
+def test_less_evidence_means_a_wider_band_not_a_narrower_one():
+    """근거가 적을수록 조정 폭은 **넓어져야** 합니다 — 팀이 정할 여지입니다."""
+    from teamflow.contribution.confidence import adjustment_range
+
+    def width(stats: CoverageStats) -> float:
+        low, high = adjustment_range(40.0, compute_confidence(stats).value)
+        return high - low
+
+    nothing_at_all = width(CoverageStats())
+    silent = width(SILENT_RECORDING)
+    heard = width(HEARD_RECORDING)
+
+    assert nothing_at_all > silent > heard, (
+        f"회의 없음 {nothing_at_all:.1f}%p · 말이 0건 {silent:.1f}%p · 말이 잡힘 {heard:.1f}%p"
+    )
+
+
+def test_a_silent_recording_says_why_and_does_not_talk_about_absent_utterances():
+    """사유가 비어 있으면 팀은 왜 낮은지 못 봅니다 — 그리고 **참인** 말을 해야 합니다.
+
+    「화자가 확정되지 않은 발화가 있습니다」라고 하려면 발화가 있어야 합니다.
+    """
+    reasons = compute_confidence(SILENT_RECORDING).reasons
+
+    assert reasons, "말이 하나도 안 잡혔는데 사유가 한 줄도 없습니다"
+    assert any("기록되지 않은" in r for r in reasons), reasons
+    assert not any("발화가 있습니다" in r for r in reasons), reasons
+
+
+def test_chit_chat_only_meetings_are_still_not_penalised():
+    """⚠️ 반대 방향 — 발화는 있는데 **점수 대상이** 0 인 회의는 깎으면 안 됩니다.
+
+    잡담을 잡담으로 맞게 분류한 것이고, `utterance_classification` 의
+    주석이 이미 정해 둔 것입니다. 428 의 고침이 여기까지 번지면 안 됩니다.
+    """
+    chit_chat = CoverageStats(
+        **{
+            **vars_of(SILENT_RECORDING),
+            "utterances_total": 12,
+            "utterances_speaker_certain": 12,
+        }
+    )
+    result = compute_confidence(chit_chat)
+
+    assert "utterance_classification" not in result.components
+    assert not any("기록되지 않은" in r for r in result.reasons), result.reasons
+
+
+def test_a_team_with_no_meetings_at_all_is_unchanged():
+    """⚠️ 갓 만든 팀은 「측정 실패」가 아닙니다 — 아직 안 한 것입니다 (결함 307)."""
+    result = compute_confidence(CoverageStats())
+
+    assert result.components == {}
+    assert result.reasons == ["수집된 활동 데이터가 없습니다"]
 
 
 def test_track_quality_is_weighted_like_speaker_certainty():
@@ -521,6 +627,99 @@ def test_retention_expiry_says_something_different(engine):
     assert "보존기간" in reason
     assert "본인 요청" not in reason
     assert "끊" not in reason
+
+
+def test_deleting_a_recording_moves_everyones_share_so_it_is_drawn_loudly(engine):
+    """⭐ 원본 삭제는 **팀 전원의 몫을 움직입니다** — 눈에 띄게 그려야 합니다.
+
+    ## 왜 이 검사가 생겼나 (결함 329)
+
+    「내 녹음과 성문 지우기」를 실제로 눌러 보고, 지운 상태와 안 지운 상태를
+    **같은 세션에서** 계산해 견줬습니다:
+
+        김민수 42.19% → 40.75%   (-1.45%p)
+        이하늘 32.95% → 35.25%   (+2.30%p)
+        박지원 24.85% → 24.00%   (-0.85%p)
+
+    ⚠️ 이 줄은 오래도록 「이 저장소에서 **한 번에 제일 크게** 움직이는
+    기록입니다」였습니다. 결함 387 에서 업무 완료를 재 보니 그쪽이 더
+    큽니다(김민수 +3.38~5.96%p · 박지원 -3.07~5.42%p) — **문서의 숫자는
+    세어 보고 쓰라**가 이 docstring 에도 걸립니다. 그래도 삭제가 분쟁에서
+    제일 먼저 볼 줄이라는 것은 그대로입니다. 그런데 활동 화면은
+    그 줄을 `touches_contribution: false` 로 받아 평범하게 그렸습니다 —
+    「업무 담당자 변경」은 눈에 띄게 그리면서요.
+
+    `TOUCHES_CONTRIBUTION` 옆에는 「**눈에 띄는 쪽으로 틀립니다** — 안 보이는
+    것보다 한 번 더 보이는 것이 낫습니다」라고 적혀 있었습니다. 손으로 고른
+    목록이라 재 본 적이 없었던 것입니다.
+
+    ⚠️ **숫자가 움직이는 것과 그 기록에 붙은 표시를 한 검사에서 묶습니다.**
+    따로 두면 한쪽만 고쳐집니다 (실패 ②).
+    """
+    from teamflow.services.activity_service import TOUCHES_CONTRIBUTION
+
+    project_id, user_id = seed_deleted_audio(deleted_reason="user_request")
+    gaps = gaps_for(project_id)
+
+    # 먼저 「정말 움직이는가」 — 이것이 참이라야 아래 요구가 의미가 있습니다.
+    assert user_id in gaps, (
+        "원본이 지워졌는데 측정 불가로 안 잡혔습니다 — 이 검사가 헛돕니다"
+    )
+    assert gaps[user_id][0].category is Category.MEETING
+
+    # 그러니 그 사실을 적는 행동은 **눈에 띄게** 그려야 합니다.
+    for action in ("user_data_revoked", "audio_deleted"):
+        assert action in TOUCHES_CONTRIBUTION, (
+            f"`{action}` 는 사람의 몫을 움직이는데 평범하게 그려집니다 — "
+            "분쟁에서 제일 먼저 볼 줄입니다"
+        )
+
+
+def test_refusing_to_keep_the_original_is_not_written_up_as_an_accident(engine):
+    """⭐ ② 원본 보관 **거부**는 권리 행사다 — 사고처럼 적으면 안 된다.
+
+    결함 326. `consent_refused` 만 문구가 없어서 「(사유 미기록)」으로
+    나갔습니다. **사유는 기록돼 있습니다** — 같은 응답의 `detail` 에
+    `"deleted_reason": "consent_refused"` 가 들어 있는 채로, 문장은 없다고
+    말하고 있었습니다.
+
+    거부한 사람이 화면에서 보는 것이 「이유는 모르겠는데 네 녹음이
+    사라졌다」이면, 그 사람은 자기가 누른 것과 일어난 일을 잇지 못합니다.
+    """
+    project_id, user_id = seed_deleted_audio(deleted_reason="consent_refused")
+    reason = gaps_for(project_id)[user_id][0].reason
+
+    assert "사유 미기록" not in reason, reason
+    assert "동의하지 않아" in reason, reason
+    assert "끊" not in reason, reason
+    assert "0" not in reason, reason  # 0점이라는 말은 절대 쓰지 않는다
+
+
+def test_every_deletion_reason_the_code_can_write_has_a_sentence():
+    """⭐ **어휘에 있는 값마다 문구가 있어야 합니다** (결함 326).
+
+    ⚠️ 앞선 검사 셋은 `user_request` · `retention_expired` · `None` 을
+    쟀습니다. `consent_refused` 는 `retention.py` 가 **실제로 쓰는 값**인데
+    아무도 안 재고 있었고, 그래서 문구가 없는 채로 오래 있었습니다.
+    낱개를 세는 대신 **짝**을 셉니다 — 넷째 사유가 생기면 그 문장을 쓰기
+    전까지 여기서 터집니다.
+
+    `_DELETION_REASON_UNKNOWN` 은 이 표에 없습니다. 그건 `deleted_reason`
+    이 **NULL** 일 때(이 열이 생기기 전에 지워진 행)의 답이고, 코드가
+    적어 넣는 값이 아닙니다.
+    """
+    written = {
+        value
+        for name, value in vars(retention).items()
+        if name.startswith("REASON_") and isinstance(value, str)
+    }
+    assert written, "retention.py 에서 REASON_* 상수를 하나도 못 찾았습니다"
+
+    missing = written - set(scoring_service._DELETION_REASON_TEXT)
+    assert not missing, f"문구가 없는 삭제 사유: {sorted(missing)}"
+
+    extra = set(scoring_service._DELETION_REASON_TEXT) - written
+    assert not extra, f"retention.py 가 안 쓰는 사유에 문구가 있습니다: {sorted(extra)}"
 
 
 def test_unknown_reason_does_not_guess(engine):

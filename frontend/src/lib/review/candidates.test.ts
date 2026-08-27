@@ -6,13 +6,16 @@ import {
   approvalConditions,
   canUndoDecision,
   attentionReasons,
+  decisionPressed,
   blockerLine,
   buildReviewPayload,
   canApprove,
   canSubmit,
+  whyCannotSubmitBatch,
   describeBlocker,
   describeSubmitResult,
   effectiveDeadline,
+  firstApprovalGap,
   emptyDraft,
   isBeforeIsoDate,
   laneCounts,
@@ -22,6 +25,7 @@ import {
   type Candidate,
   type Draft,
   type ReviewContext,
+  type ReviewSummary,
 } from './candidates.ts';
 
 const CONTEXT: ReviewContext = { memberIds: [1, 2, 3], today: '2026-09-01' };
@@ -341,6 +345,64 @@ describe('canSubmit', () => {
   it('전부 거절이어도 제출할 수 있다', () => {
     const summary = summarize([candidate()], drafts([10, { decision: 'reject' }]), CONTEXT);
     assert.equal(canSubmit(summary), true);
+  });
+});
+
+describe('whyCannotSubmitBatch', () => {
+  /* ⭐ 결함 365. `canSubmit` 이 거짓이 되는 **모든** 길에 문장이 있어야
+     합니다 — 화면은 오래도록 `blocked > 0` 하나만 적고 나머지에는 빈
+     문자열을 그렸습니다(결함 326 의 모양). */
+  it('⭐ 막는 길마다 문장이 있다 — 하나도 빈 문자열이 아니다', () => {
+    const cases: ReviewSummary[] = [
+      // 아직 아무것도 안 정했다
+      summarize([candidate({ id: 1 })], drafts(), CONTEXT),
+      // 승인 표시했는데 조건이 안 찼다
+      summarize(
+        [candidate({ id: 2, assignee_id: null, deadline: null })],
+        drafts([2, { decision: 'approve' }]),
+        CONTEXT,
+      ),
+      // 후보가 0건
+      summarize([], drafts(), CONTEXT),
+    ];
+    for (const summary of cases) {
+      assert.equal(canSubmit(summary), false, '이 사례는 막혀 있어야 합니다');
+      const why = whyCannotSubmitBatch(summary);
+      assert.notEqual(why, null, `막혔는데 이유가 null 입니다: ${JSON.stringify(summary)}`);
+      assert.ok(
+        typeof why === 'string' && why.trim().length > 0,
+        `막혔는데 이유가 빈 글자입니다: ${JSON.stringify(summary)}`,
+      );
+    }
+  });
+
+  it('제출할 수 있으면 null 이다', () => {
+    const summary = summarize([candidate()], drafts([10, { decision: 'approve' }]), CONTEXT);
+    assert.equal(canSubmit(summary), true);
+    assert.equal(whyCannotSubmitBatch(summary), null);
+  });
+
+  it('보내는 중이 맨 앞이다', () => {
+    const summary = summarize([candidate()], drafts([10, { decision: 'approve' }]), CONTEXT);
+    assert.match(whyCannotSubmitBatch(summary, { sending: true }) ?? '', /제출하는 중/);
+  });
+
+  it('후보가 0건인 것과 안 정한 것은 다른 말이다', () => {
+    const none = whyCannotSubmitBatch(summarize([], drafts(), CONTEXT));
+    const undecided = whyCannotSubmitBatch(summarize([candidate()], drafts(), CONTEXT));
+    assert.notEqual(none, undecided);
+    assert.match(none ?? '', /후보가 없습니다/);
+    assert.match(undecided ?? '', /등록하거나 거절해야/);
+  });
+
+  /* ⚠️ SPA 의 「검토 끝내기」와 **규칙이 다릅니다**(결함 365). 이쪽은
+     하나만 정해도 열립니다 — 합치면 안 됩니다. */
+  it('열둘 중 하나만 정해도 열린다 — SPA 와 다른 규칙이다', () => {
+    const list = Array.from({ length: 12 }, (_, i) => candidate({ id: i + 1 }));
+    const summary = summarize(list, drafts([1, { decision: 'reject' }]), CONTEXT);
+    assert.equal(summary.pending, 11);
+    assert.equal(canSubmit(summary), true);
+    assert.equal(whyCannotSubmitBatch(summary), null);
   });
 });
 
@@ -707,5 +769,122 @@ describe('되돌리기는 되돌릴 수 있을 때만 (결함 194)', () => {
   it('⚠️ 서버가 이미 정한 것은 화면에서 못 되돌린다 — 초안만 바꾸면 또 아무 일도 안 일어난다', () => {
     assert.strictEqual(canUndoDecision(c('approved'), { decision: 'pending' }), false);
     assert.strictEqual(canUndoDecision(c('rejected'), { decision: 'approve' }), false);
+  });
+});
+
+describe('⛔ 둘이 동시에 검토하면 뒤에 누른 사람이 속았습니다 (결함 233)', () => {
+  // ## 재현
+  //
+  // 브라우저 둘로 같은 회의의 검토 화면을 열었습니다.
+  //   A 가 후보 셋을 승인 표시하고 「검토 끝내기」 → 200, approved_count 3
+  //   B 는 낡은 화면 그대로. 같은 셋을 표시하고 「검토 끝내기」
+  //     → 200 {"approved_task_ids":[],"approved_count":0}
+  //
+  // 서버는 멱등이라 정직하게 0건이라고 답했는데, B 의 화면은 A 와
+  // **글자 하나 다르지 않았습니다.**
+  it('⛔ 승인을 표시했는데 0건이면 **그렇게 말한다** — 거절과 같은 말을 하지 않는다', () => {
+    const 남이먼저 = describeSubmitResult(0, [], 3);
+    const 전부거절 = describeSubmitResult(0, [], 0);
+    assert.equal(남이먼저 === 전부거절, false, '두 결과가 같은 문장입니다');
+    assert.equal(남이먼저.includes('3건'), true, 남이먼저);
+    assert.equal(남이먼저.includes('새로고침'), true, 남이먼저);
+  });
+
+  it('⭐ 전부 거절해서 0건인 것은 **실패가 아니다** — 그대로 둔다', () => {
+    assert.equal(describeSubmitResult(0, [], 0), '검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다');
+  });
+
+  it('⭐ 일부만 들어간 것도 말한다 — 표시한 3건 중 1건만 등록', () => {
+    const note = describeSubmitResult(1, [5], 3);
+    assert.equal(note.includes('1건이 칸반에'), true, note);
+    assert.equal(note.includes('2건은 등록되지 않았습니다'), true, note);
+  });
+
+  it('⭐ 표시한 만큼 다 들어갔으면 **군말을 안 붙인다**', () => {
+    const note = describeSubmitResult(3, [5, 6, 7], 3);
+    assert.equal(note.includes('등록되지 않았습니다'), false, note);
+    assert.equal(note.includes('3건이 칸반에 등록됐습니다'), true, note);
+  });
+
+  it('⚠️ 표시 건수를 안 주면 **예전과 같이** 답한다 — 옛 호출을 안 깨뜨린다', () => {
+    assert.equal(describeSubmitResult(0, []), '검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다');
+    assert.equal(describeSubmitResult(2, [1, 2]).includes('2건이 칸반에 등록됐습니다'), true);
+  });
+});
+
+
+describe('decisionPressed (결함 267)', () => {
+  it('⭐ 지금 고른 것만 **눌린 것**이다', () => {
+    assert.equal(decisionPressed({ decision: 'approve' }, 'approve'), true);
+    assert.equal(decisionPressed({ decision: 'approve' }, 'reject'), false);
+    assert.equal(decisionPressed({ decision: 'reject' }, 'reject'), true);
+  });
+
+  it('아직 아무것도 안 골랐으면 **둘 다 아니다**', () => {
+    assert.equal(decisionPressed({ decision: 'pending' }, 'approve'), false);
+    assert.equal(decisionPressed(undefined, 'approve'), false);
+    assert.equal(decisionPressed({}, 'reject'), false);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+// 막힌 「업무로 등록」을 눌렀을 때 데려갈 칸 (결함 373)
+// ══════════════════════════════════════════════════════════════
+
+describe('firstApprovalGap', () => {
+  const gap = (c: Candidate, d: Draft = emptyDraft()) =>
+    firstApprovalGap(approvalBlockers(c, d, CONTEXT));
+
+  it('⭐ 막힌 것이 없으면 데려갈 곳도 없다', () => {
+    assert.equal(gap(candidate()), null);
+  });
+
+  it('⭐ 담당자가 비었으면 담당자 칸', () => {
+    assert.equal(gap(candidate({ assignee_id: null })), 'assignee');
+  });
+
+  it('⭐ **담당자는 정했고 마감만 빈** 흔한 경우 — 마감 칸으로 (결함 192)', () => {
+    assert.equal(gap(candidate({ deadline: null })), 'deadline');
+  });
+
+  it('⭐ 둘 다 비었으면 담당자가 먼저다', () => {
+    assert.equal(gap(candidate({ assignee_id: null, deadline: null })), 'assignee');
+  });
+
+  it('⭐ 「비었다」만이 아니라 **틀린 값**도 그 칸으로 데려간다', () => {
+    // 명단에 없는 담당자 · 지난 마감 — 채워는 있지만 고쳐야 합니다.
+    assert.equal(gap(candidate({ assignee_id: 99 })), 'assignee');
+    assert.equal(gap(candidate({ deadline: '2026-08-01' })), 'deadline');
+  });
+
+  it('⭐ 채울 칸이 **없는** 이유면 null 이다 — 데려갈 데가 없다', () => {
+    assert.equal(gap(candidate({ evidence_utterance_ids: [] })), null);
+    assert.equal(gap(candidate({ review_status: 'approved' })), null);
+  });
+
+  it('⭐ 막는 이유가 있으면 **데려갈 칸이 있거나, 못 채우는 것이거나** 둘 중 하나다', () => {
+    /* ⚠️ 「막혔는데 데려갈 곳도 없고 못 채우는 것도 아니다」가 생기면
+       화면은 「채우세요」라고 하면서 아무 데도 안 갑니다(결함 192). */
+    const UNFILLABLE = ['no_evidence', 'already_approved', 'already_rejected'];
+    const cases: Candidate[] = [
+      candidate({ assignee_id: null }),
+      candidate({ deadline: null }),
+      candidate({ assignee_id: null, deadline: null }),
+      candidate({ assignee_id: 99 }),
+      candidate({ deadline: '2026-08-01' }),
+      candidate({ evidence_utterance_ids: [] }),
+      candidate({ review_status: 'approved' }),
+      candidate({ review_status: 'rejected' }),
+    ];
+    for (const c of cases) {
+      const blockers = approvalBlockers(c, emptyDraft(), CONTEXT);
+      if (blockers.length === 0) continue;
+      const where = firstApprovalGap(blockers);
+      const unfillable = blockers.every((b) => UNFILLABLE.includes(b.code));
+      assert.ok(
+        where !== null || unfillable,
+        `막혔는데(${blockers.map((b) => b.code).join(',')}) 데려갈 곳이 없습니다`,
+      );
+    }
   });
 });

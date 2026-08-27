@@ -28,11 +28,13 @@ import {
   hrefFor,
   isUrgent,
   readableIds,
+  timeLabel,
   type Notice,
 } from '../lib/notifications/view.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { rows as rowSkeleton } from '../lib/ui/skeleton.ts';
@@ -108,9 +110,21 @@ function App() {
         setNote({ text: unreachableText('읽음 표시를 못 보냈습니다'), tone: 'bad' });
         return;
       }
+      /* ⚠️ **세션부터 봅니다** (결함 427 과 같은 모양). 이 화면의 로드는
+         이미 `isSessionExpired` → `goToLogin` 인데 **쓰기만** 빠져
+         있었습니다 — 읽기와 쓰기가 다른 길이었습니다. */
+      if (isSessionExpired(response.status)) {
+        goToLogin();
+        return;
+      }
       if (!response.ok) {
         setNote({
-          text: describeHttpStatus(response.status) ?? '읽음 표시를 못 보냈습니다',
+          /* 서버가 쓴 문장이 먼저입니다 (결함 301) — `describeHttpStatus`
+             는 400 에 아무 말도 없습니다. */
+          text: detailText(
+            await response.json().catch(() => null),
+            describeHttpStatus(response.status) ?? '읽음 표시를 못 보냈습니다',
+          ),
           tone: 'bad',
         });
         return;
@@ -180,12 +194,18 @@ function App() {
         <ul className="nlist">
           {notices.map((notice, i) => {
             const href = hrefFor(notice, projectId);
+            const when = timeLabel(notice);
             const classes = ['nitem'];
             if (!notice.read && notice.notification_id !== null) classes.push('fresh');
             if (isUrgent(notice)) classes.push('urgent');
             return (
               <li key={`${notice.kind}-${notice.notification_id}-${i}`} className={classes.join(' ')}>
                 <span className="nkind">{describeKind(notice.kind)}</span>
+                {/* ⚠️ 시각을 그리는 곳 (결함 331). 서버는 `at` 을 줄곧 보내고
+                    있었는데 **화면이 한 글자도 안 그렸습니다** — 목록이 그
+                    값으로 정렬되는데도요. 무엇을 가리키는 시각인지는
+                    `@lib` 이 정합니다(마감일과 일어난 때는 다릅니다). */}
+                {when !== null && <span className="nwhen">{when}</span>}
                 {href === null ? (
                   <span className="ntext">{notice.text}</span>
                 ) : (

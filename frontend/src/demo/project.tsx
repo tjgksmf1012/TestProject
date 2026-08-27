@@ -20,6 +20,11 @@ import {
   repoProblem,
   titleProblem,
 } from '../lib/project/setup.ts';
+import {
+  cannotTellApartNote,
+  labelInList,
+  tellsApartInList,
+} from '../lib/people/labels.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
 import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import {
@@ -70,8 +75,8 @@ import {
 } from '../lib/analytics/trends.ts';
 import { presenceDot, presenceLabel, worthShowing } from '../lib/project/presence.ts';
 import {
-  assignableRoles,
-  canChangeRoleOf,
+  roleChoicesFor,
+  manageBlockedBecause,
   canRemove,
   LEAVE_CONFIRM,
   leaveBlockedBecause,
@@ -79,6 +84,7 @@ import {
 } from '../lib/project/roles.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
+import { plainText } from '../lib/ui/plain.ts';
 
 const params = new URLSearchParams(location.search);
 // ⚠️ 주소창의 `?api=` 를 그대로 쓰면 **비밀번호와 회의 음성이 어디로
@@ -193,7 +199,7 @@ function ProjectHealth({ data }: { data: Analytics | null }) {
 
       <h3 className="sub-head">지금 맡고 있는 일</h3>
       {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
-      <p className="sub">{LOAD_NOTE.replace(/\*\*/g, '')}</p>
+      <p className="sub">{plainText(LOAD_NOTE)}</p>
       <ul className="loads">
         {data.load.map((row) => (
           <li key={row.user_id ?? 'none'} className={row.user_id === null ? 'lnone' : undefined}>
@@ -449,7 +455,9 @@ function ProjectSettings() {
         body: JSON.stringify({ title: title.trim() }),
       });
       if (r === null) return setError(unreachableText('이름을 바꾸지 못했습니다'));
-      setError(r.ok ? '' : `이름을 바꾸지 못했습니다 (HTTP ${r.status})`);
+      setError(
+        r.ok ? '' : detailText(await r.json().catch(() => null), `이름을 바꾸지 못했습니다 (HTTP ${r.status})`),
+      );
       if (r.ok) applyDetail((await r.json()) as Detail);
     });
   };
@@ -473,7 +481,9 @@ function ProjectSettings() {
       if (r.status === 409) {
         return setError('다른 프로젝트가 이미 이 저장소를 쓰고 있습니다.');
       }
-      setError(r.ok ? '' : `저장하지 못했습니다 (HTTP ${r.status})`);
+      setError(
+        r.ok ? '' : detailText(await r.json().catch(() => null), `저장하지 못했습니다 (HTTP ${r.status})`),
+      );
       if (!r.ok) return;
       applyDetail((await r.json()) as Detail);
       // 저장소를 바꿨으면 진단도 다시 봐야 합니다. 안 그러면 앞 저장소의
@@ -492,7 +502,13 @@ function ProjectSettings() {
     void guarded(async () => {
       const r = await send(`/api/projects/${projectId}/invite/rotate`, { method: 'POST' });
       if (r === null) return setError(unreachableText('코드를 새로 만들지 못했습니다'));
-      if (!r.ok) return setError(`코드를 새로 만들지 못했습니다 (HTTP ${r.status})`);
+      if (!r.ok) {
+        /* ⛔ 예전에는 `(HTTP ${r.status})` 였습니다 (결함 316). 소유자가
+           아닌 사람이 누르면 서버가 「이 작업을 할 권한이 없습니다」라고
+           **정확히** 말하는데 화면은 「HTTP 403」을 내보냈습니다. */
+        const body = (await r.json().catch(() => null)) as unknown;
+        return setError(detailText(body, `코드를 새로 만들지 못했습니다 (HTTP ${r.status})`));
+      }
       setError('');
       applyDetail((await r.json()) as Detail);
     });
@@ -648,7 +664,19 @@ function ProjectSettings() {
   const inviteCode = detail?.invite_code || null;
   const roleTotal = sumOf(roles);
 
-  const myRole = team.find((entry) => entry.user_id === myId)?.project_role ?? null;
+  /* ⚠️ `?? null` 이 아니라 **`undefined` 를 살립니다** (결함 254). 명단이
+     아직 안 왔을 때 `null` 로 뭉개면 소유자에게도 「관리자에게 요청하세요」
+     라고 말합니다. `manageBlockedBecause` 가 그 둘을 갈라 씁니다. */
+  const myRole = team.length === 0 ? undefined : team.find((e) => e.user_id === myId)?.project_role;
+  /* ⛔ **레거시 설정 화면은 관리 권한을 한 번도 안 봤습니다** (결함 316).
+     소유자가 아닌 사람에게 「코드 새로 만들기」·「이름 저장」·「저장소
+     연결」이 **열린 채로** 그려졌고, 누르면 403 이 오고 화면은
+     「HTTP 403」이라고 적었습니다. SPA 는 셋 다 `manageBlockedBecause`
+     를 거칩니다 — 그 함수의 주석이 예로 드는 것이 바로 이 단추입니다.
+     301·308·309·313 에 이어 레거시만 갈라진 다섯 번째입니다. */
+  const rotateBlocked = manageBlockedBecause(myRole, '초대 코드 새로 만들기');
+  const titleBlocked = manageBlockedBecause(myRole, '프로젝트 이름 바꾸기');
+  const repoBlocked = manageBlockedBecause(myRole, '저장소 연결');
   const leaveWhy = leaveBlockedBecause(
     myRole,
     team.map((entry) => entry.project_role ?? 'member'),
@@ -687,8 +715,9 @@ function ProjectSettings() {
           <ul className="mlist">
             {team.map((person) => {
               const isMe = person.user_id === myId;
-              const canEdit = canChangeRoleOf(myRole, person.project_role, { isMe });
-              const options = assignableRoles(myRole);
+              // 고를 것이 하나도 없으면 안 그립니다 (결함 362) — 판단은 `@lib`.
+              const options = roleChoicesFor(myRole, person.project_role, { isMe });
+              const canEdit = options.length > 0;
               return (
                 <li key={person.user_id}>
                   {/* 프로필 이미지 (`USER-004`). 없으면 아무것도 안 그립니다 —
@@ -706,7 +735,10 @@ function ProjectSettings() {
                     {worthShowing(person.presence) && (
                       <span className={`pdot ${presenceDot(person.presence)}`} aria-hidden="true" />
                     )}
-                    {person.name ?? `사용자 #${person.user_id}`}
+                    {/* ⭐ **같은 이름이 둘이면 손잡이를 붙입니다** (결함 345).
+                        바로 옆이 「내보내기」 — 되돌릴 수 없는 단추입니다.
+                        판단은 `@lib/people/labels.ts`. */}
+                    {labelInList(person, team)}
                     {worthShowing(person.presence) && (
                       <span className="pstat">{presenceLabel(person.presence)}</span>
                     )}
@@ -717,7 +749,7 @@ function ProjectSettings() {
                       className="mrole"
                       value={person.project_role ?? 'member'}
                       onChange={(e) => void changeRole(person.user_id, e.target.value)}
-                      aria-label={`${person.name ?? ''} 권한`}
+                      aria-label={`${labelInList(person, team)} 권한`}
                     >
                       {/* ⚠️ 지금 값이 목록에 없을 수 있습니다(내가 줄 수 없는
                           등급). 빼면 select 가 엉뚱한 값을 보여 줍니다. */}
@@ -739,14 +771,17 @@ function ProjectSettings() {
                     <button
                       className="mout"
                       onClick={() =>
-                        void removeMember(
-                          person.user_id,
-                          person.name ?? `사용자 #${person.user_id}`,
-                        )
+                        void removeMember(person.user_id, labelInList(person, team))
                       }
                     >
                       내보내기
                     </button>
+                  )}
+                  {/* ⚠️ 이름표를 붙여도 두 줄이 똑같은 경우 (둘 다 GitHub
+                      미연결). 「구분됩니다」인 척하면 사람이 되돌릴 수 없는
+                      단추를 찍습니다 — 막지는 않고 사실만 적습니다. */}
+                  {!tellsApartInList(person, team) && (
+                    <span className="mbio">{cannotTellApartNote()}</span>
                   )}
                   {/* 자기소개 (`USER-004`) — 적을 수 있는데 아무도 못 보면
                       "할 일을 알려 주고 자리를 안 줌" 입니다. 여기가 그 자리. */}
@@ -874,9 +909,28 @@ function ProjectSettings() {
           >
             {copyLabel}
           </button>
-          <button id="rotate" type="button" disabled={busy} onClick={rotate}>
+          {/* ⚠️ 막는 것은 `disabled` 가 아니라 `aria-disabled` 입니다
+              (결함 234) — 초점을 받고, **사유를 말합니다**(결함 239). */}
+          <button
+            id="rotate"
+            type="button"
+            disabled={busy}
+            aria-disabled={rotateBlocked !== null}
+            aria-describedby={rotateBlocked !== null ? 'rotate-why' : undefined}
+            onClick={() => {
+              if (rotateBlocked !== null) return;
+              rotate();
+            }}
+          >
             코드 새로 만들기
           </button>
+          {rotateBlocked !== null && (
+            /* ⚠️ 가리키기만 하고 안 그리면 낭독기가 빈 곳을 가리킵니다 —
+               결함 239 가 잡은 그 모양입니다. */
+            <p className="status" id="rotate-why">
+              {rotateBlocked}
+            </p>
+          )}
         </div>
         <NoteLine note={copyNote} className="status" id="copy-note" />
         <p id="next">{detail === null ? '' : nextStepAfterCreate(detail.member_count)}</p>
@@ -911,9 +965,24 @@ function ProjectSettings() {
           프로젝트 이름
           <input id="title" type="text" value={title} onChange={(e) => setTitle(e.target.value)} />
         </label>
-        <button id="save-title" type="button" disabled={busy} onClick={saveTitle}>
+        <button
+          id="save-title"
+          type="button"
+          disabled={busy}
+          aria-disabled={titleBlocked !== null}
+          aria-describedby={titleBlocked !== null ? 'title-why' : undefined}
+          onClick={() => {
+            if (titleBlocked !== null) return;
+            saveTitle();
+          }}
+        >
           이름 저장
         </button>
+        {titleBlocked !== null && (
+          <p className="status" id="title-why">
+            {titleBlocked}
+          </p>
+        )}
 
         <label style={{ marginTop: '1rem' }}>
           GitHub 저장소
@@ -925,9 +994,24 @@ function ProjectSettings() {
             onChange={(e) => setRepo(e.target.value)}
           />
         </label>
-        <button id="save-repo" type="button" disabled={busy} onClick={saveRepo}>
+        <button
+          id="save-repo"
+          type="button"
+          disabled={busy}
+          aria-disabled={repoBlocked !== null}
+          aria-describedby={repoBlocked !== null ? 'repo-why' : undefined}
+          onClick={() => {
+            if (repoBlocked !== null) return;
+            saveRepo();
+          }}
+        >
           저장소 연결
         </button>
+        {repoBlocked !== null && (
+          <p className="status" id="repo-why">
+            {repoBlocked}
+          </p>
+        )}
 
         {/* ⚠️ 이 구역이 없던 동안, 저장소 이름을 잘못 적으면 **아무 오류도
             나지 않고 기여도만 비었습니다.** 사람은 그걸 "활동을 안 했다" 로
@@ -981,7 +1065,16 @@ function ProjectSettings() {
           </p>
         )}
         {/* ⚠️ 배달이 0건일 때는 안 보입니다. 연결도 안 됐는데 "가져오기" 를
-            누르면 아무 일이 없고, 사람은 그게 고장인 줄 압니다. */}
+            누르면 아무 일이 없고, 사람은 그게 고장인 줄 압니다.
+
+            ⛔ **막혀 있으면 이유를 말합니다** (결함 380). 예전에는 서버가
+            409 로 거절할 상태에서도 단추가 멀쩡히 그려졌고, 바로 위 경고
+            줄은 「누르면 채웁니다」라고 **약속**하고 있었습니다. */}
+        {health !== null && health.backfillBlocked !== '' && (
+          <p id="gh-backfill-why" className="sub">
+            {health.backfillBlocked}
+          </p>
+        )}
         {health !== null && health.canBackfill && (
           <button id="gh-backfill" type="button" disabled={busy} onClick={startBackfill}>
             지난 활동 가져오기

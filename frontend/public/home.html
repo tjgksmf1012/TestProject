@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
-<!-- 홈 화면에 추가하면 주소창 없이 전체화면으로 뜬다. -->
+<!-- 앱으로 설치하면 브라우저 탭이 아니라 창 하나로 뜬다.
+     ⚠️ 폰 이야기를 쓰지 마십시오 — 모바일은 범위에서 뺐습니다(결함 422). -->
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -146,8 +147,11 @@
   <section class="install" hidden id="install-card">
     <h2>앱으로 쓰기</h2>
     <p id="install" class="sub" hidden></p>
+    <!-- ⚠️ 이 글자는 `@lib/pwa/install.ts` 의 `installButtonText()` 와
+         **같아야** 합니다. React 가 그리기 전에도 보여야 해서 여기 사본이
+         있고, 갈라지지 않게 가드가 짝을 잽니다(결함 422). -->
     <button id="install-now" class="primary btn-block" type="button" hidden>
-      홈 화면에 추가
+      앱으로 설치
     </button>
     <p class="hint" id="install-why"></p>
   </section>
@@ -177,6 +181,11 @@
   <!-- 아래 탭바. `src/demo/nav.ts` 가 채운다.
        위쪽 링크 줄에 의존하면 전체화면 PWA·WebView 에서 갇힌다 —
        거기에는 주소창도 뒤로가기도 없다. -->
+  <!-- 탭 넷 **말고** 가는 곳. `src/demo/nav.ts` 가 `navLinks` 로 채운다.
+       ⛔ 이 자리를 지우면 채팅·일정·알림·활동·찾기·보고서로 **가는 길이
+       제품 전체에서 사라집니다** — 실제로 그랬습니다 (결함 305). -->
+  <nav id="nav" aria-label="더 보기"></nav>
+
   <nav id="tabs" aria-label="주요 화면"></nav>
 </body>
 </html>

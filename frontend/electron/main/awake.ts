@@ -32,6 +32,17 @@ function started(): boolean {
   return blockerId !== null && powerSaveBlocker.isStarted(blockerId);
 }
 
+/**
+ * 지금 재우기 방지를 **잡고 있는가** — 곧 「녹음 중인가」 (결함 342).
+ *
+ * ⚠️ 장부가 아니라 **OS 를 잽니다.** 이 파일의 다른 값들과 같은 규칙이고,
+ * 닫기를 막을지 정하는 데 쓰이므로 더 그렇습니다 — 장부만 믿고 막으면
+ * 녹음이 이미 끝났는데도 못 닫는 창이 됩니다.
+ */
+export function isHoldingAwake(): boolean {
+  return started();
+}
+
 /** 재우기 방지 채널을 연다. `registerChunkStore` 와 같은 origin 잠금. */
 export function registerAwake(allowedOrigin: () => string): void {
   const fromOurWindow = (event: IpcMainInvokeEvent): boolean =>

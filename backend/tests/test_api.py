@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from teamflow.config import Settings, get_settings
-from teamflow.db import assignees
+from teamflow.db import assignees, vocab
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 
@@ -104,13 +104,24 @@ def seeded(engine, client: TestClient) -> dict[str, int]:
             {"designer": 1.0},
             {"developer": 0.6, "planner": 0.4},
         ]
-        for user, login, role in zip(users, logins, roles, strict=True):
+        for index, (user, login, role) in enumerate(zip(users, logins, roles, strict=True)):
             s.add(
                 m.Member(
                     project_id=project.id,
                     user_id=user.id,
                     role_shares=role,
                     github_login=login,
+                    # ⚠️ **만든 사람은 소유자입니다** — `create_project` 가
+                    #    그렇게 만듭니다. 이 씨앗은 오래도록 그 칸을 비워
+                    #    두어 **셋 다 `member`** 였습니다. 실기가 만들 수
+                    #    없는 상태라, 등급을 보는 갈래가 여기서는 통째로
+                    #    엉뚱하게 돌았습니다 (결함 288 의 모양 · 392 에서
+                    #    확정 권한을 좁히다 드러났습니다).
+                    project_role=(
+                        str(vocab.ProjectRole.OWNER)
+                        if index == 0
+                        else str(vocab.ProjectRole.MEMBER)
+                    ),
                 )
             )
 
@@ -565,6 +576,36 @@ def add_contribution_events(project_id: int, user_id: int, count: int) -> None:
                     source_id=user_id * 1000 + i,
                     magnitude=1.0,
                     event_metadata={"difficulty": 2},
+                )
+            )
+
+
+def add_code_events(project_id: int, user_id: int, count: int) -> None:
+    """**두 번째 범주**의 근거. 왜 필요한가 — 결함 327 회차에 배운 것.
+
+    ⚠️ `add_contribution_events` 는 `task` 하나만 만듭니다. 범주가 하나뿐이면
+    가중치가 무엇이든 **정규화되어 1.0** 이라, 개발자 프로파일과 겸직
+    프로파일이 **같은 값**을 냅니다. 그 자로 재면 프로파일이 바뀌어도
+    안 걸립니다 — 실제로 심어 보고 알았습니다(0건이 나왔습니다).
+
+    「두 정렬 기준이 같은 데이터로 잰 것」과 같은 함정입니다 (AGENTS.md).
+    **갈라지는 데이터**로 재십시오.
+    """
+    from teamflow.contribution.events import Category, EventType, SourceKind
+
+    with db_session.session_scope() as s:
+        for i in range(count):
+            s.add(
+                m.ContributionEventRow(
+                    project_id=project_id,
+                    user_id=user_id,
+                    occurred_at=NOW,
+                    category=Category.CODE.value,
+                    event_type=EventType.PR_MERGED.value,
+                    source_kind=SourceKind.GITHUB_EVENT.value,
+                    source_id=900_000 + user_id * 100 + i,
+                    magnitude=1.0,
+                    event_metadata={},
                 )
             )
 
@@ -1167,6 +1208,36 @@ def test_nothing_is_confirmed_until_a_person_confirms_it(client: TestClient, see
     assert body["run_id"] == 0
 
 
+def test_only_admins_confirm_the_whole_teams_contribution(client: TestClient, seeded):
+    """⭐ 팀 **전원의** 숫자를 쓰는 일은 관리자·소유자만 (결함 392).
+
+    이 라우트는 오래도록 `_require_project_member` 만 봤습니다. 평범한
+    팀원이 자기 몫을 90%, 나머지를 5%씩으로 확정할 수 있었고 `201` 이
+    떨어졌으며 기록에는 그 사람 이름이 붙었습니다 — 브라우저로
+    재현했습니다.
+
+    ⚠️ **뒤집은 것이 아니라 적어만 두고 간 숙제입니다.** 라우트 주석이
+    「지금은 구성원 누구나 … 역할이 생기면 여기부터 좁혀야 합니다」라고
+    조건을 달아 두었고, 그 뒤에 역할이 생겼습니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    body = {"finals": [{"user_id": users[0], "final_value": 90.0, "reason": "제가 정합니다"}]}
+
+    # 팀원 — 막힙니다.
+    login_as(client, users[1])
+    blocked = client.post(_final_url(seeded), json=body)
+    assert blocked.status_code == 403, blocked.text
+
+    # 아무것도 안 남아야 합니다 — 막았는데 값이 들어가면 막은 것이 아닙니다.
+    login_as(client, users[0])
+    assert client.get(_final_url(seeded)).json()["finals"] == []
+
+    # 소유자 — 됩니다.
+    ok = client.post(_final_url(seeded), json=body)
+    assert ok.status_code == 201, ok.text
+
+
 def test_confirming_pins_the_calculation_it_was_based_on(client: TestClient, seeded):
     """⭐ 확정은 **그 순간의 계산**을 가리켜야 한다.
 
@@ -1243,6 +1314,59 @@ def test_changing_the_number_without_a_reason_is_refused(client: TestClient, see
     assert "이유" in response.json()["detail"]
 
 
+def test_a_share_outside_zero_to_hundred_is_refused(client: TestClient, seeded):
+    """⭐ 있을 수 없는 값은 확정되지 않는다 (결함 215).
+
+    베타에서 `-5 · -894 · 999` 를 넣었더니 **201** 이 나왔습니다. 셋의
+    합이 정확히 100 이라 화면의 합계 경고도 조용했고, 그 값이 그대로
+    확정 기록이 됐습니다.
+
+    ⛔ 이것은 불변식 넷째("시스템은 판정하지 않습니다")의 예외가 **아닙니다.**
+    팀이 시스템 값과 다르게 정하는 것은 얼마든지 되고(사유로 남습니다),
+    여기서 막는 것은 다른 의견이 아니라 **몫이 될 수 없는 값**입니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+
+    for bad in (-5.0, -894.0, 999.0, 100.001):
+        response = client.post(
+            _final_url(seeded),
+            json={"finals": [{"user_id": users[0], "final_value": bad, "reason": "실험"}]},
+        )
+        assert response.status_code == 400, f"{bad} 이 통과했습니다: {response.text}"
+        assert "0~100" in response.json()["detail"]
+
+    # 경계는 **막지 않습니다** — 한 사람이 전부 한 경우가 실제로 있습니다.
+    for ok_value in (0.0, 100.0):
+        response = client.post(
+            _final_url(seeded),
+            json={"finals": [{"user_id": users[0], "final_value": ok_value, "reason": "실험"}]},
+        )
+        assert response.status_code == 201, f"{ok_value} 가 막혔습니다: {response.text}"
+
+
+def test_a_sum_other_than_hundred_is_still_allowed(client: TestClient, seeded):
+    """⚠️ 합계 100 은 **강제하지 않습니다.**
+
+    팀 일부만 확정하는 경우가 있습니다. 위 범위 검사를 넣으면서 여기까지
+    막으면, 두 사람만 확정하려던 팀이 갑자기 못 하게 됩니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+
+    response = client.post(
+        _final_url(seeded),
+        json={
+            "finals": [
+                {"user_id": users[0], "final_value": 10.0, "reason": "일부만 확정"},
+                {"user_id": users[1], "final_value": 20.0, "reason": "일부만 확정"},
+            ]
+        },
+    )
+    assert response.status_code == 201, response.text
+
+
 def test_confirming_leaves_an_audit_trail(client: TestClient, seeded):
     """조정은 판단이다. 판단에는 **주체**가 있어야 이의를 제기할 상대가 생긴다."""
     users = seeded["user_ids"]
@@ -1260,6 +1384,185 @@ def test_confirming_leaves_an_audit_trail(client: TestClient, seeded):
         assert log.actor_id is not None
         assert log.after["final_value"] == 55.0
         assert log.after["reason"] == "합의"
+
+
+def test_removing_a_member_does_not_break_contributions(client: TestClient, seeded):
+    """⭐ 팀원을 내보내도 기여도는 **계속 보여야** 한다 (결함 222).
+
+    베타에서 「내보내기」를 한 번 누른 뒤로 기여도가 **영영 500** 이었습니다.
+    보는 것도 확정하는 것도 안 됐습니다 — 이 제품의 한가운데가 버튼 하나로
+    죽은 것입니다.
+
+    원인은 `score_team` 이 **기여 기록이 있는 모든 사람**을 돌면서
+    `profiles[uid]` 를 무조건 찾은 것입니다. 내보낸 사람은 기록은 남고
+    (「그 사람이 한 일은 그대로 남습니다」 — 내보내기 확인 문구)
+    프로파일만 사라지므로 `KeyError` 가 났습니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+    add_contribution_events(seeded["project_id"], users[2], 2)
+
+    before = client.get(f"/api/projects/{seeded['project_id']}/contributions")
+    assert before.status_code == 200
+    assert len(before.json()["members"]) == 3
+
+    # 내보내려면 권한이 있어야 합니다 — 첫 사람을 소유자로 올립니다.
+    with db_session.session_scope() as s:
+        me = s.scalars(
+            select(m.Member).where(
+                m.Member.project_id == seeded["project_id"],
+                m.Member.user_id == users[0],
+            )
+        ).one()
+        me.project_role = vocab.ProjectRole.OWNER
+
+    removed = client.delete(f"/api/projects/{seeded['project_id']}/members/{users[2]}")
+    assert removed.status_code == 204, removed.text
+
+    after = client.get(f"/api/projects/{seeded['project_id']}/contributions")
+    assert after.status_code == 200, after.text
+    body = after.json()
+    # ⛔ **계산에서 빠지지 않습니다.** 빼면 남은 사람들의 몫이 조용히
+    #    부풀고, 그건 `remove_member` 가 기록을 남겨 두는 이유와 정면으로
+    #    어긋납니다 — 그 엔드포인트 주석이 그렇게 적어 두고 있습니다.
+    assert [mm["user_id"] for mm in body["members"]] == sorted(users)
+    # 다만 **누가 나갔는지는 알려 줘야** 화면이 「사용자 #3」 을 안 띄웁니다.
+    assert [f["user_id"] for f in body["former_members"]] == [users[2]]
+    assert body["former_members"][0]["name"], "이름 없이 보내면 화면이 번호로 부릅니다"
+
+    # 확정도 되어야 합니다 — 여기도 같은 계산을 부릅니다.
+    confirmed = client.post(
+        _final_url(seeded), json={"finals": [{"user_id": u} for u in users[:2]]}
+    )
+    assert confirmed.status_code == 201, confirmed.text
+
+
+def test_being_removed_does_not_silently_reweigh_what_you_did(
+    client: TestClient, seeded
+):
+    """⭐ 나간 사람의 **역할 비중**도 남아야 한다 (결함 327).
+
+    ## 재현
+
+    `load_profiles` 는 `members` 행에서만 역할 비중을 읽었습니다. 행이
+    사라지면 겸직(개발 60% · 디자인 40%)이 **기본 개발자 프로파일로 조용히
+    떨어지고**, 같은 순간에 다시 계산해도 그 사람 몫이 움직였습니다:
+
+        가중치  task 0.5882 / code 0.4118  →  0.4615 / 0.5385
+        몫      24.85%  →  24.68%   (남은 두 사람이 +0.10 · +0.08 로 나눠 가짐)
+
+    `remove_member` 의 주석이 막겠다고 적은 바로 그 일입니다 —
+    「남은 팀의 기여도 비율이 조용히 부풀고」.
+
+    ⚠️ **몫이 아니라 가중치를 잽니다.** 몫은 시간 감쇠로도 조금씩 움직여서
+    「달라졌다」가 무엇 때문인지 못 가릅니다 — 가중치는 시간과 무관합니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+    add_contribution_events(seeded["project_id"], users[2], 2)
+    # ⚠️ 범주가 하나면 가중치가 무엇이든 1.0 으로 정규화됩니다 — 갈라지는
+    # 데이터라야 프로파일이 바뀐 것을 잽니다.
+    add_code_events(seeded["project_id"], users[2], 2)
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(
+            select(m.Member).where(m.Member.project_id == seeded["project_id"])
+        ).all()
+        for row in rows:
+            if row.user_id == users[0]:
+                row.project_role = vocab.ProjectRole.OWNER
+            if row.user_id == users[2]:
+                # 겸직 — 기본 프로파일과 **갈라지는** 값이라야 잽니다.
+                row.role_shares = {"developer": 0.6, "designer": 0.4}
+
+    def weights_of(user_id: int) -> dict[str, float]:
+        body = client.get(f"/api/projects/{seeded['project_id']}/contributions").json()
+        row = next(mm for mm in body["members"] if mm["user_id"] == user_id)
+        return {c["category"]: round(c["weight"], 6) for c in row["categories"]}
+
+    before = weights_of(users[2])
+    assert before, "가중치를 하나도 못 읽었습니다 — 검사가 헛돕니다"
+
+    removed = client.delete(
+        f"/api/projects/{seeded['project_id']}/members/{users[2]}"
+    )
+    assert removed.status_code == 204, removed.text
+
+    assert weights_of(users[2]) == before, (
+        "나갔다고 그 사람을 재던 자가 바뀌었습니다 — 한 일은 그대로인데 "
+        "값이 움직입니다"
+    )
+
+
+def test_walking_out_by_yourself_is_written_down_too(client: TestClient, seeded):
+    """⭐ 나가는 문은 **둘**이고 둘 다 적어야 합니다 (결함 327·328).
+
+    한 갈래만 고치는 것이 이 저장소에서 제일 흔한 재발 모양입니다
+    (실패 ② · 결함 298→301).
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+    add_code_events(seeded["project_id"], users[1], 2)
+
+    with db_session.session_scope() as s:
+        row = s.scalars(
+            select(m.Member).where(
+                m.Member.project_id == seeded["project_id"],
+                m.Member.user_id == users[1],
+            )
+        ).one()
+        row.role_shares = {"developer": 0.6, "designer": 0.4}
+
+    def weights_of(user_id: int) -> dict[str, float]:
+        body = client.get(f"/api/projects/{seeded['project_id']}/contributions").json()
+        row = next(mm for mm in body["members"] if mm["user_id"] == user_id)
+        return {c["category"]: round(c["weight"], 6) for c in row["categories"]}
+
+    before = weights_of(users[1])
+    assert before
+
+    login_as(client, users[1])
+    left = client.post(f"/api/projects/{seeded['project_id']}/members/me/leave")
+    assert left.status_code == 204, left.text
+
+    login_as(client, users[0])
+    assert weights_of(users[1]) == before
+
+    with db_session.session_scope() as s:
+        logged = s.scalars(
+            select(m.AuditLog).where(m.AuditLog.action == "member_removed")
+        ).all()
+        assert [row.target for row in logged] == [f"members/{users[1]}"], (
+            "스스로 나간 것이 감사 기록에 안 남았습니다"
+        )
+
+
+def test_leaving_a_project_does_not_break_contributions(client: TestClient, seeded):
+    """⭐ **스스로 나간 경우도 같습니다** (결함 222).
+
+    내보내기는 권한이 있어야 하지만 **나가기는 아무나 할 수 있습니다.**
+    같은 자리에서 같은 `KeyError` 가 났으므로, 터지는 문은 하나가 아니라
+    둘이었습니다. 훑기에서는 내보내기만 눌렸고, 나가기는 이 검사로
+    확인했습니다.
+    """
+    users = seeded["user_ids"]
+    add_contribution_events(seeded["project_id"], users[0], 5)
+    add_contribution_events(seeded["project_id"], users[1], 3)
+
+    login_as(client, users[1])
+    left = client.post(f"/api/projects/{seeded['project_id']}/members/me/leave")
+    assert left.status_code == 204, left.text
+
+    login_as(client, users[0])
+    after = client.get(f"/api/projects/{seeded['project_id']}/contributions")
+    assert after.status_code == 200, after.text
+    body = after.json()
+    # 나간 사람의 기록도 **그대로 셉니다** — 빼면 남은 사람 몫이 부풉니다.
+    assert users[1] in [mm["user_id"] for mm in body["members"]]
+    assert [f["user_id"] for f in body["former_members"]] == [users[1]]
 
 
 def test_an_outsider_cannot_confirm(client: TestClient, seeded):
@@ -1520,3 +1823,263 @@ def test_utterances_are_capped(client: TestClient, seeded):
 def test_utterances_with_no_ids_returns_empty(client: TestClient, seeded):
     """`ids` 없이 부르면 회의 전체 대본이 나오지 않는다."""
     assert client.get(f"/api/meetings/{seeded['meeting_id']}/utterances").json() == []
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 252 — 「검토할 회의」를 상태로만 세던 것
+# ══════════════════════════════════════════════════════════════
+
+
+def test_the_project_summary_counts_meetings_that_still_have_candidates(
+    client: TestClient, seeded, engine
+):
+    """⭐ **「검토할 회의」는 남은 후보로 셉니다.**
+
+    상태만 세면 사람이 후보를 **전부 검토한** 회의도 들어갑니다. 홈
+    머리말이 「검토할 회의 2」인데 바로 아래 덩어리는 「검토 필요 1」이라
+    한 화면에서 두 숫자가 어긋났습니다 (렌더해서 잡았습니다).
+    """
+    set_status(seeded["meeting_id"], "needs_review")
+    summary = client.get("/api/projects").json()[0]
+    assert summary["needs_review"] == 1, summary
+
+    # 후보를 전부 처리하면 — 상태는 그대로 `needs_review` 인 채로 —
+    # 검토할 것이 없어집니다.
+    with db_session.session_scope() as s:
+        for row in s.scalars(
+            select(m.MeetingTaskCandidate).where(
+                m.MeetingTaskCandidate.meeting_id == seeded["meeting_id"]
+            )
+        ).all():
+            row.review_status = "approved"
+
+    after = client.get("/api/projects").json()[0]
+    assert after["needs_review"] == 0, after
+    # ⚠️ 회의 수는 그대로여야 합니다 — 세는 곳을 고치다 분모를 건드리면
+    #    「회의 5개」가 조용히 줄어듭니다.
+    assert after["meeting_count"] == summary["meeting_count"]
+
+
+def test_a_person_who_was_never_measured_cannot_be_confirmed_as_is(
+    client: TestClient, seeded
+) -> None:
+    """⭐ **잰 것이 없으면 「시스템 값 그대로」 확정을 거절한다** (결함 307).
+
+    ## 재현
+
+    갓 만든 프로젝트(회의 0 · 업무 0 · GitHub 0)에서 기여도 화면을 열면
+    카드가 정확히 말합니다 —
+
+        —                       ← 구간
+        모르는 폭 100%p
+        이 사람의 활동이 아직 하나도 연결되지 않았습니다
+          — 0 이라는 뜻이 아니라 연결이 없다는 뜻입니다.
+
+    그런데 바로 아래 확정 줄은 「시스템 **0.0%**」였고, [이 값으로 확정] 을
+    누르면 201 과 함께 `final_value = 0` 이 남았습니다. 그리고 최종
+    보고서가 이렇게 나갔습니다 —
+
+        김민수  개발
+          측정하지 못했습니다
+          수집된 활동 데이터가 없습니다
+          팀 확정 0%            ← 두 줄 아래
+
+    한 문서가 「못 쟀다」와 「0% 로 확정」을 같이 말합니다. 불변식 ③
+    (측정 불가 ≠ 0점)이 **팀 밖으로 나가는 문서**에서 깨졌습니다.
+
+    ## 무엇을 막고 무엇을 막지 않는가
+
+    · ⛔ 막습니다 — **시스템 값을 그대로 받아들이는 것.** 잰 것이 없으면
+      받아들일 값 자체가 없습니다
+    · ✅ 안 막습니다 — **팀이 직접 0 을 적는 것.** 그건 사람의 판단이고
+      사유와 함께 남습니다 (불변식 ④: 시스템은 판정하지 않습니다)
+    """
+    user_id = seeded["user_ids"][0]
+    url = _final_url(seeded)
+
+    # 활동을 **하나도** 넣지 않습니다 — 갓 만든 프로젝트 그대로.
+    #
+    # ⚠️ 처음에는 이 검사를 「한 사람만 활동이 있는 팀」으로 썼고 **통과**
+    #    했습니다. 팀에 살아 있는 범주가 하나라도 있으면 서버가 모두에게
+    #    그 범주 칸을 개수 0 으로 만들어 주기 때문입니다 — 그건 결함 191 이
+    #    「쟀는데 0건인 것은 그대로 `0%` 다」로 못 박아 둔 **다른** 경우이고,
+    #    그 씨앗으로는 아무것도 안 재고 있었습니다.
+    refused = client.post(url, json={"finals": [{"user_id": user_id}]})
+    assert refused.status_code == 400, refused.text
+    assert "잰 것이 없어" in refused.json()["detail"]
+
+    # ✅ 팀이 **직접** 0 을 적고 이유를 남기는 것은 됩니다 (불변식 ④)
+    decided = client.post(
+        url,
+        json={
+            "finals": [
+                {"user_id": user_id, "final_value": 0, "reason": "이번 스프린트는 휴학"}
+            ]
+        },
+    )
+    assert decided.status_code == 201, decided.text
+    rows = {r["user_id"]: r for r in client.get(url).json()["finals"]}
+    assert rows[user_id]["final_value"] == 0
+    assert rows[user_id]["reason"] == "이번 스프린트는 휴학"
+
+    # ✅ **쟀는데 0건인 사람**은 그대로 확정됩니다 — 결함 191 의 결정을
+    #    이 검사가 뒤집지 않는다는 증거입니다. 팀에 활동이 생기면 이 사람도
+    #    범주 칸을 (개수 0 으로) 갖게 되고, 그때는 `0%` 가 맞습니다.
+    add_contribution_events(seeded["project_id"], seeded["user_ids"][1], 5)
+    still_ok = client.post(url, json={"finals": [{"user_id": user_id}]})
+    assert still_ok.status_code == 201, still_ok.text
+
+
+def test_a_departed_assignee_is_still_named_on_the_board(
+    client: TestClient, seeded
+) -> None:
+    """⭐ **나간 사람이 맡았던 카드도 이름으로 부른다** (결함 308).
+
+    ## 재현
+
+    팀원을 내보내고 칸반을 열면 그 사람이 맡았던 카드가 이렇게 떴습니다 —
+
+        DB 스키마 정리 · **사용자 #3** · 마감 2026-09-03
+
+    화면은 담당자 이름을 `/members` 로 찾는데 그 목록은 **지금 구성원**뿐이라
+    나간 사람이 없습니다. 같은 회차에 기여도 화면도 「사용자 #3」이었고,
+    거기서는 더 나빴습니다 — **바로 위에서 「박지원 님은 이 프로젝트를
+    떠났지만 그때 한 일은 계산에 그대로 들어 있습니다」라고 말하면서**
+    이름 자리에는 번호를 적었습니다.
+
+    ⚠️ `/members` 에 나간 사람을 **섞지 않습니다.** 그 목록은 담당자를
+    **고르는** 자리에도 쓰여서, 섞으면 떠난 사람에게 새 일을 맡길 수 있게
+    됩니다. 이름을 부르는 것과 고르는 것은 다른 일이라 목록을 나눕니다.
+    """
+    project_id = seeded["project_id"]
+    owner, leaver = seeded["user_ids"][0], seeded["user_ids"][1]
+
+    # 업무는 회의 후보 승인으로만 생기므로 검사에서는 직접 넣습니다.
+    # 내보내기는 ADMIN 권한이라(`projects/permissions.py`) 로그인한 사람에게
+    # 그 등급을 줍니다 — 씨앗은 등급을 안 정합니다.
+    with db_session.session_scope() as s:
+        task = m.Task(project_id=project_id, title="DB 스키마 정리", status="todo")
+        s.add(task)
+        s.flush()
+        s.add(m.TaskAssignee(task_id=task.id, user_id=leaver))
+        me = s.scalars(
+            select(m.Member).where(
+                m.Member.project_id == project_id, m.Member.user_id == owner
+            )
+        ).one()
+        me.project_role = str(vocab.ProjectRole.OWNER)
+
+    # 아직 팀원일 때는 나간 사람 목록이 비어 있어야 합니다.
+    assert client.get(f"/api/projects/{project_id}/tasks").json()["former_assignees"] == []
+
+    assert client.delete(
+        f"/api/projects/{project_id}/members/{leaver}"
+    ).status_code in (200, 204)
+
+    after = client.get(f"/api/projects/{project_id}/tasks").json()
+    former = after["former_assignees"]
+    assert [f["user_id"] for f in former] == [leaver], after
+    # ⭐ **이름이 있어야** 합니다 — id 만 보내면 화면은 여전히 「사용자 #N」입니다.
+    assert former[0]["name"], former
+
+    # 그리고 **지금 구성원 목록에는 안 섞입니다** — 담당자를 고르는 자리입니다.
+    members = client.get(f"/api/projects/{project_id}/members").json()
+    assert leaver not in [x["user_id"] for x in members]
+    assert owner in [x["user_id"] for x in members]
+
+
+def _open_a_meeting(client: TestClient, project_id: int, title: str) -> int:
+    made = client.post(
+        f"/api/projects/{project_id}/meetings",
+        json={"title": title, "capture_mode": "multitrack"},
+    )
+    assert made.status_code == 201, made.text
+    return made.json()["meeting_id"]
+
+
+def test_an_empty_meeting_can_be_discarded(client: TestClient, seeded: dict) -> None:
+    """⭐ **잘못 연 회의를 무를 수 있어야 합니다** (결함 320).
+
+    「회의 열기」는 누른 만큼 회의를 만듭니다. 세 번 누르니 회의가 5→8개가
+    됐는데 `DELETE /api/meetings/{id}` 가 **405** 였고, 설정·홈·로비의
+    무르는 단추도 0개였습니다 — 잘못 연 회의가 영영 남았습니다.
+    결함 298 이 일정에서 잡은 것과 같은 모양(만드는 자리만 있고 무르는
+    자리가 없음)입니다.
+    """
+    mid = _open_a_meeting(client, seeded["project_id"], "실수로 연 회의")
+    assert client.get(f"/api/meetings/{mid}").status_code == 200
+
+    gone = client.delete(f"/api/meetings/{mid}")
+    assert gone.status_code == 204, gone.text
+    assert client.get(f"/api/meetings/{mid}").status_code == 404
+
+
+def test_a_meeting_with_a_recording_is_never_discarded(
+    client: TestClient, seeded: dict
+) -> None:
+    """⛔ **소리가 담긴 회의는 못 무릅니다.**
+
+    소리는 다시 만들 수 없고, 그 소리가 발화·후보·업무·기여도로 이어져
+    있습니다. 「녹음한 것을 지우기」는 개인정보 파기라는 **다른 문**입니다.
+
+    ⚠️ 판정은 상태가 아니라 **트랙 수**입니다 — 그래서 씨앗을 상태가
+    `pending` **인데 트랙이 붙은** 회의로 만듭니다. 상태만 보는 자는
+    이 회의를 통과시킵니다.
+    """
+    mid = _open_a_meeting(client, seeded["project_id"], "녹음이 담긴 회의")
+    with db_session.session_scope() as s:
+        s.add(
+            m.MeetingTrack(
+                meeting_id=mid,
+                user_id=seeded["user_ids"][0],
+                started_at=NOW,
+                status="recording",
+            )
+        )
+        assert s.get(m.Meeting, mid).status == "pending"
+
+    refused = client.delete(f"/api/meetings/{mid}")
+    assert refused.status_code == 409, refused.text
+    detail = refused.json()["detail"]
+    assert "녹음이" in detail and "무를 수 없습니다" in detail, detail
+    # 막았으면 갈 곳을 줍니다 (결함 300 — 서버가 사람에게 쓴 문장).
+    assert "내 녹음과 성문 지우기" in detail, detail
+    # 그리고 회의는 그대로 있습니다.
+    assert client.get(f"/api/meetings/{mid}").status_code == 200
+
+
+def test_a_meeting_already_in_processing_is_never_discarded(
+    client: TestClient, seeded: dict
+) -> None:
+    """⛔ 트랙이 없어도 **처리에 들어간 회의**는 못 무릅니다.
+
+    씨앗 회의는 `needs_review` 이고 트랙이 0건입니다 — 트랙만 보는 자는
+    이 회의를 지워 버리고, 그러면 후보 둘과 그 근거가 같이 사라집니다.
+    """
+    mid = seeded["meeting_id"]
+    refused = client.delete(f"/api/meetings/{mid}")
+    assert refused.status_code == 409, refused.text
+    assert "처리에 들어간" in refused.json()["detail"], refused.text
+    assert client.get(f"/api/meetings/{mid}").status_code == 200
+
+
+def test_discarding_a_meeting_is_written_to_the_audit_log(
+    client: TestClient, seeded: dict
+) -> None:
+    """⚠️ **무른 것도 기록에 남깁니다.** 회의가 목록에서 사라지면 「내가 본
+    그 회의가 어디 갔지」가 남습니다 — 활동 기록이 그 답입니다."""
+    mid = _open_a_meeting(client, seeded["project_id"], "무를 회의")
+    assert client.delete(f"/api/meetings/{mid}").status_code == 204
+
+    feed = client.get(f"/api/projects/{seeded['project_id']}/activity").json()
+    said = [e for e in feed if e["action"] == "meeting_discarded"]
+    assert said, f"활동 기록에 안 남았습니다: {feed[:3]}"
+    # ⚠️ 어휘가 사람 말을 줘야 합니다 — 화면이 두 번째 표를 만들지 않습니다.
+    assert said[0]["label"] and said[0]["label"] != "meeting_discarded", said[0]
+    assert said[0]["who"], said[0]
+    # ⭐ **이름이 나와야 합니다** (결함 293·297). ⚠️ 무른 회의는 행 자체가
+    #    사라져서 `_target_labels` 가 **영영 못 찾습니다** — 그래서 지울 때
+    #    `before` 에 적어 둔 이름을 씁니다. 안 그러면 `meetings/8` 이 그대로
+    #    사람에게 나갑니다.
+    assert said[0]["target_label"] == "무를 회의", said[0]
+    assert said[0]["target"] == f"meetings/{mid}", said[0]

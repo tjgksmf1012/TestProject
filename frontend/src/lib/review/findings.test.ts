@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
@@ -72,9 +72,21 @@ describe('왜 걸렸는가', () => {
 
   it('⭐ 내부 사정을 사람에게 보여 주지 않는다', () => {
     // `supersedes` 는 컬럼 이름입니다. 결함 78·86 과 같은 부류 —
-    // 오류 문구가 내부 상태 이름을 흘리던 것.
-    const why = whyText(finding({ kind: 'decision_conflict', detail: { how: 'supersedes' } }));
-    strictEqual(why, '회의에서 앞의 결정을 뒤집었습니다');
+    // 오류 문구가 내부 상태 이름을 흘리던 것. **그 결정은 그대로입니다.**
+    //
+    // ⚠️ 예전에는 이 자가 문구를 **글자 그대로** 못 박고 있었습니다
+    // (`'회의에서 앞의 결정을 뒤집었습니다'`). 결함 339 가 그 문구를
+    // 고치자 요구는 하나도 안 바뀌었는데 이 자만 터졌습니다 — 결함
+    // 335(`id="keep-audio"`)·338(`1023.5px`)과 같은 모양입니다.
+    // 재는 것은 「컬럼 이름이 새는가」이지 「무슨 문장인가」가 아닙니다.
+    for (const detail of [
+      { how: 'supersedes' },
+      { how: 'supersedes', superseded_content: '인증 방식은 JWT 로 간다' },
+      { how: 'wording', shared_words: ['인증'] },
+    ]) {
+      const why = whyText(finding({ kind: 'decision_conflict', detail })) ?? '';
+      ok(!/supersedes|wording|decision_ids|superseded_decision_id/.test(why), why);
+    }
   });
 
   it('⭐ 이유를 못 만들면 **지어내지 않는다**', () => {
@@ -155,5 +167,69 @@ describe('여러 건', () => {
 
   it('없으면 빈 목록', () => {
     deepStrictEqual(findingViews([]), []);
+  });
+});
+
+describe('「왜」 는 「무엇」 을 되풀이하지 않는다 (결함 339)', () => {
+  // 「왜」 칸의 규칙은 `whyText` 머리말에 적혀 있습니다 — 만들 수 없으면
+  // `null` 이고, **아무 말도 안 하는 문장을 적지 않습니다.** 「무엇」과
+  // 같은 말을 다시 적는 것은 그 규칙을 어기는 또 다른 길입니다.
+  //
+  // 실제로 `decision_conflict` 의 `supersedes` 갈래가 그랬습니다 —
+  // 화면에 「앞의 결정을 뒤집었습니다」와 「회의에서 앞의 결정을
+  // 뒤집었습니다」가 **두 줄로** 나갔습니다. 그 갈래는 씨앗이 한 번도
+  // 안 만들어서 아무도 못 봤습니다.
+  const KINDS = [
+    'repeated_discussion',
+    'topic_drift',
+    'incomplete_task',
+    'decision_conflict',
+    'overlap_surge',
+  ];
+
+  const view = (kind: string, detail: Record<string, unknown>) =>
+    findingView({
+      kind,
+      severity: 'info',
+      start_ms: 1000,
+      end_ms: 2000,
+      evidence_utterance_ids: [1],
+      detail,
+    } as never);
+
+  it('⛔ 어느 종류도 「왜」 가 「무엇」 을 그대로 담지 않는다', () => {
+    const DETAIL: Record<string, Record<string, unknown>> = {
+      repeated_discussion: { shared_words: ['로그인'], apart_ms: 600000 },
+      topic_drift: { off_topic_words: ['점심'] },
+      incomplete_task: { count: 1 },
+      decision_conflict: { how: 'supersedes', superseded_content: '인증 방식은 JWT 로 간다' },
+      overlap_surge: { ratio: 0.77, baseline: 0.02 },
+    };
+    for (const kind of KINDS) {
+      const v = view(kind, DETAIL[kind] ?? {});
+      ok(v.why !== null, `${kind}: 「왜」 가 없습니다`);
+      ok(v.what !== null, `${kind}: 「무엇」 이 없습니다`);
+      ok(
+        !(v.why as string).includes(v.what as string),
+        `${kind}: 「왜」 가 「무엇」 을 되풀이합니다 — 화면에 같은 말이 두 줄입니다\n` +
+          `   무엇: ${v.what}\n   왜  : ${v.why}`,
+      );
+    }
+  });
+
+  it('⭐ 뒤집힌 결정을 **번호가 아니라 글**로 말한다', () => {
+    const v = view('decision_conflict', {
+      how: 'supersedes',
+      superseded_decision_id: 1,
+      decision_ids: [1, 2],
+      superseded_content: '인증 방식은 JWT 로 간다',
+    });
+    ok(v.why?.includes('인증 방식은 JWT 로 간다'), v.why ?? '(없음)');
+    ok(!/#?\d/.test(v.why ?? ''), `번호가 그대로 나갑니다: ${v.why}`);
+  });
+
+  it('⛔ 뒤집힌 결정 글이 없으면 **지어내지 않고** 비운다', () => {
+    const v = view('decision_conflict', { how: 'supersedes', superseded_decision_id: 1 });
+    strictEqual(v.why, null);
   });
 });

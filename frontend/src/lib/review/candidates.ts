@@ -248,6 +248,43 @@ export function approvalBlockers(
  * 그때도 빈손으로 두지 않는다 — 화면에 아무 설명 없이 빨간 표시만 뜨면
  * 사람은 그냥 무시하게 된다.
  */
+/**
+ * 이 결정 단추가 **지금 고른 것**인가 (결함 267).
+ *
+ * 카드를 「등록 표시됨」으로 바꾼 뒤에도 「등록」 단추가 그대로 살아
+ * 있었습니다. 재현했습니다 — 다시 눌러도 요청이 안 나가고 화면도 안
+ * 바뀝니다. 사람은 눌렀는데 아무 일도 안 일어난 것을 보고 **고장인지
+ * 이미 된 것인지** 알 수 없습니다.
+ *
+ * 지운다고 될 일이 아닙니다. 지우면 「거절로 바꿨다가 다시 등록으로」가
+ * 막힙니다. 그래서 **고른 것으로 보이게** 합니다 — 화면은 이 값을
+ * `aria-pressed` 로 옮기고, 낭독기도 「선택됨」으로 읽습니다.
+ */
+export function decisionPressed(
+  draft: { decision?: Decision | null } | undefined,
+  target: Decision,
+): boolean {
+  return (draft?.decision ?? null) === target;
+}
+
+/**
+ * 그 이유 목록에 붙일 **정직한 제목** (결함 253).
+ *
+ * 화면은 이 팝오버를 「확신이 낮은 이유」라고 불렀습니다. 두 군데가
+ * 틀렸습니다.
+ *
+ * 1. **줄들이 확신도 얘기가 아닙니다.** 대부분 서버 경고입니다 —
+ *    「담당자 미확정 — '저' 는 명단의 누구와도 맞지 않습니다」.
+ * 2. **확신이 낮지도 않습니다.** 재 보니 확신 71% 후보에 그 제목이 붙어
+ *    있었습니다. 이 파일의 저확신 기준은 `LOW_CONFIDENCE = 0.7` 입니다.
+ *
+ * 이 함수의 머리말이 이미 답을 적어 두고 있었습니다 — 「사람이 이 후보를
+ * **왜 들여다봐야 하는지**」. 제목도 그렇게 답니다.
+ */
+export function attentionAbout(candidate: Candidate): string {
+  return `${candidate.title} — 살펴봐야 하는 이유`;
+}
+
 export function attentionReasons(candidate: Candidate): string[] {
   const reasons = [...(candidate.warnings ?? [])];
   if (reasons.length === 0 && candidate.confidence < LOW_CONFIDENCE) {
@@ -382,6 +419,28 @@ export function sortForReview(candidates: readonly Candidate[]): Candidate[] {
 /** 이 확신도 아래면 화면에서 눈에 띄게 표시한다. */
 export const LOW_CONFIDENCE = 0.7;
 
+/**
+ * 확신도 알약에 적을 글자. **축 이름을 숫자와 같은 자리에** 답니다.
+ *
+ * ⛔ **맨 숫자로 적지 마십시오** (결함 395). 레거시 검토가 오래도록
+ * `34%` 만 그리고 「AI 확신도」를 `title` 에만 두었습니다 —
+ *
+ * - 그 화면에서 `%` 가 나오는 줄은 그 셋뿐이라 견줄 것이 없고,
+ * - 알약이 업무 제목 오른쪽에 붙어 **진행률**로 읽힙니다,
+ * - `title` 은 마우스 전용이고 접근성 트리에는 그 숫자가 **아예 없었습니다**
+ *   (`%` 를 이름으로 가진 노드 0개).
+ *
+ * 이 제품의 다른 백분율은 전부 축을 답니다 — 「팀의 32%」·「커버리지 80%」·
+ * 「모르는 폭 20%p」·「팀 신뢰도 62%」·「확신 45% · 모름 55%」. 맨몸은
+ * 이 하나였습니다.
+ *
+ * ⚠️ **두 뿌리가 같은 글자를 내게 여기서 만듭니다.** SPA 는 자기 파일에
+ * `확신 {n}%` 를 손으로 적고 있었습니다 — 사본이 있으면 갈라집니다(결함 363).
+ */
+export function confidenceReading(confidence: number): string {
+  return `확신 ${Math.round(confidence * 100)}%`;
+}
+
 // ══════════════════════════════════════════════════════════════
 // 갈래와 한 줄 검사 (디자인 브리프 §8·§13)
 // ══════════════════════════════════════════════════════════════
@@ -472,6 +531,25 @@ const EMPTY_FIELD: Partial<Record<BlockerCode, string>> = {
   missing_deadline: '마감일',
 };
 
+/** 막힌 「업무로 등록」을 눌렀을 때 **데려갈 칸.**
+ *
+ *  ⚠️ **막는 이유에서 뽑습니다** — 두 화면이 각자 `assignee ?? deadline`
+ *  사슬을 짜면 「담당자·마감을 채우라」고 해 놓고 엉뚱한 칸으로 데려가는
+ *  날이 옵니다(대표 실패 ②). 그리고 **첫 칸으로 보내면 안 됩니다** —
+ *  담당자는 정했고 마감만 빈 경우가 흔한데, 그때 담당자로 데려가면 사람은
+ *  「여긴 이미 했는데?」가 됩니다(결함 192).
+ *
+ *  ⚠️ 채울 칸이 **없는** 이유(근거 0건 · 이미 결정됨)는 `null` 입니다 —
+ *  데려갈 데가 없으면 데려가지 않습니다. */
+export type ApprovalGap = 'assignee' | 'deadline';
+
+export function firstApprovalGap(blockers: readonly Blocker[]): ApprovalGap | null {
+  const codes = blockers.map((b) => b.code);
+  if (codes.includes('missing_assignee') || codes.includes('unknown_assignee')) return 'assignee';
+  if (codes.includes('missing_deadline') || codes.includes('deadline_in_past')) return 'deadline';
+  return null;
+}
+
 export function blockerLine(blockers: readonly Blocker[]): BlockerLine {
   const empty: string[] = [];
   const hard: string[] = [];
@@ -543,6 +621,53 @@ export function canSubmit(summary: ReviewSummary): boolean {
 }
 
 /**
+ * 「제출」이 **지금 안 되는 이유** — 한 번에 여러 건을 올리는 레거시 검토
+ * 화면 쪽입니다.
+ *
+ * ## ⛔ 막는 이유는 둘인데 화면이 하나만 말했습니다 (결함 365)
+ *
+ * `canSubmit` 이 거짓이 되는 길은 둘입니다.
+ *
+ * 1. `blocked > 0` — 승인 표시한 것 중 조건이 안 채워진 것이 있다
+ * 2. `approving + rejecting === 0` — 아직 **아무것도 안 정했다**
+ *
+ * 화면은 1번만 적고 2번에는 **빈 문자열**을 그렸습니다. 2번은 검토
+ * 화면을 연 사람이 **맨 처음 보는 상태**라, 후보 열둘을 앞에 두고
+ * 「제출」이 죽어 있는데 왜인지는 화면 어디에도 없었습니다. 결함 326
+ * (어휘는 셋인데 문구가 둘)과 같은 모양입니다 — **갈래를 세고 그
+ * 개수만큼 문장을 두십시오.**
+ *
+ * ⚠️ **SPA 의 「검토 끝내기」와 규칙이 다릅니다.** 그쪽은 「하나도 남기지
+ * 말고 다 처리하라」(`lanes.pending > 0` 이면 막음)이고, 이쪽은 「정한
+ * 것만 올리고 나머지는 나중에」입니다. 그래서 함수를 **하나로 합치지
+ * 않았습니다** — 뜻이 다른 둘을 같은 이름으로 부르면 다음 사람이 아무
+ * 거나 가져다 씁니다(결함 353). 이름에 `Batch` 를 붙여 갈라 둡니다.
+ *
+ * 순서는 `whyCannotSave` 와 같은 뜻입니다 — **지금 벌어지는 일이 맨 앞,
+ * 값의 문제가 그다음, 「아직 아무것도 안 했습니다」가 맨 뒤.**
+ */
+export function whyCannotSubmitBatch(
+  summary: ReviewSummary,
+  options: { sending?: boolean } = {},
+): string | null {
+  if (options.sending === true) return '제출하는 중입니다';
+  if (summary.blocked > 0) {
+    return `${summary.blocked}건에 빠진 정보가 있어 제출할 수 없습니다`;
+  }
+  if (summary.approving + summary.rejecting === 0) {
+    // ⚠️ 「0건을 정했습니다」가 아니라 **무엇을 하면 열리는지**를 적습니다.
+    // 후보가 0건인 회의에서는 정할 것 자체가 없으므로 말이 달라집니다.
+    // ⚠️ **개수를 다시 적지 않습니다.** 「전체 12 · 검토 필요 12」가 바로
+    //    위에 이미 서 있고, 이 줄은 44px 짜리 띠 안에 들어갑니다 — 길면
+    //    창 반쪽에서 두 줄이 되어 단추와 높이를 다툽니다(렌더해서 봤습니다).
+    return summary.total === 0
+      ? '검토할 후보가 없습니다'
+      : '하나라도 등록하거나 거절해야 제출할 수 있습니다';
+  }
+  return null;
+}
+
+/**
  * 제출하고 나서 사람에게 할 말 (결함 85).
  *
  * 예전에는 한 줄이었습니다.
@@ -562,10 +687,43 @@ export function canSubmit(summary: ReviewSummary): boolean {
  * 후보 셋을 읽고 셋 다 거절한 참입니다. 등록이 0건인 것은 결과이지
  * 아무 일도 안 일어난 것이 아닙니다.
  */
-export function describeSubmitResult(approvedCount: number, taskIds: number[]): string {
+export function describeSubmitResult(
+  approvedCount: number,
+  taskIds: number[],
+  /**
+   * 내가 **승인 표시한** 건수. 서버의 답만으로는 「0건」의 뜻을 못 가릅니다.
+   *
+   * ⛔ 이것 없이는 **정반대 두 결과가 같은 문장**을 받습니다 (결함 233):
+   *
+   *   - 전부 거절해서 0건 → 「칸반에 등록된 업무는 없습니다」 (맞는 말)
+   *   - 셋을 승인했는데 0건 → **같은 문장** ⛔
+   *
+   * 둘이 동시에 검토하면 뒤에 누른 사람이 그렇게 됩니다 — 서버는 멱등이라
+   * 조용히 `approved_count: 0` 을 주고, 그 사람은 자기 승인 셋이 반영된
+   * 줄 압니다. 재현했습니다: 둘이 같은 회의를 열고 A 가 먼저 끝내니
+   * B 는 `{"approved_task_ids":[],"approved_count":0}` 을 받고도
+   * A 와 **글자 하나 다르지 않은** 화면을 봤습니다.
+   */
+  requestedCount = 0,
+): string {
+  if (requestedCount > 0 && approvedCount === 0) {
+    // ⚠️ "다른 사람이 먼저 했다" 고 **단정하지 않습니다.** 우리가 아는
+    //    것은 "표시한 것이 안 들어갔다" 뿐입니다.
+    return (
+      `승인 표시한 ${requestedCount}건 중 새로 등록된 것이 없습니다 — ` +
+      '이미 처리된 회의입니다. 새로고침해 지금 상태를 보세요'
+    );
+  }
   if (approvedCount === 0) {
     // ⚠️ 여기서 "실패" 라고 하지 않습니다. 거절은 정상적인 결정입니다.
     return '검토를 반영했습니다 — 칸반에 등록된 업무는 없습니다';
+  }
+  if (requestedCount > approvedCount) {
+    const missed = requestedCount - approvedCount;
+    return (
+      `${approvedCount}건이 칸반에 등록됐습니다 — 표시한 ${requestedCount}건 중 ` +
+      `${missed}건은 등록되지 않았습니다. 새로고침해 확인하세요`
+    );
   }
   // 번호가 안 왔으면 지어내지 않고 건수만 말합니다.
   const numbers = taskIds.filter((id) => Number.isFinite(id));

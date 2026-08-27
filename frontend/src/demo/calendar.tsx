@@ -21,7 +21,10 @@ import {
   dayAriaLabel,
   dayOf,
   describeKind,
+  canCancelMeeting,
+  cancelMeetingConfirm,
   describeMonth,
+  emptyNote,
   hrefFor,
   isOverdue,
   itemsInMonth,
@@ -34,8 +37,9 @@ import {
   type DayCell,
 } from '../lib/calendar/month.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
-import { todayInTeamCalendar } from '../lib/time/calendar.ts';
+import { teamInstantOf, todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
@@ -83,7 +87,7 @@ function Cell({
     <button
       type="button"
       className={classes.join(' ')}
-      aria-label={dayAriaLabel(cell)}
+      aria-label={dayAriaLabel(cell, today)}
       {...(picked ? { 'aria-current': 'date' as const } : {})}
       onClick={() => onPick(cell.date)}
     >
@@ -146,7 +150,74 @@ function App() {
     void load(at.year, at.month);
   }, [at, load]);
 
+  /* ⛔ **만들어 놓고 아무도 안 부르던 것**입니다 (결함 298).
+     `DELETE /api/scheduled-meetings/{id}` 는 서버에 처음부터 있었고 검사도
+     붙어 있었는데 부르는 곳이 0곳이었습니다 — 잘못 잡거나 두 번 잡은
+     일정이 달력·홈·회의 목록에 **영영 남았습니다.**
+
+     ⚠️ 무를 수 있는지 **최종 판정은 서버**입니다. 여기서 다시 판단하면
+     같은 규칙이 두 벌이 되고, 격자가 이웃 달을 걸치면 이미 연 회의도
+     `meeting_planned` 로 그려질 수 있습니다. 거절당하면 **서버가 한 말**을
+     그대로 보여 줍니다. */
+  const cancelMeeting = useCallback(
+    async (meetingId: number, title: string): Promise<void> => {
+      if (!window.confirm(cancelMeetingConfirm(title))) return;
+      setSending(true);
+      try {
+        const response = await trySend(() =>
+          fetch(`${apiBase}/api/scheduled-meetings/${meetingId}`, {
+            method: 'DELETE',
+            credentials: 'same-origin',
+          }),
+        );
+        if (response === null) {
+          setNote({ text: unreachableText('일정을 못 물렀습니다'), tone: 'bad' });
+          return;
+        }
+        if (isSessionExpired(response.status)) {
+          goToLogin();
+          return;
+        }
+        if (!response.ok) {
+          /* 400 은 「이미 연 회의는 무를 수 없습니다」입니다 — 그 문장이
+             `describeHttpStatus` 의 일반론보다 훨씬 쓸모 있습니다.
+
+             ⚠️ `detail` 을 `string` 으로 단언하면 안 됩니다 — 422 는
+             **객체 배열**이라 화면에 `[object Object]` 가 찍힙니다
+             (결함 51). 한 벌짜리 `detailText` 를 씁니다. 이 가드가
+             바로 위 코드를 잡아 줬습니다. */
+          const body: unknown = await response.json().catch(() => null);
+          setNote({
+            text: detailText(
+              body,
+              describeHttpStatus(response.status) ?? '일정을 못 물렀습니다',
+            ),
+            tone: 'bad',
+          });
+          return;
+        }
+        setNote({ text: '일정을 물렀습니다.', tone: 'plain' });
+        await load(at.year, at.month);
+      } finally {
+        setSending(false);
+      }
+    },
+    [at, load],
+  );
+
   const schedule = useCallback(async (): Promise<void> => {
+    /* ⚠️ `datetime-local` 은 **시간대가 없는** 글자입니다. 예전에는
+       `new Date(when).toISOString()` — **브라우저 달력**으로 읽었습니다.
+       브라우저 시간대를 바꿔 가며 같은 「10:00」을 넣어 재 보니 팀 달력에
+       Seoul 10:00 · UTC **19:00** · New York **23:00** 으로 나갔습니다
+       (결함 409). 이 제품의 시각은 팀 달력입니다(결함 246) — 읽는 쪽은
+       그때 다 옮겼는데 **쓰는 쪽만 남아** 있었습니다. */
+    const instant = teamInstantOf(when);
+    if (instant === null) {
+      // 시각을 지어내지 않습니다. 무엇이 문제인지는 그 칸이 말합니다.
+      setNote({ text: '회의 시각을 읽지 못했습니다 — 날짜와 시각을 다시 골라 주세요.', tone: 'bad' });
+      return;
+    }
     setSending(true);
     try {
       const response = await trySend(() =>
@@ -154,10 +225,7 @@ function App() {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          // ⚠️ `datetime-local` 은 **시간대가 없는** 글자입니다. 그대로
-          //    보내면 서버가 UTC 로 읽어 9시간 어긋납니다. 브라우저의
-          //    시간대로 해석해 순간으로 바꿔 보냅니다.
-          body: JSON.stringify({ title, at: new Date(when).toISOString() }),
+          body: JSON.stringify({ title, at: instant }),
         }),
       );
       if (response === null) {
@@ -169,8 +237,15 @@ function App() {
         return;
       }
       if (!response.ok) {
+        /* 서버가 쓴 문장이 먼저입니다 (결함 301) — 「회의 이름이 비어
+           있습니다」처럼 400 으로 오는 것들이 `describeHttpStatus` 에는
+           한 줄도 없습니다. 무르기 쪽(결함 298)만 고쳐 두고 **바로 위
+           만들기 쪽은 그대로**였습니다 — 가드가 잡아 줬습니다. */
         setNote({
-          text: describeHttpStatus(response.status) ?? '일정을 못 잡았습니다',
+          text: detailText(
+            await response.json().catch(() => null),
+            describeHttpStatus(response.status) ?? '일정을 못 잡았습니다',
+          ),
           tone: 'bad',
         });
         return;
@@ -188,9 +263,25 @@ function App() {
     <header className="head">
       <h1>일정</h1>
       <p className="lede">
-        업무 마감일·회의·프로젝트 마감일을 한 달로 봅니다. 따로 적어 두는 것이
-        아니라 <b>그때그때 읽어서</b> 만들기 때문에, 칸반에서 마감일을 고치면
-        여기가 바로 따라옵니다.
+        {/* ⚠️ 예전에는 「**칸반에서 마감일을 고치면** 여기가 바로 따라옵니다」
+            였습니다 (결함 386). 서버는 마감일을 바꿀 수 있고(`TaskPatch.deadline`
+            · `_change_deadline`) 그 이력까지 남기는데, **그것을 보내는 화면이
+            두 뿌리 다 0곳**입니다 — 마감일은 후보를 승인할 때 한 번 정해지고
+            그 뒤로 못 바꿉니다. 화면이 「할 수 있다」고 말하면 그 자리를
+            세십시오(결함 313). 대신 **실제로 있는 두 자리**를 듭니다.
+
+            ⚠️⚠️ **그렇게 적어 놓고 셋을 나열했습니다** (결함 408). 남아
+            있던 「프로젝트 마감일」은 `projects.deadline` 인데, 그 칸은
+            읽는 곳이 셋(달력·기여도·리스크)이고 **쓰는 곳이 0곳**입니다 —
+            `db/vocab.py` 가 「달력의 `project_due` 는 한 번도 그려진 적이
+            없습니다」라고 적어 두고 있었습니다. 달력 API 를 십 년 범위로
+            불러 세어도 `meeting_held 5 · task_due 3` 뿐이고
+            `project_due`·`task_start`·`meeting_planned` 는 0건입니다.
+            ⚠️ **범위를 말할 때는 세어 보고 쓰십시오**(결함 304) — 「두
+            자리」라고 적은 주석 바로 아래가 셋이었습니다. */}
+        업무 마감일과 회의를 한 달로 봅니다. 따로 적어 두는 것이
+        아니라 <b>그때그때 읽어서</b> 만들기 때문에, 회의를 새로 잡거나 업무
+        후보를 승인하면 여기가 바로 따라옵니다.
       </p>
     </header>
   );
@@ -265,16 +356,13 @@ function App() {
             </div>
 
             {listed.length === 0 ? (
-              <RawHtml
-                html={emptyHtml({
-                  what:
-                    pickedCell === null
-                      ? '이 달에는 잡힌 일이 없습니다'
-                      : '이 날에는 잡힌 일이 없습니다',
-                  why: '일정은 자동으로 생기지 않습니다 — 업무 마감일이나 회의에서 옵니다.',
-                  how: '아래에서 회의 일정을 잡거나, 칸반에서 업무에 마감일을 주세요.',
-                })}
-              />
+              /* ⛔ **격자에 뱃지가 보이는데 「없습니다 · 만드세요」 라고
+                 시키지 않습니다** (결함 294). 8월을 열면 격자 끝 줄에 9월
+                 초 나흘이 붙어 보이는데, 씨앗 프로젝트는 거기에 회의 넷과
+                 마감 하나가 떠 있었고 이 상자는 「칸반에서 업무에 마감일을
+                 주세요」 라고 했습니다 — 이미 있는 것을 만들라고 시킨
+                 것입니다. 무슨 말을 할지는 격자가 아는 것에서 정합니다. */
+              <RawHtml html={emptyHtml(emptyNote(cells, pickedCell))} />
             ) : (
               <ul className="ilist">
                 {listed.map((thing, i) => {
@@ -298,6 +386,17 @@ function App() {
                         </a>
                       )}
                       {thing.who !== null && <span className="iwho">{thing.who}</span>}
+                      {/* 잡아 둔 일정은 **무를 자리**가 있어야 합니다 (결함 298). */}
+                      {canCancelMeeting(thing) && (
+                        <button
+                          type="button"
+                          className="icancel"
+                          disabled={sending}
+                          onClick={() => void cancelMeeting(thing.meeting_id!, thing.title)}
+                        >
+                          무르기
+                        </button>
+                      )}
                     </li>
                   );
                 })}

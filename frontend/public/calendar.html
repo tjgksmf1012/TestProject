@@ -62,6 +62,23 @@
   .cell.today { border-color: var(--primary); }
   .cell.picked { border-color: var(--primary); background: var(--primary-tint); }
 
+  /* ⛔ **고대비에서는 「오늘」도 「이웃 달」도 사라집니다** (결함 400).
+
+     `.cell` 은 이미 `border: 1px solid var(--line)` 을 가지고 있고 오늘은
+     그 **색만** 바꿉니다. `forced-colors: active` 는 테두리를 전부 같은
+     시스템 색으로 덮으므로, 오늘 칸이 옆 칸과 **한 자도 안 달라집니다** —
+     테두리·배경·글자색·무게가 전부 같습니다(재서 확인).
+
+     이웃 달 칸도 같습니다. `border-color: transparent` 가 **보이는 테두리로
+     바뀌고** 흐린 글자색도 덮여, 지난달 27일이 이 달 27일과 같아 보입니다.
+
+     시스템 색 이름은 안 덮입니다(결함 393·399 의 방법). */
+  @media (forced-colors: active) {
+    .cell.today { border-color: Highlight; }
+    .cell.picked { border-color: Highlight; }
+    .cell.out { color: GrayText; border-color: GrayText; }
+  }
+
   .dnum { font-variant-numeric: tabular-nums; }
 
   /* 그 날의 건수. ⚠️ **글자**입니다 — 점을 개수만큼 찍으면 그게 곧
@@ -106,6 +123,15 @@
   .ititle { font-size: var(--fs-label); color: var(--text); }
   .iwho { font-size: var(--fs-caption); color: var(--text-subtle); }
 
+  /* 잡아 둔 일정 무르기 (결함 298). ⚠️ 줄 끝으로 밀어 둡니다 — 제목 옆에
+     붙으면 읽는 눈이 매번 버튼을 지나갑니다. 위험한 단추가 아니라
+     **가끔 쓰는** 단추라 조용한 모양입니다. */
+  .icancel { margin-left: auto; min-height: var(--tap);
+             padding: var(--sp-1) var(--sp-3);
+             background: transparent; border: 1px solid var(--line);
+             border-radius: var(--r-ctrl); color: var(--text-muted);
+             font-size: var(--fs-caption); }
+
   /* ── 일정 잡기 ─────────────────────────────────────── */
   .sform { display: grid; gap: var(--sp-2); max-width: 26rem; }
   .clabel { font-size: var(--fs-caption); color: var(--text-subtle); }
@@ -125,6 +151,11 @@
   <div id="app"></div>
 
   <script type="module" src="/calendar.js"></script>
+
+  <!-- 탭 넷 **말고** 가는 곳. `src/demo/nav.ts` 가 `navLinks` 로 채운다.
+       ⛔ 이 자리를 지우면 채팅·일정·알림·활동·찾기·보고서로 **가는 길이
+       제품 전체에서 사라집니다** — 실제로 그랬습니다 (결함 305). -->
+  <nav id="nav" aria-label="더 보기"></nav>
 
   <nav id="tabs" aria-label="주요 화면"></nav>
 </body>

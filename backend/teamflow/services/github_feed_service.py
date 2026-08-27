@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 from teamflow.clock import as_utc
 from teamflow.db import models as m
 from teamflow.db import vocab
+from teamflow.github import presenting
 
 #: 한 번에 내려보내는 최대 줄 수. 화면은 최근 것을 보는 곳이고,
 #: 전체 검색은 검색 화면(§20)이 담당합니다.
@@ -83,7 +84,11 @@ def recent(session: Session, project_id: int, limit: int = MAX_ITEMS) -> list[Fe
                 id=event.id,
                 kind=event.event_type,
                 label=_label(event.event_type),
-                who=user_name or event.actor_login,
+                # ⚠️ 갈래가 **셋**입니다 — 팀원 이름 → 로그인 → 모름
+                #    (결함 347). 예전에는 `user_name or actor_login` 이라
+                #    둘 다 비면 **빈 글자**가 나가 화면의 칸이 통째로
+                #    사라졌습니다. 판단은 `github/presenting.py` 한 곳.
+                who=presenting.actor_name(user_name, event.actor_login),
                 repo=event.repo,
                 ref=event.ref,
                 occurred_at=as_utc(event.occurred_at).isoformat(),
@@ -117,8 +122,9 @@ def counts(session: Session, project_id: int) -> list[KindCount]:
 
 
 def _label(kind: str) -> str:
-    """종류 → 사람 말. 모르는 종류는 **값 그대로** — 지어내지 않습니다."""
-    try:
-        return vocab.GITHUB_EVENT_LABEL[vocab.GithubEventKind(kind)]
-    except ValueError:
-        return kind
+    """종류 → 사람 말. 판단은 `github/presenting.py` 한 곳입니다 (결함 347).
+
+    ⚠️ 여기 두 벌째를 만들면 안 됩니다 — 찾기 화면이 이 표를 안 거쳐서
+    「issues.closed」를 그대로 띄우고 있었습니다.
+    """
+    return presenting.event_label(kind)

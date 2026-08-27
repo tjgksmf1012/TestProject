@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
 from teamflow.config import Settings, get_settings
 from teamflow.db import models as m
@@ -375,6 +377,101 @@ def test_seeded_events_do_not_squat_on_real_task_ids(client: TestClient, seeded:
     assert squatted == [], f"합성 이벤트가 선점한 업무: {squatted}"
 
 
+def test_a_seeded_completion_carries_its_schedule_verdict(seeded: dict):
+    """⭐ 완료 이벤트는 **혼자 오지 않는다** — 마감 판정이 짝이다 (결함 385).
+
+    실기의 `task_service.complete` 는 `TASK_COMPLETED` 를 쓴 바로 다음에
+    마감 준수를 판정해 `DEADLINE_MET` / `DEADLINE_MISSED` 를 **같은
+    `source_id`** 로 씁니다. 건너뛰는 경우는 **마감일이 없을 때뿐**입니다.
+    즉 「완료는 있는데 판정이 없다」는 이 제품이 만들 수 없는 상태입니다.
+
+    씨앗은 오래도록 완료만 손으로 적었습니다. `schedule` 이 팀 전체 0건이면
+    화면이 그 범주를 통째로 빼기 때문에 **아무 표시가 안 났고**, 카드를
+    하나 완료로 옮기는 순간 범주가 살아나 박지원이 「일정 준수 0건 ·
+    팀의 0%」로 나왔습니다 — 완료한 것으로 적혀 있는 사람인데도.
+
+    ⚠️ **낱개 사례를 세지 않습니다.** 완료 이벤트를 전수로 돌면서 짝을
+    찾습니다. 다음 사람이 완료를 하나 더 넣으면 그 줄이 이 검사를 깨웁니다.
+    """
+    SCHEDULE_VERDICTS = {"deadline_met", "deadline_missed"}
+    with db_session.session_scope() as s:
+        rows = s.scalars(select(m.ContributionEventRow)).all()
+        completions = {
+            (r.user_id, r.source_kind, r.source_id)
+            for r in rows
+            if r.event_type == "task_completed"
+        }
+        verdicts = {
+            (r.user_id, r.source_kind, r.source_id)
+            for r in rows
+            if r.event_type in SCHEDULE_VERDICTS
+        }
+    # 자가 아무것도 안 보고 있으면 그것 자체가 실패다 (결함 286).
+    assert completions, "씨앗에 완료 이벤트가 하나도 없습니다 — 이 검사가 낡았습니다"
+    orphans = sorted(completions - verdicts)
+    assert orphans == [], (
+        f"완료 이벤트에 마감 판정이 없습니다: {orphans} — 실기는 둘을 같이 씁니다. "
+        "이 상태에서는 누가 업무를 하나 완료하는 순간 나머지 사람이 "
+        "「일정 준수 0건」으로 그려집니다 (결함 385)"
+    )
+
+
+def test_the_seed_draws_both_sides_of_the_deadline(seeded: dict):
+    """⭐ 「제때」만 있으면 「늦음」 갈래는 한 번도 안 그려진다.
+
+    셋 다 `deadline_met` 이면 준수율이 전원 1.0 이라 `_schedule_raw` 의
+    분자·분모가 같아지고, 그 갈래를 아무도 검수하지 못합니다 — 「갈라지는
+    데이터로 재십시오」가 씨앗에도 걸립니다(결함 327·348).
+    """
+    with db_session.session_scope() as s:
+        kinds = {
+            r.event_type
+            for r in s.scalars(select(m.ContributionEventRow)).all()
+            if r.event_type in {"deadline_met", "deadline_missed"}
+        }
+    assert kinds == {"deadline_met", "deadline_missed"}, (
+        f"씨앗이 만드는 마감 판정: {sorted(kinds)} — 한쪽만 있으면 반대 갈래가 "
+        "미검증입니다"
+    )
+
+
+def test_the_seeds_schedule_scores_actually_diverge(seeded: dict):
+    """⭐ 「양쪽 갈래가 다 있다」와 「점수가 갈린다」는 다른 말이다.
+
+    `_schedule_raw` 는 `10 * 비율 * min(1, 건수/5)` 입니다. 처음 고른 값에서
+    셋의 raw 가 **전부 2.0** 이었습니다 — `1.0 × 0.2` 와 `0.5 × 0.4` 가
+    정확히 상쇄합니다. 그 상태로는 `missed` 항을 통째로 지워도 씨앗이
+    아무것도 못 잡습니다: 갈래는 그려지는데 **값이 안 갈립니다.**
+
+    「이름 순과 번호 순이 같은 명단으로 정렬을 잰 것」과 같은 함정이라,
+    갈래가 아니라 **값**을 봅니다.
+    """
+    from teamflow.contribution.events import EventType
+
+    FLOOR = 5
+
+    def schedule_raw(met: int, missed: int) -> float:
+        total = met + missed
+        if total == 0:
+            return 0.0
+        return 10.0 * (met / total) * min(1.0, total / FLOOR)
+
+    with db_session.session_scope() as s:
+        rows = s.scalars(select(m.ContributionEventRow)).all()
+    per_user: dict[int, list[int]] = {}
+    for r in rows:
+        if r.event_type == EventType.DEADLINE_MET.value:
+            per_user.setdefault(r.user_id, [0, 0])[0] += 1
+        elif r.event_type == EventType.DEADLINE_MISSED.value:
+            per_user.setdefault(r.user_id, [0, 0])[1] += 1
+    assert len(per_user) >= 2, "일정 판정을 가진 사람이 둘도 안 됩니다 — 이 검사가 낡았습니다"
+    raws = {u: schedule_raw(met, missed) for u, (met, missed) in per_user.items()}
+    assert len(set(raws.values())) > 1, (
+        f"씨앗의 일정 준수 점수가 전원 같습니다: {raws} — 갈래는 둘인데 값이 "
+        "안 갈리면 missed 항이 사라져도 아무도 못 봅니다"
+    )
+
+
 # ══════════════════════════════════════════════════════════════
 # 3. 가짜 ASR — GPU 없이 회의 처리가 도는가
 # ══════════════════════════════════════════════════════════════
@@ -719,6 +816,20 @@ def test_seeded_board_shows_the_chain_and_the_exceptions(client: TestClient, see
 
     회의에서 나온 업무 · 손으로 만든 업무 · 담당자 없는 업무 · 완료된 업무.
     전부 같은 모양이면 이 화면은 그냥 할 일 목록으로 보입니다.
+
+    ⚠️ **이 검사와 제품의 불변식이 서로 어긋나 있습니다** (결함 318).
+
+        approval_service.py  「승인 없이 tasks 에 쓰는 경로는 이 함수
+                              어디에도 없다 — 그게 불변식이다」
+        여기                  「손으로 만든 업무도 있어야 합니다」
+
+    즉 씨앗은 **실기가 만들 수 없는 값**을 만들고 있습니다 (결함 288 이
+    적어 둔 그 함정). 시연 칸반 다섯 중 셋이 그 상태이고, 카드를 열면
+    「어느 회의에서 나왔는지 기록이 없습니다」가 셋 뜹니다.
+
+    어느 쪽이 맞는지는 **제품 결정**이라 여기서 고르지 않았습니다 —
+    docs/17 318번에 「결정이 필요한 자리」로 적어 두었습니다. 한쪽만
+    조용히 바꾸지 마십시오.
     """
     tasks = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()["tasks"]
 
@@ -998,3 +1109,206 @@ def test_seeding_twice_does_not_double_the_links(client: TestClient, seeded):
     for task in board["tasks"]:
         numbers = [link["event_id"] for link in task["github"]]
         assert len(numbers) == len(set(numbers))
+
+
+def test_the_demo_project_has_an_owner(engine, seeded) -> None:
+    """⭐ 시연 프로젝트에 **소유자가 있는가.**
+
+    없던 동안 세 사람이 전부 `member` 였고, 그래서 **아무도 팀원을 다룰 수
+    없었습니다** — 등급 변경도, 내보내기도, 프로젝트 이름·저장소 저장도
+    관리자 이상이라 셋 다 영영 막혀 있었습니다.
+
+    ⚠️ 제품은 그 상태를 만들 수 없습니다. `POST /api/projects` 는 만든
+    사람을 소유자로 넣고, 그 주석에 "소유자가 0명이면 아무도 못 고치는
+    프로젝트가 된다" 고 적혀 있습니다. **시드가 제품이 만들 수 없는 상태를
+    만들고 있었고, 그 상태로 화면을 재 왔습니다** — 초대 코드 때(결함 71)
+    겪은 것과 같은 종류입니다.
+    """
+    with Session(engine) as session:
+        roles = list(
+            session.scalars(
+                select(m.Member.project_role).where(
+                    m.Member.project_id == seeded["project_id"]
+                )
+            )
+        )
+    assert roles, "시연 프로젝트에 팀원이 없습니다"
+    assert roles.count("owner") == 1, f"소유자가 {roles.count('owner')}명입니다 — {roles}"
+    # 나머지는 팀원. 관리자를 시드가 만들 이유는 없습니다.
+    assert set(roles) == {"owner", "member"}, roles
+
+
+def test_live_documents_do_not_misstate_what_the_seed_makes(seeded, engine):
+    """⭐ 살아 있는 문서가 **씨앗이 만드는 개수**를 틀리게 말하지 않는가.
+
+    `AGENTS.md` 가 오래도록 「씨앗은 회의 5개·**채널 2개**뿐이라」라고
+    적고 있었습니다. 세어 보니 씨앗은 채널을 **하나도** 안 만듭니다 —
+    채팅은 빈 채널 목록으로 시작합니다. 회의 5개는 맞았고 채널만
+    틀렸습니다.
+
+    ⚠️ **이 저장소 자신의 규칙이 이 자리에 걸립니다** — 「문서에 적힌
+    숫자를 그대로 믿지 말고 세어 보세요」. 그 규칙이 적힌 파일이 바로
+    틀린 숫자를 들고 있었습니다(결함 341 이 `vocab.py` 에서 겪은 그것).
+
+    ⚠️ **행을 셉니다, 부르는 자리가 아니라.** 처음에는 씨앗 대본의
+    `m.Meeting(` 을 셌는데 **2** 가 나왔습니다 — 그중 하나가 루프 안에
+    있어서 실제로는 5행을 만듭니다. 「부르는 자리」와 「만들어지는 것」은
+    다릅니다. 그래서 씨앗을 실제로 돌리는 이 파일에 둡니다.
+    """
+    import re
+
+    from teamflow.db import models as md
+
+    repo_root = Path(__file__).resolve().parents[2]
+
+    # 문서가 「씨앗은 … <이름> N개」 라고 적는 것들.
+    CLAIMS = {"회의": md.Meeting, "채널": md.Channel, "업무": md.Task}
+    with Session(engine) as session:
+        made = {
+            korean: session.query(model).count() for korean, model in CLAIMS.items()
+        }
+
+    pattern = re.compile(rf"({'|'.join(CLAIMS)})\s*(\d+)\s*개")
+    bad: list[str] = []
+    for name in ("AGENTS.md", "README.md"):
+        path = repo_root / name
+        if not path.exists():
+            continue
+        # ⚠️ **인용부터 걷습니다** (결함 238 의 마크다운판). 이 저장소는
+        #    「예전에는 이렇게 적혀 있었다」를 낫표 안에 인용해 둡니다 —
+        #    안 걷으면 **틀렸다고 적어 둔 그 문장**을 살아 있는 주장으로
+        #    읽고 자기 자신을 잡습니다. 실제로 그렇게 잡혔습니다.
+        #
+        # ⚠️ **줄 단위로 걷으면 안 됩니다** — 인용이 두 줄에 걸치면 여는
+        #    낫표가 앞줄에 있어 뒷줄에서는 안 보입니다(결함 299 의 모양).
+        #    문서 전체에서 지우되 **줄바꿈은 남겨** 줄 번호를 지킵니다.
+        text = re.sub(
+            r"「[^」]*」",
+            lambda m: re.sub(r"[^\n]", " ", m.group(0)),
+            path.read_text(encoding="utf-8"),
+        )
+        for line_no, line in enumerate(text.splitlines(), 1):
+            # 「씨앗」 이 있는 줄만 봅니다 — 다른 맥락의 「회의 5개」 는
+            # 이 검사가 말할 것이 아닙니다.
+            if "씨앗" not in line:
+                continue
+            for hit in pattern.finditer(line):
+                korean, claimed = hit.group(1), int(hit.group(2))
+                if made[korean] != claimed:
+                    bad.append(
+                        f"{name}:{line_no} — '{hit.group(0)}' "
+                        f"(씨앗이 실제로 만드는 것은 {made[korean]}개)"
+                    )
+
+    assert not bad, "씨앗이 만드는 개수를 틀리게 적은 곳이 있습니다:\n  " + "\n  ".join(bad)
+
+
+def test_the_demo_never_says_a_future_meeting_already_happened(seeded: dict):
+    """⭐ 씨앗의 회의는 **전부 과거**여야 한다 (결함 388).
+
+    `started_at` 은 회의가 **시작할 때** 찍힙니다 — 미래일 수 없습니다.
+    그런데 씨앗이 고정 날짜(`2026-09-01`)를 쓰고 있어서, 그 날짜 **이전에**
+    시연을 열면 미래인 회의 다섯이 `needs_review`·`processing`·`confirmed`·
+    `failed` 를 달고 있었습니다. 달력이 그대로 드러냈습니다 —
+
+        1일  연 회의  1주차 정기회의      ← 그날은 8월 25일이었습니다
+
+    `calendar_service` 의 `ItemKind` 주석이 막으려던 바로 그것입니다:
+    「"이미 한 것" 과 "앞으로 할 것" 을 같은 모양으로 그리면 달력에서 제일
+    알고 싶은 것이 지워진다.」
+
+    ⚠️ **낱말이 아니라 요구를 잽니다** — 상수를 읽지 않고, 씨앗이 실제로
+    만든 행의 시각을 지금과 견줍니다.
+    """
+    now = datetime.now(UTC)
+    with db_session.session_scope() as session:
+        rows = [
+            (meeting.id, meeting.status, meeting.started_at)
+            for meeting in session.query(m.Meeting).order_by(m.Meeting.id).all()
+        ]
+    assert rows, "씨앗에 회의가 없습니다 — 이 검사가 낡았습니다"
+    future = [
+        f"회의{mid}({status}) started_at={started.isoformat()[:16]}"
+        for mid, status, started in rows
+        if started is not None and started.replace(tzinfo=UTC) > now
+    ]
+    assert future == [], (
+        "시작한 적 있는 회의의 시각이 **미래**입니다 — 제품이 만들 수 없는 "
+        f"상태이고, 달력이 「연 회의」로 그립니다 (결함 388): {future}"
+    )
+
+
+def test_the_pending_candidate_can_still_be_approved(seeded: dict):
+    """⭐ 시연의 대표 장면이 **실제로 돌아야** 한다 (결함 388).
+
+    회의를 과거로 옮기면 그 회의에서 나온 마감일도 같이 과거가 됩니다.
+    그런데 서버는 **과거 마감을 거절합니다**(`DEADLINE_IN_PAST` — 결함 386
+    회차에 확인). 승인 대기 후보의 마감이 과거면 시연자가 그 후보를 승인할
+    수 없고, 그건 이 저장소가 「대표 주장을 눈으로 확인하는 순간」이라고
+    적어 둔 자리입니다.
+
+    ⚠️ 상수를 읽지 않고 **승인 판단을 실제로 물어** 봅니다.
+    """
+    now = datetime.now(UTC)
+    with db_session.session_scope() as session:
+        pending = [
+            candidate
+            for candidate in session.query(m.MeetingTaskCandidate).all()
+            if candidate.deadline is not None and candidate.created_task_id is None
+        ]
+        assert pending, "승인 대기 후보에 마감일이 하나도 없습니다 — 이 검사가 낡았습니다"
+        stale = [
+            f"후보{c.id}({c.title}) 마감={c.deadline.date()}"
+            for c in pending
+            if c.deadline.replace(tzinfo=UTC) <= now
+        ]
+    assert stale == [], (
+        "승인 대기 후보의 마감이 과거입니다 — 서버가 「마감일이 과거입니다」로 "
+        f"막아 시연의 승인 장면이 안 돕니다 (결함 388): {stale}"
+    )
+
+
+def test_the_seed_makes_name_order_visible(seeded: dict):
+    """⭐ 씨앗의 **이름 순 · 번호 순 · 점수 순**이 서로 갈린다.
+
+    불변식 ①은 「목록은 이름 순. 점수 순 정렬 금지」입니다. 그런데 그것을
+    **화면에서 확인할 수 있으려면** 세 순서가 갈라져야 합니다 — 이름 순과
+    번호 순이 같은 명단이면 화면이 `orderForDisplay` 를 통째로 빼먹어도
+    그대로 통과합니다(결함 327 이 가중치에서, 348 이 우선순위에서 겪은
+    그것). 실제로 오래도록 그랬습니다: 예전 씨앗에서 서버가 내려보내는
+    번호 순이 **하필 점수 내림차순**이었습니다.
+
+    지금은 갈립니다 —
+
+        번호 순  김민수(1) · 이하늘(2) · 박지원(3)
+        이름 순  김민수 · 박지원 · 이하늘        ← 화면이 그리는 순서
+        점수 순  이하늘 · 김민수 · 박지원
+
+    ⚠️ **점수는 재서 봅니다.** 씨앗의 이벤트 배치가 바뀌면 다시 겹칠 수
+    있고, 겹치는 순간 이 검사가 먼저 웁니다 — 그때 고칠 것은 화면이 아니라
+    **씨앗**입니다.
+    """
+    from teamflow.services import scoring_service
+
+    with db_session.session_scope() as session:
+        members = session.scalars(select(m.Member).where(m.Member.project_id == 1)).all()
+        people = {
+            member.user_id: session.get(m.User, member.user_id).name for member in members
+        }
+        scored = scoring_service.compute(session, project_id=1)
+
+    by_id = sorted(people)
+    by_name = sorted(people, key=lambda uid: people[uid])
+    # ⚠️ `TeamScoreResult.members` 는 **dict** 입니다 (`{user_id: MemberScore}`).
+    shares = {uid: row.share for uid, row in scored.members.items()}
+    by_score = sorted(shares, key=lambda uid: -shares[uid])
+
+    assert len(by_id) >= 3, f"씨앗 팀원이 {len(by_id)}명입니다 — 이 검사가 낡았습니다"
+    assert by_name != by_id, (
+        f"이름 순과 번호 순이 같습니다: {[people[u] for u in by_name]} — 화면이 "
+        "이름 순으로 세우는지 **구조적으로** 확인할 수 없습니다 (불변식 ①)"
+    )
+    assert by_score != by_name, (
+        f"점수 순과 이름 순이 같습니다: 점수 {shares} — 리더보드를 그려도 "
+        "이름 순처럼 보입니다 (불변식 ①)"
+    )

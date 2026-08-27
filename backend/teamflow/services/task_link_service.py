@@ -48,7 +48,9 @@ from teamflow.services import notification_service
 logger = logging.getLogger(__name__)
 
 #: 연결을 만드는 이벤트. 리뷰나 이슈는 "이 업무가 이 PR 로 끝났다" 가 아닙니다.
-LINKED_EVENT_TYPES = frozenset({str(vocab.GithubEventKind.PR_MERGED)})
+#: ⚠️ 원본은 `vocab.LINKED_TO_TASKS` 입니다 (결함 357). 여기 다시 적으면
+#: 두 벌이 되고, **알림 문장이 그 집합에 기대고 있습니다.**
+LINKED_EVENT_TYPES = frozenset(str(kind) for kind in vocab.LINKED_TO_TASKS)
 
 
 def link_pull_request(session: Session, event: m.GithubEvent) -> list[TaskRef]:
@@ -162,12 +164,17 @@ def _tell_the_assignee(
             #    같은 방식으로 거릅니다 — `record()` 자체는 누가 했는지 모릅니다.
             if user_id == actor_id:
                 continue
+            # ⚠️ **사건까지 넘깁니다** (결함 396). `task_id` 만 넘기면 한
+            #    업무에 PR 이 둘 붙었을 때 두 줄이 글자·시각·링크까지
+            #    똑같아지고, 둘 중 하나가 브랜치로 **추정**된 연결이어도
+            #    확정과 한 자도 안 달라집니다.
             notification_service.record(
                 session,
                 user_id=user_id,
                 project_id=task.project_id,
                 kind=vocab.NotificationKind.GITHUB,
                 task_id=task.id,
+                github_event_id=event.id,
             )
 
 

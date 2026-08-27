@@ -1,18 +1,37 @@
-import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
 import { Disclosure } from '../components/Disclosure.tsx';
 import { Why } from '../components/Why.tsx';
 import { Conditions, describeConditions, type Condition } from '../components/Conditions.tsx';
-import { useConsent, useLobbyMutations, useMe, useMeeting, useTracks } from '../api/hooks.ts';
+import {
+  useConsent,
+  useLobbyMutations,
+  useMe,
+  useMeeting,
+  useMeetingProgress,
+  useDiscardMeeting,
+  useMakeMinutes,
+  useReprocess,
+  useTracks,
+} from '../api/hooks.ts';
 import {
   captureAlerts,
+  lobbyPhase,
+  meetingTitleProblem,
   memberStatuses,
   roomStatus,
   savedExtraConsents,
   startBlockers,
+  verdictView,
+  whyConsentBlocked,
   type TrackHealth,
+  REPROCESS_CONFIRM,
+  consentAffordance,
+  discardAffordance,
+  DISCARD_CONFIRM,
+  EXTRA_CONSENTS,
 } from '@lib/lobby/room.ts';
 import { axisTicks, buildDiagram, describeGap, meetingWindow, type TrackInput } from '@lib/track/diagram.ts';
 import {
@@ -21,6 +40,10 @@ import {
   recordingSafety,
 } from '@lib/platform/recording.ts';
 import { Problem } from '../components/Problem.tsx';
+import { describeMeetingStatus } from '@lib/home/next.ts';
+import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
+import { meetingLabel } from '@lib/ui/naming.ts';
+import { ApiError } from '../api/client.ts';
 
 // 회의 로비 — 시그니처가 사는 곳 (지시서 기타-6 §로비).
 //
@@ -32,15 +55,6 @@ import { Problem } from '../components/Problem.tsx';
 
 const EMPTY_TICKS = ['0분', '7', '13', '20', '27', '33', '40분'];
 
-/** 상태를 한 낱말로. 문장은 `Why` 안에서 원문 그대로 나옵니다. */
-const VERDICT_WORD: Record<string, string> = {
-  not_joined: '대기',
-  healthy: '녹음 중',
-  at_risk: '끊김',
-  broken: '못 씀',
-  finished: '종료',
-};
-
 export default function Lobby() {
   const params = useParams();
   const meetingId = Number(params['meetingId']);
@@ -50,16 +64,49 @@ export default function Lobby() {
   const { data: me } = useMe();
   const m = useLobbyMutations(meetingId);
 
+  /* ⛔ 명단도 같습니다 (결함 255). 아직 안 온 동안 화면은 「참가자 상태
+     0명」과 「아직 아무도 참가하지 않았습니다」를 **단언**했습니다 —
+     아무것도 모르는 채로요. 세는 것과 말하는 것은 명단이 온 뒤에. */
+  const rosterKnown = consent.data !== undefined;
+  // 회의 이름 고치기 (결함 268). 판단(빈 글·길이)은 `@lib`.
+  const [renaming, setRenaming] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  /* ⛔ **이름 고치기의 여닫이가 초점을 통째로 잃었습니다** (결함 303).
+     「이름 고치기」를 누르면 그 단추가 사라지고 입력칸이 그 자리에
+     생기는데, 초점을 쥐고 있던 단추가 없어지므로 초점이 `body` 로
+     떨어집니다. 「저장」·「취소」도 같습니다 — **여닫이 셋 다**.
+
+     낭독기 사용자는 문서 맨 위로 떨어지고, 키보드 사용자는 자기가 어디
+     있었는지 잃습니다. AGENTS.md 가 손으로 지은 대화상자의 증상으로
+     적어 둔 그것입니다(결함 280 — 「닫으면 body 에 떨어집니다」).
+
+     ⚠️ **여는 쪽만 고치면 안 됩니다** — 닫는 두 갈래도 같이 데려옵니다. */
+  const titleBox = useRef<HTMLInputElement>(null);
+  const renameBtn = useRef<HTMLButtonElement>(null);
+  /** 방금 생긴 칸으로. 캐럿은 글 끝에 — 앞에 두면 고치려다 앞에 끼워 넣습니다. */
+  const focusTitleBox = useCallback((): void => {
+    const box = titleBox.current;
+    if (box === null) return;
+    box.focus();
+    const end = box.value.length;
+    box.setSelectionRange(end, end);
+  }, []);
+  const titleProblem = meetingTitleProblem(titleDraft);
   const roster = consent.data?.roster ?? [];
-  const trackList: TrackHealth[] = tracks.data?.tracks ?? [];
+  /* ⛔ **`?? []` 가 「못 받음」을 「아무도 참가 안 함」으로 접었습니다**
+     (결함 255). `/tracks` 를 500 으로 막고 이미 녹음이 끝난 회의를 열면
+     커버리지 100·98·42% 인 세 사람이 나란히 「미참가」로 섰고, 화면
+     어디에도 못 받았다는 말이 없었습니다. 아직 안 온 동안도 같습니다 —
+     `null` 을 넘겨 「모른다」고 말하게 합니다. */
+  const trackList: TrackHealth[] | null = tracks.data ? tracks.data.tracks : null;
   const statuses = memberStatuses(roster, trackList);
-  const room = roomStatus(statuses);
+  const room = roomStatus(statuses, rosterKnown);
   const blockers = startBlockers(roster);
 
   // 끝난 트랙이 있으면 실제 시간축 위에 구멍까지 그립니다.
   const inputs: TrackInput[] = useMemo(
     () =>
-      trackList.map((t) => ({
+      (trackList ?? []).map((t) => ({
         userId: t.user_id,
         startedAt: t.started_at ?? null,
         endedAt: t.ended_at ?? null,
@@ -100,7 +147,28 @@ export default function Lobby() {
     { label: '내 동의', met: iAgreed },
     { label: '전원 동의', met: blockers.length === 0 },
   ];
-  const canGoRecord = startConditions.every((c) => c.met);
+  // ⚠️ **이 화면은 오래도록 회의 상태를 안 봤습니다** (결함 214). 다섯
+  //    상태에서 화면이 글자까지 같았고, 검토까지 끝난 회의에서도
+  //    「녹음 화면으로」가 멀쩡히 눌렸습니다. 판단은 `@lib` 에 있습니다.
+  /* ⚠️ **못 받았는데 「아직 아무도 참가하지 않았습니다」 라고 했습니다**
+     (결함 224). 새로 가입한 사람이 남의 회의 주소를 열면 서버는 403 인데,
+     화면은 참가자 0명짜리 빈 로비를 그렸습니다 — 「아무도 아직 안 들어온
+     회의」 와 구별이 안 됩니다. 설정·기여도는 결함 211 에서 고쳤고,
+     여기가 빠져 있었습니다. */
+  const loadError = meeting.error ?? consent.error;
+  const cannotLoad =
+    loadError == null
+      ? null
+      : describeLoadFailure('회의', loadError instanceof ApiError ? loadError.status : null);
+
+  const phase = lobbyPhase(meeting.data?.status);
+  // 「다시 처리할 수 있는가」는 **서버가** 정합니다 (결함 231).
+  const progress = useMeetingProgress(meetingId);
+  const reprocess = useReprocess(meetingId);
+  const discard = useDiscardMeeting(meetingId);
+  const minutes = useMakeMinutes(meetingId);
+  const navigate = useNavigate();
+  const canGoRecord = phase.canStart && startConditions.every((c) => c.met);
 
   // 지금 이 창이 녹음을 끝까지 붙잡을 수 있는가. 판단은 `@lib` 에 있습니다.
   const safety = recordingSafety(window, window.matchMedia('(display-mode: standalone)').matches);
@@ -108,6 +176,20 @@ export default function Lobby() {
   // 한 명이라도 참가했으면 레인 칸을 유지합니다 — 참가한 사람과 아직인
   // 사람이 섞여 있을 때 축이 서로 어긋나면 시간을 견줄 수 없습니다.
   const anyJoined = statuses.some((s) => s.verdict !== 'not_joined');
+
+  /** 동의 단추를 지금 못 누르는 까닭 (결함 239). 판단은 `@lib`. */
+  /* ⚠️ **동의 칸이 국면을 안 봤습니다** (결함 310). 씨앗을 새로 심고
+     회의 2(pending) 와 회의 5(failed·트랙 0개) 를 나란히 재니 동의 단추가
+     `btn btn--primary` · rgb(61,58,174) · 「동의합니다」로 **글자까지**
+     같았습니다 — 레거시도 같았습니다. 결함 251 의 결정(늦은 동의를
+     서버가 막지 않는다)은 그대로 두고 **버튼이 무엇을 누르는 것인지**
+     말하게 합니다. 판단은 `@lib`. */
+  const consentAct = consentAffordance(phase.canStart, iAgreed);
+
+  const consentBlocked = whyConsentBlocked({
+    sending: m.consent.isPending,
+    alreadyAgreed: iAgreed,
+  });
 
   const submitConsent = async (consented: boolean) => {
     // ②③ 을 먼저 남기고 ① 을 마지막에 — 서버는 저장된 값으로 판단합니다.
@@ -118,19 +200,62 @@ export default function Lobby() {
     await m.consent.mutateAsync({ consent_type: 'recording', consented });
   };
 
-  const title = meeting.data?.title ?? '회의 준비';
+  /* ⚠️ 예전에는 `?? '회의 준비'` 였습니다 (결함 285) — **화면의 이름을
+     회의의 이름 자리에** 쓴 것이고, 브라우저 탭까지 그 글자라 이름 없는
+     회의를 둘 열면 탭 둘이 똑같았습니다. 이름은 `@lib` 한 벌. */
+  const title = meetingLabel(meeting.data?.title, meeting.data?.id ?? meetingId);
 
   return (
     <AppShell
       title={title}
       projectId={meeting.data?.project_id}
-      meta={room.message}
+      /* ⚠️ **머리줄이 아래 설명과 반대되는 말을 하고 있었습니다** (결함 214).
+         실패한 회의에서 「아직 아무도 참가하지 않았습니다」 — 「아직」 은
+         곧 들어온다는 뜻인데, 그 회의는 이미 끝났습니다. 방 상태는 녹음
+         국면에서만 소식이고, 끝난 뒤에는 **회의가 어느 상태인가**가
+         소식입니다. 낱말은 홈의 상태 칩과 같은 곳(`describeMeetingStatus`)
+         에서 옵니다 — 두 화면이 갈라지지 않게. */
+      meta={
+        /* ⚠️ 못 받았으면 방 상태를 말하지 않습니다 (결함 224) — 「아직
+           아무도 참가하지 않았습니다」 는 볼 권한이 없는 사람에게 거짓입니다. */
+        cannotLoad !== null
+          ? ''
+          : phase.canStart
+            ? room.message
+            : describeMeetingStatus(meeting.data?.status ?? '')
+      }
       actions={
         <div className="appbar__actions">
-          {meeting.data?.status === 'needs_review' && (
-            <Link className="btn btn--primary" to={`/meeting/${meetingId}/review`}>
-              업무 후보 검토
+          {cannotLoad !== null ? null : (
+          <>
+          {/* ⚠️ **막았으면 갈 곳을 줍니다.** 예전에는 `needs_review` 만
+              보고 「업무 후보 검토」를 그렸고, 검토가 끝난 회의(`confirmed`)
+              에서는 나가는 문이 「통화 열기」뿐이었습니다. 어디로 보낼지는
+              `lobbyPhase` 가 정합니다 — 화면은 그리기만 합니다. */}
+          {phase.go !== null && (
+            <Link
+              className="btn btn--primary"
+              to={
+                phase.go.screen === 'review'
+                  ? `/meeting/${meetingId}/review`
+                  : `/project/${meeting.data?.project_id ?? ''}/kanban`
+              }
+            >
+              {phase.go.label}
             </Link>
+          )}
+          {/* ⚠️ **실패해도 아무 말도 안 했습니다** (결함 218). 500 을 받아도
+              화면 글자가 한 글자도 안 바뀌었고, 사람은 회의가 종료된 줄
+              알고 떠납니다. 그 회의는 영영 처리되지 않습니다 — 강제 종료가
+              있는 이유가 바로 그것을 푸는 것인데요. */}
+          {m.finish.isError && (
+            <Problem>
+              {describeActionFailure(
+                '회의 강제 종료',
+                m.finish.error instanceof ApiError ? m.finish.error.status : null,
+                m.finish.error instanceof ApiError ? m.finish.error.detail : null,
+              )}
+            </Problem>
           )}
           {room.needsForceFinish && (
             <button
@@ -149,7 +274,7 @@ export default function Lobby() {
               예전에는 이 사유가 왼쪽 판 한가운데 문장으로 앉아 있었고,
               헤더가 이미 같은 말을 하고 있어 한 화면에서 방 상태를 **네 번**
               말했습니다 — 그중 둘은 글자까지 같았습니다. */}
-          {startConditions.some((c) => !c.met) && (
+          {phase.canStart && startConditions.some((c) => !c.met) && (
             <span className="conds-slot">
               <Conditions items={startConditions} id="start-conds" />
               {blockers.length > 0 && <Why about="녹음 시작 조건" lines={blockers} />}
@@ -159,25 +284,202 @@ export default function Lobby() {
             className={`btn btn--primary${!canGoRecord ? ' btn--unmet btn--disabled-link' : ''}`}
             href={canGoRecord ? `/index.html?meeting=${meetingId}` : undefined}
             aria-disabled={!canGoRecord}
-            aria-describedby={!canGoRecord ? 'start-conds' : undefined}
-            title={!canGoRecord ? describeConditions(startConditions) : undefined}
+            /* ⚠️ **`href` 없는 `<a>` 는 초점을 못 받습니다** (결함 219).
+               막혔을 때 `href` 를 안 주므로, 탭을 60번 눌러도 이 버튼에
+               닿지 않았습니다 — 즉 `aria-describedby` 가 가리키는 사유를
+               **낭독기가 영영 못 읽습니다.** 이 저장소가 "비활성 버튼은
+               `aria-disabled` 라 초점도 받는다" 고 적어 둔 그 약속이
+               여기서만 거짓이었습니다. 초점은 직접 줍니다. */
+            tabIndex={0}
+            /* 막힌 이유가 둘입니다 — 아직 동의가 안 찼거나(조건 칩),
+               이미 끝난 회의이거나(국면 설명). 가리키는 곳이 다릅니다. */
+            aria-describedby={
+              canGoRecord ? undefined : phase.canStart ? 'start-conds' : 'phase-note'
+            }
+            title={
+              !canGoRecord
+                ? (phase.note ?? describeConditions(startConditions))
+                : undefined
+            }
           >
             녹음 화면으로
           </a>
+          </>
+          )}
         </div>
       }
     >
       <div className="panes">
+        {cannotLoad !== null ? (
+          <section className="pane">
+            <div className="pane__body">
+              <div className="empty">{cannotLoad}</div>
+            </div>
+          </section>
+        ) : (
+        <>
         <section className="pane" aria-label="참가자 상태">
           <div className="pane__head">
             <h2 className="pane__title">참가자 상태</h2>
-            <span className="pane__count">{roster.length}명</span>
+            <span className="pane__count">{rosterKnown ? `${roster.length}명` : '—'}</span>
+            {/* ⛔ **회의에 이름을 붙일 자리가 없었습니다** (결함 268).
+                「회의 열기」는 제목을 안 묻고, 그래서 홈 목록에 「제목 없는
+                회의」가 쌓입니다. 서버에는 길이 있었는데(이미 연 회의도
+                제목만은 고칩니다) 부르는 화면이 0곳이었습니다.
+                ⚠️ 「열 때 물어볼 것인가」는 사람이 정할 일이라 안 건드립니다
+                — 여기서는 **언제든 되돌릴 수 있는 쪽**만 만듭니다. */}
+            <span className="pane__hint">
+              {renaming ? (
+                <>
+                  <input
+                    className="input input--sm"
+                    id="meeting-title-input"
+                    ref={titleBox}
+                    aria-label="회의 이름"
+                    aria-invalid={titleProblem !== null}
+                    aria-describedby="meeting-title-problem"
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={`btn btn--secondary btn--sm${titleProblem !== null ? ' btn--unmet' : ''}`}
+                    aria-disabled={titleProblem !== null}
+                    aria-describedby={titleProblem !== null ? 'meeting-title-problem' : undefined}
+                    onClick={() => {
+                      if (m.rename.isPending) return;
+                      if (titleProblem !== null) {
+                        document.getElementById('meeting-title-input')?.focus();
+                        return;
+                      }
+                      m.rename.mutate(titleDraft.trim(), {
+                        onSuccess: () => {
+                          setRenaming(false);
+                          requestAnimationFrame(() => renameBtn.current?.focus());
+                        },
+                      });
+                    }}
+                  >
+                    저장
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    onClick={() => {
+                      setRenaming(false);
+                      requestAnimationFrame(() => renameBtn.current?.focus());
+                    }}
+                  >
+                    취소
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  ref={renameBtn}
+                  onClick={() => {
+                    setTitleDraft(meeting.data?.title ?? '');
+                    setRenaming(true);
+                    /* 값이 붙은 다음에 옮겨야 캐럿이 글 끝에 섭니다. */
+                    requestAnimationFrame(focusTitleBox);
+                  }}
+                >
+                  이름 고치기
+                </button>
+              )}
+            </span>
           </div>
+          {/* ⚠️ `aria-describedby` 가 가리키는 자리는 **실제로 있어야**
+              합니다 (결함 234). */}
+          <Problem id="meeting-title-problem" tone="incomplete">
+            {renaming ? titleProblem : null}
+          </Problem>
+          <Problem>{m.rename.isError ? describeActionFailure('회의 이름 고치기', m.rename.error instanceof ApiError ? m.rename.error.status : null, m.rename.error instanceof ApiError ? m.rename.error.detail : null) : null}</Problem>
           <div className="pane__body">
+            {/* ⚠️ **홈이 한 말이 여기서 사라지고 있었습니다** (결함 214).
+                홈은 "처리에 실패했습니다 — 트랙이 온전한지 확인하세요"
+                라고 보내는데, 도착한 화면에는 「실패」라는 낱말이 **한 번도**
+                안 나왔습니다. 대신 「시작 전 확인」과 「녹음 화면으로」가
+                떠 있어, 이미 지나간 일을 준비하라고 말하고 있었습니다.
+
+                `id` 는 막힌 「녹음 화면으로」가 `aria-describedby` 로
+                가리킵니다 — 눈으로 보는 사람과 낭독기가 같은 문장을
+                받습니다. */}
+            {phase.note !== null && (
+              <p className="phase-note" id="phase-note">
+                {phase.note}
+              </p>
+            )}
+            {/* ⛔ **여기가 막다른 길이었습니다** (결함 231).
+                화면은 「처리에 실패했습니다. 아래 트랙이 온전한지
+                확인하세요」 라고 시켜 놓고, 확인한 사람에게 **누를 것을
+                안 줬습니다.** 서버에는 `/reprocess` 가 있고 `progress` 가
+                `can_reprocess: true` 라고 답하는데 SPA 로비는 그걸 한 번도
+                안 물어봤습니다 — 레거시 로비(`lobby.html`)에는 있었고
+                화면을 옮기면서 **버튼만 남겨졌습니다.**
+
+                ⚠️ 언제 다시 처리할 수 있는지는 **서버가 정합니다.**
+                화면이 `status` 로 스스로 정하면 규칙이 두 곳에 생깁니다. */}
+            {progress.data?.can_reprocess === true && (
+              <p className="phase-act">
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={reprocess.isPending}
+                  onClick={() => {
+                    // ⚠️ 되돌릴 수 없습니다 — 묻고 나서 합니다. 문구는
+                    //    `@lib` 한 곳에 있습니다(레거시와 같은 말).
+                    if (!window.confirm(REPROCESS_CONFIRM)) return;
+                    reprocess.mutate();
+                  }}
+                >
+                  {reprocess.isPending ? '다시 처리하는 중…' : '다시 처리하기'}
+                </button>
+                <Problem>
+                  {reprocess.isError
+                    ? describeActionFailure(
+                        '다시 처리',
+                        reprocess.error instanceof ApiError ? reprocess.error.status : null,
+                        /* 409 는 「처리에 실패했거나 큐에 걸린 회의만 다시
+                           처리할 수 있습니다」입니다 — 그 문장이 필요합니다. */
+                        reprocess.error instanceof ApiError ? reprocess.error.detail : null,
+                      )
+                    : reprocess.isSuccess
+                      ? (reprocess.data?.message ?? '')
+                      : null}
+                </Problem>
+              </p>
+            )}
+            {/* ⛔ **눈금이 사람마다 한 벌씩 있었습니다** (결함 261). 셋이면
+                같은 자(`0분 7 13 20 27 33 40분`)가 세 번 그려집니다 — 같은
+                회의의 같은 시간축인데요. 값이 아니라 **잉크만** 세 배였고,
+                이 화면에서 제일 반복되는 글자였습니다. 축은 위에 **한 벌**만
+                두고, 줄에는 막대만 그립니다.
+                ⚠️ 같은 격자(`.lrow`)를 써야 축과 막대가 어긋나지 않습니다. */}
+            {anyJoined && (
+              <div className="lrow lrow--axis" aria-hidden="true">
+                <span />
+                {/* ⚠️ 막대와 **같은 칸**(`.lrow__ribbon`)에 넣습니다 — 좁은
+                    폭에서 칸이 접힐 때 축만 남으면 눈금이 어긋납니다. */}
+                <div className="lrow__ribbon">
+                  <div className="ribbon-axis">
+                    {ticks.map((t) => (
+                      <span key={t}>{t}</span>
+                    ))}
+                  </div>
+                </div>
+                <span />
+              </div>
+            )}
             {statuses.map((status) => {
-              const track = trackList.find((t) => t.user_id === status.userId);
+              const track = trackList?.find((t) => t.user_id === status.userId);
               const gapSpans = diagram.gaps.get(status.userId) ?? [];
-              const joined = status.verdict !== 'not_joined';
+              // 모르는 것은 「참가했다」가 아닙니다 (결함 255).
+              const joined = status.verdict !== 'not_joined' && status.verdict !== 'unknown';
+              // 같은 판정이라도 **국면이 바뀌면 뜻이 달라집니다** — 끝난
+              // 회의의 「대기」는 「미참가」입니다 (결함 214).
+              const view = verdictView(status, phase.canStart);
               return (
                 <div className={`lrow${anyJoined ? '' : ' lrow--nolane'}`} key={status.userId}>
                   <span className="lrow__name">{status.name}</span>
@@ -191,7 +493,6 @@ export default function Lobby() {
                       <TrackRibbon
                         size="lg"
                         segments={segmentsFor(status.userId)}
-                        ticks={ticks}
                         label={`${status.name} — ${status.message}`}
                       />
                     )}
@@ -201,11 +502,11 @@ export default function Lobby() {
                       그대로 붙어 셋이면 세 번 반복됐고, 끊긴 트랙의 진짜
                       경고가 그 반복 속에 묻혔습니다. */}
                   <span className="lrow__status">
-                    <span className="lrow__word">{VERDICT_WORD[status.verdict]}</span>
+                    <span className="lrow__word">{view.word}</span>
                     <Why
                       about={`${status.name} — 트랙 상태`}
                       lines={[
-                        status.message,
+                        view.message,
                         ...gapSpans.map((span) => describeGap(span, diagram.durationMs)),
                         ...captureAlerts(track),
                       ]}
@@ -228,7 +529,7 @@ export default function Lobby() {
                 녹음을 끊고, 그래서 이 저장소에 데스크톱 셸이 있습니다
                 (docs/21). 그 사실을 확인할 자리가 여기 말고 없었습니다.
                 두 줄 다 **이미 있는 판단**에서 옵니다 — 새 문구가 아닙니다. */}
-            {room.recording === 0 && roster.length > 0 && (
+            {phase.canStart && room.recording === 0 && roster.length > 0 && (
               <div className="preflight">
                 <h3 className="preflight__title">시작 전 확인</h3>
                 <ul className="preflight__list">
@@ -245,6 +546,98 @@ export default function Lobby() {
                 </ul>
               </div>
             )}
+            {/* ⭐ **회의 단위 동작은 맨 아래 한 줄로.** 처음에는 이 둘을
+                참가자 명단 **위**에 뒀는데, 렌더해서 보니 화면을 열자마자
+                제일 먼저 보이는 것이 「이 회의 무르기」였습니다 — 되돌릴 수
+                없는 것에 맨 윗자리를 준 것입니다. 레거시 로비는 같은 동작을
+                **맨 아래 줄**에 둡니다(칸반 보기 · 기여도 보기 · 회의록
+                만들기 · 이 회의 무르기). 두 화면을 같은 순서로 둡니다.
+                ⚠️ 코드만 보고는 안 보였습니다 — 캡처를 보고 잡았습니다. */}
+            <div className="pane-acts">
+              {/* ⛔ **여기도 레거시에만 있었습니다** (결함 306 → 321).
+                  306 은 「회의록 만들기」를 부르는 곳이 **0곳**인데 보고서
+                  화면이 「회의 로비에서 회의록을 만드세요」라고 말하던 것을
+                  잡았습니다 — 그런데 그때 고친 것은 **레거시 로비뿐**이라
+                  `/app` 으로 들어온 사람에게는 여전히 갈 곳이 없었습니다.
+
+                  ⚠️ **만들고 나면 볼 자리로 데려갑니다.** SPA 에는 아직
+                  보고서 화면이 없으므로 레거시 `/reports.html` 로 보냅니다
+                  (`/call.html`·`/index.html` 과 같은 방식). 안 데려가면
+                  만들어 놓고 어디 있는지 안 알려 주는 실패 ③ 입니다. */}
+              <p className="phase-act">
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={minutes.isPending}
+                  onClick={() => {
+                    minutes.mutate(undefined, {
+                      onSuccess: () => {
+                        const project = meeting.data?.project_id;
+                        if (project !== undefined) {
+                          window.location.href = `/reports.html?project=${project}`;
+                        }
+                      },
+                    });
+                  }}
+                >
+                  {minutes.isPending ? '회의록을 만드는 중…' : '회의록 만들기'}
+                </button>
+                <Problem>
+                  {minutes.isError
+                    ? describeActionFailure(
+                        '회의록 만들기',
+                        minutes.error instanceof ApiError ? minutes.error.status : null,
+                        /* 400 은 「아직 처리가 안 끝났습니다」 같은 서버 문장
+                           입니다 — 일반론보다 언제나 낫습니다(결함 300). */
+                        minutes.error instanceof ApiError ? minutes.error.detail : null,
+                      )
+                    : null}
+                </Problem>
+              </p>
+              {/* ⭐ **만드는 단추를 봤으면 무르는 단추를 같이** (결함 320).
+                  「회의 열기」는 누른 만큼 회의를 만드는데 무르는 길이
+                  서버에도(405) 화면에도(0개) 없었습니다.
+
+                  ⚠️ 레거시에만 달면 결함 231 과 **같은 모양**입니다 — 그때는
+                  반대 방향이었고, 이 파일 위쪽에 그 주석이 있습니다.
+                  판단은 `@lib` 한 곳(`discardAffordance`): 녹음이 하나라도
+                  담겼거나 처리에 들어갔으면 이 단추는 아예 안 그립니다. */}
+              {discardAffordance(meeting.data?.status ?? '', trackList?.length ?? 0).can && (
+                <p className="phase-act">
+                  <button
+                    type="button"
+                    /* ⛔ 되돌릴 수 없는 것을 **바로 위 「회의록 만들기」와
+                       같은 모양**으로 뒀더니 색까지 똑같았습니다(결함 320).
+                       `btn--danger-quiet` 가 이미 있었는데 안 썼습니다. */
+                    className="btn btn--danger-quiet"
+                    disabled={discard.isPending}
+                    onClick={() => {
+                      // ⚠️ 되돌릴 수 없습니다 — 묻고 나서 합니다. 문구는
+                      //    `@lib` 한 곳에 있습니다(레거시와 같은 말).
+                      if (!window.confirm(DISCARD_CONFIRM)) return;
+                      discard.mutate(undefined, {
+                        /* ⚠️ 무른 뒤에는 이 회의가 없으므로 **머무를 수
+                           없습니다** — 안 데려가면 화면이 404 를 그립니다. */
+                        onSuccess: () => navigate('/'),
+                      });
+                    }}
+                  >
+                    {discard.isPending ? '무르는 중…' : '이 회의 무르기'}
+                  </button>
+                  <Problem>
+                    {discard.isError
+                      ? describeActionFailure(
+                          '회의 무르기',
+                          discard.error instanceof ApiError ? discard.error.status : null,
+                          /* 409 는 「녹음이 N건 담긴 회의는…」입니다 — 서버가
+                             사람에게 쓴 문장이 일반론보다 낫습니다(결함 300). */
+                          discard.error instanceof ApiError ? discard.error.detail : null,
+                        )
+                      : null}
+                  </Problem>
+                </p>
+              )}
+            </div>
           </div>
         </section>
 
@@ -256,40 +649,87 @@ export default function Lobby() {
             <p className="t13" style={{ marginBottom: 'var(--sp-4)' }}>
               {consent.data?.message ?? ''}
             </p>
-            <label className="t13" style={{ display: 'flex', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
-              <input
-                type="checkbox"
-                checked={rawAudioValue}
-                onChange={(e) => setRawAudio(e.target.checked)}
-              />
-              원본 음성 보관 — 검토 화면에서 구간을 다시 들을 수 있습니다
-            </label>
-            <label className="t13" style={{ display: 'flex', gap: 'var(--sp-3)', marginBottom: 'var(--sp-4)' }}>
-              <input
-                type="checkbox"
-                checked={voiceprintValue}
-                onChange={(e) => setVoiceprint(e.target.checked)}
-              />
-              목소리 특징 저장 — 다음 회의에서 화자를 더 잘 알아봅니다
-            </label>
+            {/* ⛔ 글은 `@lib` 한 벌입니다 (결함 335). 여기 있던 두 줄은
+                **동의했을 때 얻는 것만** 말하고 거부하면 어떻게 되는지를
+                한 글자도 안 했습니다 — `docs/07` §2.3 이 ②③ 에 대해
+                요구하는 것이 바로 그 「거부해도 됩니다」입니다. */}
+            {EXTRA_CONSENTS.map((item, i) => (
+              <label
+                key={item.key}
+                className="t13"
+                style={{
+                  display: 'flex',
+                  gap: 'var(--sp-3)',
+                  marginBottom: i === EXTRA_CONSENTS.length - 1 ? 'var(--sp-4)' : 'var(--sp-3)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={item.key === 'rawAudio' ? rawAudioValue : voiceprintValue}
+                  onChange={(e) =>
+                    item.key === 'rawAudio'
+                      ? setRawAudio(e.target.checked)
+                      : setVoiceprint(e.target.checked)
+                  }
+                />
+                {/* 글자와 설명을 **한 상자**에 넣습니다 — 형제로 두면
+                    라벨의 격자 항목이 셋이 되어 설명이 왼쪽으로 떨어집니다
+                    (레거시에서 223px 어긋났던 자리입니다). */}
+                <span style={{ display: 'grid', gap: '2px' }}>
+                  {item.label}
+                  <span className="t12 muted">{item.hint}</span>
+                </span>
+              </label>
+            ))}
             <div className="sec__row">
+              {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 (결함 234).
+                  이미 동의한 사람의 버튼이 `disabled` 면 **Tab 이 건너뛰어**
+                  「동의했습니다」라는 그 말 자체에 닿지 못합니다. 눌러도
+                  다시 안 보냅니다.
+                  ⛔ 그런데 **왜 막혔는지는 말하지 않았습니다** (결함 239) —
+                  `aria-describedby` 가 없었습니다. 동의 한 번은 요청 셋이라
+                  느린 연결에서는 십수 초 동안 눌러도 안 먹는데 화면이 조용
+                  했습니다. 판단은 `@lib` 의 `whyConsentBlocked`. */}
               <button
                 type="button"
-                className="btn btn--primary"
-                disabled={m.consent.isPending || iAgreed}
-                onClick={() => void submitConsent(true)}
+                className={`btn btn--${consentAct.primary ? 'primary' : 'secondary'}${consentBlocked !== null ? ' btn--unmet' : ''}`}
+                aria-disabled={consentBlocked !== null}
+                aria-describedby={consentBlocked !== null ? 'consent-why' : undefined}
+                onClick={() => {
+                  if (consentBlocked !== null) return;
+                  void submitConsent(true);
+                }}
               >
-                {iAgreed ? '동의했습니다' : '동의합니다'}
+                {consentAct.label}
               </button>
+              {/* 되돌리는 쪽도 보내는 동안은 막힙니다 — 같은 사유를 가리킵니다. */}
               <button
                 type="button"
-                className="btn btn--ghost"
-                disabled={m.consent.isPending}
-                onClick={() => void submitConsent(false)}
+                className={`btn btn--ghost${m.consent.isPending ? ' btn--unmet' : ''}`}
+                aria-disabled={m.consent.isPending}
+                aria-describedby={m.consent.isPending ? 'consent-why' : undefined}
+                onClick={() => {
+                  if (m.consent.isPending) return;
+                  void submitConsent(false);
+                }}
               >
-                거부합니다
+                {consentAct.refuseLabel}
               </button>
             </div>
+            {/* 눈으로 보는 사람과 낭독기가 **같은 문장**을 받습니다. */}
+            {consentBlocked !== null && (
+              <p className="t13 phase-note" id="consent-why">
+                {consentBlocked}
+              </p>
+            )}
+            {/* ⭐ **막지 않고 적습니다** (결함 310) — 늦은 동의도 기록이라는
+                결함 251 의 결정을 그대로 두고, 그것이 지나간 회의에 대한
+                기록이라는 것만 말합니다. */}
+            {consentAct.note !== null && (
+              <p className="t13 phase-note" id="consent-phase">
+                {consentAct.note}
+              </p>
+            )}
             {m.consent.isError && (
               <Problem>동의를 남기지 못했습니다 — 잠시 뒤 다시 해 보세요.</Problem>
             )}
@@ -302,6 +742,8 @@ export default function Lobby() {
             </Disclosure>
           </div>
         </section>
+        </>
+        )}
       </div>
     </AppShell>
   );

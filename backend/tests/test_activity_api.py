@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from teamflow.db import models as m
 from teamflow.db import session as db_session
@@ -40,12 +44,22 @@ def test_the_log_is_readable_at_all(client: TestClient, seeded):
 
 
 def test_contribution_touching_actions_are_marked(client: TestClient, seeded):
-    """⭐ 분쟁에서 제일 먼저 볼 기록을 화면이 알아볼 수 있어야 합니다."""
+    """⭐ 분쟁에서 제일 먼저 볼 기록을 화면이 알아볼 수 있어야 합니다.
+
+    ⚠️ **아닌 쪽 예로 `task_completed` 를 쓰고 있었습니다** (결함 387).
+    이유를 적어 내린 결정이 아니라 「집합에 없는 아무 행동」이 필요해서
+    고른 것이었는데, 재 보니 그건 이 저장소에서 숫자를 **제일 크게**
+    움직이는 행동이었습니다. 아닌 쪽 예는 **재서** 고릅니다 —
+    `candidate_rejected` 는 업무를 안 만들어 구간이 한 자도 안 움직입니다 —
+    `test_every_action_that_moves_the_numbers_is_in_the_set` 이 **여기서
+    일으킬 수 있는 다섯**을 실제로 일으켜 재고, **못 재는 일곱을 이름으로
+    적어** 둡니다. ⚠️ 「전수」가 아닙니다 — 씨앗이 안 만드는 상태가 있습니다.
+    """
     plant(seeded, "weights_changed")
-    plant(seeded, "task_completed")
+    plant(seeded, "candidate_rejected")
     rows = client.get(f"/api/projects/{seeded['project_id']}/activity").json()
     marked = {r["action"]: r["touches_contribution"] for r in rows}
-    assert marked == {"weights_changed": True, "task_completed": False}
+    assert marked == {"weights_changed": True, "candidate_rejected": False}
 
 
 def test_newest_first(client: TestClient, seeded):
@@ -92,3 +106,478 @@ def test_the_service_has_no_way_to_change_a_record():
         if any(word in name for word in ("delete", "update", "edit", "remove", "write"))
     ]
     assert forbidden == []
+
+
+# ══════════════════════════════════════════════════════════════
+# 「무엇을」 바꿨는지가 사람 말이어야 한다 (결함 293)
+# ══════════════════════════════════════════════════════════════
+
+
+def plant_target(seeded, action: str, target: str) -> None:
+    with db_session.session_scope() as session:
+        session.add(
+            m.AuditLog(
+                project_id=seeded["project_id"],
+                actor_id=seeded["user_ids"][0],
+                action=action,
+                target=target,
+                before={},
+                after={},
+            )
+        )
+
+
+def test_the_log_says_what_was_changed_not_its_id(client: TestClient, seeded):
+    """⭐ 화면이 스스로 「누가 언제 **무엇을** 바꿨는지」라고 적어 둡니다.
+
+    「누가」와 「언제」는 맞는데 「무엇」만 `task:4` 였습니다 — 그 업무 이름은
+    「접근성 점검」입니다. 감사 기록은 사람의 숫자를 건드린 일을 **읽으라고**
+    있는 화면이라, 거기서 식별자를 보여 주면 읽을 수가 없습니다.
+    """
+    project_id = seeded["project_id"]
+    with db_session.session_scope() as session:
+        task = m.Task(project_id=project_id, title="접근성 점검", status="todo")
+        session.add(task)
+        session.flush()
+        task_id = task.id
+    plant_target(seeded, "task_completed", f"task:{task_id}")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == "접근성 점검"
+    # ⚠️ 참조는 **그대로 남습니다** — 감사 기록이라 가리키는 자리가 안 변해야 합니다.
+    assert rows[0]["target"] == f"task:{task_id}"
+
+
+def test_a_member_target_reads_as_a_person(client: TestClient, seeded):
+    """⭐ `members/1` 은 「김민수」입니다.
+
+    ⚠️ **`/` 와 `:` 를 둘 다 씁니다** — `members/1` · `task:4`. 한 구분자만
+    보면 절반을 못 읽습니다.
+    """
+    plant_target(seeded, "weights_changed", f"members/{seeded['user_ids'][0]}")
+    rows = client.get(f"/api/projects/{seeded['project_id']}/activity").json()
+    assert rows[0]["target_label"] == "김민수"
+
+
+def test_a_meeting_target_uses_the_one_naming(client: TestClient, seeded):
+    """⭐ 회의 이름은 한 벌에서 옵니다 (결함 285) — 제목이 없어도 부릅니다."""
+    project_id = seeded["project_id"]
+    with db_session.session_scope() as session:
+        meeting = m.Meeting(
+            project_id=project_id,
+            title=None,
+            status="pending",
+            started_by=seeded["user_ids"][0],
+        )
+        session.add(meeting)
+        session.flush()
+        meeting_id = meeting.id
+    plant_target(seeded, "meeting_reprocessed", f"meetings/{meeting_id}")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == f"제목 없는 회의 #{meeting_id}"
+
+
+def test_an_unresolvable_target_is_not_invented(client: TestClient, seeded):
+    """⚠️ 지운 업무·모르는 종류는 **그대로** 둡니다.
+
+    「(없음)」 같은 말을 지어내면 그건 감사 기록에서 제일 나쁜 짓입니다 —
+    `describe_category`·`role_label` 과 같은 규칙입니다.
+    """
+    plant_target(seeded, "task_completed", "task:999999")
+    plant_target(seeded, "task_completed", "무슨소린지모를값")
+    rows = client.get(f"/api/projects/{seeded['project_id']}/activity").json()
+    labels = {r["target"]: r["target_label"] for r in rows}
+    assert labels["task:999999"] == "task:999999"
+    assert labels["무슨소린지모를값"] == "무슨소린지모를값"
+
+
+def test_the_log_does_not_query_once_per_row(client: TestClient, seeded):
+    """⚠️ 줄마다 질의하면 기록이 쌓일수록 이 화면이 느려집니다.
+
+    `_target_labels` 가 종류별로 **한 번씩만** 찾는지 봅니다 — 같은 업무를
+    스무 번 건드린 기록이 있어도 질의는 하나입니다.
+    """
+    project_id = seeded["project_id"]
+    with db_session.session_scope() as session:
+        task = m.Task(project_id=project_id, title="여러 번 건드린 업무", status="todo")
+        session.add(task)
+        session.flush()
+        task_id = task.id
+    for _ in range(20):
+        plant_target(seeded, "task_completed", f"task:{task_id}")
+
+    with db_session.session_scope() as session:
+        seen: list[str] = []
+        from sqlalchemy import event
+
+        engine_ = session.get_bind()
+
+        def _watch(conn, cursor, statement, *rest):
+            if "FROM tasks" in statement:
+                seen.append(statement)
+
+        event.listen(engine_, "before_cursor_execute", _watch)
+        try:
+            entries = activity_service.recent(session, project_id)
+        finally:
+            event.remove(engine_, "before_cursor_execute", _watch)
+
+    assert len(entries) >= 20
+    assert all(e.target_label == "여러 번 건드린 업무" for e in entries[:20])
+    assert len(seen) <= 1, f"업무를 {len(seen)}번 찾았습니다 — 줄마다 질의합니다"
+
+
+def test_a_deleted_task_does_not_come_back_by_name(client: TestClient, seeded):
+    """⭐ 지운 업무의 이름은 **되살아나지 않습니다** (`TASK-003`).
+
+    이름을 못 찾으면 `target` 이 그대로 남고, 그건 「그 업무는 지워졌다」는
+    정직한 답입니다. ⚠️ 이 자리를 `db/live.py` 없이 짰다가
+    `test_repo_integrity` 가 잡았습니다 — 업무를 읽는 일곱 곳 중 하나가 될
+    뻔했습니다.
+    """
+    project_id = seeded["project_id"]
+    with db_session.session_scope() as session:
+        task = m.Task(project_id=project_id, title="지울 업무", status="todo")
+        session.add(task)
+        session.flush()
+        task_id = task.id
+    plant_target(seeded, "task_completed", f"task:{task_id}")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == "지울 업무"
+
+    with db_session.session_scope() as session:
+        from datetime import UTC, datetime
+
+        gone = session.get(m.Task, task_id)
+        gone.deleted_at = datetime.now(UTC)
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == f"task:{task_id}", "지운 업무의 이름이 되살아났습니다"
+
+
+# ══════════════════════════════════════════════════════════════
+# 씨앗에 없던 종류들 (결함 297)
+#
+# 결함 293 은 **씨앗 데이터에 있던 넷**만 고쳤습니다. 실제로 「업무 후보
+# 승인」을 눌러 보니 다섯째가 식별자 그대로 나왔습니다:
+#
+#     업무 후보 승인   김민수   meeting_task_candidates/1
+#
+# ⚠️ 「기능을 한 번 쓰고 *다른* 화면을 다시 열기」 — 제 고침에도 그대로
+#    적용됩니다. 씨앗에 없는 상태는 아무도 안 재고 있습니다.
+# ══════════════════════════════════════════════════════════════
+
+
+def test_a_candidate_target_reads_as_its_title(client: TestClient, seeded):
+    """⭐ 「업무 후보 승인」이 무엇을 승인했는지 보입니다."""
+    project_id = seeded["project_id"]
+    with db_session.session_scope() as session:
+        meeting = m.Meeting(
+            project_id=project_id,
+            title="1주차 정기회의",
+            status="pending",
+            started_by=seeded["user_ids"][0],
+        )
+        session.add(meeting)
+        session.flush()
+        candidate = m.MeetingTaskCandidate(
+            meeting_id=meeting.id,
+            title="로그인 API 구현",
+            confidence=0.9,
+        )
+        session.add(candidate)
+        session.flush()
+        candidate_id = candidate.id
+    plant_target(
+        seeded, "candidate_approved", f"meeting_task_candidates/{candidate_id}"
+    )
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == "로그인 API 구현"
+    assert rows[0]["target"] == f"meeting_task_candidates/{candidate_id}"
+
+
+def test_a_final_contribution_target_names_the_person(client: TestClient, seeded):
+    """⭐ `final_contributions/3:7` — **번호가 둘**입니다.
+
+    ⚠️ 하나짜리 자(`^kind[/:]\\d+$`)로는 이 모양을 아예 못 읽습니다. 하필
+    「기여도 확정값 조정」 — 분쟁에서 제일 먼저 볼 줄입니다.
+    """
+    project_id = seeded["project_id"]
+    user_id = seeded["user_ids"][0]
+    plant_target(seeded, "score_adjusted", f"final_contributions/{project_id}:{user_id}")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == "김민수의 확정 기여도"
+
+
+def test_a_voiceprint_target_names_whose_it_is(client: TestClient, seeded):
+    """⭐ 성문 폐기는 **누구의** 성문인지가 전부입니다."""
+    project_id = seeded["project_id"]
+    user_id = seeded["user_ids"][0]
+    with db_session.session_scope() as session:
+        voiceprint = m.Voiceprint(user_id=user_id, project_id=project_id, embedding=[])
+        session.add(voiceprint)
+        session.flush()
+        voiceprint_id = voiceprint.id
+    plant_target(seeded, "voiceprint_revoked", f"voiceprints/{voiceprint_id}")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == "김민수의 성문"
+
+
+def test_an_audio_target_names_its_meeting(client: TestClient, seeded):
+    """⭐ 녹음 삭제는 **어느 회의의** 녹음인지가 전부입니다.
+
+    ⚠️ 지운 뒤에도 행은 남습니다(`deleted_at` 만 찍습니다) — 그래서 이름을
+    찾을 수 있습니다. 못 찾으면 지어내지 않고 식별자를 그대로 둡니다.
+    """
+    project_id = seeded["project_id"]
+    with db_session.session_scope() as session:
+        meeting = m.Meeting(
+            project_id=project_id,
+            title=None,
+            status="pending",
+            started_by=seeded["user_ids"][0],
+        )
+        session.add(meeting)
+        session.flush()
+        asset = m.AudioAsset(
+            meeting_id=meeting.id,
+            kind="chunk",
+            storage_key="k",
+            encryption_key_id="e",
+            retention_until=datetime(2027, 1, 1, tzinfo=UTC),
+        )
+        session.add(asset)
+        session.flush()
+        asset_id, meeting_id = asset.id, meeting.id
+    plant_target(seeded, "audio_deleted", f"audio_assets/{asset_id}")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    # 제목 없는 회의도 한 벌에서 이름을 받습니다 (결함 285).
+    assert rows[0]["target_label"] == f"제목 없는 회의 #{meeting_id}의 녹음"
+
+
+def test_an_unknown_pair_target_is_still_not_invented(client: TestClient, seeded):
+    """⚠️ 못 찾으면 **지어내지 않습니다** — 결함 293 의 규칙 그대로."""
+    project_id = seeded["project_id"]
+    plant_target(seeded, "score_adjusted", f"final_contributions/{project_id}:99999")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    assert rows[0]["target_label"] == f"final_contributions/{project_id}:99999"
+
+
+# ══════════════════════════════════════════════════════════════
+# 「사람의 숫자를 건드린 행동」 집합 — **재서** 정한다 (결함 387)
+# ══════════════════════════════════════════════════════════════
+
+
+def _ranges(client: TestClient, project_id: int) -> dict[int, tuple[float, float]]:
+    """지금 팀의 기여 구간. **값만이 아니라 폭도 숫자입니다.**"""
+    body = client.get(f"/api/projects/{project_id}/contributions").json()
+    return {
+        member["user_id"]: (float(member["range_low"]), float(member["range_high"]))
+        for member in body.get("members", [])
+    }
+
+
+def test_every_action_that_moves_the_numbers_is_in_the_set(client: TestClient, seeded):
+    """⭐ **숫자를 움직이는 행동은 빠짐없이 집합에 있어야 한다.**
+
+    화면은 이 집합을 보고 「사람의 숫자를 건드린 일」을 눈에 띄게 그립니다.
+    집합은 **손으로 고른 목록**이라, 결함 329 가 삭제 둘을 넣은 뒤로 아무도
+    그 기준으로 재 본 적이 없었습니다. 재 보니 `task_completed` 가 빠져
+    있었습니다 — 이 저장소에서 제일 크게 움직이는 행동인데도(결함 387).
+
+    ## ⚠️ 한 방향만 단언합니다
+
+    「움직인다 → 집합에 있다」만 봅니다. **반대는 아닙니다** —
+    `task_assignees_changed` 와 `ai_output_corrected` 는 지금 당장은 안
+    움직이고 **앞으로 갈 점수의 주인을 바꿉니다.** 집합 옆 주석이 그것을
+    「눈에 띄는 쪽으로 틀립니다」로 정해 뒀습니다. 그 결정을 이 검사가
+    뒤집으면 안 됩니다.
+
+    ## ⚠️ 이 검사가 **못 재는 것**
+
+    씨앗이 그 상태를 안 만들어 여기서 일으킬 수 없는 행동들입니다 —
+    `voiceprint_revoked`(성문 0건) · `audio_deleted`(오디오 0건) ·
+    `meeting_reprocess_requested`(국면이 안 맞아 409) · `member_removed` ·
+    `score_adjusted` · `weights_changed` · `github_login_changed`.
+    **「안 움직인다」가 아니라 「못 쟀다」입니다** — 세어서 적어 둡니다.
+    """
+    project_id = seeded["project_id"]
+    login_as(client, seeded["user_ids"][0])
+    meeting_id = seeded["meeting_id"]
+    candidate_ids = seeded["candidate_ids"]
+    assert len(candidate_ids) >= 2, "후보가 둘도 안 됩니다 — 이 검사가 낡았습니다"
+
+    # ⚠️ **대조군이 먼저입니다.** 두 번 재는 사이 값이 흔들리면 이 검사는
+    #    아무것도 못 가립니다 (시간 감쇠가 섞이는 자리 — 결함 387).
+    baseline = _ranges(client, project_id)
+    assert baseline, "기여도가 비어 있습니다 — 이 검사가 낡았습니다"
+    assert _ranges(client, project_id) == baseline, (
+        "아무것도 안 했는데 구간이 흔들립니다 — 이 검사는 움직임을 못 가립니다"
+    )
+
+    state: dict[str, int] = {}
+
+    def reject() -> None:
+        response = client.post(
+            f"/api/meetings/{meeting_id}/candidates/review",
+            json={"items": [{"candidate_id": candidate_ids[1], "approve": False}]},
+        )
+        assert response.status_code == 200, response.text
+
+    def approve() -> None:
+        response = client.post(
+            f"/api/meetings/{meeting_id}/candidates/review",
+            json={
+                "items": [
+                    {
+                        "candidate_id": candidate_ids[0],
+                        "approve": True,
+                        "assignee_override": seeded["user_ids"][0],
+                        # ⚠️ 과거 마감은 서버가 막습니다 — 미래로 둡니다.
+                        "deadline_override": "2026-12-31",
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200, response.text
+        task_ids = response.json()["approved_task_ids"]
+        assert task_ids, f"승인이 업무를 안 만들었습니다: {response.json()}"
+        state["task_id"] = task_ids[0]
+
+    def patch(status: str):
+        def go() -> None:
+            response = client.patch(
+                f"/api/projects/{project_id}/tasks/{state['task_id']}",
+                json={"status": status},
+            )
+            assert response.status_code == 200, response.text
+
+        return go
+
+    def delete() -> None:
+        response = client.delete(f"/api/projects/{project_id}/tasks/{state['task_id']}")
+        assert response.status_code in (200, 204), response.text
+
+    # ⚠️ 순서가 있습니다 — 승인해야 업무가 생기고, 그래야 완료할 수 있습니다.
+    #    승인 단계는 덮어쓰기를 주므로 `ai_output_corrected` 도 같이 납니다.
+    cases: list[tuple[tuple[str, ...], object]] = [
+        (("candidate_rejected",), reject),
+        (("candidate_approved", "ai_output_corrected"), approve),
+        (("task_completed",), patch("done")),
+        (("task_reopened",), patch("todo")),
+        (("task_deleted",), delete),
+    ]
+
+    unguarded: list[str] = []
+    for actions, run in cases:
+        before = _ranges(client, project_id)
+        run()
+        after = _ranges(client, project_id)
+        if before == after:
+            continue
+        # 움직였습니다 — 이 단계가 낸 행동 중 **하나라도** 집합에 있어야 합니다.
+        if not any(a in activity_service.TOUCHES_CONTRIBUTION for a in actions):
+            unguarded.append(
+                f"{'+'.join(actions)}: {before} → {after}"
+            )
+
+    assert unguarded == [], (
+        "구간을 움직였는데 TOUCHES_CONTRIBUTION 에 없는 행동이 있습니다 — "
+        "화면이 그 줄을 평범하게 그립니다 (결함 387):\n  " + "\n  ".join(unguarded)
+    )
+
+
+def test_every_action_in_the_set_has_a_label(client: TestClient, seeded):
+    """⭐ 집합과 이름표는 **짝**이다 — 한쪽만 늘면 화면이 식별자를 그립니다.
+
+    결함 328 이 `action` 어휘에서 겪은 그것입니다. 집합에 넣으면서 이름표를
+    안 넣으면 그 줄이 `task_completed` 라는 **날 글자**로 나갑니다.
+    """
+    missing = sorted(
+        action
+        for action in activity_service.TOUCHES_CONTRIBUTION
+        if action not in activity_service.ACTION_LABEL
+    )
+    assert missing == [], f"이름표가 없는 행동: {missing}"
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 430 — 번호가 재사용되면 살아 있는 행이 **다른 것**입니다
+# ══════════════════════════════════════════════════════════════
+#
+# `meetings.id` 는 `AUTOINCREMENT` 없는 SQLite ROWID 라 맨 위 행을 지우면
+# 다음 회의가 그 번호를 받습니다. 「잘못 연 회의를 무르고 새로 연다」는
+# 두 번 클릭이라 흔합니다.
+
+
+def test_a_discarded_meeting_is_named_from_the_record_not_the_live_row(
+    client: TestClient, seeded
+):
+    """⭐ 무른 회의의 이름은 **적어 둔 것**입니다 — 그 번호를 물려받은
+    회의의 이름이 아닙니다.
+    """
+    project_id = seeded["project_id"]
+    login_as(client, seeded["user_ids"][0])
+
+    made = client.post(f"/api/projects/{project_id}/meetings", json={"title": "무를 회의 A"})
+    assert made.status_code in (200, 201), made.text
+    discarded_id = made.json()["meeting_id"]
+    assert client.delete(f"/api/meetings/{discarded_id}").status_code == 204
+
+    # 같은 번호를 물려받게 만듭니다. 못 물려받으면 이 검사는 아무것도
+    # 안 재는 것이므로 그때는 건너뜁니다 — 조용히 통과시키지 않습니다.
+    again = client.post(f"/api/projects/{project_id}/meetings", json={"title": "새 회의 B"})
+    assert again.status_code in (200, 201), again.text
+    if again.json()["meeting_id"] != discarded_id:
+        pytest.skip(f"번호가 재사용되지 않았습니다({discarded_id} → {again.json()['meeting_id']})")
+
+    rows = client.get(f"/api/projects/{project_id}/activity").json()
+    discards = [r for r in rows if r["action"] == "meeting_discarded"]
+    assert discards, "무른 기록이 활동에 안 남았습니다"
+    for row in discards:
+        assert row["target_label"] != "새 회의 B", (
+            f"살아 있는 회의를 가리키며 「무름」이라고 적습니다: {row}"
+        )
+        assert row["target_label"] == "무를 회의 A", row
+
+
+def test_discarding_a_meeting_takes_its_notifications_with_it(client: TestClient, seeded):
+    """⭐ 지워진 회의를 가리키던 알림이 남으면 **다음 회의의 것**이 됩니다.
+
+    눌러 가면 엉뚱한 회의의 로비가 조용히 열립니다.
+    """
+    project_id = seeded["project_id"]
+    login_as(client, seeded["user_ids"][0])
+    made = client.post(f"/api/projects/{project_id}/meetings", json={"title": "알림 딸린 회의"})
+    meeting_id = made.json()["meeting_id"]
+
+    with db_session.session_scope() as session:
+        session.add(
+            m.Notification(
+                project_id=project_id,
+                user_id=seeded["user_ids"][0],
+                kind="meeting_soon",
+                meeting_id=meeting_id,
+            )
+        )
+
+    assert client.delete(f"/api/meetings/{meeting_id}").status_code == 204
+
+    with db_session.session_scope() as session:
+        left = session.scalars(
+            select(m.Notification).where(m.Notification.meeting_id == meeting_id)
+        ).all()
+    assert not left, f"무른 회의를 가리키는 알림이 {len(left)}건 남았습니다"
+
+
+def test_actions_that_remove_their_target_are_all_labelled(client: TestClient, seeded):
+    """⚠️ `REMOVES_TARGET` 이 `ACTION_LABEL` 밖으로 새지 않는지 (짝 가드)."""
+    unknown = activity_service.REMOVES_TARGET - set(activity_service.ACTION_LABEL)
+    assert not unknown, f"이름표가 없는 행동: {unknown}"

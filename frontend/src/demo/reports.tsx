@@ -21,15 +21,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { detailText } from '../lib/http/detail.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import {
+  emptyReports,
   describeConfidence,
   describeFinal,
   describeRange,
   describeReportType,
   describeWhen,
   gapsOf,
+  personGapsHeading,
+  teamReasonsHeading,
   subjectOf,
   toPlainText,
   tooNewToRender,
@@ -84,18 +88,29 @@ function PersonRow({ person }: { person: Person }) {
       </div>
       <div className="pwhy">
         {person.reasons.length > 0 && (
-          <ul className="notes">
-            {person.reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
+          <>
+            {/* ⚠️ **이 목록은 사람마다 똑같습니다** (결함 344). 서버는
+                `compute_confidence` 를 팀당 한 번 부르고, 보고서는 그것을
+                사람 이름 밑에 그립니다. 머리말이 없으면 네 줄이 그 사람에
+                대한 지적으로 읽힙니다 — 커버리지 1.0 인 사람의 항목이
+                「녹음이 끊긴 트랙이 있습니다」를 이고 있었습니다. */}
+            <p className="notes-head">{teamReasonsHeading()}</p>
+            <ul className="notes">
+              {person.reasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          </>
         )}
         {holes.length > 0 && (
-          <ul className="notes notes-gap">
-            {holes.map((hole) => (
-              <li key={hole}>{hole}</li>
-            ))}
-          </ul>
+          <>
+            <p className="notes-head">{personGapsHeading()}</p>
+            <ul className="notes notes-gap">
+              {holes.map((hole) => (
+                <li key={hole}>{hole}</li>
+              ))}
+            </ul>
+          </>
         )}
         {final !== null && <p className="final">{final}</p>}
       </div>
@@ -141,8 +156,10 @@ function BlockView({ block }: { block: Block }) {
     case 'people':
       return (
         <div className="people">
-          {block.people.map((person) => (
-            <PersonRow key={`${person.name}/${person.role}`} person={person} />
+          {block.people.map((person, index) => (
+            /* ⚠️ 이름+역할을 열쇠로 쓰면 **동명이인**에서 겹칩니다 (결함 345).
+               보고서의 `Person` 에는 번호가 없으므로 자리를 같이 씁니다. */
+            <PersonRow key={`${index}/${person.name}/${person.role}`} person={person} />
           ))}
         </div>
       );
@@ -201,6 +218,11 @@ function App() {
   //    줄 알고 옛 클립보드 내용을 붙여 넣습니다 (결함 81 이 말하는 그것).
   const [copyNote, setCopyNote] = useState<Note | null>(null);
   const [busy, setBusy] = useState(false);
+  /* ⚠️ **빈 상자가 「다음에 뭘」을 상수로 뱉고 있었습니다** (결함 312).
+     회의가 0개인 팀에게 「회의 로비에서 회의록을 만드세요」라고 했는데,
+     이 화면은 회의를 **받아 온 적이 없어** 그걸 알 방법이 없었습니다.
+     모르는 동안은 `null` 입니다 — 모르는 것을 0 이라고 하지 않습니다. */
+  const [meetingCount, setMeetingCount] = useState<number | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     const response = await whileLoading(
@@ -233,6 +255,10 @@ function App() {
         }
         setMe((await response.json()) as Me);
       }
+      const meetings = await get(`/api/projects/${projectId}/meetings`);
+      if (meetings !== null && meetings.ok) {
+        setMeetingCount(((await meetings.json()) as unknown[]).length);
+      }
       await load();
     })();
   }, [load]);
@@ -249,6 +275,15 @@ function App() {
       setNote({ text: unreachableText('보고서를 열지 못했습니다'), tone: 'bad' });
       return;
     }
+    /* ⚠️ **세션부터 봅니다** (결함 425). 이 화면의 다른 세 자리(목록 로드 ·
+       `/auth/me` · 만들기)는 전부 `isSessionExpired` → `goToLogin` 인데
+       **열기만** 빠져 있었습니다. 화면을 열어 둔 채 세션이 끊기고 보고서를
+       누르면 「보고서를 열지 못했습니다 (HTTP 401)」이 떴습니다 — 재현했습니다.
+       「HTTP 401」은 사람이 할 수 있는 것을 하나도 안 말합니다. */
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
     if (!response.ok) {
       setNote({ text: `보고서를 열지 못했습니다 (HTTP ${response.status})`, tone: 'bad' });
       return;
@@ -261,18 +296,17 @@ function App() {
     async (type: 'weekly' | 'final'): Promise<void> => {
       setBusy(true);
       setNote(null);
-      // ⚠️ 주간은 **지난 7일**로 못 박습니다. 기간을 사람이 고르는 화면은
-      //    아직 없으므로, 없는 것을 있는 척 고르게 하지 않습니다.
-      const end = new Date();
-      const start = new Date(end.getTime() - 6 * 24 * 3600 * 1000);
-      const body =
-        type === 'weekly'
-          ? {
-              report_type: 'weekly',
-              period_start: start.toISOString(),
-              period_end: end.toISOString(),
-            }
-          : { report_type: 'final' };
+      /* ⛔ **기간을 화면이 짓지 않습니다** (결함 296).
+         예전에는 여기서 「지난 7일」(`end - 6일 ~ end`)을 만들어 보냈습니다.
+         그 창은 누를 때마다 굴러가서 `scope_key` 가 날마다 달라졌고,
+         **하루에 한 벌씩 주간 보고서가 쌓였습니다** — 사흘 눌러 세 벌이
+         나오는 것을 재현했습니다. 게다가 단추는 「이번 주」라고 적혀
+         있는데 이 제품의 「이번 주」는 월~일입니다(`meeting/resolve.py` ·
+         `lib/calendar/month.ts`).
+
+         팀 달력을 아는 곳은 서버입니다(`clock.team_week`). 기간을 안
+         보내면 서버가 팀 달력의 이번 주로 채웁니다. */
+      const body = { report_type: type };
 
       const response = await trySend(() =>
         fetch(`${apiBase}/api/projects/${projectId}/reports`, {
@@ -292,8 +326,12 @@ function App() {
         return;
       }
       if (!response.ok) {
+        /* ⛔ 서버가 사람에게 쓴 문장을 버리고 있었습니다 (결함 316). */
         setNote({
-          text: `보고서를 만들지 못했습니다 (HTTP ${response.status})`,
+          text: detailText(
+            await response.json().catch(() => null),
+            `보고서를 만들지 못했습니다 (HTTP ${response.status})`,
+          ),
           tone: 'bad',
         });
         return;
@@ -403,11 +441,7 @@ function App() {
         {header}
         {actions}
         <RawHtml
-          html={emptyHtml({
-            what: '아직 만든 보고서가 없습니다',
-            why: '보고서는 자동으로 생기지 않습니다 — 팀이 필요할 때 만듭니다.',
-            how: '위의 [최종 보고서 만들기]를 누르거나, 회의 로비에서 회의록을 만드세요.',
-          })}
+          html={emptyHtml(emptyReports(meetingCount))}
         />
       </>
     );

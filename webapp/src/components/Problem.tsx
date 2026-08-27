@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 
+import { plainText } from '@lib/ui/plain.ts';
+
 /**
  * 사람에게 **"이건 아직 안 됩니다"** 를 말하는 자리.
  *
@@ -48,7 +50,11 @@ export function Problem({
       {...(id !== undefined ? { id } : {})}
       role={tone === 'failed' ? 'alert' : 'status'}
     >
-      {children}
+      {/* ⛔ 여기로 오는 문구는 대부분 **서버가 만든 것**입니다. 그 문구에는
+          강조와 코드 표시가 섞여 있고(같은 문장이 마크다운 보고서로도
+          나갑니다), 그대로 그리면 한국어 문장 안에 백틱이 남습니다
+          (결함 262). 글자면 걷어내고, 아니면(조각이면) 그대로 둡니다. */}
+      {typeof children === 'string' ? plainText(children) : children}
     </p>
   );
 }

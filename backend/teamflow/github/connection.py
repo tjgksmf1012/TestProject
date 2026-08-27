@@ -115,6 +115,12 @@ class ConnectionFacts:
     backfilled_at: datetime | None = None
     #: 이 시각 이후는 GitHub 에 물어봤다. None 이면 연결 이후만 있습니다.
     backfilled_to: datetime | None = None
+    #: 이 저장소에 App 이 설치돼 installation id 를 받아 두었는가.
+    #:
+    #: ⚠️ `app_credentials_present` 와 **다른 사실입니다.** 서버에 열쇠가
+    #: 있어도 이 저장소에 App 이 안 깔렸으면 지난 활동은 못 가져옵니다 —
+    #: 백필 갈래가 셋을 **모두** 봅니다(결함 380).
+    installation_present: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,18 +179,99 @@ def _missing_history_warning(facts: ConnectionFacts) -> str | None:
         return None
     # ⚠️ 마크다운을 쓰지 않습니다. 경고 줄은 화면에서 `escapeHtml` 로만
     # 지나가므로 별표가 그대로 보입니다 (결함 44 와 같은 부류).
-    return (
+    said = (
         "연결하기 전의 PR은 기여도에 들어가 있지 않습니다. "
         "웹훅은 연결한 순간부터 오기 때문입니다. "
-        "아래 ‘지난 활동 가져오기’를 누르면 채웁니다."
+    )
+    # ⚠️ **할 수 있을 때만 하라고 합니다** (결함 380). 서버가 지금 백필을
+    # 거절할 상태인데 「누르면 채웁니다」라고 하면, 사람은 눌러서 409 를
+    # 받고 그것을 고장으로 읽습니다.
+    #
+    # 못 하는 상태면 **여기서는 아무 말도 덧붙이지 않습니다.** 무엇이
+    # 막고 있는지는 단추 옆이 말합니다(`backfill_blocked`) — 이 문단의
+    # 맨 위에 적어 둔 그것입니다: 여기서 또 말하면 어느 쪽을 고쳐야
+    # 하는지 흐려지고, 사용자가 지적한 「글씨가 너무 많다」가 됩니다.
+    if not can_backfill(facts):
+        return said.rstrip()
+    return said + "아래 ‘지난 활동 가져오기’를 누르면 채웁니다."
+
+
+def backfill_blocked_because(
+    *,
+    repo: str | None,
+    app_credentials_present: bool,
+    installation_present: bool,
+) -> str | None:
+    """지난 활동 가져오기를 **지금 누르면 안 되는** 이유. 없으면 None.
+
+    ## ⛔ 화면이 「누르면 채웁니다」라고 약속하고 있었습니다 (결함 380)
+
+    설정 화면의 경고 줄은 이렇게 끝났습니다.
+
+        연결하기 전의 PR은 기여도에 들어가 있지 않습니다. 웹훅은 연결한
+        순간부터 오기 때문입니다. **아래 '지난 활동 가져오기'를 누르면
+        채웁니다.**
+
+    그 아래에 단추도 멀쩡히 그려집니다. 그런데 눌러 보면 **409** 입니다 —
+    서버는 그 순간 이미 자격 증명이 없다는 것을 **알고 있습니다.**
+
+    화면이 그것을 못 판단한 이유는 `canBackfill` 이 배달 수와 백필 이력만
+    보고 있었기 때문입니다. 그 필드의 주석은 「배달이 0건인 상태에서
+    보이면 눌러도 아무 일이 없고, 사람은 그게 고장인 줄 압니다」라고
+    **정확히 이 해악을 적어 두고** 한쪽 길만 막고 있었습니다.
+
+    ⚠️ **결함 300 과 다른 자리입니다.** 300 은 눌렀을 때 나오는 **말**을
+    고쳤고(「다른 사람이 먼저 처리했습니다」 → 서버 문장), 이것은 **누르기
+    전**입니다 — 결함 251 이 로비에서 겪은 「말만 고치고 단추는 그대로」와
+    같은 모양입니다.
+
+    ⚠️ 이 판단은 **서버의 백필 갈래와 같은 조건이어야 합니다.** 두 벌로
+    두면 갈라지고, 갈라지면 화면은 「된다」는데 서버는 거절합니다 —
+    그래서 그 갈래도 이 함수를 부릅니다(사본 없음).
+    """
+    if not repo:
+        return "저장소가 연결되지 않았습니다. 먼저 owner/repo를 저장하세요."
+    if not (app_credentials_present and installation_present):
+        return (
+            "서버에 GitHub App 자격 증명이 없거나 App이 아직 이 저장소에 "
+            "설치되지 않았습니다. 지난 활동을 가져오려면 그것부터 필요합니다."
+        )
+    return None
+
+
+def can_backfill(facts: ConnectionFacts) -> bool:
+    """지난 활동 가져오기가 **지금 실제로** 될 것인가.
+
+    아직 한 번도 안 돌렸고, 받은 배달이 있고, 서버 쪽 조건이 갖춰졌을
+    때만입니다.
+    """
+    if facts.delivery_count <= 0 or facts.backfilled_at is not None:
+        return False
+    return (
+        backfill_blocked_because(
+            repo=facts.repo,
+            app_credentials_present=facts.app_credentials_present,
+            installation_present=facts.installation_present,
+        )
+        is None
     )
 
 
 def describe_coverage(facts: ConnectionFacts) -> str:
     """"이 수치는 언제부터의 활동인가" 를 한 줄로.
 
-    기여도 화면이 그대로 씁니다. 범위를 안 밝힌 숫자는 **전부를 센 것처럼**
-    읽힙니다.
+    범위를 안 밝힌 숫자는 **전부를 센 것처럼** 읽힙니다.
+
+    ⚠️ **오래도록 「기여도 화면이 그대로 씁니다」라고 적혀 있었는데
+    아닙니다.** 그리는 곳은 설정의 저장소 연결 **둘뿐**이고(레거시·SPA),
+    기여도 화면은 두 뿌리 다 `/api/projects/{id}/github` 를 **안
+    부릅니다**(네트워크를 찍어 확인).
+
+    기여도 화면에서 그 범위를 말해 주는 것은 이 줄이 아니라 **신뢰도
+    사유**입니다 — `confidence._REASON_TEXT["github_coverage"]` 의
+    「GitHub 연결 이전 기간의 활동이 누락되었습니다」. 레거시는 본문에,
+    SPA 는 `Why` 팝오버 안에 그립니다. 즉 **사람에게 닿기는 하는데
+    다른 길로** 닿습니다.
     """
     if not facts.repo:
         return "GitHub 활동은 이 계산에 들어 있지 않습니다."

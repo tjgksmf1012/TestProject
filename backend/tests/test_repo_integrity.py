@@ -17,6 +17,7 @@ git 에게 직접 물어봐야 합니다.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -33,6 +34,53 @@ SOURCE_PATTERNS = (
     "docs/**/*.md",
 )
 
+
+
+#: 화면이 **전체 경로로는 안 잡는** 서버 갈래 — 왜인지 같이 적습니다.
+#:
+#: ⚠️ 이 표는 **두 곳이 읽습니다**: 아래 라우트 가드와,
+#: `test_the_requirements_table_does_not_claim_unwired_things` 입니다.
+#: 사본을 만들면 「서버만 있다」와 「✅ 다 됐다」가 갈라집니다 — 실제로
+#: `docs/20` 의 CHANNEL-005 가 ✅ 인 채로 그렇게 갈라져 있었습니다(결함 377).
+SERVER_ONLY_OR_ASSEMBLED: dict[str, str] = {
+        "POST /api/github/webhook": "GitHub 이 부릅니다 — 화면이 부르는 갈래가 아닙니다",
+    "GET /health": (
+        "컨테이너·배포가 살아 있는지 묻는 갈래입니다 — 화면이 부르는 것이 "
+        "아닙니다. ⚠️ 오래도록 「불린다」로 잡혀 있었는데, 그건 `/health` 가 "
+        "`../lib/github/health.ts` 라는 **import 경로 안**에 걸린 것이었습니다"
+        "(결함 379)"
+    ),
+        "PUT /api/meetings/{meeting_id}/tracks/{track_id}/chunks/{seq}": (
+            "`browser-adapter.ts` 가 `${trackUrl}/chunks/${seq}` 로 이어 붙입니다"
+        ),
+        "GET /api/meetings/{meeting_id}/tracks/{track_id}/chunks": (
+            "`demo/main.ts` 가 `${trackUrl}/chunks` 로 이어 붙입니다"
+        ),
+        "POST /api/meetings/{meeting_id}/tracks/{track_id}/complete": (
+            "`demo/main.ts` 가 `${trackUrl}/complete` 로 이어 붙입니다"
+        ),
+        # ⚠️ 아래 둘은 **진짜로 아무도 안 부릅니다.** 숨기지 않고 적어 둡니다 —
+        #    만들어 놓고 화면에 안 이은 것이고(실패 ①), 붙일 때 이 줄을 지웁니다.
+        "PATCH /api/channels/{channel_id}": (
+            "CHANNEL-003 채널 이름 변경 — 서버만 있고 화면에 아직 안 이었습니다. "
+            "자가 헐거워 오래 숨어 있었습니다(결함 378)"
+        ),
+        "DELETE /api/channels/{channel_id}": (
+            "CHANNEL-004 채널 삭제(보관) — 서버만 있고 화면에 아직 안 이었습니다. "
+            "자가 헐거워 오래 숨어 있었습니다(결함 378)"
+        ),
+        "PUT /api/projects/{project_id}/channels/order": (
+            "CHANNEL-005 채널 순서 — 서버만 있고 화면에 아직 안 이었습니다"
+        ),
+        "GET /api/projects/{project_id}/mentions": (
+            "내가 불린 **횟수**(`mention_total`) — 서버만 있고 화면에 아직 안 "
+            "이었습니다. ⚠️ 예전에 이 줄은 「멘션 자동완성」이라고 적혀 "
+            "있었는데 **거짓**입니다: 이 갈래가 돌려주는 것은 후보 목록이 "
+            "아니라 숫자 하나라, 이었어도 자동완성은 못 만듭니다(결함 417 "
+            "회차에 세다가 찾았습니다). 멘션 자체는 서버가 본문에서 찾아 "
+            "내므로 동작하고, 자동완성은 이 저장소에 아예 없습니다"
+        ),
+    }
 
 def _source_files() -> list[Path]:
     found: set[Path] = set()
@@ -323,6 +371,87 @@ def test_every_value_the_server_sends_has_a_korean_word_on_the_screen():
     )
 
 
+def _screen_label_pairs() -> list[tuple[str, dict, str, str]]:
+    """서버와 화면이 **같은 낱말을 두 벌** 적어 둔 자리.
+
+    ⚠️ 위 `_screen_vocabularies` 는 **키 집합**만 봅니다. 결함 291 이
+    그 한계를 이렇게 적어 두고 갔습니다.
+
+    > 짝 검사가 「키 집합」만 보고 있던 것 — 서버 어휘 ↔ 화면 이름표 짝
+    > 검사가 넷 있었는데 **키가 같은가**만 봤습니다. … 짝을 잴 때는
+    > **양쪽이 같은 글자를 내는가**까지 보십시오
+
+    키만 보면 한쪽이 「반대 의견」, 다른 쪽이 「반대」로 갈라져도 초록입니다.
+    같은 발언이 회의록과 화면에서 다른 이름으로 불리는 것이고, 결함 290 이
+    회의 시각에서 겪은 것과 같은 모양입니다.
+
+    ⚠️ **여기 넣을 수 있는 것은 서버에도 이름표 표가 있는 것뿐입니다.**
+    `REACTION_LABEL`·`GITHUB_EVENT_LABEL` 은 서버가 **글자를 실어 보내서**
+    화면에 사본이 없습니다 — 두 벌이 아니므로 갈라질 수 없습니다.
+    """
+    from teamflow.db import vocab
+
+    return [
+        ("발언 유형", vocab.UTTERANCE_LABEL, "frontend/src/lib/review/labels.ts", "TYPE_LABEL"),
+        (
+            "프로젝트 권한",
+            vocab.PROJECT_ROLE_LABEL,
+            "frontend/src/lib/project/roles.ts",
+            "ROLE_LABEL",
+        ),
+        (
+            "사용자 상태",
+            vocab.PRESENCE_LABEL,
+            "frontend/src/lib/project/presence.ts",
+            "PRESENCE_LABEL",
+        ),
+        (
+            "업무 우선순위",
+            vocab.TASK_PRIORITY_LABEL,
+            "frontend/src/lib/kanban/priority.ts",
+            "PRIORITY_LABEL",
+        ),
+        ("업무 상태", vocab.TASK_STATUS_LABEL, "frontend/src/lib/kanban/board.ts", "STATUS_LABEL"),
+    ]
+
+
+def test_the_two_copies_of_each_label_say_the_same_word():
+    """⭐ 짝을 잴 때는 **양쪽이 같은 글자를 내는가**까지 본다 (결함 291 의 숙제).
+
+    이건 기록된 결정이 아니라 **적어만 두고 간 숙제**입니다 — AGENTS 가
+    둘을 가르라고 적어 뒀고, 숙제는 하는 것이 뒤집는 것이 아닙니다.
+    """
+    import re
+
+    problems: list[str] = []
+    pairs = _screen_label_pairs()
+    # 안 보고 있는 상태 자체가 실패여야 합니다 (결함 286).
+    assert len(pairs) >= 5, f"짝을 {len(pairs)}개밖에 안 재고 있습니다 — 표가 낡았습니다"
+
+    for name, server, rel, table in pairs:
+        source = (REPO_ROOT / rel).read_text()
+        block = re.search(
+            rf"{table}: Record<[^,>]+, string> = \{{(.*?)\}};", source, re.DOTALL
+        )
+        if block is None:
+            problems.append(f"{name}: {rel} 에서 {table} 을 못 찾았습니다")
+            continue
+        screen = dict(
+            re.findall(r"^\s*'?([\w]+)'?:\s*'([^']*)'", block.group(1), re.MULTILINE)
+        )
+        expected = {str(getattr(k, "value", k)): v for k, v in server.items()}
+        assert expected, f"{name}: 서버 이름표가 비었습니다 — 표가 낡았습니다"
+        for key in sorted(expected):
+            mine = expected[key]
+            theirs = screen.get(key)
+            if theirs != mine:
+                problems.append(f"{name}.{key}: 서버「{mine}」 ≠ 화면「{theirs}」")
+
+    assert problems == [], "같은 값을 두 곳이 다르게 부릅니다:\n" + "\n".join(
+        f"  {p}" for p in problems
+    )
+
+
 def test_the_vocabulary_table_itself_is_not_stale():
     """표가 낡으면 **아무것도 안 보면서 통과**한다.
 
@@ -606,30 +735,66 @@ def test_the_seed_writes_gaps_in_the_same_shape_production_does():
 
 #: 두 쪽이 반드시 같아야 하는 상수. `(뜻, 백엔드 파일, 백엔드 이름, 프런트 이름)`.
 #:
-#: 프런트 파일은 전부 `frontend/src/lib/recording/timeline.ts` 입니다 —
-#: 늘면 튜플에 파일을 더하세요.
+#: 프런트 값은 `frontend/src/lib/recording/timeline.ts` **한 곳**에만
+#: 있어야 합니다. ⚠️ 「한 파일만 읽는다」와 「한 곳에만 있다」는 다릅니다 —
+#: 예전에는 앞엣것만 지켰고, `lobby/room.ts` 가 `MIN_USABLE_COVERAGE` 를
+#: **따로 들고** 있어도 검사 전부가 초록이었습니다(결함 363). 아래
+#: `test_the_paired_numbers_live_in_exactly_one_place` 가 그것을 셉니다.
+#: ⚠️ **프런트 파일을 줄마다 적습니다.** 예전에는 `FRONT_CONSTANTS` 하나로
+#: 못 박혀 있어서, 표에 넣을 수 있는 것이 `recording/timeline.ts` 의
+#: 상수뿐이었습니다. 그래서 **다른 파일에 있는 짝 넷**이 통째로 표 밖에
+#: 있었습니다(`CODE_LENGTH`·`MAX_BIO`·`MAX_BODY`·`MIN_PASSWORD_LENGTH`).
 PAIRED_CONSTANTS = [
     (
         "이보다 짧은 공백은 보고하지 않는다",
         "backend/teamflow/audio/assembly.py",
         "MIN_REPORTED_GAP_MS",
+        "frontend/src/lib/recording/timeline.ts",
         "MIN_REPORTED_GAP_MS",
     ),
     (
         "이만큼까지의 지연은 정상 지터로 본다",
         "backend/teamflow/audio/assembly.py",
         "STALL_TOLERANCE_MS",
+        "frontend/src/lib/recording/timeline.ts",
         "DEFAULT_STALL_TOLERANCE_MS",
     ),
     (
         "이 아래면 트랙을 쓰지 않는다",
         "backend/teamflow/services/recording_service.py",
         "MIN_USABLE_COVERAGE",
+        "frontend/src/lib/recording/timeline.ts",
         "MIN_USABLE_COVERAGE",
     ),
+    (
+        "초대 코드 길이 — 갈라지면 멀쩡한 코드를 화면이 거절합니다",
+        "backend/teamflow/projects/invites.py",
+        "CODE_LENGTH",
+        "frontend/src/lib/project/setup.ts",
+        "CODE_LENGTH",
+    ),
+    (
+        "자기소개 길이 — 갈라지면 화면은 받아 놓고 서버가 거절합니다",
+        "backend/teamflow/users/profile.py",
+        "MAX_BIO",
+        "frontend/src/lib/profile/edit.ts",
+        "MAX_BIO",
+    ),
+    (
+        "메시지 길이 — 갈라지면 두 화면이 서로 다른 숫자를 말합니다",
+        "backend/teamflow/services/message_service.py",
+        "MAX_BODY",
+        "frontend/src/lib/chat/view.ts",
+        "MAX_BODY",
+    ),
+    (
+        "비밀번호 최소 길이 — 갈라지면 가입이 화면 통과 후 실패합니다",
+        "backend/teamflow/auth/passwords.py",
+        "MIN_PASSWORD_LENGTH",
+        "frontend/src/lib/auth/session.ts",
+        "MIN_PASSWORD_LENGTH",
+    ),
 ]
-
-FRONT_CONSTANTS = "frontend/src/lib/recording/timeline.ts"
 
 
 def _number_after(source: str, name: str) -> str | None:
@@ -663,18 +828,17 @@ def test_the_same_number_on_both_sides_really_is_the_same():
 
     셋 다 **오류 없이** 숫자만 어긋납니다. 이 저장소의 대표 실패 방식입니다.
     """
-    front = (REPO_ROOT / FRONT_CONSTANTS).read_text()
-
     problems = []
-    for meaning, rel, back_name, front_name in PAIRED_CONSTANTS:
+    for meaning, rel, back_name, front_rel, front_name in PAIRED_CONSTANTS:
         back = (REPO_ROOT / rel).read_text()
+        front = (REPO_ROOT / front_rel).read_text()
         back_value = _number_after(back, back_name)
         front_value = _number_after(front, front_name)
         if back_value is None:
             problems.append(f"{rel} 에서 {back_name} 을 못 찾았습니다")
             continue
         if front_value is None:
-            problems.append(f"{FRONT_CONSTANTS} 에서 {front_name} 을 못 찾았습니다")
+            problems.append(f"{front_rel} 에서 {front_name} 을 못 찾았습니다")
             continue
         if float(back_value) != float(front_value):
             problems.append(
@@ -684,33 +848,311 @@ def test_the_same_number_on_both_sides_really_is_the_same():
     assert not problems, "서버와 화면의 숫자가 갈라졌습니다:\n  " + "\n  ".join(problems)
 
 
-def test_the_paired_constant_table_is_not_stale():
-    """표가 낡지 않았는가 — 주석이 &#34;같은 값&#34; 이라고 말하면 표에 있어야 한다.
+def test_the_paired_numbers_live_in_exactly_one_place():
+    """⭐ 서버와 짝지은 숫자가 화면 쪽에 **딱 한 벌**만 있는가 (결함 363).
 
-    ⚠️ 이 검사가 없으면 다음 사람이 상수를 하나 더 만들면서 같은 주석을
-    달고, 그건 아무도 안 지킵니다. 표를 늘리는 것이 규칙이 되게 합니다.
+    `test_the_same_number_on_both_sides_really_is_the_same` 은 서버와
+    `recording/timeline.ts` 를 맞춥니다. 그 자는 **읽는 파일이 하나**라,
+    같은 이름이 `@lib` 의 **다른 파일**에도 있으면 아무것도 못 봅니다.
+
+    실제로 `MIN_USABLE_COVERAGE` 가 세 벌이었습니다 — 서버 ·
+    `recording/timeline.ts` · **`lobby/room.ts`**. 로비의 값을 `0.5` 로
+    바꾸고 번들까지 다시 만든 뒤 전부 돌렸더니 **pytest 2145 · 프런트
+    1969 이 전부 초록**이었습니다. 그 상태에서 로비는 커버리지 0.6 짜리
+    트랙을 「쓸 만합니다」라고 하고 서버는 `unusable` 로 저장합니다 —
+    앞 검사의 docstring 이 **바로 그 해악**을 적어 두고 있는데, 정작
+    그 자리를 안 보고 있었습니다.
+
+    ⚠️ **낱말이 아니라 요구를 잽니다.** 「timeline.ts 를 읽는가」가 아니라
+    **「정의가 딱 하나인가」**를 셉니다 — 그래야 다음 사람이 네 번째
+    사본을 만들어도 잡힙니다. 다시 내보내는 것(`export { X }`)은 정의가
+    아니므로 세지 않습니다.
     """
     import re
 
-    declared = []
-    for rel in {rel for _, rel, _, _ in PAIRED_CONSTANTS} | {
-        "backend/teamflow/audio/assembly.py",
-        "backend/teamflow/services/recording_service.py",
-    }:
-        source = (REPO_ROOT / rel).read_text()
-        # `… 와 같은 값…` 주석 **바로 뒤**에 오는 상수 이름
-        for hit in re.finditer(
-            r"#[^\n]*(?:와|과) 같은 값[^\n]*\n([A-Z_][A-Z0-9_]*)\s*=", source
-        ):
-            declared.append((rel, hit.group(1)))
+    lib = REPO_ROOT / "frontend" / "src" / "lib"
+    problems = []
+    for _, _, _, front_rel, front_name in PAIRED_CONSTANTS:
+        # 정의인 자리만 셉니다 — 다시 내보내는 것(`export { X }`)은 정의가
+        # 아닙니다. ⚠️ **`export` 를 요구하면 안 됩니다** — 이 표의 셋 중
+        # 둘은 모듈 안에서만 쓰는 `const` 입니다(처음에 그렇게 썼다가
+        # 「0곳」이 나왔습니다).
+        pattern = re.compile(
+            rf"^\s*(?:export\s+)?const\s+{front_name}\b[^=\n]*=\s*[0-9]",
+            re.MULTILINE,
+        )
+        where = [
+            str(path.relative_to(REPO_ROOT))
+            for path in sorted(lib.rglob("*.ts"))
+            if not path.name.endswith(".test.ts")
+            and pattern.search(path.read_text(encoding="utf-8"))
+        ]
+        if len(where) != 1:
+            problems.append(
+                f"{front_name}: 정의가 {len(where)}곳입니다 — {', '.join(where) or '(0곳)'}"
+            )
+        elif where[0] != front_rel:
+            problems.append(
+                f"{front_name}: {where[0]} 에 있습니다 — 표는 {front_rel} 라고 적었습니다"
+            )
 
-    known = {(rel, name) for _, rel, name, _ in PAIRED_CONSTANTS}
-    missing = [f"{rel} 의 {name}" for rel, name in declared if (rel, name) not in known]
-    assert not missing, (
-        "주석이 '같은 값' 이라고 말하는데 표에 없습니다 — "
-        "`PAIRED_CONSTANTS` 에 넣으세요:\n  " + "\n  ".join(missing)
+    assert not problems, (
+        "서버와 짝지은 숫자가 화면 쪽에 여러 벌이거나 엉뚱한 곳에 있습니다:\n  "
+        + "\n  ".join(problems)
     )
-    assert declared, "'같은 값' 주석을 하나도 못 찾았습니다 — 이 검사가 헛돌고 있습니다"
+
+
+def test_the_paired_constant_table_is_not_stale():
+    """⭐ 표가 낡지 않았는가 — **기준으로 전수를 재서** 확인한다.
+
+    ## ⛔ 이 검사가 스스로 경고한 일이 스스로에게 났습니다
+
+    예전 판은 이렇게 적어 두었습니다.
+
+        이 검사가 없으면 다음 사람이 상수를 하나 더 만들면서 같은 주석을
+        달고, 그건 아무도 안 지킵니다. 표를 늘리는 것이 규칙이 되게 합니다.
+
+    그런데 그 판은 **파이썬만** 걷고, **하드코딩한 두 파일**만 읽고,
+    **「와 같은 값」이라는 한 가지 표현**만 찾았습니다. 그래서 프런트에
+    적힌 「서버 … 와 같아야 한다」 다섯 줄이 통째로 눈 밖이었습니다.
+
+        auth/session.ts   MIN_PASSWORD_LENGTH  ← 표에 없었음
+        profile/edit.ts   MAX_BIO              ← 표에 없었음
+        project/setup.ts  CODE_LENGTH          ← 표에 없었음
+        chat/view.ts      MAX_BODY             ← 주석조차 없이 두 벌
+
+    (재 보니 넷 다 값은 **같았습니다** — 갈라진 것이 아니라 **안 보고 있던
+    것**입니다. 그래서 결함 번호는 안 붙였습니다.)
+
+    ## 그래서 이제 손으로 고른 목록이 아니라 **기준**을 잽니다
+
+    ⚠️ 결함 329 의 「**손으로 고른 목록을 그 기준으로 전부 재 보십시오**」
+    입니다. 기준은 둘입니다.
+
+    1. 서버와 `@lib` **양쪽에 같은 이름의 숫자 상수**가 있으면 표에 있어야
+       한다 — 주석이 있든 없든(`MAX_BODY` 가 그랬습니다)
+    2. 어느 쪽이든 주석이 **「같아야/같은 값」**이라고 말하면 표에 있어야
+       한다 — **파이썬과 타입스크립트 둘 다** 걷습니다
+    """
+    import re
+
+    def blanked(source: str) -> str:
+        return _blanked(source)
+
+    #: ── 기준 ① 양쪽에 같은 이름의 숫자 상수가 있는가 ──────────────
+    def numbers(paths, pattern: str) -> dict[str, list[str]]:
+        found: dict[str, list[str]] = {}
+        for path in paths:
+            if ".test." in path.name or "__pycache__" in str(path):
+                continue
+            for hit in re.finditer(pattern, blanked(path.read_text(encoding="utf-8")), re.M):
+                found.setdefault(hit.group(1), []).append(str(path.relative_to(REPO_ROOT)))
+        return found
+
+    server = numbers(
+        REPO_ROOT.glob("backend/teamflow/**/*.py"),
+        r"^([A-Z][A-Z0-9_]{2,})\s*(?::\s*[\w\[\], ]+)?\s*=\s*-?[0-9][0-9_.]*\s*$",
+    )
+    lib = numbers(
+        REPO_ROOT.glob("frontend/src/lib/**/*.ts"),
+        r"^\s*(?:export\s+)?const\s+([A-Z][A-Z0-9_]{2,})"
+        r"\s*(?::\s*[\w<>\[\]]+)?\s*=\s*-?[0-9][0-9_.]*\s*;",
+    )
+    assert server and lib, "상수를 한쪽에서도 못 찾았습니다 — 이 검사가 헛돕니다"
+
+    tabled_back = {name for _, _, name, _, _ in PAIRED_CONSTANTS}
+    tabled_front = {name for _, _, _, _, name in PAIRED_CONSTANTS}
+    on_both = sorted(set(server) & set(lib))
+    assert on_both, "양쪽에 같은 이름인 상수를 하나도 못 찾았습니다 — 자가 낡았습니다"
+
+    missing = [
+        f"{name}  (서버 {', '.join(server[name])} ↔ @lib {', '.join(lib[name])})"
+        for name in on_both
+        if name not in tabled_back or name not in tabled_front
+    ]
+
+    #: ── 기준 ② 주석이 「같아야/같은 값」이라고 말하는가 ────────────
+    #: ⚠️ **두 언어를 다 걷습니다.** 예전 판은 파이썬만 봤습니다.
+    CLAIM = re.compile(r"(?:와|과)\s*같(?:아야|은\s*값)")
+    claimed: list[str] = []
+    for path in [
+        *REPO_ROOT.glob("backend/teamflow/**/*.py"),
+        *REPO_ROOT.glob("frontend/src/lib/**/*.ts"),
+    ]:
+        if ".test." in path.name or "__pycache__" in str(path):
+            continue
+        source = path.read_text(encoding="utf-8")
+        for line_no, line in enumerate(source.splitlines(), 1):
+            if not CLAIM.search(line):
+                continue
+            #: 그 주석이 **가리키는 상수 이름**만 셉니다. 이름이 안 적힌
+            #: 문장(「규칙은 서버와 같아야 합니다」)은 상수가 아니라 규칙이라
+            #: 표의 대상이 아닙니다 — 세면 거짓 양성만 납니다.
+            for name in re.findall(r"[A-Z][A-Z0-9_]{2,}", line):
+                if name in tabled_back or name in tabled_front:
+                    continue
+                if name in server or name in lib:
+                    rel = path.relative_to(REPO_ROOT)
+                    claimed.append(f"{name}  ({rel}:{line_no})")
+
+    problems = sorted(set(missing) | set(claimed))
+    assert not problems, (
+        "서버와 화면에 같은 숫자가 두 벌 있는데 `PAIRED_CONSTANTS` 에 없습니다.\n"
+        "  갈라지면 오류 없이 숫자만 어긋납니다 — 표에 넣으세요:\n  "
+        + "\n  ".join(problems)
+    )
+
+
+def test_status_columns_are_compared_against_their_own_vocabulary():
+    """⭐ 상태 칸을 **자기 어휘**로만 재는가 (결함 381).
+
+    ## ⛔ 달력이 프로젝트를 **업무의 말**로 쟀습니다
+
+    `calendar_service.collect` 안에서 예순네 줄 차이로 이렇게 있었습니다.
+
+        done = task.status == "done"           ← 업무. 맞습니다
+        done = project.status == "done"        ← 프로젝트. **그런 값이 없습니다**
+
+    `"done"` 은 `TaskStatus.DONE` 이고, `projects.status` 의 값이 아닙니다.
+    같은 칸을 읽는 다른 자리는 `"finished"` 를 봅니다
+    (`tasks/maintenance.py`) — **한 칸에 두 어휘**였고, 쓰는 코드가
+    0곳이라 둘 다 영원히 거짓이었습니다.
+
+    ⚠️ **낱말이 아니라 요구를 잽니다.** 「`"done"` 을 쓰지 마라」가 아니라
+    **「상태 칸을 날 글자와 비교하지 마라」**입니다 — 그래야 다음 사람이
+    `"complete"` 라고 적어도 잡힙니다(결함 295 의 「막는 길을 하나만 막은
+    것」).
+    """
+    import re
+
+    #: 어휘가 있는 상태 칸. `(모델 속성, 어휘 이름)`.
+    STATUS_COLUMNS = {
+        "project.status": "ProjectStatus",
+        "task.status": "TaskStatus",
+        "meeting.status": "MeetingStatus",
+    }
+
+    offenders: list[str] = []
+    for path in sorted(REPO_ROOT.glob("backend/teamflow/**/*.py")):
+        if "__pycache__" in str(path):
+            continue
+        code = _blanked(path.read_text(encoding="utf-8"))
+        for attr, vocab_name in STATUS_COLUMNS.items():
+            #: `project.status == "…"` · `Project.status == "…"` 둘 다.
+            noun = attr.split(".")[0]
+            pattern = re.compile(
+                rf"\b[A-Za-z_.]*{noun}\.status\s*(?:==|!=)\s*(['\"])([^'\"]*)\1",
+                re.IGNORECASE,
+            )
+            for hit in pattern.finditer(code):
+                line = code[: hit.start()].count(chr(10)) + 1
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{line}  {noun}.status == "
+                    f"{hit.group(1)}{hit.group(2)}{hit.group(1)}"
+                    f"  → `vocab.{vocab_name}` 을 쓰세요"
+                )
+
+    assert not offenders, (
+        "상태 칸을 **날 글자**와 비교하고 있습니다. 어휘가 아닌 값을 적으면 "
+        "오류 없이 영원히 거짓이 됩니다 — 달력이 프로젝트를 업무의 말로 재고 "
+        "있었습니다(결함 381):\n  " + "\n  ".join(offenders)
+    )
+
+
+#: 행을 **만드는 코드가 0곳**인 표. `(모델, 왜 비어 있나 · 무엇이 딸려 죽나)`.
+#:
+#: ⚠️ 이 표는 **손으로 고른 목록이 아닙니다** — 아래 검사가 모델 전수를
+#: 세어 이 표와 **똑같은지** 봅니다. 새로 생기면 빨개지고, 채우기
+#: 시작해도 빨개집니다(결함 306 의 「예외가 낡는 것도 재라」).
+TABLES_NOBODY_FILLS: dict[str, str] = {
+    "TaskDependency": (
+        "선행/후행 관계를 넣는 라우트·화면·씨앗이 0곳. `blocked_by_late`"
+        "(ANALYTICS-005)가 이 표만 보므로 그 신호는 **언제나 `None`** 입니다"
+        " — `docs/20` 은 오래도록 ✅ 였습니다 (결함 382)."
+    ),
+    "PeerReview": (
+        "동료평가를 제출하는 길이 0곳. 신뢰도의 `peer_completion` 은 분모가"
+        " 0이면 **계산에서 빠지도록** 설계돼 있어(`compute_confidence`) 조용히"
+        " 틀리지 않습니다. `docs/20` 에 ✅ 로 주장하는 줄도 없습니다."
+    ),
+    "ScoringProfileRow": (
+        "가중치 프로파일을 행으로 저장하는 길이 0곳 — 지금은 코드의 "
+        "`profiles.Role` 이 그 일을 합니다. 주장하는 ✅ 줄이 없습니다."
+    ),
+    "Voiceprint": (
+        "성문을 만드는 코드가 0곳. `docs/07` §2.3 이 「멀티트랙이면 애초에 "
+        "불필요」라고 적어 둔 **기록된 결정**입니다 — `db/vocab.py` 도 같은 "
+        "말을 합니다."
+    ),
+}
+
+
+def test_tables_nobody_fills_are_written_down_and_not_claimed_done():
+    """⭐ **행을 만드는 코드가 0곳인 표**를 적어 두고, ✅ 로 주장하지 않는다.
+
+    ## ⛔ 대조표가 ✅ 라고 했는데 입력이 영영 안 들어옵니다 (결함 382)
+
+    `ANALYTICS-005 선행 지연 병목` 이 ✅ 였습니다. 계산은 멀쩡히 있습니다 —
+    `find_blocked_by_late(tasks, edges, …)`. 그런데 `edges` 는
+
+        select(m.TaskDependency.predecessor_id, m.TaskDependency.successor_id)
+
+    하나에서만 오고, `TaskDependency(` 를 **만드는 코드가 저장소 전체에
+    0곳**입니다(라우트·화면·씨앗 전부). 그래서 `blocked` 는 언제나 비고
+    함수는 **언제나 `None`** 입니다.
+
+    결함 377 이 `CHANNEL-005` 에서 겪은 것과 같은 모양인데, 그때는
+    「서버는 있고 화면이 없다」였고 이번은 **「입력이 아예 안 들어온다」**
+    입니다.
+
+    ⚠️ **손으로 고른 목록이 아니라 기준으로 셉니다** (결함 329). 모델
+    전수에서 「만드는 코드가 0곳」인 것을 찾아 위 표와 대조하므로,
+    새 표가 생겨도 · 표가 채워지기 시작해도 빨개집니다.
+    """
+    import re
+
+    models_src = _blanked(
+        (REPO_ROOT / "backend" / "teamflow" / "db" / "models.py").read_text(encoding="utf-8")
+    )
+    classes = re.findall(r"class\s+([A-Z]\w+)\(Base\)", models_src)
+    assert len(classes) > 20, f"모델을 {len(classes)}개밖에 못 찾았습니다 — 가드가 헛돕니다"
+
+    sources: list[tuple[str, str]] = []
+    for path in [
+        *REPO_ROOT.glob("backend/teamflow/**/*.py"),
+        *REPO_ROOT.glob("scripts/*.py"),
+    ]:
+        if "__pycache__" in str(path) or path.name == "models.py":
+            continue
+        sources.append((str(path), _blanked(path.read_text(encoding="utf-8"))))
+
+    empty = set()
+    for name in classes:
+        #: `m.Voiceprint(` 도 `Voiceprint(` 도 만드는 것입니다. 선언은
+        #: `models.py` 를 아예 빼서 셈에서 제외했습니다.
+        rx = re.compile(rf"(?<![A-Za-z_])(?:m\.)?{name}\(")
+        if not any(rx.search(code) for _, code in sources):
+            empty.add(name)
+
+    written = set(TABLES_NOBODY_FILLS)
+    assert empty == written, (
+        "「행을 만드는 코드가 0곳인 표」 목록이 실제와 다릅니다.\n"
+        f"  새로 생김: {sorted(empty - written) or '없음'}\n"
+        f"  이제 채워짐(표에서 빼세요): {sorted(written - empty) or '없음'}"
+    )
+
+    #: 그런 표에 기대는 요구는 **✅ 로 주장하면 안 됩니다.**
+    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text(encoding="utf-8")
+    lying = []
+    for model, reason in TABLES_NOBODY_FILLS.items():
+        for req in re.findall(r"\b([A-Z]{3,}-\d{3})\b", reason):
+            for line in doc.splitlines():
+                if line.startswith(f"| {req} ") and re.search(r"\|\s*✅\s*\|", line):
+                    lying.append(f"{req} — {model} 은 아무도 안 채우는데 ✅ 입니다")
+    assert not lying, (
+        "입력이 영영 안 들어오는 요구를 `docs/20` 이 ✅ 라고 합니다 "
+        "(결함 382):\n  " + "\n  ".join(lying)
+    )
 
 
 def test_every_pipeline_stage_has_words_a_person_can_read():
@@ -1173,13 +1615,33 @@ def test_the_screens_read_the_calendar_from_one_place():
     root = REPO_ROOT / "frontend" / "src"
 
     offenders = []
-    for path in sorted(root.rglob("*.ts")):
+    # ⚠️ **`.tsx` 도 걷습니다** (결함 334). 예전에는 `*.ts` 만 훑어서
+    #    **화면 파일이 통째로 감시 밖**이었습니다 — AGENTS.md 가
+    #    「화면 파일을 세는 곳이 `.ts` 로 하드코딩돼 `.tsx` 를 못 본 것」
+    #    이라고 적어 둔 그 함정이고, 실제로 레거시 기여도 화면이 그 구멍으로
+    #    브라우저 달력을 쓰고 있었습니다. 심어서 확인했습니다: 옛 자로는
+    #    `.tsx` 에 심어도 **0건**이었습니다.
+    for path in sorted([*root.rglob("*.ts"), *root.rglob("*.tsx")]):
         rel = path.relative_to(REPO_ROOT / "frontend").as_posix()
-        if rel in allowed or rel.endswith(".test.ts"):
+        if rel in allowed or rel.endswith(".test.ts") or rel.endswith(".test.tsx"):
             continue
         source = path.read_text()
         for number, line in enumerate(source.splitlines(), 1):
-            if re.search(r"\.getMonth\(\)|\.getDate\(\)|\.getFullYear\(\)", line):
+            # ⚠️ **낱말이 아니라 요구를 잽니다** (결함 295·334). 예전에는
+            #    `getMonth()` 류만 막았는데, 브라우저 달력으로 가는 길은
+            #    하나가 아닙니다 — `toLocaleString()` 을 **시간대 없이**
+            #    부르면 똑같이 보는 사람의 달력이 됩니다. 실제로 그 길로
+            #    두 곳이 새고 있었습니다(`lib/contribution/final.ts` 는
+            #    **두 뿌리가 같이 쓰는** 자리였습니다).
+            #
+            #    `timeZone` 을 명시한 호출은 통과시킵니다 — 그건 팀 달력을
+            #    직접 지정한 것이고, `calendar.ts` 자신이 그렇게 합니다.
+            by_hand = re.search(r"\.getMonth\(\)|\.getDate\(\)|\.getFullYear\(\)", line)
+            loose_locale = (
+                re.search(r"\.toLocale(?:Date|Time)?String\(", line)
+                and "timeZone" not in line
+            )
+            if by_hand or loose_locale:
                 offenders.append(f"{rel}:{number}  {line.strip()}")
 
     assert not offenders, (
@@ -2435,3 +2897,1326 @@ def test_the_defect_log_never_reuses_a_measurement_ordinal():
     dupes = [o for o, c in Counter(ordinals).items() if c > 1]
 
     assert not dupes, f"'n번째 자' 순번이 겹칩니다: {dupes}"
+
+def test_api_times_say_which_calendar_they_are_in():
+    """⭐ 응답에 나가는 시각은 **시간대를 글자로 말한다** (결함 246).
+
+    저장은 UTC 인데 **SQLite 는 시간대를 안 돌려줍니다.** 그대로 내보내면
+    한 API 안에 규약이 둘이 됩니다:
+
+        "started_at": "2026-09-08T10:00:00"      ← 표시 없음
+        "computed_at": "2026-08-21T00:10:07Z"    ← 표시 있음
+
+    표시 없는 쪽을 브라우저는 **자기 시간대**로 읽습니다(JS 사양). 그래서
+    서울 사람과 뉴욕 사람이 같은 회의를 다른 순간으로 보고, 자정 근처면
+    날짜까지 갈라집니다.
+
+    ⚠️ 이 검사는 **찾는 자리가 낡지 않게** 필드를 세지 않고 `datetime` 이
+    남아 있는지를 봅니다 — 새 응답 모델이 생기면 그때 걸립니다.
+    """
+    import re
+
+    source = (REPO_ROOT / "backend" / "teamflow" / "api" / "main.py").read_text()
+    # 주석·문서화 문자열은 걷어냅니다 — 이 결함을 **설명하는 글**이 스스로 걸립니다.
+    code = re.sub(r'"""[\s\S]*?"""', " ", source)
+    code = re.sub(r"^\s*#.*$", " ", code, flags=re.M)
+
+    raw = [m.group(0) for m in re.finditer(r"^    [a-z_]+: datetime\b", code, re.M)]
+    assert not raw, (
+        "응답 모델에 맨 `datetime` 이 있습니다 — `UtcDatetime` 을 쓰세요. "
+        "시간대 없이 나가면 브라우저가 자기 달력으로 읽습니다:\n  "
+        + "\n  ".join(x.strip() for x in raw)
+    )
+    assert "UtcDatetime" in code, "`UtcDatetime` 이 없습니다 — 검사가 헛돕니다"
+
+
+
+# ══════════════════════════════════════════════════════════════
+# 회의 상태를 **손으로 적지 않는다** (결함 288)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_no_module_compares_a_meeting_status_that_does_not_exist() -> None:
+    """⭐ `meeting.status == "..."` 의 오른쪽은 **실재하는 상태**여야 한다.
+
+    보고서가 `x.status == "done"` 으로 「처리된 회의」를 세고 있었습니다.
+    `"done"` 은 **업무** 상태(`vocab.TaskStatus.DONE`)이지 회의 상태가
+    아니라서, 이 값은 어느 프로젝트에서든 **언제나 0** 이었습니다.
+
+    그리고 0 은 조용하지 않았습니다 — 그 옆의 설명이 이렇게 나갔습니다.
+
+        6건은 아직 처리 전이라 그 회의의 발언은 기여도에 안 들어갔습니다
+
+    같은 제품의 기여도 화면은 그 사람의 회의 근거를 11건이라고 세고
+    있었습니다. **팀이 제출하는 문서가 제품 자신의 데이터와 반대되는 말을
+    한 것**이고, 오류도 안 나고 테스트도 통과했습니다.
+
+    `MeetingStatus` 는 스스로 「여기가 유일한 출처다」라고 적어 두고
+    있었는데, 그 출처를 **안 보고 글자를 적어도** 아무도 안 막았습니다.
+    """
+    import re
+
+    from teamflow.db.models import MeetingStatus
+
+    known = {s.value for s in MeetingStatus}
+    # 이 저장소가 회의 상태 칸에 실제로 쓰는 예외들 — 뜻이 있는 값입니다.
+    allowed = known | {"superseded"}
+
+    bad: list[str] = []
+    roots = [REPO_ROOT / "backend" / "teamflow", REPO_ROOT / "backend" / "tests"]
+    for root in roots:
+      for path in root.rglob("*.py"):
+          source = path.read_text(encoding="utf-8")
+          # 주석·문서문자열의 「나쁜 예」를 물지 않게 걷어냅니다 (AGENTS.md).
+          code = re.sub(r'"""[\s\S]*?"""', "", source)
+          code = re.sub(r"^\s*#.*$", "", code, flags=re.M)
+          for m2 in re.finditer(
+              r'\b(?:meeting|x|row|item)\.status\s*(?:==|!=)\s*"([^"]+)"', code
+          ):
+              if m2.group(1) not in allowed:
+                  bad.append(f"{path.relative_to(REPO_ROOT)}: {m2.group(0)}")
+          for m2 in re.finditer(
+              r'\b(?:meeting|x|row|item)\.status\s+in\s+\{([^}]*)\}', code
+          ):
+              for lit in re.findall(r'"([^"]+)"', m2.group(1)):
+                  if lit not in allowed:
+                      bad.append(f"{path.relative_to(REPO_ROOT)}: {lit}")
+          # ⚠️ **검사 데이터가 실기와 다른 값을 만들면** 그 검사는 아무것도
+          #    안 잽니다. `m.Meeting(... status="done")` 이 바로 그것이었고,
+          #    그래서 보고서의 「처리된 회의」가 언제나 0 인데도 초록이었습니다.
+          for m2 in re.finditer(r'm\.Meeting\([^)]*?status=("([^"]+)")', code, re.S):
+              if m2.group(2) not in allowed:
+                  bad.append(f"{path.relative_to(REPO_ROOT)}: m.Meeting(status={m2.group(1)})")
+
+    assert not bad, (
+        "회의 상태로 **없는 값**을 비교합니다 — 그 가지는 영원히 안 탑니다:\n  "
+        + "\n  ".join(bad)
+    )
+
+
+def test_every_audit_target_kind_has_a_human_name() -> None:
+    """⭐ 감사 기록에 **쓰는 종류**와 **읽는 쪽이 아는 종류**가 짝이어야 한다.
+
+    ## 왜 이 검사가 생겼나
+
+    결함 293 에서 활동 기록의 `target` 에 사람 이름을 붙였습니다. 그런데
+    **씨앗 데이터에 있던 넷만** 고쳤습니다. 「업무 후보 승인」을 실제로 눌러
+    보니 다섯째가 나왔고, 화면은 이렇게 적었습니다 (결함 297):
+
+        업무 후보 승인   김민수   meeting_task_candidates/1
+
+    그 화면은 스스로 「누가 언제 **무엇을** 바꿨는지」라고 말합니다. 종류를
+    하나씩 더하는 것으로는 여섯째가 또 나옵니다 — **짝을 재는 자**를 둡니다.
+
+    ⚠️ 「덮는가」만이 아니라 **「맞는 칸인가」**도 봅니다 (결함 289 의 교훈):
+    읽는 쪽이 아는데 아무도 안 쓰는 종류가 있으면 그것도 알려 줍니다.
+    """
+    import re
+
+    from teamflow.services.activity_service import KNOWN_TARGET_KINDS
+
+    written: dict[str, str] = {}
+    for pattern in ("backend/teamflow/**/*.py",):
+        for path in sorted(REPO_ROOT.glob(pattern)):
+            source = path.read_text(encoding="utf-8")
+            # 주석·문서문자열의 「나쁜 예」를 물지 않게 걷어냅니다 (AGENTS.md).
+            code = re.sub(r'"""[\s\S]*?"""', "", source)
+            code = re.sub(r"^\s*#.*$", "", code, flags=re.M)
+            for hit in re.finditer(r'target=f?"(?P<kind>[a-z_]+)[/:]\{', code):
+                written.setdefault(hit["kind"], str(path.relative_to(REPO_ROOT)))
+
+    assert written, "감사 기록에 target 을 쓰는 곳을 하나도 못 찾았습니다 — 가드가 헛돕니다"
+
+    unnamed = sorted(k for k in written if k not in KNOWN_TARGET_KINDS)
+    assert not unnamed, (
+        "감사 기록이 이 종류를 식별자 그대로 내보냅니다 — "
+        "`activity_service._target_labels` 에 이름을 붙이세요:\n  "
+        + "\n  ".join(f"{kind}  ({written[kind]})" for kind in unnamed)
+    )
+
+    stale = sorted(KNOWN_TARGET_KINDS - set(written))
+    assert not stale, (
+        "읽는 쪽이 아는데 **아무도 안 쓰는** 종류입니다 — 낡은 것이거나 "
+        "찾는 자리가 틀린 것입니다:\n  " + "\n  ".join(stale)
+    )
+
+
+def test_leaving_a_project_is_written_down_on_both_ways_out() -> None:
+    """⭐ 내보내기와 스스로 나가기 **둘 다** 기록을 남겨야 한다 (결함 328).
+
+    ⚠️ 이 저장소에서 제일 흔한 재발 모양은 **한 갈래만 고치는 것**입니다
+    (실패 ② · 결함 298→301). 나가는 문은 둘인데 한쪽만 적으면, 스스로
+    나간 사람의 역할 비중은 여전히 소리 없이 사라집니다 (결함 327).
+    """
+    source = (REPO_ROOT / "backend/teamflow/api/main.py").read_text(encoding="utf-8")
+
+    exits = [
+        name
+        for name in ("def remove_member(", "def leave_project(")
+        if name in source
+    ]
+    assert len(exits) == 2, f"나가는 문을 둘 다 못 찾았습니다: {exits}"
+
+    for name in exits:
+        body = source.split(name, 1)[1].split("\n@app.", 1)[0]
+        assert "_remember_departure(" in body, (
+            f"{name.strip('def (')} 이 나가는 사람의 역할 비중을 안 적습니다 — "
+            "적어 두지 않으면 기여도가 조용히 다시 계산됩니다 (결함 327)"
+        )
+
+
+def test_the_activity_log_never_starts_receiving_meetings_or_chat() -> None:
+    """⭐ 활동 화면의 빈 상자가 **주장하는 범위**를 서버가 계속 지켜야 한다.
+
+    ## 왜 이 검사가 생겼나
+
+    결함 304 에서 활동 화면이 「아직 아무도 안 바꿨습니다」라고 단언했습니다.
+    같은 순간 그 팀에는 회의 다섯 · 업무 카드 넷 · 세 사람의 기여도 근거가
+    있었습니다. 고친 문장은 **이 기록이 무엇을 받는지**를 말합니다.
+
+        이 기록에는 사람이 손으로 내린 결정만 쌓입니다 …
+        **회의를 열거나 녹음하거나 이야기 나눈 것은 여기 안 남습니다.**
+
+    그 문장은 서버가 **회의를 열 때 감사 기록을 안 쓴다**는 사실 위에 서
+    있습니다. 나중에 누가 `meeting_created` 를 감사 기록에 넣으면 화면은
+    조용히 거짓말을 시작합니다 — 오류도 안 나고 아무도 안 봅니다.
+    (실패 ② — 같은 사실이 두 곳에 있으면 반드시 갈라집니다.)
+
+    ⚠️ 낱말이 아니라 **요구**를 잽니다: 「회의를 여는 것 · 녹음하는 것 ·
+    이야기 나누는 것」이 감사 기록의 갈래에 없어야 합니다. 폐기(`revoked`)·
+    삭제(`deleted`)·재처리(`reprocess`)는 **사람이 손으로 내린 결정**이라
+    화면이 말하는 범위 안이고, 그래서 예외입니다.
+    """
+    import re
+
+    forbidden = ("created", "started", "recorded", "uploaded", "sent", "posted", "opened")
+    allowed_even_though_matching = {
+        # 「손으로 내린 결정」이라 화면이 말하는 범위 안입니다.
+        "meeting_reprocess_requested",
+    }
+
+    actions: dict[str, str] = {}
+    for path in sorted(REPO_ROOT.glob("backend/teamflow/**/*.py")):
+        source = path.read_text(encoding="utf-8")
+        code = re.sub(r'"""[\s\S]*?"""', "", source)
+        code = re.sub(r"^\s*#.*$", "", code, flags=re.M)
+        for hit in re.finditer(r'action="(?P<name>[a-z_]+)"', code):
+            actions.setdefault(hit["name"], str(path.relative_to(REPO_ROOT)))
+
+    assert actions, "감사 기록에 action 을 쓰는 곳을 하나도 못 찾았습니다 — 가드가 헛돕니다"
+
+    leaked = sorted(
+        name
+        for name in actions
+        if name not in allowed_even_though_matching
+        and (
+            any(name.endswith(f"_{word}") for word in forbidden)
+            or name.startswith(("meeting_created", "message_", "chat_", "channel_"))
+        )
+    )
+    assert not leaked, (
+        "활동 화면의 빈 상자가 「회의를 열거나 녹음하거나 이야기 나눈 것은 "
+        "여기 안 남습니다」라고 말합니다 (결함 304). 이 갈래가 들어오면 그 "
+        "문장이 거짓이 됩니다 — `@lib/activity/empty.ts` 를 같이 고치세요:\n  "
+        + "\n  ".join(f"{name}  ({actions[name]})" for name in leaked)
+    )
+
+
+def _blanked(source: str) -> str:
+    """주석·docstring 을 **같은 길이의 공백**으로 덮는다 — 지우지 않는다.
+
+    ⚠️ 지우면 뒤의 offset 이 전부 밀려 **줄 번호가 틀립니다.** 처음에는
+    지웠다가 23줄, 개행만 맞췄다가 3줄 어긋났습니다. 길이를 보존하면
+    원본과 offset 이 **정확히** 같습니다.
+
+    ⚠️ `^\\s*#` 으로 주석을 지우지 마십시오 — `\\s` 가 개행을 먹어 **앞줄까지**
+    지웁니다.
+    """
+
+    def blank(match: re.Match[str]) -> str:
+        return "".join("\n" if ch == "\n" else " " for ch in match.group(0))
+
+    code = re.sub(r'"""[\s\S]*?"""', blank, source)
+    return re.sub(r"#[^\n]*", blank, code)
+
+
+def test_the_activity_log_only_carries_decisions_a_person_made() -> None:
+    """⭐ 활동 화면이 주장하는 범위의 **나머지 절반**.
+
+    바로 위 `test_the_activity_log_never_starts_receiving_meetings_or_chat`
+    은 그 문장의 **뒷부분**만 잽니다 — 「회의를 열거나 녹음하거나 이야기
+    나눈 것은 여기 안 남습니다」. 앞부분은 아무도 안 보고 있었습니다.
+
+        **이 기록에는 사람이 손으로 내린 결정만 쌓입니다** — …
+
+    ⚠️ 결함 328 이 적어 둔 「**같은 표의 옆 칸은 따로 재야 합니다**」입니다.
+
+    ## 지금은 참인데, **두 우연** 위에 서 있습니다
+
+    감사 기록을 쓰는 자리는 열다섯이고, 그중 사람이 없는 것(`actor_id=None`)
+    은 셋입니다.
+
+        audio_deleted       project_id=None   ← 프로젝트 목록에 안 뜹니다
+        audio_deleted       project_id=None   ←   (질의가 project_id 로 거릅니다)
+        voiceprint_revoked  project_id=…      ← **뜹니다.** 다만 갈래가 죽어 있습니다
+
+    `voiceprint_revoked` 는 `Voiceprint` 행이 있어야 나는데, **그것을 만드는
+    프로덕션 코드가 0곳**입니다(`db/vocab.py` 가 적어 둔 그대로 — 세어서
+    확인했습니다). 그래서 화면 문장은 **오늘은** 참입니다.
+
+    ⚠️ 누가 성문을 만들기 시작하면 그 순간 화면이 조용히 거짓말을 합니다 —
+    종료된 프로젝트의 활동 기록에 **사람 없는 줄**이 뜹니다
+    (`tasks/maintenance.revoke_finished_project_voiceprints_task` 는 Celery
+    정기 작업이라 아무도 안 누릅니다). 그래서 **예외가 낡는 것도 같이
+    잽니다**(결함 306 의 방법).
+    """
+    import re
+
+    #: 사람 없이 써도 되는 갈래 — **왜** 괜찮은지와 **언제까지** 괜찮은지.
+    ALLOWED_WITHOUT_ACTOR = {
+        "voiceprint_revoked": (
+            "종료된 프로젝트의 성문 폐기(docs/07 §2.4). 지금은 `Voiceprint` 를 "
+            "만드는 프로덕션 코드가 0곳이라 이 줄이 뜰 수 없습니다."
+        ),
+    }
+
+    sites: list[tuple[str, str, str, str]] = []
+    for path in sorted(REPO_ROOT.glob("backend/teamflow/**/*.py")):
+        source = path.read_text(encoding="utf-8")
+        code = _blanked(source)
+        for hit in re.finditer(r"m\.AuditLog\(", code):
+            #: ⚠️ 「다음 `)`」로 자르면 중첩 dict(`before=`·`after=`)에서 틀립니다.
+            #: 괄호를 세어 블록을 잡습니다.
+            i, depth = hit.end(), 1
+            while i < len(code) and depth:
+                if code[i] == "(":
+                    depth += 1
+                elif code[i] == ")":
+                    depth -= 1
+                i += 1
+            block = code[hit.end() : i]
+            project = re.search(r"project_id\s*=\s*([^,\n]+)", block)
+            actor = re.search(r"actor_id\s*=\s*([^,\n]+)", block)
+            action = re.search(r'action\s*=\s*"([a-z_]+)"', block)
+            sites.append(
+                (
+                    action.group(1) if action else "(변수)",
+                    (project.group(1).strip() if project else "(없음)"),
+                    (actor.group(1).strip() if actor else "(없음)"),
+                    f"{path.relative_to(REPO_ROOT)}:{code[: hit.start()].count(chr(10)) + 1}",
+                )
+            )
+
+    assert len(sites) > 10, (
+        f"감사 기록을 쓰는 자리를 {len(sites)}곳밖에 못 찾았습니다 — 가드가 헛돕니다"
+    )
+
+    #: 프로젝트 활동 목록에 뜨는 줄(= `project_id` 가 있는 줄) 중 사람이 없는 것.
+    actorless = [
+        (action, where)
+        for action, project, actor, where in sites
+        if project != "None" and actor == "None"
+    ]
+    unexpected = [(a, w) for a, w in actorless if a not in ALLOWED_WITHOUT_ACTOR]
+    assert not unexpected, (
+        "활동 화면이 「이 기록에는 **사람이 손으로 내린 결정만** 쌓입니다」라고 "
+        "말합니다. 사람 없이 쓰는 줄이 프로젝트 목록에 뜨면 그 문장이 거짓이 "
+        "됩니다 — `@lib/activity/empty.ts` 를 같이 고치거나, 그 줄을 "
+        "`project_id=None` 으로 쓰세요:\n  "
+        + "\n  ".join(f"{a}  ({w})" for a, w in unexpected)
+    )
+
+    #: ⚠️ **예외가 낡는 것도 잽니다** (결함 306). 성문을 만들기 시작하면
+    #: 위 예외의 전제가 깨지므로, 그때는 화면 문장을 같이 정해야 합니다.
+    makers = []
+    for path in sorted(REPO_ROOT.glob("backend/teamflow/**/*.py")):
+        source = path.read_text(encoding="utf-8")
+        code = _blanked(source)
+        #: ⚠️ **자가 두 번 틀렸습니다.**
+        #: ① `class Voiceprint(Base)` 라는 **선언**을 만드는 것으로 셌습니다
+        #:    (결함 240 의 부류).
+        #: ② 그것을 막으려고 `(?<![A-Za-z_.])` 를 달았더니 이번엔 **`.` 를
+        #:    막아** 이 저장소가 실제로 쓰는 `m.Voiceprint(` 를 못 봤습니다 —
+        #:    심어도 초록이었습니다. 막을 것은 `class` 뿐입니다.
+        for hit in re.finditer(r"(?<![A-Za-z_])Voiceprint\(", code):
+            before = code[max(0, hit.start() - 20) : hit.start()]
+            if before.rstrip().rstrip(".").endswith("class"):
+                continue
+            if before.endswith("."):
+                #: `m.Voiceprint(` · `models.Voiceprint(` 는 만드는 것입니다.
+                pass
+            makers.append(
+                f"{path.relative_to(REPO_ROOT)}:{code[: hit.start()].count(chr(10)) + 1}"
+            )
+    assert not makers, (
+        "성문을 만드는 코드가 생겼습니다. 그러면 종료된 프로젝트에서 "
+        "`voiceprint_revoked` 가 **사람 없이** 활동 기록에 뜹니다 — 활동 화면의 "
+        "「사람이 손으로 내린 결정만 쌓입니다」를 같이 정하세요:\n  "
+        + "\n  ".join(makers)
+    )
+
+
+def test_the_product_description_does_not_promise_hand_made_tasks() -> None:
+    """⛔ **사용자가 읽는 문서**가 없는 길을 약속했습니다 (결함 317).
+
+    `docs/00-이-프로그램은-무엇인가.md` 는 비개발자가 제품을 이해하려고
+    읽는 문서입니다. 거기 「손으로 만든 업무는 아무 표시가 없습니다」가
+    남아 있었습니다 — 결함 313 이 화면에서 고친 그 거짓말인데, **문서는
+    안 봤습니다.**
+
+    ⚠️ 가드가 화면만 걷고 문서를 안 걸으면 이 부류는 영영 안 보입니다.
+    """
+    doc = (
+        REPO_ROOT / "docs" / "00-이-프로그램은-무엇인가.md"
+    ).read_text(encoding="utf-8")
+    found = re.search(r"[^\n]*(직접|손으로|수동으로)\s*만[든들][^\n]*업무[^\n]*", doc)
+    assert found is None, (
+        f"제품 소개 문서가 없는 길을 약속합니다 — {found.group(0).strip() if found else ''}"
+    )
+
+
+def test_the_chat_screen_actually_pages_backwards() -> None:
+    """⛔ **라우트는 불리는데 인자가 안 불렸습니다** (결함 315).
+
+    `message_service.history` 는 `before_id` 를 받도록 만들어져 있고
+    「`before_id` 는 **번호**이지 시각이 아닙니다」라는 근거까지 적혀
+    있습니다. 그런데 화면은 그 인자를 **한 번도 안 보냈습니다** — 메시지
+    60개짜리 채널에서 처음 열 줄이 제품 안에서 영영 안 보였습니다.
+
+    ⚠️ **결함 306 의 라우트 가드는 이걸 못 잡습니다.** 그 라우트는
+    불립니다. 안 불린 것은 **인자**입니다.
+    """
+    chat = (REPO_ROOT / "frontend" / "src" / "demo" / "chat.tsx").read_text(encoding="utf-8")
+    assert "before_id=" in chat, (
+        "채팅 화면이 `before_id` 를 안 보냅니다 — 앞쪽 대화에 닿을 길이 없습니다"
+    )
+
+
+def test_the_client_page_size_matches_the_server() -> None:
+    """⚠️ **짝입니다.** 어긋나면 단추가 영영 안 뜨거나(클라 > 서버) 0개를
+    받고도 계속 뜹니다(클라 < 서버). 낱말이 아니라 **값**을 맞춥니다.
+    """
+    from teamflow.services import message_service
+
+    view = (
+        REPO_ROOT / "frontend" / "src" / "lib" / "chat" / "view.ts"
+    ).read_text(encoding="utf-8")
+    found = re.search(r"MESSAGE_PAGE\s*=\s*(\d+)", view)
+    assert found is not None, "`MESSAGE_PAGE` 를 못 찾았습니다"
+    assert int(found.group(1)) == message_service.MAX_PAGE, (
+        f"화면 {found.group(1)} ↔ 서버 {message_service.MAX_PAGE} — 한 쪽 크기가 갈라졌습니다"
+    )
+
+
+def test_every_server_route_has_a_caller() -> None:
+    """⭐ 서버 갈래마다 **부르는 곳**이 있어야 한다.
+
+    ## 왜 이 검사가 생겼나
+
+    결함 298(일정을 무르는 자리가 없었다)을 고치면서 AGENTS.md 에 이렇게
+    적어 뒀습니다 —
+
+    > 서버의 갈래마다 부르는 곳이 있는지 세는 가드가 낱말을 세는 것보다
+    > 낫습니다.
+
+    그걸 실제로 세어 봤더니 `POST /api/meetings/{id}/minutes` 가 나왔습니다
+    (결함 306). 만들어져 있고 검사도 붙어 있는데 **부르는 곳이 0곳**이었고,
+    그 사이 보고서 화면은 사람에게 「회의 로비에서 회의록을 만드세요」라고
+    말하고 있었습니다. 로비에 그런 단추가 없었습니다 (실패 ③).
+
+    ## ⚠️ 이 자의 위험 — 주소를 조각으로 만드는 곳
+
+    녹음 클라이언트는 `${trackUrl}/chunks/${seq}` 처럼 **주소를 이어 붙여**
+    만듭니다. 전체 경로를 글자로 찾는 자는 그걸 못 보고 「부르는 곳 0곳」
+    이라고 답합니다 — 처음 돌렸을 때 실제로 셋이 그렇게 잡혔습니다.
+    그래서 예외는 **왜 예외인지**를 같이 적습니다.
+
+    ⚠️ 「덮는가」만이 아니라 **「맞는 칸인가」**도 봅니다 (결함 289):
+    예외에 적어 뒀는데 이제는 제대로 불리는 갈래가 있으면 그것도
+    알려 줍니다 — 낡은 예외는 다음 사람을 속입니다.
+
+    ## ⛔ 이 자가 **구조적으로 못 보는 것** (결함 352)
+
+    두 뿌리를 **한 자루에 담아** 셉니다. 그래서 「레거시는 부르는데 SPA 는
+    안 부른다」가 초록입니다 — 결함 321 이 다른 가드에서 겪은 그것이고,
+    실제로 `GET /api/meetings/{id}/utterance-types`(REVIEW-005)와
+    `GET /api/meetings/{id}/speaking` 이 그렇게 숨어 있었습니다.
+
+    ⚠️ **뿌리마다 따로 세는 것으로 바꾸면 안 됩니다.** SPA 는 화면이
+    아홉이고 레거시는 열셋이라, 채팅·일정·알림·활동·찾기·보고서의
+    라우트 스물여덟이 전부 「SPA 가 안 부름」으로 걸립니다 — 그건 결함이
+    아니라 설계입니다.
+
+    그래서 **같은 화면이 두 뿌리에 다 있는 자리**만 따로 잽니다:
+    `test_both_review_screens_ask_for_the_same_meeting_facts`.
+    """
+    import re
+
+    EXCUSED = SERVER_ONLY_OR_ASSEMBLED
+
+    routes: list[tuple[str, str, str]] = []
+    for path in sorted((REPO_ROOT / "backend" / "teamflow" / "api").rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        prefix = ""
+        head = re.search(r"APIRouter\(([^)]*)\)", source, re.S)
+        if head:
+            got = re.search(r'prefix\s*=\s*"([^"]*)"', head.group(1))
+            if got:
+                prefix = got.group(1)
+        for hit in re.finditer(
+            r'@\w+\.(get|post|patch|put|delete)\(\s*"([^"]*)"', source
+        ):
+            routes.append(
+                (hit.group(1).upper(), prefix + hit.group(2), str(path.relative_to(REPO_ROOT)))
+            )
+
+    assert len(routes) > 50, f"라우트를 {len(routes)}개밖에 못 찾았습니다 — 가드가 헛돕니다"
+
+    screens: list[str] = []
+    for base in ("frontend/src", "webapp/src"):
+        for path in (REPO_ROOT / base).rglob("*"):
+            if path.suffix in (".ts", ".tsx") and ".test." not in path.name:
+                code = path.read_text(encoding="utf-8")
+                # 주석의 「예전에는 이렇게 불렀다」를 진짜 호출로 물지 않게 걷습니다.
+                code = re.sub(r"/\*[\s\S]*?\*/", "", code)
+                code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
+                screens.append(code)
+
+    #: 주소 한 조각에 올 수 있는 글자 — `/` 와 따옴표·백틱·공백은 경계입니다.
+    SEG = "[^/`'\"\\s]+"
+
+    #: 쓰기 갈래는 화면이 **메서드를 글자로 적어야** 부를 수 있습니다.
+    #: `GET` 은 `fetch(url)`·`get(url)`·`<audio src>` 처럼 적는 방식이 여럿이라
+    #: 안 봅니다 — 재 보니 `GET` 넷이 전부 그런 자리였고 **거짓 양성만**
+    #: 나옵니다(결함 379).
+    METHOD_MARK: dict[str, str] = {
+        "POST": r"POST|\.post\b",
+        "PUT": r"PUT|\.put\b",
+        "PATCH": r"PATCH|\.patch\b",
+        "DELETE": r"DELETE|\.delete\b",
+    }
+
+    #: ⚠️ **`{id}` 자리는 형제 갈래의 「글자 그대로」도 삼킵니다.**
+    #:
+    #: `/api/projects/{project_id}` 의 자는 그 자리를 아무 글자로 채우므로,
+    #: 화면이 형제인 `/api/projects/join` 을 부르는 것만으로 초록이 됩니다.
+    #: 지금은 두 자리가 그렇고(`join` · `me`) **둘 다 진짜 호출이 따로
+    #: 있어서** 거짓 초록은 0건입니다 — 하지만 진짜 호출이 사라지는 날
+    #: 아무도 못 봅니다. 형제의 글자가 채운 hit 는 **증거로 안 셉니다.**
+    all_paths = sorted({path for _, path, _ in routes})
+
+    def sibling_literals(route_path: str) -> dict[int, set[str]]:
+        """`{id}` 자리마다 「같은 자리에 글자를 박은 형제 갈래」를 모읍니다."""
+        parts = route_path.split("/")
+        found: dict[int, set[str]] = {}
+        for i, seg in enumerate(parts):
+            if not seg.startswith("{"):
+                continue
+            literals = {
+                other.split("/")[i]
+                for other in all_paths
+                if other != route_path
+                and len(other.split("/")) == len(parts)
+                and other.split("/")[:i] == parts[:i]
+                and not other.split("/")[i].startswith("{")
+            }
+            if literals:
+                found[i] = literals
+        return found
+
+    def called(route_path: str, method: str = "") -> bool:
+        """이 갈래를 부르는 화면이 있는가.
+
+        ⚠️ **자가 두 곳에서 헐거웠습니다** (결함 378):
+
+        1. `{id}` 자리를 그냥 `+` 로 두면 **역추적**이 아래 끝 못 박기를
+           무력화합니다 — `${channelId}` 를 `${channelI` 까지 줄여 가며
+           맞추다가 `}` 앞에서 성공해 버립니다. **원자 그룹**으로 막습니다.
+        2. `search` 만 쓰면 **더 긴 형제 갈래**가 짧은 갈래를 대신
+           만족시킵니다. 화면이 `/api/channels/${id}/messages` 를 부르는
+           것만으로 `PATCH /api/channels/{channel_id}` 가 「불린다」로
+           잡혔고, 채널 이름 변경·삭제는 **화면에 컨트롤이 0개**인 채
+           초록이었습니다.
+
+        ⚠️ 끝을 막을 때 「뒤에 아무 글자도 오면 안 된다」로 쓰면 `?q=` 가
+        붙는 자리(찾기·달력)를 전부 「안 불린다」로 잡습니다. 막을 것은
+        **경로가 더 이어지는 것**뿐입니다.
+
+        ⚠️ 이 자가 **못 보는 것**: `GET` 갈래는 메서드를 **안 봅니다**
+        (`METHOD_MARK` 에 없습니다). 같은 주소에 `GET` 과 쓰기 갈래가
+        있으면, 화면이 쓰기만 불러도 `GET` 은 초록입니다.
+
+        그런 자리가 **열 곳**이라 하나씩 세어 봤고 — `/api/projects` ·
+        `/api/projects/{project_id}`(+`/meetings` `/contributions/final`
+        `/reports` `/channels`) · `/api/meetings/{meeting_id}`(+`/consent`
+        `/tracks`) · `/api/channels/{channel_id}/messages` — **열 곳 다
+        진짜 `GET` 호출이 따로 있었습니다.** 지금은 거짓 초록이 0건입니다.
+        """
+        pattern = re.sub(r"\\\{[a-z_]+\\\}", lambda _: f"(?>{SEG})", re.escape(route_path))
+        #: ⚠️ **앞도 막습니다** (결함 379). 짧은 주소는 **남의 파일 경로
+        #: 안**에서 걸립니다 — `GET /health` 가 `../lib/github/health.ts`
+        #: 라는 import 경로에 걸려 「불린다」로 잡혔고, 그 갈래를 부르는
+        #: 화면은 **0곳**이었습니다.
+        rx = re.compile(r"(?<![A-Za-z0-9_.-])" + pattern + r"(?![A-Za-z0-9_/-])")
+        mark = METHOD_MARK.get(method)
+        siblings = sibling_literals(route_path)
+        for code in screens:
+            for hit in rx.finditer(code):
+                #: 형제 갈래의 **글자 그대로**가 `{id}` 자리를 채운 것은
+                #: 이 갈래를 부른 것이 아닙니다 — 증거로 안 셉니다.
+                got = hit.group(0).split("/")
+                if any(
+                    i < len(got) and got[i] in literals
+                    for i, literals in siblings.items()
+                ):
+                    continue
+                if mark is None:
+                    return True
+                #: 주소 **둘레**에서 메서드를 찾습니다 — `sendJson(url, 'PATCH', …)`
+                #: 도 `fetch(url, { method: 'DELETE' })` 도 `api.patch(url, …)` 도
+                #: 이 창 안에 있습니다.
+                around = code[max(0, hit.start() - 200) : hit.end() + 200]
+                if re.search(mark, around):
+                    return True
+        return False
+
+    orphans: list[str] = []
+    stale: list[str] = []
+    for method, route_path, where in routes:
+        key = f"{method} {route_path}"
+        if called(route_path, method):
+            if key in EXCUSED:
+                stale.append(f"{key}  — 예외에 적힌 사유가 낡았습니다: {EXCUSED[key]}")
+        elif key not in EXCUSED:
+            orphans.append(f"{key}  ({where})")
+
+    assert not orphans, (
+        "이 서버 갈래를 **부르는 화면이 하나도 없습니다** — 만들어 놓고 안 이은 것이거나\n"
+        "  (실패 ①), 주소를 조각으로 만들어 이 자가 못 본 것입니다. 후자면 위\n"
+        "  `EXCUSED` 에 **왜인지** 적으세요:\n  " + "\n  ".join(orphans)
+    )
+    assert not stale, (
+        "이제 제대로 불리는데 예외에 남아 있습니다 — 낡은 예외는 다음 사람을 속입니다:\n  "
+        + "\n  ".join(stale)
+    )
+
+
+def test_both_review_screens_ask_for_the_same_meeting_facts() -> None:
+    """⭐ **두 검토 화면이 같은 회의 사실을 묻습니다** (결함 352).
+
+    ## 왜 이 검사가 생겼나
+
+    같은 회의(`/review.html?meeting=1` · `/app/meeting/1/review`)를 열고
+    네트워크를 나란히 찍었더니, SPA 가 **두 갈래를 아예 안 부르고**
+    있었습니다:
+
+        GET /api/meetings/{id}/utterance-types   REVIEW-005 「무슨 말이 오갔나」
+        GET /api/meetings/{id}/speaking          AI-AUDIO-005 「누가 얼마나 말했나」
+
+    그 판의 머리 주석은 「통계·요약은 **접고** 전사가 주인공」이었는데,
+    요약만 접혀 있고 통계는 **아예 없었습니다.** `docs/20` 은 REVIEW-005 를
+    ✅ 로 적으면서 어느 뿌리인지는 안 적었습니다.
+
+    ## ⚠️ 라우트 가드는 이걸 **구조적으로** 못 봅니다
+
+    위 `test_...no_screen_calls_it` 이 두 뿌리를 한 자루에 담아 세기
+    때문입니다(결함 321 과 같은 모양). 그렇다고 그 자를 뿌리마다 가르면
+    채팅·일정·알림처럼 **SPA 에 아예 없는 화면**의 라우트 스물여덟이 전부
+    걸립니다 — 그건 결함이 아니라 설계입니다.
+
+    그래서 **같은 화면이 두 뿌리에 다 있는 자리**만 좁혀서 잽니다.
+    """
+    import re
+
+    def strip(code: str) -> str:
+        code = re.sub(r"/\*[\s\S]*?\*/", "", code)
+        return re.sub(r"^\s*//.*$", "", code, flags=re.M)
+
+    #: `/api/meetings/{id}/<여기>` 의 마지막 조각.
+    SEGMENT = r"/api/meetings/\$\{[^}]+\}/([a-z-]+)"
+
+    legacy_code = strip(
+        (REPO_ROOT / "frontend" / "src" / "demo" / "review.tsx").read_text(encoding="utf-8")
+    )
+    legacy = set(re.findall(SEGMENT, legacy_code))
+
+    # ⚠️ **SPA 는 `hooks.ts` 를 통째로 세면 안 됩니다.** 거기에는 로비의
+    #    갈래(`consent`·`tracks`·`finish`…)도 같이 있어서, 검토 화면이 안
+    #    쓰는 것까지 「부른다」로 잡힙니다 — 처음에 그렇게 짰다가 여섯이
+    #    거짓으로 잡혔습니다. **검토 화면이 실제로 쓰는 훅**만 따라갑니다.
+    screen = strip(
+        (REPO_ROOT / "webapp" / "src" / "screens" / "Review.tsx").read_text(encoding="utf-8")
+    )
+    hooks_code = (REPO_ROOT / "webapp" / "src" / "api" / "hooks.ts").read_text(encoding="utf-8")
+    bodies = dict(
+        re.findall(
+            r"export function (use\w+)\([^)]*\)\s*\{(.*?)\n\}", hooks_code, re.DOTALL
+        )
+    )
+    used = {name for name in bodies if re.search(rf"\b{name}\(", screen)}
+    assert used, "검토 화면이 훅을 하나도 안 씁니다 — 이 검사가 낡았습니다"
+    spa = {seg for name in used for seg in re.findall(SEGMENT, strip(bodies[name]))}
+
+    assert legacy, "레거시 검토가 회의에 아무것도 안 묻습니다 — 이 검사가 낡았습니다"
+    assert spa, "SPA 검토가 회의에 아무것도 안 묻습니다 — 이 검사가 낡았습니다"
+
+    #: 한쪽만 부르는 것 — **왜인지** 적습니다. 지금은 비어 있습니다:
+    #: 고치고 나니 다섯 갈래가 정확히 같아졌습니다
+    #: (`candidates` · `members` · `speaking` · `timeline` · `utterance-types`).
+    #:
+    #: ⚠️ **처음에 여기 둘을 지어냈다가 아래 「낡음」 검사에 걸렸습니다.**
+    #: `timeline` 은 레거시도 부릅니다 — 다만 「타임라인」 여닫이를 펴야
+    #: 부르는 **늦은 호출**이라, 네트워크만 보고 「SPA 만 부른다」로 읽었던
+    #: 것입니다. 예외는 **재 보고** 적으십시오.
+    EXCUSED_LEGACY_ONLY: dict[str, str] = {}
+    EXCUSED_SPA_ONLY: dict[str, str] = {}
+
+    missing = sorted(legacy - spa - set(EXCUSED_LEGACY_ONLY))
+    assert missing == [], (
+        f"SPA 검토가 안 묻는 갈래: {missing} — 레거시만 그 사실을 그립니다. "
+        "`/app` 으로 들어온 사람에게는 그 판이 통째로 없습니다"
+    )
+    extra = sorted(spa - legacy - set(EXCUSED_SPA_ONLY))
+    assert extra == [], f"레거시 검토가 안 묻는 갈래: {extra}"
+
+    # ⚠️ **예외가 낡는 것도 잽니다** (결함 306). 이제 둘 다 부르는데 예외에
+    #    남아 있으면 다음 사람이 「아직 안 붙었다」로 읽습니다.
+    stale = sorted(
+        [name for name in EXCUSED_LEGACY_ONLY if name in spa]
+        + [name for name in EXCUSED_SPA_ONLY if name in legacy]
+    )
+    assert stale == [], f"이제 둘 다 부르는데 예외에 남아 있습니다: {stale}"
+
+
+def test_both_review_screens_keep_a_draft_through_a_refresh() -> None:
+    """⭐ **검토하던 것을 잃는 화면이 있으면 안 됩니다** (결함 333).
+
+    ## 왜 이 검사가 생겼나
+
+    `@lib/review/drafts.ts` 는 결함 217 이 「새로고침 한 번에 전부
+    날아갔습니다」를 고치려고 만든 것입니다. 그런데 **SPA 에만
+    배선돼 있었습니다.** 브라우저로 재서 확인한 것 —
+
+        레거시: 「업무로 등록」 → 표시 1건 · 나간 요청 0건
+                새로고침       → 표시 **0건** · sessionStorage **비어 있음**
+
+    이 저장소가 **네 번째로** 당한 「한쪽 뿌리만 고쳐진」 자리입니다
+    (231 · 306 · 320 · 321). 레거시 화면은 라우트가 유지되므로(R8)
+    사람이 실제로 그리로 들어옵니다 — 들어온 사람은 몇 분어치 입력을
+    말없이 잃습니다.
+
+    ⚠️ **낱말이 아니라 요구를 잽니다**: 두 화면이 `drafts.ts` 의
+    세 갈래(되살리기 · 쓰기 · 확정 뒤 비우기)를 다 거치는가.
+    하나라도 빠지면 그 화면만 조용히 잃습니다.
+    """
+    roots = {
+        "레거시": REPO_ROOT / "frontend/src/demo/review.tsx",
+        "SPA": REPO_ROOT / "webapp/src/screens/Review.tsx",
+    }
+    needed = {
+        "되살리기": "parseDrafts(",
+        "쓰기": "serializeDrafts(",
+        "확정 뒤 비우기": "removeItem(draftStorageKey(",
+    }
+
+    missing: list[str] = []
+    for label, path in roots.items():
+        assert path.exists(), f"{label} 검토 화면을 못 찾았습니다: {path}"
+        source = path.read_text(encoding="utf-8")
+        for what, needle in needed.items():
+            if needle not in source:
+                missing.append(f"{label}: {what} ({needle})")
+
+    assert not missing, (
+        "검토 초안을 지키지 않는 화면이 있습니다 — 그 화면으로 들어온 "
+        "사람만 새로고침 한 번에 잃습니다:\n  " + "\n  ".join(missing)
+    )
+
+
+def test_meeting_actions_reach_both_roots() -> None:
+    """⭐ **두 로비가 같은 회의 단위 동작을 줘야 합니다** (결함 320).
+
+    ## 왜 이 검사가 생겼나
+
+    이 저장소에는 로비가 **둘**입니다 — 레거시 `frontend/src/demo/lobby.tsx`
+    와 SPA `webapp/src/screens/Lobby.tsx`. 같은 회의를 그리는데 한쪽에만
+    단추가 있으면 **사람이 어느 주소로 들어왔느냐로 할 수 있는 일이
+    달라집니다.** 실제로 세 번 났습니다:
+
+    - 결함 231 — 「다시 처리하기」가 레거시에만 (SPA 로비는 `/reprocess` 를
+      한 번도 안 물어봤습니다)
+    - 결함 306 — 「회의록 만들기」를 부르는 곳이 **0곳**인데, 보고서 화면은
+      「회의 로비에서 회의록을 만드세요」라고 말하고 있었습니다
+    - 결함 320 — 「이 회의 무르기」를 만들면서 **또** 레거시에만 달 뻔했습니다
+      (이번엔 반대 방향입니다)
+
+    ## ⚠️ 왜 결함 306 의 라우트 가드로는 못 잡나
+
+    그 가드는 `frontend/src` 와 `webapp/src` 를 **한 자루에 담아** 셉니다.
+    한쪽에서만 불려도 「부르는 곳 있음」이라 초록입니다 — AGENTS.md 가
+    결함 286 에 적어 둔 **「가드가 걷는 자리가 한쪽뿐인지 보십시오」**의
+    정확히 반대 모양입니다. 그래서 여기서는 **뿌리마다 따로** 셉니다.
+    """
+    import re
+
+    # 로비가 여는 「회의 단위」 갈래. 값은 그 갈래를 **부르는 모양**입니다 —
+    # 레거시는 `fetch(..., {method})`, SPA 는 `api.del`/`api.post` 라
+    # 글자가 다릅니다. 그래서 경로로 찾고, DELETE 만 방법을 같이 봅니다.
+    ACTIONS = {
+        "다시 처리하기 (결함 231)": re.compile(r"/api/meetings/\$\{[^}]+\}/reprocess"),
+        "회의록 만들기 (결함 306)": re.compile(r"/api/meetings/\$\{[^}]+\}/minutes"),
+        # ⚠️ 회의 자체를 지우는 것이라 **뒤에 아무 조각도 안 붙습니다.**
+        #    `/tracks/...` 같은 하위 갈래를 같이 물지 않게 끝을 못 박습니다.
+        # ⚠️ **자를 한 번 넓혔습니다.** 처음에는 「DELETE 라고 적고 나서
+        #    경로」로만 봤는데, 레거시는 `fetch(\`…\`, { method: 'DELETE' })`
+        #    라 **경로가 먼저**입니다 — 제대로 이어 놓은 자리를 거짓으로
+        #    잡았습니다(결함 299 가 적어 둔 「자 자체가 좁았다」).
+        "이 회의 무르기 (결함 320)": re.compile(
+            r"api\.del<[^>]*>\(\s*`[^`]*/api/meetings/\$\{[^}]+\}`"
+            r"|/api/meetings/\$\{[^}]+\}`[\s\S]{0,200}?method:\s*'DELETE'"
+        ),
+    }
+
+    roots = {
+        "레거시 frontend/src": REPO_ROOT / "frontend" / "src",
+        "SPA webapp/src": REPO_ROOT / "webapp" / "src",
+    }
+
+    missing: list[str] = []
+    for label, root in roots.items():
+        codes: list[str] = []
+        for path in root.rglob("*"):
+            if path.suffix in (".ts", ".tsx") and ".test." not in path.name:
+                code = path.read_text(encoding="utf-8")
+                # 주석의 「예전에는 이렇게 불렀다」를 진짜 호출로 물지 않게 걷습니다
+                # (결함 238 — 마크업에서 세 번째로 걸린 함정입니다).
+                code = re.sub(r"/\*[\s\S]*?\*/", "", code)
+                code = re.sub(r"^\s*//.*$", "", code, flags=re.M)
+                codes.append(code)
+        assert codes, f"{label} 에서 파일을 못 찾았습니다 — 가드가 헛돕니다"
+        for action, rx in ACTIONS.items():
+            if not any(rx.search(code) for code in codes):
+                missing.append(f"{action} — {label} 에서 부르는 곳이 0곳입니다")
+
+    assert not missing, (
+        "회의 로비의 동작이 **한쪽 뿌리에만** 있습니다. 같은 회의를 그리는 두\n"
+        "  화면인데 들어온 주소로 할 수 있는 일이 갈립니다:\n  " + "\n  ".join(missing)
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 회의 요약 응답의 칸이 **세 자리에서 같은가** (결함 368)
+# ══════════════════════════════════════════════════════════════
+#
+# 이 응답(`GET /api/projects/{id}/meetings`)의 모양이 세 곳에 적혀 있습니다:
+#
+#   · 서버   `MeetingSummary` (`api/main.py`)      — 실제로 내보내는 것
+#   · `@lib` `Meeting` (`home/next.ts`)            — 판단이 **읽는** 부분집합
+#   · SPA    `MeetingSummary` (`api/types.ts`)     — 화면이 받는다고 적은 것
+#
+# ⚠️ 결함 368 에서 서버에 `utterance_count` 를 더할 때 **SPA 타입에만 안
+# 넣을 뻔했습니다.** 값은 JSON 이라 런타임에는 그대로 흘러가고 타입만
+# 거짓말을 합니다 — 오류도 안 나고 화면도 멀쩡해서, 다음 사람이 그 칸이
+# 없다고 믿고 코드를 씁니다.
+#
+# 그래서 **낱말이 아니라 짝을 셉니다**: 화면이 받는다고 적은 칸 집합은
+# 서버가 내보내는 것과 **같아야** 하고, `@lib` 이 읽는 칸은 그 **안에**
+# 있어야 합니다.
+
+
+def _pydantic_fields(source: str, class_name: str) -> set[str]:
+    body = re.search(
+        rf"^class {class_name}\(BaseModel\):\n(.*?)(?=\n\n@|\n\nclass |\n\ndef )",
+        source,
+        re.S | re.M,
+    )
+    assert body is not None, f"{class_name} 을 못 찾았습니다 — 가드가 낡았습니다"
+    text = re.sub(r"^\s*#.*$", "", body.group(1), flags=re.M)
+    return set(re.findall(r"^\s{4}(\w+)\s*:", text, flags=re.M))
+
+
+def _ts_interface_fields(source: str, name: str) -> set[str]:
+    body = re.search(rf"(?:interface|type) {name}\b[^{{]*\{{(.*?)\n\}}", source, re.S)
+    assert body is not None, f"{name} 을 못 찾았습니다 — 가드가 낡았습니다"
+    text = re.sub(r"/\*[\s\S]*?\*/", "", body.group(1))
+    text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
+    return set(re.findall(r"^\s{2}(\w+)\??\s*:", text, flags=re.M))
+
+
+def test_meeting_summary_fields_agree_across_the_three_places() -> None:
+    server = _pydantic_fields(
+        (REPO_ROOT / "backend/teamflow/api/main.py").read_text(encoding="utf-8"),
+        "MeetingSummary",
+    )
+    lib = _ts_interface_fields(
+        (REPO_ROOT / "frontend/src/lib/home/next.ts").read_text(encoding="utf-8"),
+        "Meeting",
+    )
+    spa = _ts_interface_fields(
+        (REPO_ROOT / "webapp/src/api/types.ts").read_text(encoding="utf-8"),
+        "MeetingSummary",
+    )
+
+    # 세 자리를 **전부** 봤는지부터 (빈 집합이면 자가 헛돈 것입니다).
+    assert len(server) >= 5 and len(lib) >= 5 and len(spa) >= 5, (
+        f"칸을 제대로 못 읽었습니다 — 서버 {sorted(server)} · lib {sorted(lib)} · SPA {sorted(spa)}"
+    )
+
+    assert spa == server, (
+        "화면이 받는다고 적은 칸이 서버와 다릅니다 — 값은 런타임에 흘러가고\n"
+        "  타입만 거짓말을 합니다 (결함 368).\n"
+        f"  서버에만: {sorted(server - spa)}\n"
+        f"  SPA 에만: {sorted(spa - server)}"
+    )
+    assert lib <= server, (
+        "`@lib` 이 서버가 안 보내는 칸을 읽습니다 — 언제나 `undefined` 입니다.\n"
+        f"  없는 칸: {sorted(lib - server)}"
+    )
+
+
+def test_the_requirements_table_does_not_claim_unwired_things() -> None:
+    """⛔ **「서버만 있다」와 「✅ 다 됐다」가 갈라져 있었습니다** (결함 377).
+
+    라우트 가드의 예외 표는 두 갈래를 **진짜로 아무도 안 부릅니다** 라고
+    적어 두고 있습니다 — 「만들어 놓고 화면에 안 이은 것이고(실패 ①),
+    붙일 때 이 줄을 지웁니다」. 그런데 같은 저장소의 요구사항 대조표는
+    그중 하나를 **✅** 로 적고 있었습니다:
+
+        docs/20  | CHANNEL-005 순서 변경 | ✅ | `reorder_channels` … |
+        가드     | "CHANNEL-005 채널 순서 — 서버만 있고 화면에 아직 안 이었습니다"
+
+    ✅ 는 「다 됐다」로 읽힙니다. 대조표를 읽는 사람은 채널 순서를 바꿀 수
+    있다고 믿습니다 — 채팅 화면에는 순서를 바꾸는 컨트롤이 **0개**입니다.
+
+    ## 왜 표를 고치고 기능을 안 만드는가
+
+    그 예외는 **근거를 적어 둔 기록**입니다(「붙일 때 이 줄을 지웁니다」).
+    없는 기능을 지어내는 대신 **대조표가 사실을 말하게** 합니다 —
+    결함 317 이 `docs/00` 에서 한 것과 같습니다.
+
+    ## ⚠️ 이 자가 못 보는 것
+
+    예외 사유에 **요구사항 번호가 적혀 있는 것만** 짝을 잽니다. 번호가
+    없는 예외(멘션 자동완성)는 여기서 안 걸립니다 — 그 줄은 대조표에서
+    이미 정직하게 적고 있습니다(「서버가 본문에서 뽑습니다」).
+    """
+    import re
+
+    table = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text(encoding="utf-8")
+
+    #: 예외 사유에서 요구사항 번호를 뽑습니다 (`CHANNEL-005` 같은 것).
+    claimed: dict[str, str] = {}
+    for route, why in SERVER_ONLY_OR_ASSEMBLED.items():
+        for req in re.findall(r"\b([A-Z]+-\d{3})\b", why):
+            claimed[req] = route
+
+    assert claimed, (
+        "예외 사유에서 요구사항 번호를 하나도 못 뽑았습니다 — 이 검사가 낡았습니다"
+    )
+
+    offenders: list[str] = []
+    for req, route in sorted(claimed.items()):
+        rows = [line for line in table.splitlines() if req in line and line.startswith("|")]
+        if not rows:
+            offenders.append(f"{req}: 대조표에 그 줄이 없습니다 (`{route}`)")
+            continue
+        for row in rows:
+            cells = [c.strip() for c in row.split("|")]
+            #: 상태 칸은 두 번째입니다. 순수한 `✅` 는 「다 됐다」로 읽힙니다.
+            status = cells[2] if len(cells) > 2 else ""
+            if status == "✅":
+                offenders.append(
+                    f"{req}: 대조표는 ✅ 인데 `{route}` 를 부르는 화면이 0곳입니다"
+                )
+
+    assert offenders == [], (
+        "요구사항 대조표가 안 이어진 것을 「다 됐다」로 적고 있습니다:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 마감일을 바꾸는 자리 ↔ 그것을 전제로 하는 말 (결함 386)
+# ══════════════════════════════════════════════════════════════
+
+#: 서버가 마감일을 바꾸는 갈래. 이 갈래가 돌아야 `DEADLINE_CHANGED` 가 생기고,
+#: 그게 있어야 `frequent_deadline_change` 무결성 플래그가 뜰 수 있습니다.
+_TASK_PATCH_CALL = re.compile(
+    r"""
+    (?:                                  # 업무 PATCH 를 부르는 두 모양
+        patchTask\s*\(                   #   레거시: 공용 헬퍼
+      | api\.patch\s*<[^>]*>\s*\(        #   SPA: 타입 붙은 헬퍼
+      | api\.patch\s*\(
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _blanked_ts(source: str) -> str:
+    """TS/TSX 의 주석을 **길이를 지켜** 지웁니다.
+
+    ⚠️ `_blanked` 는 파이썬 모양(`\"\"\"` · `#`)이라 JS 주석을 못 걷습니다.
+    이 저장소의 화면 주석은 「예전에는 이렇게 적었고 왜 바꿨다」를 **옛 문장
+    그대로** 인용합니다 — 안 걷으면 자가 **내 고침의 주석**을 위반으로 뭅니다.
+    결함 238 이 마크업에서 겪은 그것이고, 실제로 이 검사를 처음 돌렸을 때
+    잡힌 것이 방금 고친 `calendar.tsx` 의 주석이었습니다.
+
+    길이를 지키는 이유는 `_blanked` 와 같습니다 — 창을 잘라 보는 자가
+    엉뚱한 자리를 가리키지 않게.
+
+    ## ⚠️ 이 자가 못 보는 것 — **문자열 안의 `//`**
+
+    문자열을 안 가리므로 `'http://127.0.0.1:8811/home.html'` 같은 주소를
+    **줄 주석으로 먹습니다.** 두 뿌리를 세어 보니 걸리는 줄이 아홉인데
+    여덟은 이미 주석 안이라 결과가 같고, 진짜는 하나입니다 —
+    `lib/desktop/server.ts` 의 `DEFAULT_SERVER`.
+
+    지금 이 함수를 쓰는 가드 중에 그 줄을 보는 것은 없어서 **고치지
+    않았습니다.** 제대로 고치려면 `'`·`"`·백틱과 **정규식 리터럴**까지
+    갈라야 하는데(`lib/html.ts` 의 `/[&<>"']/g` 가 정확히 그 함정입니다),
+    그 자가 틀리면 이 함수를 쓰는 가드 전부가 조용히 어긋납니다. 잘못
+    고치는 것이 안 고치는 것보다 나쁜 자리라 **재서 적어만 둡니다.**
+
+    ⚠️ 방향은 **fail-open** 입니다 — 주석으로 먹힌 코드는 안 보이므로
+    가드가 「0건」쪽으로 틀립니다. 새 가드를 이 함수 위에 얹을 때는
+    「내가 보려는 것이 문자열 안에 있나」를 먼저 세십시오.
+    """
+
+    def blank(match: re.Match[str]) -> str:
+        return "".join("\n" if ch == "\n" else " " for ch in match.group(0))
+
+    # `{/* … */}` 는 `/* … */` 가 먼저 먹으므로 블록 → 줄 순서면 충분합니다.
+    code = re.sub(r"/\*[\s\S]*?\*/", blank, source)
+    return re.sub(r"//[^\n]*", blank, code)
+
+
+def _screens_that_send_a_deadline() -> dict[str, list[str]]:
+    """업무 PATCH 본문에 `deadline` 을 싣는 화면 파일 — **뿌리마다 따로**.
+
+    ⚠️ 라우트를 세는 것과 **인자**를 세는 것은 다릅니다 (결함 315).
+    `PATCH /tasks/{id}` 는 옮기기·우선순위가 이미 부르고 있어서 라우트
+    census 로는 언제나 초록입니다. 안 불리는 것은 **`deadline` 이라는 칸**
+    입니다.
+    """
+    roots = {
+        "레거시 frontend/src": REPO_ROOT / "frontend" / "src",
+        "SPA webapp/src": REPO_ROOT / "webapp" / "src",
+    }
+    found: dict[str, list[str]] = {}
+    for name, base in roots.items():
+        hits: list[str] = []
+        if not base.exists():
+            found[name] = hits
+            continue
+        for path in sorted(base.rglob("*.ts")) + sorted(base.rglob("*.tsx")):
+            if ".test." in path.name:
+                continue
+            code = _blanked_ts(path.read_text(encoding="utf-8"))
+            for match in _TASK_PATCH_CALL.finditer(code):
+                # 그 호출의 인자 구간만 봅니다 — 파일 어딘가의 `deadline` 은
+                # 승인 화면의 후보 초안일 수 있습니다.
+                window = code[match.end() : match.end() + 400]
+                if re.search(r"\bdeadline\b", window):
+                    hits.append(str(path.relative_to(REPO_ROOT)))
+                    break
+        found[name] = hits
+    return found
+
+
+def test_nothing_promises_a_deadline_editor_that_does_not_exist() -> None:
+    """⭐ 화면이 「칸반에서 마감일을 고치면」이라고 하면 그 자리가 있어야 한다.
+
+    일정 화면이 「따로 적어 두는 것이 아니라 그때그때 읽어서 만들기 때문에,
+    **칸반에서 마감일을 고치면** 여기가 바로 따라옵니다」라고 적고 있었는데,
+    두 뿌리를 세어 보니 업무 PATCH 에 `deadline` 을 싣는 화면이 **0곳**
+    이었습니다 (결함 386). 마감일은 후보를 승인할 때 한 번 정해지고 그 뒤로
+    바꿀 자리가 없습니다.
+
+    결함 313 의 「화면이 「할 수 있다」고 말하면 그 자리를 세어 보십시오」를
+    마감일에 댄 것입니다.
+    """
+    wired = _screens_that_send_a_deadline()
+    can_edit = any(wired.values())
+
+    promises: list[str] = []
+    for base in (REPO_ROOT / "frontend" / "src", REPO_ROOT / "webapp" / "src"):
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.tsx")) + sorted(base.rglob("*.ts")):
+            if ".test." in path.name:
+                continue
+            text = _blanked_ts(path.read_text(encoding="utf-8"))
+            # ⚠️ 이 자는 처음에 `칸반에서[^.]{0,40}마감일을 (고치|바꾸|수정)`
+            # 였습니다. 같은 화면의 빈 상자가 「칸반에서 업무에 마감일을
+            # **주세요**」 라고 하고 있었는데 **그 자에 안 걸렸습니다**
+            # (결함 389). 자가 좁아서 놓친 것이지 요구가 달랐던 것이
+            # 아닙니다 — 결함 299 의 모양입니다.
+            #
+            # 재는 것은 낱말이 아니라 요구입니다: **칸반이 마감일을 정하는
+            # 자리라고 말하는가.** 「고치다·바꾸다·수정하다」 뿐 아니라
+            # 「주다·넣다·정하다·달다」 까지 보고, 두 낱말의 **순서도**
+            # 뒤집힐 수 있으므로 양방향으로 봅니다.
+            #
+            # ⚠️ 이 자가 못 보는 것: 칸반을 **다른 이름으로** 부르는 문장
+            # (「보드에서 마감일을 주세요」). 화면들이 쓰는 이름은 지금
+            # 「칸반」 하나뿐이라 그 이름으로만 잽니다.
+            flat = re.sub(r"\s+", " ", text)
+            verbs = "고치|바꾸|수정|주|넣|정하|달"
+            if re.search(rf"칸반[^.]{{0,40}}마감일[을를]?\s*({verbs})", flat) or re.search(
+                rf"마감일[을를]?[^.]{{0,40}}칸반[^.]{{0,20}}({verbs})", flat
+            ):
+                promises.append(str(path.relative_to(REPO_ROOT)))
+
+    if not can_edit:
+        assert promises == [], (
+            f"마감일을 고칠 수 있다고 말하는 화면: {promises} — 그런데 업무 PATCH 에 "
+            f"deadline 을 싣는 화면은 두 뿌리 다 0곳입니다 (결함 386). "
+            "말을 고치거나 자리를 만드세요"
+        )
+
+
+def test_the_integrity_flag_table_says_whether_the_flag_can_fire() -> None:
+    """⭐ `docs/09` 의 「구현된 무결성 플래그」와 **실제로 뜰 수 있는가**가 짝이다.
+
+    `frequent_deadline_change` 는 `DEADLINE_CHANGED` 를 셉니다. 그 이벤트는
+    `_change_deadline` 만 만들고, 그 함수는 화면이 `deadline` 을 실어 보내야
+    돕니다. 보내는 화면이 0곳이면 그 플래그는 **영원히 안 뜹니다** — 표가
+    「구현된」이라고만 적으면 읽는 사람은 그 장치가 켜져 있다고 믿습니다.
+
+    ⚠️ **양방향입니다.** 마감일을 고치는 자리를 만들면 이 단서가 낡습니다 —
+    그때는 이 검사가 「단서를 지우세요」로 빨개집니다 (결함 297 의 방법).
+    """
+    doc = (REPO_ROOT / "docs" / "09-리스크와-검증-실험.md").read_text(encoding="utf-8")
+    row = [
+        line for line in doc.splitlines() if line.startswith("| `frequent_deadline_change`")
+    ]
+    assert row, "docs/09 에 frequent_deadline_change 줄이 없습니다 — 이 검사가 낡았습니다"
+
+    wired = _screens_that_send_a_deadline()
+    can_edit = any(wired.values())
+    caveated = "아직 뜰 수 없습니다" in row[0]
+
+    if can_edit:
+        assert not caveated, (
+            f"마감일을 보내는 화면이 생겼습니다({wired}) — docs/09 의 "
+            "「아직 뜰 수 없습니다」 단서가 낡았습니다. 지우세요"
+        )
+    else:
+        assert caveated, (
+            "docs/09 가 `frequent_deadline_change` 를 「구현된」 플래그로만 적고 "
+            "있습니다. 그 플래그가 세는 이벤트를 만들 길이 화면에 0곳이라 "
+            "영원히 뜨지 않습니다 (결함 386)"
+        )
+
+
+# ══════════════════════════════════════════════════════════════
+# 사람이 적은 글자가 **마크업으로** 새는가
+# ══════════════════════════════════════════════════════════════
+#
+# 이 저장소에서 제일 무거운 부류입니다. 데스크톱 셸은 **서버가 준 화면을
+# 띄우고**(`AGENTS.md` — 「서버의 XSS 가 곧 사용자 PC 의 코드 실행」),
+# 레거시 화면 열넷은 문자열로 HTML 을 지어 `innerHTML` 에 넣습니다.
+#
+# `lib/html.ts` 는 이 위험을 알고 만들어졌습니다 — 그 머리말이 「제목에
+# 따옴표가 하나 들어가면 속성이 거기서 끝나고 그 뒤가 마크업으로
+# 해석됩니다」라고 적고 실제 사고를 인용합니다. 그런데 **「그래서 지금 전부
+# 거치고 있는가」를 세는 자는 없었습니다.**
+
+def _ts_template_literals(source: str) -> list[tuple[int, str]]:
+    """TS/TSX 에서 **템플릿 리터럴**만 골라 (줄번호, 본문) 로 돌려줍니다.
+
+    ## ⚠️ 왜 정규식으로 안 하는가 — 처음에 그렇게 했다가 눈을 감았습니다
+
+    처음 자는 `` `[^`]*<[a-zA-Z/][^`]*` `` 였습니다. 백틱을 **앞에서부터
+    둘씩 짝지어** 가는데, 주석이나 따옴표 문자열 안에 백틱이 하나라도 있으면
+    그 뒤의 짝이 통째로 어긋납니다. 실제로 `call.ts` 에서 그랬습니다 —
+    116~119줄의 `<li>` 템플릿이 **아예 안 걸려**, 그 안의 `${'${capture.tone}'}`
+    가 자의 눈 밖이었습니다. 「0건」이 그 자리에서만 참이었습니다.
+
+    그래서 문자 하나씩 걸으며 줄 주석 · 블록 주석 · `'`/`"` 문자열 · 템플릿을
+    갈라 봅니다. `${'${…}'}` 안에 다시 템플릿이 오는 것도 셉니다.
+
+    ⚠️ **정규식 리터럴은 안 가릅니다** — JS 에서 `/` 가 나눗셈인지 정규식
+    시작인지는 앞 토큰을 봐야 압니다. 정규식 안에 백틱을 쓰는 코드가 이
+    저장소에 없어서 안 하고, 생기면 이 주석이 단서입니다.
+    """
+    out: list[tuple[int, str]] = []
+    i, n = 0, len(source)
+    line = 1
+    stack: list[int] = []  # 열린 템플릿의 시작 위치
+    depth: list[int] = []  # 그 템플릿 안 `${` 중괄호 깊이
+    while i < n:
+        ch = source[i]
+        if ch == "\n":
+            line += 1
+            i += 1
+            continue
+        if not stack and source.startswith("//", i):
+            while i < n and source[i] != "\n":
+                i += 1
+            continue
+        if not stack and source.startswith("/*", i):
+            end = source.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            line += source.count("\n", i, end)
+            i = end
+            continue
+        if (not stack or depth[-1] > 0) and ch in "'\"":
+            quote, i = ch, i + 1
+            while i < n and source[i] != quote:
+                i += 2 if source[i] == "\\" else 1
+            i += 1
+            continue
+        if ch == "\\" and stack:
+            i += 2
+            continue
+        if ch == "`":
+            if stack and depth[-1] == 0:
+                start = stack.pop()
+                depth.pop()
+                out.append((source.count("\n", 0, start) + 1, source[start : i + 1]))
+            else:
+                stack.append(i)
+                depth.append(0)
+            i += 1
+            continue
+        if stack and depth[-1] >= 0:
+            if source.startswith("${", i):
+                depth[-1] += 1
+                i += 2
+                continue
+            if ch == "{" and depth[-1] > 0:
+                depth[-1] += 1
+            elif ch == "}" and depth[-1] > 0:
+                depth[-1] -= 1
+        i += 1
+    return out
+
+
+_HTML_TAG = re.compile(r"<[a-zA-Z/]")
+_INTERPOLATION = re.compile(r"\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}")
+_ESCAPING_CALL = re.compile(r"^\s*(escapeHtml\(|attr\(|iconSvg\(|String\()")
+#: `const x = … escapeHtml(…)` — 묶는 자리에서 이스케이프하고 쓰는 자리에서는
+#: 변수만 쓰는 모양. `byline.ts` 가 그렇습니다.
+_BOUND_TO_ESCAPE = re.compile(
+    r"\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*[^;]*?(?:escapeHtml\(|attr\()"
+)
+_NUMERIC = re.compile(r"^[\w.()\[\]\s+*/%?:'\"-]*\.(toFixed|repeat|length)\b|^\d")
+#: 두 갈래가 **둘 다 글자 리터럴**인 삼항 — 조건이 무엇이든 나오는 값은 리터럴.
+_LITERAL_TERNARY = re.compile(
+    r"""^[^?]*\?\s*(?:'[^']*'|"[^"]*"|`[^`$]*`)\s*:\s*(?:'[^']*'|"[^"]*"|`[^`$]*`)\s*$"""
+)
+
+#: 자가 못 가리는 자리 — **왜 안전한지**를 값에 적습니다.
+#:
+#: ⚠️ 이 표는 **정확해야** 합니다. 낡은 줄이 남아 있으면 다음 사람이
+#:    「여기는 봐준 자리」로 읽습니다 (결함 306 의 「예외가 낡는 것도
+#:    같이 재십시오」). 아래 검사가 남는 줄을 실패로 잡습니다.
+_ESCAPE_EXEMPT: dict[tuple[str, str], str] = {
+    ("frontend/src/demo/call.ts", "capture.tone"): (
+        "`Tone` 은 'ok'|'warn'|'bad' 유니언 — 값이 전부 `mesh.ts` 의 리터럴"
+    ),
+    ("frontend/src/demo/call.ts", "p.tone"): "위와 같음",
+    ("frontend/src/demo/main.ts", "w.severity"): (
+        "'critical'|'warning'|'info' — `recording/capture.ts` 가 리터럴로 만듭니다"
+    ),
+    ("frontend/src/demo/main.ts", "note?.tone ?? 'gap'"): "위와 같음",
+    ("frontend/src/demo/nav.ts", "disabled"): (
+        "`const disabled = tab.enabled ? '' : ' role=\"link\" tabindex=\"0\" "
+        "aria-disabled=\"true\"'` — 리터럴 둘. ⚠️ 셋을 한 덩어리로 두는 이유는 "
+        "언제나 같이 붙기 때문입니다 (결함 413)"
+    ),
+    ("frontend/src/demo/nav.ts", "marked"): "`marked` 도 리터럴 둘",
+    ("frontend/src/demo/nav.ts", "current"): (
+        "`const current = … ? ' aria-current=\"page\"' : ''` — 리터럴 둘 (레일·채널 두 곳)"
+    ),
+    ("frontend/src/lib/ui/skeleton.ts", "width"): "`bar(width: number, …)` — 숫자입니다",
+    ("frontend/src/lib/ui/skeleton.ts", "kind ? ` sk-${kind}` : ''"): (
+        "`kind` 는 부르는 자리가 전부 리터럴('btn'·'line'·'track'·'title'). "
+        "⚠️ 이 줄은 **정규식 자가 못 보던 자리**입니다 — 템플릿 안의 템플릿이라 "
+        "백틱 짝이 어긋났습니다. 스캐너로 바꾸고서야 보였습니다"
+    ),
+    ("frontend/src/lib/ui/skeleton.ts", "inner"): (
+        "`wrap(inner: string)` 이 받는 것은 `bar()` 가 만든 **이미 조립된** HTML"
+    ),
+}
+
+
+def _unescaped_interpolations() -> list[tuple[str, int, str]]:
+    """HTML 을 만드는 템플릿에서 **이스케이프를 안 거친** 자리.
+
+    ⚠️ 이 자가 **못 보는 것** (결함 316 의 「자가 못 보는 것을 같이
+    적으십시오」):
+
+    - 값이 **여러 함수를 거쳐** 오는 경우. 한 파일 안의 리터럴만 봅니다
+    - `innerHTML` 에 **변수를 통째로** 넣는 경우 (`el.innerHTML = html`)
+    - JSX 는 스스로 이스케이프하므로 안 봅니다. `dangerouslySetInnerHTML`
+      의 **인자**는 결국 이 자가 보는 템플릿에서 옵니다
+    - 서버가 만든 문자열. 서버는 HTML 을 안 만들지만, 만들기 시작하면
+      이 자는 조용합니다
+    """
+    found: list[tuple[str, int, str]] = []
+    for base in (REPO_ROOT / "frontend" / "src", REPO_ROOT / "webapp" / "src"):
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*.ts")) + sorted(base.rglob("*.tsx")):
+            if ".test." in path.name:
+                continue
+            text = path.read_text(encoding="utf-8")
+            safe_vars = set(_BOUND_TO_ESCAPE.findall(_blanked_ts(text)))
+            local_fns = set(re.findall(r"\bfunction\s+([A-Za-z_$][\w$]*)", text)) | set(
+                re.findall(r"\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*\(", text)
+            )
+            for line, body in _ts_template_literals(text):
+                if not _HTML_TAG.search(body):
+                    continue
+                for hit in _INTERPOLATION.finditer(body):
+                    expr = hit.group(1).strip()
+                    if _ESCAPING_CALL.match(expr) or _NUMERIC.match(expr):
+                        continue
+                    if _LITERAL_TERNARY.match(expr):
+                        continue
+                    head = re.match(r"^([A-Za-z_$][\w$]*)", expr)
+                    if head and head.group(1) in safe_vars:
+                        continue
+                    if head and head.group(1) in local_fns and expr.startswith(head.group(1) + "("):
+                        continue
+                    found.append((str(path.relative_to(REPO_ROOT)), line, expr))
+    return found
+
+
+def test_nothing_puts_unescaped_text_into_markup() -> None:
+    """⭐ 사람이 적은 글자가 **마크업으로** 새지 않는다.
+
+    브라우저로도 재 봤습니다 — 프로젝트 이름·자기소개·회의 이름·채널
+    이름·채팅 메시지에 `<img src=x onerror=…>"'<b>` 를 제품이 보내는 모양
+    그대로 심고 화면 열여섯을 열었을 때 실행 0건 · 심은 요소 0건이었습니다.
+    이 검사는 **그 상태가 유지되는지**를 브라우저 없이 봅니다.
+
+    ⚠️ 「글자로 보이는 것」은 정상입니다 — 이스케이프가 됐다는 뜻입니다.
+    """
+    leaks = [
+        (path, line, expr)
+        for path, line, expr in _unescaped_interpolations()
+        if (path, expr) not in _ESCAPE_EXEMPT
+    ]
+    assert leaks == [], (
+        "HTML 을 만드는 템플릿에 이스케이프를 안 거친 값이 들어갑니다. "
+        "사람이 적은 글자면 그대로 마크업이 됩니다 — 데스크톱 셸에서는 "
+        f"사용자 PC 의 코드 실행입니다: {leaks}"
+    )
+
+
+def test_the_escape_exemptions_are_all_still_used() -> None:
+    """⭐ 예외 표에 **낡은 줄**이 없다.
+
+    자리를 고쳐 이스케이프를 거치게 되면 예외 줄이 남습니다. 남아 있으면
+    다음 사람이 「여기는 봐준 자리」로 읽습니다 — 결함 306 이 라우트 예외
+    표에서 겪은 그것입니다.
+    """
+    live = {(path, expr) for path, _, expr in _unescaped_interpolations()}
+    stale = sorted(key for key in _ESCAPE_EXEMPT if key not in live)
+    assert stale == [], (
+        f"예외 표에 이제 안 걸리는 줄이 있습니다 — 지우세요: {stale}"
+    )

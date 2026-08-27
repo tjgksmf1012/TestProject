@@ -599,6 +599,22 @@ class MeetingStatus(StrEnum):
     FAILED = "failed"
 
 
+#: 전사가 끝나 **그 회의의 발언이 기여도에 들어간** 상태.
+#:
+#: ⚠️ 보고서가 이걸 `status == "done"` 으로 세고 있었습니다 (결함 288).
+#: `"done"` 은 **업무** 상태(`vocab.TaskStatus.DONE`)이지 회의 상태가
+#: 아니라서, 「처리된 회의」가 **어느 프로젝트에서든 언제나 0건**이었고,
+#: 최종 보고서가 그 0 을 근거로 이렇게 적었습니다 —
+#:
+#:     6건은 아직 처리 전이라 그 회의의 발언은 기여도에 안 들어갔습니다
+#:
+#: 같은 화면의 기여도는 그 사람의 회의 근거를 11건이라고 세고 있었습니다.
+#: **팀이 제출하는 문서가 제품 자신의 데이터와 반대되는 말을 한 것**입니다.
+PROCESSED_MEETING_STATUSES: frozenset[MeetingStatus] = frozenset(
+    {MeetingStatus.NEEDS_REVIEW, MeetingStatus.CONFIRMED}
+)
+
+
 class Meeting(Base):
     __tablename__ = "meetings"
 
@@ -849,6 +865,18 @@ class Notification(Base):
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"))
     meeting_id: Mapped[int | None] = mapped_column(ForeignKey("meetings.id"))
     message_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id"))
+    #: 어느 GitHub 사건인가 (결함 396).
+    #:
+    #: ⚠️ **`task_id` 만으로는 모자랍니다.** 한 업무에 PR 이 둘 붙으면
+    #: 알림이 두 줄인데 글자·시각·링크가 **한 자도 안 달라** 어느
+    #: PR 인지 알 방법이 없었습니다. 게다가 둘 중 하나가 `branch` 로
+    #: **추정된** 연결이어도 확정과 똑같이 그려졌습니다.
+    #:
+    #: ⚠️ **확정/추정을 여기 적지 않습니다.** 사람이 나중에 확인해서
+    #: 확정으로 바꾸면 그 글자만 옛말이 됩니다 — 이 표가 문장을 저장하지
+    #: 않는 이유 그대로입니다. 읽을 때 `task_github_links.relevance` 를
+    #: 봅니다.
+    github_event_id: Mapped[int | None] = mapped_column(ForeignKey("github_events.id"))
     created_at: Mapped[datetime] = _now()
     #: 읽은 시각. ⚠️ **행을 지우지 않습니다** — 지우면 "언제 알렸는가" 가
     #: 사라지고, 기여도 분쟁에서 그게 확인할 거리가 됩니다.
@@ -1159,8 +1187,11 @@ class AuditLog(Base):
     id: Mapped[int] = _pk()
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"))
     actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    # score_adjusted | consent_revoked | audio_deleted | weights_changed |
-    # candidate_approved | member_removed
+    # ⚠️ **여기에 목록을 적지 마십시오.** 예전에는 여섯 개가 적혀 있었는데,
+    # 코드가 실제로 쓰는 것은 열여섯이었고 적힌 것 중 둘(`consent_revoked`)
+    # 은 **아무도 안 쓰고** 있었습니다 — 주석이 스스로 낡은 것입니다
+    # (결함 328). 어휘의 원본은 `services/activity_service.ACTION_LABEL`
+    # 이고, 짝 가드가 「쓰는 것 == 이름표가 있는 것」을 셉니다.
     action: Mapped[str] = mapped_column(String(50), nullable=False)
     target: Mapped[str] = mapped_column(String(100), nullable=False)
     before: Mapped[dict | None] = mapped_column(JSONType)

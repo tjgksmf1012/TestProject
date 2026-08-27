@@ -115,6 +115,9 @@
   --font-sans:    "Pretendard Variable", Pretendard, -apple-system,
                   BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
   --font-display: "Wanted Sans Variable", "Wanted Sans", var(--font-sans);
+  /* ⚠️ **이 집안에는 400·500 두 벌뿐입니다** (위 `@font-face`). 600·700 을
+     적으면 브라우저가 획을 번지게 해서 만들어 냅니다 — `guards.test.ts` 가
+     모노 규칙의 무게를 셉니다 (결함 259). */
   --font-mono:    "JetBrains Mono", "IBM Plex Mono", ui-monospace,
                   "SF Mono", Consolas, monospace;
 
@@ -312,6 +315,96 @@ a { color: var(--c-evidence); }
 }
 .rail__item svg { width: 20px; height: 20px; stroke-width: 1.6; }
 .rail__spacer { flex: 1; }
+/* 관찰의 근거 한 줄 — 제목 아래, 낮은 무게. */
+.tlrow__why {
+  display: block;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-12);
+  color: var(--c-ink-muted);
+}
+/* 레일의 버튼(로그아웃)이 링크들과 같은 모양이어야 합니다 — 브라우저
+   기본 버튼 상자가 그대로 보이면 그 자리만 다른 물건처럼 읽힙니다. */
+button.rail__item {
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  font: inherit;
+  font-size: var(--fs-11);
+  cursor: pointer;
+  width: 100%;
+}
+/* ⚠️ 갈 곳이 없는 칸. **지우지 않고** 흐리게 두고 이유를 `title` 로 답니다.
+   ⛔ `opacity` 를 안 씁니다 — 이 저장소의 규칙(누를 수 있는 것을 opacity
+   로 흐리게 하면 WCAG 1.4.3 의 비활성 예외를 못 씁니다). 색 토큰으로
+   낮춥니다. */
+.rail__item--blocked {
+  color: var(--c-ink-faint);
+  cursor: not-allowed;
+}
+.rail__item--blocked:hover { background: none; color: var(--c-ink-faint); }
+
+/* ── 프로젝트 레일 — 둘 이상일 때만 그립니다 (`railIsWorthIt`).
+ *
+ * ⚠️ `.rail` 이 `overflow: hidden` 이라 프로젝트가 많으면 아래가 잘립니다.
+ *    이 묶음만 따로 스크롤하게 두고, 화면 메뉴 넷은 **언제나 보이게**
+ *    `flex-shrink` 를 여기서만 허용합니다.
+ * ⚠️ 네모는 44px 이상입니다 — 폰을 뺐어도 창 반쪽·확대 200%·터치
+ *    노트북에서 필요한 크기입니다(결함 72·150). */
+.prail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-4);
+  margin-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--c-line);
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.prail__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: var(--r-md);
+  /* ⚠️ `--c-line` 은 **줄 긋는 색**이라 일부러 3:1 아래입니다. 눌러야
+     하는 것의 테두리에 쓰면 안 보입니다 — 재 보니 레일 배경 대비
+     **1.26:1** 이었습니다(WCAG 1.4.11 은 3:1). 안 고른 칸은 배경도
+     레일과 거의 같아서, 글자 한 자만 허공에 떠 있는 모양이었습니다. */
+  border: 1px solid var(--c-line-strong);
+  background: var(--c-sunken);
+  color: var(--c-ink-muted);
+  font-family: var(--font-display);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  text-decoration: none;
+  flex: none;
+  transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.prail__item:hover { color: var(--c-ink); border-color: var(--c-line-strong); }
+/* ⚠️ 지금 보는 것은 **테두리와 글자색**으로 말합니다. 배경을 칠하면
+   검토 점(`--c-evidence`)과 같은 색이 두 뜻으로 쓰입니다. */
+.prail__item[aria-current="true"] {
+  color: var(--c-ink);
+  border-color: var(--c-evidence);
+  box-shadow: inset 0 0 0 1px var(--c-evidence);
+}
+/* 할 일이 있다는 것은 **개수가 아니라 있다/없다** 입니다 (`needsReview`).
+   숫자를 찍으면 프로젝트끼리 견주게 되고, 그건 여기가 답할 질문이
+   아닙니다 — 여기는 "어디를 눌러야 하나" 에만 답합니다. */
+.prail__dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-evidence);
+  border: 1px solid var(--c-surface);
+}
 
 .main {
   display: flex;
@@ -362,7 +455,16 @@ a { color: var(--c-evidence); }
 }
 
 /* 1024px 미만 — 레일이 하단 탭바로 */
-@media (max-width: 1023.5px) {
+/* ⚠️ **`px` 가 아니라 `rem` 입니다** (결함 338). 이 breakpoint 는 「한 줄이
+   안 들어가면 접는다」는 규칙인데, `px` 로 적으면 **창 폭**만 봅니다.
+   브라우저 기본 글자를 32px 로 키운 사람은 창이 그대로 1440px 이라 넓은
+   배치가 유지되는데 칸 폭은 `rem` 이라 **두 배**가 됩니다 — 결함 213 이
+   좁은 창에서 고친 것과 **똑같은 무너짐**이 넓은 창에서 다시 났습니다
+   (제목 폭 0 · 버튼 오른끝 1624 > 1440, 게다가 `.main` 이 `overflow:
+   hidden` 이라 스크롤로도 못 닿습니다).
+   미디어 쿼리의 `rem` 은 **브라우저 기본 글자**를 봅니다 — 그래서 이쪽이
+   「한 줄이 안 들어가는가」를 실제로 재는 축입니다. */
+@media (max-width: 63.97rem) {
   .app { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
   .rail {
     order: 2;
@@ -373,7 +475,46 @@ a { color: var(--c-evidence); }
     padding: var(--sp-2) 0;
   }
   .rail__brand, .rail__spacer { display: none; }
+
+  /* ⛔ **프로젝트 칩이 가로 탭바 안에서 세로로 쌓였습니다** (결함 281).
+     `.rail` 만 가로로 눕히고 `.prail` 은 그대로 뒀더니, 칩 기둥의 높이가
+     **탭바 전체의 높이를 끌고 갔습니다.** 재 봤습니다 (720×450, 확대 200%) —
+
+         프로젝트 2개  탭바 114px
+         프로젝트 4개  탭바 **210px**  = 창 높이의 47%
+
+     하나 늘 때마다 48px 씩 자라, 여섯이면 화면을 통째로 덮습니다. 내용은
+     위쪽 240px 로 밀려 있었습니다. 넘침 감사로는 **안 잡힙니다** — 아무것도
+     잘리지 않고 바가 자랄 뿐입니다. 눈으로 보고 잡았습니다.
+
+     칩도 같이 눕히고, 많아지면 **옆으로** 스크롤합니다 — 탭바 높이는
+     프로젝트 수와 무관해집니다. */
+  .prail {
+    flex-direction: row;
+    padding-bottom: 0;
+    margin-bottom: 0;
+    padding-right: var(--sp-3);
+    margin-right: var(--sp-2);
+    border-bottom: 0;
+    border-right: 1px solid var(--c-line);
+    overflow-y: visible;
+    overflow-x: auto;
+    /* 탭 다섯을 밀어내지 않도록 제 몫만 씁니다. */
+    max-width: 38%;
+  }
   .rail__item { border-left: 0; border-top: 2px solid transparent; min-width: 64px; }
+  /* ⛔ **로그아웃의 클릭 상자가 탭바의 절반을 넘었습니다** (결함 258).
+     세로 레일에서는 `button.rail__item { width: 100% }` 가 72px 열을
+     채우는 옳은 규칙인데, 가로 탭바에서는 그 100% 가 **탭바 전체**를
+     기준으로 잡힙니다. 재 봤습니다 —
+
+         390px  로그아웃 126px  (다른 항목은 64px)
+         700px  로그아웃 436px  = 탭바의 62%
+
+     탭바 오른쪽 **빈 자리를 눌러도 로그아웃**이 됐고, 창이 넓을수록 그
+     구역이 커졌습니다. 이 앱은 회의를 녹음합니다 — 잘못 눌러 나가면
+     그 구간은 다시 못 잽니다. */
+  button.rail__item { width: auto; }
   .rail__item[aria-current="page"] { border-top-color: var(--c-evidence); }
 
   /* ⚠️ **좁은 폭에서 머리줄이 잘려 나갔습니다** (결함 186). 높이가 못
@@ -425,6 +566,14 @@ a { color: var(--c-evidence); }
   color: var(--c-ink-muted);
 }
 .pane__count { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--c-ink-faint); }
+/* 판 머리말의 **단위 한 마디** — 줄마다 붙이면 글자가 스무 배로 늘어납니다.
+   오른쪽 끝에 붙여 제목·개수와 시선을 나눕니다 (UI 패스 v3). */
+.pane__hint {
+  margin-left: auto;
+  font-size: var(--fs-11);
+  color: var(--c-ink-faint);
+  white-space: nowrap;
+}
 .pane__body { flex: 1; overflow-y: auto; padding: var(--sp-5) var(--sp-6); min-height: 0; }
 .pane__body--flush { padding: 0; }
 
@@ -461,6 +610,40 @@ a { color: var(--c-evidence); }
    타입 유틸
    ========================================================================== */
 .muted { color: var(--c-ink-muted); }
+/* ⚠️ **못 잰 것은 흙빛입니다** — 빨강이 아닙니다. 빨강은 이 저장소에서
+   「네가 뭘 잘못했다」로 읽히는데, 안 잰 것은 잘못이 아닙니다. */
+.gap { color: var(--c-unknown); }
+
+/* 검토 화면의 세는 판 — 「무슨 말이 오갔나」·「누가 얼마나 말했나」 (결함 352).
+
+   ⛔ **막대를 그리지 마십시오.** 값을 같은 축 위에 폭으로 늘어놓으면 그게
+   곧 순위표입니다 (불변식 ① — 이 저장소가 두 번 어긴 규칙). 값은 **글자**
+   로 적고, 그림은 안 그립니다. 그래서 여기에는 폭도 배경도 없습니다. */
+.tally { list-style: none; margin: var(--sp-2) 0 0; padding: 0; }
+.tally li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-12);
+  line-height: var(--lh-12);
+}
+/* 점수에 안 들어가는 유형(맞장구·기타)은 흐리게 — 지우지는 않습니다.
+   지우면 「맞장구가 없었다」로 읽힙니다.
+
+   ⚠️ **`--c-ink-muted` 를 쓰면 안 됩니다** (결함 361). `.tally li` 가
+   물려받는 색이 이미 `--c-ink-muted` 라, 그 토큰으로 「흐리게」를 적으면
+   **있던 색을 그대로 다시 칠합니다.** 클래스는 붙고 규칙도 있는데 열세
+   줄이 전부 같은 색으로 나갔습니다 — 두 테마 다. 레거시(`.tzero`)는
+   처음부터 한 단계 더 흐린 값을 쓰고 있었습니다. */
+.tally--zero { color: var(--c-ink-faint); }
+/* ⚠️ **색만으로는 부족합니다** (결함 361). `forced-colors: active`(고대비)
+   에서는 색이 전부 덮여 열세 줄이 같은 검정이 되고, 「안 세는 것」과
+   「세는 것」이 구별되지 않습니다. 무게는 안 덮이므로 레거시(`.tzero`)는
+   처음부터 숫자의 무게까지 떨어뜨리고 있었습니다 — 여기도 같이 합니다.
+   숫자가 곧 값이므로 강조도 숫자가 받습니다(「값은 글자로」). */
+.tally .num { color: var(--c-ink); font-weight: var(--fw-semibold); }
+.tally--zero .num { color: inherit; font-weight: var(--fw-normal); }
 .faint { color: var(--c-ink-faint); }
 .micro {
   font-size: var(--fs-11);
@@ -497,20 +680,70 @@ a { color: var(--c-evidence); }
   text-decoration: none;
   transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
+/* ⛔ hover 는 **막힌 것을 비켜 가야 합니다** (결함 239).
+   `:not(:disabled)` 만 걸려 있었습니다. 그건 `disabled` 를 쓰던 시절의
+   방패인데, 234·235 에서 SPA 의 막힌 버튼을 전부 `aria-disabled` 로
+   옮기면서 **그 방패가 아무것도 안 막게 됐습니다.**
+
+   그래서 마우스를 올리면 `.btn--unmet` 의 채움만 primary 로 되돌아오고
+   글자는 잉크색 그대로 남습니다 — 재 봤습니다:
+
+       「검토 끝내기」·「등록」·「이 값으로 확정」·「동의했습니다」
+       밝은 모드 1.23:1  ·  어두운 모드 1.25:1   (글자가 사라집니다)
+
+   결함 236 의 사촌입니다. 저기는 `opacity`, 여기는 `:hover` — 둘 다
+   **쉬고 있는 상태만 재는 감사**가 구조적으로 못 보는 자리입니다. */
 .btn--primary { background: var(--c-evidence); color: var(--c-ink-inverse); }
-.btn--primary:hover:not(:disabled) { background: var(--c-evidence-hover); }
+.btn--primary:hover:not(:disabled):not([aria-disabled='true']) {
+  background: var(--c-evidence-hover);
+}
 .btn--secondary { background: var(--c-surface); border-color: var(--c-line-strong); }
-.btn--secondary:hover:not(:disabled) { background: var(--c-sunken); }
+.btn--secondary:hover:not(:disabled):not([aria-disabled='true']) { background: var(--c-sunken); }
 .btn--ghost { color: var(--c-ink-muted); }
-.btn--ghost:hover:not(:disabled) { color: var(--c-ink); background: var(--c-sunken); }
+.btn--ghost:hover:not(:disabled):not([aria-disabled='true']) {
+  color: var(--c-ink);
+  background: var(--c-sunken);
+}
 /* ⚠️ 여기 `color: #fff` 가 박혀 있었습니다. 어두운 모드에서는 채움
    (`--c-danger`)이 **밝게 뒤집히는데** 글자만 흰색으로 남아 3.26:1 이
    됐습니다 — 하필 "내 녹음과 성문 지우기", 되돌릴 수 없는 버튼입니다.
    레거시가 결함 60 으로 겪은 것과 같은 모양이고, `--c-ink-inverse` 는
    바로 이걸 막으려고 있는 토큰입니다. */
 .btn--danger { background: var(--c-danger); color: var(--c-ink-inverse); }
+/* ⚠️ **위험한데 조용해야 하는 것** (결함 257). 줄마다 서는 「내보내기」는
+   채운 빨강으로 두면 목록에서 제일 큰 소리가 되어 실수로 눌립니다. 반대로
+   `btn--ghost` 로 두면 본문 글자와 **똑같아서** 화면에서 제일 약한 것이
+   제일 위험한 행동이 됩니다 — 재 보니 `--text-muted` 에 테두리도 없었고,
+   같은 화면의 「내 녹음 지우기」만 빨강이었습니다.
+   그래서 **색은 위험, 무게는 조용**으로 갑니다. */
+/* 고른 것 — 「지금 이 상태입니다」 (결함 267). 색이 아니라 **채움과
+   테두리**로 말합니다: 이 저장소는 색을 「근거 있음/모름」에만 씁니다. */
+.btn[aria-pressed="true"] {
+  background: var(--c-sunken);
+  border-color: var(--c-line-strong);
+  color: var(--c-ink);
+  font-weight: var(--fw-semibold);
+}
+
+.btn--danger-quiet {
+  background: transparent;
+  color: var(--c-danger);
+  border-color: var(--c-danger-line);
+}
 .btn--sm { padding: 0 var(--sp-4); font-size: var(--fs-12); }
-.btn:disabled { opacity: .45; cursor: not-allowed; }
+/* ⛔ `opacity: .45` 였습니다 (결함 236). 정말로 못 누르니 WCAG 1.4.3
+   예외에는 걸리지만, 이 저장소는 그 예외를 **안 쓰기로** 이미 정했습니다
+   (아래 `.btn--disabled-link` 주석) — 같은 앱 안에서 「안 됨」이 두 가지
+   얼굴을 가지면 안 됩니다. 흐림 대신 `btn--unmet` 과 같은 **덜 채운 모양**.
+   ⚠️ 지금 SPA 에는 `:disabled` 버튼이 하나도 없습니다(234·235 에서 전부
+   `aria-disabled` 로 옮겼습니다). 그래도 규칙을 남겨 두면 **다음에 하나
+   생기는 순간** 2.91:1 이 됩니다. */
+.btn:disabled {
+  background: var(--c-evidence-tint);
+  color: var(--c-evidence);
+  border-color: var(--c-evidence-line);
+  cursor: not-allowed;
+}
 
 /* 비활성 버튼은 반드시 사유를 동반한다 — 버튼 바로 위 12px 황토.
    ⚠️ 이 자리는 `components/Problem.tsx` 가 그립니다 — 라이브 영역(끼어들
@@ -859,6 +1092,16 @@ details.disc > .disc__body {
   gap: var(--sp-5);
 }
 
+/* 빈 상태에서 **갈 곳**을 가리키는 링크 (결함 232). 설명과 같은 줄에
+   둡니다 — 떨어뜨리면 설명만 읽고 떠납니다. */
+.empty__go {
+  color: var(--c-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+
 /* ==========================================================================
    메뉴 (Radix dropdown)
    ========================================================================== */
@@ -912,9 +1155,38 @@ details.disc > .disc__body {
 }
 .warnband p { margin: 0; }
 
+/* 팀 확신 리본 — **한 화면에 하나** (결함 248). 확신도는 팀당 한 번
+   계산되는 값이라, 사람 줄마다 그리면 팀에 대해 아는 것을 사람에 대해
+   아는 것처럼 말하게 됩니다. 값은 옆에 **글자로** 섭니다. */
+.teamconf {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6);
+  border-bottom: 1px solid var(--c-line);
+}
+.teamconf > div:nth-child(2) { flex: 1; min-width: 0; }
+.teamconf__who {
+  flex: 0 0 auto;
+  font-size: var(--fs-12);
+  color: var(--c-ink-muted);
+  white-space: nowrap;
+}
+.teamconf__read {
+  margin: 0;
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-12);
+  color: var(--c-ink-muted);
+  white-space: nowrap;
+}
+
 /* 사람마다 **개별 카드** — 레인이 같은 축에 나란히 서면 눈금이 있어도
-   길이 비교표로 읽힙니다 (v2 F1-3 A안). 카드 테두리와 간격이 축을 끊고,
-   눈금(0/25/50/75/100)은 카드마다 자기 것을 갖습니다. */
+   길이 비교표로 읽힙니다 (v2 F1-3 A안).
+   ⚠️ 그 카드 안의 리본은 **지웠습니다** — 길이를 고쳐도(결함 247) 그 그림이
+   말하는 것은 팀 값이었습니다(결함 248). 눈금도 같이 걷었습니다. */
 .crow {
   padding: var(--sp-5) var(--sp-6);
   border: 1px solid var(--c-line);
@@ -923,22 +1195,28 @@ details.disc > .disc__body {
   margin-bottom: var(--sp-6);
 }
 /* 카드 = 넉 칸. 문장이 아니라 **값들**이 나란히 섭니다.
-   [이름·역할] [구간 + 레인] [모르는 폭] [근거 사슬] */
+   [이름·역할] [구간] [모르는 폭] [근거 사슬]
+
+   ⚠️ 리본이 있던 시절에는 둘째 칸이 `minmax(200px, 1fr)` 이라 폭을 다
+   먹었습니다. 리본을 걷고(결함 248) 그대로 뒀더니 **구간 숫자와 「모름」
+   사이에 500px 짜리 구멍**이 남았습니다 — 렌더해서 보고 알았습니다.
+   지금은 값을 왼쪽으로 모으고, 남는 폭은 사슬 뒤 가장자리에 둡니다. */
 .crow {
   display: grid;
-  grid-template-columns: 9rem minmax(200px, 1fr) 7rem auto;
+  grid-template-columns: 9rem 8.5rem 7rem 1fr;
   align-items: center;
   gap: var(--sp-8);
 }
+.crow .chain { justify-self: start; }
 .crow__id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .crow__name { font-weight: var(--fw-semibold); font-size: var(--fs-14); }
 .crow__role { font-size: var(--fs-11); color: var(--c-ink-faint); }
 .crow__range-cell { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 .crow__flags { color: var(--c-unknown); }
 
-@media (max-width: 1100px) {
+@media (max-width: 68.75rem) {
   /* 좁아지면 사슬을 아래 줄로 — 값을 줄이지 않고 접습니다. */
-  .crow { grid-template-columns: 9rem minmax(160px, 1fr) 7rem; }
+  .crow { grid-template-columns: 9rem 8.5rem 1fr; }
   .crow .chain { grid-column: 2 / -1; }
 }
 
@@ -1130,6 +1408,36 @@ details.disc > .disc__body {
   border-bottom: 1px dashed var(--c-line);
 }
 .member-row:last-of-type { border-bottom: 0; }
+/* ⚠️ **이름·역할·자기소개가 든 칸은 줄어들 수 있어야 합니다** (결함 354).
+   플렉스 항목의 기본값 `min-width: auto` 는 내용의 최소 크기 아래로 안
+   줄어들어서, 300자 자기소개에 긴 주소가 들어가면 상자가 1619px 로 자랍니다
+   — `overflow-wrap: break-word` 가 일할 자리가 없어지는 것입니다.
+   여기는 `.pane__body` 가 `overflow-x: auto` 라 스크롤로 닿기는 하지만,
+   그건 담아 준 것이지 고친 것이 아닙니다. */
+.member-row > div { min-width: 0; }
+/* 등급은 **글자**입니다 — 색이나 막대로 줄 세우지 않습니다(불변식 1).
+   이름 옆 작은 라벨로 붙여, 이름과 한 덩어리로 읽히게 합니다. */
+.member-row__rank {
+  margin-left: var(--sp-4);
+  font-size: var(--fs-11);
+  letter-spacing: var(--ls-11);
+  color: var(--c-ink-muted);
+  font-weight: var(--fw-normal);
+}
+/* 등급 바꾸기·내보내기는 줄 오른쪽 끝. 앞의 요소들이 늘어나므로
+   `margin-left: auto` 는 첫 번째 것에만 붙입니다. */
+.member-row__act { margin-left: auto; }
+.member-row > .btn { margin-left: var(--sp-4); }
+.input--sm { padding: var(--sp-2) var(--sp-3); font-size: var(--fs-12); min-height: var(--tap); }
+/* 눈에는 안 보이고 낭독기에는 읽히는 이름표. `display: none` 으로 감추면
+   낭독기도 못 읽습니다. */
+.vh {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .member-row__avatar {
   width: 32px; height: 32px; border-radius: 50%;
   object-fit: cover; background: var(--c-sunken);
@@ -1174,7 +1482,13 @@ details.disc > .disc__body {
    폭은 전부 4px 격자 위입니다 (120·100·260·60·140). */
 .mrow {
   display: grid;
-  grid-template-columns: 7.5rem minmax(0, 1fr) 6.25rem 16.25rem 3.75rem 8.75rem;
+  /* ⚠️ **남는 폭을 제목 칸이 다 먹고 있었습니다** (결함 260). 1368px 짜리
+     본문에서 제목 칸이 490px 이 되는데 제목은 110px 이라, 제목과 날짜
+     사이에 **380px 짜리 구멍**이 생겼습니다 — 한 줄을 읽는 데 눈이 두 번
+     건너뜁니다. 이제 제목은 제 크기만 쓰고, 남는 폭은 **날짜 칸 뒤**로
+     보냅니다. 오른쪽 셋(리본·%·행동)은 그대로 끝에 붙어 있어 세로로
+     훑을 때 우측 끝이 흔들리지 않습니다 (v2 F6 의 결정). */
+  grid-template-columns: 7.5rem minmax(0, max-content) minmax(6.25rem, 1fr) 16.25rem 3.75rem 8.75rem;
   gap: var(--sp-6);
   align-items: center;
   padding: var(--sp-4) 0;
@@ -1195,16 +1509,57 @@ details.disc > .disc__body {
 .mrow__none { font-family: var(--font-mono); color: var(--c-ink-faint); }
 .mrow__action .btn { text-decoration: none; }
 
+/* ⚠️ **좁은 폭에서 이 줄이 통째로 무너졌습니다** (결함 213). 위 6칸은
+   47.5rem(=760px)이 **고정**이라, 창을 반으로 줄이면 `minmax(0, 1fr)` 인
+   제목 칸이 먼저 0 이 되고 — 800px 에서 제목이 8px, 640px 아래로는 0px —
+   그다음에는 액션 버튼이 화면 밖으로 밀려났습니다. 400px 에서 버튼
+   오른쪽 끝이 776px, 즉 **누를 방법이 아예 없었습니다.** `.main` 이
+   `overflow: hidden` 이라 스크롤도 안 됩니다. 결함 186 과 같은 자리에서
+   같은 일이 다시 났습니다 (WCAG 1.4.10).
+
+   ⚠️ 폭을 줄여서 맞추지 않습니다 — 칸 폭을 못 박은 것은 세로로 훑을 때
+   우측 끝이 흔들리지 않게 하려던 v2 F6 의 결정이고, 그 결정은 **넓은
+   창에서** 옳습니다. 좁아지면 한 줄을 두 줄로 접습니다: 위는 사람이 먼저
+   찾는 것(상태·제목·행동), 아래는 값(날짜·리본·%). 우측 정렬은 두 줄
+   모두에서 유지되므로 세로 스캔도 살아 있습니다. */
+@media (max-width: 63.97rem) {
+  .mrow {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "status title  action"
+      "date   ribbon cov";
+    column-gap: var(--sp-5);
+    row-gap: var(--sp-4);
+  }
+  .mrow__status { grid-area: status; }
+  .mrow__title  { grid-area: title; }
+  .mrow__action { grid-area: action; }
+  .mrow__date   { grid-area: date; }
+  .mrow__ribbon { grid-area: ribbon; min-width: 0; }
+  .mrow__cov    { grid-area: cov; text-align: right; }
+}
+
 /* 대화 상자 — 시작하기 (홈 헤더) */
+/* ⚠️ 덮개와 상자는 **형제**입니다 (결함 280). Radix 의 `Overlay` 와
+   `Content` 가 포털에 나란히 붙기 때문에, 예전처럼 덮개가 상자를 **감싸서**
+   가운데로 보낼 수 없습니다. 그렇게 뒀더니 상자가 `(0, 678)` 에 앉고
+   덮개가 그 **위를** 덮어 「만들기」가 마우스로 안 눌렸습니다 — 렌더해서
+   눌러 보고 잡았습니다. 가운데로 보내는 일과 층을 상자가 스스로 합니다. */
 .dialog-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(21, 23, 30, 0.4);
-  display: grid;
-  place-items: center;
   z-index: 50;
 }
 .dialog {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  /* 덮개 **위**에 섭니다. 같은 층이면 나중에 그려진 덮개가 이깁니다. */
+  z-index: 51;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
   background: var(--c-surface);
   border: 1px solid var(--c-line);
   border-radius: var(--r-lg);
@@ -1347,6 +1702,9 @@ details.disc > .disc__body {
   border-bottom: 1px dashed var(--c-line);
 }
 .lrow:last-of-type { border-bottom: 0; }
+/* 축은 **한 벌**입니다 (결함 261). 줄이 아니라 머리이므로 선도 여백도 없이. */
+.lrow--axis { padding: 0 0 var(--sp-2); border-bottom: 0; }
+.lrow--axis .ribbon-axis { margin-bottom: 0; }
 /* 아무도 아직 참가 안 했으면 **레인 칸 자체가 없습니다** (v2 F3·F5).
    그릴 게 없는데 칸만 남겨 두면 이름과 상태 낱말 사이가 700px 비고,
    행이 "뭔가 빠졌다" 처럼 보입니다. 한 명이라도 참가하는 순간 위 규칙의
@@ -1363,6 +1721,22 @@ details.disc > .disc__body {
   padding-top: 14px;
 }
 .lrow__word { font-size: var(--fs-13); color: var(--c-ink-muted); }
+
+/* ⛔ **좁은 폭에서 시간축이 뭉갰습니다** (결함 269). 로비는 1024px 아래에서도
+   두 판이 나란히 서는데, 그러면 막대 칸이 **104px 에서 멈춥니다** — 눈금 일곱이
+   그 안에 겹쳐 글자가 서로를 덮었습니다. 재 봤습니다:
+
+       1200px  축 399px · 최소 간격 49px · 겹침 0
+        900px  축 171px · 최소 간격 11px · 겹침 0
+        800px  축 104px · 최소 간격  0px · **겹침 6**   ← 여기부터 못 읽음
+
+   폭을 줄여서 맞추지 않습니다 — 한 줄을 **접습니다.** 홈의 회의 줄이 좁아질
+   때 사슬을 아래로 내리는 것과 같은 방식입니다(결함 213). */
+@media (max-width: 58rem) {
+  .lrow { grid-template-columns: 5.5rem 1fr; }
+  .lrow__ribbon { grid-column: 1 / -1; }
+  .lrow--axis .lrow__ribbon { grid-column: 1 / -1; }
+}
 /* 아직 갈 수 없는 링크 — 조건이 차면 `href` 가 붙습니다.
    ⚠️ `opacity: .45` 였습니다. 정말로 못 누르니 WCAG 1.4.3 예외에는
    걸리지만, **같은 앱 안에서 「아직 안 됨」 이 두 가지 얼굴**을 갖게
@@ -1417,6 +1791,20 @@ details.disc > .disc__body {
 /* ── 본문으로 건너뛰기 (WCAG 2.4.1, 수준 A) ─────────────────
    ⚠️ **`display: none` 으로 감추면 안 됩니다.** 그러면 초점도 못 받아
    링크가 있으나 마나입니다. 화면 밖으로 밀어 두고 초점이 오면 데려옵니다. */
+/* 눈에는 안 보이고 **낭독기에는 읽히는** 글.
+   ⚠️ `display: none` 이나 `hidden` 은 낭독기도 못 읽습니다 — 그건
+   "없는 것" 이지 "안 보이는 것" 이 아닙니다. 껍데기(`index.html`)의
+   `.boot__say` 가 이미 같은 일을 하고 있었고, 두 번째로 필요해진
+   지금 공용으로 올립니다. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .skip {
   position: absolute;
   left: var(--sp-5);
@@ -1442,7 +1830,7 @@ details.disc > .disc__body {
   border: 0; background: none; padding: 0; cursor: pointer;
   color: var(--c-evidence); font-size: inherit; text-decoration: underline;
 }
-@media (max-width: 1023.5px) {
+@media (max-width: 63.97rem) {
   .login__hero { display: none; }
 }
 
@@ -1470,7 +1858,11 @@ details.disc > .disc__body {
   /* 28px / 라벨 11px = 2.55 — 대시보드 통설의 하한 2.5:1 을 넘깁니다.
      (22px 로 뒀다가 2.0 이라 미달이었습니다. 4px 격자 위 값으로 올림) */
   font-size: 1.75rem;
-  font-weight: var(--fw-semibold);
+  /* ⛔ **여기 600 이 적혀 있었습니다** (결함 259). JetBrains Mono 는 이
+     저장소에 400·500 **두 벌만** 있습니다. 없는 무게를 적으면 브라우저가
+     획을 번지게 해서 만들어 냅니다(합성 볼드) — 이 화면에서 제일 큰
+     28px 숫자가 그렇게 그려지고 있었습니다. 있는 무게로 적습니다. */
+  font-weight: var(--fw-medium);
   letter-spacing: -0.02em;
   color: var(--c-ink);
   white-space: nowrap;
@@ -1565,7 +1957,8 @@ a.chain__link:hover { border-color: var(--c-evidence); }
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: var(--fs-14);
-  font-weight: var(--fw-semibold);
+  /* 모노에는 600 이 없습니다 (결함 259). */
+  font-weight: var(--fw-medium);
   color: var(--c-ink);
   line-height: 1.2;
   min-height: 1.2em;
@@ -1576,11 +1969,20 @@ a.chain__link:hover { border-color: var(--c-evidence); }
    되는데 실제로는 "아직 안 이어짐" 입니다 — 이 구분이 이 제품의 전부입니다. */
 /* ⚠️ 빈 고리를 **테두리 모양으로만** 알리지 않습니다. 점선 + 흙빛 `—` +
    라벨, 셋 중 둘 이상이 함께 말해야 색각이상·저시력에서도 읽힙니다. */
+/* ⚠️ **빈 고리는 작습니다.** 값이 없는데 있는 것과 같은 자리를 차지하면
+   카드가 「빈 상자 둘」로 보입니다 — 칸반 카드는 대부분 아직 안 이어져
+   있어서, 카드 높이의 절반이 아무 값도 없는 상자였습니다. 렌더해서 보고
+   고쳤습니다. 뜻(점선 · 흙빛 `—` · 라벨)은 그대로 두고 **크기만** 줄입니다. */
 .chain__link--empty {
   border-style: dashed;
   border-color: var(--c-unknown-line);
   background: transparent;
+  min-width: 2.5rem;
+  padding: var(--sp-1) var(--sp-2);
+  align-self: center;
 }
+.chain__link--empty .chain__value { font-size: var(--fs-12); }
+.chain__link--empty .chain__label { font-size: var(--fs-11); }
 .chain__link--empty .chain__value { color: var(--c-unknown); }
 .chain__link--empty .chain__label { color: var(--c-ink-muted); }
 
@@ -1606,6 +2008,51 @@ a.chain__link:hover { border-color: var(--c-evidence); }
 
 /* 시작 전 확인 (로비) — v2 F5 로 F3 이 비운 자리를 씁니다.
    조건 칩과 같은 문법(`●` 채움 / `○` 빔)이라 새로 배울 게 없습니다. */
+/* 회의 국면 설명 (결함 214) — "이 회의는 이미 끝났습니다".
+   ⚠️ **빨강이 아닙니다.** 실패한 회의도 사용자가 뭘 잘못한 게 아니고,
+   빨강은 "네가 잘못했다" 로 읽힙니다 (기여도 불변식 셋째와 같은 이유).
+   가라앉은 바탕에 잉크 색 글자로, 왼쪽에 굵은 선 하나만 둡니다. */
+.phase-note {
+  margin: 0 0 var(--sp-6);
+  padding: var(--sp-5) var(--sp-6);
+  background: var(--c-sunken);
+  border-left: 3px solid var(--c-line-strong);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+  color: var(--c-ink);
+}
+
+/* 「다시 처리하기」가 서는 자리 (결함 231). 설명 바로 아래에 둡니다 —
+   시킨 일과 누를 것이 떨어져 있으면 못 찾습니다. */
+.phase-act {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: var(--sp-3) 0 0;
+}
+
+/* 회의 단위 동작을 **패널 맨 아래 한 줄**로 모읍니다 (결함 320·321).
+   ⚠️ 처음에는 이 둘을 참가자 명단 **위**에 뒀습니다 — 렌더해 보니
+   화면을 열자마자 제일 먼저 보이는 것이 「이 회의 무르기」였습니다.
+   레거시 로비와 같은 자리(맨 아래)로 맞춥니다. */
+.pane-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-line);
+}
+
+/* 안쪽 `.phase-act` 는 이미 한 줄이므로 위 여백을 겹쳐 주지 않습니다. */
+.pane-acts .phase-act {
+  margin: 0;
+}
+
+
 .preflight {
   margin-top: var(--sp-8);
   padding-top: var(--sp-6);
@@ -1662,3 +2109,41 @@ a.chain__link:hover { border-color: var(--c-evidence); }
 
    이 저장소의 결함 기록에 `display: flex` 가 문장을 흩어 놓은 사례가
    이미 있습니다. 줄 하나가 필요하면 **`.notice--row` 처럼 따로** 만드세요. */
+
+/* ── 화면이 터졌을 때. 라우터 기본 오류 화면(영문 + 압축 스택)을 대신합니다. */
+.crash {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-7);
+  background: var(--c-paper);
+}
+.crash__box {
+  max-width: 32rem;
+  background: var(--c-surface);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  padding: var(--sp-7);
+}
+.crash__title { font-family: var(--font-display); font-size: var(--fs-20); color: var(--c-ink); margin: 0; }
+/* ⚠️ 줄 길이는 `rem` 입니다. `ch` 는 숫자 0 의 폭이라 한글에서 너무 일찍 끊깁니다. */
+.crash__body { color: var(--c-ink-muted); margin: var(--sp-4) 0 var(--sp-6); max-width: 28rem; }
+.crash__actions { display: flex; gap: var(--sp-4); flex-wrap: wrap; }
+/* 원래 오류 문구 — 옮겨 적어 줄 수 있게 남기되, 눈의 무게는 주지 않습니다. */
+.crash__detail {
+  margin: var(--sp-6) 0 0;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-line);
+  color: var(--c-ink-faint);
+  font-size: var(--fs-11);
+  word-break: break-word;
+}
+
+/* 접힌 근거 칩 — 「+N」. 칩과 같은 모양이되 **누를 수 있다**고 말합니다. */
+.chip--more {
+  cursor: pointer;
+  border-style: dashed;
+  color: var(--c-ink-muted);
+}
+.chip--more:hover:not([aria-disabled='true']) { color: var(--c-ink); border-color: var(--c-line-strong); }

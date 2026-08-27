@@ -157,3 +157,32 @@ def test_unknown_progress_after_processing_says_nothing():
 
 def test_a_failed_meeting_says_it_failed():
     assert "실패" in svc.describe(None, meeting_status="failed")
+
+
+def test_waiting_in_line_is_not_the_same_as_being_worked_on():
+    """⛔ **차례를 기다리는 것과 하고 있는 것은 다릅니다** (결함 325).
+
+    예전에는 `("queued", "processing")` 을 한 갈래로 묶어 둘 다 「처리
+    중입니다」라고 했습니다. 그런데 `queued` 는 **줄에 서 있는 것**이고,
+    워커가 안 돌면 **영영 시작되지 않습니다.** 그 상태에서 「처리 중」은
+    일어나지 않는 일을 일어나고 있다고 말하는 것입니다.
+
+    ⚠️ 결함 106 이 「팀은 기다리기만 하고 다시 녹음하지 않습니다」로 적어 둔
+    실패 모양이고, 이 파일 바로 위 주석이 **「모르는 것과 안 한 것은
+    다릅니다」**라고 적어 두고도 그 둘을 뭉개고 있었습니다.
+
+    ⚠️ 화면 쪽 같은 결정은 `lib/home/next.test.ts` 가 지킵니다 — 한쪽만
+    고치면 홈과 로비가 갈라집니다.
+    """
+    from teamflow.services import progress_service as svc
+
+    queued = svc.describe(None, meeting_status="queued")
+    processing = svc.describe(None, meeting_status="processing")
+
+    assert queued and processing, (queued, processing)
+    assert queued != processing, f"둘이 같은 말을 합니다: {queued}"
+    # 아직 시작 안 한 것을 「하고 있다」 고 말하지 않습니다.
+    assert "처리 중입니다" not in queued, queued
+    assert "처리 중입니다" in processing, processing
+    # 그리고 「아직 안 시작했다」 는 것이 글자로 나와야 합니다.
+    assert "기다리" in queued or "아직 시작" in queued, queued

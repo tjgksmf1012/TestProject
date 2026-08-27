@@ -25,10 +25,10 @@ import {
   attentionReasons,
   blockerLine,
   buildReviewPayload,
-  canSubmit,
   describeBlocker,
   describeSubmitResult,
   effectiveAssignee,
+  firstApprovalGap,
   effectiveDeadline,
   effectiveTitle,
   emptyDraft,
@@ -36,15 +36,20 @@ import {
   reviewLane,
   sortForReview,
   summarize,
+  whyCannotSubmitBatch,
+  confidenceReading,
   type Candidate,
   type Draft,
   type Lane,
   type ReviewContext,
 } from '../lib/review/candidates.ts';
+import { detailText } from '../lib/http/detail.ts';
+import { reviewEmptyState } from '../lib/review/phase.ts';
+import { labelInList } from '../lib/people/labels.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
-import { emptyHtml, type EmptyState } from '../lib/ui/empty.ts';
+import { emptyHtml } from '../lib/ui/empty.ts';
 import { Byline, RawHtml } from './parts.tsx';
 import { failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
@@ -76,18 +81,28 @@ import {
 } from '../lib/review/timeline.ts';
 import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { mountEvidence, openEvidence } from './evidence.tsx';
+import { draftStorageKey, parseDrafts, serializeDrafts } from '../lib/review/drafts.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
+import { plainText } from '../lib/ui/plain.ts';
 
 interface Member {
   user_id: number;
   name: string;
   role_shares: Record<string, number>;
+  /** ⭐ 같은 이름을 가르는 손잡이 (결함 345). */
+  github_login?: string | null;
 }
 
 interface MeetingInfo {
   title: string | null;
   status: string;
+  /* ⚠️ **서버는 처음부터 보내고 있었는데 이 화면만 안 받아 적었습니다**
+     (결함 355). 그래서 빈 상자의 「칸반 보기」가 프로젝트 없이 나갔고,
+     레거시 칸반은 없으면 1번을 엽니다 — 왼쪽 열의 칸반 링크는 같은
+     화면에서 `?project=2` 를 제대로 달고 있었습니다(`nav.ts` 가 같은
+     응답에서 꺼내 씁니다). */
+  project_id: number;
   summary: string | null;
   next_agenda: string[];
   unresolved_issues: UnresolvedIssue[];
@@ -180,10 +195,21 @@ function Brief({ meeting }: { meeting: MeetingInfo }) {
                   <span className="what">{view.content}</span>
                   {/* ⚠️ 근거 0건도 적습니다. 감추면 근거 없는 사안이
                       근거 있는 것과 똑같아 보입니다. */}
-                  {view.evidenceCount === 0 ? (
+                  {/* ⭐ **누를 수 있습니다** (결함 420). 오랫동안 이 자리는
+                      개수만 적었습니다 — 같은 화면 아래 후보 카드는 같은
+                      발화(#5)를 `근거 #5` 라는 **단추**로 열고 있었는데,
+                      여기서는 「근거 발화 1건」이라 눌러도 아무 데도 못
+                      갔습니다. 상자는 `evidence.tsx` 로 이미 있습니다. */}
+                  {view.evidence.length === 0 ? (
                     <span className="why none">근거 발화 없음</span>
                   ) : (
-                    <span className="why">근거 발화 {view.evidenceCount}건</span>
+                    <button
+                      type="button"
+                      className="src"
+                      onClick={() => openEvidence(meetingId, view.evidence, view.content)}
+                    >
+                      근거 발화 {view.evidence.length}건
+                    </button>
                   )}
                 </li>
               ))}
@@ -244,9 +270,14 @@ function CandidateCard({
           onChange={(e) => onChange({ titleOverride: e.target.value })}
         />
         {/* ⭐ 48px `34%` 를 걷어낸 자리 (브리프 §11). 확신도는 제목을
-            **읽고 나서** 참고하는 값입니다. */}
-        <span className={low ? 'badge low' : 'badge'} title="AI 확신도">
-          {(candidate.confidence * 100).toFixed(0)}%
+            **읽고 나서** 참고하는 값입니다.
+
+            ⛔ **축 이름을 `title` 에 두지 마십시오** (결함 395). 오래도록
+            글자는 `34%` 뿐이고 「AI 확신도」는 `title` 에만 있었습니다 —
+            마우스 전용이고, 접근성 트리에는 그 숫자가 아예 없었습니다.
+            제목 오른쪽에 붙은 맨 백분율은 **진행률**로 읽힙니다. */}
+        <span className={low ? 'badge low' : 'badge'}>
+          {confidenceReading(candidate.confidence)}
         </span>
       </div>
 
@@ -256,6 +287,7 @@ function CandidateCard({
           <span className="visually-hidden">담당자</span>
           <select
             className="assignee"
+            id={`cand-assignee-${candidate.id}`}
             disabled={decided}
             value={assignee === null ? '' : String(assignee)}
             onChange={(e) =>
@@ -271,7 +303,8 @@ function CandidateCard({
             )}
             {members.map((m) => (
               <option key={m.user_id} value={m.user_id}>
-                {m.name}
+                {/* 결함 345 — 같은 이름 둘이면 목록이 같은 글자 두 줄입니다. */}
+                {labelInList(m, members)}
               </option>
             ))}
           </select>
@@ -282,6 +315,7 @@ function CandidateCard({
           <span className="visually-hidden">마감일</span>
           <input
             className="deadline"
+            id={`cand-deadline-${candidate.id}`}
             type="date"
             value={deadline}
             disabled={decided}
@@ -294,7 +328,7 @@ function CandidateCard({
         {evidence.length === 0 ? (
           <span className="src none">근거 없음</span>
         ) : (
-          <button type="button" className="src" onClick={() => openEvidence(evidence, title)}>
+          <button type="button" className="src" onClick={() => openEvidence(meetingId, evidence, title)}>
             근거 #{evidence.join(', #')}
           </button>
         )}
@@ -308,9 +342,12 @@ function CandidateCard({
         </p>
       )}
 
-      {/* ⭐ 막는 이유는 한 줄 (브리프 §13). 안 채운 칸은 흙빛. */}
+      {/* ⭐ 막는 이유는 한 줄 (브리프 §13). 안 채운 칸은 흙빛.
+          ⚠️ **id 가 있어야 단추가 이 줄을 가리킬 수 있습니다** — 없는
+          동안 눈으로만 읽혔고, 진짜 `disabled` 라 키보드는 단추에 닿지도
+          못했습니다(결함 373). */}
       {check.tone !== 'none' && (
-        <p className="check" data-tone={check.tone}>
+        <p className="check" data-tone={check.tone} id={`check-${candidate.id}`}>
           {check.text}
         </p>
       )}
@@ -335,10 +372,36 @@ function CandidateCard({
       ) : (
         <>
           <div className="acts">
+            {/* ⚠️ 진짜 `disabled` 가 아니라 `aria-disabled` 입니다
+                (결함 234·365·373). 진짜 `disabled` 는 **초점을 못 받아**
+                왜 막혔는지 들려줄 수가 없습니다 — 문서를 한 바퀴(56번) 돌아도
+                막힌 카드의 이 단추에는 **한 번도 안 닿았습니다.** 사유 줄은
+                눈에 이미 있었으므로 `aria-describedby` 로 이어 줍니다.
+                그리고 누르면 **빈 칸으로 데려갑니다** — 알려만 주고 갈 곳을
+                안 주면 대표 실패 ③ 입니다. */}
             <button
               className={draft.decision === 'approve' ? 'approve on' : 'approve'}
-              disabled={blockers.length > 0}
-              onClick={() => onChange({ decision: 'approve' })}
+              aria-disabled={blockers.length > 0}
+              aria-describedby={
+                blockers.length > 0 && check.tone !== 'none'
+                  ? `check-${candidate.id}`
+                  : undefined
+              }
+              onClick={() => {
+                if (blockers.length > 0) {
+                  const gap = firstApprovalGap(blockers);
+                  if (gap !== null) {
+                    /* 칸 이름은 SPA 와 **같은 규칙**입니다 (`cand-<칸>-<id>`)
+                       — 이름을 지어내면 그 이름에 임자가 있거나 아무것도
+                       안 잡힙니다. */
+                    const box = document.getElementById(`cand-${gap}-${candidate.id}`);
+                    box?.scrollIntoView({ block: 'center' });
+                    box?.focus();
+                  }
+                  return;
+                }
+                onChange({ decision: 'approve' });
+              }}
             >
               업무로 등록
             </button>
@@ -371,42 +434,6 @@ function CandidateCard({
       )}
     </article>
   );
-}
-
-/** 후보가 0건일 때, **회의 상태에 따라** 다른 말을 한다. */
-function emptyReviewState(status: string): EmptyState {
-  const what = '여기에는 회의에서 뽑은 업무 후보가 나옵니다.';
-  if (status === 'queued' || status === 'processing') {
-    return {
-      what,
-      why: '녹음을 아직 처리하는 중입니다.',
-      how: '끝나면 여기에 후보가 나옵니다. 잠시 뒤에 새로고침하세요.',
-    };
-  }
-  if (status === 'failed') {
-    return {
-      what,
-      why: '녹음 처리에 실패해서 후보를 만들지 못했습니다.',
-      how: '로비에서 트랙이 온전한지 확인하세요 — 끊긴 구간이 많으면 처리가 실패합니다.',
-      action: { label: '트랙 상태 보기', href: `/lobby.html?meeting=${meetingId}` },
-    };
-  }
-  if (status === 'confirmed') {
-    return {
-      what,
-      why: '이 회의의 후보는 모두 검토를 마쳤습니다.',
-      how: '승인한 업무는 칸반에 있습니다.',
-      action: { label: '칸반 보기', href: `/kanban.html?meeting=${meetingId}` },
-    };
-  }
-  // needs_review 인데 0건 — 처리는 끝났고 뽑을 게 없었습니다.
-  // **고장이 아니라 결과입니다.**
-  return {
-    what,
-    why: '처리는 끝났는데 업무로 뽑을 만한 발언이 없었습니다 — 고장이 아닙니다.',
-    how: '회의에서 누가·무엇을·언제까지 하기로 했는지 말하면 그 발언이 후보가 됩니다.',
-    action: { label: '칸반 보기', href: `/kanban.html?meeting=${meetingId}` },
-  };
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -459,7 +486,7 @@ function SpeakingShares({ data }: { data: Speaking | null }) {
     <section className="shares">
       <h2 className="minutes-head">누가 얼마나 말했나</h2>
       {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
-      <p className="text-text-subtle text-[12px]">{SHARE_NOTE.replace(/\*\*/g, '')}</p>
+      <p className="text-text-subtle text-[12px]">{plainText(SHARE_NOTE)}</p>
 
       {why !== null ? (
         // ⚠️ 빈 칸으로 두지 않습니다 — "고장" 이나 "다들 말을 안 했다" 로
@@ -554,7 +581,7 @@ function Findings({ findings }: { findings: Finding[] }) {
               <button
                 type="button"
                 className="src"
-                onClick={() => openEvidence(view.evidence, view.title)}
+                onClick={() => openEvidence(meetingId, view.evidence, view.title)}
               >
                 근거 #{view.evidence.join(', #')}
               </button>
@@ -579,7 +606,14 @@ function Findings({ findings }: { findings: Finding[] }) {
  * ⚠️ 재생 위치는 서버가 준 `position_ms` 입니다 — `start_ms` 로 틀면
  * 공백만큼 밀린 **엉뚱한 말**이 나옵니다 (`lib/review/timeline.ts`).
  */
-function Timeline({ findings }: { findings: Finding[] }) {
+function Timeline({
+  findings,
+  meetingStatus,
+}: {
+  findings: Finding[];
+  /** ⭐ 빈 타임라인이 **무슨 말을 할지** 정합니다 (결함 346). */
+  meetingStatus: string;
+}) {
   type State =
     | { k: 'idle' }
     | { k: 'loading' }
@@ -679,7 +713,7 @@ function Timeline({ findings }: { findings: Finding[] }) {
         )}
         {state.k === 'ok' &&
           (state.utterances.length === 0 ? (
-            <p className="mtl-note">{emptyTimelineNote()}</p>
+            <p className="mtl-note">{emptyTimelineNote(meetingStatus)}</p>
           ) : (
             (() => {
               const rows = timelineRows(state.utterances, findings);
@@ -838,10 +872,44 @@ function Review() {
 
   const draftOf = (id: number): Draft => drafts.get(id) ?? emptyDraft();
 
+  /* ⚠️ **표시한 결정을 새로고침 한 번에 잃었습니다** (결함 333).
+     `@lib/review/drafts.ts` 는 결함 217 이 바로 이걸 막으려고 만든
+     것인데 **SPA 에만 배선돼 있었습니다** — 이 저장소가 네 번째로
+     당한 「한쪽 뿌리만 고쳐진」 자리입니다(231·306·320·321).
+
+     재현: 레거시에서 「업무로 등록」을 누르니 카드가 표시되고(1건)
+     나간 요청은 0건 — 여기까지는 설계대로입니다(검토는 한 번에
+     확정하는 절차). 그런데 새로고침하니 **0건**이 되고
+     `sessionStorage` 는 비어 있었습니다. 경고도 없습니다.
+
+     판단(무엇을 남기고 버릴지)은 `@lib` 한 벌입니다. 여기서는 읽고
+     쓰기만 합니다 — SPA 의 `useDraftMap` 과 같은 규칙입니다. */
+  const restored = useRef(false);
+  const liveIds = screen.k === 'ok' ? screen.data.candidates.map((c) => c.id) : [];
+  const liveKey = liveIds.join(',');
+
+  useEffect(() => {
+    if (restored.current || liveIds.length === 0) return;
+    restored.current = true;
+    const saved = parseDrafts(sessionStorage.getItem(draftStorageKey(meetingId)), liveIds);
+    if (saved.size > 0) setDrafts(saved);
+    // ⚠️ 후보 목록이 **온 뒤에** 한 번만. 그전에는 무엇이 아직 살아 있는
+    //    후보인지 몰라 거를 수가 없습니다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId, liveKey]);
+
   const update = (id: number, patch: Partial<Draft>): void => {
     setDrafts((prev) => {
       const next = new Map(prev);
       next.set(id, { ...(prev.get(id) ?? emptyDraft()), ...patch });
+      // ⚠️ **바꿀 때마다 씁니다.** 「나갈 때 저장」은 브라우저가 탭을
+      //    죽이면 안 돌고, 그때가 바로 잃으면 안 되는 순간입니다.
+      try {
+        sessionStorage.setItem(draftStorageKey(meetingId), serializeDrafts(next));
+      } catch {
+        // 저장이 안 되는 브라우저(사생활 모드 등)에서도 검토는 되어야
+        // 합니다. 못 남기는 것이 못 쓰는 것보다 낫습니다.
+      }
       return next;
     });
   };
@@ -876,7 +944,13 @@ function Review() {
         return;
       }
       if (!response.ok) {
-        setResult({ tone: 'bad', text: `제출 실패 (HTTP ${response.status})` });
+        setResult({
+          tone: 'bad',
+          text: detailText(
+            await response.json().catch(() => null),
+            `제출 실패 (HTTP ${response.status})`,
+          ),
+        });
         return;
       }
       const body = (await response.json()) as {
@@ -895,6 +969,12 @@ function Review() {
           : describeSubmitResult(body.approved_count, body.approved_task_ids),
       });
       setDrafts(new Map());
+      // 확정에 성공했으면 초안은 이미 뜻이 없습니다 (결함 333).
+      try {
+        sessionStorage.removeItem(draftStorageKey(meetingId));
+      } catch {
+        /* 위와 같은 이유 */
+      }
       await load();
     } finally {
       setSending(false);
@@ -941,6 +1021,9 @@ function Review() {
 
   const { candidates, members, meeting, context } = screen.data;
   const summary = summarize(candidates, drafts, context);
+  /* ⚠️ 「왜 지금 제출이 안 되나」는 `@lib` 이 정합니다 (결함 365) —
+     화면 코드에는 자동 검사가 안 붙습니다. */
+  const submitBlocked = whyCannotSubmitBatch(summary, { sending });
   const counts = laneCounts(candidates, drafts);
   const shown = candidates.filter(
     (candidate) => lane === 'all' || reviewLane(candidate, draftOf(candidate.id)) === lane,
@@ -953,10 +1036,10 @@ function Review() {
       <SpeechTypes counts={types} />
             <SpeakingShares data={speaking} />
       <Findings findings={meeting.findings ?? []} />
-      <Timeline findings={meeting.findings ?? []} />
+      <Timeline findings={meeting.findings ?? []} meetingStatus={meeting.status} />
 
       {candidates.length === 0 ? (
-        <RawHtml html={emptyHtml(emptyReviewState(meeting.status))} />
+        <RawHtml html={emptyHtml(reviewEmptyState(meeting.status, meetingId, meeting.project_id))} />
       ) : (
         <>
           {/* ⚠️ **세기만 하고 거르지 않는 탭은 거짓말입니다.** */}
@@ -1006,17 +1089,26 @@ function Review() {
           {/* 제출 결과와 "빠진 정보" 안내가 같이 오는 자리입니다.
               `role="status"` — 사람이 방금 누른 것의 결과라 들려야 합니다. */}
           <div id="result" role="status" className={result?.tone ?? ''}>
-            {result !== null
-              ? result.text
-              : summary.blocked > 0
-                ? `${summary.blocked}건에 빠진 정보가 있어 제출할 수 없습니다`
-                : ''}
+            {result !== null ? result.text : (submitBlocked ?? '')}
           </div>
+          {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 (결함 234 · 365).
+              진짜 `disabled` 는 초점을 못 받아서, Tab 으로 문서를 한 바퀴
+              돌아도 이 단추에 **한 번도 안 닿습니다** — 재 보니 146번을
+              눌러도 못 닿았고, 닿지 못하니 `aria-describedby` 로 사유를
+              들려줄 방법도 없습니다. */}
           <button
             id="submit"
+            /* ⚠️ `btn--unmet` 을 붙이지 않습니다 — 그 클래스는 SPA 팔레트에만
+               있고 `frontend/public/app.css` 에는 없어서, 붙여도 **아무 일도
+               안 일어납니다**(결함 164). 이쪽은 `button[aria-disabled="true"]`
+               가 이미 「덜 채운 모양」을 그립니다. */
             className="primary"
-            disabled={!canSubmit(summary) || sending}
-            onClick={() => void submit()}
+            aria-disabled={submitBlocked !== null}
+            aria-describedby={submitBlocked !== null ? 'result' : undefined}
+            onClick={() => {
+              if (submitBlocked !== null) return;
+              void submit();
+            }}
           >
             제출
           </button>
@@ -1031,7 +1123,7 @@ if (host === null) throw new Error('요소 없음: app');
 createRoot(host).render(<Review />);
 
 // 근거 발화 상자를 한 번 붙인다.
-mountEvidence(apiBase, meetingId);
+mountEvidence(apiBase);
 
 renderNav('review');
 

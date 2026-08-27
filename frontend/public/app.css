@@ -304,6 +304,19 @@ body.no-tabs {
   }
 }
 
+/* ⛔ **되돌릴 수 없는 것은 쉬고 있을 때도 달라 보여야 합니다** (결함 320).
+   위 규칙은 `:hover` 안에만 있었습니다 — 즉 마우스를 올린 사람에게만
+   위험 신호가 보이고, **키보드로 도는 사람과 손가락으로 쓰는 사람에게는
+   평생 안 보입니다.** 「이 회의 무르기」를 달고 색을 재 보니 바로 옆
+   「회의록 만들기」와 `rgb(102,109,128)` 로 **완전히 같았습니다** —
+   결함 250 이 적어 둔 「클래스만 붙이고 색을 안 재 본 것」입니다.
+   ⚠️ 여기 빨강은 불변식 ③ 의 「결측 빨강 금지」와 다른 자리입니다.
+   결측은 흙빛(`--gap`)이고, 이건 **사람이 되돌릴 수 없는 일을 누르는**
+   자리입니다. */
+.linkish.danger {
+  color: var(--bad);
+}
+
 .note {
   font-size: var(--fs-label);
   color: var(--text-subtle);
@@ -333,6 +346,22 @@ body.no-tabs {
    `guards.test.ts` 가 `:empty` 규칙이 void 태그를 겨냥하지 않는지 봅니다. */
 p.note:empty {
   display: none;
+}
+
+/* ⚠️ **선 위에 절이 없으면 그 선은 아무것도 안 나눕니다** (결함 273).
+   `.note` 는 「절을 닫고 붙이는 각주」라 위에 선을 긋습니다. 그런데
+   녹음(`index.html`)·통화(`call.html`)는 이 문단이 `<main>` 의 **첫
+   자식**입니다 — 머리줄 바로 아래에 선이 하나 더 그어지고, 두 선 사이
+   56px 이 텅 빈 채로 남았습니다. 픽셀을 읽어 잡았습니다 (y=55 머리줄
+   테두리 · y=112 이 선 · 그 사이 아무것도 없음).
+
+   결함 58 과 **같은 병에 다른 방아쇠**입니다. 그때는 note 가 비었고,
+   여기는 note 의 **위**가 비었습니다. 그때 고친 것은 `p.note:empty`
+   하나뿐이라 이 갈래는 그대로 남아 있었습니다. */
+main > .note:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 /* 작은 상태 한 줄 — "저장했습니다" · "아직 아무도 확정하지 않았습니다".
@@ -530,12 +559,8 @@ button:active,
 }
 
 /* 정말로 못 누르는 것 — HTML `disabled` 는 초점도 못 받고 클릭도 안
-   먹습니다. 비활성 컨트롤이라 대비 하한 예외에 걸립니다(WCAG 1.4.3). */
-button:disabled {
-  opacity: 0.45;
-  cursor: default;
-  transform: none;
-}
+   먹습니다. 모양은 아래 `aria-disabled` 와 **같이** 정합니다 (결함 236) —
+   위치가 `button.primary` 뒤여야 하기 때문입니다. */
 
 .btn-primary,
 button.primary {
@@ -556,8 +581,20 @@ button.primary {
    두면 **뒤에 오는 `button.primary` 가 이깁니다.** 실제로 위에 뒀다가
    `녹음 시작` 이 꽉 찬 파란 버튼으로 그려졌습니다 — 못 누르는데 눌러도
    되는 것처럼 보였습니다. 렌더해서 봤습니다. */
+/* ⛔ **`:disabled` 도 여기 같이 둡니다** (결함 236).
+   예전에는 위에서 `opacity: 0.45` 로 흐렸습니다. "비활성이라 WCAG 1.4.3
+   예외" 라는 주석이 붙어 있었지만, 이 저장소는 그 예외를 **안 쓰기로**
+   이미 정했습니다(`webapp/src/app.css` 의 `.btn--disabled-link` 주석) —
+   같은 앱 안에서 「안 됨」이 두 가지 얼굴을 가지면 안 되기 때문입니다.
+
+   재 봤습니다. 통화 화면의 「마이크 끄기」(마이크 권한을 거절한 사람)가
+   **밝음 2.91:1 · 어두움 3.98:1** 이었습니다. ⚠️ `getComputedStyle` 로는
+   **17.16:1** 로 보입니다 — `opacity` 는 합성이라 색 토큰이 그대로입니다
+   (AGENTS.md, 결함 180). 픽셀로 합성해야 보입니다. */
 button[aria-disabled="true"],
-.btn[aria-disabled="true"] {
+.btn[aria-disabled="true"],
+button:disabled,
+.btn:disabled {
   background: var(--primary-tint);
   color: var(--primary);
   border-color: var(--line-strong);
@@ -570,13 +607,19 @@ button[aria-disabled="true"],
   width: 100%;
 }
 
-/* 마우스가 있는 환경에서만 hover 를 준다. */
+/* 마우스가 있는 환경에서만 hover 를 준다.
+   ⛔ **막힌 것은 비켜 갑니다** (결함 239). `:not(:disabled)` 만으로는
+   `aria-disabled` 버튼을 못 막습니다 — 이 저장소의 「아직 안 됨」은
+   대부분 그쪽입니다. 「녹음 시작」에 마우스를 올리면 채움만 primary 로
+   돌아와 밝은 모드 1.16:1 · 어두운 모드 1.27:1 이었습니다.
+   ⚠️ `.btn:hover` 에는 방패가 **아예 없었습니다** — 막힌 `<a class="btn">`
+   도 같이 걸립니다. */
 @media (hover: hover) {
-  button:hover:not(:disabled),
-  .btn:hover {
+  button:hover:not(:disabled):not([aria-disabled='true']),
+  .btn:hover:not([aria-disabled='true']) {
     background: color-mix(in srgb, var(--text) 6%, var(--bg));
   }
-  button.primary:hover:not(:disabled) {
+  button.primary:hover:not(:disabled):not([aria-disabled='true']) {
     background: color-mix(in srgb, var(--primary) 88%, black);
   }
 }
@@ -834,6 +877,69 @@ body.has-actionbar {
 
 body.no-tabs.has-actionbar {
   padding-bottom: calc(var(--safe-bottom) + 5.5rem);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   더 보기 줄 (`#nav`)
+   ══════════════════════════════════════════════════════════════
+
+   탭은 **넷 그대로** 둡니다 — 사람은 자리를 기억해서 누르므로 다섯째가
+   끼면 넷째를 누르려던 손이 엉뚱한 화면으로 갑니다(2026-08-07 결정).
+   그래서 채팅·일정·알림·활동·찾기·보고서는 여기로 옵니다.
+
+   ⛔ **이 줄이 없어서 그 여섯이 제품 전체에서 안 닿았습니다** (결함 305).
+   `src/demo/nav.ts` 는 `#nav` 이 있으면 채우는데, 그 자리가 열두 화면
+   어디에도 없었습니다. 오류도 안 나고, 링크를 만드는 `navLinks` 는 잘
+   돌고 있었습니다 — 만든 것을 아무도 안 부른 것입니다(실패 ①).
+
+   ⚠️ 본문 **끝**에 둡니다. 위에 두면 화면마다 링크 일곱 줄이 먼저 오고,
+   이 저장소가 줄이려고 애쓴 「글자가 너무 많다」를 도로 늘립니다. */
+
+#nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+  align-items: center;
+
+  margin-top: var(--sp-8);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+#nav:empty {
+  display: none;
+}
+
+#nav a {
+  /* 44px 손가락 표적 — 폰을 뺐어도 창 반쪽·확대 200%·터치 노트북에서
+     필요합니다 (결함 72·150). */
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+#nav a:hover,
+#nav a:focus-visible {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+/* 못 가는 곳과 그 이유 (`missingLinks`). 링크가 아니라 **설명**이라
+   흐리게 두되, 글자 하한 아래로는 안 내립니다 — `--text-subtle` 은
+   `tokens.css` 가 surface 5.17:1 로 재 둔 값입니다.
+
+   ⚠️ **자기 줄을 차지합니다** (결함 343). `#nav` 은 `flex-wrap: wrap` 이라
+   그냥 두면 이 문장이 링크 여섯 뒤에 **여섯째 링크처럼** 붙습니다 —
+   렌더해서 보고 알았습니다. `flex-basis: 100%` 면 줄이 갈라져서 「갈 수
+   있는 곳」과 「무엇을 하면 열리는가」가 눈에 따로 들어옵니다. */
+#nav .miss {
+  flex: 0 0 100%;
+  color: var(--text-subtle);
+  font-size: 0.8125rem;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1266,6 +1372,13 @@ pre {
    껍질을 지우면 안의 카드가 그릇의 격자에 직접 놓입니다. */
 .sk-wrap { display: contents; }
 
+/* ⚠️ **같은 문제, 같은 답** (결함 313). `RawHtml` 도 껍질을 하나 만듭니다.
+   칸반의 `#board`(격자) 안에서 그 껍질이 항목 하나로 들어가는 바람에
+   `.empty-state` 의 `grid-column: 1 / -1` 이 **닿지 않았고**, 빈 상자가
+   1024px 중 241px 한 칸만 먹어 한 줄에 한글 열넷씩 일곱 줄로 접혔습니다.
+   껍질을 지우면 안의 상자가 그릇의 격자에 직접 놓입니다. */
+.raw-wrap { display: contents; }
+
 /* 회색 막대 한 칸. 폭은 인라인으로 들어옵니다. */
 .sk {
   display: block;
@@ -1445,6 +1558,24 @@ pre {
 
   /* 로그인처럼 셸이 아예 없는 화면. */
   html:has(body.no-tabs) {
+    padding-left: 0;
+  }
+
+  /* ⛔ **없는 열을 위해 256px 을 비워 두고 있었습니다** (결함 263).
+
+     녹음·통화는 메신저 셸(목록 열)이 아니라 **좁은 레일**(`.sparail`, 72px)
+     을 씁니다. 그런데 위 `html { padding-left: var(--shell-list) }` 가
+     조건 없이 걸려서, 이 두 화면은 있지도 않은 목록 열 몫으로 256px 을
+     비우고 있었습니다. 레일과 머리줄은 `position: fixed` 라 그 여백을
+     무시하므로 — 재 봤습니다 —
+
+         머리줄 「녹음 — 스프린트 2 계획」   x = 96
+         본문 첫 글자                      x = 352
+
+     한 화면 안에서 **왼쪽 끝이 두 개**였습니다. 바로 위 주석이 같은 실수를
+     `--shell-rail` 로 겪고 적어 둔 자리인데, `--shell-list` 에서 다시
+     났습니다. */
+  html:has(body.sparail-page) {
     padding-left: 0;
   }
 
@@ -1843,11 +1974,16 @@ pre {
   }
 
   /* 남은 업무 후보 수. 글자색이 `--chrome-side` 인 것은 실수가 아닙니다 —
-     대비가 대칭이라 강조색 위에서 4.51:1 이 그대로 나옵니다. */
+     대비가 대칭이라 강조색 위에서 4.51:1 이 그대로 나옵니다.
+
+     ⚠️ **글자가 「후보 3」입니다** (결함 350). 숫자만 그리면 메신저 셸의
+     둥근 알약이라 「안 읽은 개수」로 읽힙니다 — 축 이름이 `aria-label`
+     에만 있어서 **귀가 눈보다 많이 알고 있었습니다**(결함 336 과 같은 모양).
+     그래서 좌우 여백을 한 칸 늘립니다. 알약이 아니라 **이름표**입니다. */
   .chan-count {
     flex: 0 0 auto;
     min-width: var(--sp-4);
-    padding: 0 var(--sp-1);
+    padding: 0 var(--sp-2);
     border-radius: var(--r-round);
     background: var(--chrome-accent);
     color: var(--chrome-side);
@@ -2203,6 +2339,23 @@ body.sparail-page {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 머리줄에 **문장**이 서는 자리 (결함 278).
+   `.spabar__meta` 는 숫자와 상태 낱말용이라 데이터 폰트(모노·tabular)를
+   씁니다 — 녹음 화면의 `준비 중 0분 9초` 같은 것. 그런데 통화 화면은 그
+   자리에 **한글 문장**을 넣고 있었습니다(「혼자 있습니다. 다른 팀원이
+   들어오면 자동으로 연결됩니다.」). 모노는 글자마다 폭이 같아서 낱말
+   사이가 벌어지고, 문장이 눈에 띄게 성깁니다 — 렌더해서 보고 잰
+   자리입니다. 문장은 본문 폰트로 씁니다. */
+.spabar__note {
+  font-size: var(--fs-caption);
+  color: var(--text);
+  white-space: nowrap;
+  /* `.spabar__meta` 와 같은 이유 — 밀지 말고 자기가 줄어듭니다. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .spabar__meta {
   font-family: var(--font-data);
   font-size: var(--fs-caption);
@@ -2227,7 +2380,7 @@ body.sparail-page .actionbar {
 body.sparail-page.has-actionbar { padding-bottom: 6rem; }
 
 /* 좁은 폭 — 레일이 하단 탭바로 (webapp 셸과 같은 전환점 1024px) */
-@media (max-width: 1023.5px) {
+@media (max-width: 63.97rem) {
   body.sparail-page {
     padding-left: var(--sp-4);
     padding-right: var(--sp-4);

@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { describeEmptyActivity } from '../lib/activity/empty.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
 import { tryGet, unreachableText } from '../lib/http/send.ts';
 import { describeTime } from '../lib/chat/view.ts';
@@ -51,6 +52,8 @@ interface Entry {
   label: string;
   who: string | null;
   target: string;
+  /** 사람이 읽을 이름. 못 찾으면 `target` 그대로 (결함 293). */
+  target_label: string;
   touches_contribution: boolean;
 }
 
@@ -209,11 +212,11 @@ function App() {
       <>
         {header}
         <RawHtml
-          html={emptyHtml({
-            what: '아직 기록된 활동이 없습니다',
-            why: '기록은 누가 무언가를 바꿀 때 쌓입니다 — 아직 아무도 안 바꿨습니다.',
-            how: '업무 후보를 승인하거나 역할 비중을 바꾸면 여기에 남습니다.',
-          })}
+          /* ⛔ 「아직 아무도 안 바꿨습니다」라고 **단언하고 있었습니다**
+             (결함 304). 같은 순간 그 팀에는 회의 다섯·업무 넷·기여도
+             근거가 있었습니다 — 화면은 자기 목록이 빈 것만 보고 팀 전체를
+             말했습니다. 문구는 한 벌(`@lib`)에서 옵니다. */
+          html={emptyHtml({ what: '아직 기록된 활동이 없습니다', ...describeEmptyActivity() })}
         />
       </>
     );
@@ -234,7 +237,11 @@ function App() {
             {/* ⚠️ 사람이 없으면 시스템이 한 일입니다 (보존기간 만료 삭제 등).
                 "알 수 없음" 이라고 쓰면 고장으로 읽힙니다. */}
             <span className="awho">{entry.who ?? '시스템'}</span>
-            <span className="atarget">{entry.target}</span>
+            {/* ⛔ 예전에는 `{entry.target}` 이었습니다 (결함 293) — 화면이
+                스스로 「누가 언제 **무엇을** 바꿨는지」라고 적어 두고
+                「무엇」 자리에 `task:4` 를 찍었습니다. 그 업무 이름은
+                「접근성 점검」입니다. 이름은 서버가 줍니다. */}
+            <span className="atarget">{entry.target_label}</span>
           </li>
         ))}
       </ul>

@@ -93,6 +93,55 @@ export function repoProblem(raw: string): string | null {
   return null;
 }
 
+/** 복사할 코드가 없을 때 할 말 (결함 264). 막는 것은 `aria-disabled` 라 **사유가 있어야** 합니다. */
+export function whyCannotCopyCode(inviteCode: string | null | undefined): string | null {
+  return codeToCopy(inviteCode) === null ? '복사할 초대 코드가 없습니다' : null;
+}
+
+/**
+ * 주소에 적힌 설정 구역이 **있는 것인가** (결함 266).
+ *
+ * `/settings/zzz` 를 열면 탭 줄만 나오고 **본문이 통째로 비었습니다.**
+ * 오류도 안 나고 안내도 없어서, 사람은 화면이 고장 났는지 자기가 잘못
+ * 왔는지 알 방법이 없었습니다. 오타 한 글자, 낡은 즐겨찾기, 바뀐 링크로
+ * 흔히 닿는 자리입니다.
+ *
+ * ⚠️ 아는 구역 목록은 **화면이 줍니다.** 여기에 목록을 또 두면 탭이 하나
+ * 늘 때 두 곳을 고쳐야 하고, 그러면 반드시 한쪽만 고쳐집니다.
+ */
+export function unknownSectionNote(section: string, known: readonly string[]): string | null {
+  if (known.includes(section)) return null;
+  return '설정에 없는 구역입니다 — 위 탭에서 골라 주세요.';
+}
+
+/**
+ * 이 저장이 **연결을 끊는 것인가** (결함 256).
+ *
+ * 저장소 칸을 비우고 「연결」을 누르면 `PATCH {github_repo: ""}` 가 나갑니다.
+ * 재현했습니다 — 확인도, 알림도, 되돌리기도 없이 연결이 끊겼고, 원래 이름은
+ * 화면에서 사라져 **무엇이었는지 볼 방법조차** 없었습니다.
+ *
+ * 가벼운 일이 아닙니다. 서버는 `github_repo` 만 지우는 것이 아니라
+ * `github_connected_at`·`github_verified_at`·`github_installation_id` 를 **전부**
+ * 비웁니다. 즉 다시 연결해도 (a) 설치 확인을 처음부터 다시 받아야 하고,
+ * (b) 「연결한 순간부터」의 기준 시각이 새로 잡혀 **그 사이의 활동은 연결 전**이
+ * 됩니다. GitHub 은 기여도의 세 다리 중 하나입니다.
+ */
+export function isDisconnect(current: string | null | undefined, next: string): boolean {
+  const now = (current ?? '').trim();
+  return now !== '' && normalizeRepo(next) === '';
+}
+
+/** 끊기 전에 물을 말. **무엇이 사라지는지** 적습니다. */
+export function disconnectConfirm(repo: string): string {
+  return (
+    `${repo} 연결을 끊습니다.\n` +
+    '지금까지 들어온 기여 기록은 남지만, 앞으로의 PR·리뷰는 들어오지 않습니다.\n' +
+    '다시 연결하면 설치 확인부터 새로 하고, 끊겨 있던 동안의 활동은 「연결 전」으로 남습니다.\n' +
+    '계속할까요?'
+  );
+}
+
 /**
  * 만들고 나서 무엇을 하라고 할 것인가.
  *

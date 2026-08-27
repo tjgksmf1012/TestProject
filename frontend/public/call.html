@@ -22,8 +22,11 @@
 
   /* 통화 상태 한 줄. 이 화면에서 가장 먼저 읽히는 곳이다.
      ⚠️ 이건 `lede` 가 아니라 **지금 상태**입니다 — 설명문보다 진해야
-     합니다. 그래서 머리말 안이 아니라 그 아래 제 자리에 둡니다. */
-  #summary { font-weight: 600; color: var(--text); }
+     합니다. 그래서 머리말 안이 아니라 그 아래 제 자리에 둡니다.
+     ⚠️ **클래스가 `spabar__meta` 였습니다** (결함 278). 그 자리는 숫자와
+     상태 낱말용(모노·tabular)인데 여기 들어가는 것은 한글 **문장**이라,
+     낱말 사이가 벌어져 성기게 보였습니다. `spabar__note` 로 옮겼습니다 —
+     진하게 하는 것은 그 클래스가 `--text` 로 합니다. */
 
   /* 참가자. 얼굴이 없으므로 이름 첫 글자를 원으로 — 누가 있는지 한눈에.
      ⚠️ **줄마다 긋던 가로선을 걷었습니다** (브리프 §7). 세 사람이면
@@ -94,6 +97,20 @@
   .meter span { display: block; height: 100%; width: 0;
                 background: var(--ok); transition: width .1s linear; }
 
+  /* ⚠️ **고대비에서는 채움이 통째로 사라졌습니다** (결함 402). `forced-colors:
+     active` 는 `background-color` 를 시스템 색으로 덮으므로, 채움(`--ok`)과
+     홈통(`--sunken`)이 **같은 색**이 됩니다 — 밝은 쪽 둘 다 흰색, 어두운 쪽
+     둘 다 검정. 재서 확인했습니다. 이 막대는 「내 소리가 들어가고 있나」를
+     확인하는 **유일한 곳**이고 값을 글자로 적는 자리가 없어서, 사라지면
+     고대비 사용자는 마이크가 죽은 것을 알 방법이 없습니다 — 그러면 그
+     사람의 발언은 하나도 기록되지 않습니다.
+
+     시스템 색 이름만 이 모드에서 살아남습니다(토큰·hex 는 다시 덮입니다 —
+     결함 393·399·400 이 같은 자리에서 배운 것). */
+  @media (forced-colors: active) {
+    .meter span { background: Highlight; }
+  }
+
   /* ⚠️ **둘이 화면 폭을 반씩 채우고 있었습니다** (`flex: 1`). 통화에
      들어온 사람의 주 행동은 `녹음 화면으로` 하나이고, `나가기` 는
      끝낼 때만 씁니다 — 같은 크기의 빨간 상자로 늘 띄워 두면 화면이
@@ -153,7 +170,7 @@
        화면에서 가장 먼저 읽히는 상태 줄이라 제목 옆에 앉습니다. -->
   <header class="spabar">
     <h1 class="spabar__title" id="ctx-title">통화</h1>
-    <span class="spabar__meta" id="summary">연결하는 중…</span>
+    <span class="spabar__note" id="summary">연결하는 중…</span>
     <span class="spabar__spacer"></span>
     <span class="by" id="sub" hidden></span>
   </header>
@@ -191,9 +208,17 @@
   </main>
 
   <!-- v2 F2 — 하단 고정 컨트롤 바: 마이크 토글 · 녹음 · 나가기 -->
-  <div class="actionbar">
+  <!-- ⚠️ **표지를 답니다** (결함 423). 이 막대는 `position: fixed` 라
+       `<main>` 밖 body 자식이고, 그러면 이 화면의 **주된 컨트롤 셋이 어느
+       표지에도 안 들어갑니다** — 낭독기로 「본문」에 건너뛴 사람은 마이크도
+       나가기도 못 만납니다. 재 보니 컨트롤 아홉 중 셋이 그랬습니다.
+       ⚠️ 자리를 옮기지 않습니다 — `role` 은 배치를 한 픽셀도 안 바꿉니다. -->
+  <div class="actionbar" role="region" aria-label="통화 조작">
     <div class="inner">
-      <button id="mic-toggle" type="button" aria-pressed="true" disabled>마이크 끄기</button>
+      <!-- ⚠️ 처음에는 **아직 안 열린** 상태입니다 (결함 277). 「마이크 끄기 ·
+             눌림」으로 시작하면, `paintMic` 이 돌기 전까지 낭독기는 켜져
+             있다고 읽습니다. 열리면 `paintMic` 이 드러냅니다. -->
+      <button id="mic-toggle" type="button" aria-pressed="false" hidden>마이크 켜기</button>
       <button id="record" class="primary">녹음 화면으로</button>
       <button id="leave" type="button">통화 나가기</button>
     </div>

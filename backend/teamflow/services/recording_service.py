@@ -79,6 +79,28 @@ _TRACK_STATE_MESSAGE: dict[str, str] = {
     "aborted": "이 트랙은 강제 종료됐습니다",
 }
 
+#: **늦게 도착한 조각**을 아직 받아 줄 수 있는 트랙 상태 (결함 244).
+#
+# ⛔ 예전에는 `recording` 하나뿐이었습니다. 그런데 데스크톱 셸은 못 올린
+#    조각을 디스크에 붙잡아 두고 화면에 이렇게 적습니다:
+#
+#        4개가 이 컴퓨터에 남아 있습니다 — 서버가 돌아오면 다시 올립니다.
+#
+#    그 「다시 올리기」 단추는 **정지한 뒤에만** 나타나고, 정지하면 트랙은
+#    `completed` 가 됩니다. 즉 그 단추를 누르면 서버가 전부 404 로
+#    거절했습니다 — 약속이 구조적으로 지켜질 수 없었습니다. 재현했습니다
+#    (조각 1·2·3·4 가 전부 404, 화면은 아무 말도 없음).
+#
+# ⚠️ `aborted` 는 그대로 거절합니다. 그건 회의를 **강제로 끝낸** 것이라
+#    더 받을 이유가 없습니다.
+_TRACK_ACCEPTS_LATE_CHUNKS = frozenset({"recording", "completed", "unusable"})
+
+#: 이 상태를 지나면 소리가 이미 **글로 옮겨졌습니다.** 늦게 온 조각을 받으면
+#: 회의록과 오디오가 갈라집니다 — 그건 못 받는 것보다 나쁩니다.
+_MEETING_AUDIO_FROZEN = frozenset(
+    {"queued", "processing", "needs_review", "confirmed", "failed"}
+)
+
 
 def describe_track_state(status: str) -> str:
     """트랙 상태 → 사람이 읽을 한 줄. 모르는 값은 **그대로** 돌려준다."""
@@ -119,6 +141,44 @@ class ConsentStatus:
         if self.refused:
             return f"{self.refused}명이 녹음에 동의하지 않았습니다"
         return f"{self.pending}명이 아직 동의하지 않았습니다"
+
+
+def describe_consent(status: ConsentStatus, meeting_status: str) -> str:
+    """동의 현황을 **회의 국면과 함께** 한 줄로.
+
+    ## ⛔ 이 함수가 생긴 이유 (결함 251)
+
+    예전에는 API 가 이렇게 지었다.
+
+        "전원 동의했습니다. 녹음을 시작할 수 있습니다" if all_confirmed
+        else status.describe()
+
+    **회의가 어느 국면인지 안 봤다.** 렌더해서 확인했다 — 녹음이 이미 끝나고
+    검토를 기다리는 회의(`needs_review`)의 로비에서 이랬다.
+
+        동의 칸   : 전원 동의했습니다. 녹음을 시작할 수 있습니다
+        참가자 칸 : 전원 종료했습니다. 회의 처리가 …
+
+    **한 화면이 스스로 모순됐다.** 처리에 실패한 회의(`failed`)와 검토를
+    끝낸 회의(`confirmed`)는 「2명이 아직 동의하지 않았습니다」였다 — 이미
+    지나간 회의에 대고 동의를 재촉한 것이다.
+
+    ⚠️ 늦은 동의 제출 자체는 **막지 않는다** (`submit_consent` 참조).
+    기록으로서 의미가 있고, 보관·성문 동의는 회의가 끝난 뒤에 정하는 것이
+    오히려 자연스럽다. 여기서 고치는 것은 **말**이다.
+    """
+    if meeting_status in _MEETING_AUDIO_FROZEN:
+        # 녹음이 끝난 회의. 무엇을 하라고 재촉하지 않고 **지나간 사실**로 적는다.
+        if status.total == 0:
+            return "이 프로젝트에 구성원이 없습니다"
+        if status.refused:
+            return f"이 회의의 녹음은 끝났습니다 — {status.refused}명은 동의하지 않은 채였습니다"
+        if status.pending:
+            return f"이 회의의 녹음은 끝났습니다 — {status.pending}명은 응답하지 않은 채였습니다"
+        return "이 회의의 녹음은 끝났습니다 — 전원 동의한 상태로 진행됐습니다"
+    if status.all_confirmed:
+        return "전원 동의했습니다. 녹음을 시작할 수 있습니다"
+    return status.describe()
 
 
 def consent_status(session: Session, meeting_id: int) -> ConsentStatus:
@@ -408,10 +468,19 @@ def store_chunk(
     파일이 남을 뿐인데, 그건 재개 조회가 파일시스템을 보므로 스스로 복구된다.
     """
     track = _load_track(session, meeting_id, track_id)
-    if track.status != "recording":
+    if track.status not in _TRACK_ACCEPTS_LATE_CHUNKS:
         raise TrackError(
             f"{describe_track_state(track.status)} — 더 이상 녹음을 보낼 수 없습니다."
         )
+    # 끝난 트랙에도 **늦은 조각**은 받습니다 (결함 244) — 다만 회의가 처리에
+    # 들어간 뒤는 아닙니다. 그때는 소리가 이미 글이 돼 있습니다.
+    if track.status != "recording":
+        meeting = session.get(m.Meeting, meeting_id)
+        if meeting is not None and meeting.status in _MEETING_AUDIO_FROZEN:
+            raise TrackError(
+                "이 회의는 이미 처리에 들어가 늦은 조각을 받을 수 없습니다 — "
+                "처리 전에 올려야 합니다."
+            )
 
     # 매 청크마다 확인한다. 회의 도중에 철회할 수 있기 때문이다.
     # 본인 동의를 먼저 본다 — 혼자 철회한 경우 전체 검사만으로는 막히지 않는다
@@ -463,6 +532,8 @@ class TrackSummary:
     stop_reason: str | None = None
     #: `MediaRecorder.start(timeslice)` 값. 서버가 배치를 다시 계산할 때 쓴다.
     timeslice_ms: int = 5_000
+    #: 소리가 **실제로** 시작된 시각 (결함 230). 옛 클라이언트는 안 보낸다.
+    started_at: datetime | None = None
 
 
 def _epoch_ms(value: datetime) -> int:
@@ -513,6 +584,26 @@ def complete_track(
     """
     track = _load_track(session, meeting_id, track_id)
     track.ended_at = summary.ended_at
+
+    # ⛔ **트랙이 열린 시각과 소리가 시작된 시각은 다르다** (결함 230).
+    #
+    # `started_at` 은 녹음 화면이 **열릴 때** POST 되고, 사람은 그 뒤에
+    # 마이크 권한을 허용하고 안내를 읽고 「녹음 시작」을 누른다. 커버리지는
+    # `[started_at, ended_at]` 창에 대해 재므로, 그 머뭇거린 시간이 통째로
+    # `recorder_stalled` 공백으로 잡혔다. 같은 12초 녹음을 재 봤다:
+    #
+    #     바로 시작    → 75.6%  · unusable
+    #     20초 뒤 시작 → 33.5%  · unusable
+    #
+    # 오디오는 똑같고 **버튼을 늦게 눌렀다는 것뿐**이다. 커버리지는
+    # 기여도(발화량)로 이어지므로, 안내를 꼼꼼히 읽은 사람이 불리해진다.
+    #
+    # ⚠️ 창만 고치지 않고 **트랙에 적어 둔다.** `build_plan` 은 재생
+    #    파이프라인(`playback_positions`)도 부르는데, 거기서도 같은 창을
+    #    쓰기 때문이다 — 한 곳에서만 고치면 두 벌이 된다.
+    # ⚠️ 옛 클라이언트는 안 보낸다. 그때는 있던 값을 그대로 둔다.
+    if summary.started_at is not None:
+        track.started_at = summary.started_at
 
     plan = build_plan(session, track, timeslice_ms=summary.timeslice_ms)
 
@@ -833,7 +924,7 @@ def try_finalize_meeting(
                 f"{len(missing)}명이 아직 참가하지 않았습니다",
             )
 
-    if meeting.status != "pending":
+    if meeting.status != m.MeetingStatus.PENDING:
         # 이미 누가 먼저 확정했다. 상태만 알려주고 큐에는 넣지 않는다.
         return FinalizeResult(
             True, False, len(tracks), len(finished), f"이미 처리 중입니다 ({meeting.status})"

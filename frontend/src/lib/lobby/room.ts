@@ -78,8 +78,19 @@ export interface TrackHealth {
 
 export type ConsentState = 'granted' | 'refused' | 'pending';
 
-/** 커버리지가 이 아래면 그 트랙으로는 발언량을 판단할 수 없다. */
-export const MIN_USABLE_COVERAGE = 0.8;
+/**
+ * 커버리지가 이 아래면 그 트랙으로는 발언량을 판단할 수 없다.
+ *
+ * ⚠️ **여기서 값을 다시 적지 않습니다** (결함 363). 예전에는 이 파일이
+ * `0.8` 을 따로 들고 있었습니다 — 서버·녹음 화면과 **세 벌**이었고,
+ * 그 셋을 맞추는 가드(`test_the_same_number_on_both_sides_really_is_the_same`)
+ * 는 `recording/timeline.ts` **한 파일만** 걷고 있었습니다. 이 파일의 값을
+ * 0.5 로 바꿔도 검사 전부가 초록이었습니다 — 로비는 「쓸 만합니다」,
+ * 서버는 `unusable` 로 저장하는 상태가 조용히 만들어집니다.
+ */
+import { MIN_USABLE_COVERAGE } from '../recording/timeline.ts';
+
+export { MIN_USABLE_COVERAGE };
 
 /** 회의 중 이만큼 공백이 쌓이면 화면에 경고를 띄운다. */
 export const WARN_GAP_MS = 30_000;
@@ -89,15 +100,56 @@ export function consentStateOf(entry: RosterEntry): ConsentState {
   return entry.recording ? 'granted' : 'refused';
 }
 
-export function describeConsent(state: ConsentState): string {
+export function describeConsent(
+  state: ConsentState,
+  /** 아직 시작할 수 있는 국면인가 (`lobbyPhase(status).canStart`). */
+  stillStartable = true,
+): string {
   switch (state) {
     case 'granted':
       return '동의함';
     case 'refused':
       return '거부함';
     case 'pending':
-      return '응답 대기 중';
+      /* ⛔ **「대기 중」은 곧 온다는 뜻입니다** (결함 310). 처리에 실패한
+         회의의 로비에서 세 사람이 나란히 「응답 대기 중」이었는데, 같은
+         화면 두 줄 아래는 「3명은 응답하지 않은 채였**습니다**」였습니다 —
+         한 패널이 현재형과 과거형으로 스스로 모순됐습니다. */
+      return stillStartable ? '응답 대기 중' : '응답 안 함';
   }
+}
+
+/** 동의 단추를 지금 못 누르는 까닭. 없으면 `null`. */
+export interface ConsentGate {
+  /** 서버에 남기는 중 */
+  sending: boolean;
+  /** 이미 내 동의가 명부에 있다 */
+  alreadyAgreed: boolean;
+}
+
+/**
+ * **막았으면 왜 막혔는지 말한다** (결함 235 의 규칙을 로비에도 · 결함 239).
+ *
+ * ## 왜 「보내는 중」이 그냥 도는 표시가 아닌가
+ *
+ * 동의 한 번은 요청 **셋**입니다 — 원본 보관 · 목소리 특징 · 녹음.
+ * 느린 연결에서는 그 사이가 길고, 그동안 단추는 눌러도 안 먹습니다.
+ * 아무 말이 없으면 사람은 **고장 났다고 읽고** 새로고침합니다.
+ *
+ * ## 왜 「이미 동의했습니다」에 되돌리는 법을 붙이나
+ *
+ * 되돌리는 단추 이름이 「거부합니다」입니다. 이미 동의한 사람이 그 말을
+ * 「취소」로 알아볼 이유가 없습니다 — 이 저장소가 세 번째로 적어 둔 실패
+ * (「할 일을 알려 주고 그 일을 할 자리를 안 줌」)를 피하려면 **여기서**
+ * 말해야 합니다.
+ */
+export function whyConsentBlocked(gate: ConsentGate): string | null {
+  // 순서가 있습니다 — 보내는 중이면 그것이 지금의 사실입니다.
+  if (gate.sending) return '동의를 남기는 중입니다 — 셋을 차례로 보냅니다';
+  if (gate.alreadyAgreed) {
+    return '이미 동의했습니다. 되돌리려면 「거부합니다」를 누르세요';
+  }
+  return null;
 }
 
 export interface ConsentSummary {
@@ -175,7 +227,22 @@ export function canStart(roster: readonly RosterEntry[]): boolean {
 // 회의 중 — 누구의 트랙이 망가지고 있는가
 // ══════════════════════════════════════════════════════════════
 
-export type TrackVerdict = 'healthy' | 'at_risk' | 'broken' | 'not_joined' | 'finished';
+/**
+ * ⚠️ `unknown` 은 **못 받은 것**입니다 (결함 255). 「참가 안 함」이 아닙니다.
+ *
+ * 트랙 목록을 못 받았는데 화면이 `?? []` 로 빈 목록을 만들면, 세 사람이
+ * 전부 「미참가」로 섭니다 — 재현했습니다. `/tracks` 를 500 으로 막고 이미
+ * 녹음이 끝난 회의의 로비를 열었더니 커버리지 100·98·42% 인 세 사람이
+ * 나란히 「미참가」였고, 화면 어디에도 못 받았다는 말이 없었습니다.
+ * 불변식 ③ — **측정 불가 ≠ 0.**
+ */
+export type TrackVerdict =
+  | 'healthy'
+  | 'at_risk'
+  | 'broken'
+  | 'not_joined'
+  | 'finished'
+  | 'unknown';
 
 export interface MemberStatus {
   userId: number;
@@ -252,6 +319,8 @@ function messageFor(verdict: TrackVerdict, track: TrackHealth | undefined): stri
   const percent = coverage === null || coverage === undefined ? null : Math.round(coverage * 100);
 
   switch (verdict) {
+    case 'unknown':
+      return '트랙 상태를 못 받았습니다 — 참가 여부를 알 수 없습니다';
     case 'not_joined':
       return '아직 참가하지 않았습니다';
     case 'healthy':
@@ -277,14 +346,15 @@ function messageFor(verdict: TrackVerdict, track: TrackHealth | undefined): stri
  */
 export function memberStatuses(
   roster: readonly RosterEntry[],
-  tracks: readonly TrackHealth[]
+  /** ⚠️ **`null` 은 「못 받음」입니다** (결함 255). 빈 배열과 다릅니다. */
+  tracks: readonly TrackHealth[] | null
 ): MemberStatus[] {
   const byUser = new Map<number, TrackHealth>();
-  for (const track of tracks) byUser.set(track.user_id, track);
+  for (const track of tracks ?? []) byUser.set(track.user_id, track);
 
   return roster.map((entry) => {
     const track = byUser.get(entry.user_id);
-    const verdict = verdictOf(track);
+    const verdict = tracks === null ? 'unknown' : verdictOf(track);
     return {
       userId: entry.user_id,
       name: entry.name,
@@ -316,7 +386,24 @@ export interface RoomStatus {
  * 회의가 영영 처리되지 않습니다.** 그래서 강제 종료 버튼이 있고, 이 함수는
  * 그 버튼을 언제 보여줄지 정합니다.
  */
-export function roomStatus(statuses: readonly MemberStatus[]): RoomStatus {
+export function roomStatus(
+  statuses: readonly MemberStatus[],
+  /** ⚠️ 명단이 **아직 안 왔으면** `false` (결함 255). 빈 팀과 다릅니다. */
+  rosterKnown = true,
+  /**
+   * 아직 **시작할 수 있는** 회의인가 (`lobbyPhase(status).canStart`).
+   *
+   * ⛔ 이걸 안 보던 동안, 이미 끝나 **처리에 실패한** 회의의 로비가
+   * 「**아직** 아무도 참가하지 않았습니다」라고 했습니다 (결함 309).
+   * 「아직」은 곧 들어올 사람이 있다는 말인데 회의는 끝났습니다 — 그리고
+   * 그 화면은 홈이 「트랙이 온전한지 확인하세요」라고 보낸 곳입니다.
+   * **아무도 참가 안 한 것이 바로 그 답**인데 「아직」이 그걸 덮었습니다.
+   *
+   * ⚠️ 결함 214 가 `verdictView` 에서 고친 것과 **같은 판단**입니다.
+   * 그때는 사람 줄만 고쳤고 이 요약 줄은 그대로였습니다.
+   */
+  canStart = true,
+): RoomStatus {
   const recording = statuses.filter(
     (s) => s.verdict === 'healthy' || s.verdict === 'at_risk'
   ).length;
@@ -325,12 +412,24 @@ export function roomStatus(statuses: readonly MemberStatus[]): RoomStatus {
   ).length;
   const broken = statuses.filter((s) => s.verdict === 'broken').length;
 
-  // 참가한 사람이 아무도 없으면 아직 시작 전이다. 강제 종료할 게 없다.
-  const anyJoined = statuses.some((s) => s.verdict !== 'not_joined');
+  /* ⚠️ **모르는 것은 「참가했다」도 「안 했다」도 아닙니다** (결함 255).
+     `!== 'not_joined'` 로 세면 못 받은 상태가 전부 「참가했다」가 되어
+     강제 종료 버튼까지 뜹니다. */
+  const unknown = statuses.filter((s) => s.verdict === 'unknown').length;
+  const anyJoined = statuses.some(
+    (s) => s.verdict !== 'not_joined' && s.verdict !== 'unknown'
+  );
 
   let message: string;
-  if (!anyJoined) {
-    message = '아직 아무도 참가하지 않았습니다';
+  if (!rosterKnown) {
+    // 아무것도 모르는 채로 「아무도 참가하지 않았습니다」라고 하지 않습니다.
+    message = '명단을 아직 못 받았습니다 — 누가 참가했는지 알 수 없습니다';
+  } else if (unknown > 0) {
+    message = '트랙 상태를 못 받았습니다 — 누가 참가했는지 알 수 없습니다';
+  } else if (!anyJoined) {
+    message = canStart
+      ? '아직 아무도 참가하지 않았습니다'
+      : '아무도 참가하지 않았습니다 — 이 회의에는 녹음이 하나도 없습니다';
   } else if (recording > 0) {
     message = `${recording}명이 녹음 중입니다`;
   } else if (notJoined > 0) {
@@ -344,7 +443,8 @@ export function roomStatus(statuses: readonly MemberStatus[]): RoomStatus {
     notJoined,
     broken,
     // 녹음 중인 사람이 없는데 참가 안 한 사람이 남아 있으면 사람이 풀어야 한다.
-    needsForceFinish: anyJoined && recording === 0 && notJoined > 0,
+    // 모르는 채로 강제 종료를 권하지 않습니다 — 되돌릴 수 없는 일입니다.
+    needsForceFinish: rosterKnown && unknown === 0 && anyJoined && recording === 0 && notJoined > 0,
     message,
   };
 }
@@ -395,6 +495,52 @@ export function captureAlerts(track: TrackHealth | undefined): string[] {
  * 응답 없음&#34; 이고 `false`(거부)와 다릅니다 — 이 저장소가 로스터에서
  * 지키는 구분입니다.
  */
+/**
+ * ②③ — **따로 받는 동의** 두 가지의 이름과 설명.
+ *
+ * ## 왜 `@lib` 에 있는가 (결함 335)
+ *
+ * 이 두 줄은 두 뿌리가 각자 적고 있었고, **갈라졌습니다.**
+ *
+ *     레거시  ② 거부하면 회의록을 만든 뒤 바로 지웁니다
+ *             ③ 거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다
+ *     SPA     ② 검토 화면에서 구간을 다시 들을 수 있습니다
+ *             ③ 다음 회의에서 화자를 더 잘 알아봅니다
+ *
+ * `/app` 쪽은 **동의했을 때 얻는 것만** 말하고 거부하면 어떻게 되는지를
+ * 한 글자도 안 말했습니다. `docs/07` §2.3 은 ②③ 에 대해 "거부해도
+ * 서비스 이용 가능" 을 요구하고, ② 는 "전사 완료 후 원본 즉시 삭제",
+ * ③ 은 "멀티트랙 모드면 애초에 불필요" 라고 못 박아 뒀습니다.
+ *
+ * ⚠️ ③ 의 SPA 문장은 **이 제품이 하지 않는 일**이었습니다. 파이프라인이
+ * `speaker_source` 에 쓰는 값은 `"track"` **한 곳뿐**이고
+ * (`pipeline/meeting_pipeline.py`), `Voiceprint(` 를 만드는 프로덕션
+ * 코드는 0곳입니다. 성문은 화자 식별을 **더 잘 하게 만들지 않습니다.**
+ *
+ * ⚠️ **이건 닫아 둔 결정을 뒤집는 것이 아닙니다.** `docs/17` 의
+ * 「「목소리 특징 저장」 동의 — 결함이 아니었습니다」는 ③ 을 **묻는 것**이
+ * 옳다고 적으면서 그 근거로 "화면도 이미 그렇게 말합니다 — 거부해도
+ * 됩니다" 를 들었습니다. 그 전제가 한 뿌리에서 깨져 있던 것입니다.
+ *
+ * ⛔ **화면에서 이 글을 다시 적지 마십시오.** 두 로비가 여기서 읽습니다.
+ */
+export const EXTRA_CONSENTS = [
+  {
+    key: 'rawAudio',
+    id: 'keep-audio',
+    label: '원본 음성 보관',
+    hint: '거부해도 됩니다 — 그러면 회의록을 만든 뒤 원본을 바로 지웁니다',
+  },
+  {
+    key: 'voiceprint',
+    id: 'keep-voiceprint',
+    label: '목소리 특징 저장',
+    hint: '거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다',
+  },
+] as const;
+
+export type ExtraConsent = (typeof EXTRA_CONSENTS)[number];
+
 export function savedExtraConsents(
   roster: readonly RosterEntry[],
   userId: number,
@@ -404,4 +550,353 @@ export function savedExtraConsents(
     rawAudio: mine?.raw_audio_retention ?? null,
     voiceprint: mine?.voiceprint_storage ?? null,
   };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   회의 국면 — 이 로비가 「시작 전」인가 「끝난 뒤」인가
+   ══════════════════════════════════════════════════════════════ */
+
+/**
+ * 로비가 지금 무엇을 그려야 하는가.
+ *
+ * ⚠️ **로비는 오래도록 회의 상태를 아예 안 봤습니다** (결함 214). 재서
+ * 확인한 것 — 다섯 상태 전부에서 화면이 **글자까지 같았습니다**:
+ *
+ *     회의 1 (needs_review) 「시작 전 확인」 있음 · 「녹음 화면으로」 안 막힘
+ *     회의 4 (confirmed)    「시작 전 확인」 있음
+ *     회의 5 (failed)       「시작 전 확인」 있음 · 화면에 「실패」 0회
+ *
+ * 세 가지가 한꺼번에 잘못돼 있었습니다:
+ *
+ *   1. **끝난 회의를 다시 녹음하러 갈 수 있었습니다.** 검토까지 끝난
+ *      회의에서 「녹음 화면으로」가 멀쩡히 눌렸습니다.
+ *   2. **홈이 한 말이 도착지에서 사라졌습니다.** 홈은 "처리에
+ *      실패했습니다 — 트랙이 온전한지 확인하세요" 라고 보내는데, 그
+ *      화면에는 실패라는 낱말이 한 번도 안 나옵니다. AGENTS.md 의
+ *      "할 일을 알려 주고 그 일을 할 자리를 안 줌" 그 자리입니다.
+ *   3. **끝난 회의에 「시작 전 확인」이 떴습니다.** 이미 지나간 일을
+ *      준비하라고 말하는 화면입니다.
+ *
+ * ⚠️ **모르는 상태는 「시작 전」으로 둡니다.** 반대로 하면 새 상태가
+ * 하나 생길 때마다 그 회의는 녹음을 **못 하게** 됩니다. 이 제품에서
+ * 녹음이 한 번 끊기면 그 구간은 영영 못 잽니다 — 막는 쪽이 더 비쌉니다.
+ */
+export interface LobbyPhase {
+  /** 지금 녹음을 시작할 수 있는 국면인가. */
+  canStart: boolean;
+  /**
+   * 끝난 회의라면 **무슨 일이 있었고 여기서 무엇을 볼 수 있는가**.
+   * 시작 전이면 `null` — 그때는 「시작 전 확인」이 할 말을 합니다.
+   */
+  note: string | null;
+  /**
+   * 로비 말고 갈 곳. 여기서 할 일이면 `null`.
+   *
+   * ⚠️ 「녹음 화면으로」를 막으면서 갈 곳을 안 주면 막다른 길입니다.
+   * 실패한 회의만 `null` 인데, 그건 **확인할 것이 이 화면에** 있기
+   * 때문입니다.
+   */
+  go: { label: string; screen: 'review' | 'kanban' } | null;
+}
+
+export function lobbyPhase(status: string | null | undefined): LobbyPhase {
+  switch (status) {
+    // ⛔ 차례를 기다리는 것과 하고 있는 것은 다릅니다 (결함 325).
+    case 'queued':
+      return {
+        canStart: false,
+        note: '녹음이 끝났습니다. 처리 차례를 기다리는 중입니다.',
+        go: null,
+      };
+    case 'processing':
+      return {
+        canStart: false,
+        note: '녹음이 끝나 처리 중입니다. 끝나면 업무 후보가 나옵니다.',
+        go: null,
+      };
+    case 'needs_review':
+      return {
+        canStart: false,
+        note: '녹음이 끝났습니다. 업무 후보를 검토할 차례입니다.',
+        go: { label: '업무 후보 검토', screen: 'review' },
+      };
+    case 'confirmed':
+      return {
+        canStart: false,
+        note: '검토까지 끝난 회의입니다. 아래는 그때 남은 트랙 기록입니다.',
+        go: { label: '칸반 보기', screen: 'kanban' },
+      };
+    case 'failed':
+      return {
+        canStart: false,
+        // 홈이 "트랙이 온전한지 확인하세요" 라고 보낸 그 말을 **여기서**
+        // 이어받습니다. 확인할 것은 바로 아래 참가자 상태입니다.
+        note: '처리에 실패했습니다. 아래 트랙이 온전한지 확인하세요 — 트랙이 짧거나 끊겼으면 그게 원인일 수 있습니다.',
+        go: null,
+      };
+    default:
+      // 모르는 상태도 여기로 옵니다 — 위 주석의 이유로 **막지 않습니다.**
+      return { canStart: true, note: null, go: null };
+  }
+}
+
+/**
+ * 참가자 판 아래에 설 **한 줄** — 지금 이 방의 소식.
+ *
+ * ## ⛔ 끝난 회의에게 「회의 처리가 시작됩니다」 (결함 367)
+ *
+ * `roomStatus().message` 의 마지막 갈래는 「전원 종료했습니다. 회의
+ * 처리가 시작됩니다」입니다. 그 문장은 **녹음이 방금 끝난** 회의에게만
+ * 참인데, 레거시 로비는 그것을 **국면과 상관없이 언제나** 그렸습니다.
+ * 씨앗의 회의 1(`needs_review`)에서 그대로 재현됩니다 — 처리는 한참
+ * 전에 끝났고 후보 셋이 사람을 기다리는데, 화면은 「이제 시작됩니다」
+ * 라고 합니다. 읽은 사람은 기다립니다.
+ *
+ * ⚠️ **SPA 는 이미 갈라 놓고 있었습니다** — `phase.canStart` 가 거짓이면
+ * `room.message` 를 안 씁니다. 「한쪽 뿌리만」의 그 모양입니다.
+ *
+ * ⚠️ 그리고 레거시는 `lobbyPhase().note` 를 **한 곳에서도 안 그렸습니다**
+ * (실패 ① — 만들어 놓고 아무도 안 부름). 끝난 회의가 무슨 국면인지
+ * 말해 주는 문장이 그쪽에는 아예 없었습니다.
+ *
+ * `note` 는 `canStart` 가 거짓일 때 **언제나 문장**입니다(`lobbyPhase`
+ * 참조) — 그래서 이 함수는 빈 줄을 돌려주지 않습니다.
+ */
+export function roomLine(status: string | null | undefined, room: RoomStatus): string {
+  const phase = lobbyPhase(status);
+  return phase.canStart ? room.message : (phase.note ?? room.message);
+}
+
+/**
+ * 참가자 한 줄이 쓸 낱말과 문장.
+ *
+ * ⚠️ **국면이 바뀌면 같은 판정이 다른 뜻이 됩니다.** `not_joined` 는 녹음
+ * 전이면 「대기」(곧 들어올 사람)이지만, 이미 끝난 회의에서는 「미참가」
+ * (영영 안 들어온 사람)입니다. 실패한 회의의 로비에서 세 사람이 나란히
+ * 「대기 · 아직 참가하지 않았습니다」 라고 서 있었습니다 — 아무도 기다리고
+ * 있지 않은데요. 그리고 그 화면은 "트랙이 온전한지 확인하세요" 라고 보낸
+ * 곳이었습니다. **아무도 참가 안 한 것이 바로 그 답**인데, 화면은 그것을
+ * 「아직」 이라는 말로 덮고 있었습니다 (결함 214).
+ *
+ * ⚠️ 낱말 표를 화면에 두지 않습니다. `Lobby.tsx` 안에 `VERDICT_WORD` 상수로
+ * 있었고, 화면 코드에는 자동 테스트가 없으니 이 판단은 검증 밖이었습니다.
+ */
+export interface VerdictView {
+  /** 한 낱말. 문장은 `?` 안에서 원문 그대로 나옵니다. */
+  word: string;
+  /** 그 낱말의 근거 한 줄. */
+  message: string;
+}
+
+export function verdictView(status: MemberStatus, canStart: boolean): VerdictView {
+  // 못 받은 것은 국면과 상관없이 **모른다**고만 말합니다 (결함 255).
+  if (status.verdict === 'unknown') {
+    return { word: '모름', message: status.message };
+  }
+  if (status.verdict === 'not_joined' && !canStart) {
+    return { word: '미참가', message: '이 회의에 참가하지 않았습니다 — 이 사람의 녹음은 없습니다' };
+  }
+  const WORD: Record<TrackVerdict, string> = {
+    unknown: '모름',
+    not_joined: '대기',
+    healthy: '녹음 중',
+    at_risk: '끊김',
+    broken: '못 씀',
+    finished: '종료',
+  };
+  return { word: WORD[status.verdict], message: status.message };
+}
+
+/**
+ * 회의에 붙일 이름의 문제. 없으면 `null` (결함 268).
+ *
+ * ## ⛔ 회의에 이름을 붙일 자리가 화면에 없었습니다
+ *
+ * 「회의 열기」는 제목을 안 묻습니다. 그래서 홈 목록에 **「제목 없는
+ * 회의」** 가 쌓입니다 — 재현했습니다(회의 4번). 서버에는 길이 있었고
+ * (`PATCH /api/scheduled-meetings/{id}`), 이미 연 회의도 **제목만은**
+ * 고치게 허용합니다(`calendar_service.reschedule_meeting` — 막는 것은
+ * 시각뿐입니다). 그런데 그 길을 부르는 화면이 **0곳**이었습니다.
+ *
+ * ⚠️ 「열 때 물어볼 것인가」는 아직 정하지 않았습니다. 그건 되돌릴 수
+ * 없는 결정(누르는 걸음이 하나 늘어납니다)이라 사람에게 물어야 합니다.
+ * 여기서는 **되돌릴 수 있는 쪽**만 만듭니다 — 로비에서 언제든 고치기.
+ *
+ * 규칙은 서버와 같아야 합니다(빈 글 거절 · 200자).
+ */
+export function meetingTitleProblem(raw: string): string | null {
+  const title = raw.trim();
+  if (title.length === 0) return '회의 이름을 입력하세요';
+  if (title.length > 200) return '회의 이름은 200자까지입니다';
+  return null;
+}
+
+/**
+ * 「다시 처리하기」를 누르기 **전에** 묻는 말 (결함 114 · 231).
+ *
+ * ⚠️ 되돌릴 수 없습니다 — 앞판의 발화·후보·결정이 지워지고 새로
+ * 만들어집니다. 그래서 묻습니다.
+ *
+ * ⚠️ **두 화면이 같은 말을 해야 합니다.** 레거시 로비에 이 문장이
+ * 인라인으로 있었고, SPA 로비에는 버튼 자체가 없었습니다(결함 231).
+ * 옮기면서 각자 짓게 두면 "지워진다" 는 경고가 한쪽에서만 뜹니다.
+ */
+export const REPROCESS_CONFIRM =
+  '이 회의를 처음부터 다시 처리합니다.\n' +
+  '앞서 만들어진 발화·업무 후보·결정은 지워지고 새로 만들어집니다.\n' +
+  '계속할까요?';
+
+/**
+ * 이 회의를 **무를 수 있는가**, 없으면 왜.
+ *
+ * ## ⛔ 잘못 연 회의가 영영 남았습니다 (결함 320)
+ *
+ * 「회의 열기」는 누른 만큼 회의를 만듭니다. 세 번 누르니 회의가 5→8개가
+ * 됐고 **무르는 길이 아예 없었습니다** —
+ *
+ *     DELETE /api/meetings/8   →  405 Method Not Allowed
+ *     설정·홈·로비의 지우는 단추 →  0개
+ *
+ * 결함 298 이 일정에서 잡은 것과 같은 모양이고, 그때 「만드는 단추를
+ * 봤으면 무르는 단추를 같이 찾으십시오」라고 적어 뒀습니다.
+ *
+ * ## ⛔ 무엇을 못 무르는지가 더 중요합니다
+ *
+ * **녹음이 하나라도 있으면 못 무릅니다.** 소리는 다시 만들 수 없고, 그
+ * 소리가 발화·후보·업무·기여도로 이어져 있습니다. 「녹음한 것을 지우기」는
+ * **다른 문**이고(설정의 「내 녹음과 성문 지우기」) 그건 개인정보 파기
+ * 절차입니다.
+ *
+ * ⚠️ 판정은 상태 하나가 아니라 **트랙 수**입니다 — 상태만 보면 `pending`
+ * 인데 이미 트랙이 붙은 회의가 새어 나갑니다. 서버도 같은 것을 봅니다.
+ */
+export interface DiscardAffordance {
+  can: boolean;
+  /** 못 무를 때만. 왜인지 + 어디로 가야 하는지. */
+  why: string | null;
+}
+
+export function discardAffordance(status: string, trackCount: number): DiscardAffordance {
+  if (trackCount > 0) {
+    return {
+      can: false,
+      why: `녹음이 ${trackCount}건 담겨 있어 무를 수 없습니다 — 내 녹음을 지우려면 설정의 「내 녹음과 성문 지우기」를 쓰세요.`,
+    };
+  }
+  if (status !== 'pending' && status !== 'recording') {
+    return { can: false, why: '이미 처리에 들어간 회의는 무를 수 없습니다.' };
+  }
+  return { can: true, why: null };
+}
+
+/** 무르기 전에 물을 말. 되돌릴 수 없다는 것을 적습니다. */
+export const DISCARD_CONFIRM =
+  '이 회의를 목록에서 없앱니다.\n녹음이 하나도 없는 회의만 없앨 수 있고, 없앤 것은 되돌릴 수 없습니다.\n계속할까요?';
+
+/**
+ * 동의 단추를 **어떤 회의에 대고** 누르는 것인가.
+ *
+ * ## ⛔ 끝난 회의와 시작 전 회의의 동의 칸이 **글자까지 같았습니다** (결함 310)
+ *
+ * 씨앗을 새로 심고 두 회의를 나란히 재 봤습니다.
+ *
+ *     회의 2 (pending — 아직 시작 안 함)   「동의합니다」 btn--primary  rgb(61,58,174) 흰 글자
+ *     회의 5 (failed  — 트랙 0개, 처리 실패) 「동의합니다」 btn--primary  rgb(61,58,174) 흰 글자
+ *
+ * 레거시·SPA **둘 다** 같았습니다. 지나간 회의에서도 청록 주 버튼이
+ * 「동의합니다」라고 서서, 화면이 가장 크게 가리키는 곳이 **이제 할 일이
+ * 아닌 곳**이었습니다.
+ *
+ * ## ⚠️ 결함 251 의 결정은 **뒤집지 않습니다**
+ *
+ * 「늦은 동의 제출을 서버가 막지 않는다」는 근거를 적어 가며 내린 결정이고
+ * `test_late_consent_is_still_accepted_on_purpose` 가 붙잡고 있습니다 —
+ * 보관·성문 동의는 회의가 끝난 뒤에 정하는 것이 오히려 자연스럽고, 늦게
+ * 낸 기록도 기록입니다. 251 이 고친 것은 **말**이었고, 그 말은 버튼
+ * **아래** 줄이었습니다. 여기서 고치는 것은 **버튼 자신**입니다 —
+ * 문을 닫는 게 아니라, 그 문이 어디로 나는지 적습니다.
+ */
+export interface ConsentAffordance {
+  /** 청록(주 행동)으로 세울 것인가. 녹음이 끝났으면 아니오. */
+  primary: boolean;
+  label: string;
+  refuseLabel: string;
+  /** 국면이 지나갔을 때만. 무엇을 누르는 것인지 한 줄. */
+  note: string | null;
+}
+
+export function consentAffordance(
+  /** 아직 시작할 수 있는 국면인가 (`lobbyPhase(status).canStart`). */
+  stillStartable: boolean,
+  /** 내가 이미 동의했는가. */
+  iAgreed: boolean,
+): ConsentAffordance {
+  if (!stillStartable) {
+    return {
+      primary: false,
+      label: iAgreed ? '동의로 남겨져 있습니다' : '뒤늦게 동의로 남기기',
+      refuseLabel: iAgreed ? '거부로 바꾸기' : '거부로 남기기',
+      /* ⚠️ **251 의 줄이 바로 옆에 있습니다** — 「이 회의의 녹음은 끝났습니다
+         — N명은 응답하지 않은 채였습니다」. 여기서 그 말을 또 하면 거의
+         같은 문장이 두 줄 쌓입니다(렌더해서 봤습니다). 251 이 **안 하는
+         말**만 합니다 — 이 단추를 누르면 무엇이 되는가. */
+      note: '지나간 회의에 대한 기록으로 남습니다 — 원본 보관·성문 저장도 위에서 함께 정해집니다.',
+    };
+  }
+  return {
+    // 이미 동의했으면 주 행동은 넘어갑니다 — 한 화면에 청록은 하나입니다.
+    primary: !iAgreed,
+    label: iAgreed ? '동의했습니다' : '동의합니다',
+    refuseLabel: '거부합니다',
+    note: null,
+  };
+}
+
+/**
+ * 녹음·통화 단추를 지금 눌러도 되는가, 그리고 안 되면 **뭐라고 적을 것인가**.
+ *
+ * ## ⛔ 끝난 회의에 「전원 동의 후 시작할 수 있습니다」 (결함 309)
+ *
+ * 이 단추의 라벨은 **동의만** 보고 있었습니다. 그래서 이미 끝나 처리에
+ * 실패한 회의에서도 「전원 동의 후 시작할 수 있습니다」라고 적었습니다 —
+ * 동의만 모이면 다시 녹음할 수 있다는 말인데, 그 회의는 지나갔습니다.
+ *
+ * ⚠️ **막혀 있던 것은 우연이었습니다.** 그 회의는 마침 동의가 안 모여
+ * 눌리지 않았을 뿐이고, 전원이 동의한 채로 실패한 회의였다면 「녹음
+ * 화면으로」가 멀쩡히 눌렸을 것입니다 — 결함 214 가 SPA 에서 고친
+ * 첫째 항목(「끝난 회의를 다시 녹음하러 갈 수 있었습니다」)이 이 화면에는
+ * 안 와 있었습니다.
+ *
+ * ⚠️ 순서가 중요합니다. **국면을 먼저** 봅니다 — 끝난 회의에 「동의가
+ * 모자랍니다」라고 하면 사람은 동의를 모으러 갑니다.
+ */
+export interface RecordAffordance {
+  enabled: boolean;
+  /** 녹음 단추에 적을 말. */
+  label: string;
+  /** 통화 단추에 적을 말. */
+  callLabel: string;
+}
+
+export function recordAffordance(
+  /** 아직 시작할 수 있는 국면인가 (`lobbyPhase(status).canStart`). */
+  stillStartable: boolean,
+  /** 전원이 동의했는가 (`canStart(roster)`). */
+  consentReady: boolean,
+): RecordAffordance {
+  if (!stillStartable) {
+    return {
+      enabled: false,
+      label: '이미 끝난 회의입니다',
+      callLabel: '이미 끝난 회의입니다',
+    };
+  }
+  if (!consentReady) {
+    return {
+      enabled: false,
+      label: '전원 동의 후 시작할 수 있습니다',
+      callLabel: '통화도 전원 동의 후에',
+    };
+  }
+  return { enabled: true, label: '녹음 화면으로', callLabel: '통화로 회의하기' };
 }

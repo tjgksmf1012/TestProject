@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api/client.ts';
-import { EvidenceChip } from '../components/EvidenceChip.tsx';
+import { EvidenceChipStill } from '../components/EvidenceChip.tsx';
 import { validateLogin, validateSignup, describeAuthFailure } from '@lib/auth/session.ts';
 import { pageTitle } from '@lib/shell/title.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -79,7 +79,7 @@ export default function Login() {
           </p>
           <p className="login__arrow num">↓</p>
           <p className="login__task">
-            <span className="num">demo#17</span> 병합됨 <EvidenceChip id="근거 보기" onOpen={() => {}} label="예시 근거" />
+            <span className="num">demo#17</span> 병합됨 <EvidenceChipStill id="근거 보기" />
           </p>
         </div>
       </aside>

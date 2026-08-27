@@ -18,9 +18,11 @@ import {
   navTabs,
   type NavContext,
   type ScreenId,
+  type ShellDoors,
 } from '../lib/nav/links.ts';
 import {
   channelAriaLabel,
+  channelCountText,
   emptyChannelsNote,
   meetingChannels,
   shellHeading,
@@ -40,6 +42,7 @@ import {
   type RailProject,
 } from '../lib/nav/rail.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
+import { MAIN_LANDMARK_ID } from '../lib/nav/skip.ts';
 import { escapeHtml } from '../lib/html.ts';
 import { tryGet } from '../lib/http/send.ts';
 import { safeApiBase } from '../lib/auth/session.ts';
@@ -54,9 +57,24 @@ export function renderNav(current: ScreenId): void {
   const context = contextFromSearch(current, location.search);
   paint(context);
 
+  // ⭐ **창 폭이 바뀌면 안내 줄을 다시 그립니다** (결함 343).
+  //
+  // 회의 목록은 `SHELL_WIDTH` 아래에서 통째로 접힙니다. 그러면 「회의를
+  // 고르면 열립니다」를 말해 줄 자리가 그 줄뿐인데, 한 번만 그리면
+  // 넓은 채로 열었다 좁힌 사람에게는 **아무 안내도 안 남습니다.**
+  //
+  // ⚠️ `paint` 전체가 아니라 `#nav` 만 다시 그립니다 — `paint` 를 다시
+  // 부르면 이미 받아 둔 프로젝트 이름·레일이 인자에서 빠져 날아갑니다.
+  window.matchMedia(SHELL_WIDTH).addEventListener('change', () => {
+    if (shownContext !== null) paintNav(shownContext);
+  });
+
   const tabHost = document.getElementById('tabs');
   if (tabHost) void fillChannels(tabHost, context);
 }
+
+/** 마지막으로 그린 맥락. 폭이 바뀌었을 때 다시 그리려고 들고 있습니다. */
+let shownContext: NavContext | null = null;
 
 /**
  * 맥락 하나로 내비 전부를 다시 그린다.
@@ -83,7 +101,40 @@ interface ShellData {
   projects?: readonly RailProject[];
 }
 
+/**
+ * 본문 표지 (`<main id="main-content">`) — 결함 421.
+ *
+ * 레거시 화면 열셋에는 `main` 이 하나도 없었습니다. 재 보니 레거시 홈은
+ * 컨트롤 스물 중 **열여섯이 어느 표지에도 안 들어** 있었고, 낭독기의 표지
+ * 목록에는 내비 둘만 있고 본문이 없었습니다. SPA·정적 둘은 처음부터
+ * `<main id="main-content">` 입니다.
+ *
+ * ⛔ **건너뛰기 링크는 안 답니다.** 이 셸은 되풀이되는 내비를 본문 **뒤**에
+ * 둡니다(Tab 1 = 본문 · 67 = `#nav`) — 지나갈 것이 앞에 없으므로 링크는
+ * 모든 키보드 사용자에게 Tab 한 번을 더 물리면서 아무 데도 안 데려갑니다.
+ * 자세한 것은 `@lib/nav/skip.ts` 머리말.
+ *
+ * ⚠️ `#app` 을 **감쌉니다.** 그 id 는 화면 열셋이 이름으로 집는 자리라
+ * 바꿀 수 없습니다. `body` 는 격자도 플렉스도 아니라 껍질 한 겹이 배치를
+ * 안 바꿉니다 — 감싸기 전후로 상자를 재서 확인했습니다(결함 313 의 함정:
+ * 채팅의 `.side`·`.cols`·`form.cnew`·채널 60개가 **한 픽셀도** 안 움직임).
+ */
+function paintMainLandmark(): void {
+  const app = document.getElementById('app');
+  if (app === null || document.getElementById(MAIN_LANDMARK_ID) !== null) return;
+
+  const main = document.createElement('main');
+  main.id = MAIN_LANDMARK_ID;
+  // 표지로 건너뛴 초점을 **받을 수 있어야** 합니다. `-1` 은 Tab 순서에
+  // 안 들어가면서 프로그램으로는 초점을 받는 값입니다.
+  main.tabIndex = -1;
+  app.parentNode?.insertBefore(main, app);
+  main.append(app);
+}
+
 function paint(context: NavContext, shell: ShellData = {}): void {
+  paintMainLandmark();
+
   const tabHost = document.getElementById('tabs');
   if (tabHost) {
     const chan = tabHost.querySelector('.chan') ?? document.createElement('div');
@@ -95,19 +146,46 @@ function paint(context: NavContext, shell: ShellData = {}): void {
     const name = shellHeading(shell.projectTitle);
     const heading = `<p class="chan-project" title="${escapeHtml(name)}">${escapeHtml(name)}</p>`;
 
-    tabHost.innerHTML = navTabs(context)
+    const tabs = navTabs(context);
+
+    // ⚠️ **막힌 탭의 이유가 `title` 에만 있었습니다** (결함 413).
+    //    `<a>` 는 `href` 가 없으면 **초점을 아예 못 받습니다** — 재 보니
+    //    `focus()` 를 직접 불러도 안 잡혔고, 이유는 본문 글자에 0회라
+    //    마우스를 올릴 수 있는 사람만 알 수 있었습니다. SPA 레일은
+    //    결함 219 에서 이미 고쳐 뒀습니다(`tabIndex` + `aria-describedby`
+    //    + 숨은 문단 한 벌) — 여기만 옛 모양이었습니다.
+    //
+    // ⚠️ 이유가 **같은 문장이면 문단 한 벌**만 둡니다. 항목마다 되풀이하면
+    //    낭독기가 같은 말을 세 번 읽습니다. 지금은 `links.ts` 가 한 문장만
+    //    주지만 늘어날 수 있으므로 **다른 문장마다** 하나씩 만듭니다.
+    const reasons: string[] = [];
+    for (const tab of tabs) {
+      if (tab.blockedReason !== null && !reasons.includes(tab.blockedReason)) {
+        reasons.push(tab.blockedReason);
+      }
+    }
+    const whyId = (reason: string): string => `tab-blocked-why-${reasons.indexOf(reason)}`;
+
+    tabHost.innerHTML = tabs
       .map((tab) => {
         // 못 가는 탭은 `<a href>` 를 주지 않는다. 주면 눌렸을 때
         // `?project=null` 로 가고, 서버는 404 를 주고, 사람은 화면이
         // 고장 났다고 읽는다.
         const href = tab.enabled ? ` href="${escapeHtml(tab.href)}"` : '';
-        const disabled = tab.enabled ? '' : ' aria-disabled="true"';
+        // ⚠️ 주소가 없으면 **초점도 없습니다** — 손으로 넣어 줍니다.
+        //    막힌 표시와 한 덩어리로 둡니다: 셋은 언제나 같이 붙고,
+        //    나누면 이스케이프 예외만 하나 더 늘어납니다.
+        const disabled = tab.enabled
+          ? ''
+          : ' role="link" tabindex="0" aria-disabled="true"';
         const marked = tab.current ? ' aria-current="page"' : '';
-        const title = tab.blockedReason
-          ? ` title="${escapeHtml(tab.blockedReason)}"`
-          : '';
+        const why =
+          tab.blockedReason === null
+            ? ''
+            : ` title="${escapeHtml(tab.blockedReason)}"` +
+              ` aria-describedby="${escapeHtml(whyId(tab.blockedReason))}"`;
         return (
-          `<a${href}${disabled}${marked}${title}>` +
+          `<a${href}${disabled}${marked}${why}>` +
           // ⚠️ `iconSvg` 는 **이스케이프하지 않습니다.** `icons.ts` 의
           // 상수 마크업이라 안전하고, 이스케이프하면 태그가 글자로
           // 나옵니다. 그 파일이 상수만 담는지는 테스트가 고정합니다.
@@ -117,6 +195,19 @@ function paint(context: NavContext, shell: ShellData = {}): void {
         );
       })
       .join('');
+
+    // 막힌 탭들이 가리키는 자리. 눈에는 탭이 흐린 것으로 이미 보이므로
+    // 글자를 더하지 않고 낭독기에만 답니다.
+    tabHost.insertAdjacentHTML(
+      'beforeend',
+      reasons
+        .map(
+          (reason) =>
+            `<p id="${escapeHtml(whyId(reason))}" class="visually-hidden">` +
+            `${escapeHtml(reason)}</p>`,
+        )
+        .join(''),
+    );
 
     // ⚠️ 머리말은 탭 **앞**에 넣습니다. `innerHTML` 에 같이 이어 붙이지
     // 않는 이유는 위 `.map` 이 탭만 만드는 자리이기 때문입니다 — 거기에
@@ -141,13 +232,47 @@ function paint(context: NavContext, shell: ShellData = {}): void {
     paintRail(context, shell.projects ?? []);
   }
 
+  paintNav(context);
+}
+
+/**
+ * 위쪽 링크 줄 하나만 그린다.
+ *
+ * `paint` 에서 빼낸 이유는 **창 폭이 바뀌면 이 줄만 다시 그려야** 하기
+ * 때문입니다 (결함 343). 셸 전체를 다시 그리면 받아 둔 것이 날아갑니다.
+ */
+function paintNav(context: NavContext): void {
+  shownContext = context;
+
   const host = document.getElementById('nav');
   if (!host) return;
 
+  // ⚠️ **같은 문을 두 번 그리지 않습니다.** `navLinks` 는 「여기서 갈 수
+  // 있는 곳 전부」라서 탭 넷도 들어 있습니다 — 그대로 그리면 한 화면에
+  // 홈·기여도·설정이 **두 번** 나옵니다 (탭에 한 번, 이 줄에 한 번).
+  //
+  // ⚠️ 탭 목록을 여기에 **베껴 적지 않습니다** — `navTabs` 에게 묻습니다
+  // (실패 ②: 같은 판단이 두 곳에 있으면 반드시 갈라집니다). 그리고
+  // **켜진** 탭만 뺍니다: 프로젝트를 모르면 탭 셋이 흐린 채로 주소가
+  // 없으므로, 그때 이 줄에서까지 빼면 갈 길이 아예 없어집니다.
+  const covered = new Set(
+    navTabs(context)
+      .filter((tab) => tab.enabled)
+      .map((tab) => tab.screen),
+  );
   const links = navLinks(context)
+    .filter((link) => !covered.has(link.screen))
     .map((link) => `<a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>`)
     .join('');
-  const notes = missingLinks(context)
+  // ⚠️ **셸이 이미 열어 둔 문은 「못 간다」고 말하지 않습니다** (결함 343).
+  // 회의 목록은 `SHELL_WIDTH` 이상에서만 그려지고, 프로젝트를 모르면
+  // 채울 수가 없습니다 — 그 둘이 이 값의 전부입니다. 상수로 적지
+  // 마십시오: 폭은 사람이 창을 끌면 바뀝니다.
+  const doors: ShellDoors = {
+    meetingListShown:
+      (context.projectId ?? 0) > 0 && window.matchMedia(SHELL_WIDTH).matches,
+  };
+  const notes = missingLinks(context, doors)
     .map((note) => `<span class="miss">${escapeHtml(note)}</span>`)
     .join('');
 
@@ -442,10 +567,14 @@ function renderChannels(channels: MeetingChannel[]): string {
   const rows = shown
     .map((channel) => {
       const current = channel.current ? ' aria-current="page"' : '';
+      // ⚠️ **글자는 `@lib` 이 정합니다** (결함 350). 예전에는 숫자만
+      //    그려서 낭독기만 축 이름을 들었습니다 — 메신저 셸에서 채널
+      //    이름 옆의 둥근 알약은 「안 읽은 개수」로 읽힙니다.
+      const countText = channelCountText(channel.pending);
       const count =
-        channel.pending === null
+        countText === null
           ? ''
-          : `<span class="chan-count">${escapeHtml(String(channel.pending))}</span>`;
+          : `<span class="chan-count">${escapeHtml(countText)}</span>`;
       return (
         `<a class="chan-row" href="${escapeHtml(channel.href)}"${current}` +
         ` aria-label="${escapeHtml(channelAriaLabel(channel))}">` +

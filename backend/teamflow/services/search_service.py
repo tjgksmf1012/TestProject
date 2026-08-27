@@ -34,6 +34,8 @@ from sqlalchemy.orm import Session
 from teamflow.clock import as_utc
 from teamflow.db import assignees, live, vocab
 from teamflow.db import models as m
+from teamflow.github import presenting
+from teamflow.services.naming import meeting_label
 
 #: 한 종류당 최대 건수.
 #:
@@ -173,7 +175,7 @@ def search_meetings(
         Hit(
             kind="meeting",
             meeting_id=meeting.id,
-            title=(meeting.title or "").strip() or f"회의 {meeting.id}",
+            title=meeting_label(meeting.title, meeting.id),
             at=as_utc(meeting.started_at or meeting.scheduled_at)
             if (meeting.started_at or meeting.scheduled_at) is not None
             else None,
@@ -247,13 +249,34 @@ def search_github(session: Session, project_id: int, query: str) -> list[Hit]:
         .limit(MAX_PER_KIND)
     ).all()
 
+    # 팀원 이름 — 활동 기록이 쓰는 것과 같은 값입니다.
+    linked = {e.actor_user_id for e in rows if e.actor_user_id is not None}
+    names: dict[int, str] = (
+        dict(
+            session.execute(
+                select(m.User.id, m.User.name).where(m.User.id.in_(linked))
+            ).all()
+        )
+        if linked
+        else {}
+    )
+
+    # ⚠️ **활동 기록과 같은 말을 해야 합니다** (결함 347). 예전에는 여기만
+    #    원본을 그대로 내보내서, 같은 사건이 두 화면에서 다르게 보였습니다.
+    #
+    #        활동 기록   PR 병합 · 박지원
+    #        찾기        pull_request.merged · jiwon-db
+    #
+    #    내부 enum 을 그대로 띄우는 것은 결함 78·86 이 못 박은 것이고,
+    #    `vocab.py` 는 「서버가 라벨을 만들어 내려보냅니다」라고 적어
+    #    뒀습니다. 판단은 `github/presenting.py` 한 곳입니다.
     return [
         Hit(
             kind="github",
-            title=f"{event.repo} · {event.event_type}",
+            title=f"{event.repo} · {presenting.event_label(event.event_type)}",
             body=event.ref or "",
             at=as_utc(event.occurred_at) if event.occurred_at is not None else None,
-            who=event.actor_login,
+            who=presenting.actor_name(names.get(event.actor_user_id), event.actor_login),
         )
         for event in rows
     ]

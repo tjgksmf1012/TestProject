@@ -44,7 +44,7 @@ from sqlalchemy import create_engine, func, or_, select
 from teamflow.auth import passwords
 from teamflow.config import get_settings
 from teamflow.contribution.events import CATEGORY_OF, EventType
-from teamflow.db import assignees
+from teamflow.db import assignees, vocab
 from teamflow.db import models as m
 from teamflow.db import session as db_session
 from teamflow.projects import invites
@@ -55,9 +55,51 @@ PROJECT_TITLE = "TeamFlow 시연 프로젝트"
 # 시연 계정 비밀번호. 운영에 쓸 값이 아니고, 이 파일은 시연 데이터 전용이다.
 DEMO_PASSWORD = "teamflow-demo"
 
-#: 회의 시작 시각. 마감일 해석("금요일까지")의 기준이 되므로 요일이 중요하다.
-#: 2026-09-01 은 화요일 — "금요일까지" 는 09-04 로 풀린다.
-MEETING_START = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
+def _next_friday() -> datetime:
+    """오늘 **뒤**의 가장 가까운 금요일. 회의록의 "금요일까지" 와 짝입니다.
+
+    ⚠️ 오늘이 금요일이면 **다음 주** 금요일입니다 — 오늘로 잡으면 시연
+    도중에 지나가 승인이 막힙니다(결함 388).
+    """
+    today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return today + timedelta(days=(4 - today.weekday()) % 7 or 7)
+
+
+def _recent_tuesday(*, at_least_days_ago: int) -> datetime:
+    """`at_least_days_ago` 일보다 더 전인, 가장 가까운 **화요일** 10:00 UTC.
+
+    ## ⚠️ 왜 고정 날짜가 아닌가 (결함 388)
+
+    예전에는 `datetime(2026, 9, 1, ...)` 이었습니다. 시연을 **그 날짜 이후에
+    본다**는 것을 말없이 전제한 값입니다. 그 전제가 깨지면 씨앗은 제품이
+    만들 수 없는 상태가 됩니다 — `started_at` 은 회의가 **시작할 때** 찍히므로
+    미래일 수 없는데, 미래인 회의 다섯이 `needs_review`·`processing`·
+    `confirmed`·`failed` 를 달고 있었습니다.
+
+    화면에서 그대로 드러났습니다. 달력 9월 목록이 이렇게 나왔습니다 —
+
+        1일  연 회의  1주차 정기회의      ← 오늘은 8월 25일입니다
+        2일  연 회의  중간발표 리허설
+        3일  연 회의  제목 없는 회의 #4
+
+    `calendar_service` 의 `ItemKind` 주석이 바로 이것을 막으려던 것입니다:
+    「화면이 "이미 한 것" 과 "앞으로 할 것" 을 같은 모양으로 그리고, 그건
+    달력에서 제일 알고 싶은 것을 지우는 것입니다.」
+
+    ⚠️ **요일은 화요일이어야 합니다.** 회의록의 "금요일까지" 가 사흘 뒤로
+    풀리는 것이 이 시연의 전제입니다 — 요일이 바뀌면 그 숫자가 어긋납니다.
+    """
+    anchor = datetime.now(UTC).replace(hour=10, minute=0, second=0, microsecond=0)
+    anchor -= timedelta(days=at_least_days_ago)
+    # 화요일 = weekday() 1. 뒤로 걸어 가장 가까운 화요일을 찾는다.
+    return anchor - timedelta(days=(anchor.weekday() - 1) % 7)
+
+
+#: 회의 시작 시각. 마감일 해석("금요일까지")의 기준이 되므로 **요일**이 중요하다.
+#:
+#: ⚠️ 아흐레를 뒤로 잡는 이유: 회의는 `MEETING_START + 0~7일`에 흩어져
+#: 있습니다. 마지막 회의(+7)까지 **과거**가 되려면 그만큼 물러나야 합니다.
+MEETING_START = _recent_tuesday(at_least_days_ago=9)
 
 MEMBERS = [
     ("김민수", "minsu@example.com", "minsu-dev", {"developer": 1.0}),
@@ -121,7 +163,12 @@ def build_candidates(utterance_ids: list[int], user_ids: list[int]) -> list[dict
             "title": "로그인 API 구현",
             "assignee_hint": "민수",
             "assignee_id": user_ids[0],
-            "deadline": datetime(2026, 9, 4, tzinfo=UTC),
+            # ⚠️ **이 하나만 미래입니다** (결함 388). 이 후보는 시연자가
+            #    승인하는 그 후보이고, 서버는 **과거 마감을 거절합니다**
+            #    (`ApprovalError.DEADLINE_IN_PAST` — 결함 386 회차에 확인).
+            #    회의는 지난주인데 마감은 다음 금요일 — 실기에서 흔한
+            #    모양이고, 이렇게 두어야 시연의 대표 장면이 실제로 돕니다.
+            "deadline": _next_friday(),
             "confidence": 0.92,
             "evidence": [utterance_ids[0], utterance_ids[2]],
             "warnings": [],
@@ -145,7 +192,11 @@ def build_candidates(utterance_ids: list[int], user_ids: list[int]) -> list[dict
             "title": "DB 스키마 정리",
             "assignee_hint": "저",
             "assignee_id": user_ids[2],
-            "deadline": datetime(2026, 9, 8, tzinfo=UTC),
+            # ⚠️ 이 후보는 **이미 승인**돼 칸반 업무와 이어져 있습니다
+            #    (`_seed_tasks`). 승인이 막힐 일이 없으므로 회의 기준으로
+            #    둡니다 — 고정 날짜로 두면 앵커가 움직일 때 업무의 마감과
+            #    갈라집니다(결함 388 을 고치다 하마터면 그럴 뻔했습니다).
+            "deadline": MEETING_START + timedelta(days=7),
             "confidence": 0.88,
             "evidence": [utterance_ids[3]],
             "warnings": [],
@@ -213,13 +264,30 @@ def seed(*, reset: bool) -> dict:
         s.add(project)
         s.flush()
 
-        for user, (_n, _e, login, roles) in zip(users, MEMBERS, strict=True):
+        # ⚠️ **첫 팀원을 소유자로 넣습니다.**
+        #
+        # 이게 없던 동안 시연 프로젝트의 세 사람이 전부 `member` 였고,
+        # 그래서 **아무도 팀원을 다룰 수 없었습니다** — 등급을 바꾸거나
+        # 내보내는 것도, 프로젝트 이름·저장소를 저장하는 것도 관리자
+        # 이상이라 셋 다 영영 막혀 있었습니다.
+        #
+        # 제품은 그런 상태를 만들 수 없습니다. `POST /api/projects` 는
+        # 만든 사람을 소유자로 넣고, 그 주석에 "소유자가 0명이면 아무도
+        # 못 고치는 프로젝트가 된다" 고 적혀 있습니다. **시드가 제품이
+        # 만들 수 없는 상태를 만들고 있었고, 그 상태로 화면을 재 왔습니다**
+        # — 초대 코드 때(결함 71) 겪은 것과 같은 종류입니다.
+        for index, (user, (_n, _e, login, roles)) in enumerate(
+            zip(users, MEMBERS, strict=True)
+        ):
             s.add(
                 m.Member(
                     project_id=project.id,
                     user_id=user.id,
                     role_shares=roles,
                     github_login=login,
+                    project_role=str(
+                        vocab.ProjectRole.OWNER if index == 0 else vocab.ProjectRole.MEMBER
+                    ),
                 )
             )
 
@@ -436,20 +504,58 @@ def seed(*, reset: bool) -> dict:
 # 기여도가 통째로 내려가는데, 그건 측정이 아니라 오답이다 (docs/04 §2.6).
 # 시연 데이터에 그 경우가 없으면 "측정 불가는 0점이 아니다" 를 주장할
 # 거리가 없다 — 승인 화면에서 확신도 0.34 짜리를 넣어 둔 것과 같은 이유다.
-_EVENTS: list[tuple[int, str, str, float, int]] = [
-    # (팀원 index, event_type, source_kind, magnitude, 회의 시작 후 며칠)
-    (0, "pr_merged", "github_event", 180.0, 1),
-    (0, "pr_merged", "github_event", 240.0, 3),
-    (0, "review_given", "github_event", 1.0, 2),
-    (0, "review_given", "github_event", 1.0, 4),
-    (0, "task_completed", "task", 1.0, 3),
-    (1, "pr_merged", "github_event", 90.0, 2),
-    (1, "review_given", "github_event", 1.0, 3),
-    (1, "task_completed", "task", 1.0, 2),
-    (1, "task_completed", "task", 1.0, 5),
-    (2, "pr_merged", "github_event", 120.0, 4),
-    (2, "review_given", "github_event", 1.0, 5),
-    (2, "task_completed", "task", 1.0, 4),
+# ⚠️ **`task_completed` 는 혼자 오지 않습니다** (결함 385).
+#
+# 실기의 `task_service.complete` 는 완료 이벤트를 쓴 **바로 다음에**
+# 마감 준수를 판정해 `deadline_met` / `deadline_missed` 를 같은
+# `source_id` 로 씁니다. 마감일이 없을 때만 판정을 건너뜁니다. 즉
+# 「완료 이벤트는 있는데 일정 판정이 없다」는 상태는 이 제품이
+# **만들 수 없습니다.**
+#
+# 그런데 이 표는 오래도록 완료만 손으로 적고 판정을 안 적었습니다.
+# 씨앗 그대로는 `schedule` 범주가 팀 전체 0건이라 화면이 그 범주를
+# 통째로 빼서 티가 안 났는데, **누가 카드를 하나 완료로 옮기는 순간**
+# 범주가 살아나고 박지원이 「일정 준수 0건 · 팀의 0%」로 나왔습니다 —
+# 이 사람도 업무를 완료한 것으로 적혀 있는데도. 불변식 ③이 말하는
+# 「안 잰 것」이 「쟀는데 0」으로 그려진 것입니다.
+#
+# 그래서 완료마다 판정을 짝지어 둡니다. **같은 슬롯 = 같은 업무**라서
+# `source_id` 를 공유합니다 (실기가 `source_id=task.id` 로 둘 다 쓰는
+# 것과 같은 모양입니다). 유니크 키는 event_type 까지 보므로 부딪히지
+# 않습니다.
+#
+# ⚠️ 김민수의 완료는 **일부러 `deadline_missed`** 입니다. 셋 다 「제때」면
+# 준수율이 전원 1.0 이라 그 갈래가 한 번도 안 그려집니다 — 「갈라지는
+# 데이터로 재십시오」가 씨앗에도 걸립니다.
+#
+# ⚠️ **어느 사람에게 붙이는지까지 재서 골랐습니다.** 처음에는 이하늘에게
+# 붙였는데, `_schedule_raw = 10 * 비율 * min(1, 건수/5)` 라서 셋의 raw 가
+# **전부 2.0** 으로 같아졌습니다 — 1.0×0.2 와 0.5×0.4 가 정확히 상쇄
+# 합니다. 그러면 「양쪽 갈래가 다 있다」는 참인데 **점수는 갈리지
+# 않아서**, missed 항이 통째로 사라져도 씨앗이 아무것도 못 잡습니다.
+# 지금 값은 갈립니다 — 김민수 0.0 · 이하늘 4.0 · 박지원 2.0.
+#
+# ⚠️ 김민수의 **0.0 은 「못 잰 것」이 아니라 「쟀는데 0」** 입니다
+# (결함 191 이 근거를 적어 내린 결정 — 그대로 0% 로 그립니다).
+_EVENTS: list[tuple[int, str, str, float, int, int]] = [
+    # (팀원 index, event_type, source_kind, magnitude, 회의 시작 후 며칠, 슬롯)
+    #                                                  ↑ 같은 슬롯 = 같은 업무
+    (0, "pr_merged", "github_event", 180.0, 1, 0),
+    (0, "pr_merged", "github_event", 240.0, 3, 1),
+    (0, "review_given", "github_event", 1.0, 2, 2),
+    (0, "review_given", "github_event", 1.0, 4, 3),
+    (0, "task_completed", "task", 1.0, 3, 4),
+    (0, "deadline_missed", "task", 1.0, 3, 4),
+    (1, "pr_merged", "github_event", 90.0, 2, 5),
+    (1, "review_given", "github_event", 1.0, 3, 6),
+    (1, "task_completed", "task", 1.0, 2, 7),
+    (1, "deadline_met", "task", 1.0, 2, 7),
+    (1, "task_completed", "task", 1.0, 5, 8),
+    (1, "deadline_met", "task", 1.0, 5, 8),
+    (2, "pr_merged", "github_event", 120.0, 4, 9),
+    (2, "review_given", "github_event", 1.0, 5, 10),
+    (2, "task_completed", "task", 1.0, 4, 11),
+    (2, "deadline_met", "task", 1.0, 4, 11),
     # ⚠️ `utt_*` 는 **여기 없습니다.** 예전에는 손으로 넣었는데, 이제
     # 회의 발화에서 진짜로 만들어집니다(`meeting_contribution_service`).
     #
@@ -478,7 +584,7 @@ _SEED_SOURCE_BASE = 900_000
 
 
 def _seed_contribution_events(session, project_id: int, user_ids: list[int]) -> None:
-    for seq, (index, event_type, source_kind, magnitude, day) in enumerate(_EVENTS):
+    for index, event_type, source_kind, magnitude, day, slot in _EVENTS:
         session.add(
             m.ContributionEventRow(
                 project_id=project_id,
@@ -487,10 +593,15 @@ def _seed_contribution_events(session, project_id: int, user_ids: list[int]) -> 
                 category=CATEGORY_OF[EventType(event_type)].value,
                 event_type=event_type,
                 source_kind=source_kind,
-                # `(source_kind, source_id, event_type)` 이 유니크다 — 웹훅이
-                # 같은 이벤트를 두 번 보내도 한 번만 세도록 만든 중복 제거 키다.
-                # 전부 0 으로 두면 두 번째 이벤트부터 IntegrityError 가 난다.
-                source_id=_SEED_SOURCE_BASE + seq,
+                # 유니크 키는 **네 칸**이다 — `(source_kind, source_id,
+                # event_type, user_id)`. 웹훅이 같은 이벤트를 두 번 보내도
+                # 한 번만 세도록 만든 중복 제거 키다. 전부 0 으로 두면 두
+                # 번째 이벤트부터 IntegrityError 가 난다.
+                #
+                # ⚠️ 그래서 **같은 슬롯에 완료와 마감 판정을 같이 둘 수
+                # 있습니다** — `event_type` 이 다르기 때문이다. 실기도
+                # 둘 다 `source_id=task.id` 로 쓴다 (결함 385).
+                source_id=_SEED_SOURCE_BASE + slot,
                 magnitude=magnitude,
                 # 실제 PR·업무 행을 가리키지 않는 합성 이벤트라고 남긴다.
                 # 남기지 않으면 "화면의 숫자는 원본 이벤트로 역추적된다"
@@ -546,7 +657,11 @@ _TASKS: list[tuple[str, tuple[int, ...], str, int | None, str | None]] = [
     # 승인을 거쳐 칸반에 올라온 업무. 이게 이 프로젝트의 대표 주장이
     # 화면에서 보이는 자리다 — 카드에서 회의 발화까지 거슬러 올라간다.
     ("DB 스키마 정리", (2,), "done", 2, "DB 스키마 정리"),
-    # 손으로 만든 업무. 회의에서 나오지 않은 것도 칸반에는 있습니다.
+    # ⚠️ 출처 없는 업무. 예전 주석은 「회의에서 나오지 않은 것도 칸반에는
+    #    있습니다」였는데, **제품에는 그 길이 없습니다** —
+    #    `approval_service.py` 의 불변식과 어긋납니다 (결함 318).
+    #    `test_demo_path.py` 가 이 상태를 못 박고 있어 여기서 고르지
+    #    않았습니다. docs/17 318번 「결정이 필요한 자리」.
     ("개발 환경 문서 정리", (1,), "in_progress", None, None),
     # 담당자가 없는 업무 — 완료해도 기여도에 잡히지 않는다는 걸 화면이
     # 말해 줘야 하는 경우입니다.

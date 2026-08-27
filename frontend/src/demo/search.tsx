@@ -27,10 +27,12 @@ import {
   canSearch,
   describeKind,
   excerpt,
+  filterScopeNote,
   groupByKind,
   hrefFor,
   type Hit,
 } from '../lib/search/view.ts';
+import { labelInList } from '../lib/people/labels.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
 import { tryGet, unreachableText } from '../lib/http/send.ts';
 import { STATUS_LABEL } from '../lib/kanban/board.ts';
@@ -55,6 +57,9 @@ function goToLogin(): void {
 interface Member {
   user_id: number;
   name: string;
+  /** ⭐ 같은 이름이 둘일 때 가르는 손잡이 (결함 345). 서버가 프로젝트
+      안에서 유일하게 지킵니다. */
+  github_login?: string | null;
 }
 
 function App() {
@@ -70,11 +75,29 @@ function App() {
    *  자릅니다 — 안 그러면 타자를 칠 때마다 이미 찾은 결과의 하이라이트가
    *  따라 움직입니다. */
   const [asked, setAsked] = useState('');
+  /** 무엇으로 걸러 찾은 결과인가. ⚠️ `asked` 와 **같은 이유**로 따로
+   *  둡니다 — 고르기만 하고 안 누른 값으로 「업무에만 걸렸습니다」라고
+   *  말하면 그 줄이 결과보다 앞서 갑니다 (결함 390). */
+  const [askedFilters, setAskedFilters] = useState<{
+    assignee: string;
+    status: string;
+  } | null>(null);
 
   useEffect(() => {
     void (async () => {
       const response = await get(`/api/projects/${projectId}/members`);
-      if (response === null || !response.ok) return;
+      if (response === null) return;
+      /* ⚠️ **세션이 끊겼으면 로그인으로 보냅니다** (결함 424).
+         예전에는 `|| !response.ok` 로 401 을 **조용히 삼켰습니다.** 그래서
+         로그아웃한 사람에게 이 화면만 멀쩡한 찾기 폼으로 열렸고(레거시
+         열넷 중 열셋은 바로 로그인으로 갑니다), 담당자·상태를 고르고
+         「찾기」를 누른 **뒤에야** 튕겼습니다 — 적은 말은 주소에 없으니
+         돌아와도 빈 칸입니다. */
+      if (isSessionExpired(response.status)) {
+        goToLogin();
+        return;
+      }
+      if (!response.ok) return;
       setMembers((await response.json()) as Member[]);
     })();
   }, []);
@@ -117,6 +140,7 @@ function App() {
     }
     setFailure(null);
     setAsked(query.trim());
+    setAskedFilters(filters);
     setHits((await response.json()) as Hit[]);
   }, [query, assignee, taskStatus]);
 
@@ -153,14 +177,20 @@ function App() {
 
       <div className="filters">
         <span className="fitem">
+          {/* ⚠️ 「업무」가 붙어 있어야 합니다 (결함 390). 이 칸은 서버의
+              **업무 검색 조건**이고(`search_tasks` — SEARCH-002) 회의·회의
+              내용·GitHub 은 낱말만 봅니다. 옆 칸이 「업무 상태」라고 적는
+              동안 이 칸만 안 적어서, 김민수로 걸러 놓고 박지원의 발언이
+              나왔습니다. */}
           <label className="clabel" htmlFor="who">
-            담당자
+            업무 담당자
           </label>
           <select id="who" value={assignee} onChange={(event) => setAssignee(event.target.value)}>
             <option value="">누구든</option>
             {members.map((member) => (
               <option key={member.user_id} value={String(member.user_id)}>
-                {member.name}
+                {/* 결함 345 — 같은 이름 둘이면 목록이 같은 글자 두 줄입니다. */}
+                {labelInList(member, members)}
               </option>
             ))}
           </select>
@@ -185,10 +215,28 @@ function App() {
         </span>
       </div>
 
-      {/* ⚠️ 버튼만 흐려 두면 왜 안 되는지 모른 채 계속 누릅니다. */}
-      {why !== null && <p className="cwhy">{why}</p>}
+      {/* ⚠️ 버튼만 흐려 두면 왜 안 되는지 모른 채 계속 누릅니다.
+          ⚠️ **id 가 있어야 단추가 이 줄을 가리킬 수 있습니다** — 없는 동안
+          눈으로만 읽혔고, 진짜 `disabled` 라 키보드는 단추에 닿지도 못했습니다
+          (결함 375, 373 과 같은 모양). */}
+      {why !== null && (
+        <p className="cwhy" id="find-why">
+          {why}
+        </p>
+      )}
       <NoteLine note={note} id="search-note" />
-      <button type="submit" id="find" disabled={!canSearch(query, filters)}>
+      <button
+        type="submit"
+        id="find"
+        aria-disabled={!canSearch(query, filters)}
+        aria-describedby={why !== null ? 'find-why' : undefined}
+        onClick={(event) => {
+          if (!canSearch(query, filters)) {
+            event.preventDefault();
+            document.getElementById('q')?.focus();
+          }
+        }}
+      >
         찾기
       </button>
     </form>
@@ -216,11 +264,17 @@ function App() {
           html={emptyHtml({
             what: '찾는 것이 없습니다',
             why: '이 프로젝트 안에서만 찾습니다 — 다른 팀 자료는 나오지 않습니다.',
-            how: '다른 낱말로 찾거나, 담당자·상태만으로 찾아보세요.',
+            how: '다른 낱말로 찾거나, 업무 담당자·상태만으로 찾아보세요.',
           })}
         />
       ) : (
-        groupByKind(hits).map((group) => (
+        <>
+          {/* ⚠️ 걸린 데까지만 말합니다 — 안 걸린 묶음이 **실제로 있을 때만**
+              나옵니다 (결함 390 · 294 의 방법). */}
+          {filterScopeNote(askedFilters, groupByKind(hits)) !== null && (
+            <p className="cwhy scope-note">{filterScopeNote(askedFilters, groupByKind(hits))}</p>
+          )}
+          {groupByKind(hits).map((group) => (
           <section key={group.kind} className="kgroup">
             {/* ⚠️ 종류 순서는 **고정**입니다 — 건수 순으로 세우면 그게 곧
                 순위표이고, 새로고침마다 자리가 바뀝니다. */}
@@ -249,7 +303,8 @@ function App() {
               })}
             </ul>
           </section>
-        ))
+          ))}
+        </>
       )}
     </>
   );

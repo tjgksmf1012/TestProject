@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  appRailHref,
   railAriaLabel,
   railHref,
   railInitial,
@@ -153,5 +154,47 @@ describe('railAriaLabel', () => {
     const [item] = railItems([project({ title: '옆 팀' })], 'kanban');
     ok(item);
     strictEqual(railAriaLabel(item), '옆 팀');
+  });
+});
+
+describe('appRailHref — 같은 판단, SPA 주소 (베타 QA)', () => {
+  it('⭐ basename 을 적지 않는다 — 라우터가 붙이므로 적으면 `/app/app/…` 이 된다', () => {
+    strictEqual(appRailHref('kanban', 7), '/project/7/kanban');
+    strictEqual(appRailHref('contributions', 7), '/project/7/contributions');
+  });
+
+  it('⭐ 설정은 구역까지 — `/settings` 만 주면 라우터가 한 번 더 튕긴다', () => {
+    strictEqual(appRailHref('project', 7), '/project/7/settings/role');
+  });
+
+  it('⭐ 홈은 홈에 머무른다 — SPA 홈은 프로젝트 하나의 계기판이다', () => {
+    // ⚠️ 옛 셸(`railHref`)과 **일부러 다릅니다.** 옛 홈은 모든 프로젝트를
+    //    늘어놓는 화면이라 고른 직후 홈으로 보내면 어디 있는지 몰랐습니다.
+    strictEqual(appRailHref('home', 7), '/?project=7');
+    strictEqual(railHref('home', 7), '/kanban.html?project=7');
+  });
+
+  it('회의 화면에서 프로젝트를 바꾸면 그 프로젝트의 칸반으로', () => {
+    for (const screen of ['lobby', 'review', 'record', 'chat'] as const) {
+      strictEqual(appRailHref(screen, 7), '/project/7/kanban', screen);
+    }
+  });
+});
+
+describe('railItems — 주소 만드는 법만 갈아 끼운다', () => {
+  it('⭐ 셸이 달라도 목록·순서·머리글자는 한 벌이다', () => {
+    const raw = [project({ project_id: 2, title: '옆 팀' }), project({ project_id: 1, title: '졸업작품' })];
+    const legacy = railItems(raw, 'kanban', 1);
+    const spa = railItems(raw, 'kanban', 1, appRailHref);
+    deepStrictEqual(spa.map((i) => i.projectId), legacy.map((i) => i.projectId));
+    deepStrictEqual(spa.map((i) => i.initial), legacy.map((i) => i.initial));
+    deepStrictEqual(spa.map((i) => i.current), legacy.map((i) => i.current));
+    // 다른 것은 주소뿐.
+    deepStrictEqual(spa.map((i) => i.href), ['/project/1/kanban', '/project/2/kanban']);
+    deepStrictEqual(legacy.map((i) => i.href), ['/kanban.html?project=1', '/kanban.html?project=2']);
+  });
+
+  it('넘기지 않으면 옛 주소 — 이미 쓰는 화면이 안 깨진다', () => {
+    strictEqual(railItems([project({ project_id: 3 })], 'kanban')[0]?.href, '/kanban.html?project=3');
   });
 });

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from teamflow import clock
 from teamflow.db.vocab import ReportType
 from teamflow.reports import SCHEMA_VERSION, blocks
 
@@ -48,6 +49,13 @@ class PeriodInput:
     period_end: datetime | None = None
     meetings_total: int = 0
     meetings_processed: int = 0
+    #: 처리를 **시도했다가 실패한** 회의 수.
+    #:
+    #: ⚠️ 「아직 처리 전」과 **다릅니다** (결함 370). 앞엣것은 기다리면
+    #: 들어오고, 이쪽은 **사람이 다시 돌려야** 들어옵니다. 옆 파일
+    #: (`minutes.py` 의 `state_of`)이 이미 셋으로 가르고 있었는데
+    #: 여기만 「처리됨 / 나머지」 둘이었습니다.
+    meetings_failed: int = 0
     tasks_done: int = 0
     tasks_open: int = 0
     github_events: int = 0
@@ -55,8 +63,50 @@ class PeriodInput:
     github_backfilled: bool = False
     #: 팀이 기여도를 확정했는가.
     confirmed: bool = False
-    #: 가중치가 0이라 아예 계산에서 빠진 영역.
+    #: **팀 전체의 활동량이 0이라** 아예 계산에서 빠진 영역 (결함 311).
+    #: 가중치와는 무관합니다 — 만드는 자는 `scoring.py` 의 `team_totals`.
     skipped_categories: list[str] = field(default_factory=list)
+
+
+#: 「이 기간에 일어난 일」 안에서 **기간과 무관한** 값들의 이름.
+#:
+#: ⚠️ 기간이 있는 보고서(주간)에서는 이 줄들에 **이름표**를 답니다 —
+#: 안 달면 읽는 사람이 「이번 주에 그랬다」로 읽습니다(결함 371 · 332).
+#:
+#: ⚠️ 손으로 고른 목록이 아닙니다. `test_reports.py` 가 **창을 비워서**
+#: 실제로 안 변하는 값이 무엇인지 재고, 그 집합이 이것과 같은지 봅니다 —
+#: 서버가 새 값을 창 없이 세기 시작하면 그 자리에서 빨개집니다.
+SNAPSHOT_FACTS: frozenset[str] = frozenset({"남은 업무"})
+
+
+def _snapshot_note(label: str, report_type: ReportType) -> str:
+    """기간과 무관한 줄에 다는 **이름표**.
+
+    기간이 없는 최종 보고서에는 헷갈릴 것이 없으므로 안 답니다.
+    """
+    if label not in SNAPSHOT_FACTS or report_type is not ReportType.WEEKLY:
+        return ""
+    return "이 기간이 아니라 지금 남아 있는 것입니다"
+
+
+def _not_counted(waiting: int, failed: int) -> str:
+    """기여도에 **안 들어간** 회의를 갈래별로 한 줄에.
+
+    ⚠️ 갈래마다 말이 달라야 합니다 — 두 갈래가 같은 글자를 받으면 읽는
+    사람은 「기다리면 되는 것」과 「내가 다시 돌려야 하는 것」을 구별할
+    방법이 없습니다 (결함 370 · 326 · 365 와 같은 모양).
+
+    ⚠️ 짧게 적습니다. 이 줄은 사실 칸 안에 들어가고, 밖으로 나가는
+    문서에서 한 줄이 두 줄이 되면 표가 흐트러집니다.
+    """
+    parts: list[str] = []
+    if waiting:
+        parts.append(f"{waiting}건은 아직 처리 전")
+    if failed:
+        parts.append(f"{failed}건은 처리에 실패")
+    if not parts:
+        return ""
+    return " · ".join(parts) + " — 그 회의의 발언은 기여도에 안 들어갔습니다"
 
 
 def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
@@ -69,7 +119,12 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
         raise ValueError(f"이 생성기가 만들 수 있는 종류가 아닙니다: {report_type}")
 
     if report_type is ReportType.WEEKLY:
-        span = f"{data.period_start:%Y-%m-%d} ~ {data.period_end:%Y-%m-%d}"
+        # ⛔ 여기도 UTC 를 그대로 찍고 있었습니다 (결함 290). 주간 보고서의
+        #    기간이 팀 달력과 하루 어긋날 수 있습니다.
+        span = (
+            f"{clock.local_date(data.period_start):%Y-%m-%d}"
+            f" ~ {clock.local_date(data.period_end):%Y-%m-%d}"
+        )
         title = f"주간 보고서 — {span}"
     else:
         title = f"최종 보고서 — {data.project_name}"
@@ -77,7 +132,11 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
     body: list[dict[str, Any]] = []
 
     # ── 무슨 일이 있었나 ──────────────────────────────────
-    unprocessed = data.meetings_total - data.meetings_processed
+    # ⛔ **「나머지」를 한 덩어리로 세면 안 됩니다** (결함 370).
+    #    실패한 회의를 「아직 처리 전」이라고 하면, 읽는 사람은 기다리면
+    #    들어온다고 믿습니다 — 안 들어옵니다.
+    failed = data.meetings_failed
+    waiting = data.meetings_total - data.meetings_processed - failed
     body.append(blocks.heading("이 기간에 일어난 일"))
     body.append(
         blocks.facts(
@@ -86,15 +145,27 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
                 blocks.fact(
                     "처리된 회의",
                     f"{data.meetings_processed}건",
-                    note=(
-                        f"{unprocessed}건은 아직 처리 전이라 그 회의의 발언은 "
-                        "기여도에 안 들어갔습니다"
-                        if unprocessed
-                        else ""
-                    ),
+                    note=_not_counted(waiting, failed),
                 ),
                 blocks.fact("완료한 업무", f"{data.tasks_done}건"),
-                blocks.fact("남은 업무", f"{data.tasks_open}건"),
+                blocks.fact(
+                    "남은 업무",
+                    f"{data.tasks_open}건",
+                    # ⛔ **이 줄만 기간 밖입니다** (결함 371). 나머지 넷은
+                    #    기간으로 걸러 오는데, 「남은 업무」는 아직 안 끝난
+                    #    것이라 걸러 올 날짜 자체가 없습니다 — 언제나 **지금**
+                    #    값입니다.
+                    #
+                    #    머리말이 「이 기간에 **일어난** 일」이라, 회의 0 ·
+                    #    완료 0 인 주간 보고서에서 「남은 업무 3건」만 서
+                    #    있으면 읽는 사람은 **이번 주에 3건이 밀렸다**고
+                    #    읽습니다. 프로젝트 전체의 잔량인데요.
+                    #
+                    #    결함 332 가 사람별 기여 판에서 내린 판단과 같습니다 —
+                    #    **한 문서가 두 범위를 말하면 각 범위에 이름을 붙입니다.**
+                    #    기간이 없는 최종 보고서에는 헷갈릴 것이 없으므로 안 붙입니다.
+                    note=_snapshot_note("남은 업무", report_type),
+                ),
                 blocks.fact(
                     "GitHub 활동",
                     f"{data.github_events}건",
@@ -109,7 +180,36 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
     )
 
     # ── 사람별 ────────────────────────────────────────────
-    body.append(blocks.heading("사람별 기여"))
+    #
+    # ⚠️ **여기 숫자는 기간이 아니라 프로젝트 전체입니다** (결함 332).
+    #    위 「이 기간에 일어난 일」의 숫자들(`counts`)은 기간으로 걸러
+    #    오는데, 사람별 몫은 `_people(session, project_id)` 가 **기간을
+    #    안 받습니다.** 그래서 한 문서 안에 축이 둘인데, 주간 보고서에서는
+    #    바로 위 문단이 「이 기간」이라고 말해 놓은 뒤라 사람은 아래 값도
+    #    그 주의 것으로 읽습니다.
+    #
+    #    재현: 아무 일도 없던 주에 만든 주간 보고서가 「회의 0건 · 완료한
+    #    업무 0건 · GitHub 0건」이라고 적어 놓고, 바로 아래에서 세 사람에게
+    #    30.5~53.9% · 18.0~31.7% · 23.8~42.1% 를 붙였습니다 — **최종
+    #    보고서와 한 자도 다르지 않은 값**입니다.
+    #
+    #    기간별로 다시 계산하는 것은 산정 엔진에 기간 개념을 넣는 일이라
+    #    여기서 고르지 않습니다. **무엇을 재고 있는지 말합니다** — 결함
+    #    311·323·331 이 같은 자리에서 택한 방법입니다.
+    cumulative = report_type is ReportType.WEEKLY
+    body.append(
+        blocks.heading("사람별 기여 — 프로젝트 전체 누적" if cumulative else "사람별 기여")
+    )
+    if cumulative:
+        body.append(
+            blocks.paragraph(
+                # ⚠️ 별표를 쓰지 않습니다 — 보고서 블록은 마크다운이 아니라
+                #    글자입니다(결함 292). 강조는 「」로 합니다.
+                "아래 값은 이 주에 한 일이 아니라 「프로젝트를 시작한 뒤 지금까지」의 "
+                "누적입니다. 이 주에 무슨 일이 있었는지는 위 「이 기간에 일어난 일」을 "
+                "보십시오."
+            )
+        )
     body.append(
         blocks.people(
             [
@@ -141,9 +241,14 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
         )
     else:
         body.append(
+            # ⛔ 예전에는 「**확정된 기여도가 아닙니다.**」 였습니다 (결함 292).
+            #    이 블록은 **마크다운이 아니라 글자**라, 화면에도 「글자로
+            #    복사」한 결과에도 별표가 그대로 찍혔습니다. 강조하려던 것이
+            #    오히려 문서를 어설프게 보이게 했습니다 — 이 저장소가 렌더해
+            #    보고 한 번 잡은 부류인데 이 자리에 다시 있었습니다.
             blocks.gap(
                 "팀이 아직 기여도를 확정하지 않았습니다. 위 구간은 계산값이며 "
-                "**확정된 기여도가 아닙니다.**"
+                "확정된 기여도가 아닙니다."
             )
         )
 
@@ -153,13 +258,31 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
     #    측정 불가는 0점이 아니라 **모르는 것**이고, 읽는 사람은 그 차이를
     #    알아야 숫자를 제대로 씁니다.
     holes: list[str] = []
-    if unprocessed:
-        holes.append(f"처리하지 않은 회의 {unprocessed}건 — 그 발언은 안 들어갔습니다")
+    if waiting:
+        holes.append(f"아직 처리하지 않은 회의 {waiting}건 — 그 발언은 안 들어갔습니다")
+    if failed:
+        # ⚠️ **다음에 할 일이 다릅니다.** 기다리는 것이 아니라 다시 돌리는 것.
+        holes.append(f"처리에 실패한 회의 {failed}건 — 다시 처리해야 들어갑니다")
     if not data.github_backfilled:
         holes.append("GitHub 연결 전 활동 — 아직 훑지 않아 보이지 않습니다")
     if data.skipped_categories:
+        # ⛔ **여기서 이유를 지어내고 있었습니다** (결함 311). 예전 문장은
+        #    「**가중치가 0이라** 계산에서 빠진 영역」이었는데, 이 목록을
+        #    만드는 자는 `scoring.py` 의
+        #        skipped = [c for c in Category if team_totals[c] <= 0]
+        #    입니다 — 재는 것은 **가중치가 아니라 팀의 활동량**입니다.
+        #    갓 만든 프로젝트에서 여섯 영역이 전부 여기 실렸고, 그중
+        #    코드(35%)·업무(30%)는 그 사람의 가장 큰 가중치였습니다.
+        #    **밖으로 나가는 문서**가 「네 코드는 0으로 쳤다」고 말한 셈입니다.
+        #
+        #    ⚠️ 불변식 ③ 과도 반대입니다 — 「측정 불가 ≠ 0점」인데 「가중치
+        #    0」은 **일부러 안 세기로 했다**는 뜻으로 읽힙니다. 화면은 같은
+        #    목록을 「이번 계산에서 빠졌습니다」라고만 적고 이유를 안 붙입니다
+        #    (`contribution/view.ts`). 두 자리가 **같은 사실**을 말해야 합니다.
         holes.append(
-            "가중치가 0이라 계산에서 빠진 영역: " + ", ".join(data.skipped_categories)
+            "팀 전체에 기록된 활동이 없어 계산에서 빠진 영역: "
+            + ", ".join(data.skipped_categories)
+            + " — 아무도 안 했다는 뜻이 아니라 이 계산에 잡힌 것이 없다는 뜻입니다"
         )
     for p in data.people:
         for hole in p.gaps:

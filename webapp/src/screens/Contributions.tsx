@@ -1,11 +1,21 @@
 import { useMemo, useState } from 'react';
+import { labelInList } from '@lib/people/labels.ts';
+import { teamDateTime } from '@lib/time/calendar.ts';
 import { useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
-import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
+import { TrackRibbon } from '../components/TrackRibbon.tsx';
 import { Chain, type ChainLink } from '../components/Chain.tsx';
 import { Stat } from '../components/Stat.tsx';
 import { Why } from '../components/Why.tsx';
-import { useConfirmFinals, useContributions, useFinals, useMembers } from '../api/hooks.ts';
+import { useConfirmFinals, useContributions, useFinals, useMe, useMembers } from '../api/hooks.ts';
+import { ApiError } from '../api/client.ts';
+import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
+import {
+  confidenceRibbon,
+  describeTeamRibbon,
+  ribbonReading,
+  sharedConfidence,
+} from '@lib/contribution/ribbon.ts';
 import {
   categoriesForDisplay,
   describeCategory,
@@ -17,18 +27,25 @@ import {
   orderForDisplay,
   readBeforeTheNumber,
   roleOf,
+  teamConfidenceLine,
   teamWarnings,
   uncertaintySpans,
+  describeWidth,
+  describeWidthNote,
   type MemberScore,
   type Person,
 } from '@lib/contribution/view.ts';
 import {
   adjustmentsToRestore,
   BLIND_CONFIRM,
+  confirmBlockOf,
+  whyCannotConfirm,
+  firstGapOf,
   describeFinals,
   problemsWith,
   sameValue,
   toPayload,
+  type ConfirmBlock,
   type Draft,
 } from '@lib/contribution/final.ts';
 import { Problem } from '../components/Problem.tsx';
@@ -37,16 +54,6 @@ import { Problem } from '../components/Problem.tsx';
 //
 // 불변식: 이름순 고정 · 구간(단일 점수 없음) · 결측은 황토 · 확정은 사람이.
 // 리본 채움은 **확신도** 비례입니다 — 기여도에 비례하면 그게 순위표입니다.
-
-/** 리본 조각: 왼쪽부터 확신(잉크) → 모르는 폭(빗금) → 빈 곳. */
-function ribbonFor(member: MemberScore, widthPoints: number): RibbonSegment[] {
-  const known = Math.min(1, Math.max(0, member.confidence));
-  const unknown = Math.min(1 - known, widthPoints / 100);
-  return [
-    { start: 0, end: known, kind: 'known' },
-    { start: known, end: known + unknown, kind: 'unknown' },
-  ];
-}
 
 /**
  * 이 사람의 근거를 **사슬**로 — 회의 → 업무 → 코드.
@@ -80,10 +87,11 @@ function evidenceChain(member: MemberScore): ChainLink[] {
   });
 }
 
+/* ⛔ 여기서 `new Date(iso).getHours()` 로 그리고 있었습니다 — **브라우저
+   달력**입니다. 이 제품의 마감일·달력은 팀 달력(`Asia/Seoul`)이라, 한
+   화면에서 달력 두 벌이 섞였습니다(결함 246). 판단은 `@lib`. */
 function fmtComputedAt(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return teamDateTime(iso) ?? '—';
 }
 
 export default function Contributions() {
@@ -92,6 +100,7 @@ export default function Contributions() {
   const score = useContributions(projectId);
   const finals = useFinals(projectId);
   const membersQuery = useMembers(projectId);
+  const { data: me } = useMe();
 
   const people: Person[] = useMemo(
     () =>
@@ -99,9 +108,17 @@ export default function Contributions() {
         user_id: m.user_id,
         name: m.name,
         role_shares: m.role_shares,
+        project_role: m.project_role,
       })),
     [membersQuery.data],
   );
+
+  /* 확정은 **관리자·소유자만**입니다 (결함 392). ⚠️ `?? null` 이 아니라
+     `undefined` 를 살립니다 — 명단이 오기 전에 「권한이 없다」고 단언하지
+     않기 위해서입니다(결함 254). 문장은 `@lib` 이 고릅니다. */
+  const myRole = membersQuery.isSuccess
+    ? (membersQuery.data?.find((m) => m.user_id === me?.user_id)?.project_role ?? null)
+    : undefined;
 
   // 입력 상태 — 칸을 안 건드리면 null(시스템 값 그대로).
   const [values, setValues] = useState<Record<number, string>>({});
@@ -109,9 +126,15 @@ export default function Contributions() {
   const [restored, setRestored] = useState(false);
   const confirm = useConfirmFinals(projectId);
 
+  /* ⚠️ **나간 사람은 `people` 에 없습니다** (결함 222). 그 사람의 기록은
+     계산에 그대로 들어가므로 줄은 그려지는데, 이름을 못 찾아 「사용자 #3」
+     이 뜹니다. 서버가 이름을 같이 보내 주므로 합쳐서 씁니다. */
+  const formerPeople = useMemo(() => score.data?.former_members ?? [], [score.data]);
+  const everyone = useMemo(() => [...people, ...formerPeople], [people, formerPeople]);
+
   const members = useMemo(
-    () => (score.data ? orderForDisplay(score.data.members, people) : []),
-    [score.data, people],
+    () => (score.data ? orderForDisplay(score.data.members, everyone) : []),
+    [score.data, everyone],
   );
   const spans = useMemo(() => uncertaintySpans(members), [members]);
 
@@ -169,30 +192,39 @@ export default function Contributions() {
   // 저장된 확정을 모르는 채로 확정하면 남의 조정을 지울 수 있습니다.
   const blind = finals.isError;
 
-  // 확정이 막혀 있다면 **무엇 때문인지** — 값은 아래 사유 문단의 id 입니다.
-  // ⚠️ 순서가 곧 우선순위입니다. 빈 칸이 있으면 그것부터 말합니다.
-  const confirmBlocked: string | null =
-    !allFilled && members.length > 0
-      ? 'confirm-unfilled'
-      : problems.length > 0
-        ? 'confirm-problems'
-        : blind
-          ? 'confirm-blind'
-          : null;
+  // 확정이 막혀 있다면 **무엇 때문인지**. ⚠️ 판단은 `@lib` 한 벌이고
+  // (`confirmBlockOf`), 여기서는 그 갈래를 **사유 문단의 id** 로 옮기기만
+  // 합니다 — 레거시는 같은 갈래를 문장으로 옮깁니다(결함 372). 여기서
+  // 다시 `if` 사슬을 쓰면 그 순간 두 벌입니다(대표 실패 ②).
+  const confirmBlock = confirmBlockOf({
+    myRole,
+    memberCount: members.length,
+    unfilled,
+    problems,
+    blind,
+    sending: confirm.isPending,
+  });
+
+  /** 갈래 → 사유 문단의 id. `Record` 라 갈래가 늘면 **여기가 컴파일
+   *  오류**가 되어, 새 갈래에 할 말을 정하기 전에는 못 지나갑니다.
+   *  `null` 인 둘은 사유 문단이 아니라 버튼 상태로 알리는 것들입니다. */
+  const CONFIRM_REASON_ID: Record<ConfirmBlock, string | null> = {
+    'not-allowed': 'confirm-not-allowed',
+    sending: null,
+    'no-members': null,
+    unfilled: 'confirm-unfilled',
+    problems: 'confirm-problems',
+    blind: 'confirm-blind',
+  };
+  const confirmBlocked = confirmBlock === null ? null : CONFIRM_REASON_ID[confirmBlock];
 
   /** 막힌 버튼을 눌렀을 때 **데려갈 자리**. 알려만 주고 갈 곳이 없으면
    *  이 저장소의 실패 ③(할 일을 알려 주고 그 일을 할 자리를 안 줌)입니다. */
   const focusFirstGap = () => {
-    const emptyValue = drafts.find(
-      (d) => d.final_value === null || Number.isNaN(d.final_value),
-    );
-    const target =
-      emptyValue !== undefined
-        ? `final-${emptyValue.user_id}`
-        : (() => {
-            const noReason = changed.find((d) => (reasons[d.user_id] ?? '').trim() === '');
-            return noReason !== undefined ? `reason-${noReason.user_id}` : null;
-          })();
+    // ⚠️ **어느 칸인가**는 `@lib` 이 정합니다 — 레거시도 같은 답을 씁니다.
+    // 여기서 다시 `find` 사슬을 쓰면 두 벌입니다(결함 372).
+    const gap = firstGapOf(drafts, systemValues, (id) => reasons[id] ?? '');
+    const target = gap === null ? null : `${gap.field === 'value' ? 'final' : 'reason'}-${gap.userId}`;
     if (target === null) return;
     const el = document.getElementById(target);
     if (el instanceof HTMLInputElement) {
@@ -219,8 +251,20 @@ export default function Contributions() {
         <div className="panes">
           <section className="pane">
             <div className="pane__body">
+              {/* ⚠️ 예전에는 무슨 일이 있었든 **"네트워크를 확인한 뒤
+                  새로고침하세요"** 였습니다. 없는 프로젝트를 열어도 그렇게
+                  말했고, 네트워크는 멀쩡한데 사람은 와이파이를 껐다 켰습니다.
+                  무엇이 일어났는지에 따라 **할 일이 다릅니다.** */}
               <div className="empty">
-                기여도를 불러오지 못했습니다. 네트워크를 확인한 뒤 새로고침하세요.
+                {describeLoadFailure(
+                  /* ⚠️ 404 일 때 없는 것은 **기여도가 아니라 프로젝트**
+                     입니다 — `/api/projects/{id}/contributions` 가 404 를
+                     주는 경우가 그것입니다. "이 기여도를 찾을 수
+                     없습니다" 는 사람에게 무엇을 고치라는 말인지 안
+                     알려 줍니다. */
+                  '프로젝트',
+                  score.error instanceof ApiError ? score.error.status : null,
+                )}
               </div>
             </div>
           </section>
@@ -230,10 +274,13 @@ export default function Contributions() {
   }
 
   const team = score.data;
-  const warnings = teamWarnings(team, people);
+  // ⚠️ **나간 사람 이름도 찾을 수 있어야** 합니다 — 「측정 불가」 줄이
+  //    그 사람을 부를 수 있습니다 (결함 222).
+  const warnings = teamWarnings(team, everyone);
   // 맨 앞에 세울 한 줄 — 「서로 비교하지 마세요」가 이 화면에서 가장 중요한
   // 문장입니다. 없으면(팀 신뢰도가 낮지 않으면) 첫 경고를 세웁니다.
   const headline = warnings.find((w) => w.includes('비교하지 마세요')) ?? warnings[0];
+  const teamConfidence = sharedConfidence(members.map((m) => m.confidence));
 
   return (
     <AppShell
@@ -256,6 +303,22 @@ export default function Contributions() {
             </div>
           )}
 
+          {/* ⭐ 확신도는 **팀 값 하나**입니다 — 사람 줄마다 그리면 팀에 대해
+              아는 것을 사람에 대해 아는 것처럼 말하게 됩니다 (결함 248).
+              값이 갈라지는 날이 오면 `sharedConfidence` 가 `null` 을 주고
+              이 줄은 안 그려집니다. */}
+          {teamConfidence !== null && (
+            <div className="teamconf">
+              <span className="teamconf__who">팀 전체</span>
+              <TrackRibbon
+                size="md"
+                segments={confidenceRibbon(teamConfidence)}
+                label={describeTeamRibbon(teamConfidence)}
+              />
+              <p className="teamconf__read">{ribbonReading(teamConfidence)}</p>
+            </div>
+          )}
+
           <div className="pane__body">
             {members.length === 0 ? (
               <div className="empty">
@@ -265,12 +328,20 @@ export default function Contributions() {
             ) : (
               members.map((member) => {
                 const span = spans.find((s) => s.userId === member.user_id);
-                const points = span?.points ?? 0;
-                const name = nameOf(member.user_id, people);
+                // ⚠️ `?? 0` 은 **잴 수 없음(null)** 을 0 으로 접습니다 (결함 226).
+                const points = span ? span.points : 0;
+                const name = nameOf(member.user_id, people, formerPeople);
                 // 사유는 **지우지 않고 한 자리에 모읍니다** — 팝오버 안에서
                 // 원문 그대로 나옵니다. 요약하면 그게 곧 정보 손실입니다.
                 const whyLines = [
-                  `신뢰도 ${member.confidence_label} — 모르는 폭 ${Math.round(points)}%p`,
+                  /* ⚠️ **두 줄입니다** (결함 384). 앞은 팀 하나를 잰 값이고
+                     (세 사람이 소수점까지 같습니다) 뒤는 이 사람의 값입니다
+                     (23 · 14 · 18%p). 한 줄에 이으면 둘 다 이 사람 것으로
+                     읽히고, 커버리지 100% 인 사람이 「신뢰도 낮음」을 자기
+                     탓으로 읽습니다 — 끊긴 트랙의 주인은 다른 사람입니다.
+                     글자는 `@lib` 한 벌: 레거시도 같은 함수를 부릅니다. */
+                  teamConfidenceLine(member.confidence_label),
+                  describeWidthNote(points),
                   ...readBeforeTheNumber(member),
                   ...integrityNotes(member),
                   ...(hasNoEvidence(member)
@@ -293,13 +364,14 @@ export default function Contributions() {
                     {/* 구간은 **글자가 주인공**입니다. 레인은 보조이고,
                         카드마다 자기 눈금을 가집니다 (v2 F1 · 조사 R3-4). */}
                     <div className="crow__range-cell">
+                      {/* ⛔ **여기에 리본이 있었습니다** (결함 247·248).
+                          247: 길이가 기여도에 비례해 세 줄이 막대그래프였습니다.
+                          248: 길이를 고쳐 놓고 보니 세 리본이 **완전히 같았고**,
+                          그럴 수밖에 없었습니다 — `confidence` 는 팀당 한 번
+                          계산되는 값입니다(`contribution/scoring.py`). 팀에
+                          대해 아는 것을 사람 이름으로 읽어 주던 것이라
+                          **머리말로 한 번만** 올렸습니다. */}
                       <Stat value={describeRange(member)} label="기여 구간" />
-                      <TrackRibbon
-                        size="sm"
-                        segments={ribbonFor(member, points)}
-                        ticks={['0', '25', '50', '75', '100']}
-                        label={`${name} — 확신도 ${Math.round(member.confidence * 100)}% · 모르는 폭 ${Math.round(points)}%p`}
-                      />
                     </div>
 
                     {/* ⚠️ 예전에는 `신뢰도 낮음 · 모르는 폭 20%p` 였습니다. 앞을
@@ -308,7 +380,7 @@ export default function Contributions() {
                         **말은 사람마다 다른 확률로 번역된다**는 것입니다. 그래서
                         화면은 잰 값(20%p)을 앞세우고, "낮음" 은 사유 팝오버에
                         둡니다. 근거는 `design/redesign/06-텍스트-최소화-조사.md` R4. */}
-                    <Stat value={`${Math.round(points)}%p`} label="모름" tone="unknown">
+                    <Stat value={describeWidth(points)} label="모름" tone="unknown">
                       <Why about={`${name} — 이 숫자를 읽기 전에`} lines={whyLines} />
                     </Stat>
 
@@ -331,14 +403,18 @@ export default function Contributions() {
                 lines={[
                   team.notice,
                   ...(finals.data && finals.data.finals.length > 0
-                    ? [describeFinals(finals.data.finals, new Map(people.map((p) => [p.user_id, p.name])))]
+                    ? [describeFinals(
+                        finals.data.finals,
+                        // 결함 345 — 이름표는 `@lib` 한 곳에서.
+                        new Map(people.map((p) => [p.user_id, labelInList(p, people)])),
+                      )]
                     : []),
                 ]}
               />
             </p>
             <div className="confirmbar__row">
               {members.map((member) => {
-                const name = nameOf(member.user_id, people);
+                const name = nameOf(member.user_id, people, formerPeople);
                 return (
                   <label className="confirmbar__person" key={member.user_id}>
                     <span className="t13">{name}</span>
@@ -368,12 +444,14 @@ export default function Contributions() {
                   누르면 아직 안 채운 첫 칸으로 데려다 줍니다. */}
               <button
                 type="button"
-                className={`btn btn--primary${confirmBlocked !== null ? ' btn--unmet' : ''}`}
-                aria-disabled={confirmBlocked !== null || confirm.isPending}
+                className={`btn btn--primary${
+                  confirmBlock !== null && confirmBlock !== 'sending' ? ' btn--unmet' : ''
+                }`}
+                aria-disabled={confirmBlock !== null}
                 aria-describedby={confirmBlocked ?? undefined}
                 onClick={() => {
-                  if (confirm.isPending) return;
-                  if (confirmBlocked !== null) {
+                  if (confirmBlock === 'sending') return;
+                  if (confirmBlock !== null) {
                     focusFirstGap();
                     return;
                   }
@@ -386,7 +464,7 @@ export default function Contributions() {
             {changed.length > 0 && (
               <div className="confirmbar__reasons">
                 {changed.map((d) => {
-                  const name = nameOf(d.user_id, people);
+                  const name = nameOf(d.user_id, people, formerPeople);
                   return (
                     <label className="confirmbar__reason" key={d.user_id}>
                       <span className="t12 muted">{name} 조정 사유</span>
@@ -404,12 +482,32 @@ export default function Contributions() {
                 })}
               </div>
             )}
-            {!allFilled && members.length > 0 && (
+            {/* ⚠️ **맨 앞입니다** (결함 392) — 확정할 수 없는 사람에게 「3칸
+                남음」부터 말하면 다 채우고 눌렀을 때야 403 을 만납니다.
+                문장은 `@lib` 이 고릅니다(설정 화면의 관리자 전용 단추들이
+                쓰는 그 문장). 버튼은 **지우지 않습니다** — 관리자에게
+                부탁하면 되는 일인데 사라지면 「원래 없는 기능」으로
+                읽힙니다(결함 316). */}
+            {confirmBlock === 'not-allowed' && (
+              <Problem id="confirm-not-allowed">{whyCannotConfirm({
+                myRole,
+                memberCount: members.length,
+                unfilled,
+                problems,
+                blind,
+              })}</Problem>
+            )}
+            {confirmBlock !== 'not-allowed' && !allFilled && members.length > 0 && (
               <Problem id="confirm-unfilled" tone="incomplete">{unfilled}칸 남음</Problem>
             )}
+            {/* ⚠️ **꼬리를 여기 붙이지 마십시오.** 여기에 「— 사유 없는
+                조정은 …」 이 박혀 있었고, 문제가 하나뿐인 동안은 읽혔습니다.
+                범위 문제(결함 215)가 생기자 상관없는 꼬리가 그 뒤에
+                붙었습니다. 문장은 문제를 만드는 곳(`problemsWith`)에
+                함께 둡니다. */}
             {problems.length > 0 && (
               <Problem id="confirm-problems" tone="incomplete">
-                {problems.join(' · ')} — 사유 없는 조정은 근거 없는 점수와 같습니다
+                {problems.join(' · ')}
               </Problem>
             )}
             {blind && <Problem id="confirm-blind">{BLIND_CONFIRM}</Problem>}
@@ -424,9 +522,19 @@ export default function Contributions() {
                 확정했습니다. 시스템 값과 확정값이 함께 기록에 남습니다.
               </p>
             )}
+            {/* ⛔ **서버가 준 글자를 그대로 붙이고 있었습니다** (결함 283).
+                `ApiError.message` 는 `detail` 이라, 사람에게는 아무 말도
+                아닌 문장이 그대로 뜹니다. 게다가 무슨 일이 있었든 같은
+                꼴이라 **할 일**을 말해 주지 못합니다 — 409(남이 먼저
+                확정함)와 403(권한 없음)에 필요한 말이 서로 다릅니다.
+                문구는 `@lib` 한 벌입니다. */}
             {confirm.isError && (
               <Problem>
-                확정하지 못했습니다 — {confirm.error instanceof Error ? confirm.error.message : '알 수 없는 오류'}
+                {describeActionFailure(
+                  '기여도 확정',
+                  confirm.error instanceof ApiError ? confirm.error.status : null,
+                  confirm.error instanceof ApiError ? confirm.error.detail : null,
+                )}
               </Problem>
             )}
           </div>

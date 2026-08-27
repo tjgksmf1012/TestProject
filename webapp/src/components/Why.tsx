@@ -1,5 +1,7 @@
 import * as Popover from '@radix-ui/react-popover';
 
+import { plainText } from '@lib/ui/plain.ts';
+
 // 이유는 **부르면 온다**.
 //
 // ## 정보를 지우는 것이 아니라 옮기는 것입니다
@@ -25,9 +27,17 @@ interface WhyProps {
   about: string;
   /** 원문 그대로. **요약하지 마십시오.** */
   lines: string[];
+  /**
+   * 몇 「가지」인가를 세는 낱말. 기본은 `이유`.
+   *
+   * ⚠️ 이 자리가 늘 "이유" 는 아닙니다 — 칸반의 PR 목록은 이유가 아니라
+   *    **건수**입니다. 그대로 두면 낭독기가 "붙은 PR — 이유 1가지 보기"
+   *    라고 읽습니다.
+   */
+  countsAs?: string;
 }
 
-export function Why({ about, lines }: WhyProps) {
+export function Why({ about, lines, countsAs = '이유' }: WhyProps) {
   if (lines.length === 0) return null;
   return (
     <Popover.Root>
@@ -35,7 +45,7 @@ export function Why({ about, lines }: WhyProps) {
         <button
           type="button"
           className="why"
-          aria-label={`${about} — 이유 ${lines.length}가지 보기`}
+          aria-label={`${about} — ${countsAs} ${lines.length}가지 보기`}
           onClick={(e) => e.stopPropagation()}
         >
           ?
@@ -46,7 +56,7 @@ export function Why({ about, lines }: WhyProps) {
           <p className="why__title">{about}</p>
           {lines.map((line) => (
             <p className="why__line" key={line}>
-              {line.replace(/\*\*/g, '')}
+              {plainText(line)}
             </p>
           ))}
           <Popover.Arrow className="why__arrow" />

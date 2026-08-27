@@ -1,13 +1,20 @@
-import { deepStrictEqual, strictEqual } from 'node:assert';
+import { deepStrictEqual, ok as ok2, strictEqual } from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   adjustmentsToRestore,
   describeFinals,
   problemsWith,
   toPayload,
+  firstGapOf,
+  needsReasonFor,
+  whyCannotConfirm,
   type Draft,
   type FinalRow,
+  systemLabel,
 } from './final.ts';
 
 const SYSTEM = new Map([
@@ -50,6 +57,41 @@ describe('보내기 전 검사', () => {
 
   it('시스템 값과 **같게** 적은 것도 조정이 아니다', () => {
     deepStrictEqual(problemsWith([draft({ final_value: 42.5 })], SYSTEM), []);
+  });
+
+  it('⭐ 몫이 될 수 없는 값은 막는다 — 음수도 100 초과도 (결함 215)', () => {
+    // 베타에서 `-5 · -894 · 999` 를 넣었는데 **아무 경고가 없었습니다.**
+    // 셋의 합이 정확히 100 이라 합계 경고까지 조용했습니다.
+    for (const bad of [-5, -894, 999, 100.001]) {
+      const problems = problemsWith([draft({ final_value: bad, reason: '실험' })], SYSTEM);
+      strictEqual(problems.length, 1, `${bad} 이 통과했습니다`);
+      strictEqual(problems[0]?.includes('0~100'), true);
+    }
+  });
+
+  it('⚠️ 경계는 막지 않는다 — 한 사람이 전부 한 경우가 실제로 있다', () => {
+    for (const okValue of [0, 100]) {
+      deepStrictEqual(
+        problemsWith([draft({ final_value: okValue, reason: '합의' })], SYSTEM),
+        [],
+        `${okValue} 가 막혔습니다`,
+      );
+    }
+  });
+
+  it('⛔ 합계가 100 이 아닌 것은 **여기서 막지 않는다** — 팀 일부만 확정할 수 있다', () => {
+    // 범위 검사를 넣으면서 합계까지 막으면, 두 사람만 확정하려던 팀이
+    // 갑자기 못 하게 됩니다. 합계는 화면이 경고만 합니다.
+    deepStrictEqual(
+      problemsWith(
+        [
+          draft({ final_value: 10, reason: '일부만' }),
+          draft({ user_id: 2, final_value: 20, reason: '일부만' }),
+        ],
+        SYSTEM,
+      ),
+      [],
+    );
   });
 
   it('같은 문제를 여러 번 쌓지 않는다 — 사람이 읽을 목록이다', () => {
@@ -223,5 +265,257 @@ describe('저장된 조정을 입력칸에 되돌려 놓기 (결함 97)', () => 
     const system = new Map([[2, 33.552]]);
     const blank: Draft[] = [{ user_id: 2, final_value: null, reason: '' }];
     deepStrictEqual(toPayload(blank, system), [{ user_id: 2 }]);
+  });
+});
+
+describe('안 잰 사람은 「시스템 값 그대로」 확정할 수 없다 (결함 307)', () => {
+  const draft = (userId: number, value: string, reason = ''): Draft => ({
+    user_id: userId,
+    final_value: value === '' ? null : Number(value),
+    reason,
+  });
+
+  it('⭐ **확정 줄이 `0.0%` 라고 적지 않는다** — 카드는 같은 사람을 `—` 라고 그립니다', () => {
+    /* 갓 만든 프로젝트에서 카드는 「— · 모르는 폭 100%p · 0 이라는 뜻이
+       아니라 연결이 없다는 뜻입니다」인데, 여섯 줄 아래 확정 줄은
+       「시스템 0.0%」였습니다. 한 화면이 같은 사실을 두고 서로 다른 말을
+       하고 있었습니다. */
+    strictEqual(systemLabel(0, false), '—');
+    strictEqual(systemLabel(undefined, false), '—');
+  });
+
+  it('쟀으면 숫자를 그대로 적는다 — 결함 191 의 결정을 안 뒤집는다', () => {
+    // 「쟀는데 0건」은 그대로 `0.0%` 입니다.
+    strictEqual(systemLabel(0, true), '0.0%');
+    strictEqual(systemLabel(31.25, true), '31.3%');
+  });
+
+  it('⭐ 안 잰 사람을 **빈 칸으로** 확정하려 하면 막고 이유를 말한다', () => {
+    const problems = problemsWith([draft(7, '')], new Map([[7, 0]]), new Set([7]));
+    strictEqual(problems.length, 1);
+    strictEqual(problems[0]?.includes('잰 것이 없어'), true);
+    strictEqual(problems[0]?.includes('직접 적고'), true);
+  });
+
+  it('⭐ 팀이 **직접 값을 적으면** 막지 않는다 — 시스템은 판정하지 않습니다(불변식 ④)', () => {
+    const problems = problemsWith([draft(7, '0', '이번 스프린트는 휴학')], new Map([[7, 0]]), new Set([7]));
+    strictEqual(problems.length, 0);
+    // 값을 적었으면 「잰 것이 없어…」는 안 나옵니다.
+    strictEqual(problems.some((t) => t.includes('잰 것이 없어')), false);
+  });
+
+  it('안 잰 사람이 아니면 빈 칸은 그대로 통과한다 — 「안 건드렸다」입니다', () => {
+    strictEqual(problemsWith([draft(7, '')], new Map([[7, 12]]), new Set()).length, 0);
+  });
+});
+
+describe('안 잰 사람이 직접 적은 값은 **접히지 않는다** (결함 307 회차)', () => {
+  it('⭐ 시스템 값이 0 이라도 팀이 적은 0 은 그대로 실어 보낸다', () => {
+    /* 고치면서 낸 것입니다. 안 잰 사람의 시스템 값은 0 으로 계산되므로
+       팀이 일부러 0 을 적어도 `sameValue(0, 0)` 이 참이 되어 「안
+       건드렸다」로 접혔고, 값이 안 실려 나가 서버가 400 을 줬습니다 —
+       팀이 이유까지 적었는데도. 렌더해서 잡았습니다. */
+    const drafts = [{ user_id: 7, final_value: 0, reason: '이번 스프린트는 휴학' }];
+    const payload = toPayload(drafts, new Map([[7, 0]]), new Set([7]));
+    strictEqual(payload[0]?.final_value, 0);
+    strictEqual(payload[0]?.reason, '이번 스프린트는 휴학');
+  });
+
+  it('잰 사람은 그대로 — 시스템 값과 같으면 값을 안 보냅니다', () => {
+    const drafts = [{ user_id: 7, final_value: 12, reason: '' }];
+    const payload = toPayload(drafts, new Map([[7, 12]]), new Set());
+    strictEqual(payload[0]?.final_value, undefined);
+  });
+});
+
+describe('⛔ 빈 칸을 「시스템 값 그대로」로 확정할 수 있었습니다 (결함 372)', () => {
+  /* v2 F1-4 — **확정값은 시스템이 아니라 팀이 적습니다.** 빈 칸은
+     「아직 안 정함」이고, 다 정해야 확정이 열립니다. SPA 는 그 결정대로
+     막고 있었는데 레거시는 게이트가 없어서, 손대지 않은 화면에서 한 번
+     누르면 201 이 떨어지고 「시스템 값 그대로입니다」로 기록됐습니다. */
+
+  /* ⚠️ `myRole` 이 있어야 합니다 (결함 392). 확정은 관리자·소유자만이고,
+     **모르면 잠그는** 것이 이 게이트의 규칙이라 안 주면 「권한 없음」에
+     걸립니다 — 「누가 보고 있는가」를 안 적은 씨앗은 이제 아무것도 안
+     재는 씨앗입니다. */
+  const ok = { myRole: 'owner', memberCount: 3, unfilled: 0, problems: [], blind: false };
+
+  it('⭐ 빈 칸이 있으면 확정이 안 열린다', () => {
+    strictEqual(whyCannotConfirm({ ...ok, unfilled: 3 }), '3칸 남음');
+    strictEqual(whyCannotConfirm({ ...ok, unfilled: 1 }), '1칸 남음');
+  });
+
+  it('⭐ 다 적었고 문제가 없어야 열린다', () => {
+    strictEqual(whyCannotConfirm(ok), null);
+  });
+
+  it('⭐ 막는 길마다 **다른** 말이 있다 — 하나도 빈 글자가 아니다', () => {
+    const paths: Array<[string, Parameters<typeof whyCannotConfirm>[0]]> = [
+      ['권한 없음', { ...ok, myRole: 'member' }],
+      ['보내는 중', { ...ok, sending: true }],
+      ['팀원 0명', { ...ok, memberCount: 0 }],
+      ['빈 칸', { ...ok, unfilled: 2 }],
+      ['합·안 잰 사람', { ...ok, problems: ['합이 100 이 아닙니다 (지금 90)'] }],
+      ['저장된 확정을 못 읽음', { ...ok, blind: true }],
+    ];
+    /* ⚠️ 손으로 고른 목록은 **만들 때 있던 것만** 들어 있습니다(결함 329).
+       그래서 소스에서 갈래 수를 세어 이 목록과 맞춥니다 — 여섯째 갈래를
+       더하면 여기 한 줄을 쓰기 전까지 빨간불입니다(결함 351 의 방법). */
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), 'final.ts'),
+      'utf8',
+    );
+    const body = src.slice(src.indexOf('export function confirmBlockOf'));
+    const branches = body.slice(0, body.indexOf('return null')).match(/\breturn\b/g) ?? [];
+    strictEqual(
+      paths.length,
+      branches.length,
+      `막는 길이 ${branches.length} 인데 ${paths.length} 개만 재고 있습니다`,
+    );
+
+    const said = new Map<string, string>();
+    for (const [name, gate] of paths) {
+      const why = whyCannotConfirm(gate);
+      ok2(why !== null && why.trim() !== '', `${name}: 막혔는데 아무 말도 안 합니다`);
+      ok2(!said.has(why as string), `${name} 와 ${said.get(why as string)} 가 같은 말을 합니다`);
+      said.set(why as string, name);
+    }
+  });
+
+  it('⭐ 빈 칸이 **맨 앞**이다 — 안 적은 사람에게 「고쳐라」부터 시키지 않는다', () => {
+    strictEqual(
+      whyCannotConfirm({ ...ok, unfilled: 2, problems: ['합이 100 이 아닙니다'] }),
+      '2칸 남음',
+    );
+  });
+
+  it('⭐ 권한이 **그보다도 앞**이다 (결함 392)', () => {
+    /* 확정할 수 없는 사람에게 「3칸 남음」부터 말하면, 셋을 다 채우고
+       눌렀을 때야 403 을 만납니다. */
+    const said = whyCannotConfirm({ ...ok, myRole: 'member', unfilled: 3 });
+    ok2(said !== null && !said.includes('칸 남음'), said ?? '(아무 말도 안 함)');
+    ok2(said!.includes('관리자'), said!);
+  });
+
+  it('⭐ 아직 **모르는** 것은 「권한 없음」이 아니다 (결함 254)', () => {
+    /* 명단이 오기 전 몇 초. 잠그는 것은 그대로이되 말이 다릅니다. */
+    const said = whyCannotConfirm({ ...ok, myRole: undefined });
+    ok2(said !== null, '모르는 동안에도 잠급니다');
+    ok2(!said!.includes('관리자에게 요청'), said!);
+  });
+
+  it('⭐ 관리자와 소유자는 열린다 — 팀원만 막힙니다', () => {
+    strictEqual(whyCannotConfirm({ ...ok, myRole: 'owner' }), null);
+    strictEqual(whyCannotConfirm({ ...ok, myRole: 'admin' }), null);
+    ok2(whyCannotConfirm({ ...ok, myRole: 'member' }) !== null);
+    ok2(whyCannotConfirm({ ...ok, myRole: null }) !== null, '구성원이 아니면 막힙니다');
+  });
+
+  /* 막힌 단추를 누르면 **할 일이 있는 자리로** 데려갑니다. 알려만 주고
+     갈 곳이 없는 것이 이 저장소의 대표 실패 ③ 이고, 두 화면이 각자
+     `find` 사슬을 짜면 그 순간 두 벌입니다. */
+  const SYS = new Map([
+    [1, 40],
+    [2, 30],
+    [3, 30],
+  ]);
+
+  it('⭐ 데려갈 자리는 **빈 값 칸이 먼저**다 — 막는 순서와 같다', () => {
+    const drafts: Draft[] = [
+      { user_id: 1, final_value: 55, reason: '' },
+      { user_id: 2, final_value: null, reason: '' },
+      { user_id: 3, final_value: 30, reason: '' },
+    ];
+    deepStrictEqual(firstGapOf(drafts, SYS, () => ''), { userId: 2, field: 'value' });
+  });
+
+  it('⭐ 값이 다 찼으면 **사유가 빈 조정**으로 데려간다', () => {
+    const drafts: Draft[] = [
+      { user_id: 1, final_value: 40, reason: '' },
+      { user_id: 2, final_value: 45, reason: '' },
+      { user_id: 3, final_value: 15, reason: '적었음' },
+    ];
+    deepStrictEqual(firstGapOf(drafts, SYS, (id) => drafts.find((d) => d.user_id === id)!.reason), {
+      userId: 2,
+      field: 'reason',
+    });
+  });
+
+  it('⭐ 시스템 값 그대로면 사유를 안 물으니 데려갈 곳도 없다', () => {
+    const drafts: Draft[] = [
+      { user_id: 1, final_value: 40, reason: '' },
+      { user_id: 2, final_value: 30, reason: '' },
+      { user_id: 3, final_value: 30, reason: '' },
+    ];
+    strictEqual(firstGapOf(drafts, SYS, () => ''), null);
+  });
+
+  it('⭐ 「사유가 필요한가」를 두 자가 **같은 규칙**으로 본다', () => {
+    /* ⚠️ `problemsWith`(무엇이 문제인가)와 `firstGapOf`(어디로 데려갈까)가
+       갈라지면, 「이유를 적으라」고 해 놓고 엉뚱한 칸으로 데려갑니다. */
+    for (const value of [40, 40.0000000001, 41, 0, 100]) {
+      const draft: Draft = { user_id: 1, final_value: value, reason: '' };
+      const complains = problemsWith([draft], SYS).some((p) => p.includes('이유를 적어야'));
+      const leadsThere = firstGapOf([draft], SYS, () => '')?.field === 'reason';
+      strictEqual(
+        complains,
+        leadsThere,
+        `${value}: 문제는 ${complains} 인데 데려가기는 ${leadsThere} 입니다`,
+      );
+    }
+  });
+});
+
+describe('⭐ 화면이 보여 준 값을 그대로 적으면 「그대로」다 (결함 391)', () => {
+  /* 확정 칸의 placeholder 는 `systemLabel` 의 **한 자리 반올림**인데
+     「같은가」는 정확 비교였습니다. 시스템 36.87 인 사람에게 화면은
+     `36.9%` 를 보여 주고, 그걸 그대로 적으면 「다르게 정했다」가 됐습니다.
+
+     ⚠️ 이 제품은 불변식 ②(단일 점수 금지) 때문에 정확한 값을 어디에도
+     안 그립니다 — placeholder 가 유일한 자리입니다. */
+  const SYSTEM = new Map([[1, 36.87]]);
+  const draft = (final_value: number | null, reason = ''): Draft => ({
+    user_id: 1,
+    final_value,
+    reason,
+  });
+
+  it('placeholder 와 같은 글자가 되는 값은 사유가 필요 없다', () => {
+    strictEqual(systemLabel(36.87, true), '36.9%', '이 검사가 기대는 표시 정밀도');
+    strictEqual(needsReasonFor(draft(36.9), SYSTEM), false);
+    deepStrictEqual(problemsWith([draft(36.9)], new Map(SYSTEM)), []);
+  });
+
+  it('정확한 값도 당연히 사유가 필요 없다', () => {
+    strictEqual(needsReasonFor(draft(36.87), SYSTEM), false);
+  });
+
+  it('⛔ 진짜로 다르게 정하면 여전히 사유가 필요하다', () => {
+    strictEqual(needsReasonFor(draft(40), SYSTEM), true);
+    strictEqual(problemsWith([draft(40)], new Map(SYSTEM)).length, 1);
+    deepStrictEqual(problemsWith([draft(40, '발표를 도맡았습니다')], new Map(SYSTEM)), []);
+  });
+
+  it('⭐ 표시 한 칸 차이는 갈린다 — 자가 너무 넓어지지 않았는가', () => {
+    // 36.9% 로 보이는 값과 37.0% 로 보이는 값은 **다릅니다.**
+    strictEqual(systemLabel(37.0, true), '37.0%');
+    strictEqual(needsReasonFor(draft(37.0), SYSTEM), true);
+  });
+
+  it('⭐ 게이트와 보내는 값이 **같은 자**를 쓴다', () => {
+    /* 한쪽만 고치면 「이유가 필요 없다」고 해 놓고 값은 조정으로 실려
+       나가, 서버가 사유 없는 조정을 400 으로 거절합니다. */
+    const payload = toPayload([draft(36.9)], new Map(SYSTEM));
+    deepStrictEqual(payload, [{ user_id: 1 }], '안 건드린 칸은 값을 안 보냅니다');
+    const changed = toPayload([draft(40, '발표를 도맡았습니다')], new Map(SYSTEM));
+    deepStrictEqual(changed, [
+      { user_id: 1, final_value: 40, reason: '발표를 도맡았습니다' },
+    ]);
+  });
+
+  it('⭐ 안 잰 사람이 일부러 적은 0 은 여전히 조정이다 (결함 307)', () => {
+    const zero = new Map([[1, 0]]);
+    const payload = toPayload([draft(0, '참여가 없었습니다')], zero, new Set([1]));
+    deepStrictEqual(payload, [{ user_id: 1, final_value: 0, reason: '참여가 없었습니다' }]);
   });
 });

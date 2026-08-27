@@ -22,23 +22,41 @@ import {
   HttpSyncTransport,
   HttpUploadTransport,
   keepScreenAwake,
+  UploadFailed,
 } from '../lib/recording/browser-adapter.ts';
 import { RecordingClient, type RecordingSummary } from '../lib/recording/client.ts';
 import {
   completeBody,
+  completionView,
   describeCompletion,
   describeCompletionFailure,
   type TrackCompleteResult,
+  coverageLabel,
+  usableText,
 } from '../lib/recording/complete.ts';
-import { blockers as sessionBlockers } from '../lib/recording/session.ts';
+import {
+  blockers as sessionBlockers,
+  consentForEntry,
+  consentStateFrom,
+  consentStep,
+  consentStepLabel,
+  permissionStepLabel,
+  stepsDone,
+  describeJoinFailure,
+  describeResume,
+  describeSoloEntry,
+  describeStopReason,
+  trackRefused,
+} from '../lib/recording/session.ts';
 import {
   describeRecordingSafety,
   isRiskyForRecording,
   recordingSafety,
 } from '../lib/platform/recording.ts';
 import { awakeBridge, shouldHoldAwake } from '../lib/platform/awake.ts';
-import { describeGiveUp, openChunkStore } from '../lib/platform/chunk-store.ts';
-import { describeTimeline } from '../lib/recording/timeline.ts';
+import { describeGiveUp, describeReupload, openChunkStore } from '../lib/platform/chunk-store.ts';
+import { describeGapReason, describeTimeline } from '../lib/recording/timeline.ts';
+import { describeCaptureCheck } from '../lib/recording/capture.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
@@ -46,7 +64,7 @@ import { showNote } from '../lib/ui/failure.ts';
 import { whilePressed } from '../lib/ui/pending.ts';
 import { copySucceeded, copyText, describeCopy } from '../lib/ui/copy.ts';
 import { escapeHtml } from '../lib/html.ts';
-import type { SyncTransport } from '../lib/recording/client.ts';
+import { recomputeAfterRecovery, type SyncTransport } from '../lib/recording/client.ts';
 import type { PendingChunk, UploadTransport } from '../lib/recording/upload-queue.ts';
 import { bootApp } from './pwa.ts';
 
@@ -86,6 +104,9 @@ const params = new URLSearchParams(location.search);
 // 무시하고, 로컬 화면에서 로컬 서버일 때만 통과시킨다.
 const apiBase = safeApiBase(params.get('api'), location.origin);
 const meetingId = params.get('meeting');
+
+/** 준비 단계 ①이 어디로 데려가는가. `render` 가 말을 바꿔 다는 자리 (결함 274). */
+const entryStep = consentStep(meetingId);
 
 // `?track=` 은 손으로 트랙 주소를 넣는 옛 경로다. `?meeting=` 이 있으면
 // 아래 `joinMeeting()` 이 로그인한 사람의 트랙을 서버에서 받아 온다.
@@ -143,7 +164,20 @@ const client = new RecordingClient({
   upload: {
     async send(chunk) {
       if (!trackUrl) return localUpload.send(chunk);
-      return httpUpload.send(chunk);
+      try {
+        return await httpUpload.send(chunk);
+      } catch (error) {
+        /* ⛔ **거절을 끊김으로 읽고 있었습니다** (결함 240). 서버는 청크마다
+           동의를 다시 보므로, 회의 도중 누가 철회하면 그 순간부터 전부
+           403 입니다. 큐는 여섯 번 다시 걸고 조용히 포기했고, 화면은 그
+           동안 계속 「녹음 중」이었습니다.
+           ⚠️ 여기서 화면이 「철회됐다」고 **단정하지 않습니다** — 서버
+           명부를 다시 읽습니다(결함 229). 판단은 `@lib`. */
+        if (meetingId !== null && error instanceof UploadFailed && trackRefused(error.status)) {
+          void refreshConsent(meetingId);
+        }
+        throw error;
+      }
     },
   },
   uploadOptions: {
@@ -157,6 +191,11 @@ const client = new RecordingClient({
   onStateChange: (state) => {
     syncAwake(state.phase);
     render();
+    // 스스로 멈춘 경우(동의 철회·백프레셔)에도 마무리까지 갑니다 —
+    // 「정지」가 이미 비활성이라 사람이 누를 것이 없습니다 (결함 240).
+    if (state.phase === 'stopping' && state.stopReason !== null && state.stopReason !== 'user') {
+      void finishRecording();
+    }
   },
 });
 
@@ -164,6 +203,8 @@ let wakeLock: { release: () => void } | null = null;
 let resyncTimer: ReturnType<typeof setInterval> | null = null;
 let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 let summary: RecordingSummary | null = null;
+/** 서버가 마지막으로 준 판정. 다시 올린 뒤에도 **이 값이 주인**입니다. */
+let serverVerdict: TrackCompleteResult | null = null;
 
 // ── 화면 ────────────────────────────────────────────────────
 
@@ -191,6 +232,10 @@ function render(): void {
   //    방법이 없습니다 — 하필 녹음은 못 하면 그 회의를 영영 못 잽니다.
   //    `정지` 는 그대로 둡니다: 녹음 중이 아닐 때 정지는 설명할 사유가
   //    있는 것이 아니라 **해당 없는** 것이라 진짜 비활성이 맞습니다.
+  // 왜 멈췄는지. 사람이 스스로 멈춘 것은 아무 말도 안 합니다 (결함 240).
+  const stopped = describeStopReason(state.stopReason);
+  showNote($('stop-note'), stopped ?? '', 'bad');
+
   $('start').setAttribute('aria-disabled', String(state.phase !== 'ready'));
   ($('stop') as HTMLButtonElement).disabled = !(
     state.phase === 'recording' || state.phase === 'interrupted'
@@ -202,10 +247,22 @@ function render(): void {
   $('safety').textContent = describeRecordingSafety(safety);
   $('safety').className = isRiskyForRecording(safety) ? 'banner' : 'banner ok-banner';
 
+  // ⛔ **경고 0건을 「요청대로 적용됐습니다」로 읽지 않습니다** (결함 249).
+  //    그 목록은 마이크를 얻은 뒤에야 채워집니다 — 거부당하면 빈 채로
+  //    남고, 그때 초록 글씨는 **아무것도 안 재고 만점을 준 것**입니다.
+  //    무엇을 말해도 되는지는 `@lib` 의 `describeCaptureCheck` 가 정합니다.
+  // 끝난 단계를 **끝난 것으로** 그린다 (결함 274). 판단은 `@lib`.
+  const done = stepsDone(state);
+  $('step-consent').dataset.done = String(done.consent);
+  $('step-permission').dataset.done = String(done.permission);
+  $('consent').textContent = consentStepLabel(entryStep, done.consent);
+  $('permission').textContent = permissionStepLabel(done.permission);
+
   const warnings = client.warnings;
+  const note = describeCaptureCheck(client.appliedSettings, warnings);
   $('warnings').innerHTML = warnings.length
     ? warnings.map((w) => `<li class="${w.severity}">${escapeHtml(w.message)}</li>`).join('')
-    : '<li class="ok">캡처 설정이 요청대로 적용됐습니다</li>';
+    : `<li class="${note?.tone ?? 'gap'}">${escapeHtml(note?.text ?? '')}</li>`;
 }
 
 const PHASE_LABEL: Record<string, string> = {
@@ -221,11 +278,30 @@ const PHASE_LABEL: Record<string, string> = {
 
 // ── 동작 ────────────────────────────────────────────────────
 
-$('consent').addEventListener('click', () => {
-  // 실험용이므로 로컬에서 동의를 확정한다.
-  // 실제 서비스에서는 서버가 참여자 전원의 동의를 확인해야 한다 (docs/07 §1).
-  client.setConsent('all_confirmed');
-});
+/**
+ * 동의 명부를 **서버에서 읽어** 세션에 넣는다.
+ *
+ * ⛔ 예전에는 `#consent` 를 누르면 화면이 스스로 `all_confirmed` 를
+ * 넣었습니다 (결함 229). 서버에 명부가 이미 있는데 안 물어본 것입니다 —
+ * 그래서 (a) 로비에서 진짜로 동의해도 이 화면은 「녹음 동의가
+ * 필요합니다」였고, (b) **아무도 동의 안 한 회의**에서 혼자 그 단추를
+ * 누르면 「준비됐습니다」가 되어 녹음이 실제로 돌았습니다.
+ *
+ * 판단은 `@lib` 의 `consentStateFrom` 이 합니다. 여기서는 **묻고 넣기만**.
+ */
+/** 지금 로그인한 사람. 동의 명부에서 **내 줄**을 찾는 데 씁니다. */
+let myUserId: number | null = null;
+
+async function refreshConsent(id: string): Promise<void> {
+  const response = await tryGet(`${apiBase}/api/meetings/${id}/consent`);
+  // ⚠️ 못 물어봤으면 **모르는 것**입니다. 모르는 것을 동의로 읽지 않습니다.
+  if (response === null || !response.ok) return;
+  client.setConsent(consentStateFrom(await response.json(), myUserId));
+  // 로비에서 동의를 마치고 돌아온 자리입니다. 앞서 **동의가 없어서** 트랙을
+  // 못 열었다면 지금이 다시 열 때입니다 — 안 그러면 조건은 다 찼는데
+  // 올릴 자리만 없는 채로 남습니다 (결함 272).
+  if (client.state.track === 'blocked') void joinMeeting(id);
+}
 
 /**
  * 회의에 트랙으로 참가한다.
@@ -234,11 +310,17 @@ $('consent').addEventListener('click', () => {
  * 선언했고, 그래서 남의 트랙에 목소리를 올릴 수 있었다.
  */
 async function joinMeeting(id: string): Promise<void> {
+  // ⚠️ **지금 여는 중**이라고 먼저 적습니다 (결함 272). 두 가지를 합니다 —
+  //    ① 다시 시도할 때 「못 열었다」가 남아 있지 않게 하고,
+  //    ② 아래 `refreshConsent` 가 「막혔으면 다시 열어라」를 보고 여기로
+  //       되돌아오는 **무한 재귀**를 끊습니다.
+  client.setTrack('pending');
   // ⚠️ 읽기도 `tryGet` 을 거칩니다 (결함 102). 맨 `fetch` 는 닿지 못하면
   // 던지는데, 이 함수는 `void joinMeeting(…)` 으로 불려 거부가 아무 데도
   // 안 걸립니다 — 화면은 아무 말도 안 하고 녹음 버튼만 비활성입니다.
   const me = await tryGet(`${apiBase}/api/auth/me`);
   if (me === null) {
+    client.setTrack('blocked');
     showNote($('join-note'), unreachableText('회의에 들어가지 못했습니다'));
     return;
   }
@@ -246,7 +328,12 @@ async function joinMeeting(id: string): Promise<void> {
     location.href = loginUrlFor(location.pathname + location.search);
     return;
   }
-  $('who').textContent = `${((await me.json()) as Me).name} 님의 트랙으로 녹음합니다`;
+  const who = (await me.json()) as Me;
+  myUserId = who.user_id;
+  $('who').textContent = `${who.name} 님의 트랙으로 녹음합니다`;
+  // ⚠️ **트랙 참가보다 먼저** 동의를 읽습니다 (결함 229). 참가가 403 으로
+  //    막혀도 그 이유가 화면의 막는 목록에 서 있어야 합니다.
+  await refreshConsent(id);
   // 다시 들어올 때 지난 실패가 남아 있으면 안 된다.
   showNote($('join-note'), '');
 
@@ -267,6 +354,7 @@ async function joinMeeting(id: string): Promise<void> {
     // **폰이 고장난 줄** 안다.
     // ⚠️ `#who` 를 덮지 않습니다 (결함 98). 거기는 **내가 누구인지**를
     // 말하는 자리고, 실패로 덮으면 이름이 사라진 채 부제색으로 앉습니다.
+    client.setTrack('blocked');
     showNote($('join-note'), unreachableText('트랙에 참가하지 못했습니다'));
     return;
   }
@@ -284,20 +372,48 @@ async function joinMeeting(id: string): Promise<void> {
     // 붙은 `as { detail?: string }` 를 찾았고, 여기는 `.text()` 라 안 걸렸습니다.
     // **같은 파일 아래쪽(`finish`)은 이미 `detailText` 를 쓰고 있었습니다.**
     const body = await response.json().catch(() => null);
-    showNote(
-      $('join-note'),
-      `트랙에 참가하지 못했습니다: ${detailText(body, `HTTP ${response.status}`)}`,
+    /* ⛔ **모든 실패를 빨강으로 말했습니다** (결함 237). 아직 동의하지
+       않은 사람의 403 은 고장이 아니라 **순서**입니다 — 판단은 `@lib`. */
+    const note = describeJoinFailure(
+      response.status,
+      detailText(body, `HTTP ${response.status}`),
+      client.state.consent,
     );
+    client.setTrack('blocked');
+    showNote($('join-note'), note.text, note.tone);
     return;
   }
 
   const track = (await response.json()) as { track_id: number };
   trackUrl = `${apiBase}/api/meetings/${id}/tracks/${track.track_id}`;
   httpUpload.retarget(trackUrl);
+  // ⚠️ **여기가 「올릴 자리가 생겼다」고 말하는 유일한 자리입니다** (결함 272).
+  //    이 줄이 없으면 `blockers` 가 영원히 「여는 중」에 머뭅니다.
+  client.setTrack('open');
   render();
 }
 
-if (meetingId) void joinMeeting(meetingId);
+// 준비 단계 ① — 말만 하고 갈 자리를 안 주면 안 됩니다.
+// ⛔ 예전에는 이 두 줄이 `if (meetingId)` **안에** 있었습니다. 회의 없이
+//    열면 `<a id="consent">` 가 href 없이 남아, 눈에는 단추인데 탭으로
+//    닿지도 눌리지도 않았습니다 (결함 238).
+($('consent') as HTMLAnchorElement).href = entryStep.href;
+$('consent').textContent = entryStep.label;
+
+// 회의가 없으면 동의를 물을 상대도 없습니다 — 판단은 `@lib`, 여기서는 넣기만.
+client.setConsent(consentForEntry(meetingId));
+
+if (meetingId) {
+  void joinMeeting(meetingId);
+  // 로비에서 동의하고 **돌아왔을 때** 다시 묻습니다.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refreshConsent(meetingId);
+  });
+} else {
+  // 한 시간을 녹음하고 나서 "팀에 아무것도 안 올라갔다" 를 알면 늦습니다.
+  const solo = describeSoloEntry();
+  showNote($('join-note'), solo.text, solo.tone);
+}
 
 $('permission').addEventListener('click', async () => {
   await client.requestMicrophone();
@@ -401,6 +517,12 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
   const done = (await response.json()) as TrackCompleteResult;
   showNote($('finish-state'), describeCompletion(done), 'plain');
   $('finish-retry').hidden = true;
+  // ⭐ **결과 칸을 서버 값으로 다시 그립니다** (결함 220). 이 기기가 잰
+  //    값만 보여주면, 서버가 「사용 불가 · 51.5%」 라고 답한 옆에서 칸은
+  //    「사용 가능 · 100.0%」 라고 초록으로 서 있습니다. 사람은 크고
+  //    초록인 쪽을 믿고 나갑니다.
+  serverVerdict = done;
+  applyServerVerdict(done, result);
 
   // 로비로 돌아갈 길을 만들어 준다. 여기가 끝이 아니라 다음이 있다는
   // 걸 화면이 말해 주지 않으면 사람은 여기서 멈춘다.
@@ -410,7 +532,24 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
   }
 }
 
-$('stop').addEventListener('click', async () => {
+/**
+ * 정지 뒤 마무리 — 큐를 닫고, 판정을 만들고, 서버에 끝났다고 말한다.
+ *
+ * ⛔ **버튼에만 매달려 있었습니다** (결함 240). 동의 철회·백프레셔로
+ * 세션이 **스스로** 멈추면 `#halt()` 는 마이크만 끄고 큐는 안 닫습니다.
+ * 그때 「정지」는 이미 비활성(국면이 `recording` 이 아니므로)이라 사람이
+ * 누를 것이 없고, 화면은 **영영 「마무리 중」** 에 머뭅니다 — 결과도,
+ * 커버리지도, "여기까지 저장됐다" 도 안 나옵니다. 대표 실패 ③ 입니다.
+ *
+ * ⚠️ 두 번 불려도 한 번만 먹습니다. `client.stop()` 자체는 멱등이지만
+ * (레코더는 inactive 를 알아서 넘깁니다) 서버 왕복까지 두 번 할 이유가
+ * 없습니다.
+ */
+let finishing = false;
+async function finishRecording(): Promise<void> {
+  if (finishing) return;
+  finishing = true;
+
   if (resyncTimer) clearInterval(resyncTimer);
   if (elapsedTimer) clearInterval(elapsedTimer);
   wakeLock?.release();
@@ -423,6 +562,10 @@ $('stop').addEventListener('click', async () => {
 
   showResult(summary);
   await tellServerWeAreDone(summary);
+}
+
+$('stop').addEventListener('click', () => {
+  void finishRecording();
 });
 
 $('finish-retry').addEventListener('click', () => {
@@ -477,8 +620,30 @@ $('reupload').addEventListener('click', () => {
       }
     }
 
-    done.parked = still;
-    showResult(done);
+    const sent = parked.size - still.length;
+    /* ⛔ 되찾은 조각을 반영해 **판정을 다시 만듭니다** (결함 244). 안 그러면
+       화면이 들고 있는 정지 순간의 비관이 그대로 서버로 다시 가고, 서버는
+       「클라이언트가 더 비관적이면 그쪽을 존중한다」는 규칙에 따라 그 값을
+       저장합니다 — 소리는 다 돌아왔는데 기록은 계속 「사용 불가」입니다.
+       판단은 `@lib` 의 `recomputeAfterRecovery`. */
+    const recovered = [...parked].filter((seq) => !still.includes(seq));
+    summary = recomputeAfterRecovery(done, recovered);
+    const fixed = summary;
+    fixed.parked = still;
+    showResult(fixed);
+    // ⚠️ `showResult` 는 **이 기기가 잰 값**으로 칸을 다시 씁니다. 서버
+    //    판정을 안 덮어 주면 다시 올린 순간 「사용 가능 · 100%」 로
+    //    되돌아갑니다 — 고친 것이 이 한 줄 때문에 풀립니다 (결함 220).
+    if (serverVerdict !== null) applyServerVerdict(serverVerdict, fixed, true);
+
+    // ⛔ **눌러도 아무 말이 없었습니다** (결함 245). 실패한 seq 를 조용히
+    //    목록에 도로 넣기만 해서, 화면이 그대로였습니다.
+    showNote($('parked-note'), describeReupload(sent, still.length), still.length > 0 ? 'bad' : 'plain');
+
+    // ⛔ 다시 올렸으면 **판정도 다시 받아야 합니다** (결함 244). 서버는
+    //    자기가 가진 조각으로 커버리지를 다시 계산합니다 — 안 물어보면
+    //    되찾은 소리가 화면에서는 여전히 「사용 불가」입니다.
+    if (sent > 0) await tellServerWeAreDone(fixed);
   });
 });
 
@@ -508,28 +673,61 @@ window.addEventListener('online', () => {
     if (response === null || !response.ok) return;
     const body = (await response.json().catch(() => null)) as { seqs?: number[] } | null;
     if (body === null || !Array.isArray(body.seqs)) return;
-    const skipped = client.resumeFrom(body.seqs);
-    if (skipped > 0) {
-      showNote($('join-note'), `연결이 돌아왔습니다 — 이미 올라간 ${skipped}개는 건너뜁니다`);
-    }
+    // ⚠️ 색조를 **반드시** 넘깁니다. `showNote` 의 기본값은 `bad` 라,
+    //    안 넘기면 「연결이 돌아왔습니다」가 실패 빨강으로 뜹니다 (결함 243).
+    const resumed = describeResume(client.resumeFrom(body.seqs));
+    if (resumed !== null) showNote($('join-note'), resumed.text, resumed.tone);
   })();
 });
+
+/**
+ * 서버가 답한 뒤, **결과 칸의 주인을 서버로 바꿉니다** (결함 220).
+ *
+ * ⚠️ 판단은 `@lib/recording/complete.ts` 의 `completionView` 가 합니다 —
+ *    여기서는 붙이기만 합니다.
+ */
+function applyServerVerdict(
+  done: TrackCompleteResult,
+  local: RecordingSummary,
+  reuploaded = false,
+): void {
+  const view = completionView(
+    done,
+    { coverage: local.timeline.coverage, headline: describeTimeline(local.timeline) },
+    reuploaded,
+  );
+  $('verdict').textContent = view.headline;
+  $('verdict').className = view.tone;
+  $('coverage-label').textContent = coverageLabel('server');
+  $('coverage').textContent = view.coverageText;
+  $('usable').textContent = view.usableText;
+  delete $('usable').dataset.tone;
+  $('disagree').textContent = view.disagreement ?? '';
+  $('disagree').hidden = view.disagreement === null;
+}
 
 function showResult(result: RecordingSummary): void {
   $('result').hidden = false;
   $('verdict').textContent = describeTimeline(result.timeline);
   $('verdict').className = result.verdict.usable ? 'ok' : 'bad';
 
+  // ⛔ **이 칸의 주인은 아직 이 기기입니다** (결함 275). 종료 요청이 서버에
+  //    못 닿으면 `applyServerVerdict` 가 안 돌고 이 값들이 그대로 남습니다 —
+  //    예전에는 그때도 서버 값과 **똑같은 얼굴**로 「판정 사용 가능」이라고
+  //    적혀 있었습니다. 쓸 수 있는지는 서버에 무엇이 도착했는가로 정해지고,
+  //    그건 이 기기가 모르는 값입니다. 판단은 `@lib`.
+  $('coverage-label').textContent = coverageLabel('device');
   $('coverage').textContent = `${(result.timeline.coverage * 100).toFixed(1)}%`;
   $('totalgap').textContent = `${(result.timeline.totalGapMs / 1000).toFixed(1)}초`;
   $('longestgap').textContent = `${(result.timeline.longestGapMs / 1000).toFixed(1)}초`;
-  $('usable').textContent = result.verdict.usable ? '사용 가능' : '사용 불가';
+  $('usable').textContent = usableText(null);
+  $('usable').dataset.tone = 'gap';
 
   $('gaps').innerHTML = result.timeline.gaps.length
     ? result.timeline.gaps
         .map(
           (g) =>
-            `<li><code>${g.reason}</code> ${(g.durationMs / 1000).toFixed(1)}초 ` +
+            `<li>${escapeHtml(describeGapReason(g.reason))} ${(g.durationMs / 1000).toFixed(1)}초 ` +
             `(${((g.startMs - result.timeline.startedAtMs) / 1000).toFixed(0)}초 지점)</li>`,
         )
         .join('')

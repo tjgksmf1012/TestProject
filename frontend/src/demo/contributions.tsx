@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { labelInList } from '../lib/people/labels.ts';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -21,9 +22,11 @@ import {
   hasNoEvidence,
   integrityNotes,
   nameOf,
+  nothingMeasured,
   orderForDisplay,
   readBeforeTheNumber,
   roleOf,
+  teamConfidenceLine,
   teamWarnings,
   uncertaintyDots,
   uncertaintyDotsNote,
@@ -35,9 +38,11 @@ import {
 } from '../lib/contribution/view.ts';
 import {
   adjustmentsToRestore,
-  BLIND_CONFIRM,
   describeFinals,
+  firstGapOf,
   problemsWith,
+  whyCannotConfirm,
+  systemLabel,
   toPayload,
   type Draft,
   type FinalRow,
@@ -45,10 +50,12 @@ import {
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { scoreCards } from '../lib/ui/skeleton.ts';
 import { Byline, RawHtml } from './parts.tsx';
+import { teamDateTime } from '../lib/time/calendar.ts';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
@@ -154,33 +161,50 @@ function Drawer({ rest, flags }: { rest: readonly string[]; flags: readonly stri
 function MemberRow({
   member,
   people,
+  /**
+   * 이 프로젝트를 **떠난** 사람들 (서버의 `former_members`).
+   *
+   * ⛔ 이걸 안 받던 동안 나간 사람의 줄이 「**사용자 #3**」이었습니다
+   * (결함 308). `@lib` 의 `nameOf` 는 결함 222 때 이미 나간 사람을 찾도록
+   * 고쳐졌고 SPA 는 넘기고 있었는데, **이 화면만** 안 넘겼습니다.
+   * 게다가 같은 화면이 바로 위에서 「**박지원** 님은 이 프로젝트를
+   * 떠났지만 그때 한 일은 계산에 그대로 들어 있습니다」라고 말합니다 —
+   * 이름을 아는 화면이 이름 자리에 번호를 적고 있었습니다.
+   */
+  former,
   uncertainty,
 }: {
   member: MemberScore;
   people: Person[];
+  former: Person[];
   uncertainty: UncertaintySpan | undefined;
 }) {
   const notes = readBeforeTheNumber(member);
   const flags = integrityNotes(member);
-  const points = uncertainty?.points ?? 0;
+  // ⚠️ `?? 0` 을 쓰면 **잴 수 없음(null)** 이 0 으로 접히고, 그 0 은
+  //    아래에서 "이 값은 확정적입니다" 가 됩니다 (결함 226).
+  const points = uncertainty ? uncertainty.points : 0;
   const dots = uncertaintyDots(points);
 
   return (
     <div className="read">
       <div className="read-who">
-        <span className="who">{nameOf(member.user_id, people)}</span>
+        <span className="who">{nameOf(member.user_id, people, former)}</span>
         <span className="role">{roleOf(member, people)}</span>
       </div>
 
       <div className="read-val">
         <p className="range">{describeRange(member)}</p>
-        <p className="conf">신뢰도 {member.confidence_label}</p>
+        {/* ⚠️ 「신뢰도」는 **팀 값**입니다 — 팀당 한 번 계산돼(`scoring.py`)
+            모두에게 같은 값이 실립니다. 이름 아래에 그냥 두면 「이 사람의
+            데이터가 부실하다」로 읽힙니다 (결함 248). 임자를 적습니다. */}
+        <p className="conf">{teamConfidenceLine(member.confidence_label)}</p>
         {/* ⭐ **막대에서 셀 수 있는 점으로** (docs/19 §25). 위치가 아니라
             **개수**로만 씁니다 — 축 위에 뿌리면 순위표가 됩니다.
             폭 0 은 "완전히 확정" 이라 그릴 것이 없습니다. 0px 막대를
             그리면 사람은 그것을 "안 나왔다(고장)" 로 읽습니다. */}
         {dots === 0 ? (
-          <p className="unc-none">{uncertaintyDotsNote(0)}</p>
+          <p className="unc-none">{uncertaintyDotsNote(points)}</p>
         ) : (
           <>
             <div className="unc-dots" role="img" aria-label={uncertaintyDotsNote(points)}>
@@ -267,7 +291,12 @@ function Contributions() {
       return;
     }
     const body = (await response.json()) as { finals: FinalRow[] };
-    setFinalState(describeFinals(body.finals, new Map(people.map((p) => [p.user_id, p.name]))));
+    setFinalState(describeFinals(
+        body.finals,
+        // 결함 345 — 같은 이름 둘이면 「이하늘이 33% 로 확정」이 누구 말인지
+        // 알 수 없습니다. 이름표는 `@lib` 한 곳에서 붙입니다.
+        new Map(people.map((p) => [p.user_id, labelInList(p, people)])),
+      ));
     // ⚠️ **판단은 `adjustmentsToRestore` 가 합니다.** 되돌릴 것이 없으면
     // 비웁니다 — 남겨 두면 다시 그린 표에 지난 조정이 유령처럼 남습니다.
     const saved = adjustmentsToRestore(body.finals);
@@ -337,34 +366,25 @@ function Contributions() {
 
   const saveFinal = async (): Promise<void> => {
     if (screen.k !== 'ok') return;
-    // ⚠️ 저장된 확정을 못 읽었으면 여기서 멈춥니다 (결함 97). 입력칸이
-    // 비어 있는 것이 "시스템 값 그대로" 인지 "못 불러온 것" 인지 화면도
-    // 구분 못 하는 상태라, 그대로 보내면 남의 조정을 지웁니다.
-    if (!finalsKnown) {
-      setMessage({ text: BLIND_CONFIRM, tone: 'bad' });
+    /* ⚠️ **그리는 자리와 같은 판단을 씁니다.** 여기서 다시 짜면 두 벌이
+       되고, 언젠가 한쪽만 고쳐집니다(대표 실패 ②). 막힌 이유에는
+       「저장된 확정을 못 읽었다」(결함 97)와 「안 잰 사람을 시스템 값
+       그대로 확정」(결함 307)이 그대로 들어 있습니다. */
+    if (confirmBlocked !== null) {
+      /* ⚠️ **막힌 이유를 `message` 에 담지 않습니다.** 담았더니 사유를
+         적어 게이트가 열린 뒤에도 「이유를 적어야 합니다」가 화면에 그대로
+         남아, **열린 단추 밑에서 하라고 이미 한 일을 시켰습니다.**
+         `#final-message` 는 막혀 있는 동안 `confirmBlocked` 를 그대로
+         그리므로(결함 365 — 누르기 전에도 서 있어야 합니다) 여기서 다시
+         담을 필요가 없고, 담으면 **파생값이 저장값에 가려집니다.**
+         대신 **할 일이 있는 자리로 데려갑니다** — 알려만 주고 갈 곳을 안
+         주는 것이 이 저장소의 대표 실패 ③ 이고, SPA 는 이미 그렇게
+         합니다(`focusFirstGap`). */
+      focusFirstGap();
       return;
     }
-
-    const drafts: Draft[] = orderForDisplay(screen.score.members, screen.people).map((ms) => {
-      const mine = typed.get(ms.user_id);
-      const raw = (mine?.value ?? '').trim();
-      return {
-        user_id: ms.user_id,
-        // 빈 칸은 **0 이 아니라 "안 건드렸다"** 입니다. `Number('')` 가 0 이라
-        // 여기서 안 가르면 아무것도 안 적은 사람이 0점으로 확정됩니다.
-        final_value: raw === '' ? null : Number(raw),
-        reason: mine?.reason ?? '',
-      };
-    });
-
-    const problems = problemsWith(drafts, systemValues);
-    if (problems.length > 0) {
-      // ⚠️ 서버도 같은 규칙으로 거절합니다. 여기서 먼저 말하는 이유는,
-      // 서버가 400 을 돌려준 뒤에 알려 주면 그때는 이미 다른 사람의
-      // 확정까지 같이 실패한 뒤이기 때문입니다.
-      setMessage({ text: problems.join(' · '), tone: 'bad' });
-      return;
-    }
+    const drafts = draftsNow;
+    const unmeasured = unmeasuredNow;
 
     setSaving(true);
     try {
@@ -374,7 +394,7 @@ function Contributions() {
         fetch(`${apiBase}/api/projects/${projectId}/contributions/final`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ finals: toPayload(drafts, systemValues) }),
+          body: JSON.stringify({ finals: toPayload(drafts, systemValues, unmeasured) }),
           credentials: 'same-origin',
         }),
       );
@@ -389,12 +409,12 @@ function Contributions() {
       if (!response.ok) {
         // ⚠️ **`.json()` 도 던집니다.** 500 이 HTML 오류 페이지를 돌려주면
         // 파싱이 실패합니다 (결함 87 이 고친 자리가 다른 길로 열렸던 곳).
-        const body = (await response.json().catch(() => null)) as { detail?: unknown } | null;
+        const body: unknown = await response.json().catch(() => null);
+        /* ⚠️ 여기 손으로 만든 것이 `detailText` 와 **같은 판단 두 벌**
+           이었습니다 (실패 ②). 422 의 객체 배열까지 보는 쪽은 한 벌뿐이라
+           그것을 씁니다 (결함 51 · 301). */
         setMessage({
-          text:
-            typeof body?.detail === 'string'
-              ? body.detail
-              : (describeHttpStatus(response.status) ?? '확정하지 못했습니다'),
+          text: detailText(body, describeHttpStatus(response.status) ?? '확정하지 못했습니다'),
           tone: 'bad',
         });
         return;
@@ -483,12 +503,67 @@ function Contributions() {
   }
 
   const { score, people } = screen;
+  /* ⛔ 나간 사람의 줄이 「사용자 #3」이었습니다 (결함 308). 서버는 그때도
+     `former_members` 로 이름을 같이 보내고 있었고 `@lib` 의 `nameOf` 도
+     받을 준비가 돼 있었는데, **이 화면만** 안 읽었습니다. */
+  const former = score.former_members ?? [];
   const warnings = teamWarnings(score, people);
   const shown = orderForDisplay(score.members, people);
   // ⚠️ 모르는 폭은 **팀에서 가장 넓은 구간** 기준이라 한 사람만 보고는
   // 정할 수 없습니다. 그래서 목록 전체로 한 번에 계산합니다.
   const spans = new Map(uncertaintySpans(shown).map((s) => [s.userId, s]));
   const typedOf = (userId: number): Typed => typed.get(userId) ?? { value: '', reason: '' };
+
+  /* ⛔ **눌러 봐야 아는 것이 아닙니다** (결함 372). 예전에는 확정 단추가
+     `disabled={saving}` 뿐이라, 손대지 않은 화면에서 한 번 누르면 201 이
+     떨어지고 「시스템 값 그대로입니다」로 기록이 남았습니다 — 사람이 아무
+     값도 안 적었는데 시스템 값이 팀의 확정으로 굳는 것이고, 그 기록에는
+     사람 이름이 붙습니다(불변식 ④ — 시스템은 판정하지 않습니다).
+
+     SPA 는 v2 F1-4 대로 이미 막고 있었습니다. 판단은 `@lib` 한 벌
+     (`whyCannotConfirm`)로 두고 두 뿌리가 같이 씁니다. */
+  const draftsNow: Draft[] = shown.map((ms) => {
+    const mine = typed.get(ms.user_id);
+    const raw = (mine?.value ?? '').trim();
+    return {
+      user_id: ms.user_id,
+      // 빈 칸은 **0 이 아니라 「안 정함」** 입니다 — `Number('')` 는 0 입니다.
+      final_value: raw === '' ? null : Number(raw),
+      reason: mine?.reason ?? '',
+    };
+  });
+  const unmeasuredNow = new Set(shown.filter(nothingMeasured).map((ms) => ms.user_id));
+  /* ⚠️ `?? null` 이 아니라 **`undefined` 를 살립니다** (결함 254) — 명단이
+     아직 안 왔을 때 `null` 로 뭉개면 소유자에게도 「관리자에게 요청하세요」
+     라고 말합니다. `manageBlockedBecause` 가 그 둘을 갈라 씁니다. */
+  const myRole =
+    people.length === 0
+      ? undefined
+      : people.find((person) => person.user_id === me?.user_id)?.project_role;
+  const confirmBlocked = whyCannotConfirm({
+    myRole,
+    memberCount: draftsNow.length,
+    unfilled: draftsNow.filter(
+      (d) => d.final_value === null || Number.isNaN(d.final_value),
+    ).length,
+    problems: problemsWith(draftsNow, systemValues, unmeasuredNow),
+    blind: !finalsKnown,
+    sending: saving,
+  });
+  /** 막힌 단추를 눌렀을 때 **데려갈 자리**. 어느 칸인가는 `@lib` 이
+   *  정하고(`firstGapOf` — SPA 와 같은 답), 여기서는 DOM 만 만집니다.
+   *  이 화면의 칸에는 id 가 없어 행의 `data-user` 로 찾습니다. */
+  const focusFirstGap = (): void => {
+    const gap = firstGapOf(draftsNow, systemValues, (id) => typedOf(id).reason);
+    if (gap === null) return;
+    const row = document.querySelector(`.final-row[data-user="${gap.userId}"]`);
+    const box = row?.querySelector(gap.field === 'value' ? 'input.val' : 'input.reason');
+    if (box instanceof HTMLInputElement) {
+      box.scrollIntoView({ block: 'center' });
+      box.focus();
+    }
+  };
+
   const setTypedFor = (userId: number, patch: Partial<Typed>): void => {
     setTyped((prev) => {
       const next = new Map(prev);
@@ -502,7 +577,7 @@ function Contributions() {
       {header}
 
       <p className="meta-line" id="meta">
-        {score.algo_version} · {new Date(score.computed_at).toLocaleString('ko-KR')} 기준
+        {score.algo_version} · {teamDateTime(score.computed_at) ?? score.computed_at} 기준
       </p>
 
       {/* ⚠️ 이 경고는 **안 줄였습니다.** 여기가 이 제품의 윤리가 사는
@@ -534,6 +609,7 @@ function Contributions() {
               key={ms.user_id}
               member={ms}
               people={people}
+              former={former}
               uncertainty={spans.get(ms.user_id)}
             />
           ))
@@ -555,13 +631,19 @@ function Contributions() {
         </p>
         <div id="finals">
           {shown.map((ms) => {
-            const name = nameOf(ms.user_id, people);
-            const system = (systemValues.get(ms.user_id) ?? 0).toFixed(1);
+            const name = nameOf(ms.user_id, people, former);
+            /* ⛔ 예전에는 `(systemValues.get(id) ?? 0).toFixed(1)` 이라
+               안 잰 사람에게 **`0.0%`** 라고 적었습니다 (결함 307). 여섯 줄
+               위 카드는 같은 사람을 `—` 라고 그리고 「0 이라는 뜻이 아니라
+               연결이 없다는 뜻입니다」라고 말합니다 — 한 화면이 같은 사실을
+               두고 서로 다른 말을 하고 있었습니다. */
+            const measured = !nothingMeasured(ms);
+            const system = systemLabel(systemValues.get(ms.user_id), measured);
             return (
               <div className="final-row" key={ms.user_id} data-user={ms.user_id}>
                 <span className="who">{name}</span>
                 {/* ⚠️ 시스템 값은 **지워지지 않고 나란히 남습니다.** */}
-                <span className="sys">시스템 {system}%</span>
+                <span className="sys">시스템 {system}</span>
                 <label>
                   확정{' '}
                   <input
@@ -570,7 +652,7 @@ function Contributions() {
                     step="0.1"
                     min="0"
                     max="100"
-                    placeholder={system}
+                    placeholder={measured ? system : ""}
                     aria-label={`${name} 확정값`}
                     value={typedOf(ms.user_id).value}
                     onChange={(e) => setTypedFor(ms.user_id, { value: e.target.value })}
@@ -591,13 +673,27 @@ function Contributions() {
           })}
         </div>
         <div className="row" style={{ marginTop: '.75rem' }}>
-          <button id="confirm" className="primary" disabled={saving} onClick={() => void saveFinal()}>
+          {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 (결함 234·365) —
+              진짜 `disabled` 는 초점을 못 받아 사유가 안 들립니다. */}
+          <button
+            id="confirm"
+            className="primary"
+            aria-disabled={confirmBlocked !== null}
+            aria-describedby={confirmBlocked !== null ? 'final-message' : undefined}
+            onClick={() => void saveFinal()}
+          >
             이 값으로 확정
           </button>
         </div>
-        {message !== null && (
-          <p className={message.tone === 'plain' ? 'status plain' : 'status'} id="final-message">
-            {message.text}
+        {/* ⚠️ 누르기 **전에도** 왜 막혔는지 서 있어야 합니다 (결함 365 의
+            모양) — 눌러야 알려 주면 그건 이미 늦습니다. */}
+        {(message ?? (confirmBlocked !== null ? { text: confirmBlocked, tone: 'bad' } : null)) !==
+          null && (
+          <p
+            className={message?.tone === 'plain' ? 'status plain' : 'status'}
+            id="final-message"
+          >
+            {message?.text ?? confirmBlocked}
           </p>
         )}
         <p className="note">

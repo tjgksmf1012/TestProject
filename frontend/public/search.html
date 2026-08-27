@@ -36,6 +36,12 @@
   /* 왜 못 찾는지. ⚠️ 버튼만 흐려 두면 사람은 계속 누릅니다. */
   .cwhy { margin: 0; font-size: var(--fs-caption); color: var(--text-muted); }
 
+  /* 거르개가 **어디까지 걸렸는지**. ⚠️ 「담당자·업무 상태」는 업무 검색의
+     조건이라 회의·회의 내용·GitHub 은 낱말만 봅니다 — 안 적으면 김민수로
+     걸러 놓고 박지원의 발언이 나옵니다(결함 390). 모양은 `.cwhy` 와 같은
+     역할이라 **그 규칙을 같이 씁니다** — 자리만 결과 쪽으로 옮깁니다. */
+  .scope-note { max-width: 48rem; margin: 0 0 var(--sp-5); }
+
   /* ── 결과 ─────────────────────────────────────────── */
   .kgroup { max-width: 48rem; margin: 0 0 var(--sp-8); }
   .shead { display: flex; align-items: baseline; gap: var(--sp-3);
@@ -64,7 +70,7 @@
   /* ⚠️ 손가락에서는 입력 칸 글자를 16px 밑으로 내리지 않습니다. */
   @media (hover: none) and (pointer: coarse) {
     .htitle { font-size: 1rem; }
-    .hbody, .hstatus, .hwho, .kcount, .cwhy { font-size: .875rem; }
+    .hbody, .hstatus, .hwho, .kcount, .cwhy, .scope-note { font-size: .875rem; }
   }
         </style>
 </head>
@@ -73,6 +79,11 @@
   <div id="app"></div>
 
   <script type="module" src="/search.js"></script>
+
+  <!-- 탭 넷 **말고** 가는 곳. `src/demo/nav.ts` 가 `navLinks` 로 채운다.
+       ⛔ 이 자리를 지우면 채팅·일정·알림·활동·찾기·보고서로 **가는 길이
+       제품 전체에서 사라집니다** — 실제로 그랬습니다 (결함 305). -->
+  <nav id="nav" aria-label="더 보기"></nav>
 
   <nav id="tabs" aria-label="주요 화면"></nav>
 </body>

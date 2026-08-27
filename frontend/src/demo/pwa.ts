@@ -10,7 +10,12 @@
  * 판단은 `src/lib/pwa/install.ts` 에 있고 11개 테스트가 붙습니다.
  */
 
-import { describeInstall, installState, whyInstall } from '../lib/pwa/install.ts';
+import {
+  describeInstall,
+  installButtonText,
+  installState,
+  whyInstall,
+} from '../lib/pwa/install.ts';
 import { isDesktopApp } from '../lib/platform/recording.ts';
 
 // ⚠️ 셸 판별은 `lib/platform/recording.ts` 한 곳에서만 합니다.
@@ -83,6 +88,10 @@ export function renderInstallHint(): void {
 
   const button = document.getElementById('install-now');
   if (!button) return;
+  /* ⚠️ 글자는 `@lib` 이 정합니다 (결함 422). 마크업에도 같은 글자가 있는데,
+     그건 스크립트가 돌기 전에도 보여야 해서 둔 사본입니다 — 갈라지지 않게
+     검사가 짝을 잽니다. 여기서 다시 쓰면 어휘를 고칠 때 화면이 따라옵니다. */
+  button.textContent = installButtonText();
   button.hidden = state !== 'promptable';
   button.onclick = () => {
     void deferredPrompt?.prompt();

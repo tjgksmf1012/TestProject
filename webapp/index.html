@@ -13,6 +13,59 @@
     <title>TeamFlow</title>
   </head>
   <body>
+    <!-- ⚠️ **첫 방문의 흰 화면.**
+
+         재 봤습니다 — 400kbps 회선에서 캐시를 비우고 열면 아무것도 없는
+         흰 화면이 **12.5초**였습니다(압축을 켜서 4.8초로 줄였지만 여전히
+         5초 가까이 흽니다). 사람은 5초짜리 흰 화면을 "고장" 으로 읽고
+         새로고침을 누릅니다. 그러면 처음부터 다시입니다.
+
+         그래서 **HTML 만으로 그려지는 껍데기**를 둡니다. 스타일시트도
+         스크립트도 기다리지 않으므로(인라인) 문서가 닿는 순간 나타납니다.
+
+         ⚠️ 색은 `app.css` 의 `--c-paper`·`--c-surface`·`--c-line` 과 **같은
+         값**을 손으로 적습니다. 그 파일은 아직 안 왔기 때문에 변수를 쓸 수
+         없습니다. 다른 값을 적으면 진짜 화면이 뜨는 순간 **바탕이
+         번쩍입니다.** 팔레트를 고치면 여기도 같이 고치십시오 —
+         `guards.test.ts` 가 맞대 봅니다.
+
+         ⚠️ 낭독기에는 모양이 아무 말도 안 해 줍니다. 그래서 `role="status"`
+         한 줄을 같이 둡니다 — 안 두면 5초 동안 **아무 일도 안 일어난
+         것**과 같습니다. -->
+    <style>
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        background: #FAFAFB;
+      }
+      /* ⚠️ 진짜 레일의 `TF` 와 **같은 자리**에 둡니다. 아무 표식도 없으면
+         "회색 기둥 두 개" 라 무엇을 기다리는지 알 수 없고, 자리가 다르면
+         진짜 화면이 뜰 때 글자가 튑니다. */
+      #boot .boot__rail {
+        width: 72px; border-right: 1px solid #E3E5EA; background: #FFFFFF;
+        padding-top: 20px; text-align: center;
+        font: 700 11px/1 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: .08em; color: #878EA0;
+      }
+      #boot .boot__main { flex: 1; }
+      #boot .boot__bar { height: 56px; border-bottom: 1px solid #E3E5EA; background: #FFFFFF; }
+      #boot .boot__say {
+        position: absolute;
+        width: 1px; height: 1px; overflow: hidden;
+        clip-path: inset(50%); white-space: nowrap;
+      }
+      @media (prefers-color-scheme: dark) {
+        #boot { background: #121319; }
+        #boot .boot__rail, #boot .boot__bar { background: #191B23; border-color: #2A2E3B; }
+        #boot .boot__rail { color: #6E7688; }
+      }
+    </style>
+    <div id="boot">
+      <p class="boot__say" role="status">불러오는 중입니다</p>
+      <div class="boot__rail" aria-hidden="true">TF</div>
+      <div class="boot__main" aria-hidden="true"><div class="boot__bar"></div></div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

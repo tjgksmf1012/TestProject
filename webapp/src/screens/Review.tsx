@@ -1,6 +1,22 @@
-import { useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
+import {
+  describeMissingSummary,
+  reviewPhase,
+  showsFinishReview,
+  whyCannotFinishReview,
+} from '@lib/review/phase.ts';
+import { pendingNote, typeCounts } from '@lib/review/labels.ts';
+import { plainText } from '@lib/ui/plain.ts';
+import {
+  SHARE_NOTE,
+  inGivenOrder,
+  notMeasurableText,
+  shareText,
+  skewText,
+} from '@lib/review/speaking.ts';
+import { labelInList } from '@lib/people/labels.ts';
 import { Disclosure } from '../components/Disclosure.tsx';
 import { EvidenceChip } from '../components/EvidenceChip.tsx';
 import { Conditions, describeConditions, type Condition } from '../components/Conditions.tsx';
@@ -11,33 +27,47 @@ import {
   useCandidates,
   useMeeting,
   useMeetingMembers,
+  useSpeaking,
+  useUtteranceTypes,
   useSubmitReview,
   useTimeline,
 } from '../api/hooks.ts';
 import {
   approvalBlockers,
+  firstApprovalGap,
   approvalConditions,
   canUndoDecision,
+  attentionAbout,
   attentionReasons,
+  decisionPressed,
   buildReviewPayload,
   effectiveAssignee,
   effectiveDeadline,
-  canSubmit,
   describeSubmitResult,
   emptyDraft,
   laneCounts,
   reviewLane,
   sortForReview,
   summarize,
+  confidenceReading,
   type Candidate,
   type Draft,
   type ReviewContext,
 } from '@lib/review/candidates.ts';
 import { audioNote, emptyTimelineNote, timelineRows, trackAudioUrl, type TimelineRow } from '@lib/review/timeline.ts';
-import { missingNote, emptyEvidenceNote, withContext } from '@lib/review/evidence.ts';
+import {
+  missingNote,
+  emptyEvidenceNote,
+  splitEvidenceChips,
+  withContext,
+} from '@lib/review/evidence.ts';
 import { agendaItems, issueViews } from '@lib/review/minutes.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { Problem } from '../components/Problem.tsx';
+import { draftStorageKey, parseDrafts, serializeDrafts } from '@lib/review/drafts.ts';
+import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
+import { meetingLabel } from '@lib/ui/naming.ts';
+import { ApiError } from '../api/client.ts';
 
 // 업무 후보 검토 — 3판 (지시서 07).
 //
@@ -45,16 +75,83 @@ import { Problem } from '../components/Problem.tsx';
 // 근거를 확인할 때 참조하는 것이라 옆에 둡니다 — 위에 쌓지 않습니다.
 // AI 가 만든 것(점선 위)과 사람이 정하는 것(점선 아래)을 형태로 가릅니다.
 
-function useDraftMap() {
+/**
+ * 검토하던 것.
+ *
+ * ⚠️ **새로고침 한 번에 전부 날아갔습니다** (결함 217). 재서 확인한 것 —
+ * 담당자를 고르면 화면은 바뀌는데 **나간 요청이 0건**이고(그게 맞습니다,
+ * 검토는 한 번에 확정하는 절차니까요), 새로고침하면 「미지정」으로
+ * 돌아가며 **경고 대화상자도 0건**이었습니다. 후보가 열셋인 회의에서
+ * 담당자와 마감일을 다 채운 뒤 실수로 새로고침하면 그 몇 분이 통째로
+ * 사라집니다.
+ *
+ * 판단(무엇을 남기고 무엇을 버릴지)은 `@lib/review/drafts.ts` 에 있습니다.
+ * 여기서는 읽고 쓰기만 합니다.
+ */
+function useDraftMap(meetingId: number, liveIds: readonly number[]) {
   const [drafts, setDrafts] = useState<ReadonlyMap<number, Draft>>(new Map());
+  // 되살리기는 **후보 목록이 온 뒤에** 한 번만. 그 전에는 무엇이 아직
+  // 살아 있는 후보인지 알 수 없어 거를 수가 없습니다.
+  const restored = useRef(false);
+
+  useEffect(() => {
+    if (restored.current || liveIds.length === 0) return;
+    restored.current = true;
+    const saved = parseDrafts(sessionStorage.getItem(draftStorageKey(meetingId)), liveIds);
+    if (saved.size > 0) setDrafts(saved);
+  }, [meetingId, liveIds]);
+
   const update = (id: number, patch: Partial<Draft>) => {
     setDrafts((prev) => {
       const next = new Map(prev);
       next.set(id, { ...(prev.get(id) ?? emptyDraft()), ...patch });
+      // ⚠️ **바꿀 때마다 씁니다.** "나갈 때 저장" 은 브라우저가 탭을
+      //    죽이면 안 돌고, 그때가 바로 잃으면 안 되는 순간입니다.
+      try {
+        sessionStorage.setItem(draftStorageKey(meetingId), serializeDrafts(next));
+      } catch {
+        // 저장이 안 되는 브라우저(사생활 모드 등)에서도 검토는 되어야
+        // 합니다. 못 남기는 것이 못 쓰는 것보다 낫습니다.
+      }
       return next;
     });
   };
-  return { drafts, update };
+
+  /** 확정에 성공했으면 초안은 이미 뜻이 없습니다. */
+  const clear = () => {
+    try {
+      sessionStorage.removeItem(draftStorageKey(meetingId));
+    } catch {
+      /* 위와 같은 이유 */
+    }
+  };
+
+  return { drafts, update, clear };
+}
+
+/**
+ * 근거 칩 묶음 — **다 펼치지 않습니다** (UI 패스 v3).
+ *
+ * 근거 열둘이 두 줄로 깔리면 회의 내용보다 숫자가 먼저 보입니다. 몇 개까지
+ * 펼칠지는 `@lib` 의 `splitEvidenceChips` 가 정하고, 나머지는 「+N」 뒤에
+ * 있습니다 — **감추는 것이 아니라 접는 것**입니다.
+ */
+function EvidenceChips({ ids, onOpen }: { ids: number[]; onOpen: (id: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const { head, rest } = splitEvidenceChips(ids);
+  const shown = open ? ids : head;
+  return (
+    <span className="cand__chips">
+      {shown.map((id) => (
+        <EvidenceChip key={id} id={`#${id}`} onOpen={() => onOpen(id)} />
+      ))}
+      {rest.length > 0 && !open && (
+        <button type="button" className="chip chip--more" onClick={() => setOpen(true)}>
+          +{rest.length}
+        </button>
+      )}
+    </span>
+  );
 }
 
 export default function Review() {
@@ -64,20 +161,40 @@ export default function Review() {
   const candidatesQuery = useCandidates(meetingId);
   const timeline = useTimeline(meetingId);
   const membersQuery = useMeetingMembers(meetingId);
+  // ⛔ **SPA 가 이 둘을 안 부르고 있었습니다** (결함 352). 레거시 검토는
+  //    부르고 있었고, 라우트 가드가 두 뿌리를 **한 자루에 담아 세어**
+  //    초록이었습니다 — 결함 321 과 같은 모양입니다.
+  const tally = useUtteranceTypes(meetingId);
+  const speaking = useSpeaking(meetingId);
   const submit = useSubmitReview(meetingId);
 
-  const { drafts, update } = useDraftMap();
+  const candidates = useMemo(
+    () => sortForReview(candidatesQuery.data ?? []),
+    [candidatesQuery.data],
+  );
+  /* 되살릴 초안을 거를 기준 — **지금 화면에 있는 후보**입니다. 그 사이에
+     누가 처리해 버린 후보의 초안은 이미 뜻이 없습니다 (결함 217). */
+  const liveIds = useMemo(() => candidates.map((c) => c.id), [candidates]);
+
+  /* ⚠️ **못 받았는데 「업무 후보 0건 · 기록된 발화가 없습니다」 라고
+     했습니다** (결함 224). 새로 가입한 사람이 남의 회의 주소를 열면 서버는
+     403 인데, 화면은 빈 검토 화면을 그리고 **왜 비었는지 이유까지 지어
+     냈습니다** — "녹음이 아직 처리되지 않았거나, 녹음 없이 열린
+     회의입니다". 그건 사실이 아닙니다. 셋 중 가장 나쁜 자리입니다:
+     0 을 단언하는 데서 그치지 않고 **틀린 설명**을 붙였습니다. */
+  const loadError = meeting.error ?? candidatesQuery.error ?? timeline.error;
+  const cannotLoad =
+    loadError == null
+      ? null
+      : describeLoadFailure('회의', loadError instanceof ApiError ? loadError.status : null);
+
+  const { drafts, update, clear: clearDrafts } = useDraftMap(meetingId, liveIds);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [submitNote, setSubmitNote] = useState<string | null>(null);
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
   const listRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playingId, setPlayingId] = useState<number | null>(null);
-
-  const candidates = useMemo(
-    () => sortForReview(candidatesQuery.data ?? []),
-    [candidatesQuery.data],
-  );
   const members = membersQuery.data ?? [];
   const context: ReviewContext = useMemo(
     () => ({ memberIds: members.map((m) => m.user_id), today: todayInTeamCalendar() }),
@@ -167,24 +284,53 @@ export default function Review() {
     setPlayingId(utteranceId);
   };
 
+  /* ⛔ **화면이 회의 상태를 안 봤습니다** (결함 232). 후보가 0건이면
+     끝난 회의에도 「회의 처리가 끝나면 AI 초안이 여기 올라옵니다」라고
+     했습니다 — 방금 업무 셋을 확정한 사람에게. 판단은 `@lib` 에. */
+  const phase = reviewPhase(meeting.data?.status);
   const lanes = laneCounts(candidates, drafts);
   const summary = summarize(candidates, drafts, context);
-  const submitBlockedReason =
-    lanes.pending > 0
-      ? `${lanes.all}건 중 ${lanes.pending}건이 아직 처리되지 않았습니다`
-      : !canSubmit(summary)
-        ? summary.blocked > 0
-          ? '승인 표시된 후보 중 조건이 안 채워진 것이 있습니다'
-          : '결정한 후보가 없습니다'
-        : null;
+  /* ⚠️ 「왜 지금 못 끝내나」는 `@lib` 이 정합니다 (결함 366) — 화면 코드에는
+     자동 검사가 없어서, 여기서 짜면 후보가 **처음부터 0건**인 회의에게
+     「결정한 후보가 없습니다」라고 하는 것 같은 문장이 조용히 남습니다. */
+  const submitBlockedReason = whyCannotFinishReview({
+    status: meeting.data?.status,
+    lanes,
+    summary,
+  });
 
   const onSubmit = () => {
     try {
       const payload = buildReviewPayload(candidates, drafts, context);
       submit.mutate(payload, {
+        /* ⚠️ **`onError` 가 없었습니다** (결함 218). 서버가 500 을 줘도
+           화면 글자가 **한 글자도 안 바뀌었고** 버튼은 다시 눌리는 상태로
+           돌아갔습니다 — 사람은 확정된 줄 알고 떠납니다. 감싼 `try/catch`
+           는 payload 를 만드는 동안만 봅니다. 비동기 실패는 그 밖입니다. */
+        onError: (error) => {
+          setSubmitNote(
+            describeActionFailure(
+              '검토 확정',
+              error instanceof ApiError ? error.status : null,
+              error instanceof ApiError ? error.detail : null,
+            ),
+          );
+        },
         onSuccess: (result) => {
-          setSubmitNote(describeSubmitResult(result.approved_count, result.approved_task_ids));
+          /* ⛔ **서버가 준 답을 읽습니다** (결함 233). `approved_count: 0` 은
+             「전부 거절함」일 수도 「이미 남이 처리함」일 수도 있는데,
+             가르는 것은 **내가 몇 건을 승인 표시했는가** 뿐입니다. */
+          setSubmitNote(
+            describeSubmitResult(
+              result.approved_count,
+              result.approved_task_ids,
+              payload.items.filter((i) => i.approve).length,
+            ),
+          );
           setSelectedId(null);
+          // 확정했으면 초안은 뜻이 없습니다 — 남겨 두면 다음에 이 회의를
+          // 열었을 때 이미 처리된 결정이 되살아난 것처럼 보입니다.
+          clearDrafts();
         },
       });
     } catch (e) {
@@ -192,15 +338,21 @@ export default function Review() {
     }
   };
 
-  const title = meeting.data?.title ?? '회의 검토';
+  /* ⚠️ 예전에는 `?? '회의 검토'` 였습니다 (결함 285) — 로비는 같은
+     회의를 「회의 준비」라고 불렀습니다. 이름은 `@lib` 한 벌. */
+  const title = meetingLabel(meeting.data?.title, meeting.data?.id ?? meetingId);
   const note = audioNote(timeline.data?.has_audio ?? false, rows);
 
   return (
     <AppShell
-      title={`${title} · 업무 후보 ${lanes.all}건`}
+      /* ⚠️ 머리줄도 **숫자를 단언하면 안 됩니다** (결함 224). 못 받았는데
+         「업무 후보 0건」 이라고 적으면 판을 가려 놓은 것이 무색합니다. */
+      title={cannotLoad === null ? `${title} · 업무 후보 ${lanes.all}건` : title}
       projectId={meeting.data?.project_id}
       actions={
         <div className="appbar__actions">
+          {cannotLoad !== null || !showsFinishReview(lanes) ? null : (
+          <>
           {/* v2 F10 — 일괄 승인 기능은 **만들지 않습니다.** 이 버튼은
               후보를 하나씩 다 처리한 뒤에야 열리는 마무리 버튼이고,
               라벨도 그렇게 읽혀야 합니다(`3건 모두 처리하고 제출` → `검토
@@ -237,16 +389,31 @@ export default function Review() {
           >
             검토 끝내기
           </button>
+          </>
+          )}
         </div>
       }
     >
       <audio ref={audioRef} hidden />
       <div className="panes">
+        {cannotLoad !== null ? (
+          <section className="pane">
+            <div className="pane__body">
+              <div className="empty">{cannotLoad}</div>
+            </div>
+          </section>
+        ) : (
+        <>
         {/* 좌 — 회의 내용. 통계·요약은 접고 전사가 주인공. */}
         <section className="pane pane--transcript" aria-label="회의 내용">
           <div className="pane__head">
             <h2 className="pane__title">회의 내용</h2>
             <span className="pane__count">{rows.length}</span>
+            {/* ⚠️ 왼쪽 시각(`0:01`·`12:00`)은 **회의 시작 후**입니다. 단위가
+                없으면 `12:00` 이 낮 열두 시로 읽힙니다 — 줄마다 단위를
+                붙이면 글자가 스무 배로 늘어나므로 **머리말에서 한 번**
+                말합니다 (UI 패스 v3). */}
+            <span className="pane__hint">시작 후 분:초</span>
           </div>
           <div className="pane__body">
             {meeting.data && (
@@ -254,7 +421,12 @@ export default function Review() {
                 <Disclosure
                   summary={`요약 · 다음 안건 ${agendaItems(meeting.data.next_agenda).length} · 답 안 난 것 ${issueViews(meeting.data.unresolved_issues).length}`}
                 >
-                  <p>{meeting.data.summary ?? '요약이 아직 없습니다 — 처리가 끝나면 여기 담깁니다.'}</p>
+                  {/* ⛔ 예전에는 여기 한 문장이 박혀 있었습니다 (결함 284) —
+                      「처리가 끝나면 여기 담깁니다」. 검토까지 끝난 회의와
+                      처리에 **실패한** 회의에도 그렇게 말했습니다. 바로 옆
+                      후보 칸은 이 병을 이미 고쳤는데(`reviewPhase`) 요약
+                      칸만 남아 있었습니다. 판단은 `@lib`. */}
+                  <p>{meeting.data.summary ?? describeMissingSummary(meeting.data.status)}</p>
                   {agendaItems(meeting.data.next_agenda).map((item) => (
                     <p key={item}>다음 안건 — {item}</p>
                   ))}
@@ -267,7 +439,32 @@ export default function Review() {
                           (<span className="num">{issue.at}</span>)
                         </>
                       )}{' '}
-                      · 근거 {issue.evidenceCount}건
+                      {/* ⭐ **칩으로 엽니다** (결함 420). 예전에는 「근거
+                          1건」이라고 **적기만** 했습니다 — 아래 관찰 줄과
+                          후보 카드는 같은 값을 처음부터 칩으로 열고
+                          있었으니, 같은 화면 안에서 셋 중 하나만 막힌
+                          것입니다. 서버가 번호를 싣는 이유가 바로 「사람이
+                          확인할 수 있게」입니다(`UnresolvedIssueOut`). */}
+                      {issue.evidence.length === 0 ? (
+                        <span className="muted">· 근거 없음</span>
+                      ) : (
+                        /* ⚠️ **축 이름을 눈에도 남깁니다** (결함 395). 칩만
+                           그리면 눈에는 맨 숫자 `#5` 뿐이고 「근거」는
+                           `aria-label` 에만 있습니다 — 귀가 눈보다 많이
+                           아는 상태입니다. */
+                        <>
+                          {'· 근거 '}
+                          <EvidenceChips
+                            ids={issue.evidence}
+                            onOpen={(id) =>
+                              rowRefs.current.get(id)?.scrollIntoView({
+                                behavior: reduceMotion ? 'auto' : 'smooth',
+                                block: 'center',
+                              })
+                            }
+                          />
+                        </>
+                      )}
                     </p>
                   ))}
                 </Disclosure>
@@ -278,6 +475,84 @@ export default function Review() {
                     </p>
                   </Disclosure>
                 )}
+                {/* ⭐ **무슨 말이 오갔나** (정의서 §10 · `REVIEW-005`) — 결함 352.
+                    이 판의 머리 주석은 「통계·요약은 **접고** 전사가 주인공」
+                    인데, 요약만 접혀 있고 통계는 **아예 없었습니다.**
+                    레거시 검토는 처음부터 그리고 있었습니다.
+
+                    ⚠️ **사람 이름이 여기 없습니다.** 회의 단위로만 셉니다 —
+                    사람별로 세면 그 순간 「누가 제일 많이 제안했나」 표가
+                    되고, 그건 불변식 ①(순위·리더보드 금지)입니다. 서버도
+                    사람별 건수를 안 줍니다.
+
+                    ⚠️ **막대를 안 그립니다.** 값을 같은 축 위에 늘어놓으면
+                    그게 곧 순위표입니다 — 값은 글자로. */}
+                {tally.data !== undefined && tally.data.total > 0 && (
+                  <Disclosure summary="무슨 말이 오갔나">
+                    {/* 안 잰 것을 0 옆에 두지 않습니다 — 따로 적습니다. */}
+                    {pendingNote(tally.data.unclassified, tally.data.total) !== null && (
+                      <p className="t12 gap">
+                        {pendingNote(tally.data.unclassified, tally.data.total)}
+                      </p>
+                    )}
+                    <ul className="tally">
+                      {typeCounts(tally.data.labels)
+                        .filter((row) => row.count > 0)
+                        .map((row) => (
+                          <li key={row.type} className={row.zero ? 'tally--zero' : undefined}>
+                            <span>{row.label}</span>
+                            <span className="num">{row.count}</span>
+                          </li>
+                        ))}
+                    </ul>
+                    {/* ⚠️ 0건인 유형을 통째로 숨기면 「반대가 없었다」가
+                        안 보입니다. 줄로 세우면 시끄러우니 한 줄로. */}
+                    {typeCounts(tally.data.labels).some((row) => row.count === 0) && (
+                      <p className="t12 muted">
+                        없던 것 —{' '}
+                        {typeCounts(tally.data.labels)
+                          .filter((row) => row.count === 0)
+                          .map((row) => row.label)
+                          .join(' · ')}
+                      </p>
+                    )}
+                  </Disclosure>
+                )}
+                {/* ⭐ **누가 얼마나 말했나** (정의서 §9 `AI-AUDIO-005`) — 결함 352.
+
+                    ⚠️ **이 구역이 이 제품에서 제일 위험합니다.** 정의서의
+                    예시가 내림차순 목록, 곧 리더보드입니다. 그래서:
+                    ① 다시 정렬하지 않습니다(서버가 이름 순으로 줍니다)
+                    ② 막대를 안 그립니다 ③ 기여도가 아니라고 화면이 말합니다.
+                    판단은 전부 `@lib/review/speaking.ts`. */}
+                {speaking.data !== undefined && (
+                  <Disclosure summary="누가 얼마나 말했나">
+                    {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
+                    {/* ⚠️ `plainText` 를 거칩니다 — `SHARE_NOTE` 는 마크다운이라
+                        그냥 그리면 **별표가 그대로** 나갑니다. 렌더해서
+                        잡았습니다(이 저장소가 이미 한 번 당한 것). */}
+                    <p className="t12 muted">{plainText(SHARE_NOTE)}</p>
+                    {notMeasurableText(speaking.data) !== null ? (
+                      /* 빈 칸으로 두지 않습니다 — 「고장」으로 읽힙니다. */
+                      <p className="t12 muted">{notMeasurableText(speaking.data)}</p>
+                    ) : (
+                      <>
+                        <ul className="tally">
+                          {inGivenOrder(speaking.data.shares).map((row) => (
+                            <li key={row.user_id}>
+                              <span>{row.name}</span>
+                              <span className="num">{shareText(row)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        {/* ⚠️ 누가인지 안 적고, 나무라지도 않습니다. */}
+                        {skewText(speaking.data) !== null && (
+                          <p className="t12 muted">{skewText(speaking.data)}</p>
+                        )}
+                      </>
+                    )}
+                  </Disclosure>
+                )}
               </>
             )}
             {note !== null && (
@@ -286,7 +561,7 @@ export default function Review() {
                 <Why about="이 회의의 소리" lines={[note]} />
               </p>
             )}
-            {rows.length === 0 && <div className="empty">{emptyTimelineNote()}</div>}
+            {rows.length === 0 && <div className="empty">{emptyTimelineNote(meeting.data?.status)}</div>}
             {rows.map((row, i) =>
               row.kind === 'finding' ? (
                 <div className="tlrow" key={`f-${i}`}>
@@ -296,6 +571,33 @@ export default function Review() {
                       {row.view.title}
                       {row.view.what !== null && ` — ${row.view.what}`}
                     </span>
+                    {/* ⭐ **근거 없는 지적은 잔소리입니다.**
+                        `findings.ts` 머리말이 "근거 없는 지적은 반박할 수
+                        없고, 반박할 수 없으면 잔소리입니다" 라고 적어
+                        뒀는데, 화면은 제목과 한 줄 설명만 그리고 있었습니다
+                        — 어떤 낱말이 겹쳤는지, 몇 분 만에 다시 나왔는지,
+                        어느 발화가 근거인지가 다 빠져 있었습니다.
+
+                        `whyText` 와 `findingView().evidence` 는 처음부터
+                        `@lib` 에 있었고 레거시 화면만 부르고 있었습니다.
+
+                        ⚠️ `why` 는 만들 수 없으면 `null` 입니다 —
+                        "알 수 없는 이유로 걸렸습니다" 를 적지 않는 것이
+                        그 함수의 규칙이고, 여기서도 그때는 안 그립니다. */}
+                    {row.view.why !== null && (
+                      <span className="tlrow__why">{row.view.why}</span>
+                    )}
+                    {row.view.evidence.length > 0 && (
+                      <EvidenceChips
+                        ids={row.view.evidence}
+                        onOpen={(id) =>
+                          rowRefs.current.get(id)?.scrollIntoView({
+                            behavior: reduceMotion ? 'auto' : 'smooth',
+                            block: 'center',
+                          })
+                        }
+                      />
+                    )}
                   </div>
                   <span />
                 </div>
@@ -357,7 +659,24 @@ export default function Review() {
             )}
             {candidates.length === 0 && !candidatesQuery.isPending && (
               <div className="empty">
-                검토할 후보가 없습니다 — 회의 처리가 끝나면 AI 초안이 여기 올라옵니다.
+                {phase.emptyNote}
+                {/* ⚠️ **간 곳을 알려 줍니다** (결함 232). 업무 셋이 칸반으로
+                    갔는데 이 화면 어디에도 그 말이 없었습니다 — 실패 ③. */}
+                {phase.go !== null && meeting.data !== undefined && (
+                  <>
+                    {' '}
+                    <Link
+                      className="empty__go"
+                      to={
+                        phase.go.screen === 'kanban'
+                          ? `/project/${meeting.data.project_id}/kanban`
+                          : `/meeting/${meetingId}/lobby`
+                      }
+                    >
+                      {phase.go.label}
+                    </Link>
+                  </>
+                )}
               </div>
             )}
             {candidates.map((candidate) => {
@@ -390,31 +709,72 @@ export default function Review() {
                     {lane === 'approve' && <span className="cand__state cand__state--approve">등록 표시됨</span>}
                     {lane === 'reject' && <span className="cand__state cand__state--reject">거절 표시됨</span>}
                     <span className="cand__conf">
-                      확신 {Math.round(candidate.confidence * 100)}%
-                      {/* "왜 확신이 낮은가" 는 **지우지 않습니다** — 원문 그대로
-                          한 번의 동작으로 닿습니다. 카드마다 같은 문장을
-                          펼쳐 두면 셋이면 186자가 되고, 늘 있는 글자는
-                          배경이 되어 아무도 안 읽습니다. */}
+                      {/* 글자는 `@lib` 에서 (결함 395). 여기 손으로 적으면
+                          레거시와 갈라집니다 — 실제로 갈라져 있었습니다. */}
+                      {confidenceReading(candidate.confidence)}
+                      {/* 사유는 **지우지 않습니다** — 원문 그대로 한 번의
+                          동작으로 닿습니다. 카드마다 같은 문장을 펼쳐 두면
+                          셋이면 186자가 되고, 늘 있는 글자는 배경이 되어
+                          아무도 안 읽습니다.
+
+                          ⛔ 제목이 「확신이 낮은 이유」였습니다 (결함 253).
+                          줄들은 대개 서버 경고(담당자 미확정)이고, 확신
+                          71% 후보에도 그 제목이 붙어 있었습니다 — 저확신
+                          기준은 0.7 입니다. 제목도 `@lib` 이 답니다. */}
                       <Why
-                        about={`${candidate.title} — 확신이 낮은 이유`}
+                        about={attentionAbout(candidate)}
                         lines={attentionReasons(candidate)}
                       />
                     </span>
                   </div>
                   <h3 className="cand__title">{candidate.title}</h3>
-                  <div className="cand__chips">
-                    {noEvidence ? (
+                  {noEvidence ? (
+                    <div className="cand__chips">
                       <span className="chip chip--unknown">⚠ 근거 없음 — 등록할 수 없습니다</span>
-                    ) : (
-                      candidate.evidence_utterance_ids.map((id) => (
-                        <EvidenceChip
-                          key={id}
-                          id={`#${id}`}
-                          onOpen={() => select(candidate)}
-                        />
-                      ))
-                    )}
-                  </div>
+                    </div>
+                  ) : (
+                      /* ⚠️ **어느 칩을 눌러도 첫 근거로 갔습니다** (결함 223).
+                         `select(candidate)` 는 `evidence_utterance_ids[0]`
+                         으로 스크롤합니다 — 근거가 #1·#3 인 후보에서
+                         「근거 #3 원문 보기」 를 누르면 #1 로 갔습니다.
+                         재서 확인했습니다 — 근거를 #1·#14 로 벌려 놓고
+                         쟀더니 두 칩 모두 scrollTop 57 이었습니다. 가까운
+                         근거로 재면 두 동작이 **같은 결과**를 내서 아무것도
+                         못 잽니다(#1·#3 으로는 못 잡았습니다).
+
+                         칩의 이름이 「근거 #3 **원문 보기**」 인데 다른 것을
+                         보여 주면, 이 저장소가 실패 ③ 으로 적어 둔 "근거
+                         번호만 주고 볼 자리를 안 준 것" 과 같은 종류입니다
+                         — 자리는 있는데 **틀린 자리**로 갑니다.
+
+                         아래 관찰 줄의 칩은 처음부터 자기 발화로 갔습니다.
+                         같은 화면 안에서 둘이 달랐던 것입니다. */
+                    /* ⚠️ **`EvidenceChips` 로 감쌉니다** (결함 364). 예전에는
+                       여기서 `map` 으로 **전부** 그렸습니다 — 근거가 열둘인
+                       후보를 창 반쪽(720px)에서 열면 맨 숫자가 **세 줄**로
+                       깔려 제목 바로 아래 제일 넓은 자리를 먹었습니다.
+                       접는 판단은 `@lib` 의 `splitEvidenceChips` 에 있고
+                       그 머리말이 바로 이 해악을 적어 뒀는데, 부르는 곳이
+                       아래 관찰 줄 하나뿐이었습니다. */
+                    <EvidenceChips
+                      ids={candidate.evidence_utterance_ids}
+                      onOpen={(id) => {
+                            select(candidate);
+                            /* ⚠️ **다음 프레임에 해야 먹습니다.** `select` 가
+                               먼저 자기 스크롤(첫 근거)을 시작하는데, 같은
+                               task 안에서 두 번째 `scrollIntoView` 를 부르면
+                               삼켜집니다 — 재서 확인했습니다. 처음 쓴 고침이
+                               바로 이래서 **아무 일도 안 했고**, 화면을 재
+                               보지 않았으면 고쳤다고 적을 뻔했습니다. */
+                            requestAnimationFrame(() => {
+                              rowRefs.current.get(id)?.scrollIntoView({
+                                behavior: reduceMotion ? 'auto' : 'smooth',
+                                block: 'center',
+                              });
+                        });
+                      }}
+                    />
+                  )}
                   {/* 점선 아래 — 여기부터 사람의 몫 */}
                   <hr className="cand__divider" />
                   <div
@@ -445,7 +805,11 @@ export default function Review() {
                             assigneeOverride: next === null ? null : Number(next),
                           })
                         }
-                        options={members.map((m) => ({ value: String(m.user_id), label: m.name }))}
+                        /* 결함 345 — 같은 이름 둘이면 목록이 같은 글자 두 줄입니다. */
+                        options={members.map((m) => ({
+                          value: String(m.user_id),
+                          label: labelInList(m, members),
+                        }))}
                         emptyLabel="미지정"
                         ariaLabel={`${candidate.title} — 담당자`}
                       />
@@ -485,12 +849,10 @@ export default function Review() {
                           //    정했고 마감만 빈 경우가 흔한데, 그때 담당자로
                           //    데려가면 사람은 "여긴 이미 했는데?" 가 됩니다.
                           //    **비어 있는 칸**으로 갑니다.
-                          const gap =
-                            effectiveAssignee(candidate, draft) === null
-                              ? 'assignee'
-                              : effectiveDeadline(candidate, draft) === null
-                                ? 'deadline'
-                                : null;
+                          //    ⚠️ 어느 칸인가는 `@lib` 이 **막는 이유에서**
+                          //    뽑습니다 — 레거시도 같은 답을 씁니다(결함 373).
+                          //    여기서 다시 사슬을 짜면 두 벌입니다.
+                          const gap = firstApprovalGap(blockers);
                           if (gap !== null) {
                             document
                               .getElementById(`cand-${gap}-${candidate.id}`)
@@ -501,6 +863,12 @@ export default function Review() {
                         }
                         update(candidate.id, { decision: 'approve' });
                       }}
+                      /* ⛔ **이미 고른 뒤에도 살아 있었습니다** (결함 267).
+                         다시 눌러도 요청이 안 나가고 화면도 안 바뀌어,
+                         고장인지 이미 된 것인지 알 수 없었습니다. 지우면
+                         「거절 → 다시 등록」이 막히므로, **고른 것으로
+                         보이게** 합니다. 판단은 `@lib`. */
+                      aria-pressed={decisionPressed(draft, 'approve')}
                     >
                       등록
                     </button>
@@ -524,6 +892,7 @@ export default function Review() {
                       type="button"
                       className="btn btn--ghost btn--sm"
                       onClick={() => update(candidate.id, { decision: 'reject' })}
+                      aria-pressed={decisionPressed(draft, 'reject')}
                     >
                       거절
                     </button>
@@ -599,6 +968,8 @@ export default function Review() {
             )}
           </div>
         </section>
+        </>
+        )}
       </div>
     </AppShell>
   );

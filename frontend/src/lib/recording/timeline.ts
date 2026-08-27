@@ -253,6 +253,18 @@ const REASON_LABEL: Record<Gap['reason'], string> = {
   chunk_lost: '업로드 실패',
 };
 
+/**
+ * 공백 하나의 까닭을 **사람의 말로** (결함 241).
+ *
+ * ⛔ 결과 화면의 공백 목록이 `<code>chunk_lost</code>` 를 그대로 띄우고
+ * 있었습니다. 어휘표는 **바로 여기 있었는데** 한 줄 요약(`describeTimeline`)
+ * 만 쓰고 목록은 안 썼습니다 — 만들어 놓고 절반만 부른 것입니다.
+ * `guards.test.ts` 의 어휘 면제표가 경고하는 결함 78·86 과 같은 부류입니다.
+ */
+export function describeGapReason(reason: Gap['reason']): string {
+  return REASON_LABEL[reason];
+}
+
 /** 사용자에게 보여줄 한 줄 요약. 숨기지 않고 그대로 알린다. */
 export function describeTimeline(timeline: Timeline): string {
   if (timeline.gaps.length === 0) {

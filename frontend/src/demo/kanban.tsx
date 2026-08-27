@@ -22,7 +22,7 @@
  * 이스케이프합니다. 손으로 부르는 것보다 안전합니다 — 빠뜨릴 자리가 없어서.
  */
 
-import { useCallback, useEffect, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import {
@@ -34,10 +34,20 @@ import {
   sortLinks,
   statusPatch,
   summarize,
+  cardMarks,
   taskWarnings,
   toColumns,
   type Task,
+  emptyBoard,
+  unknownOriginNote,
 } from '../lib/kanban/board.ts';
+import {
+  describePriority,
+  priorityChoices,
+  priorityTone,
+  showsBadge,
+} from '../lib/kanban/priority.ts';
+import { labelInList } from '../lib/people/labels.ts';
 import { canDropOn, draggedTaskId, dragPayload, TASK_DRAG_TYPE } from '../lib/kanban/dnd.ts';
 import { assigneeText, splitNote, toggled } from '../lib/kanban/assignees.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
@@ -46,6 +56,8 @@ import { iconSvg } from '../lib/nav/icons.ts';
 import { deleteTaskConfirm } from '../lib/project/roles.ts';
 import { withJosa } from '../lib/text/josa.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
+import { focusPlan, whoHasFocus } from '../lib/ui/focus.ts';
+import { detailText } from '../lib/http/detail.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { board as boardSkeleton } from '../lib/ui/skeleton.ts';
@@ -53,10 +65,15 @@ import { todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { Byline, RawHtml } from './parts.tsx';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
+import { meetingLabel } from '../lib/ui/naming.ts';
+import { mountEvidence, openEvidence } from './evidence.tsx';
 
 interface Member {
   user_id: number;
   name: string;
+  /** ⭐ 같은 이름이 둘일 때 가르는 손잡이 (결함 345). 서버가 프로젝트
+      안에서 유일하게 지킵니다. */
+  github_login?: string | null;
 }
 
 const params = new URLSearchParams(location.search);
@@ -69,6 +86,23 @@ const projectId = Number(params.get('project') ?? '1');
 // ⚠️ **읽기도 `tryGet` 을 거칩니다** (결함 102) — 칸반 판이 텅 빈 채로 남았습니다.
 const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
 
+/**
+ * 실패한 응답을 **사람이 읽을 한 줄**로 (결함 301).
+ *
+ * ⛔ 예전에는 `` `지우지 못했습니다 (${describeHttpStatus(response.status)})` ``
+ * 였습니다. `describeHttpStatus` 는 **400·409·422 에 아무 말도 없어서**
+ * `null` 을 돌려주고, 그 글자가 그대로 화면에 나갑니다 —
+ * 「지우지 못했습니다 (null)」. 서버는 그때 「이 프로젝트의 팀원이 아닌
+ * 사람은 담당자로 지정할 수 없습니다」처럼 정확히 말하고 있습니다.
+ *
+ * ⚠️ 이 모양은 **재현하지 못했습니다** — 화면의 담당자 칸이 팀원만
+ * 보여 주기 때문입니다. 그래도 `null` 을 글자로 내보내는 것은 고쳤습니다.
+ */
+async function failureText(response: Response, fallback: string): Promise<string> {
+  const body: unknown = await response.json().catch(() => null);
+  return detailText(body, describeHttpStatus(response.status) ?? fallback);
+}
+
 function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
 }
@@ -77,6 +111,17 @@ interface Loaded {
   tasks: Task[];
   statuses: string[];
   members: Member[];
+  /**
+   * 담당자로 남아 있지만 지금은 팀원이 아닌 사람들 (서버의 `former_assignees`).
+   *
+   * ⛔ 이게 없어서 나간 사람이 맡았던 카드가 「**사용자 #3**」으로 떴습니다
+   * (결함 308). `/members` 는 **지금 구성원**뿐이라 나간 사람이 없습니다.
+   *
+   * ⚠️ `members` 에 섞지 **않습니다.** 그 목록은 담당자를 **고르는** 자리
+   * (`AssigneePicker`)에도 쓰여서, 섞으면 떠난 사람에게 새 일을 맡길 수
+   * 있게 됩니다. **이름을 부르는 것과 고르는 것은 다른 일입니다.**
+   */
+  former: Member[];
 }
 
 type Screen =
@@ -99,16 +144,38 @@ type Screen =
  */
 function Drawer({ task, warnings }: { task: Task; warnings: readonly string[] }) {
   const links = task.github ?? [];
+  const origin = task.origin ?? null;
   return (
     <details className="more">
       <summary>자세히</summary>
       <div className="more-body">
-        {task.origin === null || task.origin === undefined ? (
-          <p>손으로 만든 업무입니다 — 회의에서 나온 것이 아닙니다.</p>
+        {origin === null ? (
+          /* ⛔ 예전에는 「손으로 만든 업무입니다」였습니다 (결함 317) —
+             313 이 고친 곳의 **셋째 자리**이고, 이 제품에 그 길은
+             없습니다. 모르는 것은 모른다고 적습니다. */
+          <p>{unknownOriginNote()}</p>
         ) : (
           <p>
-            {task.origin.meeting_title ?? '회의'}에서 나온 업무입니다 · 근거 발화{' '}
-            {task.origin.evidence_utterance_ids.length}건
+            {meetingLabel(origin.meeting_title, origin.meeting_id)}에서 나온 업무입니다{' '}
+            {/* ⛔ **개수만 적고 문을 안 줬습니다** (결함 418). `evidence.ts` 의
+                머리말이 「이 제품의 대표 주장은 기여도 숫자에서 출발해 어느
+                회의 몇 번째 발언까지 거슬러 올라갈 수 있다는 것」이라고 적어
+                두고, 오래도록 화면은 `근거 #5` 라고 **적기만** 했다고
+                했습니다 — 검토 화면은 고쳤는데 이 카드가 그 모양으로
+                남아 있었습니다. 상자는 같은 것을 씁니다. */}
+            <button
+              type="button"
+              className="src"
+              onClick={() =>
+                openEvidence(
+                  origin.meeting_id,
+                  origin.evidence_utterance_ids,
+                  task.title,
+                )
+              }
+            >
+              근거 발화 {origin.evidence_utterance_ids.length}건
+            </button>
           </p>
         )}
         {/* 카드 표면에서는 색으로만 말한 것(확정/추정)을 여기서는 글로 남깁니다. */}
@@ -190,7 +257,64 @@ function AssigneePicker({
                  여기서 배열을 주무르면 같은 판단이 두 벌이 됩니다. */
               onChange={() => onAssign(toggled(task.assignee_ids, member.user_id))}
             />
-            {member.name}
+            {/* 결함 345 — 같은 이름이 둘이면 손잡이를 붙입니다. 여기서
+                잘못 고르면 남의 기여로 셉니다. */}
+            {labelInList(member, members)}
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/**
+ * 우선순위를 정하는 자리 (`TASK-007`) — **레거시 칸반에는 없었습니다** (결함 348).
+ *
+ * ## ⚠️ 판단은 있었고, 부르는 뿌리가 하나였습니다
+ *
+ * `lib/kanban/priority.ts` 는 어휘(0 긴급 ~ 3 낮음)·배지 규칙·메뉴 항목을
+ * 전부 들고 있었고 `test_repo_integrity.py` 가 서버 어휘와 짝까지 잽니다.
+ * 그런데 그 함수를 부르는 화면이 **SPA 하나뿐**이었습니다 — `/app` 으로
+ * 들어온 사람은 카드에서 「긴급」을 보고 값을 바꾸는데, 레거시 칸반으로
+ * 들어온 사람에게는 **우선순위라는 글자가 한 자도 없었습니다.**
+ *
+ * 이 저장소의 대표 재발입니다(231·306·320·321·333·334·335·337·345) —
+ * 한쪽 뿌리만 배선된 것. 실패 ①(만들어 놓고 아무도 안 부름)이 뿌리
+ * 하나에서 난 모양이기도 합니다.
+ *
+ * ## ⚠️ 라디오입니다
+ *
+ * 넷 중 하나를 고르는 값이라 체크박스가 아닙니다. 칸 높이(44px)와 간격은
+ * `app.css` 의 `label:has(> input[type='radio'])` 가 이미 합니다 — 여기
+ * 다시 적으면 같은 판단이 두 벌이 됩니다 (결함 164 가 바로 옆
+ * `AssigneePicker` 에서 겪은 것).
+ *
+ * ⚠️ **지금 값도 목록에 남깁니다.** 빼면 항목이 셋이 되고 「지금 뭐지」를
+ * 다른 데서 확인해야 합니다. 그 규칙도 `@lib`(`priorityChoices`) 입니다.
+ */
+function PriorityPicker({
+  task,
+  moving,
+  onPriority,
+}: {
+  task: Task;
+  moving: boolean;
+  onPriority: (priority: number) => void;
+}) {
+  return (
+    <details className="prioedit">
+      <summary>우선순위</summary>
+      <div className="whoedit-body">
+        {priorityChoices(task.priority).map((choice) => (
+          <label key={choice.value}>
+            <input
+              type="radio"
+              name={`prio-${task.id}`}
+              checked={choice.current}
+              disabled={moving}
+              onChange={() => onPriority(choice.value)}
+            />
+            {choice.label}
           </label>
         ))}
       </div>
@@ -203,11 +327,15 @@ function Card({
   today,
   statuses,
   members,
+  /* ⚠️ **이름을 부르는 명단**입니다 — 나간 담당자까지 포함합니다 (결함 308).
+     담당자를 **고르는** 명단(`members`)과 일부러 다릅니다. */
+  naming,
   moving,
   beingDragged,
   onMove,
   onDelete,
   onAssign,
+  onPriority,
   onDragStart,
   onDragEnd,
 }: {
@@ -215,11 +343,13 @@ function Card({
   today: string;
   statuses: string[];
   members: Member[];
+  naming: Member[];
   moving: boolean;
   beingDragged: boolean;
   onMove: (to: string) => void;
   onDelete: () => void;
   onAssign: (userIds: number[]) => void;
+  onPriority: (priority: number) => void;
   onDragStart: (e: DragEvent<HTMLElement>) => void;
   onDragEnd: () => void;
 }) {
@@ -237,9 +367,21 @@ function Card({
       draggable={!moving}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}>
-      <p className="title">{task.title}</p>
+      {/* ⭐ 우선순위 표식 (`TASK-007`, 결함 348). **제목 줄에 섭니다** —
+          meta 줄은 담당자와 마감이 이미 차 있어서, 렌더해 보니 좁은 폭에서
+          한 줄이 접혀 카드가 커졌습니다(SPA 가 같은 이유로 같은 자리).
+          ⚠️ `보통` 은 안 그립니다 — 넷 중 셋에 배지가 붙으면 배지가 배경이
+          되고 정작 `긴급` 이 안 보입니다. 그 판단은 `@lib` 에. */}
+      <p className="title">
+        {task.title}
+        {showsBadge(task.priority) && (
+          <span className={`kprio kprio--${priorityTone(task.priority)}`}>
+            {describePriority(task.priority)}
+          </span>
+        )}
+      </p>
       <p className="meta">
-        {assigneeText(task.assignee_ids, members)}
+        {assigneeText(task.assignee_ids, naming)}
         {task.deadline ? ` · 마감 ${task.deadline}` : ''}
       </p>
 
@@ -252,7 +394,15 @@ function Card({
           아니라 그냥 사실입니다. */}
       {split !== null && <p className="shared">{split}</p>}
 
-      <AssigneePicker task={task} members={members} moving={moving} onAssign={onAssign} />
+      {/* ⚠️ **두 여닫이를 한 줄에 세웁니다.** 우선순위를 붙이면서 세로로
+          쌓았더니 카드마다 줄이 하나 더 생겨 보드가 눈에 띄게 길어졌습니다
+          (렌더해서 봤습니다). 바로 옆 `.whoedit` 주석이 **같은 이유로**
+          데스크톱에서 줄 높이를 걷고 있습니다 — 매일 하는 일은 카드를
+          옮기는 것이지 담당자나 우선순위를 바꾸는 것이 아닙니다. */}
+      <div className="cardedit">
+        <AssigneePicker task={task} members={members} moving={moving} onAssign={onAssign} />
+        <PriorityPicker task={task} moving={moving} onPriority={onPriority} />
+      </div>
 
       {/* ⭐ 이 프로젝트의 주장이 화면에서 보이는 지점. 이게 없으면 이
           화면은 그냥 할 일 목록입니다.
@@ -263,7 +413,7 @@ function Card({
       {task.origin && (
         <p className="origin">
           <span className="ico" dangerouslySetInnerHTML={{ __html: iconSvg('meeting') }} />
-          {task.origin.meeting_title ?? '회의'}
+          {meetingLabel(task.origin.meeting_title, task.origin.meeting_id)}
           <span className="ev">근거 {task.origin.evidence_utterance_ids.length}</span>
         </p>
       )}
@@ -273,7 +423,15 @@ function Card({
       {/* 못 재는 자리 — **형태로** 말합니다. 전문은 접힌 곳에.
           ⚠️ 못 잰다는 말은 경고가 아닙니다 — 담당자가 없는 업무는 잘못된
           것이 아니라 **누구 기여인지 알 수 없는** 것이라 흙빛입니다. */}
-      {warnings.length > 0 && <p className="gapmark">기여도에 반영 안 됨</p>}
+      {/* ⛔ 예전에는 `warnings.length > 0` 하나로 **종류를 안 보고**
+          「기여도에 반영 안 됨」을 붙였습니다 (결함 319). 담당자가 둘인데
+          마감만 지난 업무에도 그 말이 붙었고, 그건 거짓입니다 — 늦게 끝낸
+          업무도 완료 점수는 그대로 받습니다. 판단은 `@lib`. */}
+      {cardMarks(task, today).map((mark) => (
+        <p key={mark.tone} className={mark.tone === 'gap' ? 'gapmark' : 'gapmark latemark'}>
+          {mark.text}
+        </p>
+      ))}
 
       <div className="moves">
         {/* ⭐ 지우기 (`TASK-003`).
@@ -322,6 +480,67 @@ function Kanban() {
   const [error, setError] = useState('');
   // 옮기는 동안 잠급니다. 두 번 눌러 두 칸 건너뛰는 것을 막습니다.
   const [moving, setMoving] = useState(false);
+
+  /**
+   * 일하는 동안 **초점을 잃지 않게** 한다 (결함 349).
+   *
+   * ⛔ 이 화면의 카드 컨트롤은 요청이 도는 동안 `disabled` 가 됩니다.
+   * 브라우저는 초점을 쥔 요소가 `disabled` 가 되면 **초점을 버리고**,
+   * 다시 `enabled` 가 돼도 돌려주지 않습니다 — 키보드만 쓰는 사람은
+   * 카드를 한 칸 옮길 때마다 문서 맨 앞에서 다시 Tab 해야 했습니다.
+   * 담당자·옮기기·우선순위 **셋 다** 그랬고, 마우스로는 아무 일도 안
+   * 일어나므로 눈으로는 안 보입니다.
+   *
+   * ⚠️ **되돌릴지 말지는 판단이라 `@lib` 에 있습니다**(`focusToRestore`).
+   * 사람이 그 사이 다른 곳을 눌렀으면 뺏지 않고, 그 자리가 사라졌으면
+   * 되돌리지 않습니다.
+   *
+   * ⚠️ `requestAnimationFrame` 을 한 번 기다립니다 — React 가 다시 그리기
+   * **전에** `focus()` 를 부르면 방금 그 자리가 아직 `disabled` 라 도로
+   * 튕깁니다. 로비의 이름 고치기(결함 303)가 같은 이유로 같은 것을 씁니다.
+   */
+  const held = useRef<{ spot: HTMLElement | null; card: string | null }>({
+    spot: null,
+    card: null,
+  });
+
+  /** 잠그면서 **지금 초점을 쥔 자리와 그 카드**를 기억한다. */
+  const lock = (): void => {
+    // ⚠️ 여기서 기억해야 합니다. `useEffect` 로 옮기면 이미 늦습니다 —
+    //    효과는 DOM 을 고친 **뒤에** 도는데, 그때는 이미 `disabled` 가
+    //    붙어 초점이 날아간 뒤입니다.
+    const at = document.activeElement;
+    const spot = at instanceof HTMLElement ? at : null;
+    // ⚠️ 카드도 기억합니다 — 다른 열로 옮기면 눌렀던 버튼이 **통째로
+    //    사라져** 되돌릴 데가 없습니다. 카드는 살아 있습니다.
+    held.current = { spot, card: spot?.closest('.task')?.getAttribute('data-id') ?? null };
+    setMoving(true);
+  };
+
+  /** 잠금을 풀고, 판단이 시키는 자리로 초점을 보낸다. */
+  const unlock = (): void => {
+    setMoving(false);
+    const { spot, card } = held.current;
+    held.current = { spot: null, card: null };
+    // ⚠️ 한 프레임 기다립니다 — React 가 다시 그리기 **전에** `focus()` 를
+    //    부르면 그 자리가 아직 `disabled` 라 도로 튕깁니다. 로비의 이름
+    //    고치기(결함 303)가 같은 이유로 같은 것을 씁니다.
+    requestAnimationFrame(() => {
+      const again =
+        card === null
+          ? null
+          : document.querySelector<HTMLElement>(
+              `.task[data-id="${card}"] button, .task[data-id="${card}"] summary`,
+            );
+      const plan = focusPlan(
+        spot,
+        whoHasFocus(document.activeElement, document.body),
+        again !== null,
+      );
+      if (plan === 'remembered') spot?.focus();
+      else if (plan === 'nearby') again?.focus();
+    });
+  };
   /**
    * 지금 끌고 있는 카드 (`TASK-005`).
    *
@@ -362,13 +581,18 @@ function Kanban() {
       setScreen({ k: 'failed', status: boardRes.status });
       return;
     }
-    const payload = (await boardRes.json()) as { statuses: string[]; tasks: Task[] };
+    const payload = (await boardRes.json()) as {
+      statuses: string[];
+      tasks: Task[];
+      former_assignees?: Member[];
+    };
     setScreen({
       k: 'ok',
       data: {
         tasks: payload.tasks,
         statuses: payload.statuses,
         members: memberRes?.ok ? ((await memberRes.json()) as Member[]) : [],
+        former: payload.former_assignees ?? [],
       },
     });
   }, []);
@@ -416,7 +640,7 @@ function Kanban() {
    */
   const drop = async (task: Task): Promise<void> => {
     if (!confirm(deleteTaskConfirm(task.title))) return;
-    setMoving(true);
+    lock();
     try {
       const response = await trySend(() =>
         fetch(`${apiBase}/api/projects/${projectId}/tasks/${task.id}`, {
@@ -433,31 +657,44 @@ function Kanban() {
         return;
       }
       if (!response.ok) {
-        setError(`지우지 못했습니다 (${describeHttpStatus(response.status)})`);
+        setError(await failureText(response, '지우지 못했습니다'));
         return;
       }
       setError('');
       await load();
     } finally {
-      setMoving(false);
+      unlock();
     }
   };
 
-  const move = async (taskId: number, to: string): Promise<void> => {
-    setMoving(true);
+  /**
+   * 카드 한 장을 고친다 — `PATCH /tasks/{id}` 하나뿐인 자리.
+   *
+   * ⚠️ **우선순위를 붙이면서 두 벌이 될 뻔했습니다** (결함 348). 옮기기와
+   * 우선순위는 같은 엔드포인트에 다른 칸을 보내는 것이라, 각자 `fetch` 를
+   * 쓰면 실패 처리·세션 만료·카드 갈아 끼우기가 곧 갈라집니다 — 이
+   * 저장소의 대표 실패 ② 입니다. 두 번째로 필요해진 순간 올렸습니다.
+   *
+   * ⚠️ 응답으로 온 카드만 갈아 끼웁니다. 판 전체를 다시 받으면 스크롤이
+   * 튀고, 방금 연 서랍이 닫힙니다.
+   */
+  const patchTask = async (
+    taskId: number,
+    patch: Record<string, unknown>,
+    failed: string,
+  ): Promise<void> => {
+    lock();
     try {
       const response = await trySend(() =>
         fetch(`${apiBase}/api/projects/${projectId}/tasks/${taskId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          // ⚠️ `statusPatch` 를 씁니다. 손으로 객체를 만들면서
-          // `deadline: null` 을 넣으면 서버가 마감일을 지웁니다.
-          body: JSON.stringify(statusPatch(to)),
+          body: JSON.stringify(patch),
           credentials: 'same-origin',
         }),
       );
       if (response === null) {
-        setError(unreachableText('옮기지 못했습니다'));
+        setError(unreachableText(failed));
         return;
       }
       if (isSessionExpired(response.status)) {
@@ -465,7 +702,12 @@ function Kanban() {
         return;
       }
       if (!response.ok) {
-        setError(`옮기지 못했습니다 (HTTP ${response.status})`);
+        setError(
+          detailText(
+            await response.json().catch(() => null),
+            `${failed} (HTTP ${response.status})`,
+          ),
+        );
         return;
       }
       const updated = (await response.json()) as Task;
@@ -482,9 +724,23 @@ function Kanban() {
             },
       );
     } finally {
-      setMoving(false);
+      unlock();
     }
   };
+
+  // ⚠️ `statusPatch` 를 씁니다. 손으로 객체를 만들면서 `deadline: null` 을
+  // 넣으면 서버가 마감일을 지웁니다.
+  const move = (taskId: number, to: string): Promise<void> =>
+    patchTask(taskId, statusPatch(to), '옮기지 못했습니다');
+
+  /**
+   * 무엇부터 볼 것인가를 정한다 (`TASK-007`, 결함 348).
+   *
+   * ⛔ **기여도에 닿지 않습니다.** 닿는 순간 드롭다운 하나가 점수 발행기가
+   * 됩니다 — 서버도 이 변경으로 기여 이벤트를 만들지 않습니다.
+   */
+  const setPriority = (taskId: number, priority: number): Promise<void> =>
+    patchTask(taskId, { priority }, '우선순위를 바꾸지 못했습니다');
 
   /**
    * 담당자를 바꾼다 (`TASK-006`).
@@ -496,7 +752,7 @@ function Kanban() {
    * 튀고, 방금 연 서랍이 닫힙니다.
    */
   const assign = async (taskId: number, userIds: number[]): Promise<void> => {
-    setMoving(true);
+    lock();
     try {
       const response = await trySend(() =>
         fetch(`${apiBase}/api/projects/${projectId}/tasks/${taskId}/assignees`, {
@@ -515,7 +771,7 @@ function Kanban() {
         return;
       }
       if (!response.ok) {
-        setError(`담당자를 바꾸지 못했습니다 (${describeHttpStatus(response.status)})`);
+        setError(await failureText(response, '담당자를 바꾸지 못했습니다'));
         return;
       }
       const updated = (await response.json()) as Task;
@@ -532,7 +788,7 @@ function Kanban() {
             },
       );
     } finally {
-      setMoving(false);
+      unlock();
     }
   };
 
@@ -540,7 +796,11 @@ function Kanban() {
     <>
       <header className="head">
         <h1>칸반</h1>
-        <p className="lede">회의에서 승인된 업무와 직접 만든 업무가 단계별로 놓입니다.</p>
+        {/* ⛔ 예전에는 「회의에서 승인된 업무와 **직접 만든 업무**가…」였습니다
+            (결함 313). 빈 상자만 고치고 **여기를 놓칠 뻔했습니다** — 이 줄은
+            비어 있지 않을 때도 늘 보이니 더 자주 읽힙니다. 같은 화면에서
+            같은 모양을 몇 곳이나 쓰는지 세고 고칩니다(실패 ②). */}
+        <p className="lede">회의에서 승인된 업무가 단계별로 놓입니다.</p>
         {me !== null && <Byline name={me.name} avatar={me.avatar} what="보는 중" />}
       </header>
     </>
@@ -609,7 +869,10 @@ function Kanban() {
     );
   }
 
-  const { tasks, statuses, members } = screen.data;
+  const { tasks, statuses, members, former } = screen.data;
+  /* 이름을 부를 때만 나간 담당자를 더합니다 — 고르는 자리(`AssigneePicker`)
+     에는 안 넣습니다 (결함 308). */
+  const naming = [...members, ...former];
   const today = todayInTeamCalendar();
   const summary = summarize(tasks, today);
 
@@ -639,10 +902,15 @@ function Kanban() {
       {summary.total === 0 ? (
         <div id="board" className="board">
           <RawHtml
+            /* ⛔ 예전 문구는 「… **직접 만들 수도 있습니다**」였습니다
+               (결함 313). 이 제품에 그 길은 **일부러** 없습니다 — 업무를
+               만드는 코드는 `approval_service.py` 한 곳이고 그 옆에
+               「승인 없이 tasks 에 쓰는 경로는 없다 — 그게 불변식이다」라고
+               적혀 있습니다. 화면의 컨트롤 열셋을 세어 봐도 만드는 것은
+               없었습니다. SPA 는 처음부터 맞게 적고 있었고, 이제 **한 벌**
+               입니다. */
             html={emptyHtml({
-              what: '여기에는 팀의 업무 카드가 단계별로 놓입니다.',
-              why: '아직 등록된 업무가 하나도 없습니다 — 고장이 아닙니다.',
-              how: '회의를 열어 녹음하면 AI가 업무 후보를 뽑고, 승인한 것이 여기로 옵니다. 직접 만들 수도 있습니다.',
+              ...emptyBoard(),
               action: { label: '회의 열기', href: `/project.html?project=${projectId}` },
             })}
           />
@@ -692,11 +960,13 @@ function Kanban() {
                     today={today}
                     statuses={statuses}
                     members={members}
+                    naming={naming}
                     moving={moving}
                     beingDragged={dragTask !== null && dragTask.id === task.id}
                     onMove={(to) => void move(task.id, to)}
                     onDelete={() => void drop(task)}
                     onAssign={(userIds) => void assign(task.id, userIds)}
+                    onPriority={(priority) => void setPriority(task.id, priority)}
                     onDragStart={(e) => {
                       e.dataTransfer.setData(TASK_DRAG_TYPE, dragPayload(task.id));
                       e.dataTransfer.effectAllowed = 'move';
@@ -722,6 +992,10 @@ function Kanban() {
 const host = document.getElementById('app');
 if (host === null) throw new Error('요소 없음: app');
 createRoot(host).render(<Kanban />);
+
+// ⛔ **근거 상자를 붙입니다** (결함 418). 안 붙이면 카드의 「근거 발화 N건」
+//    이 눌려도 아무 일이 안 납니다 — 대표 실패 ③ 의 모양입니다.
+mountEvidence(apiBase);
 
 renderNav('kanban');
 

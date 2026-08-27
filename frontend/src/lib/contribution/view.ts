@@ -58,15 +58,40 @@ export interface TeamScore {
   computed_at: string;
   members: MemberScore[];
   skipped_categories: string[];
+  /**
+   * 기여 기록은 있는데 **지금 구성원이 아닌** 사람들 (결함 222).
+   *
+   * ⚠️ 계산에는 **그대로 들어갑니다** — 빼면 남은 사람들의 몫이 조용히
+   * 부풀고, 그건 서버가 나간 사람의 기록을 일부러 남겨 두는 이유와
+   * 어긋납니다. 이 목록은 화면이 그 줄을 **이름으로** 부르고 「나간 사람」
+   * 이라고 표시하기 위한 것입니다.
+   *
+   * ⚠️ 옛 서버는 이 칸을 안 보냅니다. 없으면 아무 표시도 안 합니다.
+   */
+  former_members?: Person[];
   notice: string;
 }
 
 /** 이름을 붙이려면 팀원 명단이 필요하다. 서버 점수에는 user_id 만 있다. */
+import { labelInList } from '../people/labels.ts';
+
 export interface Person {
   user_id: number;
   name: string;
   /** 역할 비중. 겸직이면 둘 이상이 들어 있다. */
   role_shares?: Record<string, number>;
+  /**
+   * ⭐ 같은 이름이 둘일 때 가르는 손잡이 (결함 345). 프로젝트 안에서
+   * **유일**하도록 서버가 지킵니다 — 설정 화면이 그 이유를 적어 뒀습니다
+   * (「남의 아이디를 적으면 그 사람의 PR이 내 기여가 됩니다」).
+   */
+  github_login?: string | null;
+  /**
+   * 프로젝트 안의 **등급**(`owner`·`admin`·`member`). 서버의 `/members`
+   * 가 이미 보냅니다 — 기여도 확정이 관리자·소유자만인지 화면이 알아야
+   * 해서 여기 적습니다 (결함 392).
+   */
+  project_role?: string | null;
 }
 
 /**
@@ -120,8 +145,29 @@ export function orderForDisplay(
   });
 }
 
-export function nameOf(userId: number, people: readonly Person[]): string {
-  return people.find((p) => p.user_id === userId)?.name ?? `사용자 #${userId}`;
+/**
+ * 이름을 부른다.
+ *
+ * ⚠️ **나간 사람도 이름으로 불러야 합니다** (결함 222). `people` 은 지금
+ * 구성원 목록이라 나간 사람이 없고, 그러면 기여도 줄에 「사용자 #3」 이
+ * 뜹니다 — 기여도는 사람 이름 옆에 붙는 값이라 더욱 그렇습니다. 서버가
+ * `former_members` 로 이름을 같이 보내므로 **두 명단을 합쳐** 찾습니다.
+ */
+export function nameOf(
+  userId: number,
+  people: readonly Person[],
+  former: readonly Person[] = [],
+): string {
+  // ⭐ **같은 이름이 둘이면 손잡이를 붙입니다** (결함 345). 기여도 화면은
+  //    이름 옆에 값을 붙이고 그 옆에 **확정 칸**을 둡니다 — 이름이 같으면
+  //    `aria-label` 까지 「이하늘 확정값」으로 같아져서, 팀이 합의해
+  //    확정한다는 그 입력이 사람을 못 가릅니다(불변식 ④).
+  //
+  // ⚠️ 나간 사람까지 **한 목록으로** 보고 판정합니다 — 화면에는 둘이
+  //    같이 그려지므로, 지금 구성원끼리만 안 겹친다고 안심하면 안 됩니다.
+  const everyone = [...people, ...former];
+  const found = everyone.find((p) => p.user_id === userId);
+  return found === undefined ? `사용자 #${userId}` : labelInList(found, everyone);
 }
 
 /**
@@ -159,6 +205,45 @@ export function nothingMeasured(member: MemberScore): boolean {
 }
 
 /**
+ * 서버가 준 구간의 폭이 0 인데, 그게 **"확실하다" 는 뜻이 아닌** 경우.
+ *
+ * ## 결함 191 이 절반만 고쳐져 있었습니다
+ *
+ * `adjustment_range` 의 폭은 **그 사람의 몫에 비례**합니다.
+ *
+ *     spread = share × (1 − confidence) × 0.5
+ *
+ * 그래서 `share` 가 0 이면 **신뢰도가 얼마든** 폭이 0 으로 나옵니다.
+ * 신뢰도 0.0 — "수집된 활동 데이터가 없습니다" — 에서도 `0.0 ~ 0.0` 입니다.
+ *
+ *     adjustment_range(0.0, confidence=0.0) == (0.0, 0.0)
+ *
+ * 191 은 이 기제를 이미 적어 뒀지만(`describeRange` 의 주석) **`categories`
+ * 가 빈 경우만** 갈랐습니다. 팀에 살아 있는 범주가 있고 이 사람만 0건인
+ * 경우 — 이번 주에 막 들어온 사람 — 는 그대로 남았고, 화면이 이렇게 나옵니다.
+ *
+ *     0%
+ *     신뢰도 낮음
+ *     구간이 없습니다 — 이 값은 확정적입니다   ← ⛔
+ *
+ * 바로 윗줄에서 "낮음" 이라고 해 놓고 아랫줄에서 **확정**이라고 말합니다.
+ * 불변식 ②(단일 점수 금지)와 ④(시스템은 판정하지 않는다)를 한 줄에서
+ * 둘 다 어깁니다 — 하필 **가장 방어할 힘이 없는 사람**의 줄에서.
+ *
+ * ⚠️ 폭을 **지어내지 않습니다.** `nothingMeasured` 처럼 100 을 주면 그것도
+ * 주장입니다("이 사람은 아무것도 모른다") — 이 사람은 세 범주를 **쟀고**
+ * 0건이었습니다. 우리가 아는 것은 폭이 0 이 아니라는 것뿐이라, 폭은
+ * `null` — **잴 수 없음** 입니다.
+ *
+ * ⚠️ 신뢰도가 만점이면 폭 0 은 진짜 확정입니다. 그때는 참이 아닙니다.
+ */
+export function widthUnknown(member: MemberScore): boolean {
+  if (nothingMeasured(member)) return false; // 그쪽은 폭 100 으로 따로 답한다
+  const width = Math.abs(clamp(member.range_high, 0, 100) - clamp(member.range_low, 0, 100));
+  return width === 0 && member.confidence < 1;
+}
+
+/**
  * 구간을 사람이 읽을 글자로.
  *
  * ⚠️ **잰 것이 없으면 숫자를 만들지 않습니다.** 서버는 그때 `share`·
@@ -190,8 +275,13 @@ export function describeRange(member: MemberScore): string {
 /** 한 사람의 "얼마나 모르는가". */
 export interface UncertaintySpan {
   userId: number;
-  /** 구간의 폭 (%p). 클수록 덜 안다 */
-  points: number;
+  /**
+   * 구간의 폭 (%p). 클수록 덜 안다.
+   *
+   * ⚠️ `null` 은 **0 이 아니라 "잴 수 없음"** 입니다 (`widthUnknown`).
+   * 0 으로 바꿔 읽으면 화면이 "확정적" 이라고 말합니다.
+   */
+  points: number | null;
   /** 팀에서 가장 넓은 구간 대비 (0~100). 막대 길이로 쓴다 */
   ratio: number;
 }
@@ -217,20 +307,28 @@ export interface UncertaintySpan {
  * "잴 것이 없었다" 입니다. 그 사람의 폭은 **100** 입니다.
  */
 export function uncertaintySpans(members: readonly MemberScore[]): UncertaintySpan[] {
-  const points = members.map((m) =>
+  const points: (number | null)[] = members.map((m) => {
     // ⚠️ **잰 것이 없으면 폭이 0 이 아니라 100 입니다** (결함 191).
     //    서버는 그때 구간을 `0~0` 으로 주는데, 그건 "0% 라고 확신한다" 는
     //    뜻이 되어 버립니다. 우리가 아는 것은 정반대 — **아무것도 모릅니다.**
-    nothingMeasured(m)
-      ? 100
-      : Math.abs(clamp(m.range_high, 0, 100) - clamp(m.range_low, 0, 100)),
-  );
-  const widest = Math.max(0, ...points);
-  return members.map((member, i) => ({
-    userId: member.user_id,
-    points: points[i] ?? 0,
-    ratio: widest === 0 ? 0 : Math.round(((points[i] ?? 0) / widest) * 100),
-  }));
+    if (nothingMeasured(m)) return 100;
+    // ⚠️ **쟀는데 몫이 0 이면 폭을 잴 수 없습니다** (결함 226). 서버의 폭은
+    //    몫에 비례해서 접히는 것이라, 그 0 은 "확정" 이 아닙니다. 0 도
+    //    100 도 주장이므로 `null` — 모른다고 말합니다.
+    if (widthUnknown(m)) return null;
+    return Math.abs(clamp(m.range_high, 0, 100) - clamp(m.range_low, 0, 100));
+  });
+  // ⚠️ 잴 수 없는 폭은 **최댓값 계산에서 뺍니다** — 0 으로 세면 남들의
+  //    막대가 그만큼 길어 보입니다.
+  const widest = Math.max(0, ...points.filter((p): p is number => p !== null));
+  return members.map((member, i) => {
+    const p = points[i] ?? null;
+    return {
+      userId: member.user_id,
+      points: p,
+      ratio: p === null || widest === 0 ? 0 : Math.round((p / widest) * 100),
+    };
+  });
 }
 
 /**
@@ -263,8 +361,15 @@ export function uncertaintySpans(members: readonly MemberScore[]): UncertaintySp
  */
 export const POINTS_PER_DOT = 4;
 
-/** 한 줄에 그릴 점 개수. 0 이면 그릴 것이 없다는 뜻입니다. */
-export function uncertaintyDots(points: number): number {
+/**
+ * 한 줄에 그릴 점 개수. 0 이면 **그릴 것이 없다**는 뜻입니다.
+ *
+ * ⚠️ `null`(잴 수 없음)도 0 개입니다 — 지어낸 개수를 찍을 수는 없으니까요.
+ * 다만 **0 개가 곧 "확정" 은 아닙니다.** 그 말은 `uncertaintyDotsNote` 가
+ * `points` 를 직접 보고 정합니다 (결함 226).
+ */
+export function uncertaintyDots(points: number | null): number {
+  if (points === null) return 0;
   if (!Number.isFinite(points) || points <= 0) return 0;
   // ⚠️ **0 으로 내림하지 않습니다.** 폭이 1%p 라도 "모르는 게 있다" 는
   // 사실이고, 점이 0 개면 화면에서 그것이 **완전히 확정** 으로 보입니다.
@@ -274,11 +379,65 @@ export function uncertaintyDots(points: number): number {
   return Math.min(dots, Math.ceil(100 / POINTS_PER_DOT));
 }
 
-/** 점 개수를 사람 말로. 화면이 숫자를 지어내지 않게 여기서 만듭니다. */
-export function uncertaintyDotsNote(points: number): string {
+/**
+ * 점 개수를 사람 말로. 화면이 숫자를 지어내지 않게 여기서 만듭니다.
+ *
+ * ⛔ **"확정적" 은 폭이 진짜 0 일 때만** 입니다 (결함 226). 잴 수 없는
+ * 폭(`null`)에 이 말을 붙이면, 신뢰도 「낮음」 바로 아래에서 화면이
+ * 정반대를 말합니다.
+ */
+/**
+ * 「모름」 칸에 적을 글자. **두 화면이 같은 말을 하게** 여기서 만듭니다.
+ *
+ * ⚠️ `null` 을 `0%p` 로 적으면 그게 곧 "확정" 입니다 (결함 226).
+ */
+export function describeWidth(points: number | null): string {
+  return points === null ? '?' : `${Math.round(points)}%p`;
+}
+
+export function uncertaintyDotsNote(points: number | null): string {
+  const note = describeWidthNote(points);
   const dots = uncertaintyDots(points);
-  if (dots === 0) return '구간이 없습니다 — 이 값은 확정적입니다';
-  return `모르는 폭 ${Math.round(points)}%p · 점 하나가 ${POINTS_PER_DOT}%p`;
+  // ⚠️ 점 이야기는 **점을 그리는 화면에서만** 합니다. SPA 는 리본을 그리지
+  //     점을 안 찍는데 "점 하나가 4%p" 라고 적으면 없는 그림을 설명합니다.
+  return dots === 0 ? note : `${note} · 점 하나가 ${POINTS_PER_DOT}%p`;
+}
+
+/**
+ * 신뢰도 한 줄 — **누구를 잰 값인지**를 글자에 답니다 (결함 384).
+ *
+ * ## ⚠️ 이 값은 **팀 하나**를 잰 것입니다
+ *
+ * 서버의 `compute_confidence` 는 사람 루프 **밖**에서 한 번 불리고, 그 한
+ * 벌이 사람 수만큼 복사됩니다 — 시연 데이터에서 세 사람의 `confidence` 가
+ * 소수점까지 같습니다(0.446). 그런데 화면은 그것을 **사람 이름 밑에**
+ * 그립니다. 범위를 안 적으면 커버리지 100% 인 사람이 「신뢰도 낮음」을
+ * 자기 것으로 읽습니다 — 끊긴 트랙의 주인은 다른 사람인데도.
+ *
+ * 결함 344 가 **보고서**에서 고친 그것이고(`reports/view.ts`), 레거시
+ * 기여도는 처음부터 「팀 신뢰도」라고 적고 있었는데 **SPA 만** 화면 파일
+ * 안에서 `신뢰도 ${label}` 을 손으로 만들고 있었습니다(결함 384).
+ * 세 자리 중 하나만 달랐습니다.
+ *
+ * ⚠️ **모르는 폭과 한 줄에 잇지 마십시오.** 그 값은 사람마다 다릅니다
+ * (23 · 14 · 18%p). 한 줄에 두 범위를 실으면 둘 다 같은 것으로 읽힙니다
+ * (결함 331·332 가 알림과 주간 보고서에서 만난 그 모양입니다).
+ */
+export function teamConfidenceLine(label: string): string {
+  return `팀 신뢰도 ${label}`;
+}
+
+/**
+ * 「모르는 폭」 한 줄 — **두 화면이 같은 말을 하게** 여기서 만듭니다.
+ *
+ * ⛔ "확정적" 은 폭이 **진짜 0** 일 때만입니다 (결함 226). 잴 수 없는
+ * 폭(`null`)에 이 말을 붙이면, 신뢰도 「낮음」 바로 옆에서 화면이 정반대를
+ * 말합니다.
+ */
+export function describeWidthNote(points: number | null): string {
+  if (points === null) return '모르는 폭을 잴 수 없습니다 — 확정이라는 뜻이 아닙니다';
+  if (!Number.isFinite(points) || points <= 0) return '구간이 없습니다 — 이 값은 확정적입니다';
+  return `모르는 폭 ${Math.round(points)}%p`;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -337,25 +496,75 @@ export function teamWarnings(score: TeamScore, people: readonly Person[]): strin
   }
 
   const unmeasured = score.members.filter((m) => (m.measurement_gaps ?? []).length > 0);
+  // ⚠️ 아래 두 곳에서 씁니다 — **먼저** 만들어 둡니다 (TDZ).
+  const former = score.former_members ?? [];
+
   if (unmeasured.length > 0) {
-    const names = unmeasured.map((m) => nameOf(m.user_id, people)).join(', ');
+    const names = unmeasured.map((m) => nameOf(m.user_id, people, former)).join(', ');
     warnings.push(
       `${names} 님은 일부 활동을 측정하지 못했습니다. ` +
         '그 영역은 0이 아니라 나머지 활동으로 추정한 값입니다.',
     );
   }
 
+  /* ⛔ **아직 아무것도 안 잰 팀에게 신뢰도 이야기를 먼저 하지 않습니다**
+     (결함 228). 프로젝트를 막 만든 사람이 기여도 화면을 열면 이랬습니다:
+
+         ⚠ 팀 전원의 신뢰도가 낮습니다. 이 수치로 서로를 비교하지 마세요
+         김민수 · 개발 · — · 100%p 모름 · — 회의 · — 업무 · — 코드
+
+     **비교할 「이 수치」가 한 개도 없습니다** — 전부 `—` 입니다. 게다가
+     혼자 만든 프로젝트에는 「서로」가 없습니다.
+
+     낮은 신뢰도는 여기서 **결과가 아니라 원인의 그림자**입니다. 원인
+     쪽에만 사람이 할 일이 붙어 있습니다 — 회의를 열거나 저장소를 잇는 것.
+     하필 **새 팀이 이 제품에서 처음 보는 화면**이라 더 그렇습니다
+     (결함 191 과 같은 자리). */
   const shaky = score.members.filter((m) => m.confidence < LOW_CONFIDENCE);
-  if (shaky.length === score.members.length) {
+  if (score.members.every(nothingMeasured)) {
     warnings.push(
-      '팀 전원의 신뢰도가 낮습니다. 이 수치로 서로를 비교하지 마세요 — ' +
-        '연결되지 않은 데이터가 무엇인지 먼저 확인해야 합니다.',
+      '아직 이 팀에서 잰 활동이 없습니다. 회의를 열거나 GitHub 저장소를 ' +
+        '연결하면 근거와 함께 값이 생깁니다.',
+    );
+  } else if (shaky.length === score.members.length) {
+    // ⚠️ 혼자면 「서로」가 없습니다. 같은 말을 억지로 쓰면 화면이 사람을
+    //    안 보고 있다는 인상만 남깁니다.
+    warnings.push(
+      score.members.length === 1
+        ? '이 수치의 신뢰도가 낮습니다. 연결되지 않은 데이터가 무엇인지 먼저 확인해야 합니다.'
+        : '팀 전원의 신뢰도가 낮습니다. 이 수치로 서로를 비교하지 마세요 — ' +
+          '연결되지 않은 데이터가 무엇인지 먼저 확인해야 합니다.',
     );
   }
 
+  /* ⛔ **「빠졌습니다」만 적으면 「네 활동은 뺐다」로 읽힙니다** (결함 323).
+     이 목록을 만드는 자는 `scoring.py` 의
+         skipped = [c for c in Category if team_totals[c] <= 0]
+     이라 재는 것은 **팀의 활동량**입니다 — 사람의 잘잘못이 아닙니다.
+
+     ⚠️ 보고서(`reports/period.py`)는 결함 311 에서 여기에 이유를 붙였고,
+     그 주석은 「화면은 이유를 안 붙입니다 — 두 자리가 **같은 사실**을
+     말해야 합니다」라고 **적어만 두고** 갔습니다. 활동이 있는 팀에서는
+     위의 「아직 이 팀에서 잰 활동이 없습니다」 줄도 안 나오므로, 사람은
+     이유 없는 「빠졌습니다」만 봅니다. 문장을 서버와 맞춥니다. */
   if (score.skipped_categories.length > 0) {
     const skipped = score.skipped_categories.map(describeCategory).join(', ');
-    warnings.push(`${skipped} 활동은 이번 계산에서 빠졌습니다.`);
+    warnings.push(
+      `${skipped} — 팀 전체에 기록된 활동이 없어 이번 계산에서 빠졌습니다. ` +
+        '아무도 안 했다는 뜻이 아니라 이 계산에 잡힌 것이 없다는 뜻입니다.',
+    );
+  }
+
+  /* ⚠️ **나간 사람의 기록은 계산에 그대로 들어갑니다** (결함 222). 빼면
+     남은 사람들의 몫이 조용히 부풀기 때문입니다. 다만 목록에 이름이 있는
+     이유는 말해 줘야 합니다 — 안 그러면 "왜 나간 사람이 여기 있지" 가
+     됩니다. */
+  if (former.length > 0) {
+    const names = former.map((p) => p.name).join(', ');
+    warnings.push(
+      `${names} 님은 이 프로젝트를 떠났지만 그때 한 일은 계산에 그대로 ` +
+        '들어 있습니다. 빼면 남은 사람들의 몫이 실제보다 커집니다.',
+    );
   }
 
   return warnings;

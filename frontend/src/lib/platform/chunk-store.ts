@@ -146,3 +146,20 @@ export function describeGiveUp(outcome: GiveUpOutcome, count: number): string {
     ? `${count}개가 이 컴퓨터에 남아 있습니다 — 서버가 돌아오면 다시 올립니다.`
     : `${count}개를 못 올렸습니다. 그 구간은 회의록에 공백으로 남습니다.`;
 }
+
+/**
+ * 「남은 청크 다시 올리기」를 누른 **뒤에** 뭐라고 할지 (결함 245).
+ *
+ * ⛔ 예전에는 실패한 seq 를 조용히 목록에 도로 넣기만 했습니다. 화면은
+ * 그대로였고(같은 「N개가 남아 있습니다」), 사람은 **눌러도 아무 일도 안
+ * 일어난다**고 읽습니다. 하필 그 조각들은 회의의 소리이고, 이 버튼이
+ * 그것을 되찾는 유일한 길입니다.
+ */
+export function describeReupload(sent: number, still: number): string {
+  if (sent === 0 && still === 0) return '올릴 것이 없습니다';
+  if (still === 0) return `${sent}개를 올렸습니다 — 이 컴퓨터에 남은 것이 없습니다`;
+  if (sent === 0) {
+    return `${still}개를 아직 못 올렸습니다 — 서버가 돌아온 뒤 다시 눌러 보세요`;
+  }
+  return `${sent}개를 올렸습니다. ${still}개는 아직 못 올렸습니다 — 다시 눌러 보세요`;
+}

@@ -207,10 +207,21 @@ console.log('안전 배너  :', banner.slice(0, 44), banner.includes('화면을 
 //    와 `keepsAwake` 가 참말인지는 설정이 아니라 **이 숫자**가 말합니다.
 //    ?meeting= 없이 열었으므로 서버 없이 도는 로컬 모드입니다 — 업로드는
 //    로컬 카운터로 가고, 청크는 디스크 보관소를 스쳐 갑니다(Phase 1).
-await page.click('#consent');
+// ⛔ 예전에는 여기서 `#consent` 를 **눌렀습니다.** 그때는 단추였고,
+//    누르면 화면이 스스로 「전원 동의」를 넣었습니다 — 결함 229 가 그걸
+//    걷어내고 `<a>` 링크로 바꿨습니다. 그 뒤로 이 줄은 **로비로 나가
+//    버리는** 줄이었고, 아래 생존율 측정은 한 번도 안 돌았습니다 (결함 238).
+//    회의 없이 연 화면은 동의를 물을 상대가 없어 `solo` 입니다.
 await page.click('#permission');
-// requestMicrophone(getUserMedia)이 끝나야 시작 버튼이 열립니다.
-await page.waitForFunction(() => !document.getElementById('start').disabled, null, { timeout: 10_000 });
+// ⚠️ `disabled` 가 아니라 **`aria-disabled`** 입니다. 이 버튼은 초점을
+//    받아야 해서 진짜 비활성이 아닙니다 — `.disabled` 로 기다리면 그 값은
+//    **언제나 false** 라 기다림이 통째로 헛돕니다(그래서 다음 줄의 클릭이
+//    30초 타임아웃으로 죽었습니다).
+await page.waitForFunction(
+  () => document.getElementById('start').getAttribute('aria-disabled') === 'false',
+  null,
+  { timeout: 10_000 },
+);
 await page.click('#start');
 await page.waitForTimeout(6_500); // 타임슬라이스 5초 → 첫 청크가 앉을 시간
 const chunksShown = Number(await page.locator('#chunks').innerText());
@@ -220,6 +231,35 @@ await page.waitForTimeout(11_000); // 숨긴 채 두 타임슬라이스
 const chunksHidden = Number(await page.locator('#chunks').innerText());
 const phaseHidden = await page.locator('#phase').innerText();
 await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].show());
+
+// ⭐ **녹음 중에 창을 닫으면 묻는가** (결함 342). 정지 **전에** 잽니다 —
+//    이 셸의 존재 이유가 「창을 내려도 녹음이 안 끊기게」인데, 창의 X
+//    하나면 그게 다 무너지고 있었습니다(앱이 통째로 죽었습니다).
+//
+// ⚠️ 네이티브 대화상자는 Playwright 가 못 누릅니다. **검사 하네스가**
+//    main 의 `showMessageBoxSync` 를 갈아끼워 「머무르는 쪽」을 고릅니다 —
+//    앱 코드가 아니라 여기서만 하는 일입니다.
+await app.evaluate(({ dialog }) => {
+  globalThis.__asked = null;
+  dialog.showMessageBoxSync = (win, opts) => {
+    globalThis.__asked = { title: opts.title, buttons: opts.buttons, detail: opts.detail };
+    return 0; // 머무릅니다
+  };
+});
+const chunksBeforeClose = Number(await page.locator('#chunks').innerText());
+await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+await page.waitForTimeout(6_500);
+const asked = await app.evaluate(() => globalThis.__asked);
+const chunksAfterClose = Number(await page.locator('#chunks').innerText());
+const closeGuard = {
+  물었나: asked !== null,
+  제목: asked?.title ?? '(안 물음)',
+  머무르는쪽이먼저: asked?.buttons?.[0] ?? '(없음)',
+  청크: `${chunksBeforeClose} → ${chunksAfterClose}`,
+};
+const closeOk =
+  closeGuard.물었나 && chunksAfterClose >= chunksBeforeClose;
+console.log('닫기 잠금 :', JSON.stringify(closeGuard), closeOk ? 'OK' : '⛔ 녹음 중에 그냥 닫힙니다');
 
 await page.click('#stop');
 await page.waitForFunction(() => !document.getElementById('result').hidden, null, { timeout: 10_000 });

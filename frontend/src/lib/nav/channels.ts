@@ -20,6 +20,7 @@
  */
 
 import { describeMeetingStatus, type Meeting } from '../home/next.ts';
+import { meetingLabel } from '../ui/naming.ts';
 
 /**
  * 채널 옆 점이 무엇을 뜻하는가.
@@ -82,10 +83,14 @@ export function channelState(status: string): ChannelState {
  *
  * ⚠️ 서버는 `title` 을 `null` 로 줄 수 있습니다. 빈 글자를 그대로 그리면
  * 목록에 **누를 수는 있는데 이름이 없는 줄**이 생깁니다.
+ *
+ * ⚠️ 예전에는 여기서 직접 `회의 {번호}` 를 지었습니다 (결함 285). 채널
+ * 목록은 **모든 화면에 늘 떠 있는데**, 같은 회의를 머리줄은 「제목 없는
+ * 회의 #4」, 왼쪽 목록은 「회의 4」라고 불렀습니다. 이름은 한 벌에서
+ * 옵니다 — 여기서는 `Meeting` 모양을 그 한 벌에 넘겨 주기만 합니다.
  */
 export function channelLabel(meeting: Meeting): string {
-  const title = (meeting.title ?? '').trim();
-  return title === '' ? `회의 ${meeting.meeting_id}` : title;
+  return meetingLabel(meeting.title, meeting.meeting_id);
 }
 
 /**
@@ -171,11 +176,39 @@ export function shellHeading(projectTitle?: string | null): string {
 }
 
 /**
+ * 개수 알약에 **뭐라고 적을 것인가** (결함 350).
+ *
+ * ## ⛔ 숫자만 적어서 귀가 눈보다 많이 알고 있었습니다
+ *
+ * 알약은 `3` 한 글자였고 낭독기만 「업무 후보 3건 검토 대기」를 들었습니다.
+ * 결함 336 이 홈의 리본에서 잡은 것과 **같은 모양**입니다 — 축 이름이
+ * `aria-label` 에만 있으면 눈으로 보는 사람이 값을 다른 뜻으로 읽습니다.
+ *
+ * 그리고 여기서는 **읽힐 다른 뜻이 이미 정해져 있습니다.** 이 셸은
+ * 일부러 메신저를 본떴고(`docs/19`), 그 세계에서 채널 이름 옆의 둥근
+ * 알약은 **안 읽은 개수**입니다. 이 제품에도 안 읽은 알림이 있고 같은
+ * 모양(`--r-round` + 강조 채움)으로 그립니다 — 다만 그쪽은 「안 읽은
+ * 알림」이라는 글자를 달고 있습니다.
+ *
+ * 세어 보니 두 뿌리의 세는 알약 **여섯 중 다섯**이 바로 앞에 축 이름을
+ * 답니다(「할 일 2」·「검토 필요 3」·「안 읽은 알림 3」·「{n}명」·「업무 4」).
+ * 이름을 안 다는 것은 이 하나뿐이었습니다.
+ *
+ * ⚠️ 그래서 **글자를 늘리는 게 아니라 옮깁니다** — 이미 `aria-label` 에
+ * 있던 말을 눈에도 보이게 두 글자로 줄여 적습니다.
+ */
+export function channelCountText(pending: number | null): string | null {
+  return pending === null ? null : `후보 ${pending}`;
+}
+
+/**
  * 채널 하나를 낭독기에 뭐라고 읽어 줄 것인가.
  *
- * ⚠️ 점과 개수 알약은 **눈으로만 읽히는 표시**입니다. 그것뿐이면 낭독기
- * 사용자에게는 회의 이름만 남습니다 — 어느 방이 열려 있는지, 어디에 할
- * 일이 남았는지가 통째로 사라집니다.
+ * ⚠️ 점은 **눈으로만 읽히는 표시**입니다. 그것뿐이면 낭독기 사용자에게는
+ * 회의 이름만 남습니다 — 어느 방이 열려 있는지가 통째로 사라집니다.
+ *
+ * ⚠️ 개수는 이제 **눈에도 축 이름이 있습니다**(`channelCountText`).
+ * 여기서는 그것을 풀어 씁니다 — 낭독기는 줄여 쓸 이유가 없습니다.
  */
 export function channelAriaLabel(channel: MeetingChannel): string {
   const parts = [channel.label, channel.stateLabel];

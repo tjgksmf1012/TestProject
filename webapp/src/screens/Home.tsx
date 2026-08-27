@@ -1,18 +1,35 @@
-import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import * as Dialog from '@radix-ui/react-dialog';
+import { useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
 import { StatusChip } from '../components/StatusChip.tsx';
+import { Why } from '../components/Why.tsx';
 import {
+  useCreateProject,
+  useJoinProject,
   useMeetings,
   useProjects,
   useSettingsMutations,
-  useTracks,
 } from '../api/hooks.ts';
-import { api, ApiError } from '../api/client.ts';
+import { ApiError } from '../api/client.ts';
 import type { MeetingSummary } from '../api/types.ts';
-import { hasLane, nextStepFor, orderProjects, sectionMeetings } from '@lib/home/next.ts';
+import {
+  coverageReading,
+  describeCoverageRibbon,
+  emphasisFor,
+  emptyProjectsMessage,
+  hasLane,
+  homeProject,
+  nextStepFor,
+  requestedProjectId,
+  sectionMeetings,
+  describeMeetingWhen,
+} from '@lib/home/next.ts';
 import { codeProblem, normalizeCode, titleProblem } from '@lib/project/setup.ts';
+import { describeActionFailure } from '@lib/ui/load.ts';
+import { meetingLabel } from '@lib/ui/naming.ts';
 import { Problem } from '../components/Problem.tsx';
 
 // 홈 — "다음에 뭘 해야 하는가" 에 대한 답 (지시서 기타-6 §홈).
@@ -32,11 +49,14 @@ function spaHref(href: string, projectId: number): string {
   return '/';
 }
 
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
+/* ⛔ 여기서 `new Date(iso).getMonth()` 로 그리고 있었습니다 — **브라우저
+   달력**입니다. 같은 회의를 서울 사람은 09-02 로, 뉴욕 사람은 09-01 로
+   봅니다. 마감일·달력은 팀 달력이라 한 화면에 달력이 둘이었습니다
+   (결함 246). 판단은 `@lib`. */
+/* ⚠️ 예전에는 `shortTeamDate(meeting.started_at)` 이었습니다 (결함 287).
+   잡아만 둔 회의는 `started_at` 이 없어 「—」가 떴고, 레거시 홈은 아예
+   **브라우저 달력**으로 다른 날을 그렸습니다. 「이 회의는 언제인가」는
+   `@lib` 한 벌(`describeMeetingWhen`)이 답합니다. */
 
 /**
  * 회의 한 줄.
@@ -63,22 +83,23 @@ function MeetingRow({
    */
   waiting: boolean;
 }) {
-  // 녹음 전 회의는 트랙이 없으므로 묻지 않습니다 — 빈 축이 정답입니다.
-  const recorded = meeting.status !== 'pending';
-  const tracks = useTracks(recorded ? meeting.meeting_id : undefined);
-  const step = nextStepFor({ ...meeting, title: meeting.title });
+  const step = nextStepFor({ ...meeting, title: meeting.title }, projectId);
 
-  const coverages = (tracks.data?.tracks ?? [])
-    .map((t) => t.coverage)
-    .filter((c): c is number => c !== null && Number.isFinite(c));
-  const coverage =
-    coverages.length > 0 ? coverages.reduce((a, b) => a + b, 0) / coverages.length : null;
+  // ⚠️ 예전에는 **줄마다** `GET /api/meetings/{id}/tracks` 를 불렀습니다.
+  //    회의 다섯짜리 시연 데이터로 홈 한 번에 요청 7건이었고(재서 확인),
+  //    회의 서른인 팀이면 33건입니다 — 브라우저는 호스트당 여섯 개씩만
+  //    동시에 여니 나머지는 줄을 섭니다. 목록이 길수록 홈이 느려지는
+  //    구조였습니다.
+  //
+  //    이제 목록 응답이 `coverage` 를 함께 줍니다. **`null` 은 0 이 아니라
+  //    "못 쟀다" 입니다** — `hasLane` 이 그때 레인을 안 그립니다.
+  const coverage = meeting.coverage;
 
   return (
     <div className="mrow">
       <span className="mrow__status">{!waiting && <StatusChip status={meeting.status} />}</span>
-      <span className="mrow__title">{meeting.title ?? '제목 없는 회의'}</span>
-      <span className="mrow__date num">{fmtDate(meeting.started_at)}</span>
+      <span className="mrow__title">{meetingLabel(meeting.title, meeting.meeting_id)}</span>
+      <span className="mrow__date num">{describeMeetingWhen(meeting)}</span>
       {/* ⚠️ **잴 게 없으면 레인을 안 그립니다** (v2 F3). 예전에는 회의
           다섯 중 넷이 빈 회색 막대였고, 값 없는 요소가 목록의 시각적
           무게중심을 차지했습니다. 레인은 "아는 것 / 모르는 것" 을 말하는
@@ -92,50 +113,111 @@ function MeetingRow({
               { start: 0, end: coverage as number, kind: 'known' },
               { start: coverage as number, end: 1, kind: 'unknown' },
             ]}
-            label={`${meeting.title ?? '회의'} — 녹음 커버리지 ${Math.round((coverage as number) * 100)}%`}
+            label={describeCoverageRibbon(
+              meetingLabel(meeting.title, meeting.meeting_id),
+              coverage as number,
+            )}
           />
         )}
       </span>
+      {/* ⭐ **축에 이름을 붙입니다** (결함 336). 예전에는 `80%` 뿐이라
+          `aria-label` 만 「녹음 커버리지」를 알고 있었고, 「처리 중」·
+          「검토 필요」가 적힌 줄들 사이에서 그 막대는 **처리 진행률**로
+          읽혔습니다. 형제 자리인 기여도는 이미 `ribbonReading()` 으로
+          「확신 45% · 모름 55%」를 눈에도 적고 있었습니다. */}
       <span className="mrow__cov num">
-        {hasLane(coverage) ? `${Math.round((coverage as number) * 100)}%` : ''}
+        {hasLane(coverage) ? coverageReading(coverage as number) : ''}
       </span>
+      {/* ⭐ **이유는 `?` 아래에 둡니다 — `title` 이 아니라** (결함 406).
+          `docs/22` 의 처방 ③ 이 「문장을 지우지 않고 `?` 한 겹 아래로
+          (`Why`)」이고, 같은 문서가 `Why` 를 WCAG 1.4.13 세 조건으로 재
+          두었습니다(ESC 로 닫힘 · 위로 옮겨도 안 사라짐 · 2.5초 뒤에도
+          떠 있음 · **키보드로도 열림**).
+
+          그런데 이 화면만 그 문장을 `title=` 에 넣고 있었습니다 — 다섯
+          줄 전부. 렌더해서 재니 본문에 그 문장이 **0곳**, 홈의 `Why` 도
+          **0개**, 링크에 `aria-label`·`aria-describedby` 도 없어서
+          **마우스를 쓰는 사람에게만** 보였습니다. 같은 사실을 레거시 홈은
+          눈에 보이는 글로 적고 있습니다(결함 290). SPA 의 다른 화면 넷은
+          이미 `Why` 를 열 곳에서 씁니다 — 여기만 예외였습니다. */}
       <span className="mrow__action">
         {step.href !== null ? (
           /* ⚠️ **primary 는 「검토 필요」 줄에만** (v2 F9). 예전에는
              `actionable` 인 줄이 전부 인디고라 한 화면에 primary 가 셋이었고,
-             셋이 다 강조면 아무것도 강조가 아닙니다. 나머지 줄도 `actionable`
-             여부는 살립니다 — 갈 수 있는 곳은 테두리 버튼, 그냥 보러 가는
-             곳은 ghost. lib 이 준 판단을 버리지 않습니다. */
+             셋이 다 강조면 아무것도 강조가 아닙니다.
+
+             ⛔ 그런데 그 규칙을 화면이 직접 적었더니 `waiting` 이 `actionable`
+             **위로 올라갔습니다** — 후보 0건인 회의의 「칸반 보기」가 화면에서
+             제일 센 버튼이었습니다 (결함 252). 이제 `@lib` 이 정합니다. */
           <Link
-            className={`btn btn--sm ${
-              waiting ? 'btn--primary' : step.actionable ? 'btn--secondary' : 'btn--ghost'
-            }`}
+            className={`btn btn--sm btn--${emphasisFor(step, waiting)}`}
             to={spaHref(step.href, projectId)}
-            title={step.reason}
           >
             {step.label}
           </Link>
         ) : (
-          /* 갈 곳이 없는 상태(처리 중)입니다. 이유는 상태 칩이 이미 말하고
-             있으므로 여기서 되풀이하지 않습니다. 자리는 비워 두지 않고
+          /* 갈 곳이 없는 상태(처리 중)입니다. 자리는 비워 두지 않고
              `—` 로 예약합니다 — 행마다 우측 끝이 어긋나면 세로 스캔이
              죽습니다. */
-          <span className="mrow__none" title={step.reason}>
-            —
-          </span>
+          <span className="mrow__none">—</span>
         )}
+        <Why
+          about={`${meetingLabel(meeting.title, meeting.meeting_id)} — 다음에 할 일`}
+          lines={[step.reason]}
+          countsAs="안내"
+        />
       </span>
     </div>
   );
 }
 
 /** 프로젝트 만들기/참가 — 상시 노출할 이유가 없어 헤더 뒤 대화 상자로. */
-function StartDialog({ onClose }: { onClose: () => void }) {
+function StartDialog({
+  focus,
+  onClose,
+  onClosed,
+}: {
+  /** `null` 이면 닫힌 상태. ⚠️ **닫혔다고 이 컴포넌트를 떼지 마십시오** —
+      Radix 가 닫을 때 「열기 전에 초점이 있던 곳」으로 되돌리는데, 같은
+      순간에 통째로 떼면 그 일이 못 끝나고 초점이 `body` 로 떨어집니다
+      (결함 280). 여는 것과 닫는 것은 `open` 하나로만 말합니다. */
+  focus: 'create' | 'join' | null;
+  onClose: () => void;
+  /** 닫히고 나서 초점을 어디로 돌려놓을 것인가. */
+  onClosed: () => void;
+}) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  /**
+   * 만들었으면 **거기로 데려갑니다.**
+   *
+   * ⚠️ 예전에는 `navigate(0)` — 즉 **문서 전체 새로고침**이었습니다.
+   *    재 봤더니 3.5초 동안 `/app/` · `index-*.js` · `index-*.css` 를 다시
+   *    받으며 앱이 통째로 재부팅됐고, 그러고 나서도 홈은 **첫 번째
+   *    프로젝트**를 보여 줬습니다 — 방금 만든 것이 아니라.
+   *
+   *    TanStack Query 가 이미 `['projects']` 를 들고 있으므로 무효화 한
+   *    줄이면 됩니다. 그리고 주소로 어느 프로젝트인지 말합니다.
+   */
+  const land = async (projectId: number) => {
+    await queryClient.invalidateQueries({ queryKey: ['projects'] });
+    navigate(`/?project=${projectId}`);
+    onClose();
+  };
+
+  /* ⚠️ **`useMutation` 을 거칩니다** (결함 426). 예전에는 여기서
+     `api.post(...)` 를 직접 불렀고, 그러면 `main.tsx` 의
+     `mutationCache.onError` 를 **안 거칩니다** — 세션이 죽은 채 누르면
+     대화상자가 「로그인이 필요합니다」라고 말하는데 **로그인으로 가는
+     자리가 없습니다**(결함 227 이 고친 그 병). 실패를 한 자리에서 받는다는
+     결정은 그 한 자리를 지나갈 때만 참입니다. */
+  const createProject = useCreateProject();
+  const joinProject = useJoinProject();
 
   const create = async () => {
     const bad = titleProblem(title);
@@ -145,8 +227,8 @@ function StartDialog({ onClose }: { onClose: () => void }) {
     }
     setBusy(true);
     try {
-      await api.post('/api/projects', { title: title.trim() });
-      navigate(0);
+      const made = await createProject.mutateAsync(title.trim());
+      await land(made.project_id);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : '만들지 못했습니다');
       setBusy(false);
@@ -160,22 +242,57 @@ function StartDialog({ onClose }: { onClose: () => void }) {
     }
     setBusy(true);
     try {
-      await api.post('/api/projects/join', { invite_code: normalizeCode(code) });
-      navigate(0);
+      const joined = await joinProject.mutateAsync(normalizeCode(code));
+      await land(joined.project_id);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : '참가하지 못했습니다');
       setBusy(false);
     }
   };
 
+  /* ⛔ **손으로 만든 `role="dialog"` 였습니다** (결함 280).
+     `aria-modal="true"` 라고 적어 두면 낭독기는 뒤쪽을 안 읽지만,
+     **키보드는 그 말을 안 듣습니다.** 재현했습니다 —
+
+       · Escape 를 눌러도 **안 닫혔습니다** (듣는 곳이 없었습니다)
+       · 안에서 Tab 을 누르면 **뒤쪽 화면**으로 새어 나갔고, 그 자리는
+         `dialog-backdrop` 에 **가려져 눈에 안 보입니다.** 거기서 Enter 를
+         눌렀더니 `/app/meeting/6/lobby` 로 **가 버렸습니다** — 사람은
+         왜 회의 로비에 와 있는지 모릅니다
+
+     `@radix-ui/react-dialog` 는 **이미 의존성에 있었고 아무도 안 썼습니다**
+     (대표 실패 ①). 초점 가두기·Escape·닫은 뒤 초점 되돌리기가 전부 거기
+     들어 있습니다. 손으로 다시 짜지 않습니다. */
   return (
-    <div className="dialog-backdrop" role="dialog" aria-modal="true" aria-label="프로젝트 시작하기">
-      <div className="dialog">
-        <h2 className="sec__title">프로젝트 시작하기</h2>
+    <Dialog.Root
+      open={focus !== null}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-backdrop" />
+        <Dialog.Content
+          className="dialog"
+          aria-label="프로젝트 시작하기"
+          /* ⚠️ Radix 의 기본 되돌리기는 이 화면에서 `body` 로 떨어졌습니다 —
+             손잡이가 `Dialog.Trigger` 가 아니라 따로 선 단추 셋이라서.
+             어디로 돌아갈지 **부르는 쪽이** 압니다. */
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            onClosed();
+          }}
+        >
+        <Dialog.Title className="sec__title">프로젝트 시작하기</Dialog.Title>
         <label className="field">
           <span className="field__label">새 프로젝트 이름</span>
           <div className="sec__row">
-            <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input
+              className="input"
+              autoFocus={focus === 'create'}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
             <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void create()}>
               만들기
             </button>
@@ -187,6 +304,7 @@ function StartDialog({ onClose }: { onClose: () => void }) {
             <input
               className="input input--num"
               placeholder="ABCD-EFGH"
+              autoFocus={focus === 'join'}
               value={code}
               onChange={(e) => setCode(e.target.value)}
             />
@@ -196,31 +314,53 @@ function StartDialog({ onClose }: { onClose: () => void }) {
           </div>
         </label>
         <Problem>{error}</Problem>
-        <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>
-          닫기
-        </button>
-      </div>
-    </div>
+        <Dialog.Close asChild>
+          <button type="button" className="btn btn--ghost btn--sm">
+            닫기
+          </button>
+        </Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
 export default function Home() {
   const navigate = useNavigate();
+  const { search } = useLocation();
   const projectsQuery = useProjects();
-  const projects = useMemo(
-    () => orderProjects(projectsQuery.data ?? []),
-    [projectsQuery.data],
+  // ⭐ **주소가 어느 프로젝트인지 말합니다** (`?project=`). 없으면 예전처럼
+  //    할 일이 있는 것부터. 판단은 `@lib/home/next.ts` 에 있습니다 —
+  //    "내 목록에 없는 id 는 조용히 첫 번째로" 까지 거기서 정합니다.
+  const project = useMemo(
+    () => homeProject(projectsQuery.data ?? [], requestedProjectId(search)),
+    [projectsQuery.data, search],
   );
-  const project = projects[0];
   const meetings = useMeetings(project?.project_id);
   const m = useSettingsMutations(project?.project_id);
-  const [startOpen, setStartOpen] = useState(false);
+  /* 어느 손잡이로 열었는가 (결함 270). 참가하러 온 사람은 **참가 칸에
+     초점이 앉은 채** 시작해야 합니다 — 문이 하나뿐이라 이름만 다릅니다. */
+  const [starting, setStarting] = useState<'create' | 'join' | null>(null);
+  /* 닫은 뒤 초점을 **열었던 단추로** 돌려놓습니다 (결함 280). 안 그러면
+     Escape 를 누른 사람이 `body` 에 떨어져, Tab 을 처음부터 다시 밟아야
+     합니다. 손잡이가 셋이라 어느 것으로 열었는지 기억해 둡니다. */
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const start =
+    (which: 'create' | 'join') => (event: MouseEvent<HTMLButtonElement>) => {
+      openerRef.current = event.currentTarget;
+      setStarting(which);
+    };
 
   // 가르는 판단은 `@lib` 에 있습니다 — 화면은 그리기만.
   const sections = useMemo(() => sectionMeetings(meetings.data ?? []), [meetings.data]);
 
   return (
     <AppShell
+      /* ⚠️ 이 줄이 없으면 레일의 「지금 보는 프로젝트」 표시가 **거짓말을
+         합니다.** 홈 주소에는 `:projectId` 가 없어서 셸이 목록 첫 번째로
+         떨어지고, `?project=2` 를 보고 있는데 1번에 표시가 붙습니다.
+         렌더해서 잡았습니다 — 코드만 봤을 때는 안 보였습니다. */
+      projectId={project?.project_id}
       title={project?.title ?? '홈'}
       meta={
         project !== undefined
@@ -230,7 +370,7 @@ export default function Home() {
       actions={
         <div className="appbar__actions">
           {/* v2 F9 — 화면당 primary 는 하나. 주된 행동은 `회의 열기` 입니다. */}
-          <button type="button" className="btn btn--ghost" onClick={() => setStartOpen(true)}>
+          <button type="button" className="btn btn--ghost" onClick={start('create')}>
             + 새 프로젝트
           </button>
           {project !== undefined && (
@@ -258,10 +398,32 @@ export default function Home() {
       <div className="panes">
         <section className="pane">
           <div className="pane__body">
+            {/* ⛔ **참가하러 온 사람에게 참가할 자리를 안 줬습니다**
+                (결함 270). 초대 코드로 막 들어온 사람이 되어 보니, 가입
+                직후 이 화면에서 누를 수 있는 것이 넷이고 **입력칸은
+                0개**였습니다. 참가 칸은 「+ 새 프로젝트」 **안**에 있는데
+                그 단추 이름은 만드는 쪽만 말합니다.
+                문구는 `@lib` 한 벌을 쓰고(예전에는 여기 따로 적혀
+                있었습니다 — 실패 ②), 참가라는 **이름의 손잡이**를 답니다. */}
             {projectsQuery.isSuccess && project === undefined && (
               <div className="empty">
-                아직 프로젝트가 없습니다. 오른쪽 위 “+ 새 프로젝트”로 만들거나 초대
-                코드로 참가하세요.
+                <p style={{ margin: 0 }}>{emptyProjectsMessage()}</p>
+                <div className="sec__row" style={{ justifyContent: 'center', marginTop: 'var(--sp-5)' }}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={start('create')}
+                  >
+                    새 프로젝트 만들기
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={start('join')}
+                  >
+                    초대 코드로 참가
+                  </button>
+                </div>
               </div>
             )}
             {meetings.isSuccess && (meetings.data?.length ?? 0) === 0 && (
@@ -303,16 +465,25 @@ export default function Home() {
                 ))}
               </section>
             )}
+            {/* ⛔ 서버가 준 글자를 그대로 붙이고 있었습니다 (결함 283) —
+                위 기여도 화면과 같은 자리입니다. 문구는 `@lib` 한 벌. */}
             {m.openMeeting.isError && (
               <Problem>
-                회의를 열지 못했습니다 —{' '}
-                {m.openMeeting.error instanceof Error ? m.openMeeting.error.message : '알 수 없는 오류'}
+                {describeActionFailure(
+                  '회의 열기',
+                  m.openMeeting.error instanceof ApiError ? m.openMeeting.error.status : null,
+                  m.openMeeting.error instanceof ApiError ? m.openMeeting.error.detail : null,
+                )}
               </Problem>
             )}
           </div>
         </section>
       </div>
-      {startOpen && <StartDialog onClose={() => setStartOpen(false)} />}
+      <StartDialog
+        focus={starting}
+        onClose={() => setStarting(null)}
+        onClosed={() => openerRef.current?.focus()}
+      />
     </AppShell>
   );
 }

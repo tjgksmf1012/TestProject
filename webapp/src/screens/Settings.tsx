@@ -11,12 +11,47 @@ import {
 } from '../api/hooks.ts';
 import type { Member } from '../api/types.ts';
 import { ROLE_OPTIONS, problemWith, roleSummary, sumOf, toPayload } from '@lib/contribution/roles.ts';
+import {
+  cannotTellApartNote,
+  labelInList,
+  tellsApartInList,
+} from '@lib/people/labels.ts';
 import { describeRoles } from '@lib/contribution/roles.ts';
+import { plainText } from '@lib/ui/plain.ts';
 import { describeHealth, describeHealthFailure } from '@lib/github/health.ts';
-import { githubLoginStatus, repoProblem, titleProblem, normalizeRepo } from '@lib/project/setup.ts';
-import { LEAVE_CONFIRM } from '@lib/project/roles.ts';
+import {
+  codeToCopy,
+  disconnectConfirm,
+  githubLoginStatus,
+  isDisconnect,
+  normalizeRepo,
+  repoProblem,
+  titleProblem,
+  unknownSectionNote,
+  whyCannotCopyCode,
+} from '@lib/project/setup.ts';
+import { copySucceeded, copyText, describeCopy } from '@lib/ui/copy.ts';
+import {
+  LEAVE_CONFIRM,
+  roleChoicesFor,
+  canRemove,
+  leaveBlockedBecause,
+  manageBlockedBecause,
+  roleLabel,
+} from '@lib/project/roles.ts';
 import { presenceLabel, worthShowing } from '@lib/project/presence.ts';
-import { AVATAR_SIDE, MAX_BIO, PHOTO_NOTE, bioProblem, coverCrop, photoProblem } from '@lib/profile/edit.ts';
+import { describeOutcome } from '@lib/privacy/deletion.ts';
+import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
+import { whyCannotSave } from '@lib/ui/save.ts';
+import {
+  AVATAR_SIDE,
+  MAX_BIO,
+  PHOTO_NOTE,
+  avatarToShow,
+  bioProblem,
+  coverCrop,
+  photoProblem,
+} from '@lib/profile/edit.ts';
 import { ApiError } from '../api/client.ts';
 import { Problem } from '../components/Problem.tsx';
 
@@ -37,6 +72,9 @@ const SECTIONS = [
   { group: '프로젝트', key: 'repo', label: '저장소 연결' },
   { group: '프로젝트', key: 'general', label: '이름과 초대' },
 ] as const;
+
+/** 아는 구역 — 탭에 선 것들과 위험 구역. **한 벌**입니다 (결함 266). */
+const KNOWN_SECTIONS: readonly string[] = [...SECTIONS.map((s) => s.key), 'danger'];
 
 const WHY_ONLY_ME =
   '남이 내 역할을 바꿀 수 있으면 그건 남의 점수를 바꾸는 일입니다. 역할 비중은 기여도 가중치라서, 본인만 고치고 고친 기록이 남습니다.';
@@ -59,6 +97,7 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
     Object.entries(current).map(([k, v]) => [k, v.trim() === '' ? 0 : Number(v)]),
   );
   const problem = problemWith(shares);
+  const roleBlocked = whyCannotSave({ problem, saving: save.isPending });
   const sum = sumOf(shares);
 
   return (
@@ -71,6 +110,7 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
           <input
             className="input input--num"
             inputMode="decimal"
+            id={option.key === ROLE_OPTIONS[0]?.key ? 'role-first' : undefined}
             aria-label={`${option.label} 비중`}
             value={current[option.key] ?? '0'}
             onChange={(e) => setEdited({ ...current, [option.key]: e.target.value })}
@@ -84,15 +124,27 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
         <span className="rolerow__hint">지금 {roleSummary(mine?.role_shares) ?? '미정'}</span>
       </div>
       <div className="sec__row" style={{ marginTop: 'var(--sp-5)' }}>
+        {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 (결함 234).
+            `disabled` 는 초점을 못 받아 **Tab 이 건너뜁니다** — 바로 옆에
+            적힌 사유로 닿는 길이 없었습니다. 누르면 첫 비중 칸으로
+            데려다 줍니다. */}
         <button
           type="button"
-          className="btn btn--primary"
-          disabled={problem !== null || save.isPending}
-          onClick={() => save.mutate(toPayload(shares), { onSuccess: () => setEdited(null) })}
+          className={`btn btn--primary${roleBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={roleBlocked !== null}
+          aria-describedby={roleBlocked !== null ? 'role-problem' : undefined}
+          onClick={() => {
+            if (save.isPending) return;
+            if (roleBlocked !== null) {
+              document.getElementById('role-first')?.focus();
+              return;
+            }
+            save.mutate(toPayload(shares), { onSuccess: () => setEdited(null) });
+          }}
         >
           저장
         </button>
-        <Problem tone="incomplete" inline>{problem}</Problem>
+        <Problem id="role-problem" tone="incomplete" inline>{roleBlocked}</Problem>
         {save.isSuccess && edited === null && <span className="status-ok" role="status">저장됐습니다</span>}
         <Problem inline>{save.isError ? mutationError(save.error) : null}</Problem>
       </div>
@@ -107,6 +159,7 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
 function GithubSection({ mine, save }: { mine: Member | undefined; save: ReturnType<typeof useSettingsMutations>['saveGithubLogin'] }) {
   const [value, setValue] = useState<string | null>(null);
   const login = value ?? mine?.github_login ?? '';
+  const ghBlocked = whyCannotSave({ dirty: value !== null, saving: save.isPending });
   return (
     <div className="sec">
       <h2 className="sec__title">GitHub 계정</h2>
@@ -114,20 +167,31 @@ function GithubSection({ mine, save }: { mine: Member | undefined; save: ReturnT
       <div className="sec__row">
         <input
           className="input input--num"
+          id="gh-input"
           placeholder="github-id"
           aria-label="GitHub 아이디"
           value={login}
           onChange={(e) => setValue(e.target.value)}
         />
+        {/* 결함 234 — `disabled` 는 초점을 못 받습니다. */}
         <button
           type="button"
-          className="btn btn--primary"
-          disabled={save.isPending || value === null}
-          onClick={() => save.mutate(login.trim(), { onSuccess: () => setValue(null) })}
+          className={`btn btn--primary${ghBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={ghBlocked !== null}
+          aria-describedby={ghBlocked !== null ? 'gh-problem' : undefined}
+          onClick={() => {
+            if (save.isPending) return;
+            if (ghBlocked !== null) {
+              document.getElementById('gh-input')?.focus();
+              return;
+            }
+            save.mutate(login.trim(), { onSuccess: () => setValue(null) });
+          }}
         >
           저장
         </button>
       </div>
+      <Problem id="gh-problem" tone="incomplete">{ghBlocked}</Problem>
       <p className={mine?.github_login ? 'status-ok' : 'micro muted'} style={{ marginTop: 'var(--sp-3)' }}>
         {githubLoginStatus(mine?.github_login ?? null)}
       </p>
@@ -146,9 +210,11 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
   const [avatar, setAvatar] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const bioValue = bio ?? me?.bio ?? '';
-  const avatarValue = avatar ?? me?.avatar ?? null;
+  // 빈 글은 「지움」입니다 — 판단은 `@lib` (결함 265).
+  const avatarValue = avatarToShow(avatar, me?.avatar ?? null);
   const problem = bioProblem(bioValue);
   const dirty = bio !== null || avatar !== null;
+  const profileBlocked = whyCannotSave({ problem, dirty, saving: save.isPending });
 
   const onFile = (file: File | undefined) => {
     if (!file) return;
@@ -186,6 +252,25 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
             <span className="field__label">사진 — {PHOTO_NOTE}</span>
             <input type="file" accept="image/*" onChange={(e) => onFile(e.target.files?.[0])} />
           </label>
+          {/* ⛔ **올린 사진을 지울 자리가 없었습니다** (결함 265). 서버는
+              길을 만들어 뒀고(`clean_avatar("")` → `None`) 레거시 화면에는
+              「사진 지우기」가 있었는데, SPA 로 옮기며 빠졌습니다. 올릴 수는
+              있고 내릴 수는 없는 상태였습니다 — 얼굴은 지우고 싶을 때가
+              있습니다.
+              ⚠️ 지우는 것도 **저장을 눌러야** 적용됩니다. 여기서 바로
+              보내면 「저장」의 뜻이 칸마다 달라집니다. */}
+          {avatarValue !== null && (
+            <button
+              type="button"
+              className="btn btn--danger-quiet btn--sm"
+              onClick={() => {
+                setPhotoError(null);
+                setAvatar('');
+              }}
+            >
+              사진 지우기
+            </button>
+          )}
           <Problem>{photoError}</Problem>
         </div>
       </div>
@@ -201,11 +286,15 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
         />
       </label>
       <div className="sec__row">
+        {/* 결함 234 — `disabled` 는 초점을 못 받습니다. */}
         <button
           type="button"
-          className="btn btn--primary"
-          disabled={!dirty || problem !== null || save.isPending}
+          className={`btn btn--primary${profileBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={profileBlocked !== null}
+          aria-describedby={profileBlocked !== null ? 'profile-problem' : undefined}
           onClick={() => {
+            if (save.isPending) return;
+            if (profileBlocked !== null) return;
             const payload: { bio?: string; avatar?: string } = {};
             if (bio !== null) payload.bio = bio;
             if (avatar !== null) payload.avatar = avatar;
@@ -219,7 +308,10 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
         >
           저장
         </button>
-        <Problem tone="incomplete" inline>{problem}</Problem>
+        {/* ⚠️ `aria-describedby` 가 **없는 id 를 가리키면** 낭독기에는
+            아무 말도 안 됩니다 — 사유가 없는 것보다 나쁩니다. 처음에
+            이 자리를 안 만들어 놓고 가리켰습니다 (결함 234). */}
+        <Problem id="profile-problem" tone="incomplete" inline>{profileBlocked}</Problem>
         {save.isSuccess && !dirty && <span className="status-ok" role="status">저장됐습니다</span>}
       </div>
     </div>
@@ -227,38 +319,145 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
 }
 
 // ── 프로젝트 > 팀원 ─────────────────────────────────────────────
-function MembersSection({ members, leave }: { members: Member[]; leave: ReturnType<typeof useSettingsMutations>['leave'] }) {
+/**
+ * 팀원 — 등급 보기 · 바꾸기 · 내보내기 (`PROJECT-003`·`PROJECT-004`).
+ *
+ * ## ⚠️ 판단은 처음부터 있었는데 이 화면만 안 불렀습니다
+ *
+ * `@lib/project/roles.ts` 에 `roleLabel`·`canChangeRoleOf`·
+ * `roleChoicesFor`·`canRemove`·`leaveBlockedBecause` 가 전부 있고 검사도
+ * 붙어 있습니다. 레거시 화면(`demo/project.tsx`)은 그걸 부르고 등급
+ * `<select>` 와 내보내기 버튼을 그렸는데, **리디자인 SPA 는 이름과 기여도
+ * 가중치만 그렸습니다.** 레거시가 부르고 있어서 "아무도 안 쓰는 export"
+ * 가드도 조용히 통과했습니다 — 결함 197 과 똑같은 모양이고, 이번이 네
+ * 번째입니다.
+ *
+ * 그 동안 소유자·관리자가 SPA 안에서 할 수 없던 것:
+ * 누가 어떤 등급인지 보기 · 팀원을 올리고 내리기 · 팀원 내보내기.
+ *
+ * ⚠️ **막는 것은 지우지 않고 이유를 말합니다.** 없어진 버튼은 "이 화면은
+ *    그걸 못 한다" 가 아니라 "고장 났다" 로 읽힙니다.
+ */
+function MembersSection({
+  members,
+  myUserId,
+  myRole,
+  leave,
+  changeRole,
+  removeMember,
+}: {
+  members: Member[];
+  myUserId: number | undefined;
+  /** 내 권한. **한 벌만** 만듭니다 — 두 곳에서 각자 구하면 한쪽만 고쳐집니다. */
+  myRole: string | null | undefined;
+  leave: ReturnType<typeof useSettingsMutations>['leave'];
+  changeRole: ReturnType<typeof useSettingsMutations>['changeRole'];
+  removeMember: ReturnType<typeof useSettingsMutations>['removeMember'];
+}) {
   const navigate = useNavigate();
   // ⭐ 이름순 고정 — 점수 관련 정보는 여기 없습니다.
   const ordered = [...members].sort(
     (a, b) => a.name.localeCompare(b.name, 'ko') || a.user_id - b.user_id,
   );
+  // ⚠️ 나가기가 막히는 이유는 **누르기 전에** 말합니다. 예전에는 누른 뒤
+  //    서버 409 로만 나왔습니다.
+  const leaveBlocked = leaveBlockedBecause(myRole, members.map((x) => x.project_role));
+
   return (
     <div className="sec">
       <h2 className="sec__title">팀원 {members.length}명</h2>
-      {ordered.map((member) => (
-        <div className="member-row" key={member.user_id}>
-          {member.avatar !== null ? (
-            <img className="member-row__avatar" src={member.avatar} alt="" />
-          ) : (
-            <span className="member-row__avatar" aria-hidden="true" />
-          )}
-          <div>
-            <div className="member-row__name">{member.name}</div>
-            <div className="member-row__roles">{describeRoles(member.role_shares)}</div>
-            {member.bio !== null && member.bio !== '' && <div className="t12 muted">{member.bio}</div>}
+      {ordered.map((member) => {
+        const isMe = member.user_id === myUserId;
+        // 고를 것이 하나도 없으면 안 그립니다 (결함 362) — 판단은 `@lib`.
+        const canGive = roleChoicesFor(myRole, member.project_role, { isMe });
+        const mayRemove = canRemove(myRole, member.project_role, { isMe });
+        return (
+          <div className="member-row" key={member.user_id}>
+            {member.avatar !== null ? (
+              <img className="member-row__avatar" src={member.avatar} alt="" />
+            ) : (
+              <span className="member-row__avatar" aria-hidden="true" />
+            )}
+            <div>
+              <div className="member-row__name">
+                {/* ⭐ 같은 이름이 둘이면 손잡이를 붙입니다 (결함 345) —
+                    이 줄 오른쪽 끝이 「내보내기」입니다. */}
+                {labelInList(member, ordered)}
+                {/* 등급은 **글자**입니다. 색이나 길이로 줄 세우지 않습니다. */}
+                <span className="member-row__rank">{roleLabel(member.project_role)}</span>
+              </div>
+              <div className="member-row__roles">{describeRoles(member.role_shares)}</div>
+              {/* 이름표를 붙여도 두 줄이 똑같은 경우 (둘 다 GitHub 미연결).
+                  막지는 않고 사실만 적습니다 — 시스템은 판정하지 않습니다. */}
+              {!tellsApartInList(member, ordered) && (
+                <div className="t12 muted">{cannotTellApartNote()}</div>
+              )}
+              {member.bio !== null && member.bio !== '' && <div className="t12 muted">{member.bio}</div>}
+            </div>
+            {worthShowing(member.presence) && (
+              <span className="presence">● {presenceLabel(member.presence)}</span>
+            )}
+            {canGive.length > 0 && (
+              <label className="member-row__act">
+                <span className="vh">{labelInList(member, ordered)} 등급</span>
+                <select
+                  className="input input--sm"
+                  value={member.project_role}
+                  disabled={changeRole.isPending}
+                  onChange={(e) =>
+                    changeRole.mutate({ userId: member.user_id, role: e.target.value })
+                  }
+                >
+                  {/* 지금 등급이 내가 줄 수 있는 목록 밖일 수 있습니다
+                      (소유자를 관리자가 볼 때) — 그때도 값이 비지 않게 둡니다. */}
+                  {!canGive.includes(member.project_role as (typeof canGive)[number]) && (
+                    <option value={member.project_role}>{roleLabel(member.project_role)}</option>
+                  )}
+                  {canGive.map((r) => (
+                    <option key={r} value={r}>
+                      {roleLabel(r)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {mayRemove && (
+              /* ⛔ **화면에서 제일 약한 것이 제일 위험한 행동이었습니다**
+                 (결함 257). 재 보니 `--text-muted`(본문 글자와 같은 색)에
+                 테두리도 배경도 없었고, 같은 화면의 「내 녹음 지우기」만
+                 빨강이었습니다. 색은 위험, 무게는 조용으로 갑니다. */
+              <button
+                type="button"
+                className="btn btn--danger-quiet btn--sm"
+                disabled={removeMember.isPending}
+                onClick={() => {
+                  if (window.confirm(`${labelInList(member, ordered)} 님을 이 프로젝트에서 내보냅니다. 그 사람이 한 일(업무·발화·기여 기록)은 그대로 남습니다.`)) {
+                    removeMember.mutate(member.user_id);
+                  }
+                }}
+              >
+                내보내기
+              </button>
+            )}
           </div>
-          {worthShowing(member.presence) && (
-            <span className="presence">● {presenceLabel(member.presence)}</span>
-          )}
-        </div>
-      ))}
+        );
+      })}
+      <Problem>
+        {changeRole.isError
+          ? mutationError(changeRole.error)
+          : removeMember.isError
+            ? mutationError(removeMember.error)
+            : null}
+      </Problem>
       <div style={{ marginTop: 'var(--sp-6)' }}>
         <button
           type="button"
-          className="btn btn--secondary"
-          disabled={leave.isPending}
+          className={`btn btn--secondary${leaveBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={leaveBlocked !== null}
+          aria-describedby={leaveBlocked !== null ? 'leave-why' : undefined}
           onClick={() => {
+            if (leaveBlocked !== null) return;
+            if (leave.isPending) return;
             if (window.confirm(LEAVE_CONFIRM)) {
               leave.mutate(undefined, { onSuccess: () => navigate('/') });
             }
@@ -266,6 +465,9 @@ function MembersSection({ members, leave }: { members: Member[]; leave: ReturnTy
         >
           이 프로젝트에서 나가기
         </button>
+        <Problem id="leave-why" tone="incomplete">
+          {leaveBlocked}
+        </Problem>
         <Problem>{leave.isError ? mutationError(leave.error) : null}</Problem>
       </div>
     </div>
@@ -278,9 +480,12 @@ function RepoSection({
   repo,
   save,
   backfill,
+  myRole,
 }: {
   projectId: number;
   repo: string | null;
+  /** 내 권한 — 저장소 연결은 관리자만 (결함 225). */
+  myRole: string | null | undefined;
   save: ReturnType<typeof useSettingsMutations>['saveProject'];
   backfill: ReturnType<typeof useSettingsMutations>['backfill'];
 }) {
@@ -288,8 +493,23 @@ function RepoSection({
   const [value, setValue] = useState<string | null>(null);
   const input = value ?? repo ?? '';
   const problem = input.trim() === '' ? null : repoProblem(input);
+  // 낱말이 **하는 일과 같아야** 합니다 (결함 256).
+  const disconnecting = isDisconnect(repo, input);
   // 아직 연결할 수 없는 경우 — 안 고쳤거나(`value === null`), 주소가 틀렸거나.
-  const connectBlocked = value === null || problem !== null;
+  /* ⚠️ 관리자만 되는 일입니다 (결함 225) — 구성원에게도 눌렸고, 서버는
+     403 을 주는데 화면은 아무 말도 안 했습니다. */
+  const manageBlocked = manageBlockedBecause(myRole, '저장소 연결');
+  /* ⛔ **안 건드린 첫 화면에서 「연결」이 막혔는데 이유가 없었습니다**
+     (결함 235). `aria-disabled` 라 초점은 받는데, `manageBlocked` 도
+     `problem` 도 `null` 이면 `aria-describedby` 가 안 붙어 **아무 말도
+     안 했습니다.** 234 를 고치면서 이 패널만 빼놨습니다 — 하필 그
+     넷의 **모범**이던 자리입니다. */
+  const connectBlocked = whyCannotSave({
+    noPermission: manageBlocked,
+    problem,
+    dirty: value !== null,
+    saving: save.isPending,
+  });
   const view = health.data
     ? describeHealth(health.data, new Date())
     : health.isError
@@ -318,39 +538,73 @@ function RepoSection({
             초점을 못 받아 낭독기에 사유를 못 전합니다(GOV.UK). 사유(`problem`)
             는 바로 아래 적혀 있는데, 그 자리로 닿는 길이 없었습니다.
             누르면 저장소 칸으로 데려다 줍니다. */}
+        {/* ⛔ **칸을 비우고 누르면 연결이 끊겼습니다** — 확인도, 알림도,
+            되돌릴 실마리도 없이 (결함 256). 게다가 버튼에는 「연결」이라고
+            적혀 있었습니다. 낱말이 하는 일과 달랐던 것입니다.
+            판단(`isDisconnect`·`disconnectConfirm`)은 `@lib`. */}
         <button
           type="button"
-          className={`btn btn--primary${connectBlocked ? ' btn--unmet' : ''}`}
-          aria-disabled={connectBlocked || save.isPending}
-          aria-describedby={problem !== null ? 'repo-problem' : undefined}
+          className={`btn btn--primary${connectBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={connectBlocked !== null}
+          aria-describedby={connectBlocked !== null ? 'repo-blocked' : undefined}
           onClick={() => {
-            if (save.isPending) return;
-            if (connectBlocked) {
+            if (save.isPending || manageBlocked !== null) return;
+            if (connectBlocked !== null) {
               document.getElementById('repo-input')?.focus();
               return;
             }
+            if (disconnecting && !window.confirm(disconnectConfirm(repo ?? ''))) return;
             save.mutate({ github_repo: normalizeRepo(input) }, { onSuccess: () => setValue(null) });
           }}
         >
-          연결
+          {disconnecting ? '연결 해제' : '연결'}
         </button>
       </div>
+      {/* 칸 옆 오류는 **그 칸과** 이어져 있어야 합니다 — 입력칸이
+          `aria-describedby="repo-problem"` 으로 이 자리를 가리킵니다. */}
       <Problem id="repo-problem" tone="incomplete">{problem}</Problem>
+      <Problem id="repo-blocked" tone="incomplete">{connectBlocked}</Problem>
       <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
       {view !== null && (
         <div className={view.tone === 'ok' ? 'card' : 'notice'} style={{ marginTop: 'var(--sp-5)' }} role="note">
+          {/* ⛔ **마크다운 표시가 화면까지 나왔습니다** (결함 262).
+              서버 문구에는 강조(`**…**`)와 코드 표시(백틱)가 섞여 있고,
+              그건 같은 문장이 마크다운 보고서로도 나가기 때문입니다.
+              걷어낼 자리는 화면이고, 그 일은 `@lib` 의 `plainText` 한
+              벌이 합니다 — 예전에는 세 벌이 있었고 셋 다 백틱을 놓쳤습니다. */}
           <p>
-            <strong>{view.headline}</strong>
+            <strong>{plainText(view.headline)}</strong>
           </p>
-          <p className="t13">{view.detail}</p>
-          {view.nextStep !== null && <p className="t13">{view.nextStep}</p>}
+          <p className="t13">{plainText(view.detail)}</p>
+          {view.nextStep !== null && <p className="t13">{plainText(view.nextStep)}</p>}
           {view.warnings.map((w) => (
             <p className="t12 muted" key={w}>
-              {w}
+              {plainText(w)}
             </p>
           ))}
           {view.activity !== '' && <p className="t12 num">{view.activity}</p>}
           {view.coverage !== '' && <p className="t12 muted">{view.coverage}</p>}
+          {/* ⚠️ **실패해도 아무 말도 안 했습니다** (결함 218). 500 을 받아도
+              화면이 그대로라 사람은 가져오는 중인 줄 알고 기다립니다. */}
+          {backfill.isError && (
+            <Problem>
+              {describeActionFailure(
+                '지난 활동 가져오기',
+                backfill.error instanceof ApiError ? backfill.error.status : null,
+                backfill.error instanceof ApiError ? backfill.error.detail : null,
+                /* ⭐ 서버가 「GitHub App 자격 증명이 없습니다」라고 정확히
+                   말하는데 화면이 버리고 있었습니다 (결함 300). */
+              )}
+            </Problem>
+          )}
+          {/* ⛔ **막혀 있으면 이유를 말합니다** (결함 380). 예전에는 서버가
+              409 로 거절할 상태에서도 단추가 그려졌고, 위 경고 줄은
+              「누르면 채웁니다」라고 약속하고 있었습니다. */}
+          {view.backfillBlocked !== '' && (
+            <p className="t12 muted" id="repo-backfill-why">
+              {view.backfillBlocked}
+            </p>
+          )}
           {view.canBackfill && (
             <button
               type="button"
@@ -374,15 +628,34 @@ function GeneralSection({
   inviteCode,
   save,
   rotate,
+  myRole,
 }: {
   title: string;
   inviteCode: string;
+  /** 내 권한. **관리자만 되는 일**을 막을 때 씁니다 (결함 225). */
+  myRole: string | null | undefined;
   save: ReturnType<typeof useSettingsMutations>['saveProject'];
   rotate: ReturnType<typeof useSettingsMutations>['rotateInvite'];
 }) {
   const [value, setValue] = useState<string | null>(null);
   const input = value ?? title;
   const problem = titleProblem(input);
+  /* ⚠️ 관리자만 되는 일 — 판단은 `@lib/project/roles.ts` 에 처음부터
+     있었고 이 화면만 안 불렀습니다 (결함 225). */
+  const renameBlocked = manageBlockedBecause(myRole, '프로젝트 이름 바꾸기');
+  const titleBlocked = whyCannotSave({
+    noPermission: renameBlocked,
+    problem: value !== null ? problem : null,
+    dirty: value !== null,
+    saving: save.isPending,
+  });
+  const rotateBlocked = manageBlockedBecause(myRole, '초대 코드 새로 만들기');
+  // 표시용 글자가 아니라 **데이터**에서 만듭니다 (결함 71).
+  const copyTarget = codeToCopy(inviteCode);
+  // 막는 것은 `aria-disabled` 라 **사유가 있어야** 합니다 (결함 234).
+  const copyBlocked = whyCannotCopyCode(inviteCode);
+  const [copyLabel, setCopyLabel] = useState('코드 복사');
+  const [copyNote, setCopyNote] = useState<string | null>(null);
   return (
     <div className="sec">
       <h2 className="sec__title">이름과 초대</h2>
@@ -391,22 +664,37 @@ function GeneralSection({
         <div className="sec__row">
           <input
             className="input"
+            id="title-input"
             aria-invalid={problem !== null && value !== null}
             aria-describedby="title-problem"
             value={input}
             onChange={(e) => setValue(e.target.value)}
           />
+          {/* ⚠️ **구성원에게도 멀쩡히 눌렸습니다** (결함 225). 서버는 403
+              을 주는데 화면은 아무 말도 안 했습니다. `canManage` 는 처음부터
+              `@lib` 에 있었고 이 화면만 안 불렀습니다. */}
           <button
             type="button"
-            className="btn btn--primary"
-            disabled={value === null || problem !== null || save.isPending}
-            onClick={() => save.mutate({ title: input.trim() }, { onSuccess: () => setValue(null) })}
+            /* ⚠️ 권한(`renameBlocked`)은 `aria-disabled` 였는데 값 문제는
+               `disabled` 였습니다 (결함 234) — 소유자가 이름을 비우면
+               버튼이 **초점 밖으로** 사라졌습니다. */
+            className={`btn btn--primary${titleBlocked !== null ? ' btn--unmet' : ''}`}
+            aria-disabled={titleBlocked !== null}
+            aria-describedby={titleBlocked !== null ? 'title-problem' : undefined}
+            onClick={() => {
+              if (save.isPending) return;
+              if (titleBlocked !== null) {
+                document.getElementById('title-input')?.focus();
+                return;
+              }
+              save.mutate({ title: input.trim() }, { onSuccess: () => setValue(null) });
+            }}
           >
             저장
           </button>
         </div>
       </label>
-      <Problem id="title-problem" tone="incomplete">{value !== null ? problem : null}</Problem>
+      <Problem id="title-problem" tone="incomplete">{titleBlocked}</Problem>
       <h3 className="pane__title" style={{ margin: 'var(--sp-6) 0 var(--sp-3)' }}>
         팀원 초대
       </h3>
@@ -414,13 +702,58 @@ function GeneralSection({
         <span className="invite-code">{inviteCode === '' ? '(없음)' : inviteCode}</span>
       </div>
       <div className="sec__row">
-        <button type="button" className="btn btn--secondary" disabled={rotate.isPending} onClick={() => rotate.mutate()}>
+        {/* ⛔ **복사 단추가 없었습니다** (결함 264). 이 패널이 하는 일은
+            코드를 **남에게 보내는 것**인데, 손으로 옮겨 적어야 했습니다.
+            `@lib/ui/copy.ts` 와 `codeToCopy` 는 진작 있었고 레거시 화면은
+            부르고 있었습니다 — SPA 로 옮기며 빠진 자리입니다.
+            ⚠️ 안 됐을 때 그렇다고 말합니다(결함 81): `http://` 로 열면
+            `navigator.clipboard` 가 아예 없습니다. */}
+        <button
+          type="button"
+          className={`btn btn--secondary${copyBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={copyBlocked !== null}
+          aria-describedby={copyBlocked !== null ? 'copy-blocked' : undefined}
+          onClick={() => {
+            if (copyTarget === null) return;
+            void copyText(copyTarget, navigator.clipboard).then((outcome) => {
+              if (copySucceeded(outcome)) {
+                setCopyNote(null);
+                setCopyLabel(describeCopy(outcome, '코드'));
+                window.setTimeout(() => setCopyLabel('코드 복사'), 1500);
+                return;
+              }
+              // 실패 이유는 버튼이 아니라 아래 줄에 적습니다 — 버튼 글자를
+              // 길게 만들면 옆의 「코드 새로 만들기」와 겹칩니다 (결함 77).
+              setCopyNote(describeCopy(outcome, '코드'));
+            });
+          }}
+        >
+          {copyLabel}
+        </button>
+        <button
+          type="button"
+          className={`btn btn--secondary${rotateBlocked !== null ? ' btn--unmet' : ''}`}
+          disabled={rotate.isPending}
+          aria-disabled={rotateBlocked !== null}
+          aria-describedby={rotateBlocked !== null ? 'rotate-blocked' : undefined}
+          onClick={() => {
+            if (rotateBlocked !== null) return;
+            rotate.mutate();
+          }}
+        >
           코드 새로 만들기
         </button>
       </div>
       <Disclosure summary="코드를 새로 만들면 어떻게 되나요">
         <p>이전 코드는 그 즉시 무효가 됩니다. 이미 들어온 팀원은 그대로 남습니다.</p>
       </Disclosure>
+      <Problem id="copy-blocked" tone="incomplete">{copyBlocked}</Problem>
+      <Problem>{copyNote}</Problem>
+      <Problem id="rotate-blocked" tone="incomplete">{rotateBlocked}</Problem>
+      {/* ⚠️ **`rotate` 만 실패를 말할 자리가 없었습니다** (결함 225). 결함
+          218 의 훑기 가드가 이걸 놓쳤는데, 그 가드가 **다음 600자 안의 다른
+          mutate 의 `onError`** 를 보고 통과시켰기 때문입니다. */}
+      <Problem>{rotate.isError ? mutationError(rotate.error) : null}</Problem>
       <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
     </div>
   );
@@ -476,25 +809,30 @@ function DangerSection({ revoke }: { revoke: ReturnType<typeof useSettingsMutati
           내 녹음과 성문 지우기
         </button>
       </div>
-      {revoke.isSuccess && (
-        <div className="notice" style={{ marginTop: 'var(--sp-5)' }} role="status">
-          <p>
-            원본 <span className="num">{revoke.data.deleted_assets}</span>건 · 성문{' '}
-            <span className="num">{revoke.data.revoked_voiceprints}</span>건을 지웠습니다.
-          </p>
-          {revoke.data.kept.map((k) => (
-            <p className="t12" key={k}>
-              {k}
-            </p>
-          ))}
-          {Object.keys(revoke.data.failed).length > 0 && (
-            <p className="t12">
-              지우지 못한 것이 {Object.keys(revoke.data.failed).length}건 있습니다 — 다시
-              요청해 주세요.
-            </p>
-          )}
-        </div>
-      )}
+      {/* ⚠️ **결과 문구를 여기서 짓지 않습니다.**
+          예전에는 이 자리에서 손으로 "원본 N건 · 성문 N건을 지웠습니다" 를
+          찍었고, 그래서 **0건일 때도 "지웠습니다"** 라고 했습니다. 지울
+          음성 자료가 애초에 없던 사람이 지워진 줄 알게 되는 것입니다 —
+          개인정보보호법 제36조 삭제 요청의 결과 보고인데.
+
+          판단(`describeOutcome`)은 처음부터 `@lib/privacy/deletion.ts` 에
+          있었고 "0건을 성공으로만 답하지 않습니다" 라고 못까지 박아
+          뒀는데, 레거시 화면만 그걸 부르고 있었습니다 — 결함 197 과 같은
+          모양이고 이번이 다섯 번째입니다. */}
+      {revoke.isSuccess &&
+        (() => {
+          const outcome = describeOutcome(revoke.data);
+          return (
+            <div className="notice" style={{ marginTop: 'var(--sp-5)' }} role="status">
+              <p>{outcome.text}</p>
+              {revoke.data.kept.map((k) => (
+                <p className="t12" key={k}>
+                  {k}
+                </p>
+              ))}
+            </div>
+          );
+        })()}
       <Problem>{revoke.isError ? mutationError(revoke.error) : null}</Problem>
     </div>
   );
@@ -512,6 +850,34 @@ export default function Settings() {
 
   const members = useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
   const mine = members.find((member) => member.user_id === me?.user_id);
+  /**
+   * 내 권한 — **모르는 것과 없는 것을 가릅니다** (결함 254).
+   *
+   * `undefined` 는 「아직 모름」, `null` 은 「명단에 확실히 없음」입니다.
+   * 예전에는 둘 다 `undefined` 라, 명단이 오기 전 몇 초 동안 **소유자에게**
+   * 「팀의 관리자에게 요청하세요」라고 말했습니다. 재현했습니다 —
+   * `/members` 를 4초 늦추고 여니 그 문장이 떠 있었고, 명단이 오자
+   * 사라졌습니다. 잠그는 것은 그대로입니다(모르면 잠급니다). 고친 것은
+   * **말**입니다.
+   */
+  const myRole = membersQuery.isSuccess ? (mine?.project_role ?? null) : undefined;
+
+  /**
+   * ⚠️ **못 불러온 것을 「0명」 이라고 단언하지 않습니다.**
+   *
+   * 서버가 404 를 준 프로젝트에서도 이 화면은 멀쩡한 설정 화면을 그리고
+   * **「팀원 0명」** 이라고 말했습니다. 없는 프로젝트와 빈 팀을 사람이
+   * 구별할 수 없었고, 위의 `?? []` 가 그 둘을 같은 값으로 만들고
+   * 있었습니다(불변식 셋째 — 측정 불가 ≠ 0점).
+   */
+  const loadError = project.error ?? membersQuery.error;
+  const cannotLoad =
+    loadError == null
+      ? null
+      : describeLoadFailure(
+          '프로젝트',
+          loadError instanceof ApiError ? loadError.status : null,
+        );
 
   const groups = [...new Set(SECTIONS.map((s) => s.group))];
 
@@ -546,10 +912,18 @@ export default function Settings() {
 
             묶음 이름(`내 설정`·`프로젝트`)은 **탭 사이 구분선**이 됩니다 —
             탭 줄에 머리말을 넣으면 누를 수 없는 글자가 탭처럼 보입니다.
-            대신 `title` 로 남겨 낭독기와 마우스에는 전해집니다. */}
+
+            ⚠️ 예전에는 「대신 `title` 로 남겨 **낭독기와 마우스에는**
+            전해집니다」라고 적혀 있었는데 **낭독기 쪽이 거짓**이었습니다
+            (결함 412). 링크에 글자가 있으면 접근 이름은 그 글자에서
+            나오고 `title` 은 안 쓰입니다 — 재 보니 접근 이름이 여섯 다
+            눈에 보이는 글자 그대로였고, 「내 설정」은 화면 본문에 **0회**
+            였습니다. 구분선도 `aria-hidden` 이라 낭독기는 묶음이 있다는
+            것조차 몰랐습니다. 이름은 **묶음 자신**에 답니다 — 이 저장소가
+            `activity.tsx` 의 거르개에서 이미 쓰는 방법입니다. */}
         <nav className="tabs" aria-label="설정 구역">
           {groups.map((group, gi) => (
-            <span className="tabs__group" key={group}>
+            <span className="tabs__group" key={group} role="group" aria-label={group}>
               {gi > 0 && <span className="tabs__sep" aria-hidden="true" />}
               {SECTIONS.filter((s) => s.group === group).map((s) => (
                 <NavLink
@@ -576,12 +950,25 @@ export default function Settings() {
         </nav>
         <section className="pane">
           <div className="pane__body">
-            {section === 'role' && <RoleSection mine={mine} save={m.saveRole} />}
-            {section === 'github' && <GithubSection mine={mine} save={m.saveGithubLogin} />}
-            {section === 'profile' && <ProfileSection save={m.saveProfile} />}
-            {section === 'members' && <MembersSection members={members} leave={m.leave} />}
-            {section === 'repo' && (
+            {/* 못 불러왔으면 **여기서 멈춥니다.** 아래를 그리면 빈 값들이
+                사실처럼 보입니다. */}
+            {cannotLoad !== null && <Problem>{cannotLoad}</Problem>}
+            {cannotLoad === null && section === 'role' && <RoleSection mine={mine} save={m.saveRole} />}
+            {cannotLoad === null && section === 'github' && <GithubSection mine={mine} save={m.saveGithubLogin} />}
+            {cannotLoad === null && section === 'profile' && <ProfileSection save={m.saveProfile} />}
+            {cannotLoad === null && section === 'members' && (
+              <MembersSection
+                members={members}
+                myRole={myRole}
+                myUserId={me?.user_id}
+                leave={m.leave}
+                changeRole={m.changeRole}
+                removeMember={m.removeMember}
+              />
+            )}
+            {cannotLoad === null && section === 'repo' && (
               <RepoSection
+                  myRole={myRole}
                 projectId={projectId}
                 repo={project.data?.github_repo ?? null}
                 save={m.saveProject}
@@ -590,13 +977,23 @@ export default function Settings() {
             )}
             {section === 'general' && project.data && (
               <GeneralSection
+                  myRole={myRole}
                 title={project.data.title}
                 inviteCode={project.data.invite_code}
                 save={m.saveProject}
                 rotate={m.rotateInvite}
               />
             )}
-            {section === 'danger' && <DangerSection revoke={m.revokeMyData} />}
+            {cannotLoad === null && section === 'danger' && <DangerSection revoke={m.revokeMyData} />}
+            {/* ⛔ **없는 구역 주소가 백지였습니다** (결함 266). 탭 줄만
+                나오고 본문이 통째로 비어, 고장인지 잘못 온 것인지 알 수
+                없었습니다. 아는 구역 목록은 **여기 한 벌**(`SECTIONS`)만
+                있고 판단은 `@lib` 이 합니다. */}
+            {cannotLoad === null && (
+              <Problem tone="incomplete">
+                {unknownSectionNote(section, KNOWN_SECTIONS)}
+              </Problem>
+            )}
             {m.openMeeting.isError && (
               <Problem>{mutationError(m.openMeeting.error)}</Problem>
             )}

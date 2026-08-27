@@ -12,11 +12,15 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
 from teamflow.db.vocab import CARRIES_CONTRIBUTION, ReportType
 from teamflow.reports import blocks, minutes, period, scope_key
+
+#: 저장소 뿌리 — 서버 문장과 화면 문장을 **나란히 놓고** 재기 위해 (결함 311).
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _find(content: dict, kind: str) -> list[dict]:
@@ -413,6 +417,57 @@ def test_every_meeting_status_is_classified():
     )
 
 
+def test_every_meeting_status_is_classified_into_the_right_one():
+    """⭐ **덮는 것만으로는 모자랍니다** — 맞는 칸에 들어가야 합니다 (결함 289).
+
+    위 검사는 「어디에도 안 떨어지는가」만 봤습니다. 그래서 `pending` 이
+    **「처리를 마친 것」**에 들어가 있어도 초록이었고, 녹음조차 시작 안 한
+    회의(발화 0 · 오디오 없음)의 회의록이 이렇게 나갔습니다 —
+
+        처리: 처리를 마쳤습니다
+
+    보고서는 밖으로 나가는 문서라 그 거짓이 그대로 제출물이 됩니다.
+    """
+    from teamflow.db.models import MeetingStatus
+
+    expected = {
+        # 아직 아무것도 안 나온 것 — 기다리면 바뀝니다.
+        MeetingStatus.PENDING: "unprocessed",  # 녹음 전·녹음 중
+        MeetingStatus.QUEUED: "unprocessed",
+        MeetingStatus.PROCESSING: "unprocessed",
+        # 사람이 다시 돌려야 하는 것.
+        MeetingStatus.FAILED: "failed",
+        # 요약·안건·사안이 나온 것.
+        MeetingStatus.NEEDS_REVIEW: "processed",
+        MeetingStatus.CONFIRMED: "processed",
+    }
+    assert set(expected) == set(MeetingStatus), (
+        "회의 상태가 늘거나 줄었습니다 — 이 표에도 넣으십시오"
+    )
+    wrong = {
+        s.value: (minutes.state_of(s.value), want)
+        for s, want in expected.items()
+        if minutes.state_of(s.value) != want
+    }
+    assert not wrong, f"엉뚱한 칸에 들어간 회의 상태입니다 (지금→맞는 것): {wrong}"
+
+
+def test_the_three_sets_hold_no_status_that_does_not_exist():
+    """⚠️ 없는 값이 섞이면 세 집합이 **꽉 찬 것처럼 보입니다** (결함 289).
+
+    `recording`·`uploading`·`open` 과 `done` 이 들어 있었습니다. `done` 은
+    **업무** 상태입니다 (결함 288 과 같은 뿌리). 그 덕에 잘못 들어간 하나가
+    눈에 안 띄었습니다.
+    """
+    from teamflow.db.models import MeetingStatus
+
+    known = {s.value for s in MeetingStatus}
+    strays = sorted(
+        (minutes._UNPROCESSED | minutes._FAILED | minutes._PROCESSED) - known
+    )
+    assert not strays, f"회의 상태가 아닌 값이 분류표에 있습니다: {strays}"
+
+
 def test_the_document_does_not_leak_english_identifiers():
     """⚠️ `processing`·`multitrack` 을 그대로 적지 않습니다.
 
@@ -431,6 +486,60 @@ def test_the_document_does_not_leak_english_identifiers():
     assert "트랙이 곧 사람" in flat
 
 
+def test_the_period_report_does_not_leak_an_english_role():
+    """⭐ **역할도 영어 식별자를 남기지 않습니다** (결함 291).
+
+    이 검사는 회의록의 `processing`·`multitrack` 만 보고 있었고, 사람별
+    기여가 들어가는 주간·최종 보고서는 안 보고 있었습니다 — 그래서 최종
+    보고서가 `developer` 를 그대로 싣고 화면에 그대로 떴습니다.
+
+    ⚠️ **값만 봅니다.** JSON 의 열쇠(`role`·`blocks` …)는 구조라 영어가
+    맞습니다 — 열쇠까지 세면 이 검사는 영원히 빨갛습니다.
+    """
+    from teamflow.contribution.profiles import Role
+    from teamflow.reports import period as period_builder
+
+    content = period_builder.build(
+        period_builder.PeriodInput(
+            project_name="팀",
+            people=[
+                period_builder.Person(
+                    name="김민수",
+                    role="개발 60% · 디자인 40%",
+                    measured=True,
+                    range_low=10.0,
+                    range_high=20.0,
+                    confidence=0.5,
+                    confidence_label="낮음",
+                    reasons=[],
+                    evidence_count=3,
+                    gaps=[],
+                    final_value=None,
+                    final_reason=None,
+                )
+            ],
+        ),
+        ReportType.FINAL,
+    )
+    values = _string_values(content)
+    leaked = sorted({v for v in values if v in {str(r) for r in Role}})
+    assert not leaked, f"문서에 영어 역할 식별자가 남았습니다: {leaked}"
+
+
+def _string_values(node, out=None):
+    """JSON 에서 **값**인 문자열만 모은다 (열쇠는 뺀다)."""
+    out = [] if out is None else out
+    if isinstance(node, dict):
+        for v in node.values():
+            _string_values(v, out)
+    elif isinstance(node, list):
+        for v in node:
+            _string_values(v, out)
+    elif isinstance(node, str):
+        out.append(node)
+    return out
+
+
 def test_a_failed_meeting_is_not_reported_as_finished():
     """실패는 **아직 안 한 것과도, 마친 것과도** 다릅니다."""
     failed = minutes.build(
@@ -439,7 +548,7 @@ def test_a_failed_meeting_is_not_reported_as_finished():
         )
     )
     text = json.dumps(failed, ensure_ascii=False)
-    assert "처리하다 실패했습니다" in text
+    assert "처리에 실패했습니다" in text
     assert "다시 처리해야 합니다" in text
     # 실패한 회의에서 "아직 처리하지 않았습니다" 로 안내하면 사람은 기다립니다.
     assert "아직 처리하지 않았습니다" not in text
@@ -480,4 +589,557 @@ def test_the_processing_line_keeps_its_sentence():
     facts = _find(content, "facts")[0]["items"]
     processing = next(f for f in facts if f["label"] == "처리")
     assert processing["gap"] is False
-    assert processing["value"] == "처리하다 실패했습니다 — 다시 처리해야 합니다"
+    assert processing["value"] == "처리에 실패했습니다 — 다시 처리해야 합니다"
+
+
+# ══════════════════════════════════════════════════════════════
+# 문서의 시각도 팀 달력이다 (결함 290)
+# ══════════════════════════════════════════════════════════════
+
+
+def test_the_minutes_print_the_team_calendar_not_utc():
+    """⭐ 밖으로 나가는 문서가 화면과 **다른 시각**을 적으면 안 된다.
+
+    같은 회의를 홈 화면은 `09-08 19:00`, 회의록은 `2026-09-08 10:00` 이라고
+    했습니다 — 서버가 들고 있는 UTC 를 그대로 찍었기 때문입니다. 아홉
+    시간이 어긋난 쪽이 **제출물**이었습니다.
+
+    ⚠️ **자정을 넘는 순간**으로 잽니다. `10:00Z` 로 재면 날짜가 안 넘어가
+    UTC 든 팀 달력이든 날짜가 같아, 그 자는 아무것도 안 가릅니다.
+    """
+    from datetime import UTC, datetime
+
+    content = minutes.build(
+        minutes.MinutesInput(
+            meeting_title="자정 넘는 회의",
+            status="needs_review",
+            capture_mode="multitrack",
+            started_at=datetime(2026, 8, 25, 16, 30, tzinfo=UTC),
+        )
+    )
+    flat = json.dumps(content, ensure_ascii=False)
+    assert "2026-08-26 01:30" in flat, flat
+    assert "2026-08-25 16:30" not in flat, "UTC 를 그대로 찍었습니다"
+
+
+def test_no_report_module_formats_a_datetime_by_hand():
+    """⚠️ 시각을 손으로 찍으면 그 자리는 **팀 달력 밖**입니다 (결함 290).
+
+    `f"{...:%Y-%m-%d ...}"` 는 datetime 을 그대로 찍습니다. 서버가 들고
+    있는 값은 UTC 이므로, `clock.local_time`·`clock.local_date` 를 거치지
+    않은 자리는 전부 아홉 시간 어긋납니다.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "teamflow" / "reports"
+    bad: list[str] = []
+    for path in root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        code = re.sub(r'"""[\s\S]*?"""', "", source)
+        code = re.sub(r"^\s*#.*$", "", code, flags=re.M)
+        for m in re.finditer(r"\{([^{}]*?):%[YmdHM][^{}]*\}", code):
+            inner = m.group(1)
+            if "clock.local_time" in inner or "clock.local_date" in inner:
+                continue
+            # 사람이 읽는 글자가 아니라 **열쇠**인 자리 하나만 예외입니다.
+            # 열쇠는 시간대를 타면 안 됩니다 — 표시는 `period.py` 가 따로
+            # 만듭니다. 예외는 그 줄에 `# teamtz-ok` 로 적어 둡니다.
+            line = code[: m.start()].count("\n")
+            if "teamtz-ok" in code.splitlines()[line]:
+                continue
+            bad.append(f"{path.name}: {m.group(0)}")
+    assert not bad, (
+        "보고서가 시각을 손으로 찍습니다 — `clock.local_time`/`local_date` 를 "
+        "거치세요:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_no_report_text_carries_markdown_syntax():
+    """⭐ 보고서 블록은 **마크다운이 아니라 글자**입니다 (결함 292).
+
+    최종 보고서에 이렇게 찍혀 있었습니다 —
+
+        위 구간은 계산값이며 **확정된 기여도가 아닙니다.**
+
+    화면에도, 「글자로 복사」한 결과에도 별표가 그대로 나갑니다. 강조하려던
+    것이 오히려 문서를 어설프게 보이게 합니다. 렌더해서 눈으로 보고
+    찾았습니다.
+    """
+    import re
+
+    from teamflow.contribution.profiles import Role  # noqa: F401  (씨앗 대조용)
+
+    made = [
+        minutes.build(
+            minutes.MinutesInput(
+                meeting_title="회의",
+                status="needs_review",
+                capture_mode="multitrack",
+                summary="요약",
+            )
+        ),
+        # ⚠️ **두 종류를 다 걸어야 합니다** (결함 332 회차). 이 자는 오래도록
+        #    `FINAL` 하나만 지어서, 주간 보고서에만 나가는 글자는 **구조적으로
+        #    못 봤습니다** — 결함 286 이 「가드가 걷는 자리가 한쪽뿐인지
+        #    보십시오」라고 적어 둔 그 모양이고, 실제로 이 회차에 주간 전용
+        #    문단을 별표째로 넣었는데 이 검사가 초록이었습니다.
+        period_builder_content(),
+        period_builder_content(ReportType.WEEKLY),
+    ]
+    bad: list[str] = []
+    for content in made:
+        for text in _string_values(content):
+            if re.search(r"\*\*|__|\[[^\]]+\]\([^)]+\)", text):
+                bad.append(text[:80])
+    assert not bad, f"보고서 글자에 마크다운이 섞였습니다: {bad}"
+
+
+def test_the_report_does_not_invent_a_reason_for_a_skipped_category():
+    """⛔ 「가중치가 0이라 계산에서 빠진 영역」 — **지어낸 이유** (결함 311).
+
+    이 목록을 만드는 자는 `scoring.py` 의
+
+        skipped = [c for c in Category if team_totals[c] <= 0]
+
+    입니다. 재는 것은 **가중치가 아니라 팀의 활동량**입니다. 갓 만든
+    프로젝트에서 렌더해 보니 여섯 영역이 전부 실렸고, 그중 코드(35%)·
+    업무(30%)는 그 사람의 **가장 큰 가중치**였습니다 — 밖으로 나가는
+    문서가 「네 코드는 0으로 쳤다」고 말한 셈입니다.
+
+    ⚠️ 불변식 ③(측정 불가 ≠ 0점) 과도 반대 방향입니다.
+    """
+    from teamflow.reports import period as period_builder
+
+    content = period_builder.build(
+        period_builder.PeriodInput(
+            project_name="갓 만든 팀",
+            people=[
+                period_builder.Person(
+                    name="김민수",
+                    role="개발",  # 코드 35% · 업무 30% — 0 이 아닙니다
+                    measured=False,
+                    range_low=None,
+                    range_high=None,
+                    confidence=0.0,
+                    confidence_label="매우 낮음",
+                    reasons=[],
+                    evidence_count=0,
+                    gaps=["활동 기록이 없어 잴 수 없었습니다"],
+                    final_value=None,
+                    final_reason=None,
+                )
+            ],
+            # 실기에서 나오는 모양 그대로 — 갓 만든 프로젝트는 여섯 다 실립니다
+            skipped_categories=["업무", "코드", "회의", "문서", "일정 준수", "동료 평가"],
+        ),
+        ReportType.FINAL,
+    )
+    text = json.dumps(content, ensure_ascii=False)
+
+    assert "가중치가 0" not in text, (
+        "보고서가 이유를 지어냅니다 — 이 목록은 가중치가 아니라 활동량으로 만들어집니다"
+    )
+    assert "팀 전체에 기록된 활동이 없어" in text, text
+    # ⚠️ 「없다」를 「0점」으로 읽히게 두지 않습니다 (불변식 ③).
+    assert "이 계산에 잡힌 것이 없다는 뜻입니다" in text, text
+
+
+def test_a_weekly_report_says_the_shares_are_cumulative_not_this_week():
+    """⭐ 한 문서에 **축이 둘**이면 그렇다고 말해야 합니다 (결함 332).
+
+    ## 재현
+
+    아무 일도 없던 주에 주간 보고서를 만들었더니:
+
+        ## 이 기간에 일어난 일
+           회의 0건 · 처리된 회의 0건 · 완료한 업무 0건 · GitHub 0건
+        ## 사람별 기여
+           김민수 30.5~53.9%   박지원 18.0~31.7%   이하늘 23.8~42.1%
+
+    아래 셋은 **최종 보고서와 한 자도 다르지 않은 값**입니다. 위 문단이
+    「이 기간」이라고 말해 놓은 뒤라, 사람은 아래도 그 주의 몫으로 읽습니다.
+
+    원인: `counts` 는 기간으로 걸러 오는데 `_people()` 은 **기간을 안
+    받습니다.** 기간별 재계산은 산정 엔진에 기간 개념을 넣는 일이라 고르지
+    않고, **무엇을 재고 있는지 말하게** 했습니다 — 결함 311·323·331 과
+    같은 방법입니다.
+
+    ⚠️ 최종 보고서는 프로젝트가 곧 기간이므로 이 말을 붙이지 않습니다.
+    붙이면 없는 구분을 만듭니다.
+    """
+    from teamflow.reports import period as period_builder
+
+    def make(report_type: ReportType) -> str:
+        return json.dumps(
+            period_builder.build(
+                period_builder.PeriodInput(
+                    project_name="TeamFlow 시연 프로젝트",
+                    people=[
+                        period_builder.Person(
+                            name="김민수",
+                            role="개발",
+                            range_low=30.5,
+                            range_high=53.9,
+                            confidence=0.45,
+                            confidence_label="낮음",
+                            evidence_count=11,
+                        )
+                    ],
+                    period_start=datetime(2026, 8, 23, 15, tzinfo=UTC),
+                    period_end=datetime(2026, 8, 30, 15, tzinfo=UTC),
+                ),
+                report_type,
+            ),
+            ensure_ascii=False,
+        )
+
+    weekly = make(ReportType.WEEKLY)
+    assert "누적" in weekly, (
+        "주간 보고서가 프로젝트 전체 값을 그 주의 몫처럼 내놓습니다"
+    )
+    assert "이 주에 한 일이 아니라" in weekly, weekly
+
+    final = make(ReportType.FINAL)
+    assert "누적" not in final, (
+        "최종 보고서는 프로젝트가 곧 기간입니다 — 없는 구분을 만들지 마십시오"
+    )
+
+
+def test_the_report_and_the_screen_say_the_same_thing_about_skipped_areas():
+    """⚠️ **같은 사실을 말하는 두 자리를 나란히 놓습니다** (결함 290 의 교훈).
+
+    ## ⚠️ 이 검사는 한 번 **아무것도 안 재고 있었습니다** (결함 323)
+
+    처음 판은 「화면이 `가중치` 라고 적지 않는가」라는 **부정만** 봤습니다.
+    그래서 화면이 이유를 **하나도 안 붙인** 상태가 그대로 초록이었습니다 —
+    결함 291 이 적어 둔 「짝 검사가 키 집합만 보고 있던 것」과 같은
+    모양입니다. **짝을 잴 때는 양쪽이 같은 글자를 내는가까지 봅니다.**
+
+    화면에서 이 문장이 왜 중요한가: 활동이 있는 팀에서는 「아직 이 팀에서
+    잰 활동이 없습니다」 줄이 **안 나오므로**, 사람은 이유 없는
+    「문서, 일정 준수, 동료 평가 활동은 이번 계산에서 빠졌습니다」만
+    봅니다. 기여를 다루는 제품에서 그건 「네 활동은 뺐다」로 읽힙니다.
+    """
+    view = (ROOT / "frontend" / "src" / "lib" / "contribution" / "view.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "이번 계산에서 빠졌습니다" in view, "화면 쪽 문장을 못 찾았습니다"
+    assert "가중치" not in view.split("이번 계산에서 빠졌습니다")[0][-400:], (
+        "화면이 이유를 붙이기 시작했으면 서버 문장과 맞춰야 합니다"
+    )
+
+    # ⭐ **양쪽이 같은 말을 하는가.** 주석이 아니라 실제로 내보내는 글자에서
+    #    찾습니다 — 주석에 적어 두고 안 고친 것이 바로 결함 323 이었습니다.
+    view_body = "\n".join(
+        line for line in view.splitlines() if not line.strip().startswith(("//", "*", "/*"))
+    )
+    period_src = (
+        ROOT / "backend" / "teamflow" / "reports" / "period.py"
+    ).read_text(encoding="utf-8")
+    period_body = "\n".join(
+        line for line in period_src.splitlines() if not line.strip().startswith("#")
+    )
+    for clause in ("팀 전체에 기록된 활동이 없어", "이 계산에 잡힌 것이 없다는 뜻입니다"):
+        assert clause in period_body, f"보고서가 「{clause}」 를 안 씁니다"
+        assert clause in view_body, (
+            f"화면이 「{clause}」 를 안 씁니다 — 같은 사실을 두 자리가 다르게 말하고 "
+            "있습니다. 화면만 보는 사람은 「빠졌습니다」 를 「내 활동은 뺐다」 로 읽습니다"
+        )
+
+    assert "가중치가 0이라 계산에서 빠진" not in period_body, (
+        "보고서가 아직 가중치를 이유로 댑니다"
+    )
+
+
+
+def period_builder_content(report_type: ReportType = ReportType.FINAL):
+    from teamflow.reports import period as period_builder
+
+    return period_builder.build(
+        period_builder.PeriodInput(
+            project_name="팀",
+            people=[
+                period_builder.Person(
+                    name="김민수",
+                    role="개발",
+                    measured=True,
+                    range_low=10.0,
+                    range_high=20.0,
+                    confidence=0.5,
+                    confidence_label="낮음",
+                    reasons=["근거가 적습니다"],
+                    evidence_count=3,
+                    gaps=["녹음이 끊겼습니다"],
+                    final_value=None,
+                    final_reason=None,
+                )
+            ],
+            skipped_categories=["문서"],
+            period_start=datetime(2026, 8, 23, 15, tzinfo=UTC),
+            period_end=datetime(2026, 8, 30, 15, tzinfo=UTC),
+        ),
+        report_type,
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 「처리를 마쳤다」에는 **두 얼굴**이 있습니다 (결함 369)
+# ══════════════════════════════════════════════════════════════
+
+
+def _minutes(**over):
+    base = dict(
+        meeting_title="DB 스키마 확정 논의",
+        status="needs_review",
+        capture_mode="multitrack",
+        started_at=datetime(2026, 9, 5, 1, 0, tzinfo=UTC),
+    )
+    base.update(over)
+    return minutes.build(minutes.MinutesInput(**base))
+
+
+def _empty_notes(content) -> list[str]:
+    return [b["empty_note"] for b in content["blocks"] if b["kind"] == "list" and not b["items"]]
+
+
+def test_minutes_do_not_assert_absence_when_nothing_was_transcribed():
+    """⭐ 소리가 하나도 안 잡힌 회의록이 「없었습니다」라고 단언하면 안 된다.
+
+    회의록은 **팀 밖으로 나가는 문서**입니다. 「미해결로 남은 사안이
+    없습니다」는 회의 내용에 대한 주장인데, 발화가 0건이면 그건 알 수
+    없는 것입니다 — 이 제품의 불변식(**측정 불가 ≠ 0점**)이 문장에도
+    그대로 걸립니다.
+    """
+    silent = _minutes(utterance_count=0)
+    notes = _empty_notes(silent)
+    assert len(notes) == 3, f"빈 목록이 셋이어야 합니다: {notes}"
+    for note in notes:
+        assert "없습니다" not in note or "확인할 수 없습니다" in note, (
+            f"발화가 0건인데 없었다고 단언합니다: {note!r}"
+        )
+
+    # 왜 확인할 수 없는지는 **한 번** 말합니다 — 사실 줄과 요약 자리에서.
+    facts = next(b for b in silent["blocks"] if b["kind"] == "facts")
+    assert any(f["label"] == "기록된 발화" and f["value"] == "0건" for f in facts["items"]), (
+        f"이 문서가 무엇을 근거로 쓰였는지 안 적습니다: {facts['items']}"
+    )
+    gaps = [b["text"] for b in silent["blocks"] if b["kind"] == "gap"]
+    assert any("기록되지 않아" in g for g in gaps), gaps
+
+
+def test_minutes_still_say_none_when_the_meeting_was_heard():
+    """⭐ 발화가 있는데 결과가 없으면 그건 **진짜 없는** 것이다."""
+    heard = _minutes(utterance_count=12)
+    notes = _empty_notes(heard)
+    assert notes == [
+        "다음 안건으로 잡힌 것이 없습니다.",
+        "미해결로 남은 사안이 없습니다.",
+        "회의에서 뽑힌 업무 후보가 없습니다.",
+    ], notes
+
+
+def test_minutes_never_guess_when_the_count_was_not_measured():
+    """⭐ 안 센 것은 0 이 아니다 — 옛 부름은 옛 문장 그대로.
+
+    ⚠️ `utterance_count` 의 기본값을 0 으로 두면, 안 넘긴 자리가 전부
+    「소리가 하나도 안 잡혔다」가 되어 **멀쩡한 회의록이 그렇게 나갑니다.**
+    """
+    unknown = _minutes()
+    assert _empty_notes(unknown) == _empty_notes(_minutes(utterance_count=12))
+    facts = next(b for b in unknown["blocks"] if b["kind"] == "facts")
+    assert not any(f["label"] == "기록된 발화" for f in facts["items"]), (
+        "안 센 값을 사실처럼 적습니다"
+    )
+
+
+def test_every_processed_branch_has_its_own_sentence():
+    """⭐ 갈래를 세고 **그 개수만큼** 문장이 있는가 (결함 326·365·369).
+
+    빈 목록 옆 문구가 갈래마다 달라야 합니다. 두 갈래가 같은 글자를 받으면
+    읽는 사람은 둘을 구별할 방법이 없습니다.
+    """
+    cases = {
+        "아직 처리 안 함": _minutes(status="pending", utterance_count=0),
+        "처리했고 소리 없음": _minutes(status="needs_review", utterance_count=0),
+        "처리했고 들림": _minutes(status="needs_review", utterance_count=12),
+    }
+    seen: dict[tuple[str, ...], str] = {}
+    for name, content in cases.items():
+        key = tuple(_empty_notes(content))
+        assert key not in seen, f"{name} 와 {seen[key]} 가 같은 문장을 받습니다: {key}"
+        seen[key] = name
+
+
+# ══════════════════════════════════════════════════════════════
+# 결함 429 — 갈래를 **손으로** 적으면 새 갈래가 조용히 빠집니다
+# ══════════════════════════════════════════════════════════════
+#
+# 위 검사는 사례 **셋**을 손으로 적었고 `failed` 가 없었습니다. 그래서
+# 처리에 실패한 회의의 회의록이 「미해결로 남은 사안이 없습니다」라고
+# 단언하는 동안 초록이었습니다 (결함 329 의 모양이 검사에서 난 것).
+#
+# 아래는 `state_of` 가 낼 수 있는 국면을 **전수로** 훑습니다.
+
+
+def _all_meeting_states() -> set[str]:
+    """`state_of` 가 실제로 내는 국면 전부.
+
+    ⚠️ 목록을 여기 베끼지 않습니다 — 베끼면 그 순간 두 벌입니다.
+    어휘의 모든 회의 상태 + 어휘에 **없는** 값 하나를 먹여 봅니다.
+    """
+    from teamflow.db.models import MeetingStatus
+
+    states = {minutes.state_of(status.value) for status in MeetingStatus}
+    states.add(minutes.state_of("어휘에-없는-상태"))
+    return states
+
+
+def test_every_state_of_branch_has_an_empty_note():
+    """⭐ 국면이 하나 늘고 문장을 안 적으면 **그 자리에서** 터져야 합니다."""
+    missing = [st for st in _all_meeting_states() if st not in minutes._EMPTY_NOTE_BY_STATE]
+    assert not missing, (
+        f"국면 {missing} 에 빈 목록 문장이 없습니다 — "
+        f"그대로 두면 「없었습니다」로 단언하며 팀 밖으로 나갑니다"
+    )
+
+
+def _asserting_notes() -> set[str]:
+    """**처리를 마치고 말도 잡힌** 회의가 받는 문장들.
+
+    ⚠️ 「없었다」는 낱말로 재지 않습니다 — 정직한 답인 「확인할 수
+    **없습니다**」가 그 자에 걸립니다(처음 쓴 자가 그랬습니다). 재려는 것은
+    **「진짜로 없었다」고 단언하는 그 문장을 받는가**입니다. 그러니 단언해도
+    되는 갈래에서 실제로 나오는 문장을 뽑아 씁니다.
+    """
+    return set(_empty_notes(_minutes(status="needs_review", utterance_count=12)))
+
+
+def test_a_failed_meeting_does_not_assert_that_there_was_nothing():
+    """⭐ 처리에 실패한 회의는 사안이 있었는지 **알 수 없습니다**.
+
+    분석이 아예 안 돌았습니다. 바로 위 「요약」 자리는 같은 회의에 대해
+    「요약을 만들지 못했습니다」라고 제대로 말하고 있었습니다.
+    """
+    asserting = _asserting_notes()
+    notes = _empty_notes(_minutes(status="failed", utterance_count=0))
+
+    assert notes, "빈 목록이 하나도 없습니다 — 씨앗이 이 갈래를 안 만들고 있습니다"
+    assert asserting, "단언하는 갈래가 문장을 하나도 안 내놓습니다 — 자가 헛돕니다"
+    for note in notes:
+        assert note not in asserting, (
+            f"처리에 실패한 회의가 「{note}」라고 단언합니다 — 알 수 없는 것입니다"
+        )
+
+
+def test_an_unknown_status_does_not_assert_either():
+    """⚠️ 어휘가 늘었는데 분류를 안 하면 그때도 단언하면 안 됩니다."""
+    asserting = _asserting_notes()
+    for note in _empty_notes(_minutes(status="어휘에-없는-상태", utterance_count=0)):
+        assert note not in asserting, note
+
+
+def test_the_four_states_do_not_all_say_the_same_thing():
+    """⚠️ 반대 방향 — 전부 「확인할 수 없습니다」로 뭉개도 안 됩니다.
+
+    「아직 안 한 것」과 「해 봤는데 못 한 것」은 사람이 할 일이 다릅니다.
+    """
+    unprocessed = tuple(_empty_notes(_minutes(status="pending", utterance_count=0)))
+    failed = tuple(_empty_notes(_minutes(status="failed", utterance_count=0)))
+    heard = tuple(_empty_notes(_minutes(status="needs_review", utterance_count=12)))
+
+    assert len({unprocessed, failed, heard}) == 3, (
+        f"세 갈래가 같은 문장을 받습니다: {unprocessed} · {failed} · {heard}"
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+# 「아직 처리 전」과 「처리에 실패」는 다릅니다 (결함 370)
+# ══════════════════════════════════════════════════════════════
+
+
+def _period(**over):
+    base = dict(project_name="시연", people=[], meetings_total=5, meetings_processed=3)
+    base.update(over)
+    return period.build(period.PeriodInput(**base), ReportType.FINAL)
+
+
+def _fact_note(content, label: str) -> str:
+    for block in content["blocks"]:
+        if block["kind"] == "facts":
+            for item in block["items"]:
+                if item["label"] == label:
+                    return item.get("note", "")
+    raise AssertionError(f"{label} 칸이 없습니다 — 검사가 낡았습니다")
+
+
+def _holes(content) -> list[str]:
+    for block in content["blocks"]:
+        if block["kind"] == "list" and any("회의" in str(i) for i in block["items"]):
+            return [str(i) for i in block["items"]]
+    return []
+
+
+def test_a_failed_meeting_is_not_called_not_yet_processed():
+    """⭐ 실패한 회의를 「아직 처리 전」이라고 하면 안 된다.
+
+    앞엣것은 **기다리면** 들어오고 뒤엣것은 **사람이 다시 돌려야** 들어
+    옵니다. 다음에 할 일이 정반대인데 한 문장으로 뭉개고 있었습니다 —
+    그리고 이 문서는 **팀 밖으로 나갑니다.**
+    """
+    note = _fact_note(_period(meetings_failed=1), "처리된 회의")
+    assert "처리에 실패" in note, note
+    # 「1건은 아직 처리 전」이 실패한 그 한 건을 가리키면 안 됩니다.
+    assert note.count("건은") == 2, f"두 갈래가 따로 서야 합니다: {note}"
+
+
+def test_the_two_kinds_get_different_next_steps():
+    """⭐ 못 잰 것 목록이 **무엇을 해야 하는지**까지 갈라 말한다."""
+    holes = _holes(_period(meetings_failed=1))
+    waiting = [h for h in holes if "아직 처리하지 않은" in h]
+    failed = [h for h in holes if "실패" in h]
+    assert waiting and failed, holes
+    assert "다시 처리" in failed[0], failed[0]
+    assert waiting[0] != failed[0]
+
+
+def test_all_processed_says_nothing():
+    """⭐ 다 처리했으면 아무 말도 안 한다 — 없는 구멍을 만들지 않습니다."""
+    content = _period(meetings_total=3, meetings_processed=3, meetings_failed=0)
+    assert _fact_note(content, "처리된 회의") == ""
+    assert not [h for h in _holes(content) if "회의" in h]
+
+
+def test_only_failed_does_not_invent_a_waiting_one():
+    """⭐ 실패만 있으면 「아직 처리 전 0건」 같은 말을 만들지 않는다."""
+    content = _period(meetings_total=4, meetings_processed=3, meetings_failed=1)
+    note = _fact_note(content, "처리된 회의")
+    assert "아직 처리 전" not in note, note
+    assert note.count("건은") == 1, note
+
+
+def test_the_report_and_the_minutes_group_statuses_the_same_way():
+    """⭐ 같은 패키지의 **두 builder 가 상태를 같은 셋으로 가르는가.**
+
+    `minutes.state_of` 는 오래전부터 「아직 처리 전 · 처리 실패 · 처리를
+    마침」 셋으로 갈랐고, 그 이유까지 적어 두고 있었습니다. 기간 보고서만
+    「처리됨 / 나머지」 둘이었습니다 (결함 370).
+
+    새 상태가 하나 생겼을 때 한쪽만 고치면 같은 회의를 두 문서가 다르게
+    셉니다 — 그 순간 빨개져야 합니다.
+    """
+    from teamflow.db import models as md
+
+    disagree: list[str] = []
+    for status in md.MeetingStatus:
+        by_report = (
+            "processed"
+            if status in md.PROCESSED_MEETING_STATUSES
+            else "failed"
+            if status is md.MeetingStatus.FAILED
+            else "unprocessed"
+        )
+        by_minutes = minutes.state_of(status.value)
+        if by_report != by_minutes:
+            disagree.append(f"{status.value}: 보고서={by_report} · 회의록={by_minutes}")
+    assert not disagree, "두 builder 가 상태를 다르게 가릅니다:\n  " + "\n  ".join(disagree)

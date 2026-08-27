@@ -852,3 +852,454 @@ def test_spa_the_claims_written_next_to_the_derived_colours_are_true(spa: str):
         f"주장을 {checked} 개밖에 못 읽었습니다. 주석 모양이 바뀌면 이 검사는 "
         "아무것도 안 재면서 통과합니다 — 정규식을 고치세요."
     )
+
+
+def test_no_button_is_dimmed_with_opacity(spa: str):
+    """⛔ **버튼을 `opacity` 로 흐리게 하지 않습니다** (결함 236).
+
+    `opacity` 는 글자와 채움을 **같이** 끌어당깁니다. 그래서 색 토큰은
+    그대로인데 실제로 읽히는 대비만 무너집니다 — `getComputedStyle` 을
+    읽는 감사는 **구조적으로 못 봅니다**(결함 180 에서 이미 당했습니다).
+
+    재 봤습니다. 통화 화면에서 마이크 권한을 거절한 사람의
+    「마이크 끄기」가 이랬습니다.
+
+        합성 전 (색 토큰)  17.16:1   ← 감사가 보던 값
+        합성 후 (사람이 봄) 2.91:1   ← 밝은 모드
+                            3.98:1   ← 어두운 모드
+
+    ⚠️ `disabled` 는 WCAG 1.4.3 의 비활성 예외에 걸리지만, 이 저장소는
+    그 예외를 **안 쓰기로 이미 정했습니다** — 같은 앱 안에서 「안 됨」이
+    두 가지 얼굴(흐림 · 덜 채운 모양)을 가지면 안 되기 때문입니다
+    (`webapp/src/app.css` 의 `.btn--disabled-link` 주석).
+
+    흐림 대신 **모양**으로 말합니다.
+    """
+    legacy = LEGACY_APP_CSS.read_text(encoding="utf-8")
+    bad: list[str] = []
+    for name, css in (("webapp/src/app.css", spa), ("frontend/public/app.css", legacy)):
+        # 주석을 걷어냅니다 — 이 결함을 **설명하는 주석**이 스스로 걸립니다.
+        body = re.sub(r"/\*.*?\*/", " ", css, flags=re.S)
+        for block in re.finditer(r"([^{}]+)\{([^{}]*)\}", body):
+            selector, decls = block.group(1).strip(), block.group(2)
+            if not re.search(r"\bbutton\b|\.btn\b", selector):
+                continue
+            # 깜빡임(`@keyframes`)은 상태가 아니라 움직임이라 예외입니다.
+            m = re.search(r"(?<![-\w])opacity\s*:\s*([0-9.]+)", decls)
+            if m and float(m.group(1)) < 1:
+                bad.append(f"{name}: `{selector}` 에 opacity {m.group(1)}")
+    assert not bad, (
+        "버튼을 흐리게 하고 있습니다 — 글자와 채움이 같이 내려가 색 토큰만 "
+        "보는 감사는 못 잡습니다. 모양으로 말하세요:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_hover_steps_around_blocked_buttons(spa: str):
+    """⛔ **hover 는 막힌 것을 비켜 간다** (결함 239).
+
+    막힌 버튼은 「덜 채운 모양」(`btn--unmet` · `:disabled` 규칙)으로
+    말합니다. 그런데 hover 규칙이 채움만 되돌려 놓으면 글자는 잉크색으로
+    남아 **사라집니다.** 재 봤습니다 — 마우스를 올린 채로:
+
+        SPA  「검토 끝내기」·「등록」·「이 값으로 확정」·「동의했습니다」
+             밝은 1.23:1  ·  어두운 1.25:1
+        레거시 「녹음 시작」
+             밝은 1.16:1  ·  어두운 1.27:1
+
+    막던 것은 `:not(:disabled)` 하나였습니다. 그건 `disabled` 를 쓰던
+    시절의 방패인데, 결함 234·235 에서 막힌 버튼을 전부 `aria-disabled`
+    로 옮기면서 **아무것도 안 막게 됐습니다.** 요구가 아니라 방패가
+    낡은 것이고, `AGENTS.md` 가 경고하는 바로 그 부류입니다.
+
+    ⚠️ 결함 236 의 사촌입니다. 저기는 `opacity`, 여기는 `:hover` — 둘 다
+    **쉬고 있는 상태만 재는 감사**가 구조적으로 못 보는 자리입니다.
+    """
+    legacy = LEGACY_APP_CSS.read_text(encoding="utf-8")
+    bad: list[str] = []
+    checked = 0
+    for name, css in (("webapp/src/app.css", spa), ("frontend/public/app.css", legacy)):
+        # 주석을 걷어냅니다 — 이 결함을 **설명하는 주석**이 스스로 걸립니다.
+        body = re.sub(r"/\*.*?\*/", " ", css, flags=re.S)
+        for block in re.finditer(r"([^{}]+)\{([^{}]*)\}", body):
+            selector, decls = block.group(1).strip(), block.group(2)
+            if ":hover" not in selector:
+                continue
+            if not re.search(r"\bbutton\b|\.btn\b", selector):
+                continue
+            # 색을 바꾸지 않는 hover(밑줄·그림자)는 모양을 안 무릅니다.
+            if not re.search(r"(?<![-\w])(background|color)\s*:", decls):
+                continue
+            checked += 1
+            # ⚠️ 셀렉터가 여럿이면 **하나하나** 봅니다 — 콤마로 묶어 두면
+            #    한쪽만 막아 놓고 통과합니다(레거시가 실제로 그랬습니다:
+            #    `button:hover:not(:disabled), .btn:hover` — 뒤쪽은 맨몸).
+            for one in selector.split(","):
+                one = one.strip()
+                if ":hover" not in one:
+                    continue
+                if not re.search(r"\bbutton\b|\.btn\b", one):
+                    continue
+                if "[aria-disabled" not in one:
+                    bad.append(f"{name}: `{one}`")
+    assert checked > 0, "hover 규칙을 하나도 안 봤습니다 — 검사가 헛돕니다"
+    assert not bad, (
+        "막힌 버튼 위에서 hover 가 채움을 되돌립니다 — 글자가 사라집니다. "
+        "`:not([aria-disabled='true'])` 를 붙이세요:\n  " + "\n  ".join(bad)
+    )
+
+
+def test_a_destructive_control_differs_when_it_is_just_sitting_there(spa: str):
+    """⛔ **되돌릴 수 없는 단추는 쉬고 있을 때도 달라 보여야 합니다** (결함 322).
+
+    ## 무엇이 잘못돼 있었나
+
+    레거시의 `.linkish.danger` 규칙이 **`@media (hover: hover)` 안에만**
+    있었습니다. 즉 위험 신호가 **마우스를 올린 사람에게만** 보이고,
+    키보드로 도는 사람과 손가락으로 쓰는 사람에게는 평생 안 보입니다.
+
+    쉬고 있는 상태를 재 보니 「강제 종료」(`linkish danger`)와 옆의 평범한
+    「칸반 보기」(`linkish`)가 `rgb(102, 109, 128)` 으로 **글자색까지
+    똑같았습니다.** 클래스는 꼬박꼬박 붙어 있었고 **아무 색도 안
+    나갔습니다** — 결함 250 이 녹음 화면에서 겪은 것과 같은 모양이고,
+    이번에는 규칙이 **아예 없던** 쪽입니다.
+
+    ⚠️ 이 자리의 빨강은 불변식 ③ 의 「결측은 빨강이 아니라 흙빛」과 **다른
+    자리**입니다. 결측은 「못 잰 것」이고, 이건 「사람이 되돌릴 수 없는 일을
+    누르는 것」입니다.
+
+    ## ⚠️ 이 자의 한계
+
+    글자로 잽니다 — 「그 규칙이 실제로 이겼는가」(특성도)까지는 못 봅니다.
+    그건 렌더해서 픽셀로 확인했고(밝은 `rgb(176,46,46)` · 다크
+    `rgb(224,106,106)`, 다크 대비 5.27:1·5.68:1), 여기서는 **규칙이
+    `:hover` 밖에 있는지**만 지킵니다.
+    """
+    legacy = LEGACY_APP_CSS.read_text(encoding="utf-8")
+
+    # 「되돌릴 수 없다」를 말하는 클래스들. 뿌리마다 이름이 다릅니다.
+    # ⚠️ **자를 한 번 조였습니다.** 처음에는 `\.linkish\.danger` 였는데 그
+    #    자는 `.linkish.dangerXX` 도 **통과시킵니다** — 규칙 이름을 바꿔
+    #    심었더니 초록이 떴습니다. 이름 끝을 못 박습니다.
+    WANTED = (
+        ("frontend", legacy, r"\.linkish\.danger(?![-\w])"),
+        ("webapp", spa, r"\.btn--danger-quiet(?![-\w])"),
+    )
+
+    missing: list[str] = []
+    for where, css_text, selector_rx in WANTED:
+        rules = re.sub(r"/\*.*?\*/", "", css_text, flags=re.S)
+        resting = False
+        for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", rules):
+            selector, body = m.group(1).strip(), m.group(2)
+            if not re.search(selector_rx, selector):
+                continue
+            # ⚠️ `:hover`·`:active`·`:focus` 안에만 있는 것은 **쉬고 있을 때**
+            #    아무 말도 안 합니다 — 그게 이 결함이었습니다.
+            if re.search(r":(hover|active|focus)", selector):
+                continue
+            if re.search(r"(?<![-a-z])color:", body):
+                resting = True
+        if not resting:
+            missing.append(
+                f"[{where}] {selector_rx} 가 쉬고 있을 때 `color` 를 정하지 않습니다"
+            )
+
+    assert missing == [], (
+        "되돌릴 수 없는 단추가 **쉬고 있을 때** 평범한 단추와 같아 보입니다 — "
+        + " | ".join(missing)
+        + ". `:hover` 안에만 적으면 키보드·터치 사용자에게는 영영 안 보입니다."
+    )
+
+
+def test_being_late_is_never_painted_as_blame(spa: str):
+    """⛔ **늦은 것을 빨강으로 칠하지 않습니다** (결함 324).
+
+    ## 이 제품이 이미 세 번 내린 결정
+
+    - 결함 319 (칸반): 「늦은 것은 **사실**이지 『네가 뭘 잘못했다』가
+      아닙니다」 → `.task .latemark { color: var(--text-subtle) }`
+    - SPA 우선순위 칩: 「긴급만 색을 씁니다. **빨강이 아니라 황토** —
+      빨강은 "네가 뭘 잘못했다"」 → `.kprio--urgent`
+    - 불변식 ③: 결측은 빨강이 아니라 흙빛(`--gap`)
+
+    그런데 **알림 화면만** 「지연」을 `--bad`(빨강)로 그리고 있었습니다.
+    같은 사실을 칸반은 옅은 잉크로, 알림은 빨강으로 — 결함 290 이 적어 둔
+    「같은 사실을 말하는 두 자리를 나란히 놓으십시오」의 위반이고, 하필
+    빨강 쪽이 **그 사람에게 직접 보내는 알림**이었습니다.
+
+    ## ⚠️ 무엇을 재는가
+
+    「빨강을 쓰지 마라」가 아니라 **「늦음·긴급을 뜻하는 자리가 위험색을
+    쓰지 마라」**입니다. 위험색 자체는 되돌릴 수 없는 단추에 필요합니다
+    (결함 322) — 거기서는 옳습니다.
+    """
+    ROOT_DIR = LEGACY_APP_CSS.parent   # frontend/public
+
+    # (파일, 선택자, 그 선택자가 무슨 뜻인가) — 뜻을 적어 둡니다.
+    PLACES = [
+        ("notifications.html", ".nitem.urgent", "`isUrgent` = kind가 overdue — 마감이 지난 알림"),
+        ("notifications.html", ".nitem.urgent .nkind", "그 알림의 「지연」 이름표"),
+        ("kanban.html", ".task .latemark", "카드의 「마감 지남」·「늦게 완료」"),
+    ]
+    DANGER = ("--bad", "--c-danger")
+
+    offenders: list[str] = []
+    for filename, selector, meaning in PLACES:
+        path = ROOT_DIR / filename
+        assert path.exists(), f"{filename} 이 없습니다 — 가드가 헛돕니다"
+        css = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.S)
+        found = False
+        for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+            sel, body = m.group(1).strip(), m.group(2)
+            # 선택자가 정확히 이것인 규칙만 (앞부분만 물지 않게)
+            if not any(s.strip() == selector for s in sel.split(",")):
+                continue
+            found = True
+            for token in DANGER:
+                if token in body:
+                    offenders.append(f"{filename} `{selector}` ({meaning}) → {token}")
+        assert found, (
+            f"{filename} 에서 `{selector}` 규칙을 못 찾았습니다 — 화면을 옮겼으면 "
+            "이 가드의 자리도 같이 고치십시오(결함 286)"
+        )
+
+    assert offenders == [], (
+        "늦음을 위험색으로 칠하고 있습니다 — " + " | ".join(offenders) + ". "
+        "늦은 것은 사실이지 「네가 뭘 잘못했다」가 아닙니다(결함 319·324). "
+        "구별은 글자와 잉크 세기로 하십시오."
+    )
+
+    # ⭐ SPA 가 같은 결정을 적어 둔 자리도 지킵니다 — 한쪽만 지키면 갈라집니다.
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", spa, flags=re.S)):
+        sel, body = m.group(1).strip(), m.group(2)
+        if any(s.strip() == ".kprio--urgent" for s in sel.split(",")):
+            assert "--c-danger" not in body, (
+                "SPA 의 「긴급」 칩이 위험색을 씁니다 — 그 규칙 옆에 "
+                "「빨강이 아니라 황토」라고 적혀 있습니다"
+            )
+
+
+def test_the_uncertainty_dots_survive_forced_colors() -> None:
+    """⭐ 「점 하나가 4%p」라고 적으면 고대비에서도 **점이 보여야** 한다.
+
+    ## ⛔ 점 열여섯이 통째로 사라졌습니다 (결함 393)
+
+    `.unc-dots i` 는 `background: var(--gap)` 하나로 그려집니다. 그런데
+    `forced-colors: active`(고대비)는 채움을 **시스템 배경색으로 덮습니다** —
+    밝은 쪽에서는 흰 바탕에 흰색, 다크에서는 검은 바탕에 검은색이라 하나도
+    안 보였습니다. 브라우저로 재서 확인했습니다:
+
+        고대비        점 rgb(255,255,255) · body rgb(255,255,255)
+        고대비+다크    점 rgb(0,0,0)       · body rgb(0,0,0)
+
+    바로 옆 문구는 「모르는 폭 20%p · **점 하나가 4%p**」입니다.
+    `lib/contribution/view.ts` 가 그 자리에 「점을 안 찍는데 "점 하나가
+    4%p" 라고 적으면 없는 그림을 설명합니다」라고 적어 두고 **개수가 0인
+    경우만** 막고 있었습니다 — 고대비는 개수가 열여섯인데 **안 보이는**
+    경우입니다.
+
+    ⚠️ 색이 뜻을 나르는 것이 아닙니다. 뜻은 **개수**이고(「값은 글자로,
+    그림은 폭이나 개수만」), 고대비에서도 개수는 셀 수 있어야 합니다.
+
+    ⚠️ 이 검사가 **못 보는 것**: 다른 화면의 작은 그림들. 같은 회차에
+    전수로 세어 보니 채움만으로 그려지는 것이 더 있는데(레일 상태 점 ·
+    SPA 리본 · 검토 타임라인 점), 그것들은 **뜻이 같은 줄의 글자에**
+    있어서 사라져도 사실이 안 없어집니다 — 결함 350 이 레일 점에 대해
+    「값이 아니라 장식」이라고 적어 둔 그것입니다.
+    """
+    html = (
+        Path(__file__).resolve().parents[2] / "frontend" / "public" / "contributions.html"
+    ).read_text(encoding="utf-8")
+
+    assert ".unc-dots i" in html, "점 규칙이 없습니다 — 이 검사가 낡았습니다"
+    forced = re.search(
+        r"@media\s*\(\s*forced-colors:\s*active\s*\)\s*\{(?P<body>[^}]*\{[^}]*\}[^}]*)\}",
+        html,
+    )
+    assert forced is not None, (
+        "고대비 규칙이 없습니다 — 채움만으로 그린 점은 고대비에서 배경색으로 "
+        "덮여 사라지는데, 옆 문구는 「점 하나가 4%p」라고 그 그림을 가리킵니다 "
+        "(결함 393)"
+    )
+    body = forced.group("body")
+    assert ".unc-dots i" in body, f"고대비 규칙이 점을 안 다룹니다: {body[:120]}"
+    # 시스템 색 이름만 안 덮입니다 — 토큰이나 hex 를 적으면 그대로 사라집니다.
+    assert re.search(r"background:\s*(CanvasText|LinkText|Highlight)\b", body), (
+        f"고대비 규칙이 시스템 색이 아닌 값을 씁니다: {body[:120]} — "
+        "`var(--gap)` 이나 hex 는 그 모드에서 다시 덮입니다"
+    )
+
+
+def test_the_unread_bar_survives_forced_colors() -> None:
+    """⭐ 고대비에서도 **어느 줄이 안 읽은 것인지** 보여야 한다.
+
+    ## ⛔ 「안 읽음」이 통째로 사라졌습니다 (결함 399)
+
+    알림 줄의 안 읽음 표시는 왼쪽 2px 막대 하나입니다 — 읽은 줄은
+    `border-left: 2px solid transparent`, 안 읽은 줄만 `--primary`.
+    그런데 `forced-colors: active` 는 색을 시스템 값으로 덮고 **거기에는
+    `transparent` 도 들어갑니다.** 브라우저로 재서 확인했습니다:
+
+        고대비   안읽음 rgb(0,0,0) · 읽음 rgb(0,0,0) · 지연 rgb(0,0,0)
+
+    넷이 전부 같은 검정 막대가 됐습니다. 그런데 바로 위 배지는 **「안 읽은
+    알림 2」**라고 말합니다 — 몇 개인지는 아는데 **어느 줄인지** 알 수
+    없습니다(결함 393 이 「점 하나가 4%p」에서 만난 그 모양).
+
+    ⚠️ **「지연」은 살아남습니다** — 그 규칙은 `.nkind` 의 **무게**도 한 단
+    올리고, 무게는 고대비가 안 덮습니다. 「안 읽음」만 색 하나에 실려
+    있었습니다(결함 361: 뜻을 색 하나에 실었으면 고대비로 재 보십시오).
+
+    고친 뒤 네 값이 갈립니다 —
+
+        고대비      안읽음 Highlight(남색) · 읽음 Canvas(흰색=안 보임) · 지연 CanvasText
+        고대비+다크  안읽음 Highlight(청록) · 읽음 Canvas(검정=안 보임) · 지연 CanvasText
+
+    ⚠️ 이 검사가 **못 보는 것**: 다른 화면의 「테두리 하나로 말하는」 표시.
+    이 회차에는 알림 화면만 셌습니다.
+    """
+    html = (
+        Path(__file__).resolve().parents[2] / "frontend" / "public" / "notifications.html"
+    ).read_text(encoding="utf-8")
+
+    assert ".nitem.fresh" in html, "안 읽음 규칙이 없습니다 — 이 검사가 낡았습니다"
+    forced = re.search(
+        r"@media\s*\(\s*forced-colors:\s*active\s*\)\s*\{(?P<body>(?:[^{}]*\{[^{}]*\})+[^{}]*)\}",
+        html,
+    )
+    assert forced is not None, (
+        "고대비 규칙이 없습니다 — 테두리 하나로 말하는 「안 읽음」은 고대비에서 "
+        "읽은 줄과 **같은 막대**가 되는데, 배지는 「안 읽은 알림 N」이라고 "
+        "그 표시를 가리킵니다 (결함 399)"
+    )
+    body = forced.group("body")
+
+    # ⚠️ 세 갈래가 **모두** 있어야 갈립니다. 안 읽음만 정하면 읽은 줄의
+    #    `transparent` 가 그대로 덮여 둘 다 보이는 막대가 됩니다.
+    for needed in (".nitem ", ".nitem.fresh", ".nitem.urgent"):
+        assert needed in body, f"고대비 규칙에 `{needed}` 가 없습니다: {body[:160]}"
+
+    # ⚠️ 값을 **넓게** 집습니다. `[A-Za-z]+` 로만 집으면 `var(--primary)` 가
+    #    아예 안 잡혀서 「셋 다 안 정했다」는 **엉뚱한 문장**이 나옵니다 —
+    #    가드가 가리키는 줄이 틀리면 다음 사람이 그 줄을 보고 「없는데?」 합니다.
+    colors = [v.strip() for v in re.findall(r"border-left-color:\s*([^;]+);", body)]
+    assert len(colors) >= 3, f"고대비 규칙이 테두리 색을 셋 다 안 정합니다: {colors}"
+
+    # 시스템 색 이름만 안 덮입니다 — 토큰이나 hex 를 적으면 그대로 사라집니다.
+    allowed = {"Canvas", "CanvasText", "Highlight", "LinkText", "GrayText"}
+    assert set(colors) <= allowed, (
+        f"고대비 규칙이 시스템 색이 아닌 값을 씁니다: {sorted(set(colors) - allowed)} — "
+        "`var(--primary)` 나 hex 는 그 모드에서 다시 덮입니다"
+    )
+    # 갈라져야 하는 것이 갈리는가. 같은 색을 셋에 주면 고친 것이 아닙니다.
+    assert len(set(colors)) >= 3, (
+        f"고대비에서 세 갈래가 같은 색입니다: {colors} — 읽음·안읽음·지연이 "
+        "구별되지 않습니다"
+    )
+
+
+def test_the_mic_level_survives_forced_colors() -> None:
+    """⭐ 고대비에서도 **내 소리가 들어가는지** 보여야 한다 (결함 402).
+
+    통화 화면의 마이크 레벨은 `채움 폭` 하나로만 값을 말합니다 — 그 값을
+    글자로 적는 자리가 화면에 **0곳**입니다(`describeMic` 는 마이크가
+    켜졌는지·설정이 어떤지를 말할 뿐 지금 소리가 들어오는지는 안 말합니다).
+    `forced-colors: active` 는 `background-color` 를 시스템 색으로 덮으므로
+    채움(`--ok`)과 홈통(`--sunken`)이 **같은 색**이 됩니다. 가짜 마이크로
+    소리를 넣고 브라우저로 재서 확인했습니다:
+
+        고대비      채움 rgb(255,255,255) · 홈통 rgb(255,255,255)  → 같음
+        고대비+다크  채움 rgb(0,0,0)       · 홈통 rgb(0,0,0)        → 같음
+        보통        채움 rgb(31,107,69)   · 홈통 rgb(240,241,244)  → 다름
+
+    즉 고대비 사용자에게는 레벨이 **언제나 0** 으로 보입니다. 이 제품에서
+    마이크가 죽은 채로 회의를 하면 그 사람의 발언은 하나도 기록되지
+    않으므로(`callWarnings`), 그것을 확인할 유일한 창이 사라지는 것입니다.
+
+    ⚠️ 이 검사가 **못 보는 것**: 이 화면의 다른 색-전용 자리. 참가자 카드의
+    `.state.ok/.warn/.bad` 도 고대비에서 한 색으로 뭉개지지만, **갈래마다
+    글자가 다르므로**(연결됨 / 신호가 불안정합니다 / 연결 실패 — …) 사실이
+    안 없어집니다 — 재서 확인했고 결함으로 안 셌습니다(결함 393 의 기준).
+    """
+    html = (
+        Path(__file__).resolve().parents[2] / "frontend" / "public" / "call.html"
+    ).read_text(encoding="utf-8")
+
+    assert ".meter span" in html, "레벨 채움 규칙이 없습니다 — 이 검사가 낡았습니다"
+    forced = re.search(
+        r"@media\s*\(\s*forced-colors:\s*active\s*\)\s*\{(?P<body>(?:[^{}]*\{[^{}]*\})+[^{}]*)\}",
+        html,
+    )
+    assert forced is not None, (
+        "고대비 규칙이 없습니다 — 레벨은 채움 **색** 하나로만 값을 말하는데 "
+        "고대비는 채움을 홈통과 같은 색으로 덮습니다 (결함 402)"
+    )
+    body = forced.group("body")
+    assert ".meter span" in body, f"고대비 규칙에 `.meter span` 이 없습니다: {body[:160]}"
+
+    fill = re.search(r"\.meter span\s*\{([^}]*)\}", body)
+    assert fill is not None
+    values = [v.strip() for v in re.findall(r"background(?:-color)?:\s*([^;]+);?", fill.group(1))]
+    allowed = {"Canvas", "CanvasText", "Highlight", "LinkText", "GrayText"}
+    assert values, f"고대비 규칙이 채움을 안 정합니다: {fill.group(1)!r}"
+    assert set(values) <= allowed, (
+        f"고대비 규칙이 시스템 색이 아닌 값을 씁니다: {sorted(set(values) - allowed)} — "
+        "`var(--ok)` 나 hex 는 그 모드에서 다시 덮입니다"
+    )
+    # 홈통은 `Canvas` 로 덮입니다. 채움에 `Canvas` 를 주면 고친 것이 아닙니다.
+    assert "Canvas" not in values, (
+        "채움에 `Canvas` 를 줬습니다 — 홈통이 덮이는 색과 같아서 여전히 "
+        "레벨이 0 으로 보입니다"
+    )
+
+
+def test_the_calendar_today_survives_forced_colors() -> None:
+    """⭐ 고대비에서도 **오늘이 어느 칸인지** 보여야 한다 (결함 400).
+
+    `.cell` 은 이미 `border: 1px solid var(--line)` 을 가지고 있고 오늘은
+    그 **색만** 바꿉니다. `forced-colors: active` 는 테두리를 전부 같은
+    시스템 색으로 덮으므로 오늘 칸이 옆 칸과 **한 자도 안 달라집니다** —
+    브라우저로 재서 확인했습니다:
+
+        고대비      오늘 rgb(0,0,0)      · 보통 rgb(0,0,0)      · 이웃달 rgb(0,0,0)
+        고대비+다크  오늘 rgb(255,255,255) · 보통 rgb(255,255,255) · 이웃달 같음
+
+    테두리·배경·글자색·무게가 전부 같았습니다. 이웃 달 칸도 같습니다 —
+    `border-color: transparent` 가 **보이는 테두리로 바뀌어** 지난달 27일이
+    이 달 27일과 같아 보입니다.
+
+    ⚠️ 이 검사가 **못 보는 것**: 귀 쪽. 그건 `month.test.ts` 의
+    「오늘은 귀로도 오늘이다」가 잽니다 — 색이 아니라 **이름표**입니다.
+    """
+    html = (
+        Path(__file__).resolve().parents[2] / "frontend" / "public" / "calendar.html"
+    ).read_text(encoding="utf-8")
+
+    assert ".cell.today" in html, "오늘 규칙이 없습니다 — 이 검사가 낡았습니다"
+    forced = re.search(
+        r"@media\s*\(\s*forced-colors:\s*active\s*\)\s*\{(?P<body>(?:[^{}]*\{[^{}]*\})+[^{}]*)\}",
+        html,
+    )
+    assert forced is not None, (
+        "고대비 규칙이 없습니다 — 오늘은 테두리 **색** 하나로만 말하는데 "
+        "고대비는 모든 칸의 테두리를 같은 색으로 덮습니다 (결함 400)"
+    )
+    body = forced.group("body")
+    for needed in (".cell.today", ".cell.out"):
+        assert needed in body, f"고대비 규칙에 `{needed}` 가 없습니다: {body[:160]}"
+
+    colors = [v.strip() for v in re.findall(r"(?:border-)?color:\s*([^;]+);", body)]
+    allowed = {"Canvas", "CanvasText", "Highlight", "LinkText", "GrayText"}
+    assert colors, f"고대비 규칙이 색을 하나도 안 정합니다: {body[:160]}"
+    assert set(colors) <= allowed, (
+        f"고대비 규칙이 시스템 색이 아닌 값을 씁니다: {sorted(set(colors) - allowed)} — "
+        "`var(--primary)` 나 hex 는 그 모드에서 다시 덮입니다"
+    )
+    # 오늘은 **보통 칸과 달라야** 합니다. 보통 칸은 `CanvasText` 로 덮이므로,
+    # 오늘에 `CanvasText` 를 주면 고친 것이 아닙니다.
+    today_rule = re.search(r"\.cell\.today\s*\{([^}]*)\}", body)
+    assert today_rule is not None
+    assert "CanvasText" not in today_rule.group(1), (
+        "오늘에 `CanvasText` 를 줬습니다 — 보통 칸이 덮이는 색과 같아서 "
+        "여전히 구별되지 않습니다"
+    )

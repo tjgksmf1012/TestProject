@@ -108,6 +108,42 @@ export interface RecordingSummary {
   timesliceMs: number;
 }
 
+/**
+ * 뒤늦게 올라간 조각을 반영해 **판정을 다시 만든다** (결함 244).
+ *
+ * ## 왜 필요한가
+ *
+ * 「남은 청크 다시 올리기」로 잃었던 조각을 되찾아도, 화면이 들고 있는
+ * 요약은 **정지하던 순간의 것**입니다. 그대로 서버에 다시 보내면 서버는
+ * 「클라이언트가 더 비관적이면 그쪽을 존중한다」는 규칙에 따라 **옛
+ * 비관을 그대로 저장**합니다 — 소리는 다 돌아왔는데 회의 기록은 계속
+ * 「사용 불가 57%」 입니다. 그 판정은 기여도로 이어집니다.
+ *
+ * ⚠️ 되찾지 못한 것은 **그대로 잃은 것**으로 둡니다. 이 함수는 실제로
+ * 올라간 seq 만 지웁니다 — 못 담은 것을 담았다고 하지 않습니다.
+ */
+export function recomputeAfterRecovery(
+  summary: RecordingSummary,
+  recovered: readonly number[],
+): RecordingSummary {
+  const back = new Set(recovered);
+  const stillLost = summary.state.lostSeqs.filter((seq) => !back.has(seq));
+  if (stillLost.length === summary.state.lostSeqs.length) return summary;
+
+  const state: SessionState = { ...summary.state, lostSeqs: stillLost };
+  const timeline = buildTimeline(state.chunks, {
+    ...toTimelineInput(state),
+    timesliceMs: summary.timesliceMs,
+  });
+  return {
+    ...summary,
+    state,
+    timeline,
+    verdict: judgeTrack(timeline),
+    parked: summary.parked.filter((seq) => !back.has(seq)),
+  };
+}
+
 // ══════════════════════════════════════════════════════════════
 
 export class RecordingClient {
@@ -121,6 +157,10 @@ export class RecordingClient {
   #recorder: RecorderHandle | null = null;
   #nextSeq = 0;
   #warnings: CaptureWarning[] = [];
+  /* ⚠️ **경고 0건과 「아직 안 잼」은 다른 것입니다** (결함 249). 이 값이
+     `null` 인 동안 경고 목록이 비어 있는 것은 「문제 없음」이 아니라
+     「아직 아무것도 안 읽음」입니다. 화면이 그 둘을 가릅니다. */
+  #settings: AppliedAudioSettings | null = null;
 
   constructor(options: RecordingClientOptions) {
     this.#options = options;
@@ -156,6 +196,11 @@ export class RecordingClient {
     return this.#warnings;
   }
 
+  /** 트랙에서 **실제로 읽어 온** 설정. 아직 안 읽었으면 `null`. */
+  get appliedSettings(): AppliedAudioSettings | null {
+    return this.#settings;
+  }
+
   /**
    * 참여자 동의 상태는 서버가 판단한다. 클라이언트는 전달만 한다.
    *
@@ -167,6 +212,16 @@ export class RecordingClient {
     if (this.#state.stopReason === 'consent_revoked' && this.#state.endedAtMs === null) {
       this.#halt();
     }
+  }
+
+  /**
+   * 서버에 내 트랙이 열렸는지 알린다 (결함 272).
+   *
+   * 화면은 참가 요청의 **결과만** 넣습니다 — 「그래서 시작해도 되는가」는
+   * `session.blockers` 가 정합니다.
+   */
+  setTrack(state: SessionState['track']): void {
+    this.#dispatch({ type: 'TRACK', state });
   }
 
   /** 탭 가시성 변화. iOS 에서는 이게 오디오 중단 신호일 수 있다. */
@@ -233,7 +288,8 @@ export class RecordingClient {
     try {
       const track = await this.#options.media.requestMicrophone();
       this.#track = track;
-      this.#warnings = checkAppliedSettings(track.getSettings());
+      this.#settings = track.getSettings();
+      this.#warnings = checkAppliedSettings(this.#settings);
       track.onMuteChange((muted) => {
         // 시각 동기화 전의 mute 는 기록하지 않는다. 시각이 없으면 구간을
         // 만들 수 없고, 지어내면 엉뚱한 자리에 공백이 생긴다.

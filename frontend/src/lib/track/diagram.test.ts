@@ -138,6 +138,38 @@ describe('축 눈금', () => {
   it('길이가 0 이면 눈금도 없다', () => {
     deepStrictEqual(axisTicks(0), []);
   });
+
+  it('⭐ 1분보다 짧으면 **초로** 말한다 (결함 242)', () => {
+    // 베타 참가자가 제일 먼저 하는 30초짜리 시험 녹음에서 축이
+    // `0분 0 0 0 0 0 0분` 이었습니다 — 아무것도 안 말하고, 고장으로 읽힙니다.
+    deepStrictEqual(axisTicks(30_000), ['0초', '5', '10', '15', '20', '25', '30초']);
+    deepStrictEqual(axisTicks(12_000), ['0초', '2', '4', '6', '8', '10', '12초']);
+  });
+
+  it('경계에서 단위가 바뀐다 — 1분부터는 분', () => {
+    strictEqual(axisTicks(59_999).at(-1)?.endsWith('초'), true);
+    strictEqual(axisTicks(60_000).at(-1)?.endsWith('분'), true);
+  });
+
+  it('단위가 무엇이든 눈금은 **커지기만** 하고 끝이 전체 길이다', () => {
+    /* ⚠️ 처음에는 「간격이 전부 같다」로 썼다가 5분짜리에서 걸렸습니다 —
+       `round(5*i/6)` 은 `1 2 3 3 4` 라 라벨이 겹칩니다. 자리는 등간격이고
+       **라벨만** 반올림된 것이라 거짓말은 아닙니다(등간격 거짓말은 자리를
+       속이는 것입니다). 요구가 아니라 제가 잰 것이 틀렸습니다. */
+    for (const [ms, unit] of [
+      [12_000, '초'],
+      [30_000, '초'],
+      [5 * MIN, '분'],
+      [30 * MIN, '분'],
+    ] as const) {
+      const ticks = axisTicks(ms);
+      const values = ticks.map((t) => Number.parseInt(t, 10));
+      for (let i = 1; i < values.length; i += 1) {
+        strictEqual(values[i]! >= values[i - 1]!, true, `${ms} → ${ticks.join(' ')}`);
+      }
+      strictEqual(ticks.at(-1), `${ms / (unit === '초' ? 1_000 : 60_000)}${unit}`);
+    }
+  });
 });
 
 describe('구멍 설명', () => {
@@ -168,5 +200,23 @@ describe('구멍 설명', () => {
     const text = describeGap(d.gaps.get(1)![0]!, d.durationMs);
     strictEqual(text.includes('martian_ray'), false);
     strictEqual(text.includes('끊겼습니다'), true);
+  });
+});
+
+describe('짧은 회의의 구멍도 초로 말한다 (결함 242)', () => {
+  it('⛔ 「0분쯤」은 구멍이 어디인지 하나도 안 알려 준다', () => {
+    const d = buildDiagram([
+      {
+        userId: 1,
+        startedAt: '2026-09-01T10:00:00.000Z',
+        endedAt: '2026-09-01T10:00:12.000Z',
+        gaps: [{ startMs: 5_000, endMs: 10_000, reason: 'chunk_lost' }],
+      },
+    ]);
+    const [span] = d.gaps.get(1) ?? [];
+    const text = describeGap(span!, d.durationMs);
+    strictEqual(text.includes('분'), false, text);
+    strictEqual(text.includes('초'), true, text);
+    strictEqual(text.includes('5~10초'), true, text);
   });
 });

@@ -56,19 +56,55 @@
      차면 그 줄이 화면에서 가장 진한 것이 됩니다. */
   .nitem.fresh { border-left-color: var(--primary); }
 
-  /* ⚠️ 지난 것만 경고색입니다. `due_soon` 은 아직 안 늦었습니다 —
-     둘을 같은 모양으로 그리면 진짜 지난 것을 못 알아봅니다. */
-  .nitem.urgent { border-left-color: var(--bad); }
-  .nitem.urgent .nkind { color: var(--bad); font-weight: 600; }
+  /* ⚠️ **지난 것을 빨강으로 칠하지 않습니다** (결함 324).
+
+     예전에는 `--bad`(빨강)였습니다. 그런데 같은 사실을 칸반은
+     `--text-subtle` 로 그립니다 — 결함 319 가 「늦은 것은 **사실**이지
+     『네가 뭘 잘못했다』가 아닙니다」라고 근거를 적어 정한 톤입니다.
+     한 제품이 같은 사실을 두 자리에서 다르게 말하고 있었습니다(결함 290),
+     그리고 빨강 쪽은 **그 사람에게 직접 보내는 알림**이었습니다.
+
+     구별은 남깁니다 — 「지연」과 「곧 마감」은 **글자가 다르고**, 지난 것은
+     잉크를 한 단 올려 또렷합니다. 색으로 나무라지 않을 뿐입니다.
+     (`due_soon` 은 아직 안 늦었으므로 여전히 옅은 잉크입니다.) */
+  .nitem.urgent { border-left-color: var(--text-subtle); }
+  .nitem.urgent .nkind { color: var(--text); font-weight: 600; }
+
+  /* ⛔ **고대비에서는 「안 읽음」이 통째로 사라졌습니다** (결함 399).
+
+     `forced-colors: active` 는 색을 시스템 값으로 덮습니다 — **`transparent`
+     테두리까지** 글자색이 됩니다. 그래서 읽은 줄·안 읽은 줄·지연 줄이 전부
+     같은 2px 막대가 되고(넷 다 `rgb(0,0,0)`), 배지는 「안 읽은 알림 2」라고
+     말하는데 **어느 줄인지** 알 수 없었습니다.
+
+     ⚠️ 「지연」은 살아남습니다 — 바로 위 규칙이 `.nkind` 의 **무게**를 한 단
+     올리고, 무게는 고대비가 안 덮습니다. 「안 읽음」만 색 하나에 실려
+     있었습니다(결함 361 이 적어 둔 그것: 뜻을 색 하나에 실었으면 고대비로
+     재 보십시오).
+
+     시스템 색 이름은 안 덮입니다(결함 393 의 방법) — 읽은 줄은 배경색으로
+     숨기고, 안 읽은 줄은 강조색으로 그립니다. */
+  @media (forced-colors: active) {
+    .nitem { border-left-color: Canvas; }
+    .nitem.fresh { border-left-color: Highlight; }
+    .nitem.urgent { border-left-color: CanvasText; }
+  }
 
   .nkind { flex: none; min-width: 4rem; font-size: var(--fs-caption);
            color: var(--text-subtle); }
   .ntext { font-size: var(--fs-label); color: var(--text); }
 
+  /* 시각 (결함 331). ⚠️ **본문보다 옅게, 종류표와 같은 크기로.** 이 값은
+     소식이 아니라 소식을 읽는 눈금입니다 — 활동 기록이 시각을 그리는
+     방식과 같은 무게로 둡니다. `tabular-nums` 는 줄마다 자릿수가
+     흔들리지 않게 합니다. */
+  .nwhen { flex: none; font-size: var(--fs-caption); color: var(--text-subtle);
+           font-variant-numeric: tabular-nums; white-space: nowrap; }
+
   /* ⚠️ 손가락에서는 16px 밑으로 내려가지 않습니다. */
   @media (hover: none) and (pointer: coarse) {
     .ntext, .ncount { font-size: 1rem; }
-    .nkind, .badge { font-size: .875rem; }
+    .nkind, .nwhen, .badge { font-size: .875rem; }
   }
         </style>
 </head>
@@ -79,6 +115,11 @@
   <div id="app"></div>
 
   <script type="module" src="/notifications.js"></script>
+
+  <!-- 탭 넷 **말고** 가는 곳. `src/demo/nav.ts` 가 `navLinks` 로 채운다.
+       ⛔ 이 자리를 지우면 채팅·일정·알림·활동·찾기·보고서로 **가는 길이
+       제품 전체에서 사라집니다** — 실제로 그랬습니다 (결함 305). -->
+  <nav id="nav" aria-label="더 보기"></nav>
 
   <nav id="tabs" aria-label="주요 화면"></nav>
 </body>

@@ -1,5 +1,11 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+/** 이 파일이 있는 폴더 — 공용 사례 파일이 옆에 있습니다 (결함 410). */
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 import {
   LOW_CONFIDENCE,
@@ -11,9 +17,11 @@ import {
   nameOf,
   nothingMeasured,
   orderForDisplay,
+  describeWidth,
   uncertaintyDots,
   uncertaintyDotsNote,
   uncertaintySpans,
+  widthUnknown,
   readBeforeTheNumber,
   roleOf,
   teamWarnings,
@@ -494,24 +502,25 @@ describe('uncertaintyDotsNote', () => {
   });
 });
 
-describe('아무것도 안 잰 사람 (결함 191)', () => {
-  // 프로젝트를 막 만든 팀. 회의도 저장소도 아직 없습니다.
-  // 서버는 `categories: []` 에 `share/range_low/range_high` 를 전부 0 으로 줍니다
-  // (`adjustment_range` 의 폭이 `share` 에 비례하므로 0 에서는 0).
-  const 갓만든팀 = (userId: number): MemberScore => ({
-    user_id: userId,
-    role: 'developer',
-    share: 0,
-    range_low: 0,
-    range_high: 0,
-    confidence: 0,
-    confidence_label: '매우 낮음',
-    confidence_reasons: ['수집된 활동 데이터가 없습니다'],
-    categories: [],
-    integrity_flags: [],
-    measurement_gaps: [],
-  });
+// 프로젝트를 막 만든 팀. 회의도 저장소도 아직 없습니다.
+// 서버는 `categories: []` 에 `share/range_low/range_high` 를 전부 0 으로 줍니다
+// (`adjustment_range` 의 폭이 `share` 에 비례하므로 0 에서는 0).
+// ⚠️ 결함 226 의 검사도 이 사람을 씁니다 — describe 밖에 둡니다.
+const 갓만든팀 = (userId: number): MemberScore => ({
+  user_id: userId,
+  role: 'developer',
+  share: 0,
+  range_low: 0,
+  range_high: 0,
+  confidence: 0,
+  confidence_label: '매우 낮음',
+  confidence_reasons: ['수집된 활동 데이터가 없습니다'],
+  categories: [],
+  integrity_flags: [],
+  measurement_gaps: [],
+});
 
+describe('아무것도 안 잰 사람 (결함 191)', () => {
   // 활동 중인 팀에서 **이 사람만** 아직 아무것도 안 한 경우.
   // 팀에 살아 있는 범주가 있으므로 서버가 칸을 만들어 주고, 개수가 0 입니다.
   const 아직안한사람 = (userId: number): MemberScore => ({
@@ -545,9 +554,39 @@ describe('아무것도 안 잰 사람 (결함 191)', () => {
     strictEqual(span?.points, 100);
   });
 
-  it('쟀는데 0건이면 폭은 서버가 준 그대로(0)다', () => {
+  it('⛔ 쟀는데 0건이면 폭은 0 이 **아니라 `null`** 이다 (결함 226)', () => {
+    // 191 이 절반만 고쳐져 있었습니다. 서버의 폭은 몫에 비례해서 접히므로
+    // (`adjustment_range(0, c) == (0, 0)` — c 가 얼마든), 이 0 은 "확정"
+    // 이 아니라 **계산이 접힌 것**입니다.
     const [span] = uncertaintySpans([아직안한사람(2)]);
-    strictEqual(span?.points, 0);
+    strictEqual(span?.points, null);
+  });
+
+  /*
+   * 결함 410 — 이 판단이 **보고서에도** 있습니다(파이썬).
+   *
+   * 팀원 20명을 실기 경로로 만들어 최종 보고서를 읽어 보니, 막 들어와
+   * 활동이 0인 사람 열일곱에게 「측정하지 못했습니다」라고 적혀 나갔습니다.
+   * 같은 순간 이 화면은 같은 사람을 `0%` 로 그립니다 — 위 191 의 결정입니다.
+   *
+   * 언어가 달라 합칠 수가 없으므로(결함 363 의 「사본을 없애라」가 안 되는
+   * 자리) 사례를 **한 파일**에 두고 두 검사가 같이 읽습니다(결함 345).
+   */
+  it('⭐ 공용 사례 — 보고서(파이썬)와 **같은 답**을 낸다 (결함 410)', () => {
+    const cases = JSON.parse(
+      readFileSync(join(HERE, 'measured_cases.json'), 'utf8'),
+    ) as { cases: { 왜: string; category_count: number; measured: boolean }[] };
+    ok(cases.cases.length >= 3, '사례가 너무 적습니다 — 검사가 낡았습니다');
+    const wrong = cases.cases
+      .map((c) => {
+        const member = 아직안한사람(2);
+        const one = member.categories[0] as (typeof member.categories)[number];
+        const categories = Array.from({ length: c.category_count }, () => ({ ...one }));
+        const measured = !nothingMeasured({ ...member, categories });
+        return measured === c.measured ? null : `${c.왜}: 화면 ${measured} · 사례 ${c.measured}`;
+      })
+      .filter((x): x is string => x !== null);
+    deepStrictEqual(wrong, [], `공용 사례와 다릅니다:\n  ${wrong.join('\n  ')}`);
   });
 
   it('⚠️ `hasNoEvidence` 와 다르다 — 그쪽은 빈 배열도 참이라 "안 쟀다"를 못 묻는다', () => {
@@ -555,5 +594,190 @@ describe('아무것도 안 잰 사람 (결함 191)', () => {
     strictEqual(hasNoEvidence(아직안한사람(2)), true);
     // 같은 답을 주므로, **가르는 물음은 `nothingMeasured` 뿐**입니다.
     strictEqual(nothingMeasured(갓만든팀(1)) === nothingMeasured(아직안한사람(2)), false);
+  });
+});
+
+describe('⛔ 신뢰도 「낮음」 옆에서 「확정적」이라고 말하던 것 (결함 226)', () => {
+  // ## 재현
+  //
+  // 초대 코드로 이번 주에 막 들어온 사람. 팀에는 회의·업무·코드가 다 있어서
+  // 서버가 칸 셋을 만들어 주고, 그 사람의 개수만 0 입니다. 서버의 폭은
+  // **몫에 비례**하므로 `0.0 ~ 0.0`, 폭 0 — 신뢰도가 0.446 「낮음」 인데도.
+  //
+  //     0%
+  //     신뢰도 낮음
+  //     구간이 없습니다 — 이 값은 확정적입니다   ← 바로 윗줄과 정반대
+  const 이번주에온사람 = (confidence: number): MemberScore => ({
+    user_id: 7,
+    role: 'developer',
+    share: 0,
+    range_low: 0,
+    range_high: 0,
+    confidence,
+    confidence_label: confidence < LOW_CONFIDENCE ? '낮음' : '높음',
+    confidence_reasons: ['GitHub 저장소가 연결되지 않았습니다'],
+    categories: [
+      { category: 'meeting', raw: 0, team_share: 0, weight: 0.4, event_count: 0, evidence_ids: [] },
+      { category: 'task', raw: 0, team_share: 0, weight: 0.3, event_count: 0, evidence_ids: [] },
+      { category: 'code', raw: 0, team_share: 0, weight: 0.3, event_count: 0, evidence_ids: [] },
+    ],
+    integrity_flags: [],
+    measurement_gaps: [],
+  });
+
+  it('⭐ 화면이 지나는 길 전부를 통과시켜도 「확정적」이 안 나온다', () => {
+    // ⚠️ 예전 검사는 `uncertaintyDotsNote(0)` 을 **직접** 불러서 통과했습니다.
+    //    화면이 실제로 지나는 길은 `spans → points → note` 이고, 결함은
+    //    그 사이에서 `null` 이 0 으로 접히는 데 있었습니다.
+    const [span] = uncertaintySpans([이번주에온사람(0.446)]);
+    // ⚠️ 검사가 `?? 0` 을 쓰면 **검사가 결함을 다시 만듭니다** — 실제로
+    //    처음 이렇게 써서 「확정적」이 나왔습니다. 화면도 안 접습니다.
+    strictEqual(span !== undefined, true);
+    const note = uncertaintyDotsNote(span!.points);
+    strictEqual(note.includes('확정'), true, note); // "확정이라는 뜻이 아닙니다"
+    strictEqual(note.includes('확정적'), false, note);
+  });
+
+  it('⭐ 신뢰도 0.0 — "데이터가 없습니다" — 에서도 폭 0 을 말하지 않는다', () => {
+    const [span] = uncertaintySpans([이번주에온사람(0)]);
+    strictEqual(span?.points, null);
+    strictEqual(describeWidth(span!.points), '?');
+  });
+
+  it('⭐ 신뢰도가 만점이면 폭 0 은 **진짜** 확정이다 — 그때는 그대로 말한다', () => {
+    const [span] = uncertaintySpans([이번주에온사람(1)]);
+    strictEqual(span?.points, 0);
+    strictEqual(uncertaintyDotsNote(span!.points).includes('이 값은 확정적입니다'), true);
+  });
+
+  it('⭐ 잴 수 없는 폭은 **남의 막대를 길게 만들지 않는다**', () => {
+    // `widest` 를 0 으로 세면 옆 사람의 ratio 가 그만큼 부풉니다.
+    const 쟀고넓은사람: MemberScore = {
+      ...이번주에온사람(0.446),
+      user_id: 8,
+      share: 30,
+      range_low: 20,
+      range_high: 40,
+      categories: [
+        { category: 'code', raw: 9, team_share: 1, weight: 1, event_count: 9, evidence_ids: [1] },
+      ],
+    };
+    const spans = uncertaintySpans([이번주에온사람(0.446), 쟀고넓은사람]);
+    strictEqual(spans[0]?.points, null);
+    strictEqual(spans[0]?.ratio, 0);
+    strictEqual(spans[1]?.points, 20);
+    strictEqual(spans[1]?.ratio, 100);
+  });
+
+  it('⚠️ `nothingMeasured` 와 다른 물음이다 — 저쪽은 폭 100, 이쪽은 잴 수 없음', () => {
+    strictEqual(widthUnknown(갓만든팀(1)), false);
+    strictEqual(widthUnknown(이번주에온사람(0.446)), true);
+    const [빈팀] = uncertaintySpans([갓만든팀(1)]);
+    strictEqual(빈팀?.points, 100);
+  });
+
+  it('점은 지어내지 않는다 — 잴 수 없으면 0 개', () => {
+    strictEqual(uncertaintyDots(null), 0);
+  });
+});
+
+describe('⛔ 새 팀의 첫 화면이 「서로를 비교하지 마세요」라고 하던 것 (결함 228)', () => {
+  // 프로젝트를 막 만들고 기여도를 열어 본 사람. 화면은 이랬습니다:
+  //
+  //   ⚠ 팀 전원의 신뢰도가 낮습니다. 이 수치로 서로를 비교하지 마세요
+  //   김민수 · 개발 · — · 100%p 모름 · — 회의 · — 업무 · — 코드
+  //
+  // 비교할 「이 수치」가 한 개도 없고(전부 `—`), 혼자 만든 프로젝트에는
+  // 「서로」도 없습니다.
+  const 쟀고낮은사람 = (userId: number): MemberScore => ({
+    ...갓만든팀(userId),
+    confidence: 0.3,
+    confidence_label: '낮음',
+    categories: [
+      { category: 'code', raw: 3, team_share: 1, weight: 1, event_count: 3, evidence_ids: [7] },
+    ],
+  });
+  const team228 = (members: MemberScore[]): TeamScore => ({
+    algo_version: 'v1',
+    computed_at: '',
+    members,
+    skipped_categories: [],
+    notice: '',
+  });
+
+  it('⭐ 아무도 안 재였으면 **원인**을 말한다 — 신뢰도는 그 그림자다', () => {
+    const [line] = teamWarnings(team228([갓만든팀(1)]), PEOPLE);
+    strictEqual(line?.includes('아직 이 팀에서 잰 활동이 없습니다'), true, String(line));
+    // 있지도 않은 수치를 가리키지 않습니다.
+    strictEqual(line?.includes('이 수치'), false, String(line));
+    strictEqual(line?.includes('서로를 비교'), false, String(line));
+  });
+
+  it('⭐ 사람이 여럿이어도 같다 — 아무것도 안 이어진 팀은 비교할 게 없다', () => {
+    const notes = teamWarnings(team228([갓만든팀(1), 갓만든팀(2), 갓만든팀(3)]), PEOPLE);
+    strictEqual(notes.some((n) => n.includes('서로를 비교')), false, JSON.stringify(notes));
+  });
+
+  it('⛔ 혼자인데 신뢰도가 낮으면 「서로」라고 하지 않는다', () => {
+    const [line] = teamWarnings(team228([쟀고낮은사람(1)]), PEOPLE);
+    strictEqual(line?.includes('신뢰도가 낮습니다'), true, String(line));
+    strictEqual(line?.includes('서로를 비교'), false, String(line));
+  });
+
+  it('⭐ 둘 이상이고 잰 것이 있으면 **예전 문장 그대로** — 그때는 맞는 말이다', () => {
+    const notes = teamWarnings(team228([쟀고낮은사람(1), 쟀고낮은사람(2)]), PEOPLE);
+    strictEqual(
+      notes.some((n) => n.includes('팀 전원의 신뢰도가 낮습니다') && n.includes('서로를 비교하지 마세요')),
+      true,
+      JSON.stringify(notes),
+    );
+  });
+
+  it('한 사람만 낮으면 아무 말도 안 한다 — 전원일 때만 팀의 문제다', () => {
+    const 높은사람: MemberScore = { ...쟀고낮은사람(2), confidence: 0.9, confidence_label: '높음' };
+    const notes = teamWarnings(team228([쟀고낮은사람(1), 높은사람]), PEOPLE);
+    strictEqual(notes.some((n) => n.includes('신뢰도가 낮습니다')), false, JSON.stringify(notes));
+  });
+});
+
+describe('떠난 사람의 기록 (결함 222)', () => {
+  // ⚠️ **`PEOPLE` 에 없는 이름**을 씁니다. 예전에는 `박지원` 이었는데,
+  //    그 이름은 지금 구성원(user_id 3)에도 있어서 결함 345 의 동명이인
+  //    갈래로 떨어졌습니다 — 이 검사가 재려는 것은 「나간 사람도 이름으로
+  //    부르는가」이지 동명이인이 아닙니다. 겹치는 경우는 아래에 따로 둡니다.
+  const GONE: Person[] = [{ user_id: 9, name: '정우성', role_shares: { developer: 100 } }];
+
+  it('⭐ 나간 사람이 목록에 있는 **이유를 말한다**', () => {
+    // 그 사람의 기록은 계산에 그대로 들어갑니다 — 빼면 남은 사람들의 몫이
+    // 조용히 부풀기 때문입니다. 말해 주지 않으면 "왜 나간 사람이 여기
+    // 있지" 가 됩니다.
+    const notes = teamWarnings(team({ former_members: GONE }), PEOPLE);
+    const line = notes.find((n) => n.includes('떠났지만'));
+    strictEqual(line !== undefined, true, '아무 말도 안 합니다');
+    strictEqual(/정우성/.test(line as string), true, '이름을 안 부릅니다');
+    strictEqual(/실제보다 커집니다/.test(line as string), true);
+  });
+
+  it('⛔ 옛 서버(칸이 없음)에서는 아무 말도 안 한다', () => {
+    strictEqual(teamWarnings(team({}), PEOPLE).some((n) => n.includes('떠났지만')), false);
+  });
+
+  it('⭐ 나간 사람도 **이름으로** 부른다 — 「사용자 #9」 가 뜨면 안 된다', () => {
+    // `people` 은 지금 구성원이라 나간 사람이 없습니다. 서버가 이름을
+    // 같이 보내므로 두 명단을 합쳐 찾습니다.
+    strictEqual(nameOf(9, PEOPLE), '사용자 #9');
+    strictEqual(nameOf(9, PEOPLE, GONE), '정우성');
+  });
+
+  it('⭐ 나간 사람이 지금 구성원과 **이름이 같으면** 갈라 부른다 (결함 345)', () => {
+    // 화면에는 둘이 **같이** 그려집니다. 지금 구성원끼리만 안 겹친다고
+    // 안심하면, 나간 박지원과 남아 있는 박지원이 같은 줄로 읽힙니다.
+    const 겹침: Person[] = [{ user_id: 9, name: '박지원', github_login: 'jiwon-old' }];
+    strictEqual(nameOf(3, PEOPLE, 겹침), '박지원 · GitHub 미연결');
+    strictEqual(nameOf(9, PEOPLE, 겹침), '박지원 · @jiwon-old');
+  });
+
+  it('아무 데도 없는 번호는 숨기지 않는다 — 번호라도 보여야 제보할 수 있다', () => {
+    strictEqual(nameOf(404, PEOPLE, GONE), '사용자 #404');
   });
 });

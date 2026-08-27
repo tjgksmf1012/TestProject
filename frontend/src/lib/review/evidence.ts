@@ -10,7 +10,10 @@
  */
 
 import { describeType } from './labels.ts';
-import { atText } from './minutes.ts';
+// ⚠️ **`minutes.ts` 의 `atText` 가 아닙니다** (결함 353) — 그쪽은
+//    「근거가 없어 0」을 `null` 로 떨어뜨립니다. 발화의 `0` 은
+//    「회의 시작과 동시에」라는 **시각**입니다.
+import { momentText } from './moment.ts';
 
 /** 서버가 주는 발화 한 줄 (`GET /api/meetings/{id}/utterances`). */
 export interface Utterance {
@@ -91,7 +94,7 @@ export function speakerNote(source: string, confidence: number | null): string |
 export function evidenceView(utterance: Utterance): EvidenceView {
   return {
     id: utterance.id,
-    at: atText(utterance.start_ms),
+    at: momentText(utterance.start_ms),
     text: utterance.text,
     // ⚠️ 이름이 없으면 **지어내지 않습니다.** `사용자 #3` 같은 것도
     // 안 씁니다 — 그건 사람 이름처럼 읽힙니다.
@@ -174,4 +177,34 @@ export function withContext(
     }
   }
   return all.filter((id) => keep.has(id)).map((id) => ({ id, isEvidence: mark.has(id) }));
+}
+
+/**
+ * 근거 칩을 **몇 개까지 펼쳐 둘지** (UI 패스 v3).
+ *
+ * ## 왜 자르나
+ *
+ * 반복 논의 하나에 근거가 열둘이면 화면에는 `#1 #2 #3 … #14` 가 두 줄로
+ * 깔립니다. 렌더해서 보면 그 줄이 **회의 내용보다 눈에 먼저 들어옵니다** —
+ * 숫자 열둘은 아무것도 말하지 않는데 자리는 제일 넓게 씁니다.
+ *
+ * ⚠️ **버리지 않습니다.** 나머지는 「+N」 뒤에 있고, 눌러서 폅니다. 근거를
+ * 감추면 이 저장소가 세 번째로 적어 둔 실패(「근거 #5 라고 적어 놓고 원문을
+ * 볼 방법이 없던 것」)로 되돌아갑니다.
+ */
+export const EVIDENCE_CHIPS_SHOWN = 5;
+
+export interface ChipSplit<T> {
+  head: T[];
+  rest: T[];
+}
+
+export function splitEvidenceChips<T>(
+  ids: readonly T[],
+  shown: number = EVIDENCE_CHIPS_SHOWN,
+): ChipSplit<T> {
+  // ⚠️ 하나 남는 것을 「+1」로 접으면 **접는 쪽이 더 넓습니다.** 그럴 바엔
+  //    그냥 보여 줍니다.
+  if (ids.length <= shown + 1) return { head: [...ids], rest: [] };
+  return { head: ids.slice(0, shown), rest: ids.slice(shown) };
 }

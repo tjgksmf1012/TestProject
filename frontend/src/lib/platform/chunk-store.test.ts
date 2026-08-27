@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   chunkBridge,
   describeGiveUp,
+  describeReupload,
   openChunkStore,
   toBytes,
   type ChunkBridge,
@@ -110,5 +111,26 @@ describe('사람에게 하는 말', () => {
   it('⭐ 둘의 말이 서로 다르다', () => {
     // 같은 문장이면 가른 의미가 없습니다.
     assert.notEqual(describeGiveUp('parked', 1), describeGiveUp('lost', 1));
+  });
+});
+
+describe('다시 올린 뒤 뭐라고 하는가 (결함 245)', () => {
+  it('⭐ 국면마다 **말이 있다** — 눌렀는데 조용하면 안 됩니다', () => {
+    for (const [sent, still] of [[4, 0], [0, 4], [2, 2], [0, 0]] as const) {
+      const said = describeReupload(sent, still);
+      assert.equal(said.length > 0, true, `${sent}/${still}`);
+    }
+  });
+
+  it('다 올렸으면 **남은 것이 없다**고 말한다', () => {
+    const said = describeReupload(4, 0);
+    assert.equal(said.includes('4개'), true, said);
+    assert.equal(said.includes('남은 것이 없습니다'), true, said);
+  });
+
+  it('못 올렸으면 **다시 누를 수 있다**고 말한다 — 되찾을 길을 닫지 않는다', () => {
+    for (const said of [describeReupload(0, 4), describeReupload(2, 2)]) {
+      assert.equal(said.includes('다시 눌러'), true, said);
+    }
   });
 });

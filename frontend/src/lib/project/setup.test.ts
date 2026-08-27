@@ -6,6 +6,9 @@ import {
   NO_CODE,
   codeProblem,
   codeToCopy,
+  disconnectConfirm,
+  isDisconnect,
+  unknownSectionNote,
   formatCode,
   nextStepAfterCreate,
   normalizeCode,
@@ -192,5 +195,42 @@ describe('githubLoginStatus', () => {
     strictEqual(githubLoginStatus('hong7'), '지금 hong7로 이어져 있습니다.'); // 칠 → ㄹ
     strictEqual(githubLoginStatus('hong3'), '지금 hong3으로 이어져 있습니다.'); // 삼 → ㅁ
     strictEqual(githubLoginStatus('minsu-dev'), '지금 minsu-dev로 이어져 있습니다.'); // 브이
+  });
+});
+
+
+describe('결함 256 — 확인 없이 끊기던 저장소 연결', () => {
+  it('⭐ **비우는 것**만 연결 해제다', () => {
+    strictEqual(isDisconnect('owner/repo', ''), true);
+    strictEqual(isDisconnect('owner/repo', '   '), true);
+    // 다른 저장소로 **바꾸는** 것은 해제가 아닙니다.
+    strictEqual(isDisconnect('owner/repo', 'owner/other'), false);
+    // 원래 연결이 없으면 끊을 것도 없습니다.
+    strictEqual(isDisconnect(null, ''), false);
+    strictEqual(isDisconnect('', ''), false);
+    strictEqual(isDisconnect(undefined, ''), false);
+  });
+
+  it('⭐ 물을 때 **무엇이 사라지는지** 적는다', () => {
+    const said = disconnectConfirm('owner/repo');
+    strictEqual(said.includes('owner/repo'), true, said);
+    // 되돌릴 수 있는 것과 없는 것을 **둘 다** 말합니다.
+    strictEqual(said.includes('남지만'), true, said);
+    strictEqual(said.includes('연결 전'), true, said);
+  });
+});
+
+
+describe('결함 266 — 없는 설정 구역이 백지였다', () => {
+  const KNOWN = ['role', 'members', 'danger'];
+
+  it('⭐ 모르는 주소에는 **말을 한다**', () => {
+    const said = unknownSectionNote('zzz', KNOWN);
+    strictEqual(said !== null, true);
+    strictEqual(said?.includes('없는 구역'), true, said ?? '');
+  });
+
+  it('⚠️ **아는 구역에는 아무 말도 안 한다** — 안 그러면 모든 화면에 뜹니다', () => {
+    for (const k of KNOWN) strictEqual(unknownSectionNote(k, KNOWN), null, k);
   });
 });

@@ -1,0 +1,1 @@
+function r(n){let t=Math.floor(n/1e3);return`${Math.floor(t/60)}:${String(t%60).padStart(2,"0")}`}function e(n){return!Number.isFinite(n)||n<0?null:r(n)}function u(n){return!Number.isFinite(n)||n<=0?null:r(n)}export{e as a,u as b};

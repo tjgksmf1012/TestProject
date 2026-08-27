@@ -235,11 +235,11 @@ def test_the_audit_log_is_now_read_somewhere():
     assert writes > 0, "감사 로그를 쓰는 곳이 0곳이 됐습니다 — 기록이 끊겼습니다"
     # 문서가 적어 둔 개수도 같이 봅니다. ⚠️ 처음에 "다섯 곳" 이라고 적었는데
     # 실제로는 열한 곳이었습니다 — 세지 않고 눈대중으로 적은 것입니다.
-    assert writes == 13, (
+    assert writes == 15, (
         f"감사 로그를 쓰는 곳이 {writes}곳입니다 — `docs/20` ACTIVITY-001 의 "
         "개수를 고치십시오"
     )
-    assert "쓰기는 열세 곳" in _doc(), (
+    assert "쓰기는 열다섯 곳" in _doc(), (
         "문서에서 쓰기 개수를 적은 자리를 못 찾았습니다 — 문구가 바뀌었으면 "
         "이 검사도 같이 고치십시오"
     )
@@ -264,6 +264,17 @@ def test_the_action_labels_cover_every_action_the_code_writes():
     assert not missing, (
         f"사람 말이 없는 감사 행동입니다: {missing} — "
         "`activity_service.ACTION_LABEL` 에 넣으십시오"
+    )
+
+    # ⚠️ **반대 방향도 봅니다** (결함 328). 이 검사는 오래도록 「덮는가」만
+    # 봤습니다. 그동안 `models.py` 주석은 어휘랍시고 여섯 개를 적어 두고
+    # 있었고 그중 `member_removed` 는 **쓰는 곳이 0곳**이었습니다 —
+    # 「목록에 있으니 되겠지」로 읽히면 아무 일도 안 일어납니다(실패 ①).
+    # 결함 289 가 「맞는 칸인가도 보십시오」로 적어 둔 그것입니다.
+    stale = sorted(set(activity_service.ACTION_LABEL) - written)
+    assert not stale, (
+        f"이름표는 있는데 **아무도 안 쓰는** 행동입니다: {stale} — "
+        "낡은 것이거나 만들어 놓고 안 부르는 것입니다"
     )
 
 
@@ -390,3 +401,185 @@ def test_the_finding_screen_tables_agree_with_the_detectors():
     assert ordered == detected, (
         f"`KIND_ORDER` 와 `DETECTED` 가 다릅니다: {sorted(detected ^ ordered)}"
     )
+
+
+def test_the_summary_table_does_not_claim_more_than_the_detail_rows():
+    """⭐ 요약표의 ✅ 가 **상세표와 어긋나지 않는가** (결함 383).
+
+    ## ⛔ 앞 결함들이 상세만 고치고 요약을 두고 갔습니다
+
+    `docs/20` 은 두 층입니다 — 맨 위 **절 요약표**(§6 채널 관리 …)와
+    아래 **요구 하나하나의 상세표**. 결함 377·378 이 채널 셋을
+    `⚠️ 서버만` 으로 내렸는데(화면에 컨트롤이 0개), 요약표는 그대로
+    **맨몸 `✅`** 였습니다.
+
+        요약   | §6 채널 관리 | CHANNEL-001~005 | ✅ |
+        상세   | CHANNEL-003 이름 변경 | ⚠️ 서버만 | …
+               | CHANNEL-004 삭제      | ⚠️ 서버만 | …
+               | CHANNEL-005 순서 변경 | ⚠️ 서버만 | …
+
+    문서를 펴면 **요약이 먼저** 보입니다 — 「채널은 다 됐구나」로 읽고
+    아래를 안 봅니다. 이 저장소의 「한 갈래만 고치고 옆 갈래를 그대로 둔
+    것」(결함 298·301)이 **문서에서** 난 것입니다.
+
+    ## 자
+
+    요약이 `✅` 면 그 절의 상세에 **`⚠️`·`❌`·`⛔` 가 하나도 없어야**
+    합니다. `🟡` 은 허용합니다 — 요약이 `✅ (GitHub 은 원문 제외)` 처럼
+    **단서를 달아** 그 하나를 정확히 가리키는 자리가 실제로 있습니다
+    (SEARCH-005). 단서 없는 맨몸 ✅ 로 딱딱한 상태를 덮는 것만 막습니다.
+
+    ⚠️ **이 자가 못 보는 것**: 🟡 을 덮는 단서가 **맞는 말인지**는 안
+    잽니다. SEARCH 는 손으로 읽어 확인했습니다.
+    """
+    import re
+
+    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text(encoding="utf-8")
+    lines = doc.splitlines()
+
+    HARD = ("⛔", "❌", "⚠️")
+    SYMBOLS = (*HARD, "🟡", "✅")
+
+    def mark(cell: str) -> str:
+        for symbol in SYMBOLS:
+            if symbol in cell:
+                return symbol
+        return "?"
+
+    summary: list[tuple[str, int, int, str]] = []
+    detail: dict[str, list[str]] = {}
+    for line in lines:
+        head = re.match(
+            r"\|\s*§\d+[^|]*\|\s*([A-Z]{3,}(?:-[A-Z]+)?)-(\d{3})~?(\d{3})?\s*\|\s*(.+?)\s*\|",
+            line,
+        )
+        if head:
+            summary.append(
+                (head.group(1), int(head.group(2)), int(head.group(3) or head.group(2)),
+                 head.group(4))
+            )
+        row = re.match(
+            r"\|\s*([A-Z]{3,}(?:-[A-Z]+)?)-(\d{3})([^|]*)\|\s*([^|]+?)\s*\|", line
+        )
+        if row:
+            detail.setdefault(f"{row.group(1)}-{row.group(2)}", []).append(row.group(4).strip())
+
+    assert len(summary) > 10, f"요약표를 {len(summary)}줄밖에 못 찾았습니다 — 검사가 낡았습니다"
+    assert len(detail) > 50, f"상세표를 {len(detail)}줄밖에 못 찾았습니다 — 검사가 낡았습니다"
+
+    unknown = [
+        f"{key}: {cell}"
+        for key, cells in detail.items()
+        for cell in cells
+        if mark(cell) == "?"
+    ]
+    assert not unknown, (
+        "상세표에서 표시를 못 읽은 줄이 있습니다 — 새 기호가 생겼으면 "
+        "`SYMBOLS` 에 넣으세요:\n  " + "\n  ".join(unknown)
+    )
+
+    lying = []
+    for prefix, low, high, claim in summary:
+        if mark(claim) != "✅":
+            continue
+        harsh = [
+            key
+            for number in range(low, high + 1)
+            for key in [f"{prefix}-{number:03d}"]
+            for cell in detail.get(key, [])
+            if mark(cell) in HARD
+        ]
+        if harsh:
+            names = ", ".join(sorted(set(harsh)))
+            lying.append(f"§{prefix}: 요약은 ✅ 인데 {names} 이(가) 아닙니다")
+
+    assert not lying, (
+        "요약표가 상세표보다 더 됐다고 말합니다 — 문서를 펴면 요약이 먼저 "
+        "보입니다 (결함 383):\n  " + "\n  ".join(lying)
+    )
+
+
+def test_the_calendar_cannot_claim_a_kind_whose_column_nothing_writes() -> None:
+    """⭐ 달력이 그리는 종류는 **그 칸을 채우는 코드**가 있어야 한다 (결함 408).
+
+    달력은 다섯 종류를 그립니다. API 를 십 년 범위로 불러 세니 씨앗에서
+    나오는 것은 둘뿐이었습니다:
+
+        meeting_held 5 · task_due 3 · task_start 0 · meeting_planned 0 · project_due 0
+
+    셋 중 `meeting_planned` 은 **씨앗이 안 만드는 것**입니다 — 제품에
+    「회의 일정 잡기」가 있고 눌러 보면 생깁니다. 나머지 둘은 다릅니다:
+
+        tasks.start_date     읽는 곳 1 (달력) · **쓰는 곳 0**
+        projects.deadline    읽는 곳 3 (달력·기여도·리스크) · **쓰는 곳 0**
+
+    `db/vocab.py` 의 `ProjectStatus` 는 이것을 **이미 적어 두고** 있었습니다
+    (「달력의 `project_due` 는 한 번도 그려진 적이 없습니다」). 그런데
+    `docs/20` 만 두 줄 다 맨몸 ✅ 였습니다 — 결함 382 가 적어 둔 그 모양
+    입니다: **비어 있는 것 자체는 죄가 아니고, 비어 있는데 됐다고 말하는
+    것이 죄입니다.**
+
+    ⚠️ 결함 382 의 자는 **표 단위**(「그 클래스를 만드는 코드가 0곳」)라
+    이 부류를 구조적으로 못 봅니다 — `tasks`·`projects` 행은 멀쩡히
+    만들어지고 **그 칸만** 안 채워집니다. 382 자신이 「두 자는 서로를 못
+    본다」고 적어 뒀습니다.
+
+    ⚠️ **양방향입니다.** 나중에 그 칸을 채우는 길이 생기면 이 검사가
+    「이제 ✅ 로 올리세요」 쪽으로 웁니다 — 단서가 낡는 것도 같이 잽니다.
+
+    ⚠️ **이 자가 못 보는 것**: 칸을 채우는 방법이 여기 적은 두 모양
+    (`x.col = …` · 생성자 `col=…`)이 아니면 못 봅니다. 그리고 「쓰는 코드가
+    있다」와 「사람이 그 자리에 닿는다」는 다른 질문입니다(결함 386).
+    """
+    src = REPO_ROOT / "backend" / "teamflow"
+    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text(encoding="utf-8")
+
+    def code_of(path: Path) -> str:
+        """주석·docstring 을 **같은 길이의 공백으로** 덮습니다 (결함 391)."""
+        text = path.read_text(encoding="utf-8")
+        text = re.sub(r'"""[\s\S]*?"""', lambda m: " " * len(m.group(0)), text)
+        text = re.sub(r"#[^\n]*", lambda m: " " * len(m.group(0)), text)
+        return text
+
+    files = [
+        p
+        for p in src.rglob("*.py")
+        # 모델은 칸을 **선언**하는 자리입니다 — 채우는 자리가 아닙니다.
+        if p.name != "models.py"
+    ]
+
+    def writers(owner: str, column: str) -> list[str]:
+        """`owner.column = …` 과 생성자 `Owner(… column=… )` 를 셉니다."""
+        attr = re.compile(rf"\b{owner}\w*\.{column}\s*=(?!=)")
+        ctor = re.compile(rf"m\.{owner.capitalize()}\((?:[^()]|\([^()]*\))*?\b{column}\s*=")
+        hits: list[str] = []
+        for path in files:
+            code = code_of(path)
+            if attr.search(code) or ctor.search(code):
+                hits.append(str(path.relative_to(REPO_ROOT)))
+        return hits
+
+    # 달력이 그리는 종류 → (그 값을 담는 칸, 대조표의 요구 id)
+    KINDS = {
+        "task_start": (("task", "start_date"), "CALENDAR-002"),
+        "project_due": (("project", "deadline"), "CALENDAR-005"),
+    }
+
+    complaints: list[str] = []
+    for kind, ((owner, column), req) in KINDS.items():
+        found = writers(owner, column)
+        row = re.search(rf"^\|\s*{re.escape(req)}[^|]*\|\s*([^|]+?)\s*\|", doc, re.M)
+        assert row is not None, f"{req} 줄을 대조표에서 못 찾았습니다 — 검사가 낡았습니다"
+        cell = row.group(1)
+        bare_ok = cell.strip() == "✅"
+        if not found and bare_ok:
+            complaints.append(
+                f"{req}: `{owner}s.{column}` 를 쓰는 코드가 0곳인데 표는 맨몸 ✅ 입니다 — "
+                f"달력의 `{kind}` 는 한 번도 안 그려집니다"
+            )
+        if found and not bare_ok:
+            complaints.append(
+                f"{req}: 이제 `{owner}s.{column}` 를 쓰는 곳이 있습니다({', '.join(found)}) — "
+                f"표의 단서가 낡았습니다. `{kind}` 가 그려지면 ✅ 로 올리세요"
+            )
+    assert not complaints, "\n  ".join(["대조표와 코드가 어긋납니다:", *complaints])

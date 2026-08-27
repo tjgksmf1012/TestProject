@@ -37,19 +37,36 @@ describe('atText', () => {
 });
 
 describe('describeIssue', () => {
-  it('내용·시각·근거 건수를 같이 준다', () => {
+  it('내용·시각·근거 **번호**를 같이 준다', () => {
     deepStrictEqual(describeIssue(issue()), {
       content: '배포 방식을 못 정했습니다',
       at: '2:05',
-      evidenceCount: 2,
+      evidence: [4, 5],
     });
   });
 
   it('⭐ 근거 0건도 **감추지 않는다**', () => {
     // 감추면 근거 없는 사안이 근거 있는 것과 똑같아 보입니다.
     const view = describeIssue(issue({ evidence_utterance_ids: [], start_ms: 0 }));
-    strictEqual(view.evidenceCount, 0);
+    deepStrictEqual(view.evidence, []);
     strictEqual(view.at, null);
+  });
+
+  it('⭐ 번호를 **버리지 않는다** — 개수만 주면 화면이 문을 못 냅니다 (결함 420)', () => {
+    /*
+     * 서버 `UnresolvedIssueOut` 의 docstring: 「근거 발화를 같이 싣습니다 —
+     * 근거 없이 "이게 미해결입니다" 라고만 하면 사람은 확인할 방법이
+     * 없고, 이 저장소는 그런 값을 화면에 올리지 않기로 했습니다.」
+     * 그 번호를 여기서 버리면 두 뿌리 다 개수만 적게 됩니다.
+     */
+    const view = describeIssue(issue({ evidence_utterance_ids: [9, 11] }));
+    deepStrictEqual(view.evidence, [9, 11]);
+  });
+
+  it('⛔ 돌려준 배열을 고쳐도 **원본이 안 바뀐다**', () => {
+    const src = issue({ evidence_utterance_ids: [1, 2] });
+    describeIssue(src).evidence.push(99);
+    deepStrictEqual(src.evidence_utterance_ids, [1, 2]);
   });
 });
 

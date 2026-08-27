@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes" />
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161a" />
-<!-- 홈 화면에 추가하면 주소창 없이 전체화면으로 뜬다. -->
+<!-- 앱으로 설치하면 브라우저 탭이 아니라 창 하나로 뜬다.
+     ⚠️ 폰 이야기를 쓰지 마십시오 — 모바일은 범위에서 뺐습니다(결함 422). -->
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -305,6 +306,17 @@
                      padding: var(--sp-2) var(--sp-4); }
       .acts .approve { background: var(--primary); border-color: var(--primary);
                        color: var(--primary-fg); font-weight: 600; }
+      /* ⚠️ **이 줄이 없으면 막힌 등록 단추가 눌리는 것과 똑같이 보입니다**
+         (결함 373). `app.css` 의 `button[aria-disabled="true"]` 가 「덜 채운
+         모양」을 정하는데, 바로 위 `.acts .approve` (0,2,0) 가 그것
+         (0,1,1) 을 **특성도에서 이깁니다** — 결함 250 과 같은 자리입니다.
+         위 규칙은 「이 화면의 주된 행동은 등록 하나」라는 결정이라 뒤집지
+         않고, 막힌 갈래만 같은 자리에서 다시 정합니다. 값은 `app.css` 와
+         **같은 토큰**입니다 — 새 hex 를 만들지 않습니다. */
+      .acts .approve[aria-disabled="true"] {
+        background: var(--primary-tint); color: var(--primary);
+        border-color: var(--line-strong);
+      }
       .acts .clear { background: transparent; border-color: var(--line-strong);
                      color: var(--text-muted); font-weight: 500; }
       /* 거절은 **글자만**입니다. 빨간 상자를 늘 띄워 두면 화면이 경고처럼
@@ -418,6 +430,11 @@
   <!-- 아래 탭바. `src/demo/nav.ts` 가 채운다.
        위쪽 링크 줄에 의존하면 전체화면 PWA·WebView 에서 갇힌다 —
        거기에는 주소창도 뒤로가기도 없다. -->
+  <!-- 탭 넷 **말고** 가는 곳. `src/demo/nav.ts` 가 `navLinks` 로 채운다.
+       ⛔ 이 자리를 지우면 채팅·일정·알림·활동·찾기·보고서로 **가는 길이
+       제품 전체에서 사라집니다** — 실제로 그랬습니다 (결함 305). -->
+  <nav id="nav" aria-label="더 보기"></nav>
+
   <nav id="tabs" aria-label="주요 화면"></nav>
   </body>
 </html>

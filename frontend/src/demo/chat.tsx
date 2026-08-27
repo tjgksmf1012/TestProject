@@ -38,18 +38,28 @@ import {
   dayGroups,
   describeTime,
   DELETED_TEXT,
+  describeEmptyChannel,
+  hasOlderMessages,
+  olderCursor,
+  prependOlder,
   EDITED_MARK,
   MAX_BODY,
   mentionSegments,
   reactionAriaLabel,
   reactionIcon,
-  REACTION_MARKS,
+  offerableReactions,
   sendBlockedReason,
+  streamClosedNote,
+  quoteFor,
   voiceChannelNote,
   type ChatChannel,
   type ChatMessage,
+  type ReactionChoice,
+  type QuoteView,
 } from '../lib/chat/view.ts';
 import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth/session.ts';
+import { detailText } from '../lib/http/detail.ts';
+import { blockedReason, canSearch } from '../lib/search/view.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { iconSvg } from '../lib/nav/icons.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
@@ -60,20 +70,48 @@ import { NoteLine, RawHtml, type Note } from './parts.tsx';
 import { renderNav } from './nav.ts';
 import { bootApp } from './pwa.ts';
 
+/** `GET /api/chat/channel-kinds` 한 줄. **서버가 어휘의 주인**입니다. */
+interface ChannelKindChoice {
+  kind: string;
+  label: string;
+  hint: string;
+}
+
 const params = new URLSearchParams(location.search);
 // ⚠️ 주소창의 `?api=` 를 그대로 쓰면 링크 하나로 팀 대화가 어디로 가는지
 // 바뀝니다. 채널에는 팀 내부 이야기가 쌓입니다.
 const apiBase = safeApiBase(params.get('api'), location.origin);
 const projectId = Number(params.get('project') ?? '1');
+/**
+ * 알림에서 넘어올 때 **어느 대화를 열 것인가** (결함 417).
+ *
+ * ⚠️ 없으면 지금까지처럼 첫 텍스트 채널을 엽니다. 이 값이 없던 동안
+ * 「디자인 채널에서 나를 불렀습니다」를 눌러도 `#공지` 가 열렸습니다.
+ */
+const wantedChannel = Number(params.get('channel') ?? '') || null;
 
 const get = (path: string): Promise<Response | null> => tryGet(`${apiBase}${path}`);
 
-const sendJson = (
+/**
+ * 쓰기 한 번.
+ *
+ * ⚠️ **세션 만료는 여기서 봅니다** (결함 427). 예전에는 부르는 쪽 다섯 중
+ * **둘**만 봤습니다 — 보내기·고치기는 로그인으로 갔고, **반응·지우기·
+ * 채널 만들기**는 그냥 문장만 띄웠습니다. 세션이 죽은 채 「지우기」를
+ * 누르면 `401 DELETE /api/messages/2` 가 나고 화면은 「로그인이
+ * 필요합니다」라고 말하는데, **그 말을 들을 자리가 없습니다** — 결함 227
+ * 이 고친 그 병입니다. 재현했습니다.
+ *
+ * 부르는 쪽마다 적으면 반드시 몇 곳이 빠집니다(대표 실패 ②). 설정
+ * 화면(`project.tsx`)이 `call()` 에서 같은 판단을 하고 있고, 그래서 쓰기
+ * **열둘이 전부** 지켜집니다 — 그 모양을 그대로 씁니다.
+ */
+const sendJson = async (
   path: string,
   method: 'POST' | 'PATCH' | 'PUT' | 'DELETE',
   body?: unknown,
-): Promise<Response | null> =>
-  trySend(() =>
+): Promise<Response | null> => {
+  const response = await trySend(() =>
     fetch(`${apiBase}${path}`, {
       method,
       credentials: 'same-origin',
@@ -82,6 +120,31 @@ const sendJson = (
         : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
     }),
   );
+  if (response !== null && isSessionExpired(response.status)) goToLogin();
+  return response;
+};
+
+/**
+ * 실패한 응답을 **사람이 읽을 한 줄**로.
+ *
+ * ⛔ 예전에는 `describeHttpStatus(status) ?? '채널을 못 만들었습니다'` 였고,
+ * `describeHttpStatus` 는 **400 에 아무 말도 없습니다**(`null`). 그래서
+ * 이미 있는 이름으로 채널을 만들면 서버가
+ *
+ *     400  `일반` 채널이 이미 있습니다
+ *
+ * 라고 정확히 말하는데 화면은 「채널을 못 만들었습니다」만 띄웠습니다
+ * (결함 301). 사람은 이름이 겹친 건지, 권한이 없는 건지, 서버가 죽은
+ * 건지 알 방법이 없습니다 — 바로 옆 목록에 `#일반` 이 보이는데도요.
+ *
+ * ⚠️ `detail` 을 `string` 으로 단언하지 않습니다 — 422 는 **객체 배열**
+ * 이라 화면에 `[object Object]` 가 찍힙니다 (결함 51). 한 벌짜리
+ * `detailText` 가 그 모양까지 봅니다.
+ */
+async function failureText(response: Response, fallback: string): Promise<string> {
+  const body: unknown = await response.json().catch(() => null);
+  return detailText(body, describeHttpStatus(response.status) ?? fallback);
+}
 
 function goToLogin(): void {
   location.href = loginUrlFor(location.pathname + location.search);
@@ -134,20 +197,24 @@ function Reactions({
   busy,
   picking,
   onTogglePicker,
-  labels,
+  choices,
 }: {
   message: ChatMessage;
   onPick: (mark: string | null) => void;
   busy: boolean;
   picking: boolean;
   onTogglePicker: () => void;
-  /** 반응 이름 → 사람 말. **서버가 줍니다** — 화면이 두 번째 표를 만들지 않습니다. */
-  labels: Record<string, string>;
+  /**
+   * 고를 수 있는 반응 전부 — **서버가 줍니다**(`GET /api/chat/reactions`).
+   *
+   * ⚠️ 이름표만 꺼내 쓰고 **집합과 순서를 화면이 다시 정하면 안 됩니다**
+   *    (결함 414). 못 받았으면 빈 배열이고, 그러면 고르는 자리를 안
+   *    그립니다 — 채널 종류가 결함 360 에서 내린 결정과 같습니다.
+   */
+  choices: readonly ReactionChoice[];
 }) {
   if (message.deleted) return null;
-  const unused = REACTION_MARKS.filter(
-    (mark) => !message.reactions.some((r) => r.mark === mark),
-  );
+  const unused = offerableReactions(choices, message.reactions);
   return (
     <div className="rrow">
       {message.reactions.map((reaction) => {
@@ -184,20 +251,20 @@ function Reactions({
       )}
 
       {picking &&
-        unused.map((mark) => {
-          const icon = reactionIcon(mark);
+        unused.map((choice) => {
+          const icon = reactionIcon(choice.mark);
           if (icon === null) return null;
           return (
             <button
               type="button"
-              key={mark}
+              key={choice.mark}
               className="rchip add"
               disabled={busy}
               // ⚠️ 아이콘뿐이라 낭독기에게는 **이름밖에 없습니다.** 서버가
               //    주는 사람 말(`label`)은 이미 달린 반응에만 오므로, 아직
               //    안 단 것은 여기서 말을 붙입니다.
-              aria-label={`${labels[mark] ?? mark} 반응 달기`}
-              onClick={() => onPick(mark)}
+              aria-label={`${choice.label} 반응 달기`}
+              onClick={() => onPick(choice.mark)}
             >
               <Icon name={icon} />
             </button>
@@ -209,7 +276,7 @@ function Reactions({
 
 function Row({
   message,
-  parent,
+  quote,
   runOn,
   meId,
   busy,
@@ -219,10 +286,10 @@ function Row({
   onReact,
   picking,
   onTogglePicker,
-  labels,
+  choices,
 }: {
   message: ChatMessage;
-  parent: ChatMessage | undefined;
+  quote: QuoteView | null;
   runOn: boolean;
   meId: number | null;
   busy: boolean;
@@ -232,18 +299,24 @@ function Row({
   onReact: (message: ChatMessage, mark: string | null) => void;
   picking: boolean;
   onTogglePicker: () => void;
-  labels: Record<string, string>;
+  choices: readonly ReactionChoice[];
 }) {
   return (
     <li className={runOn ? 'msg run' : 'msg'}>
-      {parent !== undefined && (
-        // ⚠️ 답글이 무엇에 달렸는지 **여기 보여 줍니다.** 안 보이면
-        //    "근거 #5" 라고 적어 놓고 원문을 볼 방법이 없던 그 실패입니다.
-        <p className="mquote">
-          <span className="qwho">{parent.author_name}</span>
-          <span className="qbody">{parent.deleted ? DELETED_TEXT : parent.body}</span>
-        </p>
-      )}
+      {/* ⚠️ 답글이 무엇에 달렸는지 **여기 보여 줍니다.** 안 보이면
+          "근거 #5" 라고 적어 놓고 원문을 볼 방법이 없던 그 실패입니다.
+          ⚠️ 원글이 **아직 안 불러온 앞쪽**에 있으면 예전에는 이 자리를
+          통째로 비웠고, 그러면 답글이 평범한 글로 보였습니다(결함 419).
+          판단은 `@lib` 의 `quoteFor` 가 합니다. */}
+      {quote !== null &&
+        (quote.kind === 'quote' ? (
+          <p className="mquote">
+            <span className="qwho">{quote.who}</span>
+            <span className="qbody">{quote.body}</span>
+          </p>
+        ) : (
+          <p className="mquote">{quote.note}</p>
+        ))}
       {!runOn && (
         <p className="mhead">
           <span className="mwho">{message.author_name}</span>
@@ -264,7 +337,7 @@ function Row({
             onPick={(mark) => onReact(message, mark)}
             picking={picking}
             onTogglePicker={onTogglePicker}
-            labels={labels}
+            choices={choices}
           />
           <div className="mtools">
             <button type="button" disabled={busy} onClick={() => onReply(message)}>
@@ -304,7 +377,18 @@ function App() {
   const [sending, setSending] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
   const [newName, setNewName] = useState('');
+  /* ⚠️ **종류를 서버에서 받아 옵니다** (결함 360). 예전에는 만드는 자리에
+     종류가 아예 없었고 `kind: 'text'` 가 박혀 있었습니다 — 서버는 처음부터
+     둘 다 받았고 화면은 음성 채널을 제대로 그렸는데, 만들 길만 없었습니다.
+     목록을 화면에 적으면 서버의 `CHANNEL_LABEL` 과 두 벌이 됩니다. */
+  const [kinds, setKinds] = useState<ChannelKindChoice[]>([]);
+  const [newKind, setNewKind] = useState('text');
   const [query, setQuery] = useState('');
+  /* 찾기 게이트는 `@lib` 한 벌입니다 — 이 화면에는 거를 칸이 없으므로
+     `filters` 는 `null` 입니다(결함 375). 규칙을 여기서 다시 적으면
+     찾기 화면과 갈라집니다(대표 실패 ②). */
+  const canFind = canSearch(query, null);
+  const searchBlocked = blockedReason(query, null);
   const [found, setFound] = useState<{ channel_name: string; message: ChatMessage }[] | null>(
     null,
   );
@@ -312,10 +396,28 @@ function App() {
    *  펴지면 처음 상태로 되돌아갑니다(줄마다 네모 넷). */
   const [picking, setPicking] = useState<number | null>(null);
   /** 반응 이름 → 사람 말. **서버가 줍니다.** */
-  const [labels, setLabels] = useState<Record<string, string>>({});
+  const [choices, setChoices] = useState<ReactionChoice[]>([]);
 
   const open = channels?.find((c) => c.id === openId) ?? null;
   const foot = useRef<HTMLDivElement>(null);
+  /* ⛔ **「고치기」·「답글」을 눌러도 초점이 그 자리에 남아 있었습니다**
+     (결함 302). 글은 아래 작성칸으로 옮겨 가는데 초점은 안 갑니다 —
+     키보드만 쓰는 사람은 **Tab 을 31~32번** 눌러야 그 칸에 닿습니다
+     (남은 메시지마다 반응·답글·고치기·지우기 넷을 지나갑니다). 메시지가
+     쌓일수록 더 멀어집니다.
+
+     화면은 「고치는 중」이라고 말은 합니다 — 실패 ③ 「할 일을 알려 주고
+     그 일을 할 자리를 안 줌」 그대로입니다. */
+  const draftBox = useRef<HTMLTextAreaElement>(null);
+
+  /** 글을 옮겨 놓은 칸으로 **데려다 줍니다.** 캐럿은 글 끝에 둡니다. */
+  const goToDraft = useCallback((): void => {
+    const box = draftBox.current;
+    if (box === null) return;
+    box.focus();
+    const end = box.value.length;
+    box.setSelectionRange(end, end);
+  }, []);
 
   const loadChannels = useCallback(async (): Promise<void> => {
     const response = await get(`/api/projects/${projectId}/channels`);
@@ -338,12 +440,23 @@ function App() {
     setChannels(rows);
     setOpenId((current) => {
       if (current !== null && rows.some((c) => c.id === current)) return current;
+      // ⚠️ 알림이 데려온 채널이 먼저입니다 — 없거나 내가 못 보는
+      //    채널이면 지금까지처럼 첫 텍스트 채널로 떨어집니다.
+      const asked = rows.find((c) => c.id === wantedChannel);
+      if (asked !== undefined) return asked.id;
       return rows.find(carriesMessages)?.id ?? rows[0]?.id ?? null;
     });
   }, []);
 
+  /* ⛔ **대화의 앞부분에 닿을 길이 없었습니다** (결함 315). 서버는 최신
+     50개만 주는데(`MAX_PAGE`) 화면에 「더 보기」가 없어, 메시지 60개짜리
+     채널에서 처음 열 줄이 제품 안에서 영영 안 보였습니다. 서버는 이미
+     `before_id` 를 받을 수 있었고 화면이 한 번도 안 보냈습니다. */
+  const [older, setOlder] = useState<'maybe' | 'none' | 'loading'>('none');
+
   const loadMessages = useCallback(async (channelId: number): Promise<void> => {
     setMessages(null);
+    setOlder('none');
     const response = await whileLoading(
       get(`/api/channels/${channelId}/messages`),
       () => setSlow(true),
@@ -364,7 +477,33 @@ function App() {
       return;
     }
     setFailure(null);
-    setMessages((await response.json()) as ChatMessage[]);
+    const rows = (await response.json()) as ChatMessage[];
+    setMessages(rows);
+    setOlder(hasOlderMessages(rows.length) ? 'maybe' : 'none');
+  }, []);
+
+  /** 앞쪽 한 쪽 더. 판단(더 있을 수 있는가·어디서부터·어떻게 붙이는가)은 `@lib`. */
+  const loadOlder = useCallback(async (channelId: number, cursor: number): Promise<void> => {
+    setOlder('loading');
+    const response = await get(`/api/channels/${channelId}/messages?before_id=${cursor}`);
+    if (response === null) {
+      setFailure(unreachableText('이전 대화를 못 불러왔습니다'));
+      setOlder('maybe');
+      return;
+    }
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
+    if (!response.ok) {
+      setFailure(describeHttpStatus(response.status) ?? '이전 대화를 못 불러왔습니다');
+      setOlder('maybe');
+      return;
+    }
+    setFailure(null);
+    const rows = (await response.json()) as ChatMessage[];
+    setMessages((current) => prependOlder(rows, current ?? []));
+    setOlder(hasOlderMessages(rows.length) ? 'maybe' : 'none');
   }, []);
 
   useEffect(() => {
@@ -378,12 +517,19 @@ function App() {
       if (response.ok) setMe((await response.json()) as Me);
     })();
     void (async () => {
-      // 반응 이름표. ⚠️ 못 받아도 화면은 돕니다 — 낭독기 라벨이 이름
-      //    그대로 나올 뿐이고, 여기서 빨간 줄을 띄울 일은 아닙니다.
+      // 고를 수 있는 반응. ⚠️ 못 받으면 **고르는 자리를 안 그립니다** —
+      //    화면이 집합을 지어내면 서버의 어휘와 두 벌이 됩니다(결함 414).
+      //    이미 달린 반응은 메시지에 `label` 이 딸려 오므로 그대로 보입니다.
       const response = await get('/api/chat/reactions');
       if (response === null || !response.ok) return;
-      const rows = (await response.json()) as { mark: string; label: string }[];
-      setLabels(Object.fromEntries(rows.map((r) => [r.mark, r.label])));
+      setChoices((await response.json()) as ReactionChoice[]);
+    })();
+    void (async () => {
+      // 채널 종류. ⚠️ 못 받으면 **고르는 칸을 안 그립니다** — 종류를
+      //    화면이 지어내면 서버의 어휘와 두 벌이 됩니다(결함 360).
+      const response = await get('/api/chat/channel-kinds');
+      if (response === null || !response.ok) return;
+      setKinds((await response.json()) as ChannelKindChoice[]);
     })();
     void loadChannels();
   }, [loadChannels]);
@@ -411,6 +557,17 @@ function App() {
     } catch {
       return;
     }
+    // ⚠️ 우리가 닫는 것과 저쪽이 끊는 것을 갈라야 합니다 — 채널을
+    //    옮길 때마다 「끊겼습니다」가 뜨면 그 말이 닳습니다.
+    let onPurpose = false;
+
+    socket.onclose = () => {
+      const say = streamClosedNote(onPurpose);
+      // ⚠️ 이 화면의 `Note` 는 `'bad' | 'plain'` 둘뿐입니다 — 세 번째를
+      //    만들지 않습니다. 서버에 못 닿는 다른 문구들과 같은 부류이므로
+      //    같은 톤을 씁니다.
+      if (say !== null) setNote({ text: say, tone: 'bad' });
+    };
     socket.onmessage = (event: MessageEvent<string>) => {
       let payload: { kind?: string; message?: ChatMessage };
       try {
@@ -432,7 +589,10 @@ function App() {
         return merged;
       });
     };
-    return () => socket.close();
+    return () => {
+      onPurpose = true;
+      socket.close();
+    };
   }, [openId]);
 
   useEffect(() => {
@@ -463,7 +623,7 @@ function App() {
       }
       if (!response.ok) {
         setNote({
-          text: describeHttpStatus(response.status) ?? '메시지를 못 보냈습니다',
+          text: await failureText(response, '메시지를 못 보냈습니다'),
           tone: 'bad',
         });
         return;
@@ -500,7 +660,7 @@ function App() {
         }
         if (!response.ok) {
           setNote({
-            text: describeHttpStatus(response.status) ?? '반응을 못 보냈습니다',
+            text: await failureText(response, '반응을 못 보냈습니다'),
             tone: 'bad',
           });
           return;
@@ -527,7 +687,7 @@ function App() {
       }
       if (!response.ok) {
         setNote({
-          text: describeHttpStatus(response.status) ?? '메시지를 못 지웠습니다',
+          text: await failureText(response, '메시지를 못 지웠습니다'),
           tone: 'bad',
         });
         return;
@@ -546,7 +706,7 @@ function App() {
     setSending(true);
     try {
       const response = await sendJson(`/api/projects/${projectId}/channels`, 'POST', {
-        kind: 'text',
+        kind: newKind,
         name: newName,
       });
       if (response === null) {
@@ -555,7 +715,7 @@ function App() {
       }
       if (!response.ok) {
         setNote({
-          text: describeHttpStatus(response.status) ?? '채널을 못 만들었습니다',
+          text: await failureText(response, '채널을 못 만들었습니다'),
           tone: 'bad',
         });
         return;
@@ -568,10 +728,16 @@ function App() {
     } finally {
       setSending(false);
     }
-  }, [newName, loadChannels]);
+    /* ⚠️ **`newKind` 가 여기 없으면 고른 종류가 조용히 버려집니다**
+       (결함 376). 이 콜백은 `newName` 이 바뀔 때만 다시 만들어지는데,
+       사람은 대개 **이름을 먼저 적고 종류를 고릅니다** — 그러면 클로저가
+       쥔 `newKind` 는 이름을 마지막으로 친 시점의 값(`'text'`)이고, 서버는
+       그 값을 받아 **201** 을 줍니다. 화면에는 아무 오류도 안 납니다. */
+  }, [newName, newKind, loadChannels]);
 
   const runSearch = useCallback(async (): Promise<void> => {
-    if (query.trim().length < 2) {
+    // ⚠️ 그리는 자리와 **같은 판단**을 씁니다 (결함 375).
+    if (!canSearch(query, null)) {
       setFound(null);
       return;
     }
@@ -582,8 +748,17 @@ function App() {
       setNote({ text: unreachableText('찾지 못했습니다'), tone: 'bad' });
       return;
     }
+    /* ⚠️ **세션부터 봅니다** (결함 425 와 같은 모양). 이 파일의 다른 자리는
+       전부 `isSessionExpired` → `goToLogin` 입니다. ⚠️ 이 자리는 화면으로
+       **재현하지 못했습니다**(글 찾기를 켜려면 채널과 글이 먼저 필요합니다)
+       — 결함으로 세지 않고, 같은 파일이 이미 지키는 규칙을 여기에도
+       적용했습니다. */
+    if (isSessionExpired(response.status)) {
+      goToLogin();
+      return;
+    }
     if (!response.ok) {
-      setNote({ text: describeHttpStatus(response.status) ?? '찾지 못했습니다', tone: 'bad' });
+      setNote({ text: await failureText(response, '찾지 못했습니다'), tone: 'bad' });
       return;
     }
     setNote(null);
@@ -674,6 +849,36 @@ function App() {
               placeholder="예: 디자인"
               onChange={(event) => setNewName(event.target.value)}
             />
+            {/* ⚠️ **종류를 고를 자리** (결함 360). 서버는 처음부터 둘 다
+                받았고 화면은 음성 채널을 제대로 그렸는데(`voiceChannelNote`),
+                만드는 자리만 텍스트로 박혀 있었습니다 — `vocab.py` 는 「두
+                종류 다 화면에서 만들 수 있고」라고, `docs/20` 은 CHANNEL-002
+                를 ✅ 라고 적어 두고 있었습니다.
+
+                ⚠️ 이름표와 설명은 **서버가 줍니다.** 여기 적으면 어휘가 두
+                벌이 되고, 종류가 늘 때 한쪽만 고쳐집니다.
+
+                ⚠️ 못 받았으면 **안 그립니다.** 빈 라디오 묶음을 그리면
+                누를 수 있는데 아무 뜻이 없는 칸이 됩니다. */}
+            {kinds.length > 0 && (
+              <fieldset className="ckind">
+                <legend>채널 종류</legend>
+                {kinds.map((choice) => (
+                  <label key={choice.kind} htmlFor={`kind-${choice.kind}`}>
+                    <input
+                      id={`kind-${choice.kind}`}
+                      type="radio"
+                      name="channel-kind"
+                      value={choice.kind}
+                      checked={newKind === choice.kind}
+                      onChange={() => setNewKind(choice.kind)}
+                    />
+                    <span className="kname">{choice.label}</span>
+                    <span className="khint">{choice.hint}</span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
             <button type="submit" id="add-channel" disabled={newName.trim() === '' || sending}>
               채널 만들기
             </button>
@@ -693,11 +898,35 @@ function App() {
               id="q"
               value={query}
               placeholder="두 글자 이상"
+              aria-describedby={searchBlocked !== null ? 'q-why' : undefined}
               onChange={(event) => setQuery(event.target.value)}
             />
-            <button type="submit" id="search" disabled={query.trim().length < 2}>
+            {/* ⚠️ **한 글자를 적는 순간 placeholder 가 사라집니다** — 그때
+                단추는 그대로 막혀 있는데 화면 어디에도 이유가 없었습니다
+                (결함 375). 찾기 화면은 같은 규칙을 `@lib` 의
+                `blockedReason` 으로 이미 말하고 있었고, 이 화면만 규칙을
+                손으로 다시 적고 있었습니다(대표 실패 ②).
+                ⚠️ 그리고 진짜 `disabled` 가 아니라 `aria-disabled` 입니다
+                (결함 234·373·374) — 닿지 못하면 사유를 들려줄 수 없습니다. */}
+            <button
+              type="submit"
+              id="search"
+              aria-disabled={!canFind}
+              aria-describedby={searchBlocked !== null ? 'q-why' : undefined}
+              onClick={(event) => {
+                if (!canFind) {
+                  event.preventDefault();
+                  document.getElementById('q')?.focus();
+                }
+              }}
+            >
               찾기
             </button>
+            {searchBlocked !== null && (
+              <p id="q-why" className="status plain">
+                {searchBlocked}
+              </p>
+            )}
           </form>
         </aside>
 
@@ -743,14 +972,31 @@ function App() {
             slow && <div aria-busy="true" dangerouslySetInnerHTML={{ __html: rowSkeleton(4) }} />
           ) : messages.length === 0 ? (
             <RawHtml
-              html={emptyHtml({
-                what: '아직 아무 말도 없습니다',
-                why: `${channelTitle(open)} 채널이 방금 만들어졌습니다.`,
-                how: '아래에 첫 마디를 적어 보세요.',
-              })}
+              /* ⛔ 예전에는 「`${channelTitle(open)}` 채널이 **방금
+                 만들어졌습니다**」였습니다 (결함 304 회차). 화면은 만든
+                 시각을 받지 않습니다 — 채널 목록은 {id, kind, name,
+                 position} 뿐이라 「방금」인지 알 수가 없었습니다. 문구는
+                 한 벌(`@lib`)에서 옵니다. */
+              html={emptyHtml({ what: '아직 아무 말도 없습니다', ...describeEmptyChannel() })}
             />
           ) : (
             <div className="stream">
+              {/* ⭐ **대화의 앞부분으로 가는 문** (결함 315). 서버는 한 번에
+                  50개만 줍니다 — 그 앞이 있는지 없는지 화면이 말하지
+                  않으면, 사람은 처음 열 줄이 사라진 줄도 모릅니다.
+                  판단은 `@lib` 의 `hasOlderMessages`·`olderCursor`. */}
+              {older !== 'none' && olderCursor(messages) !== null && (
+                <p className="more">
+                  <button
+                    type="button"
+                    id="older"
+                    disabled={older === 'loading'}
+                    onClick={() => void loadOlder(open.id, olderCursor(messages) as number)}
+                  >
+                    {older === 'loading' ? '불러오는 중…' : '이전 대화 더 보기'}
+                  </button>
+                </p>
+              )}
               {dayGroups(messages).map((group) => (
                 <section key={group.date} className="day">
                   {/* ⚠️ 날짜를 안 가르면 어제 온 말과 방금 온 말이 붙어
@@ -761,22 +1007,22 @@ function App() {
                       <Row
                         key={message.id}
                         message={message}
-                        parent={
-                          message.reply_to_id === null
-                            ? undefined
-                            : messages.find((m) => m.id === message.reply_to_id)
-                        }
+                        quote={quoteFor(message.reply_to_id, messages)}
                         runOn={continuesRun(group.messages[i - 1], message)}
                         meId={me?.user_id ?? null}
                         busy={sending}
                         onReply={(target) => {
                           setReplyTo(target);
                           setEditing(null);
+                          goToDraft();
                         }}
                         onEdit={(target) => {
                           setEditing(target);
                           setReplyTo(null);
                           setDraft(target.body);
+                          /* ⚠️ `setDraft` 는 다음 그리기에 반영되므로 캐럿을
+                             끝에 두려면 그 뒤에 옮겨야 합니다. */
+                          requestAnimationFrame(goToDraft);
                         }}
                         onDelete={(target) => void remove(target)}
                         onReact={(target, mark) => {
@@ -787,7 +1033,7 @@ function App() {
                         onTogglePicker={() =>
                           setPicking((current) => (current === message.id ? null : message.id))
                         }
-                        labels={labels}
+                        choices={choices}
                       />
                     ))}
                   </ul>
@@ -831,6 +1077,7 @@ function App() {
               </label>
               <textarea
                 id="draft"
+                ref={draftBox}
                 value={draft}
                 rows={2}
                 maxLength={MAX_BODY}

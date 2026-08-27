@@ -331,8 +331,19 @@ def change_task(
     우선순위는 "무엇부터 볼까" 일 뿐입니다. 남기면 로그가 잡음으로
     가득 차고, 정작 중요한 변경이 그 속에 묻힙니다.
     """
+    # ⚠️ **지운 업무도 여기서 막습니다.**
+    #
+    # 행은 남기 때문에(`delete_task` 참고) `session.get` 은 지운 것도
+    # 돌려줍니다. 바로 옆 `set_assignees` 는 `deleted_at` 을 같이 보는데
+    # 여기만 안 봤고, 그래서 **지운 업무의 상태가 바뀌었습니다.** 그러고
+    # 나면 화면에 돌려줄 줄을 목록에서 못 찾아(`list_tasks` 는 지운 것을
+    # 거릅니다) API 가 `StopIteration` 으로 터졌습니다 — 사람은 **500** 을
+    # 봤고 서버 로그에는 트레이스백이 남았습니다.
+    #
+    # 베타에서 흔한 모양입니다: 둘이 같은 칸반을 보다 한 명이 카드를
+    # 지우고, 다른 한 명이 그 카드를 옮기는 것.
     task = session.get(m.Task, task_id)
-    if task is None or task.project_id != project_id:
+    if task is None or task.project_id != project_id or task.deleted_at is not None:
         raise TaskError("업무를 찾을 수 없습니다")
 
     if status is not None and status not in STATUSES:

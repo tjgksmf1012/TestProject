@@ -16,6 +16,7 @@ import pytest
 from teamflow.github.connection import (
     ConnectionFacts,
     NearMiss,
+    can_backfill,
     diagnose,
     looks_like_typo_of,
     repo_key,
@@ -323,6 +324,12 @@ def test_connected_but_never_backfilled_says_history_is_missing():
             member_logins=frozenset({"minsu"}),
             actor_logins=frozenset({"minsu"}),
             backfilled_at=None,
+            # ⚠️ 배달이 와서 `verified_at` 이 찍힌 프로젝트는 **설치 id 도
+            # 있습니다** — 서명된 웹훅 본문의 `installation.id` 로만 채우기
+            # 때문입니다(결함 36). 이 칸을 빼면 실기가 만들지 않는 상태가
+            # 되고, 그 상태에서는 백필이 안 되므로 「가져오기」를 권하지
+            # 않는 것이 맞습니다(결함 380).
+            installation_present=True,
         )
     )
     assert state.code == "connected"
@@ -418,3 +425,68 @@ def test_no_warning_smuggles_markdown_onto_the_screen():
     assert seen, "경고를 하나도 안 만드는 조합만 돌았습니다 — 테스트가 헛돕니다"
     offenders = [w for w in seen if "**" in w or "`" in w]
     assert offenders == [], offenders
+
+
+def test_the_screen_is_never_told_to_press_a_button_the_server_will_refuse():
+    """⭐ **「누르면 채웁니다」는 실제로 채울 수 있을 때만** (결함 380).
+
+    경고 줄은 이렇게 끝났습니다.
+
+        … 아래 '지난 활동 가져오기'를 누르면 채웁니다.
+
+    그 아래 단추도 그려집니다. 그런데 서버는 자격 증명이나 App 설치가
+    없으면 **409** 로 거절합니다 — 시연 상태가 정확히 그랬습니다.
+
+    ⚠️ **낱개 사례를 늘리지 않고 전수로 돕니다.** 백필 가능 여부를
+    가르는 축을 모두 만들어, 「못 하는데 권하는」 조합이 하나도 없어야
+    합니다.
+    """
+    import itertools
+
+    promised: list[tuple] = []
+    checked = 0
+    for repo, creds, install, count, backfilled in itertools.product(
+        ("team/teamflow", None), (True, False), (True, False), (0, 12), (None, AT)
+    ):
+        facts = ConnectionFacts(
+            repo=repo,
+            webhook_secret_present=True,
+            app_credentials_present=creds,
+            installation_present=install,
+            verified_at=AT,
+            delivery_count=count,
+            member_logins=frozenset({"minsu"}),
+            actor_logins=frozenset({"minsu"}),
+            backfilled_at=backfilled,
+        )
+        state = diagnose(facts)
+        says_press = any("누르면 채웁니다" in w for w in state.warnings)
+        if says_press:
+            checked += 1
+            if not can_backfill(facts):
+                promised.append((repo, creds, install, count, backfilled))
+
+    assert checked > 0, "「누르면 채웁니다」가 한 번도 안 나왔습니다 — 자가 헛돕니다"
+    assert promised == [], (
+        "서버가 거절할 상태인데 화면에 「누르면 채웁니다」라고 말하고 있습니다: " f"{promised}"
+    )
+
+
+def test_backfill_possible_means_the_button_is_offered():
+    """⭐ 반대 방향도 봅니다 — **할 수 있는데 안 권하면** 기능이 죽습니다.
+
+    한쪽만 재면 「언제나 False」가 통과합니다.
+    """
+    facts = ConnectionFacts(
+        repo="team/teamflow",
+        webhook_secret_present=True,
+        app_credentials_present=True,
+        installation_present=True,
+        verified_at=AT,
+        delivery_count=12,
+        member_logins=frozenset({"minsu"}),
+        actor_logins=frozenset({"minsu"}),
+        backfilled_at=None,
+    )
+    assert can_backfill(facts) is True
+    assert any("누르면 채웁니다" in w for w in diagnose(facts).warnings)

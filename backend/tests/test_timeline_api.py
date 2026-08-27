@@ -321,3 +321,80 @@ def test_track_audio_is_for_members_only(
     )
     assert response.status_code in (403, 404)
     assert CHUNK not in response.content
+
+
+# ══════════════════════════════════════════════════════════════
+# 압축 — 흰 화면 시간을 줄이되, 소리는 건드리지 않는다
+# ══════════════════════════════════════════════════════════════
+#
+# ⚠️ 이 둘은 **짝**입니다. 아래 "소리는 압축 안 함" 만 두면, 압축을 통째로
+#    꺼도 통과합니다 — 아무것도 재지 않는 검사가 됩니다. 그래서 "글자는
+#    압축함" 을 같이 둡니다.
+
+
+def test_text_responses_are_compressed(client: TestClient, meeting: dict, audio_root: Path):
+    """⭐ 압축이 실제로 켜져 있는가.
+
+    이게 없으면 아래 검사가 **압축을 꺼도 통과**합니다.
+
+    번들을 압축 없이 보내고 있었습니다 — `index-*.js` 가 526KB 였고, gzip
+    하면 161KB 입니다. 400kbps 회선에서 캐시를 비우고 열면 **6초가 넘게
+    흰 화면**이었습니다(브라우저로 재서 확인).
+    """
+    store = ChunkStore(root=audio_root)
+    track_id = add_track(meeting["meeting_id"], meeting["member"], store, seqs=[0])
+    for i in range(40):
+        add_utterance(
+            meeting["meeting_id"],
+            start_ms=i * 1_000,
+            end_ms=i * 1_000 + 900,
+            text=f"압축이 켜졌는지 보려고 넣는 긴 발화 {i} — 한국어는 UTF-8 로 세 바이트입니다",
+            speaker_id=meeting["member"],
+            track_id=track_id,
+        )
+
+    login_as(client, meeting["member"])
+    response = client.get(
+        f"/api/meetings/{meeting['meeting_id']}/timeline",
+        headers={"Accept-Encoding": "gzip"},
+    )
+    assert response.status_code == 200
+    assert response.headers.get("content-encoding") == "gzip", (
+        "본문이 크지 않아 검사가 헛돌 수 있습니다 — 실제 크기: "
+        f"{len(response.content)}바이트"
+    )
+    # 압축을 풀어도 내용은 그대로여야 합니다 (httpx 가 풀어 줍니다).
+    assert len(response.json()["utterances"]) >= 40
+
+
+def test_the_audio_stream_is_never_gzipped(
+    client: TestClient, meeting: dict, audio_root: Path
+):
+    """⚠️ **소리는 압축하지 않습니다.**
+
+    webm 은 이미 압축된 형식이라 gzip 이 줄이는 양이 0에 가깝습니다. 그런데
+    회의 한 시간짜리 트랙은 수십 MB 이고, 매 재생마다 그걸 다시 압축하면
+    **아무것도 얻지 못하면서 재생이 끊깁니다.**
+
+    ⚠️ `response.content` 로는 못 잡습니다 — httpx 가 알아서 풀어 주기
+    때문에 압축을 하든 안 하든 같은 바이트가 나옵니다. **헤더**를 봐야
+    합니다.
+    """
+    store = ChunkStore(root=audio_root)
+    track_id = add_track(meeting["meeting_id"], meeting["member"], store, seqs=[0, 1, 2])
+    # gzip 이 잘 먹는 바이트를 일부러 넣습니다 — 압축이 걸렸다면 반드시
+    # 헤더가 붙을 만큼 크고 반복적인 내용입니다.
+    for seq in (0, 1, 2):
+        store.write(meeting["meeting_id"], track_id, seq, b"A" * 4_000)
+
+    login_as(client, meeting["member"])
+    response = client.get(
+        f"/api/meetings/{meeting['meeting_id']}/tracks/{track_id}/audio",
+        headers={"Accept-Encoding": "gzip"},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("audio/webm")
+    assert "content-encoding" not in response.headers, (
+        "소리에 gzip 이 걸렸습니다 — 줄어드는 양은 0인데 CPU 만 태웁니다"
+    )
+    assert response.content == b"A" * 12_000

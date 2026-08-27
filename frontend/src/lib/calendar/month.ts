@@ -69,8 +69,13 @@ function iso(at: Date): string {
  * 이 달의 몇째 날부터 격자를 그릴 것인가 — **그 주의 월요일**.
  *
  * ⚠️ 일요일 시작이 아니라 월요일 시작입니다. 이 제품은 팀 프로젝트
- * 도구이고 주간 보고서도 월~일로 끊습니다(`reports/period.py`). 달력만
- * 일요일 시작이면 "이번 주" 가 두 뜻이 됩니다.
+ * 도구이고 주간 보고서도 월~일로 끊습니다(`teamflow/clock.py` 의
+ * `team_week`). 달력만 일요일 시작이면 "이번 주" 가 두 뜻이 됩니다.
+ *
+ * ⚠️ 이 줄은 한동안 **사실이 아니었습니다** — `reports/period.py` 를
+ * 가리키고 있었는데 그 파일은 받은 기간을 찍기만 하고, 실제로는 화면이
+ * 「지난 7일」을 만들어 보내고 있었습니다(결함 296). 문서에 적힌 것을
+ * 그대로 믿지 말고 세어 보라는 것이 이 저장소의 규칙입니다.
  */
 export function weekStart(year: number, month: number): Date {
   const first = new Date(Date.UTC(year, month - 1, 1));
@@ -218,9 +223,166 @@ export function isOverdue(item: CalendarItem, today: string): boolean {
  * ⚠️ 칸 안의 점·색은 **눈으로만 읽히는 표시**입니다. 그것뿐이면 낭독기
  * 사용자에게는 숫자만 남습니다.
  */
-export function dayAriaLabel(cell: DayCell): string {
-  if (cell.items.length === 0) return `${cell.day}일`;
-  return `${cell.day}일, ${cell.items.length}건 — ${cell.items
+export function dayAriaLabel(cell: DayCell, today: string): string {
+  /* ⛔ **「오늘」을 색 하나에만 싣지 마십시오** (결함 400).
+     `.cell.today` 는 테두리 **색**만 바꿉니다. `forced-colors: active` 는
+     모든 칸의 테두리를 같은 시스템 색으로 덮으므로 오늘 칸이 옆 칸과
+     **한 자도 안 달라집니다** — 재서 확인했습니다. 그리고 귀로는 원래부터
+     알 수 없었습니다: 이 이름표가 「26일」이라 「1일」과 모양이 같았습니다.
+     같은 파일이 **고른 날**에는 `aria-current="date"` 를 붙이고 있었으니,
+     안 붙어 있던 것은 오늘 쪽입니다. */
+  /* ⛔ **이웃 달 칸도 귀로 갈라져야 합니다** (결함 407). 8월 격자에는
+     7월 27~31 과 9월 1~6 이 앞뒤로 붙고, 이 달에도 27~31 · 1~6 이
+     있습니다 — 재 보니 **열한 칸이 이 달의 어느 칸과 글자까지 똑같이**
+     읽혔습니다(「27일」 ↔ 「27일」). 눈으로는 결함 400 이 흐린 색으로
+     갈라 뒀지만 색은 귀에 안 옵니다.
+
+     ⚠️ **이 달 칸에는 달을 안 붙입니다** — 머리줄이 이미 「2026년 8월」
+     이라고 말하고, 서른한 번 되풀이하면 그 말이 배경이 됩니다
+     (`docs/22` 처방 ①). 예외인 칸에만 붙입니다. */
+  const month = Number(cell.date.slice(5, 7));
+  const label = cell.inMonth ? `${cell.day}일` : `${month}월 ${cell.day}일`;
+  const day = cell.date === today ? `${label}, 오늘` : label;
+  if (cell.items.length === 0) return day;
+  return `${day}, ${cell.items.length}건 — ${cell.items
     .map((item) => `${describeKind(item.kind)} ${item.title}`)
     .join(', ')}`;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 비어 있을 때 할 말
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 비어 있는 자리에 적을 세 줄.
+ *
+ * ⛔ **격자에 뱃지가 보이는데 「없습니다 · 만드세요」 라고 시키면 안 됩니다.**
+ * 8월을 열면 격자 끝 줄에 9월 초 나흘이 붙어 보이고, 씨앗 프로젝트에서는
+ * 거기에 회의 넷과 마감 하나가 뱃지로 떠 있었습니다. 그런데 바로 아래
+ * 목록은 「이 달에는 잡힌 일이 없습니다 — 일정은 자동으로 생기지 않습니다.
+ * 칸반에서 업무에 마감일을 주세요」 라고 **없다고 단언하고 이미 있는 것을
+ * 만들라고 시켰습니다**(결함 294). 한 화면이 서로 반대되는 말을 합니다.
+ *
+ * 「이 달에는 없다」 자체는 참입니다 — 거짓말은 **이유와 다음 할 일**
+ * 쪽입니다. 그래서 그 두 줄만 격자가 아는 것으로 바꿉니다.
+ */
+export interface EmptyNote {
+  what: string;
+  why: string;
+  how: string;
+}
+
+/** `2026-09-01` → `9월 1일`. 못 읽으면 원문 그대로. */
+export function describeDate(date: string): string {
+  const hit = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (hit === null) return date;
+  return `${Number(hit[2])}월 ${Number(hit[3])}일`;
+}
+
+function dayNumber(date: string): number {
+  return Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10)));
+}
+
+/**
+ * 격자에서 일이 있는 칸 중 기준 날짜에 **가장 가까운** 것. 없으면 `null`.
+ *
+ * ⚠️ 같은 거리면 **앞날**을 고릅니다. 지나간 것을 가리키면 "가서 보라" 는
+ * 말이 쓸모없어집니다.
+ */
+export function nearestDayWithItems(cells: readonly DayCell[], from: string): DayCell | null {
+  const base = dayNumber(from);
+  let best: DayCell | null = null;
+  let bestGap = Number.POSITIVE_INFINITY;
+  let bestAhead = false;
+  for (const cell of cells) {
+    if (cell.items.length === 0) continue;
+    const delta = dayNumber(cell.date) - base;
+    const gap = Math.abs(delta);
+    const ahead = delta >= 0;
+    if (gap < bestGap || (gap === bestGap && ahead && !bestAhead)) {
+      best = cell;
+      bestGap = gap;
+      bestAhead = ahead;
+    }
+  }
+  return best;
+}
+
+/**
+ * 이 격자에서 「비었습니다」 라고 말할 때 함께 할 말.
+ *
+ * `picked` 가 `null` 이면 달 전체가, 아니면 고른 날 하나가 빈 것입니다.
+ */
+export function emptyNote(cells: readonly DayCell[], picked: DayCell | null): EmptyNote {
+  const what = picked === null ? '이 달에는 잡힌 일이 없습니다' : '이 날에는 잡힌 일이 없습니다';
+  const from = picked?.date ?? cells.find((cell) => cell.inMonth)?.date ?? cells[0]?.date ?? '';
+  const near = from === '' ? null : nearestDayWithItems(cells, from);
+
+  // 격자가 통째로 비었을 때만 "만드세요" 가 참입니다.
+  //
+  // ⚠️ 예전에는 `how` 가 「아래에서 회의 일정을 잡거나, **칸반에서 업무에
+  // 마감일을 주세요**」 였습니다 (결함 389). 칸반에는 마감일을 주는 자리가
+  // 없습니다 — 업무 PATCH 에 `deadline` 을 싣는 화면이 **두 뿌리 다 0곳**
+  // 이고, 마감일은 후보를 승인할 때 한 번 정해집니다. 결함 386 이 바로 위
+  // 머리줄에서 걷어낸 그 주장인데, **같은 화면의 이 줄이 그대로 남아**
+  // 머리줄과 반대되는 말을 하고 있었습니다 (실패 ②·결함 298·301).
+  if (near === null) {
+    return {
+      what,
+      why: '일정은 자동으로 생기지 않습니다 — 업무 마감일이나 회의에서 옵니다.',
+      how: '아래에서 회의 일정을 잡으세요. 업무 마감일은 업무 후보를 승인할 때 정해집니다.',
+    };
+  }
+
+  const when = describeDate(near.date);
+  if (near.inMonth) {
+    // 고른 날만 비었습니다 — 이 달에는 있습니다.
+    return {
+      what,
+      why: `이 달에 잡힌 일은 있습니다 — 가장 가까운 것은 ${when}입니다.`,
+      how: '[이 달 전체 보기]를 누르면 이 달에 있는 일이 모두 나옵니다.',
+    };
+  }
+
+  const ahead = dayNumber(near.date) >= dayNumber(from);
+  return {
+    what,
+    why: `가장 가까운 일은 ${when}입니다 — 격자 ${ahead ? '끝' : '앞'}의 흐린 칸에 이미 보입니다.`,
+    how: `[${ahead ? '다음달' : '지난달'}]을 누르면 그 달이 열립니다.`,
+  };
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// 잡아 둔 일정 무르기 (결함 298)
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 이 항목을 **무를 수 있는가**.
+ *
+ * ⛔ 서버에는 `DELETE /api/scheduled-meetings/{id}` 가 처음부터 있었고
+ * 검사까지 붙어 있었는데 **부르는 곳이 0곳**이었습니다 — 이 저장소가
+ * 대표 실패 ① 로 적어 둔 「만들어 놓고 아무도 안 부름」입니다. 일정을
+ * 잘못 잡거나 두 번 잡으면 달력·홈·회의 목록에 **영영 남았습니다**
+ * (실패 ③ 「할 일을 알려 주고 그 일을 할 자리를 안 줌」).
+ *
+ * ⚠️ **여기는 「보여 줄까」만 정합니다.** 무를 수 있는지 최종 판정은
+ * 서버입니다(`이미 연 회의는 무를 수 없습니다`) — 격자가 이웃 달을
+ * 걸치면 이미 연 회의도 `meeting_planned` 로 그려질 수 있습니다.
+ * 같은 판단을 두 벌 만들지 않고, 거절당하면 **서버가 한 말을 그대로**
+ * 보여 줍니다.
+ */
+export function canCancelMeeting(item: CalendarItem): boolean {
+  return item.kind === 'meeting_planned' && item.meeting_id !== null;
+}
+
+/**
+ * 무르기 전에 물어볼 말.
+ *
+ * ⚠️ 「되돌릴 수 없습니다」라고 적지 않습니다 — 잡아 둔 일정은 다시 잡으면
+ * 그만이고, 없는 위험을 말하면 다음에 진짜 경고를 안 읽습니다
+ * (`deleteTaskConfirm` 과 다른 이유로 다른 문장입니다).
+ */
+export function cancelMeetingConfirm(title: string): string {
+  return `${title} 일정을 무릅니다. 아직 안 연 회의라 기록은 남지 않습니다.`;
 }

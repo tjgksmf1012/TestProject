@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,7 +90,12 @@ def seeded(engine, client: TestClient) -> dict:
             title="9월 1일 정기회의",
             started_at=NOW,
             duration_sec=1800,
-            status="done",
+            # ⚠️ 예전에는 `status="done"` 이었습니다 (결함 288). `"done"` 은
+            #    **업무** 상태이지 회의 상태가 아닙니다. 실기가 절대 만들지
+            #    않는 값을 검사 데이터가 만들고 있었고, 그래서 보고서의
+            #    「처리된 회의」가 언제나 0 인데도 검사는 초록이었습니다 —
+            #    **통과는 넣은 값에 대해서만 참입니다.**
+            status=m.MeetingStatus.NEEDS_REVIEW.value,
             started_by=users[0].id,
             summary="배포 일정을 다음 회의로 미뤘습니다",
             next_agenda=["배포 일정 재논의"],
@@ -310,14 +315,104 @@ def test_minutes_cannot_be_requested_from_the_project_route(
     assert "회의록은 회의에서" in response.json()["detail"]
 
 
-def test_a_weekly_report_without_a_period_is_refused(client: TestClient, seeded):
-    """⚠️ 조용히 기본 기간을 쓰면 **멀쩡한 주를 덮어씁니다.**"""
+# ── 「이번 주」는 서버가 정합니다 (결함 296) ────────────────────────
+#
+# ⚠️ **여기 있던 검사를 바꿨습니다.** 예전에는 기간 없는 `weekly` 를 400 으로
+#    거절했고 이유가 이렇게 적혀 있었습니다 —
+#
+#        ⚠️ 조용히 기본 기간을 쓰면 **멀쩡한 주를 덮어씁니다.**
+#
+#    그 걱정은 **아무 기본값**을 두는 경우에 참입니다. 그런데 그 계약 때문에
+#    유일한 실사용자(보고서 화면)가 「지난 7일」을 직접 만들어 보내고
+#    있었고, 그 창은 누를 때마다 굴러가서 `scope_key` 가 날마다 달라졌습니다
+#    — **하루에 한 벌씩 주간 보고서가 쌓였습니다**(사흘 눌러 세 벌, 그중
+#    둘은 제목까지 같아 사람 눈에 구별이 안 됨). `_upsert` 가 「쌓으면 안
+#    됩니다」라고 적어 둔 것이 아무것도 안 막고 있었습니다.
+#
+#    그래서 기본값을 **정해진 것**(팀 달력의 이번 주)으로 두고, 원래 걱정은
+#    아래 둘째 검사가 **실제로 재도록** 옮겨 적었습니다.
+
+
+def test_a_bare_weekly_report_means_this_team_week(client: TestClient, seeded):
+    """기간을 안 주면 **팀 달력의 이번 주**입니다."""
+    from teamflow import clock
+
     response = client.post(
         f"/api/projects/{seeded['project_id']}/reports",
         json={"report_type": "weekly"},
     )
-    assert response.status_code == 400
-    assert "period_start" in response.json()["detail"]
+    assert response.status_code == 201
+    body = response.json()
+    start, end = clock.team_week()
+    assert clock.local_date(datetime.fromisoformat(body["period_start"])) == clock.local_date(
+        start
+    )
+    assert clock.local_date(datetime.fromisoformat(body["period_end"])) == clock.local_date(end)
+    # 월요일에서 시작해 일요일에 끝납니다.
+    assert clock.local_date(datetime.fromisoformat(body["period_start"])).weekday() == 0
+    assert clock.local_date(datetime.fromisoformat(body["period_end"])).weekday() == 6
+
+
+def test_the_default_week_never_overwrites_another_week(client: TestClient, seeded):
+    """⭐ 원래 걱정을 **실제로 잽니다** — 기본값이 남의 주를 덮으면 안 됩니다."""
+    from teamflow import clock
+
+    # 지지난 주를 손으로 만들어 둡니다.
+    other_start, other_end = clock.team_week(datetime(2020, 6, 1, 3, 0, tzinfo=UTC))
+    made = client.post(
+        f"/api/projects/{seeded['project_id']}/reports",
+        json={
+            "report_type": "weekly",
+            "period_start": other_start.isoformat(),
+            "period_end": other_end.isoformat(),
+        },
+    )
+    assert made.status_code == 201
+    other_id = made.json()["id"]
+
+    # 기간 없이 한 번 더 — 이번 주로 갑니다.
+    fresh = client.post(
+        f"/api/projects/{seeded['project_id']}/reports",
+        json={"report_type": "weekly"},
+    )
+    assert fresh.status_code == 201
+    assert fresh.json()["id"] != other_id
+
+    # 옛 주는 그대로 있습니다.
+    kept = client.get(f"/api/reports/{other_id}")
+    assert kept.status_code == 200
+    assert clock.local_date(
+        datetime.fromisoformat(kept.json()["period_start"])
+    ) == clock.local_date(other_start)
+
+
+def test_pressing_the_weekly_button_on_different_days_does_not_stack(
+    client: TestClient, seeded
+):
+    """⭐ 결함 296 본체 — **한 주에 주간 보고서는 한 벌**입니다.
+
+    굴러가는 창이었을 때는 이 셋이 서로 다른 `scope_key` 를 만들어 세 벌이
+    쌓였고, 그중 둘은 제목까지 같았습니다.
+    """
+    from teamflow import clock
+
+    project_id = seeded["project_id"]
+    monday = datetime(2026, 8, 17, 1, 0, tzinfo=UTC)
+    for days in (0, 1, 3):
+        start, end = clock.team_week(monday + timedelta(days=days))
+        response = client.post(
+            f"/api/projects/{project_id}/reports",
+            json={
+                "report_type": "weekly",
+                "period_start": start.isoformat(),
+                "period_end": end.isoformat(),
+            },
+        )
+        assert response.status_code == 201
+
+    listed = client.get(f"/api/projects/{project_id}/reports").json()
+    weekly = [row for row in listed if row["report_type"] == "weekly"]
+    assert len(weekly) == 1, [row["title"] for row in weekly]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -366,3 +461,265 @@ def test_a_single_report_can_be_read_back(client: TestClient, seeded):
     created = client.post(f"/api/meetings/{seeded['meeting_id']}/minutes").json()
     fetched = client.get(f"/api/reports/{created['id']}").json()
     assert fetched["content"] == created["content"]
+
+
+# ══════════════════════════════════════════════════════════════
+# 「처리된 회의」가 사실이어야 한다 (결함 288)
+# ══════════════════════════════════════════════════════════════
+
+
+def _facts(content: dict) -> dict[str, str]:
+    for block in content["blocks"]:
+        if block["kind"] == "facts":
+            return {i["label"]: i["value"] for i in block["items"]}
+    raise AssertionError("보고서에 사실 칸이 없습니다 — 검사가 낡았습니다")
+
+
+def _note(content: dict, label: str) -> str:
+    for block in content["blocks"]:
+        if block["kind"] == "facts":
+            for i in block["items"]:
+                if i["label"] == label:
+                    return i.get("note", "")
+    return ""
+
+
+def test_processed_meetings_are_actually_counted(client: TestClient, seeded):
+    """⭐ 「처리된 회의」가 **언제나 0** 이었습니다.
+
+    `x.status == "done"` 으로 세고 있었는데 `"done"` 은 **업무** 상태라
+    어느 회의도 해당하지 않습니다. 씨앗에는 전사가 끝난 회의가 둘 있습니다
+    (`needs_review` 하나 · `confirmed` 하나).
+
+    그리고 그 0 은 조용하지 않았습니다 — 옆의 설명이 「N건은 아직 처리
+    전이라 그 회의의 발언은 기여도에 안 들어갔습니다」로 나갔고, 같은 제품의
+    기여도 화면은 그 사람의 회의 근거를 세고 있었습니다. **팀이 제출하는
+    문서가 제품 자신의 데이터와 반대되는 말을 한 것**입니다.
+    """
+    project_id = seeded["project_id"]
+    made = client.post(
+        f"/api/projects/{project_id}/reports", json={"report_type": "final"}
+    )
+    assert made.status_code == 201, made.text
+    facts = _facts(made.json()["content"])
+
+    assert facts["처리된 회의"] != "0건", (
+        "전사가 끝난 회의가 있는데 「처리된 회의 0건」입니다 — "
+        f"회의 {facts['회의']}"
+    )
+    # 이 파일의 씨앗은 회의 **하나**(`needs_review`)입니다. 전부 처리됐으니
+    # 「회의」와 「처리된 회의」가 같아야 합니다.
+    assert facts["처리된 회의"] == "1건"
+    assert facts["회의"] == facts["처리된 회의"]
+
+
+def test_a_meeting_that_has_not_happened_is_not_counted_as_having_happened(
+    client: TestClient, seeded
+):
+    """⭐ 머리말이 「이 기간에 **일어난** 일」입니다.
+
+    잡아만 두고 아직 안 연 회의는 일어나지 않았습니다 (결함 287). 최종
+    보고서는 기간을 안 받으므로 아무것도 안 걸러 주고, 예정 회의가 그대로
+    「회의 N건」에 섞여 들어갔습니다.
+    """
+    project_id = seeded["project_id"]
+    before = _facts(
+        client.post(
+            f"/api/projects/{project_id}/reports", json={"report_type": "final"}
+        ).json()["content"]
+    )["회의"]
+
+    made = client.post(
+        f"/api/projects/{project_id}/scheduled-meetings",
+        json={"title": "앞으로 할 회의", "at": "2027-01-05T02:00:00Z"},
+    )
+    assert made.status_code == 201, made.text
+
+    after = _facts(
+        client.post(
+            f"/api/projects/{project_id}/reports", json={"report_type": "final"}
+        ).json()["content"]
+    )["회의"]
+    assert after == before, (
+        f"일정을 잡았더니 「일어난 일」의 회의가 {before} → {after} 로 늘었습니다"
+    )
+
+
+def test_the_note_only_appears_when_something_really_is_unprocessed(
+    client: TestClient, seeded
+):
+    """⚠️ 설명이 **숫자와 같은 것**을 말해야 한다.
+
+    처리 안 된 회의가 0 이면 그 문장은 아예 안 나옵니다.
+    """
+    project_id = seeded["project_id"]
+    content = client.post(
+        f"/api/projects/{project_id}/reports", json={"report_type": "final"}
+    ).json()["content"]
+    facts = _facts(content)
+    note = _note(content, "처리된 회의")
+
+    total = int(facts["회의"].removesuffix("건"))
+    processed = int(facts["처리된 회의"].removesuffix("건"))
+    if total == processed:
+        assert note == "", "다 처리했는데 「아직 처리 전」이라고 합니다"
+    else:
+        assert f"{total - processed}건" in note, (
+            f"설명의 숫자가 사실과 다릅니다 — {total}−{processed} 인데 「{note}」"
+        )
+
+
+def test_the_service_counts_the_utterances_it_hands_the_builder(
+    client: TestClient, seeded, db: Session
+):
+    """⭐ 소리가 하나도 안 잡힌 회의의 회의록이 **API 를 통과한 뒤에도**
+    없었다고 단언하지 않는가 (결함 369).
+
+    ⚠️ 생성기만 보면 놓칩니다. 실제로 놓쳤습니다 — builder 는 갈래를 제대로
+    가르는데 **서비스가 개수를 안 넘기면** 아무 일도 안 일어나고, 검사
+    셋이 전부 초록이었습니다(대표 실패 ①). 여기서는 서비스가 **세어서
+    넘기는가**를 봅니다.
+    """
+    silent = m.Meeting(
+        project_id=seeded["project_id"],
+        title="아무 말도 안 잡힌 회의",
+        started_at=NOW,
+        duration_sec=600,
+        status=m.MeetingStatus.NEEDS_REVIEW.value,
+        started_by=seeded["user_ids"][0],
+    )
+    db.add(silent)
+    db.commit()
+    db.refresh(silent)
+
+    content = client.post(f"/api/meetings/{silent.id}/minutes").json()["content"]
+    facts = next(b for b in content["blocks"] if b["kind"] == "facts")
+    assert any(f["label"] == "기록된 발화" and f["value"] == "0건" for f in facts["items"]), (
+        f"서비스가 발화 수를 안 넘겼습니다: {facts['items']}"
+    )
+    notes = [b["empty_note"] for b in content["blocks"] if b["kind"] == "list" and not b["items"]]
+    assert notes and all(n == "확인할 수 없습니다." for n in notes), notes
+
+    # 발화가 있는 회의는 그대로 「없습니다」 — 그건 진짜 없는 것입니다.
+    heard = client.post(f"/api/meetings/{seeded['meeting_id']}/minutes").json()["content"]
+    heard_facts = next(b for b in heard["blocks"] if b["kind"] == "facts")
+    assert any(f["label"] == "기록된 발화" for f in heard_facts["items"]), heard_facts["items"]
+
+
+def test_the_service_counts_failed_meetings_separately(
+    client: TestClient, seeded, db: Session
+):
+    """⭐ 실패한 회의가 **API 를 통과한 뒤에도** 「아직 처리 전」이 아닌가
+    (결함 370).
+
+    ⚠️ builder 만 재면 놓칩니다 — 결함 369 에서 실제로 놓쳤습니다.
+    builder 가 갈래를 제대로 갈라도 **서비스가 안 세면** 문서는 그대로
+    입니다(대표 실패 ①).
+    """
+    db.add(
+        m.Meeting(
+            project_id=seeded["project_id"],
+            title="처리에 실패한 회의",
+            started_at=NOW,
+            duration_sec=600,
+            status=m.MeetingStatus.FAILED.value,
+            started_by=seeded["user_ids"][0],
+        )
+    )
+    db.commit()
+
+    content = client.post(
+        f"/api/projects/{seeded['project_id']}/reports",
+        json={"report_type": "final"},
+    ).json()["content"]
+
+    note = _note(content, "처리된 회의")
+    assert "처리에 실패" in note, f"서비스가 실패한 회의를 안 셌습니다: {note!r}"
+
+    flat = str(content)
+    assert "다시 처리해야 들어갑니다" in flat, "무엇을 해야 하는지 안 말합니다"
+
+
+def test_every_line_that_ignores_the_window_says_so(
+    client: TestClient, seeded, db: Session
+):
+    """⭐ 「이 기간에 **일어난** 일」 안에서 기간을 안 보는 줄은 이름표를 단다
+    (결함 371).
+
+    ⚠️ 손으로 고른 목록을 믿지 않습니다. **창을 비워서** 실제로 안 변하는
+    값이 무엇인지 재고, 그 집합이 이름표를 단 집합과 같은지 봅니다 —
+    서버가 새 값을 창 없이 세기 시작하면 그 자리에서 빨개집니다.
+    """
+    project_id = seeded["project_id"]
+    # ⚠️ **씨앗에 안 끝난 업무가 없으면 이 검사는 아무것도 안 잽니다.**
+    #    처음에 그대로 돌렸다가 「창을 비워도 안 변하는 값이 하나도 없습니다」
+    #    로 스스로 걸렸습니다 — 자가 헛돌면 그것도 실패여야 합니다.
+    db.add(m.Task(project_id=project_id, title="아직 안 끝난 일", status="todo"))
+    db.add(
+        m.Task(
+            project_id=project_id,
+            title="끝낸 일",
+            status="done",
+            completed_at=NOW,
+        )
+    )
+    db.add(
+        m.GithubEvent(
+            project_id=project_id,
+            repo="team/repo",
+            event_type="pull_request",
+            actor_login="minsu-dev",
+            payload={},
+            occurred_at=NOW,
+        )
+    )
+    db.commit()
+
+    def facts(**payload) -> dict[str, tuple[str, str]]:
+        content = client.post(
+            f"/api/projects/{project_id}/reports", json=payload
+        ).json()["content"]
+        for block in content["blocks"]:
+            if block["kind"] == "facts":
+                return {i["label"]: (i["value"], i.get("note", "")) for i in block["items"]}
+        raise AssertionError("사실 칸이 없습니다 — 검사가 낡았습니다")
+
+    # 이 팀의 활동이 하나도 안 들어오는 창.
+    far = facts(
+        report_type="weekly",
+        period_start="2020-01-06T00:00:00Z",
+        period_end="2020-01-12T00:00:00Z",
+    )
+    # 전부 들어오는 창.
+    wide = facts(
+        report_type="weekly",
+        period_start="2020-01-01T00:00:00Z",
+        period_end="2030-01-01T00:00:00Z",
+    )
+
+    # ⚠️ **모든 줄이 실제로 재어졌는가** 부터 봅니다. 양쪽 창에서 다 `0건`
+    #    인 줄은 이 자가 **못 보는 줄**입니다 — 그런 줄이 하나라도 있으면
+    #    검사 데이터를 늘려야 합니다(처음에 GitHub 줄이 그래서 심기 하나를
+    #    놓쳤습니다).
+    blind = sorted(
+        label
+        for label, (value, _) in wide.items()
+        if value == "0건" and far[label][0] == "0건"
+    )
+    assert not blind, f"이 검사가 못 보는 줄이 있습니다 — 데이터를 늘리세요: {blind}"
+
+    ignores_window = {
+        label for label, (value, _) in far.items() if value == wide[label][0]
+    }
+    assert ignores_window, "창을 비워도 안 변하는 값이 하나도 없습니다 — 검사가 헛돕니다"
+
+    unlabelled = sorted(label for label in ignores_window if not far[label][1])
+    assert not unlabelled, (
+        "기간을 안 보는 줄인데 이름표가 없습니다 — 읽는 사람은 「이번 주에 그랬다」로 읽습니다:\n"
+        f"  {unlabelled}"
+    )
+
+    # 최종 보고서에는 기간이 없으므로 그 이름표를 안 답니다.
+    final = facts(report_type="final")
+    for label in ignores_window:
+        assert not final[label][1], f"기간이 없는 문서에 기간 이름표를 답니다: {label}"

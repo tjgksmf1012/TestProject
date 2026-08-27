@@ -1,9 +1,10 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { TEAM_TIMEZONE, teamDateOf } from '../time/calendar.ts';
 
 import {
+  countText,
   daysBetween,
   describeLinkState,
   describePull,
@@ -20,6 +21,10 @@ import {
   toColumns,
   type Task,
   type TaskGithubLink,
+  emptyBoard,
+  emptyBoardLine,
+  cardMarks,
+  unknownOriginNote,
 } from './board.ts';
 
 const TODAY = '2026-09-10';
@@ -490,5 +495,123 @@ describe('summarize — withPulls', () => {
       TODAY,
     );
     strictEqual(summary.withPulls, 2);
+  });
+});
+
+describe('countText — 못 잰 것을 0 으로 말하지 않는다 (불변식 셋째)', () => {
+  it('⭐ 아직 모르면 `—`', () => {
+    // 칸반 머리말이 불러오는 중에 `회의에서 0 · PR 연결 0 · 지연 0` 이라고
+    // **단언**하고 있었습니다. 같은 화면의 사슬은 `—` 를 그리는데.
+    strictEqual(countText(null), '—');
+    strictEqual(countText(undefined), '—');
+  });
+
+  it('⭐ **진짜 0 은 0 입니다** — 모르는 것과 없는 것은 다릅니다', () => {
+    strictEqual(countText(0), '0');
+  });
+
+  it('숫자는 그대로', () => {
+    strictEqual(countText(3), '3');
+  });
+});
+
+describe('업무가 없을 때 뭐라고 적는가 (결함 313)', () => {
+  it('⛔ 「직접 만들」 길이 있다고 하지 않는다 — 이 제품에 그 길은 없다', () => {
+    /* 재서 확인한 것: 갓 만든 프로젝트의 레거시 칸반에서 보이는 컨트롤
+       열셋을 전부 세었는데 업무를 만드는 것이 하나도 없었습니다. 서버도
+       같습니다 — `approval_service.py` 가 유일한 자리이고 그 옆에
+       「승인 없이 tasks 에 쓰는 경로는 없다 — 그게 불변식이다」. */
+    const empty = emptyBoard();
+    const all = `${empty.what} ${empty.why} ${empty.how}`;
+    ok(!/직접 만들 수/.test(all), all);
+    ok(/승인/.test(all), `업무가 어디서 오는지 안 적습니다: ${all}`);
+  });
+
+  it('⭐ **왜** 그 길이 없는지 적는다 — 「안 됩니다」만 적으면 고장처럼 읽힌다', () => {
+    ok(/일부러/.test(emptyBoard().why), emptyBoard().why);
+  });
+
+  it('⛔ 마크다운 별표를 쓰지 않는다 — 이 자리는 글자 그대로 그려진다 (결함 292)', () => {
+    const empty = emptyBoard();
+    for (const [key, text] of Object.entries(empty)) {
+      ok(!/\*\*/.test(text), `${key} 에 별표가 있습니다: ${text}`);
+    }
+    ok(!/\*\*/.test(emptyBoardLine()), emptyBoardLine());
+  });
+
+  it('⭐ 한 줄짜리와 세 줄짜리가 **같은 사실**을 말한다 — 두 화면이 갈라지지 않게', () => {
+    // 레거시는 세 줄, SPA 는 한 줄입니다. 갈라지면 결함 313 이 그대로입니다.
+    ok(emptyBoardLine().includes(emptyBoard().how), `${emptyBoardLine()} ↔ ${emptyBoard().how}`);
+  });
+});
+
+describe('출처 기록이 없는 카드 (결함 317)', () => {
+  it('⛔ 「손으로 만들었다」고 **단언하지 않는다** — 그 길은 없다', () => {
+    /* 결함 313 의 셋째·넷째 자리입니다. 레거시 카드 서랍과 SPA 카드 힌트가
+       `task.origin` 이 비면 「사람이 손으로 만든 업무입니다」라고 적었습니다. */
+    const note = unknownOriginNote();
+    ok(!/(직접|손으로|수동으로)\s*만[든들]/.test(note), note);
+  });
+
+  it('⭐ 모르는 것을 **모른다고** 적는다 (불변식 ③ 과 같은 자리)', () => {
+    ok(/기록이 없습니다/.test(unknownOriginNote()), unknownOriginNote());
+  });
+
+  it('⛔ **이유를 지어내지 않는다** (결함 318)', () => {
+    /* 처음에는 「기록이 지워졌거나 옛 자료입니다」라고 적었습니다. 그런데
+       시연 데이터가 이 상태를 **일부러** 만들고 그것을 못 박은 검사까지
+       있습니다(`test_demo_path.py`) — 제품의 불변식과 서로 어긋난 채로요.
+       어느 쪽이 맞는지는 제품 결정이라 화면은 **아는 것만** 말합니다.
+       결함 311 이 「결과를 옮겨 적는 자리에서 없는 이유를 붙이지 마라」고
+       적어 둔 그것입니다. */
+    const note = unknownOriginNote();
+    ok(!/지워졌|옛 자료|고장|오류/.test(note), `없는 이유를 붙였습니다: ${note}`);
+  });
+});
+
+describe('카드 표면의 표 (결함 319)', () => {
+  const task = (over: Partial<Task>): Task =>
+    ({
+      id: 1, title: 't', assignee_ids: [1], status: 'todo',
+      deadline: null, completed_at: null, origin: null, github: [], priority: 2,
+      ...over,
+    }) as Task;
+
+  it('⛔ 마감만 지난 업무에 「기여도에 반영 안 됨」을 붙이지 않는다', () => {
+    /* 재서 확인한 것: 마감을 과거로 옮기니 「접근성 점검」(담당자 둘)의
+       표면이 「기여도에 반영 안 됨」이었습니다. 서버는 늦게 끝낸 업무에도
+       `TASK_COMPLETED`(10점)를 그대로 줍니다 — 늦음이 바꾸는 것은
+       **일정 준수** 범주뿐입니다. */
+    const marks = cardMarks(task({ assignee_ids: [1, 2], deadline: '2026-08-10' }), '2026-08-22');
+    ok(!marks.some((m) => /반영 안 됨/.test(m.text)), JSON.stringify(marks));
+    ok(marks.some((m) => m.tone === 'late'), JSON.stringify(marks));
+  });
+
+  it('⭐ 담당자가 없을 때만 「기여도에 반영 안 됨」이다', () => {
+    const none = cardMarks(task({ assignee_ids: [], deadline: null }), '2026-08-22');
+    deepStrictEqual(none, [{ text: '기여도에 반영 안 됨', tone: 'gap' }]);
+  });
+
+  it('⭐ 둘 다면 둘 다 — 하나로 뭉개지 않는다', () => {
+    const both = cardMarks(task({ assignee_ids: [], deadline: '2026-08-10' }), '2026-08-22');
+    deepStrictEqual(both.map((m) => m.tone), ['gap', 'late']);
+  });
+
+  it('⭐ 제때인 업무에는 아무 표도 없다', () => {
+    deepStrictEqual(cardMarks(task({ deadline: '2026-09-30' }), '2026-08-22'), []);
+    deepStrictEqual(cardMarks(task({ deadline: null }), '2026-08-22'), []);
+  });
+
+  it('⚠️ 늦게 **완료**한 것과 아직 안 한 것을 가른다', () => {
+    /* ⚠️ 완료된 업무는 `completed_at` 이 있어야 늦음을 잽니다 —
+       처음 쓴 씨앗은 `completed_at: null` 이라 **실기가 만들 수 없는
+       모양**이었고, 그래서 아무 표도 안 나왔습니다 (결함 288 의 교훈). */
+    const done = cardMarks(
+      task({ deadline: '2026-08-10', status: 'done', completed_at: '2026-08-15T01:00:00Z' }),
+      '2026-08-22',
+    );
+    strictEqual(done[0]?.text, '늦게 완료');
+    const todo = cardMarks(task({ deadline: '2026-08-10' }), '2026-08-22');
+    strictEqual(todo[0]?.text, '마감 지남');
   });
 });
