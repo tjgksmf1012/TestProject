@@ -921,3 +921,57 @@ def test_the_home_list_says_how_many_are_in_the_recording_screen(
     assert rows[done]["recording_tracks"] == 0, (
         "끝난 트랙을 여기 세면 회의가 끝난 뒤에도 홈이 「들어와 있습니다」라고 합니다"
     )
+
+
+def test_the_home_list_carries_the_utterance_count_it_declares(
+    client: TestClient, engine, people: dict
+):
+    """⭐ 목록이 `utterance_count` 를 **실제로 채운다** (결함 368 의 남은 구멍).
+
+    368 은 이 칸을 만들면서 세 자리(서버 · SPA 타입 · `@lib` 입력)의 **이름**을
+    맞추는 짝 가드를 뒀습니다. 그런데 그 가드는 **채우는지**를 안 봅니다 —
+    서버가 칸을 선언해 놓고 안 채우면 기본값 0 이 나가는데 이름은 세 곳에
+    다 있으므로 초록입니다(결함 312 의 모양).
+
+    결함 444 에서 `recording_tracks` 로 그것을 심어 확인했고, 그때 같은
+    구멍이 이 칸에 남아 있다고 적었습니다 — 그 숙제를 여기서 합니다.
+
+    ⚠️ **0 은 「못 잰 것」이 아니라 「잰 0」입니다.** 그 구분이 홈에서
+    「후보 0건」의 두 이유를 가릅니다(이야기했는데 업무가 안 나온 것 ↔
+    소리가 하나도 안 잡힌 것). 그래서 「말이 있는 회의」와 「없는 회의」를
+    **둘 다** 두고 값이 갈라지는지 봅니다 — 한쪽만 두면 채우는 줄을 빼도
+    통과합니다(결함 327).
+    """
+    from sqlalchemy.orm import Session
+
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    def open_meeting(title: str) -> int:
+        made = client.post(f"/api/projects/{project_id}/meetings", json={"title": title})
+        return int(made.json()["meeting_id"])
+
+    heard = open_meeting("말이 오간 회의")
+    silent = open_meeting("소리가 안 잡힌 회의")
+
+    with Session(engine) as session:
+        for start in (0, 1000, 2000):
+            session.add(
+                m.Utterance(
+                    meeting_id=heard,
+                    speaker_id=people["founder"],
+                    start_ms=start,
+                    end_ms=start + 900,
+                    text="한 마디",
+                    speaker_source="track",
+                    speaker_confidence=1.0,
+                )
+            )
+        session.commit()
+
+    rows = {r["meeting_id"]: r for r in client.get(f"/api/projects/{project_id}/meetings").json()}
+    assert rows[heard]["utterance_count"] == 3
+    assert rows[silent]["utterance_count"] == 0, (
+        "발화가 없으면 0 입니다 — 그리고 그 0 은 「잰 0」이라 화면이 "
+        "「소리가 하나도 안 잡혔습니다」라고 말할 수 있습니다"
+    )
