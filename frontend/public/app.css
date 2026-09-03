@@ -2412,3 +2412,40 @@ body.sparail-page.has-actionbar { padding-bottom: 6rem; }
     padding-bottom: calc(56px + var(--safe-bottom) + 6rem);
   }
 }
+
+/* ══ 고대비 — 「지금 어디인가」를 다시 세웁니다 ═══════════════════
+
+   `forced-colors: active` 는 **채움과 테두리를 시스템 색으로 덮습니다.**
+   셸의 현재 위치 표시는 그라디언트(`--chrome-sel`)와 3px 막대
+   (`--chrome-accent`)로 **색에만** 실려 있어서, 고대비에서 현재 탭이
+   나머지와 한 자도 안 달라졌습니다.
+
+   제일 나쁜 자리는 검토 화면이었습니다 — 왼쪽 레일의 현재 회의가
+   나머지와 같아지는데, 그 회의 이름은 **문서 전체에 딱 한 번** 거기에만
+   있습니다. 어느 회의를 검토 중인지가 눈에서 통째로 사라집니다.
+
+   ⚠️ **SPA 는 같은 자리를 `font-weight` 로 잡아 살아남습니다** — 결함 399
+   가 「무게는 고대비가 안 덮습니다」라고 근거로 든 그 방법입니다. 여기서는
+   셋이 「같은 표시」라는 규칙(위 주석들)을 지켜야 해서, 무게 대신 결함 400
+   이 달력에서 쓴 방법을 씁니다: **시스템 색 이름.** 토큰이나 hex 는 그
+   모드에서 다시 덮입니다.
+
+   ⚠️ 화면 스모크(`frontend/screens/smoke.mjs`)가 이것을 잽니다 — 현재
+   항목이 나머지와 갈라지는지를 보통·고대비 둘에서 재고, 갈라짐이
+   사라지면 빨개집니다. */
+@media (forced-colors: active) {
+  #tabs a[aria-current="page"],
+  .chan-row[aria-current="page"],
+  .rail-item[aria-current="page"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  #tabs a[aria-current="page"]::before,
+  .chan-row[aria-current="page"]::before,
+  .rail-item[aria-current="page"]::before {
+    forced-color-adjust: none;
+    background: HighlightText;
+  }
+}

@@ -2045,6 +2045,22 @@ class MeetingSummary(BaseModel):
     #: 시연 데이터로 홈 한 번에 요청 7건이었고(재서 확인), 회의 서른인
     #: 팀이면 33건이다. 브라우저는 호스트당 여섯 개씩만 동시에 연다.
     coverage: float | None = None
+    #: 지금 **녹음 화면에 들어와 있는 사람 수** (트랙이 `recording` 인 것).
+    #:
+    #: ⚠️ 이 칸이 없어서 홈은 「아직 아무도 안 들어왔다」와 「지금 녹음
+    #: 중이다」를 못 갈랐습니다 — 셋이 동의하고 한 사람이 녹음 화면에서
+    #: 조각을 올리고 있는데도 홈은 「동의를 받고 녹음을 시작합니다」였고,
+    #: 같은 순간 로비는 세 사람이 전부 「동의함」이라고 적고 있었습니다
+    #: (결함 444). 브라우저로 나란히 놓고 쟀습니다(결함 290).
+    #:
+    #: ⚠️ **「참가했다」이지 「소리가 오고 있다」가 아닙니다.** `recording`
+    #: 은 `join_track` 에서 붙으므로 조각이 0개여도 이 값에 들어갑니다 —
+    #: 결함 404 가 통화 화면에서 정확히 그것을 「녹음 중입니다」로 읽어
+    #: 로비와 어긋났습니다. 그래서 홈의 문장도 **들어와 있다**까지만
+    #: 말하고, 소리가 오는지는 로비(`verdictOf`)가 말합니다.
+    #:
+    #: ⚠️ 개수를 그대로 보냅니다 — 판단은 `@lib` 이 합니다.
+    recording_tracks: int = 0
 
 
 @app.get("/api/projects/{project_id}/meetings", response_model=list[MeetingSummary])
@@ -2095,6 +2111,17 @@ def list_project_meetings(
             .group_by(m.Utterance.meeting_id)
         ).all()
     )
+    # ⚠️ 이것도 한 번에 묶어 셉니다(`coverage`·`utterance_count` 와 같은 방식).
+    recording = dict(
+        session.execute(
+            select(m.MeetingTrack.meeting_id, func.count())
+            .where(
+                m.MeetingTrack.meeting_id.in_(meeting_ids),
+                m.MeetingTrack.status == "recording",
+            )
+            .group_by(m.MeetingTrack.meeting_id)
+        ).all()
+    )
     coverage = dict(
         session.execute(
             select(m.MeetingTrack.meeting_id, func.avg(m.MeetingTrack.coverage))
@@ -2118,6 +2145,7 @@ def list_project_meetings(
             coverage=(
                 float(coverage[meeting.id]) if coverage.get(meeting.id) is not None else None
             ),
+            recording_tracks=recording.get(meeting.id, 0),
         )
         for meeting in meetings
     ]
@@ -5194,7 +5222,20 @@ class NoticeOut(BaseModel):
 
 
 class ReadIn(BaseModel):
+    #: 이 번호들만 읽습니다. ⚠️ **빈 목록은 아무것도 안 읽습니다** — 「전부」 가
+    #: 아닙니다. 화면이 실수로 빈 배열을 보냈을 때 사람의 알림이 통째로
+    #: 사라지면 안 되므로, 되돌릴 수 없는 쪽은 아래에서 **따로 말합니다.**
+    #:
+    #: ⚠️ 필수로 둡니다. 기본값을 주면 본문을 통째로 빠뜨린 요청이 422 대신
+    #: 조용한 no-op 이 됩니다.
     notification_ids: list[int]
+    #: 「다 읽음으로」 — 이 프로젝트의 **내** 안 읽은 알림 전부 (결함 432).
+    #:
+    #: ⚠️ 왜 번호로는 안 되는가: 화면 목록은 `MAX_ITEMS` 로 잘리는데 배지는
+    #: DB 전수라, 목록의 번호만 모아 보내면 **잘린 뒤쪽이 영영 안 읽힙니다.**
+    #: 61건이 21건에서 멈추고 버튼까지 잠겼습니다. 버튼이 「다」 라고 적혀
+    #: 있으면 서버에도 「다」 라고 말할 자리가 있어야 합니다.
+    all_unread: bool = False
 
 
 @app.get("/api/projects/{project_id}/notifications", response_model=list[NoticeOut])
@@ -5243,9 +5284,19 @@ def read_unread_count(
 def mark_notifications_read(
     project_id: int, payload: ReadIn, session: DbSession, user: CurrentUser
 ) -> dict[str, int]:
-    """읽음 표시. ⚠️ **남의 알림은 못 읽습니다** — 서비스가 한 번 더 거릅니다."""
+    """읽음 표시. ⚠️ **남의 알림은 못 읽습니다** — 서비스가 한 번 더 거릅니다.
+
+    갈래가 둘입니다. `all_unread` 면 이 프로젝트의 내 것 **전부**, 아니면
+    준 **번호만**. 둘을 한 라우트에 두는 이유는 같은 판단(「무엇을 읽었다고
+    할 것인가」)이 두 자리로 갈라지지 않게 하기 위해서입니다.
+    """
     _require_project_member(session, project_id, user)
-    marked = notification_service.mark_read(session, user.id, payload.notification_ids)
+    if payload.all_unread:
+        marked = notification_service.mark_all_read(session, user.id, project_id)
+    else:
+        marked = notification_service.mark_read(
+            session, user.id, payload.notification_ids
+        )
     session.commit()
     return {"marked": marked}
 

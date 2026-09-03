@@ -42,6 +42,13 @@ export interface MeetingSummary {
    * (docs/05 불변식 셋째). 아직 회의가 안 끝났으면 잰 적이 없습니다.
    */
   coverage: number | null;
+  /**
+   * 지금 **녹음 화면에 들어와 있는 사람 수**.
+   *
+   * ⚠️ 「참가했다」이지 「소리가 오고 있다」가 아닙니다 — 조각이 0개여도
+   * 셉니다(결함 404). 홈은 그래서 「들어와 있다」까지만 말합니다(결함 444).
+   */
+  recording_tracks?: number;
 }
 
 /** ⚠️ 서버가 camelCase 로 보냅니다 (`recording_service.py`). */

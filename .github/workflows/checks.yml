@@ -1,0 +1,96 @@
+# 이 저장소의 검사를 **자동으로** 돌립니다.
+#
+# ⚠️ 오래도록 CI 가 없었습니다. 검사 4,368개(pytest 2,225 + 프런트 2,143)를
+#    아무것도 안 돌렸고, 「초록입니다」는 전부 **누가 돌리고 그렇게 말한
+#    것**이었습니다 (`docs/24` 「처음 보는 사람의 눈으로」).
+#
+# ⚠️ 잡을 하나로 합치지 않습니다 — 어느 층이 빨간지가 바로 보여야 합니다.
+
+name: 검사
+
+on:
+  push:
+  pull_request:
+
+# 같은 브랜치에 새로 밀면 앞의 것은 접습니다 (러너를 아끼려고).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 서버 (pytest · ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'          # pyproject 의 requires-python
+          cache: pip
+      - run: python -m venv .venv && .venv/bin/pip install -e ".[dev]"
+      # ⚠️ 검사는 **스스로 SQLite 를 만듭니다** — DATABASE_URL 이 필요 없습니다.
+      - run: .venv/bin/python -m pytest backend/tests -q
+      - run: .venv/bin/ruff check backend
+
+  frontend:
+    name: 레거시 (검사 · 타입 · 빌드)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'              # package.json 의 engines
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # `npm test` 는 설치 없이 돌지만, 타입 검사와 빌드는 설치가 필요합니다.
+      - run: npm --prefix frontend ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'   # 이 잡은 브라우저를 안 씁니다
+      - run: npm --prefix frontend test
+      - run: npm --prefix frontend run typecheck
+      # ⚠️ 빌드는 **번들이 낡았는지**도 잡습니다 — `public/` 은 커밋됩니다.
+      - run: npm --prefix frontend run build
+      - name: 번들이 커밋된 것과 같은가
+        run: git diff --exit-code -- frontend/public
+
+  webapp:
+    name: SPA (타입 · 빌드)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - run: npm --prefix webapp ci
+      - run: npm --prefix webapp run typecheck
+      - run: npm --prefix webapp run build
+      - name: dist 가 커밋된 것과 같은가
+        run: git diff --exit-code -- webapp/dist
+
+  screens:
+    name: 화면 스모크 (브라우저)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m venv .venv && .venv/bin/pip install -e ".[dev]"
+      - run: npm --prefix frontend ci
+      # ⚠️ `npx --prefix frontend playwright …` 로 쓰지 마십시오 — 그건 로컬
+      #    설치를 안 보고 **레지스트리에서 다른 버전을 받아 옵니다**(재 봤습니다:
+      #    "package was not found and will be installed: playwright@1.62.1").
+      #    그러면 받은 브라우저와 `import('playwright')` 가 푸는 버전이 갈려
+      #    실행 시점에 「브라우저가 없다」로 죽습니다. 설치된 바이너리를
+      #    **직접** 부릅니다.
+      - run: ./frontend/node_modules/.bin/playwright install --with-deps chromium
+      # 스모크가 스스로 서버를 띄웁니다 (DB·오디오를 지우고 새로 심습니다).
+      - run: npm --prefix frontend run smoke:screens

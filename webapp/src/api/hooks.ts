@@ -478,8 +478,16 @@ export function useConsent(meetingId: number | undefined, refetchMs?: number) {
 export function useLobbyMutations(meetingId: number | undefined) {
   const queryClient = useQueryClient();
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ['meetings', meetingId, 'consent'] });
-    void queryClient.invalidateQueries({ queryKey: ['meetings', meetingId, 'tracks'] });
+    /* ⚠️ **회의 자신도 무효로 만듭니다** (결함 440). 예전에는 `consent` 와
+       `tracks` 만 다시 읽어서, 「강제 종료」로 서버가 `pending → queued` 로
+       옮겨도 화면의 `meeting.data.status` 는 옛 값 그대로였습니다 — 15초를
+       기다려도 「강제 종료」와 「녹음 화면으로」가 계속 눌렸고, 누르면
+       `POST /tracks` 409 입니다. 새로고침해야 맞게 나왔습니다.
+
+       ⚠️ 키는 **앞자리로 맞춥니다** — `['meetings', id]` 는 `consent`·
+       `tracks`·`progress` 를 다 덮습니다. 셋을 따로 적으면 넷째가 생길 때
+       또 빠집니다(이번이 정확히 그 모양입니다). */
+    void queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] });
   };
   return {
     consent: useMutation({

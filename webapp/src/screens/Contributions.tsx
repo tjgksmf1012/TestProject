@@ -413,6 +413,12 @@ export default function Contributions() {
               />
             </p>
             <div className="confirmbar__row">
+              {/* ⚠️ 입력칸을 **자기 상자**에 담습니다 (결함 434). 사람이 스물셋이면
+                  이 줄이 여덟 줄로 접혀 바가 창의 89% 를 먹었고, 「이 값으로
+                  확정」 이 창 아래 78px 밖으로 나가 **마우스로는 못 눌렀습니다.**
+                  바깥에 두면 버튼은 언제나 제자리에 남고, 넘치는 것은 여기서만
+                  굴러갑니다. */}
+              <div className="confirmbar__people">
               {members.map((member) => {
                 const name = nameOf(member.user_id, people, formerPeople);
                 return (
@@ -434,6 +440,7 @@ export default function Contributions() {
                   </label>
                 );
               })}
+              </div>
               <span className="appbar__spacer" />
               {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 — 검토 화면의
                   `검토 끝내기` 와 같은 규칙입니다. 비활성 버튼은 **초점을 못

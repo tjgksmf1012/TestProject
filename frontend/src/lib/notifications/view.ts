@@ -113,19 +113,6 @@ export function hrefFor(notice: Notice, projectId: number): string | null {
 }
 
 /**
- * 읽음 표시를 누를 수 있는 알림들의 번호.
- *
- * ⚠️ **마감은 빠집니다.** 읽었다고 마감이 사라지지 않으므로, 읽음 표시를
- * 보내 봐야 서버가 할 일이 없습니다. 그런데도 버튼을 그리면 눌러도 아무
- * 일이 안 일어나는 버튼이 됩니다.
- */
-export function readableIds(notices: readonly Notice[]): number[] {
-  return notices
-    .filter((n) => n.notification_id !== null && !n.read)
-    .map((n) => n.notification_id as number);
-}
-
-/**
  * 배지에 쓸 글자. **0 이면 `null`** 입니다.
  *
  * ⚠️ `0` 을 배지로 그리면 "0건 남음" 이라는 뜻 없는 표가 붙습니다
@@ -136,6 +123,23 @@ export function readableIds(notices: readonly Notice[]): number[] {
 export function badgeText(unread: number): string | null {
   if (!Number.isFinite(unread) || unread <= 0) return null;
   return unread > 99 ? '99+' : String(unread);
+}
+
+/**
+ * 「다 읽음으로」 를 누를 수 있는가.
+ *
+ * ⚠️ **재는 축이 배지와 같아야 합니다.** 예전에는 화면 목록의 번호로
+ * 쟀는데, 그건 **지금 화면에 있는 목록**이고 배지는 **DB 전수**입니다.
+ * 안 읽은 것이 한 페이지(`MAX_ITEMS`)를 넘으면 한 번 누른 뒤 목록 안에는
+ * 안 읽은 것이 0 이 되어 **버튼이 잠기는데 배지는 21 로 남았습니다** —
+ * 그때부터 사람은 그 숫자를 영영 못 지웁니다.
+ *
+ * ⚠️ 파생 알림(마감)은 배지에 안 셉니다(`unread_count`). 그래서 이 축은
+ * 「읽어서 없앨 수 있는 것」과 정확히 같은 집합입니다 — 두 자리가 다른
+ * 집합을 보면 이번과 반대로 **눌러도 아무 일이 없는 버튼**이 됩니다.
+ */
+export function canMarkAllRead(unread: number): boolean {
+  return Number.isFinite(unread) && unread > 0;
 }
 
 /** 아무것도 없을 때 할 말. */

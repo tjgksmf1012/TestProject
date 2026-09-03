@@ -42,6 +42,7 @@ import {
   hasOlderMessages,
   olderCursor,
   prependOlder,
+  scrollIntentFor,
   EDITED_MARK,
   MAX_BODY,
   mentionSegments,
@@ -400,6 +401,10 @@ function App() {
 
   const open = channels?.find((c) => c.id === openId) ?? null;
   const foot = useRef<HTMLDivElement>(null);
+  /** 직전에 그린 목록. 「무엇이 늘었는가」를 재려면 앞뒤가 필요합니다. */
+  const seen = useRef<ChatMessage[]>([]);
+  /** 옛 대화를 붙이기 **직전**의 문서 높이 (결함 433). */
+  const heightBefore = useRef(0);
   /* ⛔ **「고치기」·「답글」을 눌러도 초점이 그 자리에 남아 있었습니다**
      (결함 302). 글은 아래 작성칸으로 옮겨 가는데 초점은 안 갑니다 —
      키보드만 쓰는 사람은 **Tab 을 31~32번** 눌러야 그 칸에 닿습니다
@@ -502,6 +507,9 @@ function App() {
     }
     setFailure(null);
     const rows = (await response.json()) as ChatMessage[];
+    /* ⚠️ **붙이기 전에** 재야 합니다 — 붙은 뒤에 재면 늘어난 만큼이
+       이미 들어 있어서 차이가 0 입니다. */
+    heightBefore.current = document.documentElement.scrollHeight;
     setMessages((current) => prependOlder(rows, current ?? []));
     setOlder(hasOlderMessages(rows.length) ? 'maybe' : 'none');
   }, []);
@@ -596,9 +604,30 @@ function App() {
   }, [openId]);
 
   useEffect(() => {
-    // 새 메시지가 오면 아래로. ⚠️ `smooth` 를 쓰지 않습니다 — 여러 개가
-    // 연달아 오면 애니메이션이 겹쳐 화면이 출렁입니다.
-    foot.current?.scrollIntoView();
+    /* 어디를 보여 줄지는 `@lib` 이 정합니다 — 「무엇이 늘었는가」에 달렸습니다.
+       ⚠️ 예전에는 여기서 **무조건** 맨 아래로 굴렸습니다. 주석은 「새
+       메시지가 오면 아래로」였는데 `messages` 는 **옛 대화를 앞에 붙일
+       때도** 바뀌어서, 「이전 대화 더 보기」를 누르면 방금 불러온 쉰 줄을
+       지나쳐 맨 아래로 돌아갔습니다 (결함 433). */
+    const before = seen.current;
+    const after = messages ?? [];
+    seen.current = after;
+
+    const intent = scrollIntentFor(before, after);
+    if (intent === 'to-bottom') {
+      // ⚠️ `smooth` 를 쓰지 않습니다 — 여러 개가 연달아 오면 애니메이션이
+      //    겹쳐 화면이 출렁입니다.
+      foot.current?.scrollIntoView();
+      return;
+    }
+    if (intent === 'keep-position') {
+      /* 읽던 자리를 지킵니다. 앞에 붙은 만큼 문서가 길어졌으므로, **늘어난
+         높이만큼** 같이 내려 주면 눈앞의 글이 그대로 남습니다.
+         ⚠️ 이 화면은 **문서 자체가 스크롤 상자**입니다(메시지 전용 스크롤
+         판이 없습니다) — 그래서 `documentElement.scrollHeight` 로 잽니다. */
+      const grew = document.documentElement.scrollHeight - heightBefore.current;
+      if (grew > 0) window.scrollBy(0, grew);
+    }
   }, [messages]);
 
   const submit = useCallback(async (): Promise<void> => {

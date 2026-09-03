@@ -144,6 +144,24 @@ function Lobby() {
   const refresh = useCallback(async (): Promise<void> => {
     const first = !loaded.current;
     try {
+      /* ⚠️ **회의 자신도 다시 읽습니다** (결함 440). 예전에는 이 요청이
+         마운트 때 **한 번만** 나가서 `meetingStatus` 가 첫 로드 값에
+         얼어붙었습니다. 「강제 종료」를 누르면 서버는 `pending → queued` 로
+         옮기는데, 15초를 기다려도 화면은 여전히 「1명이 참가하지 않아 회의가
+         끝나지 않습니다 — 강제 종료할 수 있습니다」였고 「녹음 화면으로」가
+         계속 눌렸습니다(누르면 `POST /tracks` 409). 새로고침해야 맞게
+         나왔습니다 — 즉 **폴링이 국면을 안 보고 있었습니다.**
+         ⚠️ 제목도 여기서 받습니다 — 회의 이름은 고칠 수 있습니다(결함 268). */
+      const meeting = (await getJson(`/api/meetings/${meetingId}`).catch(() => null)) as {
+        project_id: number;
+        title: string | null;
+        status: string | null;
+      } | null;
+      if (meeting !== null) {
+        setProjectId(meeting.project_id);
+        setMeetingTitle(meeting.title);
+        setMeetingStatus(meeting.status);
+      }
       const [consent, trackBody] = await whileLoading(
         Promise.all([
           getJson(`/api/meetings/${meetingId}/consent`) as Promise<{
@@ -218,16 +236,8 @@ function Lobby() {
         return;
       }
       setMe((await response.json()) as Me);
-      const meeting = (await getJson(`/api/meetings/${meetingId}`).catch(() => null)) as {
-        project_id: number;
-        title: string | null;
-        status: string | null;
-      } | null;
-      if (meeting !== null) {
-        setProjectId(meeting.project_id);
-        setMeetingTitle(meeting.title);
-        setMeetingStatus(meeting.status);
-      }
+      // 회의 자신은 `refresh()` 가 읽습니다 — 여기서 또 읽으면 두 벌이 되고,
+      // 폴링이 안 보는 값이 마운트 때만 맞는 상태로 돌아갑니다 (결함 440).
       await refresh();
       timer = setInterval(() => void refresh(), POLL_MS) as unknown as number;
     })();
@@ -538,7 +548,8 @@ function Lobby() {
      않았습니다」 · 「전원 동의 후 **시작**할 수 있습니다」가 떴습니다
      (결함 309) — 이미 지나간 일을 준비하라고 말하는 화면이었습니다.
      판단은 `@lib` 의 `lobbyPhase` 한 벌입니다. */
-  const stillStartable = lobbyPhase(meetingStatus).canStart;
+  const phase = lobbyPhase(meetingStatus);
+  const stillStartable = phase.canStart;
   const room = roomStatus(statuses, true, stillStartable);
   /* 시작할 수 없는 회의에 「시작 전 확인」을 그리지 않습니다 (결함 214 가
      SPA 에서 고친 셋째 항목 — 이 화면에는 안 와 있었습니다). */
@@ -570,8 +581,14 @@ function Lobby() {
   // 결정(늦은 동의를 서버가 막지 않는다)은 그대로 두고, **버튼이 무엇을
   // 누르는 것인지** 말하게 합니다.
   const consentAct = consentAffordance(stillStartable, iAgreed);
-  // 처리가 끝나야 후보가 생깁니다. 그 전에 눌러도 빈 화면이라 감춥니다.
-  const reviewReady = !(room.recording > 0 || room.notJoined > 0 || (tracks?.length ?? 0) === 0);
+  /* ⚠️ **다음에 갈 곳은 `@lib` 이 정합니다** (결함 437). 예전에는 이 화면이
+     `!(room.recording > 0 || room.notJoined > 0 || tracks.length === 0)` 라는
+     **자기 사본**으로 판정했는데, 그 식은 **회의 상태를 한 번도 안 봅니다.**
+     그래서 녹음이 끝나 차례를 기다리는 회의(`queued`)와 검토까지 끝난
+     회의(`confirmed`)에 「업무 후보 검토」를 주 버튼으로 그렸고, 누르면
+     검토 화면이 「아직 시작하지 않았습니다 [회의 로비로]」로 **되돌렸습니다** —
+     왕복입니다. SPA 는 처음부터 `phase.go` 를 씁니다. */
+  const goNext = phase.go;
   // ⚠️ **한 화면에 주 버튼은 하나** (지시서 §8). 내가 아직 동의를 안 했으면
   // "동의합니다" 가 주 동작이고, 하고 나면 주 동작이 넘어갑니다.
 
@@ -618,8 +635,14 @@ function Lobby() {
           )
         )}
 
-        {/* ⚠️ `#roster` 는 `<ul>` 입니다. `<div>` 를 넣으면 낭독기가 세는
-            항목 수가 틀어집니다 — 그래서 `<li>` 판 스켈레톤을 씁니다. */}
+        {/* ⚠️ **못 받았으면 여기서 멈춥니다** (결함 439). 예전에는 실패
+            상자만 얹고 **그 아래를 그대로 그렸습니다** — 남의 회의를 연
+            비구성원(403)에게 「아직 아무도 참가하지 않았습니다」라고 했고
+            (실제로는 셋이 참가), 「동의합니다」 단추까지 눌리게 뒀습니다
+            (누르면 `POST 403`). SPA 는 `cannotLoad` 문지기로 판 전체를
+            막고, 같은 셸의 칸반·기여도도 막습니다 — 여기만 뚫려 있었습니다. */}
+        {loadFailure === null && (
+        <>
         <ul id="roster" {...(slow ? { 'aria-busy': 'true' as const } : {})}>
           {slow ? (
             <RawHtml html={rowItems(3)} />
@@ -691,8 +714,14 @@ function Lobby() {
           {consentMessage}
         </p>
         <NoteLine note={consentNote} id="consent-note" />
+        </>
+        )}
       </section>
 
+      {/* 못 받은 회의에 대해 방 판과 동작 판을 그리지 않습니다 — 빈 사실을
+          단언하고, 누르면 403 이 나는 단추만 남습니다 (결함 439). */}
+      {loadFailure === null && (
+      <>
       <section className="panel">
         <h2>참가자 상태</h2>
         {ticks.length > 0 && (
@@ -798,7 +827,7 @@ function Lobby() {
               닿기만 하면 들립니다. */}
           <button
             id="record"
-            className={reviewReady ? '' : 'primary'}
+            className={goNext !== null ? '' : 'primary'}
             aria-disabled={!affordance.enabled}
             onClick={() => {
               if (!affordance.enabled) return;
@@ -824,13 +853,18 @@ function Lobby() {
               다시 처리하기
             </button>
           )}
-          {reviewReady && (
+          {goNext !== null && (
             <button
               id="review"
               className="primary"
-              onClick={() => (location.href = `/review.html?meeting=${meetingId}`)}
+              onClick={() =>
+                (location.href =
+                  goNext.screen === 'review'
+                    ? `/review.html?meeting=${meetingId}`
+                    : `/kanban.html?project=${projectId}&meeting=${meetingId}`)
+              }
             >
-              업무 후보 검토
+              {goNext.label}
             </button>
           )}
         </div>
@@ -838,6 +872,9 @@ function Lobby() {
         <NoteLine note={reprocessNote} id="reprocess-note" />
 
         <div className="act-quiet">
+          {/* ⚠️ 주 버튼이 이미 칸반으로 데려가면 여기 또 두지 않습니다 —
+              글자까지 같은 단추가 한 화면에 둘이면 사람은 다른 것인 줄 압니다. */}
+          {goNext?.screen !== 'kanban' && (
           <button
             id="kanban"
             className="linkish"
@@ -847,6 +884,7 @@ function Lobby() {
           >
             칸반 보기
           </button>
+          )}
           <button
             id="contrib"
             className="linkish"
@@ -879,6 +917,8 @@ function Lobby() {
         </div>
         <NoteLine note={minutesNote} id="minutes-note" />
       </section>
+      </>
+      )}
     </>
   );
 }

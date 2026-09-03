@@ -100,7 +100,13 @@ export default function Lobby() {
      `null` 을 넘겨 「모른다」고 말하게 합니다. */
   const trackList: TrackHealth[] | null = tracks.data ? tracks.data.tracks : null;
   const statuses = memberStatuses(roster, trackList);
-  const room = roomStatus(statuses, rosterKnown);
+  /* ⚠️ **국면을 넘깁니다** (결함 436 · 441). 이 인자는 결함 309 가 「끝난
+     회의에 「**아직** 아무도 참가하지 않았습니다」라고 하지 않기」 위해
+     만든 것인데, **SPA 는 넘긴 적이 없습니다.** 기본값이 `true` 라 309 도
+     436 도 이쪽에서는 아무 일도 안 하고 있었습니다 — 「한쪽 뿌리만」이
+     **인자 하나**에서 난 것입니다. */
+  const roomPhase = lobbyPhase(meeting.data?.status);
+  const room = roomStatus(statuses, rosterKnown, roomPhase.canStart);
   const blockers = startBlockers(roster);
 
   // 끝난 트랙이 있으면 실제 시간축 위에 구멍까지 그립니다.
@@ -161,7 +167,8 @@ export default function Lobby() {
       ? null
       : describeLoadFailure('회의', loadError instanceof ApiError ? loadError.status : null);
 
-  const phase = lobbyPhase(meeting.data?.status);
+  // 위에서 이미 구했습니다 — 같은 판단을 두 번 부르지 않습니다.
+  const phase = roomPhase;
   // 「다시 처리할 수 있는가」는 **서버가** 정합니다 (결함 231).
   const progress = useMeetingProgress(meetingId);
   const reprocess = useReprocess(meetingId);

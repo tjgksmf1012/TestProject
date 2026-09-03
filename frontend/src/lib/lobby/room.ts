@@ -10,8 +10,8 @@
  *   2. 회의 중에 누구의 트랙이 망가지고 있는가?
  *   3. "전원 종료" 를 기다려도 되는가, 강제 종료해야 하는가?
  *
- * 2번이 이 화면의 진짜 값어치입니다. 폰이 잠긴 걸 회의가 **끝난 뒤에**
- * 알면 그 사람의 발언은 이미 사라진 뒤입니다. 회의 중에 보이면 폰을
+ * 2번이 이 화면의 진짜 값어치입니다. 창이 잠긴 걸 회의가 **끝난 뒤에**
+ * 알면 그 사람의 발언은 이미 사라진 뒤입니다. 회의 중에 보이면 창을
  * 흔들어 깨울 수 있습니다 — 그게 커버리지 40% 와 100% 의 차이입니다.
  */
 
@@ -286,7 +286,7 @@ function verdictOf(track: TrackHealth | undefined): TrackVerdict {
  * 것으로 보입니다 — 운행도표의 축 문제와 같습니다.
  *
  * ⚠️ **모르면 경고하지 않습니다.** `silent_ms` 가 없는 서버(옛 버전)에서는
- * 판단하지 않습니다. 없는 근거로 "폰을 확인하세요" 를 띄우면, 다음부터
+ * 판단하지 않습니다. 없는 근거로 "창을 확인하세요" 를 띄우면, 다음부터
  * 사람은 이 경고를 안 믿습니다.
  */
 export function isSilentTooLong(track: TrackHealth): boolean {
@@ -299,7 +299,16 @@ export function isSilentTooLong(track: TrackHealth): boolean {
  * 무엇을 확인해야 하는지까지 말한다.
  *
  * 조각이 **한 개도** 안 온 것과, 오다가 끊긴 것은 **할 일이 다릅니다.**
- * 앞은 녹음을 아예 시작 안 했을 수 있고, 뒤는 화면이 꺼졌을 가능성이 큽니다.
+ * 앞은 녹음을 아예 시작 안 했을 수 있고, 뒤는 창이 잠겼을 가능성이 큽니다.
+ *
+ * ⚠️ **폰 이야기를 하지 않습니다** (결함 446). 오래도록 「폰 화면을 켜
+ * 주세요」였습니다 — 모바일은 2026-08-13 에 범위에서 뺐고 셸은 PC 웹·PC
+ * 앱 둘뿐인데, 녹음이 끊긴 팀원에게 **없는 기기**를 확인하라고 보냈습니다.
+ * 이 제품에서 제일 급한 안내(지금 소리가 사라지고 있습니다)가 그랬습니다.
+ *
+ * ⚠️ 새 어휘를 만들지 않고 `describeRecordingSafety` 가 이미 쓰는 말을
+ * 그대로 씁니다 — 「창을 켜 두세요」·「화면이 잠기면 녹음이 끊깁니다」.
+ * 같은 뜻에 말이 둘이면 반드시 한쪽만 고쳐집니다.
  */
 function describeAtRisk(track: TrackHealth | undefined): string {
   const silentMs = track?.silent_ms;
@@ -307,11 +316,11 @@ function describeAtRisk(track: TrackHealth | undefined): string {
     const seconds = Math.round(silentMs / 1000);
     const howLong = seconds >= 60 ? `${Math.round(seconds / 60)}분째` : `${seconds}초째`;
     return (track?.chunk_count ?? 0) === 0
-      ? `${howLong} 녹음이 한 조각도 안 왔습니다 — 그 폰에서 녹음을 시작했는지 확인해 주세요`
-      : `${howLong} 녹음이 안 올라옵니다 — 폰 화면을 켜 주세요`;
+      ? `${howLong} 녹음이 한 조각도 안 왔습니다 — 녹음을 시작했는지 확인해 주세요`
+      : `${howLong} 녹음이 안 올라옵니다 — 창을 켜 두세요, 화면이 잠기면 녹음이 끊깁니다`;
   }
   const gapSeconds = Math.round((track?.total_gap_ms ?? 0) / 1000);
-  return `녹음이 끊기고 있습니다 (공백 ${gapSeconds}초) — 폰 화면을 켜 주세요`;
+  return `녹음이 끊기고 있습니다 (공백 ${gapSeconds}초) — 창을 켜 두세요, 화면이 잠기면 녹음이 끊깁니다`;
 }
 
 function messageFor(verdict: TrackVerdict, track: TrackHealth | undefined): string {
@@ -433,7 +442,13 @@ export function roomStatus(
   } else if (recording > 0) {
     message = `${recording}명이 녹음 중입니다`;
   } else if (notJoined > 0) {
-    message = `${notJoined}명이 참가하지 않아 회의가 끝나지 않습니다 — 강제 종료할 수 있습니다`;
+    /* ⚠️ **국면을 봅니다** (결함 436). 이 말은 「회의가 아직 안 끝났다」는
+       단언인데, 이미 처리까지 끝난(`confirmed`) 회의에서도 그대로 나갔습니다 —
+       참가 안 한 사람이 하나라도 있으면 조건이 참이기 때문입니다. 끝난
+       회의에 「끝나지 않습니다」라고 말하면 사람은 자기가 뭘 안 한 줄 압니다. */
+    message = canStart
+      ? `${notJoined}명이 참가하지 않아 회의가 끝나지 않습니다 — 강제 종료할 수 있습니다`
+      : `${notJoined}명은 끝내 참가하지 않았습니다`;
   } else {
     message = '전원 종료했습니다. 회의 처리가 시작됩니다';
   }
@@ -444,7 +459,15 @@ export function roomStatus(
     broken,
     // 녹음 중인 사람이 없는데 참가 안 한 사람이 남아 있으면 사람이 풀어야 한다.
     // 모르는 채로 강제 종료를 권하지 않습니다 — 되돌릴 수 없는 일입니다.
-    needsForceFinish: rosterKnown && unknown === 0 && anyJoined && recording === 0 && notJoined > 0,
+    //
+    // ⚠️ **`canStart` 도 봅니다** (결함 436). 이 단추가 있는 이유는 「브라우저를
+    //    그냥 닫은 사람 때문에 회의가 영영 처리되지 않는 것」을 사람이 푸는
+    //    것입니다 — 이미 큐에 들어갔거나 처리가 끝난 회의에는 풀 것이
+    //    없습니다. 결함 309 가 `canStart` 를 인자로 받게 만들어 놓고
+    //    **`!anyJoined` 갈래에만** 썼습니다: 같은 함수 안에서 한 칸만 고쳐진
+    //    모양이라 여기는 그대로 남았습니다.
+    needsForceFinish:
+      canStart && rosterKnown && unknown === 0 && anyJoined && recording === 0 && notJoined > 0,
     message,
   };
 }

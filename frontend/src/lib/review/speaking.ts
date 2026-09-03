@@ -53,13 +53,45 @@ export function shareText(share: Share): string {
  * ⚠️ **빈 칸으로 두지 않습니다.** 아무것도 안 그리면 사람은 "고장" 으로
  * 읽거나, 더 나쁘게는 "다들 말을 안 했다" 로 읽습니다.
  */
-export function notMeasurableText(speaking: Speaking): string | null {
+export function notMeasurableText(
+  speaking: Speaking,
+  /**
+   * 회의 국면 (`meeting.status`).
+   *
+   * ⚠️ **이걸 안 받는 동안 다섯 국면이 한 문장이었습니다** (결함 438).
+   * 「**아직** 발언이 분석되지 않아」는 「기다리면 온다」는 말인데, 처리에
+   * 실패한 회의(`failed`)에게는 거짓이고 검토까지 끝난 회의(`confirmed`)
+   * 에게는 정반대입니다 — 분석은 이미 끝났고 결과가 0건인 것입니다.
+   *
+   * ⚠️ 바로 옆 칸(`emptyTimelineNote`)은 처음부터 다섯을 갈라 말합니다.
+   * **같은 화면의 형제 칸이 이미 하는 일**이었습니다 (결함 328 의
+   * 「같은 표의 옆 칸은 따로 재야 합니다」).
+   */
+  status?: string | null,
+): string | null {
   if (speaking.measurable) return null;
   const spoke = speaking.shares.some((s) => s.speaking_ms > 0);
-  if (!spoke) {
-    return '아직 발언이 분석되지 않아 비중을 잴 수 없습니다.';
+  if (spoke) {
+    return '회의가 짧아 비중을 말하기 어렵습니다 — 짧은 회의의 비율은 경향으로 읽으면 안 됩니다.';
   }
-  return '회의가 짧아 비중을 말하기 어렵습니다 — 짧은 회의의 비율은 경향으로 읽으면 안 됩니다.';
+  switch (status) {
+    case 'pending':
+      return '아직 녹음하지 않은 회의라 비중을 잴 수 없습니다.';
+    case 'queued':
+      return '녹음은 끝났고 처리 차례를 기다리는 중입니다 — 아직 재지 않았습니다.';
+    case 'processing':
+      return '녹음을 처리하는 중입니다 — 끝나면 비중이 여기 나옵니다.';
+    case 'failed':
+      return '처리에 실패해 비중을 재지 못했습니다 — 로비에서 다시 처리할 수 있습니다.';
+    case 'needs_review':
+    case 'confirmed':
+      // 처리는 끝났는데 발언이 0건 — **고장이 아니라 결과**입니다.
+      // 「아직」이라고 하면 오지 않을 것을 기다립니다.
+      return '처리는 끝났는데 기록된 발언이 없어 비중을 잴 수 없습니다.';
+    default:
+      // 모르는 상태. 양다리를 걸치되 **모른다는 것**을 숨기지 않습니다.
+      return '비중을 잴 발언이 없습니다 — 녹음이 아직 처리되지 않았거나, 녹음 없이 열린 회의입니다.';
+  }
 }
 
 /**

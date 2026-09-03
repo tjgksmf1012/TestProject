@@ -860,3 +860,118 @@ def test_an_outsider_cannot_set_a_role(client: TestClient, people: dict):
         f"/api/projects/{project_id}/members/me",
         json={"role_shares": {"planner": 1.0}},
     ).status_code in (403, 404)
+
+
+def test_the_home_list_says_how_many_are_in_the_recording_screen(
+    client: TestClient, engine, people: dict
+):
+    """⭐ 목록이 **지금 녹음 화면에 들어와 있는 사람 수**를 싣는다 (결함 444).
+
+    이 칸이 없어서 홈은 「아직 아무도 안 들어왔다」와 「지금 녹음 중이다」를
+    못 갈랐습니다. 셋이 동의하고 한 사람이 조각을 올리는 동안 홈은 계속
+    「동의를 받고 녹음을 시작합니다」였고, 같은 순간 로비는 세 사람이 전부
+    「동의함」이라고 적고 있었습니다 — 브라우저로 나란히 놓고 쟀습니다.
+
+    ⚠️ **칸 이름을 맞추는 짝 가드로는 이걸 못 잡습니다.** 서버가 칸을
+    선언해 놓고 **안 채우면** 언제나 기본값 0 이 나가는데, 이름은 세 곳에
+    다 있으므로 그 가드는 초록입니다 (결함 312 의 모양). 심어서 확인했고
+    그때 빨간 것은 이 검사뿐이었습니다 — API 를 통과한 뒤를 재는 검사가
+    따로 있어야 합니다 (결함 370).
+
+    ⚠️ **`recording` 은 「참가했다」이지 「소리가 오고 있다」가 아닙니다.**
+    `join_track` 에서 붙으므로 조각이 0개여도 셉니다 — 결함 404 가 통화
+    화면에서 정확히 그것을 「녹음 중입니다」로 읽었습니다. 그래서 이 칸의
+    이름도 문장도 「들어와 있다」까지만 말합니다.
+    """
+    from sqlalchemy.orm import Session
+
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+    def open_meeting(title: str) -> int:
+        made = client.post(f"/api/projects/{project_id}/meetings", json={"title": title})
+        return int(made.json()["meeting_id"])
+
+    live = open_meeting("지금 녹음 중")
+    idle = open_meeting("아직 안 들어옴")
+    done = open_meeting("다 끝남")
+
+    with Session(engine) as session:
+        # 들어와 있는 사람 둘. ⚠️ 한 회의에 같은 사람의 트랙은 하나뿐입니다.
+        for who in (people["founder"], people["joiner"]):
+            session.add(
+                m.MeetingTrack(
+                    meeting_id=live, user_id=who, started_at=NOW, status="recording", coverage=None
+                )
+            )
+        # 끝난 트랙은 안 셉니다 — 그 갈래는 `coverage` 가 말합니다(결함 405).
+        session.add(
+            m.MeetingTrack(
+                meeting_id=done,
+                user_id=people["founder"],
+                started_at=NOW,
+                status="completed",
+                coverage=1.0,
+            )
+        )
+        session.commit()
+
+    rows = {r["meeting_id"]: r for r in client.get(f"/api/projects/{project_id}/meetings").json()}
+    assert rows[live]["recording_tracks"] == 2
+    assert rows[idle]["recording_tracks"] == 0, "트랙이 없으면 0 입니다"
+    assert rows[done]["recording_tracks"] == 0, (
+        "끝난 트랙을 여기 세면 회의가 끝난 뒤에도 홈이 「들어와 있습니다」라고 합니다"
+    )
+
+
+def test_the_home_list_carries_the_utterance_count_it_declares(
+    client: TestClient, engine, people: dict
+):
+    """⭐ 목록이 `utterance_count` 를 **실제로 채운다** (결함 368 의 남은 구멍).
+
+    368 은 이 칸을 만들면서 세 자리(서버 · SPA 타입 · `@lib` 입력)의 **이름**을
+    맞추는 짝 가드를 뒀습니다. 그런데 그 가드는 **채우는지**를 안 봅니다 —
+    서버가 칸을 선언해 놓고 안 채우면 기본값 0 이 나가는데 이름은 세 곳에
+    다 있으므로 초록입니다(결함 312 의 모양).
+
+    결함 444 에서 `recording_tracks` 로 그것을 심어 확인했고, 그때 같은
+    구멍이 이 칸에 남아 있다고 적었습니다 — 그 숙제를 여기서 합니다.
+
+    ⚠️ **0 은 「못 잰 것」이 아니라 「잰 0」입니다.** 그 구분이 홈에서
+    「후보 0건」의 두 이유를 가릅니다(이야기했는데 업무가 안 나온 것 ↔
+    소리가 하나도 안 잡힌 것). 그래서 「말이 있는 회의」와 「없는 회의」를
+    **둘 다** 두고 값이 갈라지는지 봅니다 — 한쪽만 두면 채우는 줄을 빼도
+    통과합니다(결함 327).
+    """
+    from sqlalchemy.orm import Session
+
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    def open_meeting(title: str) -> int:
+        made = client.post(f"/api/projects/{project_id}/meetings", json={"title": title})
+        return int(made.json()["meeting_id"])
+
+    heard = open_meeting("말이 오간 회의")
+    silent = open_meeting("소리가 안 잡힌 회의")
+
+    with Session(engine) as session:
+        for start in (0, 1000, 2000):
+            session.add(
+                m.Utterance(
+                    meeting_id=heard,
+                    speaker_id=people["founder"],
+                    start_ms=start,
+                    end_ms=start + 900,
+                    text="한 마디",
+                    speaker_source="track",
+                    speaker_confidence=1.0,
+                )
+            )
+        session.commit()
+
+    rows = {r["meeting_id"]: r for r in client.get(f"/api/projects/{project_id}/meetings").json()}
+    assert rows[heard]["utterance_count"] == 3
+    assert rows[silent]["utterance_count"] == 0, (
+        "발화가 없으면 0 입니다 — 그리고 그 0 은 「잰 0」이라 화면이 "
+        "「소리가 하나도 안 잡혔습니다」라고 말할 수 있습니다"
+    )

@@ -275,6 +275,40 @@ def mark_read(session: Session, user_id: int, notification_ids: list[int]) -> in
     return len(rows)
 
 
+def mark_all_read(session: Session, user_id: int, project_id: int) -> int:
+    """「다 읽음으로」 — **이 프로젝트의 내** 안 읽은 알림 전부.
+
+    ⚠️ 왜 번호 목록으로는 안 되는가: 배지는 DB 전수(`unread_count`)인데
+    화면 목록은 `MAX_ITEMS` 로 잘립니다. 화면이 자기 목록의 번호만 모아
+    보내면 **잘린 뒤쪽은 영영 안 읽힙니다** — 61건에서 21건에 멈추고,
+    목록 안에 안 읽은 것이 0 이라 버튼까지 잠겨서 더 누를 수도 없었습니다.
+    `unread_count` 가 「배지가 영영 안 줄어드는 숫자가 됩니다」라고 적어 둔
+    바로 그 상태가 **다른 길**로 난 것입니다 (결함 295 의 모양).
+
+    ⚠️ **범위를 넓히지 마십시오.** `user_id` 와 `project_id` 둘 다로
+    거릅니다 — 남의 알림도, 다른 프로젝트의 내 알림도 건드리면 안 됩니다.
+    그건 고친 게 아니라 지운 것입니다.
+
+    ⚠️ 파생 알림(마감)은 애초에 행이 없어서 여기 안 걸립니다. 읽었다고
+    마감이 사라지면 안 되고, `unread_count` 도 그것을 안 셉니다 — 두 자리가
+    같은 집합을 봅니다.
+    """
+    rows = list(
+        session.scalars(
+            select(m.Notification).where(
+                m.Notification.user_id == user_id,
+                m.Notification.project_id == project_id,
+                m.Notification.read_at.is_(None),
+            )
+        ).all()
+    )
+    now = datetime.now(UTC)
+    for row in rows:
+        row.read_at = now
+    session.flush()
+    return len(rows)
+
+
 # ══════════════════════════════════════════════════════════════
 # 읽기 — 저장된 것 + 지금 상태에서 나온 것
 # ══════════════════════════════════════════════════════════════

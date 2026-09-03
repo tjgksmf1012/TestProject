@@ -855,7 +855,13 @@ button.rail__item {
   cursor: pointer;
   position: relative;
 }
-.cal__nav::after { content: ""; position: absolute; inset: -8px; }
+/* ⚠️ 손가락 표적은 **공용 규칙**이 줍니다 (`.why, .kcard__menu-btn,
+   .cal__nav, …::after`) — 여기 다시 적지 마십시오. 오래도록
+   `.cal__nav::after { inset: -8px }` 가 한 줄 더 있었습니다. 같은
+   특성도(0,1,1)라 **나중 것**인 공용 규칙이 이겨서 아무 일도 안 났지만,
+   `.why` 는 순서가 반대여서 정확히 이 모양으로 깨졌습니다(결함 445).
+   재서 확인했습니다 — 지우기 전에도 `.cal__nav` 은 다섯 점 다 자기가
+   잡혔습니다(0/5). **져서 무사했을 뿐입니다.** */
 .cal__nav:hover { background: var(--c-sunken); color: var(--c-ink); }
 .cal__grid { display: grid; grid-template-columns: repeat(7, 32px); gap: var(--sp-2); }
 .cal__wd {
@@ -1240,10 +1246,45 @@ details.disc > .disc__body {
   gap: var(--sp-5);
   flex-wrap: wrap;
 }
+/* 사람이 많아도 바가 창을 다 먹지 않게 (결함 434).
+ *
+ * ⚠️ 재현한 것: 팀원 23명 · 창 720×450(확대 200%)에서 바가 **401px = 창의
+ * 89%** 를 먹고 목록칸에 **24px** 만 남았습니다. `.main` 이 `overflow:
+ * hidden` 이라 넘친 174px 은 굴려도 안 나오고(휠 20번 → scrollTop 0),
+ * 입력칸 다섯과 「이 값으로 확정」(bottom=528)이 **창 밖**이었습니다 —
+ * 키보드로는 Tab 으로 닿는데 **마우스만 못 닿습니다**(결함 373 의 거울상).
+ *
+ * ⚠️ 버튼은 이 상자 **밖**에 둡니다. 안에 두면 같이 굴러가서, 사람이
+ * 「바 안에서 또 굴려야 한다」는 것을 알아채야 합니다.
+ *
+ * ⚠️ 단위는 `vh` 입니다. 데스크톱(900px)에서 216px 이라 지금 쓰는
+ * 164~208px 을 안 건드리고, 창이 낮아질 때만 조입니다 — px 로 박으면
+ * 정작 좁은 창에서 아무 일도 안 합니다. */
+.confirmbar__people {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+  /* ⚠️ basis 는 **0** 입니다. `auto` 면 이 상자가 max-content 폭을 요구해
+     줄을 다 차지하고, 「확정」 버튼이 **다음 줄로 밀려나** 바가 44px 더
+     높아집니다 (데스크톱 269 → 313px 로 한 번 나빠졌습니다). */
+  flex: 1 1 0;
+  min-width: 0;
+  max-height: 24vh;
+  overflow-y: auto;
+}
 .confirmbar__person { display: inline-flex; align-items: baseline; gap: var(--sp-3); }
 /* 구간 placeholder("32~52% (시스템 추정)")가 다 보여야 합니다 (v2 F1-4). */
 .confirmbar__person .input--num { width: 11rem; }
-.confirmbar__reasons { margin-top: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); }
+/* 사유 칸도 사람 수만큼 자랍니다 — 같은 이유로 상한을 둡니다 (결함 434). */
+.confirmbar__reasons {
+  margin-top: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-height: 22vh;
+  overflow-y: auto;
+}
 .confirmbar__reason { display: flex; align-items: center; gap: var(--sp-4); }
 .confirmbar__reason .input { flex: 1; max-width: 32rem; }
 
@@ -1903,9 +1944,20 @@ details.disc > .disc__body {
   padding: 0;
 }
 .why:hover { border-color: var(--c-evidence); color: var(--c-evidence); }
-/* 손가락 표적 44px — 눈에 보이는 원은 18px 이지만 누를 수 있는 넓이는
-   따로 줍니다 (창 반쪽·터치 노트북·확대 200%). */
-.why::after { content: ""; position: absolute; inset: -13px; }
+/* 손가락 표적 44px 는 **위의 공용 규칙**이 줍니다 (`.why, .kcard__menu-btn,
+   .cal__nav, …::after`). 여기 두 번째로 적지 마십시오.
+
+   ⚠️ 오래도록 여기 `.why::after { inset: -13px }` 가 한 줄 더 있었습니다.
+   같은 특성도(0,1,1)라 **나중 것이 이겨** `inset` 은 갈아탔는데, 공용
+   규칙의 `transform: translate(-50%, -50%)` 는 **그대로 남았습니다.**
+   그래서 44x44 짜리 표적이 자기 크기의 절반(22px)만큼 위·왼쪽으로 밀려
+   버튼보다 **35px 위**에 앉았고, 보이는 `?` 의 아래쪽 절반을 누르면
+   **다음 회의의 팝오버**가 열렸습니다 — 홈에서 세 줄이 그랬습니다
+   (결함 445). 재서 잡았습니다(y 를 1px 씩 훑어 누가 잡히는지 지도로).
+
+   이 저장소의 대표 실패 ②(「두 벌이 있으면 한쪽만 고쳐진다」)이고,
+   여기서는 한쪽만 **고쳐진 것도 아니라** 한쪽이 다른 쪽을 반쯤 덮어
+   아무도 안 짠 위치가 나왔습니다. */
 
 .why__pop {
   max-width: 22rem;
@@ -2147,3 +2199,4 @@ a.chain__link:hover { border-color: var(--c-evidence); }
   color: var(--c-ink-muted);
 }
 .chip--more:hover:not([aria-disabled='true']) { color: var(--c-ink); border-color: var(--c-line-strong); }
+

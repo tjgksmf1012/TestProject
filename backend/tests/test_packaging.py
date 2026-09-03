@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import ast
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -484,3 +485,80 @@ def test_the_api_runs_as_a_single_worker():
             "메모리에 있어 워커가 둘 이상이면 같은 회의의 사람들이 서로를 "
             "못 봅니다 (backend/teamflow/call/rooms.py 모듈 주석)."
         )
+
+
+# ── pytest 의 「예외」가 낡는 것을 잡습니다 ────────────────────────────────
+#
+# `pyproject.toml` 은 우리 코드의 DeprecationWarning 을 **오류**로 둡니다.
+# 그 엄격함이 남의 코드에도 걸려서, `starlette/testclient.py` 가 쓰는
+# `anyio.abc.BlockingPortal`(anyio 4.15 에서 폐기) 하나 때문에 **수집 단계에서
+# 30개가 통째로** 죽었습니다. 그래서 그 한 줄만 비껴가는 예외를 뒀습니다.
+#
+# ⚠️ 예외를 두면 **예외가 낡는 것도 재야 합니다**(결함 306). 아래 둘이
+# 양방향으로 잽니다 — 하나는 「아직 필요한가」, 하나는 「너무 넓지 않은가」.
+
+_ANYIO_IGNORE = "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning"
+
+
+def _filterwarnings() -> list[str]:
+    cfg = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return cfg["tool"]["pytest"]["ini_options"]["filterwarnings"]
+
+
+def test_anyio_blocking_portal_ignore_is_still_needed():
+    """⭐ starlette 이 고쳤으면 이 예외를 **지우라고** 알려 줍니다.
+
+    예외는 조용히 낡습니다 — 원인이 사라져도 아무도 안 지우고, 다음 사람은
+    그 줄을 보고 「아직 문제가 있나 보다」라고 읽습니다.
+
+    ⚠️ 이 검사는 **하위 프로세스**로 재야 합니다. `starlette.testclient` 는
+    이미 import 돼 있어서, 이 프로세스 안에서 `simplefilter("error")` 를 걸어도
+    모듈 최상위 줄이 다시 돌지 않습니다 — 언제나 통과하는 자가 됩니다.
+    """
+    probe = subprocess.run(
+        [sys.executable, "-W", "error::DeprecationWarning", "-c", "import fastapi.testclient"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+    if probe.returncode == 0:
+        # ⚠️ `anyio.__version__` 은 **없습니다** — 실패 메시지가 AttributeError 로
+        #    죽어서 정작 무엇이 문제인지 안 보였습니다. 메타데이터에서 읽습니다.
+        from importlib.metadata import version
+
+        installed = " · ".join(f"{n} {version(n)}" for n in ("anyio", "starlette"))
+        pytest.fail(
+            "이 환경에서는 그 폐기 경고가 **안 납니다**. 읽는 법이 둘입니다:\n"
+            f"  · 지금 깔린 것: {installed}\n"
+            "  ① starlette 이 고쳤다 → pyproject.toml 의 filterwarnings 에서\n"
+            f"     {_ANYIO_IGNORE!r} 를 지우고 이 테스트도 같이 지우세요.\n"
+            "  ② 내 venv 가 낡아서 CI 와 다르다 → 그러면 **이 환경이 CI 를\n"
+            "     재현하지 못하고 있습니다.** 여기서 초록이어도 CI 는 빨갤 수\n"
+            "     있습니다(실제로 그랬습니다 — anyio 4.14 는 조용하고 4.15 는\n"
+            "     수집 30건을 깨뜨립니다). `pip install -U -e \'.[dev]\'` 로 맞추세요.\n"
+            "둘을 가르는 법: anyio 4.15 이상이면 ①, 그 아래면 ②."
+        )
+    assert "anyio.abc.BlockingPortal" in probe.stderr, (
+        "예외의 이유였던 그 경고가 아니라 **다른 것**이 터졌습니다. "
+        "예외를 넓히지 말고 무엇이 터지는지 읽으십시오:\n" + probe.stderr[-2000:]
+    )
+
+
+def test_the_deprecation_exception_stays_narrow():
+    """⭐ 예외가 넓어지면 **우리 것도 같이 조용해집니다.**
+
+    `error::DeprecationWarning` 이 남아 있어야 하고, 비껴가는 것은 그 한
+    메시지뿐이어야 합니다. `"ignore::DeprecationWarning"` 처럼 통째로 끄면
+    이 저장소는 자기 폐기 경고를 영영 못 봅니다.
+    """
+    rules = _filterwarnings()
+    assert "error::DeprecationWarning" in rules, (
+        "우리 코드의 DeprecationWarning 을 오류로 두는 규칙이 사라졌습니다."
+    )
+    ignores = [r for r in rules if r.startswith("ignore")]
+    assert ignores == [_ANYIO_IGNORE], (
+        "DeprecationWarning 을 비껴가는 규칙은 anyio 별칭 하나뿐이어야 합니다. "
+        f"지금: {ignores}\n"
+        "새로 두려면 왜 남의 코드라 못 고치는지와, 그 예외가 낡는 것을 재는 "
+        "검사를 같이 두십시오."
+    )

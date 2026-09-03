@@ -154,6 +154,45 @@ export function filterScopeNote(
 }
 
 /** 종류별로 나눈다. ⚠️ **순서는 `KINDS` 고정**입니다 — 건수 순이 아닙니다. */
+/**
+ * 한 종류당 서버가 돌려주는 최대 건수.
+ *
+ * ⚠️ **`search_service.MAX_PER_KIND` 와 같은 값이어야 합니다** —
+ * `test_repo_integrity.py` 의 짝 표가 지킵니다. 갈라지면 화면이 잘리지도
+ * 않은 결과에 「더 있습니다」를 붙이거나(작으면), 잘린 것을 총계로
+ * 단언합니다(크면) — 뒤엣것이 결함 435 입니다.
+ */
+export const MAX_PER_KIND = 30;
+
+/**
+ * 이 묶음이 **잘렸을 수 있는가** (결함 435).
+ *
+ * ⚠️ 예전에는 화면이 받은 개수를 그대로 총계인 양 적었습니다 — DB 에
+ * 41건인데 머리줄은 「회의 30」 이고, 잘렸다는 말이 **한 자도** 없었습니다.
+ * 사람은 그 30이 전부인 줄 알고 없는 회의를 찾으러 갑니다.
+ *
+ * ⚠️ 「잘렸다」가 아니라 **「잘렸을 수 있다」** 입니다 — 딱 30건인 경우도
+ * 참을 돌려줍니다. 서버가 세어 보내면 정확해지지만, 이 저장소는 채팅에서
+ * 같은 자리를 이미 「미리 세지 않는다」로 정했습니다(`hasOlderMessages`) —
+ * 세면 질의가 한 번 더 늘고 그 값은 곧 낡습니다. 그래서 **문장이 그
+ * 불확실성을 그대로 말합니다.**
+ */
+export function mayHaveMore(shown: number, cap = MAX_PER_KIND): boolean {
+  return shown >= cap;
+}
+
+/**
+ * 잘렸을 때 할 말. 아니면 `null`.
+ *
+ * ⚠️ 「전부 보기」로 데려가지 **않습니다** — 그런 자리가 이 제품에 없습니다
+ * (결함 306: 가라고 적기 전에 그 자리를 세십시오). 여기서 할 수 있는 일은
+ * 검색어를 좁히는 것이고, 그 칸은 같은 화면 위에 있습니다.
+ */
+export function moreNote(shown: number, cap = MAX_PER_KIND): string | null {
+  if (!mayHaveMore(shown, cap)) return null;
+  return `한 종류에 ${cap}개까지만 보여 줍니다 — 더 있을 수 있으니 검색어를 좁혀 보세요`;
+}
+
 export function groupByKind(hits: readonly Hit[]): { kind: string; hits: Hit[] }[] {
   return KINDS.map((kind) => ({
     kind: kind as string,

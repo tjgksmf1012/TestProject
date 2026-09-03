@@ -100,11 +100,11 @@ function Body({ apiBase, ask }: { apiBase: string; ask: Request }) {
   }, [apiBase, meetingId, ask]);
 
   if (state.kind === 'loading') {
-    return <p className="text-text-subtle text-[13px]">불러오는 중…</p>;
+    return <p className="text-text-subtle text-label">불러오는 중…</p>;
   }
   if (state.kind === 'unreachable') {
     return (
-      <p className="text-text-muted text-[13px]">
+      <p className="text-text-muted text-label">
         근거 발화를 불러오지 못했습니다 — 연결을 확인하고 다시 열어 주세요.
       </p>
     );
@@ -114,14 +114,14 @@ function Body({ apiBase, ask }: { apiBase: string; ask: Request }) {
   const missing = missingNote(ask.ids, state.rows);
 
   if (views.length === 0) {
-    return <p className="text-text-muted text-[13px]">{emptyEvidenceNote(ask.ids)}</p>;
+    return <p className="text-text-muted text-label">{emptyEvidenceNote(ask.ids)}</p>;
   }
 
   return (
     <div className="flex flex-col gap-4">
       {views.map((view) => (
         <article key={view.id} className="flex flex-col gap-1">
-          <div className="flex items-baseline gap-2 text-[12px] text-text-subtle">
+          <div className="flex items-baseline gap-2 text-caption text-text-subtle">
             {view.at !== null && <span className="tabular-nums">{view.at}</span>}
             <span className="font-semibold text-text-muted">{view.speaker}</span>
             {/* ⚠️ 유형은 서버가 오래전부터 보내고 있었는데 **화면이 안 쓰고
@@ -131,13 +131,18 @@ function Body({ apiBase, ask }: { apiBase: string; ask: Request }) {
             {view.overlap && <span className="text-gap">동시 발언</span>}
           </div>
           {/* 원문. 손대지 않고 그대로 — 줄바꿈도 살립니다. */}
-          <p className="text-[14px] leading-relaxed whitespace-pre-wrap text-text">{view.text}</p>
+          {/* ⚠️ 이 줄이 이 제품의 대표 주장입니다 — 숫자에서 출발해 **몇 번째
+              발언까지** 거슬러 올라간 그 원문. 크기를 px 로 적으면 브라우저
+              기본 글자를 키운 사람에게 이 줄이 화면에서 **가장 작은 글자**가
+              됩니다(제목은 40px 인데 원문은 14px — 결함 443). 14px 짜리
+              토큰이 없어 `--fs-body`(15)로 올렸습니다 — 한 단계 커집니다. */}
+          <p className="text-body leading-relaxed whitespace-pre-wrap text-text">{view.text}</p>
           {view.speakerNote !== null && (
-            <p className="text-[12px] text-gap">{view.speakerNote}</p>
+            <p className="text-caption text-gap">{view.speakerNote}</p>
           )}
         </article>
       ))}
-      {missing !== null && <p className="text-[12px] text-gap">{missing}</p>}
+      {missing !== null && <p className="text-caption text-gap">{missing}</p>}
     </div>
   );
 }
@@ -150,24 +155,46 @@ function EvidenceDialog({ apiBase }: { apiBase: string }) {
     <Dialog.Root open={ask !== null} onOpenChange={(open) => !open && set(null)}>
       <Dialog.Portal>
         {/* ⚠️ 덮개를 새까맣게 하지 않습니다. 뒤의 카드가 비쳐야 "이 후보의
-            근거" 라는 관계가 유지됩니다. */}
-        <Dialog.Overlay className="fixed inset-0 bg-black/25" />
+            근거" 라는 관계가 유지됩니다.
+
+            ⚠️ **층을 적어야 합니다.** 이 상자는 `Dialog.Portal` 로 `<body>`
+            끝에 붙으므로 뿌리 쌓임 맥락에 서는데, 층을 안 적으면 0 이라
+            `#tabs`(30)·`.actionbar`(20) 같은 **고정 크롬 아래**로 깔립니다.
+            1440x900 에서는 상자가 그 사이에 들어가 안 겹치지만, 확대 200%
+            에서 23% · 브라우저 기본 글자 32px 에서 22% 가 덮였습니다
+            (결함 442). SPA 의 `.dialog` 는 처음부터 50/51 이고 그 옆에
+            왜인지가 적혀 있습니다 — 레거시만 빠져 있었습니다.
+            ⚠️ `.skip`(100) 보다는 **아래**입니다. 그건 초점을 받을 때만
+            나타나는 탈출구이고, 상자가 초점을 가두므로 만날 일이 없습니다. */}
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/25" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 w-[min(34rem,calc(100vw-2rem))] max-h-[80vh]
+          className="fixed left-1/2 top-1/2 z-51 w-[min(34rem,calc(100vw-2rem))] max-h-[80vh]
                      -translate-x-1/2 -translate-y-1/2 overflow-y-auto
                      rounded-card border border-line bg-surface p-6
                      focus:outline-none"
         >
-          <Dialog.Title className="m-0 text-[15px] font-semibold text-text">
+          {/* ⚠️ 크기를 여기서 정하지 않습니다 — `app.css` 의 `h2` 가 정합니다
+              (`--fs-title`). 저 파일은 **레이어가 없어서** `@layer utilities`
+              안의 Tailwind 를 특성도와 상관없이 전부 이깁니다. 오래도록
+              `text-[15px]` 가 적혀 있었는데 화면은 한 번도 15px 인 적이
+              없었습니다(20px, 기본 글자 32px 에서는 40px — 결함 443). */}
+          <Dialog.Title className="m-0 font-semibold text-text">
             회의에서 이렇게 말했습니다
           </Dialog.Title>
-          <Dialog.Description className="mt-1 mb-5 text-[12px] text-text-subtle">
+          <Dialog.Description className="mt-1 mb-5 text-caption text-text-subtle">
             {ask?.title ?? ''}
           </Dialog.Description>
           {ask !== null && <Body apiBase={apiBase} ask={ask} />}
           <div className="mt-6 flex justify-end">
-            <Dialog.Close className="min-h-0 rounded-ctrl border border-line-strong bg-bg
-                                     px-4 py-2 text-[13px] font-medium text-text-muted">
+            {/* ⚠️ 여기도 크기·높이를 안 적습니다 — `app.css` 의 `button` 이
+                `--fs-item`(15) 과 `min-height: var(--tap)`(44) 을 정하고,
+                레이어가 없어 언제나 이깁니다. 적혀 있던 `text-[13px]` 과
+                `min-h-0` 은 둘 다 **한 번도 안 먹었습니다**(재 봤습니다:
+                15px · 44px). ⚠️ 그리고 `min-h-0` 은 먹었다면 이 저장소의
+                44px 손가락 표적 규칙을 깨는 것이었습니다 — 진 덕분에
+                안 깨졌을 뿐이라 지웁니다. */}
+            <Dialog.Close className="rounded-ctrl border border-line-strong bg-bg
+                                     px-4 py-2 font-medium text-text-muted">
               닫기
             </Dialog.Close>
           </div>

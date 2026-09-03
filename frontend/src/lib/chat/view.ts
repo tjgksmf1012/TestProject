@@ -77,6 +77,47 @@ export function prependOlder<T extends { id: number }>(
   return [...older.filter((m) => !seen.has(m.id)), ...current];
 }
 
+/**
+ * 목록이 바뀌었을 때 **어디를 보여 줄 것인가** (결함 433).
+ *
+ * ⚠️ 예전에는 화면이 `useEffect(… , [messages])` 에서 무조건 맨 아래로
+ * 굴렸습니다. 주석은 「새 메시지가 오면 아래로」였는데, `messages` 는
+ * **옛 메시지를 앞에 붙일 때도** 바뀝니다 — 그래서 「이전 대화 더 보기」를
+ * 누르면 방금 불러온 쉰 줄을 **지나쳐** 맨 아래로 돌아갔습니다. 재현한
+ * 것: 누른 뒤 화면이 `[116]~[120]` 으로 **누르기 전과 똑같고**, 요청한
+ * 옛 대화는 11,000px 위에 있었습니다. 사람이 보기에는 **아무 일도 안
+ * 일어난 것**입니다.
+ *
+ * 그래서 「무엇이 늘었는가」를 보고 정합니다:
+ *
+ * - `to-bottom` — 끝에 붙었다(새 메시지) · 처음 열었다 → 맨 아래로
+ * - `keep-position` — 앞에 붙었다(옛 대화) → **읽던 자리를 지킵니다**
+ * - `none` — 안 바뀌었다 → 건드리지 않습니다
+ *
+ * ⚠️ **개수로 재지 마십시오.** 지우기·고치기도 개수를 바꾸고, 옛 대화를
+ * 불러오는 것도 개수를 늘립니다 — 그 축으로는 셋이 안 갈립니다.
+ * 갈라 주는 것은 **양 끝의 번호**입니다.
+ */
+export type ScrollIntent = 'to-bottom' | 'keep-position' | 'none';
+
+export function scrollIntentFor(
+  before: readonly { id: number }[],
+  after: readonly { id: number }[],
+): ScrollIntent {
+  if (after.length === 0) return 'none';
+  // 처음 그리는 것(채널을 연 순간)은 맨 아래가 맞습니다.
+  if (before.length === 0) return 'to-bottom';
+
+  const lastChanged = before[before.length - 1]!.id !== after[after.length - 1]!.id;
+  const firstChanged = before[0]!.id !== after[0]!.id;
+
+  // ⚠️ 끝이 바뀌었으면 앞이 같이 바뀌었어도 `to-bottom` 입니다 — 옛 대화를
+  //    불러오는 사이에 새 메시지가 와도 사람은 새것을 보고 싶어 합니다.
+  if (lastChanged) return 'to-bottom';
+  if (firstChanged) return 'keep-position';
+  return 'none';
+}
+
 export interface Reaction {
   mark: string;
   /** 사람 말. ⚠️ **서버가 줍니다** — 화면에 두 번째 표를 만들지 않습니다. */

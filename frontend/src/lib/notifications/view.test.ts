@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
@@ -7,7 +7,7 @@ import {
   emptyNote,
   hrefFor,
   isUrgent,
-  readableIds,
+  canMarkAllRead,
   timeLabel,
   type Notice,
 } from './view.ts';
@@ -72,25 +72,27 @@ describe('보이는 모양', () => {
 });
 
 describe('읽음', () => {
-  it('안 읽은 **저장된** 알림만 읽음 대상이다', () => {
-    deepStrictEqual(
-      readableIds([
-        notice({ notification_id: 3, read: false }),
-        notice({ notification_id: 4, read: true }),
-      ]),
-      [3],
-    );
+  /* ⚠️ `readableIds` 는 **없앴습니다.** 화면이 번호를 모아 보내던 시절의
+     것인데, 그 방식이 결함 432 의 원인이었습니다 — 목록은 `MAX_ITEMS` 로
+     잘리고 배지는 DB 전수라, 잘린 뒤쪽이 영영 안 읽혔습니다. 지금은 서버의
+     `mark_all_read` 가 「이 프로젝트의 내 것 전부」를 지웁니다.
+
+     그 함수가 지키던 요구(「마감은 읽어도 안 사라진다」)는 사라지지 않고
+     **서버로 옮겨 갔습니다** — 파생 알림은 애초에 행이 없어서 걸릴 것이
+     없고, `test_notifications.py` 가 그것을 잽니다. 판단이 없어진 것이
+     아니라 **한 자리로 모인 것**입니다. */
+
+  it('⭐ 배지가 0 이면 「다 읽음으로」 를 못 누른다', () => {
+    strictEqual(canMarkAllRead(0), false);
+    strictEqual(canMarkAllRead(-1), false);
+    strictEqual(canMarkAllRead(Number.NaN), false);
   });
 
-  it('⭐ 마감은 읽음 대상이 아니다 — 읽어도 안 사라진다', () => {
-    deepStrictEqual(
-      readableIds([notice({ kind: 'overdue', notification_id: null, read: false })]),
-      [],
-    );
-  });
-
-  it('빈 목록은 빈 목록', () => {
-    deepStrictEqual(readableIds([]), []);
+  it('⭐ 한 페이지를 넘어도 누를 수 있다 — 목록이 아니라 **배지**로 잰다', () => {
+    // 결함 432: 61건에서 한 번 누르면 21건이 남는데, 그때 화면 목록 안에는
+    // 안 읽은 것이 0 이었습니다. 목록으로 재던 옛 게이트는 여기서 잠깁니다.
+    strictEqual(canMarkAllRead(21), true);
+    strictEqual(canMarkAllRead(1), true);
   });
 });
 

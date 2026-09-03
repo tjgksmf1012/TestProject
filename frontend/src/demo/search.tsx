@@ -29,6 +29,7 @@ import {
   excerpt,
   filterScopeNote,
   groupByKind,
+  moreNote,
   hrefFor,
   type Hit,
 } from '../lib/search/view.ts';
@@ -281,6 +282,14 @@ function App() {
             <h2 className="shead">
               {describeKind(group.kind)} <span className="kcount">{group.hits.length}</span>
             </h2>
+            {/* ⚠️ **받은 개수는 총계가 아닙니다** (결함 435). 서버가 한 종류당
+                `MAX_PER_KIND` 로 자르는데 화면이 그 수를 그대로 적어서, DB 에
+                41건인 검색이 「회의 30」 으로 나가고 잘렸다는 말은 한 자도
+                없었습니다. 같은 셸의 회의 레일은 잘릴 때 「그 밖에 25개 —
+                홈에서 전부 봅니다」라고 **이미 말하고 있었습니다.** */}
+            {moreNote(group.hits.length) !== null && (
+              <p className="cwhy kmore">{moreNote(group.hits.length)}</p>
+            )}
             <ul className="hlist">
               {group.hits.map((thing, i) => {
                 const href = hrefFor(thing, projectId);

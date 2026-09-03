@@ -176,7 +176,10 @@ describe('memberStatuses', () => {
     const statuses = memberStatuses(consented, [track(1, { total_gap_ms: 45_000 })]);
 
     strictEqual(statuses[0]?.verdict, 'at_risk');
-    strictEqual(statuses[0]?.message.includes('폰 화면'), true);
+    // ⚠️ **낱말이 아니라 요구를 잽니다.** 예전에는 `'폰 화면'` 을 못 박고
+    //    있어서, 그 문구가 PC 전용 제품에 남아 있는 것을 자가 **지키고**
+    //    있었습니다(결함 446). 재야 할 것은 「무엇을 확인할지 말하는가」입니다.
+    strictEqual(statuses[0]?.message.includes('창을 켜'), true);
     strictEqual(statuses[0]?.message.includes('45초'), true);
   });
 
@@ -261,6 +264,32 @@ describe('roomStatus', () => {
     strictEqual(status.message.includes('강제 종료'), true);
   });
 
+  it('⭐ **이미 끝난 회의에는 강제 종료를 권하지 않는다** (결함 436)', () => {
+    // `canStart=false` 는 큐에 들어갔거나 처리·검토가 끝난 회의입니다.
+    // 그때는 「브라우저를 닫은 사람 때문에 영영 처리되지 않는」 상태가
+    // 아니므로 풀 것이 없습니다. 그런데 참가 안 한 사람이 하나라도 있으면
+    // 조건이 참이라, `confirmed` 회의에서도 단추가 그대로 떴습니다.
+    const statuses = memberStatuses(consented, [
+      track(1, { status: 'completed', coverage: 1 }),
+      track(2, { status: 'completed', coverage: 1 }),
+    ]);
+    const ended = roomStatus(statuses, true, false);
+
+    strictEqual(ended.notJoined, 1, '세는 것은 그대로입니다');
+    strictEqual(ended.needsForceFinish, false);
+    strictEqual(
+      ended.message.includes('회의가 끝나지 않습니다'),
+      false,
+      '끝난 회의에 「끝나지 않습니다」라고 하면 사람은 자기가 뭘 안 한 줄 압니다',
+    );
+    strictEqual(ended.message.includes('강제 종료'), false);
+
+    // 아직 시작할 수 있는 회의에서는 그대로여야 합니다 — 반대 방향.
+    const live = roomStatus(statuses, true, true);
+    strictEqual(live.needsForceFinish, true);
+    strictEqual(live.message.includes('강제 종료'), true);
+  });
+
   it('전원 종료하면 처리가 시작된다고 말한다', () => {
     const statuses = memberStatuses(
       consented,
@@ -341,7 +370,9 @@ describe('회의 중에 폰이 죽었는가 (결함 83)', () => {
     const status = only(recording({ chunk_count: 42, silent_ms: 75_000 }));
     strictEqual(status.verdict, 'at_risk');
     strictEqual(status.message.includes('안 올라옵니다'), true);
-    strictEqual(status.message.includes('폰 화면을 켜'), true);
+    strictEqual(status.message.includes('창을 켜'), true);
+    // 앞 갈래(조각 0개)와 **다른 말**이어야 합니다 — 할 일이 다릅니다.
+    strictEqual(status.message.includes('시작했는지'), false);
   });
 
   it('막 참가해 아직 조용한 것은 경고하지 않는다', () => {
@@ -362,6 +393,37 @@ describe('회의 중에 폰이 죽었는가 (결함 83)', () => {
     strictEqual(isSilentTooLong(recording({})), false);
     strictEqual(isSilentTooLong(recording({ silent_ms: null })), false);
     strictEqual(only(recording({})).verdict, 'healthy');
+  });
+
+  /* ⚠️ 이 제품은 **PC 웹 · PC 앱 둘뿐입니다** (모바일은 2026-08-13 에 범위
+     에서 뺐습니다). 그런데 녹음이 끊긴 팀원에게 「폰 화면을 켜 주세요」라고
+     보내고 있었습니다 — 이 제품에서 제일 급한 안내(지금 소리가 사라지고
+     있습니다)가 **없는 기기**를 확인하라고 한 것입니다(결함 446).
+
+     `platform/recording.test.ts` 의 「폰 이야기 금지」 가드는 그 파일의
+     **한 함수만** 봅니다. 그 주석이 「사람에게 보이는 안내를 새로 만들면
+     그 자리에도 같은 자를 대십시오」라고 적어 뒀는데, 이 파일에는 안
+     댔습니다 — 결함 422 와 같은 모양(자가 아니라 **걷는 자리**가 좁음)이고,
+     그 가드 자신이 경고한 일이 그대로 났습니다. */
+  it('⭐ 폰 이야기를 하지 않는다 (PC 전용 제품)', () => {
+    const 갈래 = [
+      recording({ chunk_count: 0, silent_ms: 90_000 }),
+      recording({ chunk_count: 42, silent_ms: 75_000 }),
+      recording({ chunk_count: 42, total_gap_ms: 45_000 }),
+      recording({ chunk_count: 42, silent_ms: 3_000 }),
+      recording({ coverage: 0.42, status: 'unusable' }),
+      recording({ coverage: 1, status: 'completed' }),
+    ];
+    for (const t of 갈래) {
+      const message = only(t).message;
+      for (const word of ['폰', '홈 화면', '모바일', '스마트폰']) {
+        strictEqual(
+          message.includes(word),
+          false,
+          `"${word}" 가 남아 있습니다 — 이 제품에 그 기기는 없습니다: ${message}`,
+        );
+      }
+    }
   });
 
   it('⭐ 분 단위로 넘어가면 분으로 읽는다', () => {

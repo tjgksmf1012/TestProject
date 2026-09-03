@@ -11524,3 +11524,183 @@ describe('결함 395 — 확신도 알약이 **축 이름을 글자로** 단다'
     strictEqual(confidenceReading(0.925), '확신 93%');
   });
 });
+
+describe('⭐ 로비가 `roomStatus` 에 **국면을 넘기는가** (결함 441)', () => {
+  /* 결함 309 가 「끝난 회의에 「**아직** 아무도 참가하지 않았습니다」라고
+     하지 않기」 위해 `canStart` 를 인자로 만들었고, 결함 436 이 「끝난
+     회의에 강제 종료를 권하지 않기」 위해 그 인자를 하나 더 쓰게 했습니다.
+
+     ⚠️ **그런데 SPA 는 그 인자를 넘긴 적이 없습니다.** 기본값이 `true` 라
+     둘 다 SPA 에서는 아무 일도 안 하고 있었고, 오류도 안 나고 화면도
+     멀쩡해서 **양쪽을 나란히 놓기 전에는 안 보였습니다.** 이 저장소의
+     대표 실패가 **인자 하나**에서 난 것입니다.
+
+     낱말이 아니라 **인자 개수**를 셉니다. ⚠️ `Function.length` 로 세면
+     기본값이 붙은 인자는 안 잡힙니다(AGENTS.md) — 여기서는 **부르는 쪽**의
+     소스를 읽으므로 그 함정은 없지만, 대신 **최상위 쉼표**로 갈라야
+     합니다: `roomStatus(memberStatuses(a, b), c)` 를 쉼표로 그냥 쪼개면
+     인자가 셋으로 보입니다. */
+  const topLevelArgs = (call: string): number => {
+    let depth = 0;
+    let count = 1;
+    for (const ch of call) {
+      if ('([{'.includes(ch)) depth += 1;
+      else if (')]}'.includes(ch)) depth -= 1;
+      else if (ch === ',' && depth === 0) count += 1;
+    }
+    return call.trim() === '' ? 0 : count;
+  };
+
+  const callsIn = (code: string): string[] => {
+    const out: string[] = [];
+    let at = code.indexOf('roomStatus(');
+    while (at !== -1) {
+      let i = at + 'roomStatus('.length;
+      let depth = 1;
+      const start = i;
+      while (i < code.length && depth > 0) {
+        if ('([{'.includes(code[i]!)) depth += 1;
+        else if (')]}'.includes(code[i]!)) depth -= 1;
+        if (depth > 0) i += 1;
+      }
+      out.push(code.slice(start, i));
+      at = code.indexOf('roomStatus(', i);
+    }
+    return out;
+  };
+
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'lobby.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx')],
+  ];
+
+  for (const [name, file] of ROOTS) {
+    it(`${name} 로비는 세 번째 인자(canStart)까지 넘긴다`, () => {
+      const calls = callsIn(readFileSync(file, 'utf8'));
+      // ⚠️ **한 뿌리에서 한 건도 못 보면 실패입니다** (결함 286) — 화면을
+      //    옮기면 이 자가 조용히 눈을 감습니다.
+      ok(calls.length > 0, `${name}: \`roomStatus(\` 를 부르는 곳을 못 찾았습니다`);
+      for (const call of calls) {
+        strictEqual(
+          topLevelArgs(call) >= 3,
+          true,
+          `${name}: \`roomStatus(${call.trim()})\` — 국면(canStart)을 안 넘깁니다. ` +
+            '기본값이 `true` 라 결함 309·436 이 이 뿌리에서 아무 일도 안 합니다.',
+        );
+      }
+    });
+  }
+});
+
+describe('결함 442·443 — 화면이 적은 것과 화면에 나오는 것', () => {
+  /* 근거 발화 상자를 확대 200% 로 열었더니 **23% 가 고정 크롬 아래로**
+     깔렸고(결함 442), 브라우저 기본 글자를 32px 로 키우니 제목은 40px 이
+     되는데 **발언 원문은 14px 그대로**였습니다(결함 443).
+
+     ⚠️ 둘은 원인이 다릅니다:
+       442 = 층을 안 적어서 `z-index: auto`(0) → `#tabs`(30)·`.actionbar`(20)
+       443 = 크기를 px 로 적어서 `rem` 축을 안 봄
+
+     그리고 443 에는 **둘째 갈래**가 있었습니다 — `app.css` 는 레이어가
+     없어서 `@layer utilities` 안의 Tailwind 를 전부 이깁니다. 그래서
+     `text-[15px]`·`text-[13px]`·`min-h-0` 셋은 적혀만 있고 **한 번도 안
+     먹었습니다**(재 봤습니다: 20px · 15px · 44px). 적어 놓고 안 먹는 것은
+     다음 사람이 그 값을 믿게 만듭니다. */
+
+  /** 화면 파일 전부(두 뿌리). `@lib` 은 글자를 안 그리므로 뺍니다. */
+  const screenFiles = (): { rel: string; source: string }[] => {
+    const out: { rel: string; source: string }[] = [];
+    const walk = (dir: string, label: string): void => {
+      if (!existsSync(dir)) return;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full, label);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.endsWith('.test.ts')) {
+          out.push({ rel: `${label}/${entry.name}`, source: readFileSync(full, 'utf8') });
+        }
+      }
+    };
+    walk(DEMO, '레거시');
+    walk(join(ROOT, '..', 'webapp', 'src'), 'SPA');
+    return out;
+  };
+
+  it('⭐ 글자 크기를 px 로 적지 않는다 (두 뿌리)', () => {
+    const files = screenFiles();
+    // ⚠️ **한 뿌리에서 한 건도 못 보면 실패입니다** (결함 286).
+    for (const label of ['레거시', 'SPA']) {
+      ok(
+        files.some((f) => f.rel.startsWith(label)),
+        `${label}: 화면 파일을 하나도 못 찾았습니다 — 자가 눈을 감았습니다`,
+      );
+    }
+
+    const offenders: string[] = [];
+    for (const { rel, source } of files) {
+      // ⚠️ **주석을 먼저 걷습니다.** 이 저장소는 "예전에는 `text-[14px]`
+      //    였다" 를 주석에 그대로 적어 둡니다 (결함 238).
+      for (const m of codeOf(source).matchAll(/\btext-\[(\d+(?:\.\d+)?)px\]/g)) {
+        offenders.push(`${rel}: text-[${m[1]}px]`);
+      }
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      'px 로 적은 글자는 **브라우저 기본 글자**를 안 봅니다 — 확대(뷰포트를 줄임)와 ' +
+        '다른 축이라 폭으로 접는 규칙도 안 걸립니다. `tokens.css` 의 `--fs-*` 를 ' +
+        '가리키는 이름(`text-body`·`text-label`·`text-caption` …)을 쓰십시오.',
+    );
+  });
+
+  it('⭐ `app.css` 는 레이어가 없다 — 유틸리티가 진다는 전제', () => {
+    /* 위 주석과 `evidence.tsx` 의 주석 둘이 "크기는 app.css 가 정합니다"
+       라고 적어 두고 있습니다. 그 말이 참인 이유는 **레이어가 없어서**
+       입니다 — 누가 `@layer` 로 감싸면 그 세 자리의 설명이 조용히
+       거짓이 되고, 그때 화면 크기가 바뀌는데 아무도 안 봅니다. */
+    const app = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    strictEqual(
+      /@layer\b/.test(app.replace(/\/\*[\s\S]*?\*\//g, '')),
+      false,
+      'app.css 에 `@layer` 가 생겼습니다. 그러면 Tailwind 유틸리티가 **이기기 ' +
+        '시작합니다** — `evidence.tsx` 가 "크기는 app.css 가 정합니다" 라고 적어 둔 ' +
+        '자리 둘(제목·닫기)을 다시 재고 주석을 고치십시오.',
+    );
+  });
+
+  it('⭐ 레거시 대화상자는 고정 크롬 위에 선다', () => {
+    /* `Dialog.Portal` 은 `<body>` 끝에 붙어 뿌리 쌓임 맥락에 섭니다.
+       층을 안 적으면 0 이라, 아래에서 세는 고정 크롬이 전부 위를 덮습니다. */
+    const source = readFileSync(join(DEMO, 'evidence.tsx'), 'utf8');
+    const code = codeOf(source);
+
+    // 이 화면이 넘어야 하는 층 — `app.css` 에서 **세어서** 정합니다.
+    // 손으로 적으면 크롬이 하나 늘 때 이 자가 조용히 낡습니다.
+    const appCss = readFileSync(join(PUBLIC, 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const chrome = [...appCss.matchAll(/z-index:\s*(\d+)/g)]
+      .map((m) => Number(m[1]))
+      // `.skip`(100) 은 넘지 않습니다 — 초점을 받을 때만 나타나는 탈출구이고,
+      // 상자가 초점을 가두므로 만날 일이 없습니다.
+      .filter((z) => z < 100);
+    ok(chrome.length > 0, 'app.css 에서 고정 크롬의 층을 하나도 못 읽었습니다');
+    const highest = Math.max(...chrome);
+
+    for (const [what, re] of [
+      ['덮개', /<Dialog\.Overlay[\s\S]*?className="([^"]*)"/],
+      ['상자', /<Dialog\.Content[\s\S]*?className="([\s\S]*?)"/],
+    ] as const) {
+      const m = re.exec(code);
+      ok(m !== null, `${what}의 className 을 못 찾았습니다 — 자가 낡았습니다`);
+      const z = /\bz-(\d+)\b/.exec((m as RegExpExecArray)[1] as string);
+      ok(
+        z !== null,
+        `${what}에 층이 없습니다. 안 적으면 0 이라 \`#tabs\`(30)·\`.actionbar\`(20) ` +
+          '아래로 깔립니다 — 확대 200% 에서 23% 가 덮였습니다(결함 442).',
+      );
+      ok(
+        Number((z as RegExpExecArray)[1]) > highest,
+        `${what}의 층이 ${(z as RegExpExecArray)[1]} 인데 고정 크롬 중 제일 높은 것이 ` +
+          `${highest} 입니다 — 그 위에 서야 합니다.`,
+      );
+    }
+  });
+});

@@ -51,7 +51,7 @@ import { isSessionExpired, loginUrlFor, safeApiBase, type Me } from '../lib/auth
 import { describeUnexpected, tryGet, trySend, unreachableText } from '../lib/http/send.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { Byline, RawHtml } from './parts.tsx';
-import { failureHtml } from '../lib/ui/failure.ts';
+import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
 import { rows as skeletonRows } from '../lib/ui/skeleton.ts';
 import {
@@ -133,7 +133,15 @@ interface Loaded {
 type Screen =
   | { k: 'loading' }
   | { k: 'unreachable' }
-  | { k: 'error' }
+  /**
+   * 서버가 답은 했는데 못 준 것. **상태 코드를 들고 다닙니다** (결함 439).
+   *
+   * ⚠️ 예전에는 `{ k: 'error' }` 뿐이라 코드를 버렸고, 화면은 403 에도
+   * 「알 수 없는 오류가 생겼습니다」라고 했습니다 — 같은 셸의 칸반·기여도는
+   * 같은 상황에서 「이 프로젝트의 구성원만 볼 수 있습니다」라고 말합니다.
+   * 「볼 권한이 없다」와 「무슨 일인지 모르겠다」는 사람이 할 일이 다릅니다.
+   */
+  | { k: 'error'; status: number | null }
   | { k: 'ok'; data: Loaded };
 
 // ══════════════════════════════════════════════════════════════
@@ -476,22 +484,26 @@ interface TypeTally {
  *    곧 순위표입니다. 값은 글자로
  * 3. **기여도가 아니라고 화면이 말합니다**
  */
-function SpeakingShares({ data }: { data: Speaking | null }) {
+function SpeakingShares({ data, status }: { data: Speaking | null; status?: string | null }) {
   if (data === null) return null;
 
-  const why = notMeasurableText(data);
+  /* ⚠️ **국면을 넘깁니다** (결함 438). 안 넘기면 다섯 국면이 「아직 발언이
+     분석되지 않아」 한 문장으로 뭉개집니다 — 실패한 회의에게는 거짓이고
+     검토까지 끝난 회의에게는 정반대입니다. 바로 옆 타임라인 칸은 처음부터
+     다섯을 갈라 말하고 있었습니다. */
+  const why = notMeasurableText(data, status);
   const skew = skewText(data);
 
   return (
     <section className="shares">
       <h2 className="minutes-head">누가 얼마나 말했나</h2>
       {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
-      <p className="text-text-subtle text-[12px]">{plainText(SHARE_NOTE)}</p>
+      <p className="text-text-subtle text-caption">{plainText(SHARE_NOTE)}</p>
 
       {why !== null ? (
         // ⚠️ 빈 칸으로 두지 않습니다 — "고장" 이나 "다들 말을 안 했다" 로
         //    읽힙니다.
-        <p className="text-text-subtle text-[12px]">{why}</p>
+        <p className="text-text-subtle text-caption">{why}</p>
       ) : (
         <>
           <ul className="slist">
@@ -503,7 +515,7 @@ function SpeakingShares({ data }: { data: Speaking | null }) {
             ))}
           </ul>
           {/* ⚠️ 누가인지 안 적고, 나무라지도 않습니다. */}
-          {skew !== null && <p className="text-text-subtle text-[12px]">{skew}</p>}
+          {skew !== null && <p className="text-text-subtle text-caption">{skew}</p>}
         </>
       )}
     </section>
@@ -525,7 +537,7 @@ function SpeechTypes({ counts }: { counts: TypeTally | null }) {
     <section className="types">
       <h2 className="minutes-head">무슨 말이 오갔나</h2>
       {/* ⚠️ 안 잰 것을 0 옆에 두지 않습니다 — 위에 따로 적습니다. */}
-      {pending !== null && <p className="text-gap text-[12px]">{pending}</p>}
+      {pending !== null && <p className="text-gap text-caption">{pending}</p>}
       <ul className="tlist">
         {spoken.map((row) => (
           <li key={row.type} className={row.zero ? 'tzero' : undefined}>
@@ -537,7 +549,7 @@ function SpeechTypes({ counts }: { counts: TypeTally | null }) {
       {/* ⚠️ 0건인 유형을 통째로 숨기면 "반대가 없었다" 가 안 보입니다.
           줄로 세우면 시끄러우니 한 줄로 적습니다. */}
       {spoken.length < rows.length && (
-        <p className="text-text-subtle text-[12px]">
+        <p className="text-text-subtle text-caption">
           없던 것 — {rows.filter((r) => r.count === 0).map((r) => r.label).join(' · ')}
         </p>
       )}
@@ -837,7 +849,9 @@ function Review() {
       return;
     }
     if (!c.ok || !m.ok || !g.ok) {
-      setScreen({ k: 'error' });
+      // 처음 실패한 응답의 코드를 들고 갑니다 — 셋이 같은 이유로 실패합니다.
+      const failed = [c, m, g].find((r) => !r.ok);
+      setScreen({ k: 'error', status: failed?.status ?? null });
       return;
     }
     setTypes(t !== null && t.ok ? ((await t.json()) as TypeTally) : null);
@@ -1006,7 +1020,20 @@ function Review() {
                 screen.k === 'unreachable'
                   ? unreachableText('업무 후보를 불러오지 못했습니다.')
                   : '업무 후보를 불러오지 못했습니다.',
-              ...(screen.k === 'error' ? { help: describeUnexpected() } : {}),
+              /* ⚠️ **서버가 무엇이라 했는지 말합니다** (결함 439). 403 을
+                 「알 수 없는 오류」로 덮으면 사람은 팀에 요청하면 될 일을
+                 고장으로 읽습니다. `describeHttpStatus` 는 이 셸의 관습이고
+                 칸반·기여도·로비가 이미 그것을 씁니다 — 여기만 빠져
+                 있었습니다. 모르는 코드에는 여전히 `describeUnexpected()`
+                 입니다(그 함수는 **지어내지 않습니다**). */
+              ...(screen.k === 'error'
+                ? {
+                    help:
+                      (screen.status !== null ? describeHttpStatus(screen.status) : null) ??
+                      describeUnexpected(),
+                    ...(screen.status !== null ? { code: screen.status } : {}),
+                  }
+                : {}),
               retry: true,
             })}
             onRetry={() => {
@@ -1034,7 +1061,7 @@ function Review() {
       {header}
       <Brief meeting={meeting} />
       <SpeechTypes counts={types} />
-            <SpeakingShares data={speaking} />
+      <SpeakingShares data={speaking} status={meeting.status} />
       <Findings findings={meeting.findings ?? []} />
       <Timeline findings={meeting.findings ?? []} meetingStatus={meeting.status} />
 
