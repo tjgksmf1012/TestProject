@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  scrollIntentFor,
   canEdit,
   canSend,
   carriesMessages,
@@ -464,5 +465,43 @@ describe('답글이 **무엇에 달렸는지** (결함 419)', () => {
       who: '이하늘',
       body: DELETED_TEXT,
     });
+  });
+});
+
+describe('목록이 바뀌었을 때 어디를 보여 주는가 (결함 433)', () => {
+  const ids = (...n: number[]) => n.map((id) => ({ id }));
+
+  it('⭐ **옛 대화를 앞에 붙이면 읽던 자리를 지킨다** — 맨 아래로 돌아가지 않는다', () => {
+    // 결함 433 이 난 자리. 옛 코드는 여기서도 맨 아래로 굴러서, 방금 불러온
+    // 쉰 줄을 지나쳐 「누르기 전과 똑같은 화면」이 됐습니다.
+    strictEqual(scrollIntentFor(ids(71, 72, 73), ids(21, 22, 71, 72, 73)), 'keep-position');
+  });
+
+  it('새 메시지가 끝에 붙으면 맨 아래로', () => {
+    strictEqual(scrollIntentFor(ids(71, 72), ids(71, 72, 73)), 'to-bottom');
+  });
+
+  it('처음 그리는 것(채널을 연 순간)은 맨 아래로', () => {
+    strictEqual(scrollIntentFor([], ids(71, 72)), 'to-bottom');
+  });
+
+  it('안 바뀌었으면 건드리지 않는다', () => {
+    strictEqual(scrollIntentFor(ids(71, 72), ids(71, 72)), 'none');
+  });
+
+  it('빈 목록은 건드리지 않는다', () => {
+    strictEqual(scrollIntentFor(ids(71), []), 'none');
+  });
+
+  it('⭐ 옛 대화를 불러오는 사이에 새 메시지가 오면 **새것**을 보여 준다', () => {
+    // 양쪽이 다 바뀐 경우. 사람은 새 메시지를 보고 싶어 합니다.
+    strictEqual(scrollIntentFor(ids(71, 72), ids(21, 71, 72, 73)), 'to-bottom');
+  });
+
+  it('⭐ 개수로는 갈리지 않는다 — 그래서 **양 끝의 번호**로 잽니다', () => {
+    // 셋 다 「3개 → 3개」 인데 뜻이 다릅니다.
+    strictEqual(scrollIntentFor(ids(71, 72, 73), ids(71, 72, 73)), 'none');
+    strictEqual(scrollIntentFor(ids(71, 72, 73), ids(72, 73, 74)), 'to-bottom');
+    strictEqual(scrollIntentFor(ids(71, 72, 73), ids(69, 70, 73)), 'keep-position');
   });
 });
