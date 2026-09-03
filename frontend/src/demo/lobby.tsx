@@ -625,8 +625,14 @@ function Lobby() {
           )
         )}
 
-        {/* ⚠️ `#roster` 는 `<ul>` 입니다. `<div>` 를 넣으면 낭독기가 세는
-            항목 수가 틀어집니다 — 그래서 `<li>` 판 스켈레톤을 씁니다. */}
+        {/* ⚠️ **못 받았으면 여기서 멈춥니다** (결함 439). 예전에는 실패
+            상자만 얹고 **그 아래를 그대로 그렸습니다** — 남의 회의를 연
+            비구성원(403)에게 「아직 아무도 참가하지 않았습니다」라고 했고
+            (실제로는 셋이 참가), 「동의합니다」 단추까지 눌리게 뒀습니다
+            (누르면 `POST 403`). SPA 는 `cannotLoad` 문지기로 판 전체를
+            막고, 같은 셸의 칸반·기여도도 막습니다 — 여기만 뚫려 있었습니다. */}
+        {loadFailure === null && (
+        <>
         <ul id="roster" {...(slow ? { 'aria-busy': 'true' as const } : {})}>
           {slow ? (
             <RawHtml html={rowItems(3)} />
@@ -698,8 +704,14 @@ function Lobby() {
           {consentMessage}
         </p>
         <NoteLine note={consentNote} id="consent-note" />
+        </>
+        )}
       </section>
 
+      {/* 못 받은 회의에 대해 방 판과 동작 판을 그리지 않습니다 — 빈 사실을
+          단언하고, 누르면 403 이 나는 단추만 남습니다 (결함 439). */}
+      {loadFailure === null && (
+      <>
       <section className="panel">
         <h2>참가자 상태</h2>
         {ticks.length > 0 && (
@@ -895,6 +907,8 @@ function Lobby() {
         </div>
         <NoteLine note={minutesNote} id="minutes-note" />
       </section>
+      </>
+      )}
     </>
   );
 }
