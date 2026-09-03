@@ -261,6 +261,32 @@ describe('roomStatus', () => {
     strictEqual(status.message.includes('강제 종료'), true);
   });
 
+  it('⭐ **이미 끝난 회의에는 강제 종료를 권하지 않는다** (결함 436)', () => {
+    // `canStart=false` 는 큐에 들어갔거나 처리·검토가 끝난 회의입니다.
+    // 그때는 「브라우저를 닫은 사람 때문에 영영 처리되지 않는」 상태가
+    // 아니므로 풀 것이 없습니다. 그런데 참가 안 한 사람이 하나라도 있으면
+    // 조건이 참이라, `confirmed` 회의에서도 단추가 그대로 떴습니다.
+    const statuses = memberStatuses(consented, [
+      track(1, { status: 'completed', coverage: 1 }),
+      track(2, { status: 'completed', coverage: 1 }),
+    ]);
+    const ended = roomStatus(statuses, true, false);
+
+    strictEqual(ended.notJoined, 1, '세는 것은 그대로입니다');
+    strictEqual(ended.needsForceFinish, false);
+    strictEqual(
+      ended.message.includes('회의가 끝나지 않습니다'),
+      false,
+      '끝난 회의에 「끝나지 않습니다」라고 하면 사람은 자기가 뭘 안 한 줄 압니다',
+    );
+    strictEqual(ended.message.includes('강제 종료'), false);
+
+    // 아직 시작할 수 있는 회의에서는 그대로여야 합니다 — 반대 방향.
+    const live = roomStatus(statuses, true, true);
+    strictEqual(live.needsForceFinish, true);
+    strictEqual(live.message.includes('강제 종료'), true);
+  });
+
   it('전원 종료하면 처리가 시작된다고 말한다', () => {
     const statuses = memberStatuses(
       consented,

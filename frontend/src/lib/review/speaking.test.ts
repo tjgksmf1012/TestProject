@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from 'node:assert/strict';
+import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
@@ -43,13 +43,58 @@ describe('⭐ 잴 수 없을 때', () => {
   it('짧은 회의와 분석 전을 **가려서 말한다**', () => {
     const short = notMeasurableText(
       speaking({ measurable: false, shares: [share({ speaking_ms: 30_000 })] }),
+      'confirmed',
     );
     strictEqual((short as string).includes('짧아'), true);
 
+    // ⚠️ 말한 시간이 있으면 **국면과 상관없이** 「짧아서」입니다 — 그건
+    //    처리가 끝났는지와 무관한 사실입니다.
+    strictEqual(
+      notMeasurableText(
+        speaking({ measurable: false, shares: [share({ speaking_ms: 30_000 })] }),
+        'queued',
+      ),
+      short,
+    );
+
     const notYet = notMeasurableText(
       speaking({ measurable: false, shares: [share({ speaking_ms: 0, ratio: null })] }),
+      'processing',
     );
-    strictEqual((notYet as string).includes('분석'), true);
+    strictEqual((notYet as string).includes('처리'), true);
+  });
+
+  describe('⭐ 발언이 0건일 때 **국면마다 다르게 말한다** (결함 438)', () => {
+    const none = speaking({ measurable: false, shares: [share({ speaking_ms: 0, ratio: null })] });
+    const PHASES = ['pending', 'queued', 'processing', 'needs_review', 'confirmed', 'failed'];
+
+    it('다섯 국면이 한 문장으로 뭉개지지 않는다', () => {
+      const said = PHASES.map((st) => notMeasurableText(none, st) as string);
+      for (const line of said) ok(line.trim().length > 0, '빈 줄입니다');
+      // 「처리 중」과 「처리 끝」이 같은 말을 하면 안 됩니다.
+      ok(
+        new Set(said).size >= 4,
+        `국면이 여섯인데 문장이 ${new Set(said).size}가지뿐입니다: ${JSON.stringify([...new Set(said)])}`,
+      );
+    });
+
+    it('⭐ **끝난 회의에 「아직」이라고 하지 않는다** — 오지 않을 것을 기다립니다', () => {
+      for (const st of ['needs_review', 'confirmed', 'failed']) {
+        const line = notMeasurableText(none, st) as string;
+        ok(!line.includes('아직'), `${st}: 「아직」은 「기다리면 온다」로 읽힙니다 — ${line}`);
+      }
+    });
+
+    it('실패한 회의에는 **할 수 있는 일**을 말한다', () => {
+      const line = notMeasurableText(none, 'failed') as string;
+      ok(line.includes('다시 처리'), `로비에서 풀 수 있다는 것을 적어야 합니다 — ${line}`);
+    });
+
+    it('모르는 상태도 빈 칸으로 두지 않고, 모른다는 것을 숨기지 않는다', () => {
+      const line = notMeasurableText(none, 'no-such-status') as string;
+      ok(line.trim().length > 0);
+      ok(line.includes('않았거나'), `양다리를 걸치되 모른다는 것을 적어야 합니다 — ${line}`);
+    });
   });
 
   it('잴 수 있으면 아무 말도 안 한다', () => {

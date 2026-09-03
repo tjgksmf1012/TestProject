@@ -538,7 +538,8 @@ function Lobby() {
      않았습니다」 · 「전원 동의 후 **시작**할 수 있습니다」가 떴습니다
      (결함 309) — 이미 지나간 일을 준비하라고 말하는 화면이었습니다.
      판단은 `@lib` 의 `lobbyPhase` 한 벌입니다. */
-  const stillStartable = lobbyPhase(meetingStatus).canStart;
+  const phase = lobbyPhase(meetingStatus);
+  const stillStartable = phase.canStart;
   const room = roomStatus(statuses, true, stillStartable);
   /* 시작할 수 없는 회의에 「시작 전 확인」을 그리지 않습니다 (결함 214 가
      SPA 에서 고친 셋째 항목 — 이 화면에는 안 와 있었습니다). */
@@ -570,8 +571,14 @@ function Lobby() {
   // 결정(늦은 동의를 서버가 막지 않는다)은 그대로 두고, **버튼이 무엇을
   // 누르는 것인지** 말하게 합니다.
   const consentAct = consentAffordance(stillStartable, iAgreed);
-  // 처리가 끝나야 후보가 생깁니다. 그 전에 눌러도 빈 화면이라 감춥니다.
-  const reviewReady = !(room.recording > 0 || room.notJoined > 0 || (tracks?.length ?? 0) === 0);
+  /* ⚠️ **다음에 갈 곳은 `@lib` 이 정합니다** (결함 437). 예전에는 이 화면이
+     `!(room.recording > 0 || room.notJoined > 0 || tracks.length === 0)` 라는
+     **자기 사본**으로 판정했는데, 그 식은 **회의 상태를 한 번도 안 봅니다.**
+     그래서 녹음이 끝나 차례를 기다리는 회의(`queued`)와 검토까지 끝난
+     회의(`confirmed`)에 「업무 후보 검토」를 주 버튼으로 그렸고, 누르면
+     검토 화면이 「아직 시작하지 않았습니다 [회의 로비로]」로 **되돌렸습니다** —
+     왕복입니다. SPA 는 처음부터 `phase.go` 를 씁니다. */
+  const goNext = phase.go;
   // ⚠️ **한 화면에 주 버튼은 하나** (지시서 §8). 내가 아직 동의를 안 했으면
   // "동의합니다" 가 주 동작이고, 하고 나면 주 동작이 넘어갑니다.
 
@@ -798,7 +805,7 @@ function Lobby() {
               닿기만 하면 들립니다. */}
           <button
             id="record"
-            className={reviewReady ? '' : 'primary'}
+            className={goNext !== null ? '' : 'primary'}
             aria-disabled={!affordance.enabled}
             onClick={() => {
               if (!affordance.enabled) return;
@@ -824,13 +831,18 @@ function Lobby() {
               다시 처리하기
             </button>
           )}
-          {reviewReady && (
+          {goNext !== null && (
             <button
               id="review"
               className="primary"
-              onClick={() => (location.href = `/review.html?meeting=${meetingId}`)}
+              onClick={() =>
+                (location.href =
+                  goNext.screen === 'review'
+                    ? `/review.html?meeting=${meetingId}`
+                    : `/kanban.html?project=${projectId}&meeting=${meetingId}`)
+              }
             >
-              업무 후보 검토
+              {goNext.label}
             </button>
           )}
         </div>
@@ -838,6 +850,9 @@ function Lobby() {
         <NoteLine note={reprocessNote} id="reprocess-note" />
 
         <div className="act-quiet">
+          {/* ⚠️ 주 버튼이 이미 칸반으로 데려가면 여기 또 두지 않습니다 —
+              글자까지 같은 단추가 한 화면에 둘이면 사람은 다른 것인 줄 압니다. */}
+          {goNext?.screen !== 'kanban' && (
           <button
             id="kanban"
             className="linkish"
@@ -847,6 +862,7 @@ function Lobby() {
           >
             칸반 보기
           </button>
+          )}
           <button
             id="contrib"
             className="linkish"

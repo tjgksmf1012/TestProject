@@ -433,7 +433,13 @@ export function roomStatus(
   } else if (recording > 0) {
     message = `${recording}명이 녹음 중입니다`;
   } else if (notJoined > 0) {
-    message = `${notJoined}명이 참가하지 않아 회의가 끝나지 않습니다 — 강제 종료할 수 있습니다`;
+    /* ⚠️ **국면을 봅니다** (결함 436). 이 말은 「회의가 아직 안 끝났다」는
+       단언인데, 이미 처리까지 끝난(`confirmed`) 회의에서도 그대로 나갔습니다 —
+       참가 안 한 사람이 하나라도 있으면 조건이 참이기 때문입니다. 끝난
+       회의에 「끝나지 않습니다」라고 말하면 사람은 자기가 뭘 안 한 줄 압니다. */
+    message = canStart
+      ? `${notJoined}명이 참가하지 않아 회의가 끝나지 않습니다 — 강제 종료할 수 있습니다`
+      : `${notJoined}명은 끝내 참가하지 않았습니다`;
   } else {
     message = '전원 종료했습니다. 회의 처리가 시작됩니다';
   }
@@ -444,7 +450,15 @@ export function roomStatus(
     broken,
     // 녹음 중인 사람이 없는데 참가 안 한 사람이 남아 있으면 사람이 풀어야 한다.
     // 모르는 채로 강제 종료를 권하지 않습니다 — 되돌릴 수 없는 일입니다.
-    needsForceFinish: rosterKnown && unknown === 0 && anyJoined && recording === 0 && notJoined > 0,
+    //
+    // ⚠️ **`canStart` 도 봅니다** (결함 436). 이 단추가 있는 이유는 「브라우저를
+    //    그냥 닫은 사람 때문에 회의가 영영 처리되지 않는 것」을 사람이 푸는
+    //    것입니다 — 이미 큐에 들어갔거나 처리가 끝난 회의에는 풀 것이
+    //    없습니다. 결함 309 가 `canStart` 를 인자로 받게 만들어 놓고
+    //    **`!anyJoined` 갈래에만** 썼습니다: 같은 함수 안에서 한 칸만 고쳐진
+    //    모양이라 여기는 그대로 남았습니다.
+    needsForceFinish:
+      canStart && rosterKnown && unknown === 0 && anyJoined && recording === 0 && notJoined > 0,
     message,
   };
 }

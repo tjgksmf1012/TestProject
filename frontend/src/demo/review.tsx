@@ -476,10 +476,14 @@ interface TypeTally {
  *    곧 순위표입니다. 값은 글자로
  * 3. **기여도가 아니라고 화면이 말합니다**
  */
-function SpeakingShares({ data }: { data: Speaking | null }) {
+function SpeakingShares({ data, status }: { data: Speaking | null; status?: string | null }) {
   if (data === null) return null;
 
-  const why = notMeasurableText(data);
+  /* ⚠️ **국면을 넘깁니다** (결함 438). 안 넘기면 다섯 국면이 「아직 발언이
+     분석되지 않아」 한 문장으로 뭉개집니다 — 실패한 회의에게는 거짓이고
+     검토까지 끝난 회의에게는 정반대입니다. 바로 옆 타임라인 칸은 처음부터
+     다섯을 갈라 말하고 있었습니다. */
+  const why = notMeasurableText(data, status);
   const skew = skewText(data);
 
   return (
@@ -1034,7 +1038,7 @@ function Review() {
       {header}
       <Brief meeting={meeting} />
       <SpeechTypes counts={types} />
-            <SpeakingShares data={speaking} />
+      <SpeakingShares data={speaking} status={meeting.status} />
       <Findings findings={meeting.findings ?? []} />
       <Timeline findings={meeting.findings ?? []} meetingStatus={meeting.status} />
 

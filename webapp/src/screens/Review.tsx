@@ -532,9 +532,9 @@ export default function Review() {
                         그냥 그리면 **별표가 그대로** 나갑니다. 렌더해서
                         잡았습니다(이 저장소가 이미 한 번 당한 것). */}
                     <p className="t12 muted">{plainText(SHARE_NOTE)}</p>
-                    {notMeasurableText(speaking.data) !== null ? (
+                    {notMeasurableText(speaking.data, meeting.data?.status) !== null ? (
                       /* 빈 칸으로 두지 않습니다 — 「고장」으로 읽힙니다. */
-                      <p className="t12 muted">{notMeasurableText(speaking.data)}</p>
+                      <p className="t12 muted">{notMeasurableText(speaking.data, meeting.data?.status)}</p>
                     ) : (
                       <>
                         <ul className="tally">
