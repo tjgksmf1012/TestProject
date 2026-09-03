@@ -15,7 +15,13 @@
  * ## ⚠️ 마감 알림은 **읽을 수 없습니다**
  *
  * 저장된 것이 아니라 지금 상태에서 나온 것이라, 읽음 표시를 보내 봐야
- * 서버가 할 일이 없습니다. `readableIds` 가 그것을 거릅니다.
+ * 서버가 할 일이 없습니다.
+ *
+ * ⚠️ 예전에는 화면이 `readableIds` 로 그것을 걸러 **번호를 모아** 보냈는데,
+ * 그 방식 자체가 결함 432 의 원인이었습니다 — 목록은 `MAX_ITEMS` 로 잘리고
+ * 배지는 DB 전수라 잘린 뒤쪽이 영영 안 읽혔습니다. 지금은 서버의
+ * `mark_all_read`(`all_unread: true`) 가 「이 프로젝트의 내 것 전부」를 지우고, 파생 알림은
+ * 애초에 행이 없어서 걸릴 것이 없습니다 — **판단이 한 자리로 모였습니다.**
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -27,7 +33,7 @@ import {
   emptyNote,
   hrefFor,
   isUrgent,
-  readableIds,
+  canMarkAllRead,
   timeLabel,
   type Notice,
 } from '../lib/notifications/view.ts';
@@ -94,8 +100,13 @@ function App() {
   }, [load]);
 
   const markRead = useCallback(async (): Promise<void> => {
-    const ids = readableIds(notices ?? []);
-    if (ids.length === 0) return;
+    /* ⚠️ **번호를 모아 보내지 않습니다.** 예전에는 `readableIds(notices)` 를
+       보냈는데, 그 목록은 `MAX_ITEMS` 로 잘린 **이 페이지**뿐이고 배지는
+       DB 전수입니다 — 61건에서 한 번 누르면 21건이 남고, 그때는 목록 안에
+       안 읽은 것이 0 이라 버튼까지 잠겨 **영영 못 지웠습니다.**
+       버튼이 「다」 라고 말하면 서버에도 「다」 라고 말할 자리가 있어야
+       합니다. */
+    if (!canMarkAllRead(unread)) return;
     setSending(true);
     try {
       const response = await trySend(() =>
@@ -103,7 +114,10 @@ function App() {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notification_ids: ids }),
+          /* ⚠️ **빈 목록이 「전부」 라는 뜻이 아닙니다** — 「전부」 는
+             `all_unread` 로 따로 말합니다. 되돌릴 수 없는 일에 지름길을
+             두면 화면이 실수로 빈 배열을 보냈을 때 알림이 통째로 사라집니다. */
+          body: JSON.stringify({ notification_ids: [], all_unread: true }),
         }),
       );
       if (response === null) {
@@ -134,7 +148,7 @@ function App() {
     } finally {
       setSending(false);
     }
-  }, [notices, load]);
+  }, [unread, load]);
 
   const badge = badgeText(unread);
 
@@ -167,7 +181,9 @@ function App() {
     );
   }
 
-  const canRead = readableIds(notices).length > 0;
+  /* ⚠️ 게이트를 **배지와 같은 축**으로 잽니다. 목록으로 재면 잘린 뒤쪽이
+     남아 있는데도 버튼이 잠깁니다 (`canMarkAllRead` 머리말). */
+  const canRead = canMarkAllRead(unread);
 
   return (
     <>

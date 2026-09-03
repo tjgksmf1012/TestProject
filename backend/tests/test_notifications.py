@@ -510,3 +510,140 @@ def test_when_deadlines_alone_overflow_the_most_overdue_survive(seeded):
             session, seeded["user_ids"][1], seeded["project_id"], now=datetime.now(UTC)
         )
     assert oldest == min(n.at for n in every), "제일 오래 지난 마감이 잘려 나갔습니다"
+
+
+# ══════════════════════════════════════════════════════════════
+# 「다 읽음으로」 는 **다** 읽어야 합니다 (레인 1 · L1-1)
+# ══════════════════════════════════════════════════════════════
+#
+# 안 읽은 알림이 `MAX_ITEMS` 를 넘으면 배지가 **영영 0 이 안 됐습니다.**
+# 재현했던 것:
+#
+#     누르기 전 : unread=61  목록=50줄  배지="61"  버튼 enabled
+#     한 번 뒤   : unread=21  목록=50줄  배지="21"  버튼 disabled
+#     네 번 더   : 21 그대로
+#
+# 갈린 이유는 **세는 자리와 지우는 자리의 범위가 달랐던 것**입니다:
+# 배지는 DB 전수(`unread_count`)인데, 화면은 자기 목록에 있는 것만
+# 번호로 모아 보냈고 그 목록은 `MAX_ITEMS` 에서 파생 알림이 먹고 남은
+# 자리뿐입니다. 그리고 다 읽고 나면 목록 안에 안 읽은 것이 0 이라
+# 버튼까지 잠겨서 **더 누를 수도 없었습니다.**
+#
+# ⚠️ `unread_count` 의 docstring 은 이 해악을 이미 적어 두고 있었습니다 —
+# 「배지가 영영 안 줄어드는 숫자가 됩니다」. 파생 알림 쪽 길만 막고
+# **페이지 상한 쪽 길**은 열려 있었습니다 (결함 295 의 모양).
+
+
+def _unread(client: TestClient, project_id: int) -> int:
+    got = client.get(f"/api/projects/{project_id}/notifications/unread")
+    assert got.status_code == 200, got.text
+    return int(got.json()["unread"])
+
+
+def _many_unread(seeded, how_many: int) -> None:
+    """저장되는 갈래로 안 읽은 알림을 `how_many` 건 심는다.
+
+    ⚠️ 파생 갈래(`overdue`·`due_soon`)로는 못 심습니다 — DB 가 거절하고
+    (`test_the_database_refuses_a_derived_kind`), 애초에 읽어도 안 없어지는
+    것이라 배지에 안 셉니다.
+    """
+    kind = str(NotificationKind.MENTION)
+    assert kind in NOTIFICATION_STORED, "저장되는 갈래로 심어야 합니다"
+    with db_session.session_scope() as session:
+        for _ in range(how_many):
+            session.add(
+                m.Notification(
+                    user_id=seeded["user_ids"][0],
+                    project_id=seeded["project_id"],
+                    kind=kind,
+                )
+            )
+
+
+def test_marking_all_read_clears_the_badge_past_the_page_limit(
+    client: TestClient, seeded
+):
+    """⭐ 안 읽은 것이 한 페이지를 넘어도 「다 읽음으로」 한 번이면 0 입니다.
+
+    ⚠️ `MAX_ITEMS` 를 **넘겨서** 심어야 재는 것이 됩니다. 그 아래로 심으면
+    화면 목록이 전부를 들고 있어서 옛 코드도 통과합니다 — 대조군을 아래에
+    따로 뒀습니다.
+    """
+    project_id = seeded["project_id"]
+    _many_unread(seeded, MAX_ITEMS + 11)
+    before = _unread(client, project_id)
+    assert before > MAX_ITEMS, f"한 페이지를 넘게 심어야 합니다 (지금 {before})"
+
+    marked = client.post(
+        f"/api/projects/{project_id}/notifications/read",
+        json={"notification_ids": [], "all_unread": True},
+    )
+    assert marked.status_code == 200, marked.text
+
+    after = _unread(client, project_id)
+    assert after == 0, (
+        f"「다 읽음으로」 를 눌렀는데 배지가 {after} 로 남았습니다. "
+        "세는 자리(DB 전수)와 지우는 자리의 범위가 어긋났습니다 — "
+        "그러면 사람은 이 배지를 다시는 안 봅니다."
+    )
+
+
+def test_marking_all_read_stays_inside_one_project(client: TestClient, seeded):
+    """⭐ 「다」 는 **이 프로젝트의 내 것**까지입니다.
+
+    범위를 넓히는 것이 이 고침의 유일한 위험입니다 — 남의 알림이나 다른
+    프로젝트의 알림까지 읽음으로 만들면 그건 고친 게 아니라 지운 것입니다.
+    """
+    project_id = seeded["project_id"]
+    mine, other_person = seeded["user_ids"][0], seeded["user_ids"][1]
+    kind = str(NotificationKind.MENTION)
+
+    with db_session.session_scope() as session:
+        other_project = m.Project(title="옆 프로젝트")
+        session.add(other_project)
+        session.flush()
+        # ⚠️ 「ProjectMember」 라는 클래스는 **없습니다** — `Member` 입니다.
+        #    이름을 지어내 한 번 터졌습니다.
+        session.add(m.Member(project_id=other_project.id, user_id=mine, role_shares={}))
+        # 내 것이지만 **다른 프로젝트**
+        session.add(m.Notification(user_id=mine, project_id=other_project.id, kind=kind))
+        # 같은 프로젝트지만 **남의 것**
+        session.add(m.Notification(user_id=other_person, project_id=project_id, kind=kind))
+        session.flush()
+        elsewhere = other_project.id
+
+    _many_unread(seeded, 3)
+    client.post(
+        f"/api/projects/{project_id}/notifications/read",
+        json={"notification_ids": [], "all_unread": True},
+    )
+
+    assert _unread(client, project_id) == 0
+    assert _unread(client, elsewhere) == 1, "다른 프로젝트의 내 알림까지 읽었습니다"
+    from teamflow.services import notification_service as ns
+
+    with db_session.session_scope() as session:
+        theirs = ns.unread_count(
+            session, other_person, project_id, now=datetime.now(UTC)
+        )
+    assert theirs == 1, "남의 알림을 읽음으로 만들었습니다"
+
+
+def test_marking_by_id_still_only_touches_those_ids(client: TestClient, seeded):
+    """⭐ 번호를 준 갈래는 **그것만** 읽습니다 — 「다」 로 바뀌면 안 됩니다.
+
+    빈 목록을 「전부」 로 읽으면, 화면이 실수로 빈 배열을 보냈을 때 사람의
+    알림이 통째로 사라집니다. 그래서 「전부」 는 **따로 말해야** 합니다.
+    """
+    project_id = seeded["project_id"]
+    _many_unread(seeded, 5)
+    listed = notices(client, project_id)
+    ids = [n["notification_id"] for n in listed if n.get("notification_id") is not None][:2]
+    assert len(ids) == 2, "번호가 있는 알림 둘이 필요합니다"
+
+    client.post(f"/api/projects/{project_id}/notifications/read", json={"notification_ids": ids})
+    assert _unread(client, project_id) == 3
+
+    # 빈 목록은 **아무것도** 읽지 않습니다
+    client.post(f"/api/projects/{project_id}/notifications/read", json={"notification_ids": []})
+    assert _unread(client, project_id) == 3, "빈 목록이 전부를 읽었습니다"

@@ -5194,7 +5194,20 @@ class NoticeOut(BaseModel):
 
 
 class ReadIn(BaseModel):
+    #: 이 번호들만 읽습니다. ⚠️ **빈 목록은 아무것도 안 읽습니다** — 「전부」 가
+    #: 아닙니다. 화면이 실수로 빈 배열을 보냈을 때 사람의 알림이 통째로
+    #: 사라지면 안 되므로, 되돌릴 수 없는 쪽은 아래에서 **따로 말합니다.**
+    #:
+    #: ⚠️ 필수로 둡니다. 기본값을 주면 본문을 통째로 빠뜨린 요청이 422 대신
+    #: 조용한 no-op 이 됩니다.
     notification_ids: list[int]
+    #: 「다 읽음으로」 — 이 프로젝트의 **내** 안 읽은 알림 전부 (결함 432).
+    #:
+    #: ⚠️ 왜 번호로는 안 되는가: 화면 목록은 `MAX_ITEMS` 로 잘리는데 배지는
+    #: DB 전수라, 목록의 번호만 모아 보내면 **잘린 뒤쪽이 영영 안 읽힙니다.**
+    #: 61건이 21건에서 멈추고 버튼까지 잠겼습니다. 버튼이 「다」 라고 적혀
+    #: 있으면 서버에도 「다」 라고 말할 자리가 있어야 합니다.
+    all_unread: bool = False
 
 
 @app.get("/api/projects/{project_id}/notifications", response_model=list[NoticeOut])
@@ -5243,9 +5256,19 @@ def read_unread_count(
 def mark_notifications_read(
     project_id: int, payload: ReadIn, session: DbSession, user: CurrentUser
 ) -> dict[str, int]:
-    """읽음 표시. ⚠️ **남의 알림은 못 읽습니다** — 서비스가 한 번 더 거릅니다."""
+    """읽음 표시. ⚠️ **남의 알림은 못 읽습니다** — 서비스가 한 번 더 거릅니다.
+
+    갈래가 둘입니다. `all_unread` 면 이 프로젝트의 내 것 **전부**, 아니면
+    준 **번호만**. 둘을 한 라우트에 두는 이유는 같은 판단(「무엇을 읽었다고
+    할 것인가」)이 두 자리로 갈라지지 않게 하기 위해서입니다.
+    """
     _require_project_member(session, project_id, user)
-    marked = notification_service.mark_read(session, user.id, payload.notification_ids)
+    if payload.all_unread:
+        marked = notification_service.mark_all_read(session, user.id, project_id)
+    else:
+        marked = notification_service.mark_read(
+            session, user.id, payload.notification_ids
+        )
     session.commit()
     return {"marked": marked}
 
