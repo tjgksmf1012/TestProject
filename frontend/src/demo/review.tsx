@@ -498,12 +498,12 @@ function SpeakingShares({ data, status }: { data: Speaking | null; status?: stri
     <section className="shares">
       <h2 className="minutes-head">누가 얼마나 말했나</h2>
       {/* ⚠️ 이 한 줄이 빠지면 사람은 이 숫자를 성적으로 읽습니다. */}
-      <p className="text-text-subtle text-[12px]">{plainText(SHARE_NOTE)}</p>
+      <p className="text-text-subtle text-caption">{plainText(SHARE_NOTE)}</p>
 
       {why !== null ? (
         // ⚠️ 빈 칸으로 두지 않습니다 — "고장" 이나 "다들 말을 안 했다" 로
         //    읽힙니다.
-        <p className="text-text-subtle text-[12px]">{why}</p>
+        <p className="text-text-subtle text-caption">{why}</p>
       ) : (
         <>
           <ul className="slist">
@@ -515,7 +515,7 @@ function SpeakingShares({ data, status }: { data: Speaking | null; status?: stri
             ))}
           </ul>
           {/* ⚠️ 누가인지 안 적고, 나무라지도 않습니다. */}
-          {skew !== null && <p className="text-text-subtle text-[12px]">{skew}</p>}
+          {skew !== null && <p className="text-text-subtle text-caption">{skew}</p>}
         </>
       )}
     </section>
@@ -537,7 +537,7 @@ function SpeechTypes({ counts }: { counts: TypeTally | null }) {
     <section className="types">
       <h2 className="minutes-head">무슨 말이 오갔나</h2>
       {/* ⚠️ 안 잰 것을 0 옆에 두지 않습니다 — 위에 따로 적습니다. */}
-      {pending !== null && <p className="text-gap text-[12px]">{pending}</p>}
+      {pending !== null && <p className="text-gap text-caption">{pending}</p>}
       <ul className="tlist">
         {spoken.map((row) => (
           <li key={row.type} className={row.zero ? 'tzero' : undefined}>
@@ -549,7 +549,7 @@ function SpeechTypes({ counts }: { counts: TypeTally | null }) {
       {/* ⚠️ 0건인 유형을 통째로 숨기면 "반대가 없었다" 가 안 보입니다.
           줄로 세우면 시끄러우니 한 줄로 적습니다. */}
       {spoken.length < rows.length && (
-        <p className="text-text-subtle text-[12px]">
+        <p className="text-text-subtle text-caption">
           없던 것 — {rows.filter((r) => r.count === 0).map((r) => r.label).join(' · ')}
         </p>
       )}

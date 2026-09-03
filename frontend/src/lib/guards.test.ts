@@ -11591,3 +11591,116 @@ describe('⭐ 로비가 `roomStatus` 에 **국면을 넘기는가** (결함 441)
     });
   }
 });
+
+describe('결함 442·443 — 화면이 적은 것과 화면에 나오는 것', () => {
+  /* 근거 발화 상자를 확대 200% 로 열었더니 **23% 가 고정 크롬 아래로**
+     깔렸고(결함 442), 브라우저 기본 글자를 32px 로 키우니 제목은 40px 이
+     되는데 **발언 원문은 14px 그대로**였습니다(결함 443).
+
+     ⚠️ 둘은 원인이 다릅니다:
+       442 = 층을 안 적어서 `z-index: auto`(0) → `#tabs`(30)·`.actionbar`(20)
+       443 = 크기를 px 로 적어서 `rem` 축을 안 봄
+
+     그리고 443 에는 **둘째 갈래**가 있었습니다 — `app.css` 는 레이어가
+     없어서 `@layer utilities` 안의 Tailwind 를 전부 이깁니다. 그래서
+     `text-[15px]`·`text-[13px]`·`min-h-0` 셋은 적혀만 있고 **한 번도 안
+     먹었습니다**(재 봤습니다: 20px · 15px · 44px). 적어 놓고 안 먹는 것은
+     다음 사람이 그 값을 믿게 만듭니다. */
+
+  /** 화면 파일 전부(두 뿌리). `@lib` 은 글자를 안 그리므로 뺍니다. */
+  const screenFiles = (): { rel: string; source: string }[] => {
+    const out: { rel: string; source: string }[] = [];
+    const walk = (dir: string, label: string): void => {
+      if (!existsSync(dir)) return;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) walk(full, label);
+        else if (SCREEN_EXT.test(entry.name) && !entry.name.endsWith('.test.ts')) {
+          out.push({ rel: `${label}/${entry.name}`, source: readFileSync(full, 'utf8') });
+        }
+      }
+    };
+    walk(DEMO, '레거시');
+    walk(join(ROOT, '..', 'webapp', 'src'), 'SPA');
+    return out;
+  };
+
+  it('⭐ 글자 크기를 px 로 적지 않는다 (두 뿌리)', () => {
+    const files = screenFiles();
+    // ⚠️ **한 뿌리에서 한 건도 못 보면 실패입니다** (결함 286).
+    for (const label of ['레거시', 'SPA']) {
+      ok(
+        files.some((f) => f.rel.startsWith(label)),
+        `${label}: 화면 파일을 하나도 못 찾았습니다 — 자가 눈을 감았습니다`,
+      );
+    }
+
+    const offenders: string[] = [];
+    for (const { rel, source } of files) {
+      // ⚠️ **주석을 먼저 걷습니다.** 이 저장소는 "예전에는 `text-[14px]`
+      //    였다" 를 주석에 그대로 적어 둡니다 (결함 238).
+      for (const m of codeOf(source).matchAll(/\btext-\[(\d+(?:\.\d+)?)px\]/g)) {
+        offenders.push(`${rel}: text-[${m[1]}px]`);
+      }
+    }
+    deepStrictEqual(
+      offenders,
+      [],
+      'px 로 적은 글자는 **브라우저 기본 글자**를 안 봅니다 — 확대(뷰포트를 줄임)와 ' +
+        '다른 축이라 폭으로 접는 규칙도 안 걸립니다. `tokens.css` 의 `--fs-*` 를 ' +
+        '가리키는 이름(`text-body`·`text-label`·`text-caption` …)을 쓰십시오.',
+    );
+  });
+
+  it('⭐ `app.css` 는 레이어가 없다 — 유틸리티가 진다는 전제', () => {
+    /* 위 주석과 `evidence.tsx` 의 주석 둘이 "크기는 app.css 가 정합니다"
+       라고 적어 두고 있습니다. 그 말이 참인 이유는 **레이어가 없어서**
+       입니다 — 누가 `@layer` 로 감싸면 그 세 자리의 설명이 조용히
+       거짓이 되고, 그때 화면 크기가 바뀌는데 아무도 안 봅니다. */
+    const app = readFileSync(join(PUBLIC, 'app.css'), 'utf8');
+    strictEqual(
+      /@layer\b/.test(app.replace(/\/\*[\s\S]*?\*\//g, '')),
+      false,
+      'app.css 에 `@layer` 가 생겼습니다. 그러면 Tailwind 유틸리티가 **이기기 ' +
+        '시작합니다** — `evidence.tsx` 가 "크기는 app.css 가 정합니다" 라고 적어 둔 ' +
+        '자리 둘(제목·닫기)을 다시 재고 주석을 고치십시오.',
+    );
+  });
+
+  it('⭐ 레거시 대화상자는 고정 크롬 위에 선다', () => {
+    /* `Dialog.Portal` 은 `<body>` 끝에 붙어 뿌리 쌓임 맥락에 섭니다.
+       층을 안 적으면 0 이라, 아래에서 세는 고정 크롬이 전부 위를 덮습니다. */
+    const source = readFileSync(join(DEMO, 'evidence.tsx'), 'utf8');
+    const code = codeOf(source);
+
+    // 이 화면이 넘어야 하는 층 — `app.css` 에서 **세어서** 정합니다.
+    // 손으로 적으면 크롬이 하나 늘 때 이 자가 조용히 낡습니다.
+    const appCss = readFileSync(join(PUBLIC, 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const chrome = [...appCss.matchAll(/z-index:\s*(\d+)/g)]
+      .map((m) => Number(m[1]))
+      // `.skip`(100) 은 넘지 않습니다 — 초점을 받을 때만 나타나는 탈출구이고,
+      // 상자가 초점을 가두므로 만날 일이 없습니다.
+      .filter((z) => z < 100);
+    ok(chrome.length > 0, 'app.css 에서 고정 크롬의 층을 하나도 못 읽었습니다');
+    const highest = Math.max(...chrome);
+
+    for (const [what, re] of [
+      ['덮개', /<Dialog\.Overlay[\s\S]*?className="([^"]*)"/],
+      ['상자', /<Dialog\.Content[\s\S]*?className="([\s\S]*?)"/],
+    ] as const) {
+      const m = re.exec(code);
+      ok(m !== null, `${what}의 className 을 못 찾았습니다 — 자가 낡았습니다`);
+      const z = /\bz-(\d+)\b/.exec((m as RegExpExecArray)[1] as string);
+      ok(
+        z !== null,
+        `${what}에 층이 없습니다. 안 적으면 0 이라 \`#tabs\`(30)·\`.actionbar\`(20) ` +
+          '아래로 깔립니다 — 확대 200% 에서 23% 가 덮였습니다(결함 442).',
+      );
+      ok(
+        Number((z as RegExpExecArray)[1]) > highest,
+        `${what}의 층이 ${(z as RegExpExecArray)[1]} 인데 고정 크롬 중 제일 높은 것이 ` +
+          `${highest} 입니다 — 그 위에 서야 합니다.`,
+      );
+    }
+  });
+});

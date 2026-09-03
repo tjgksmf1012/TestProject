@@ -72,6 +72,33 @@
   --color-gap: var(--gap);
   --color-gap-tint: var(--gap-tint);
 
+  /* ── 글자 크기 ───────────────────────────────────────
+     ⚠️ **화면에 `text-[14px]` 처럼 px 를 적지 마십시오.** 두 가지가 같이
+     깨집니다:
+
+       ① px 는 **브라우저 기본 글자**를 안 봅니다. 확대(200%)는 CSS 뷰포트를
+          줄이지만 기본 글자를 키우는 것은 뷰포트를 그대로 둔 채 `rem` 만
+          키우는 **다른 축**이라, px 로 적은 글자는 한 픽셀도 안 커집니다.
+          기본 글자를 32px 로 하면 근거 상자의 제목은 40px 이 되는데 **발언
+          원문은 14px 그대로**였습니다 — 이 제품의 대표 주장인 「숫자 →
+          발언 원문」이 화면에서 가장 작은 글자가 됩니다 (결함 443).
+
+       ② `app.css` 는 **레이어가 없습니다.** 레이어 없는 CSS 는 특성도와
+          상관없이 `@layer` 안의 것을 **전부 이깁니다** — 즉 `h2`·`button`
+          처럼 app.css 가 이미 정하는 자리에서는 Tailwind 유틸리티가 언제나
+          집니다. 실제로 `text-[15px]`·`text-[13px]`·`min-h-0` 셋이 적혀만
+          있고 **한 번도 안 먹고** 있었습니다.
+
+     그래서 값은 여기서도 `tokens.css` 를 가리킵니다 — 이름만 가져갑니다. */
+  --text-display: var(--fs-display);
+  --text-title: var(--fs-title);
+  --text-item: var(--fs-item);
+  --text-body: var(--fs-body);
+  --text-label: var(--fs-label);
+  --text-caption: var(--fs-caption);
+  --text-number: var(--fs-number);
+  --text-input: var(--fs-input);
+
   /* ── 글꼴 ────────────────────────────────────────────
      ⚠️ 웹폰트를 **받지 않습니다.** 비용 0원이고 오프라인에서도 열려야
      합니다(PWA). Pretendard 는 있으면 쓰고 없으면 시스템 글꼴로 갑니다. */
