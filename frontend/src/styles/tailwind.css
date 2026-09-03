@@ -26,6 +26,14 @@
 
 @import "tailwindcss";
 
+/* ⚠️ 화면 스모크(`screens/`)는 **검사 도구**입니다 — Tailwind v4 는 저장소를
+   통째로 훑으므로, 거기 적은 선택자 글자(`.sr-only` 같은)가 그대로 배포
+   번들에 유틸리티로 실립니다. 실제로 `smoke.mjs` 를 만들자마자 `tw.css` 에
+   `.sr-only` 가 생겼습니다 — **검사 파일이 제품 CSS 를 바꾼 것**입니다.
+   그러면 CI 의 `git diff --exit-code -- frontend/public` 이 스모크를 고칠
+   때마다 엉뚱하게 웁니다. 훑는 자리에서 뺍니다. */
+@source not "../../screens";
+
 /* 어두운 모드는 `tokens.css` 가 `prefers-color-scheme` 으로 이미 뒤집습니다.
    Tailwind 의 `dark:` 변형도 같은 신호를 보게 맞춥니다 — 둘이 다른 신호를
    보면 한 화면 안에서 절반만 어두워집니다. */

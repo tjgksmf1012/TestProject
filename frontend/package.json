@@ -13,7 +13,8 @@
     "serve": "python3 -m http.server 3000 --directory public",
     "build:css": "tailwindcss -i src/styles/tailwind.css -o public/tw.css --minify",
     "build": "npm run build:demo && npm run build:css",
-    "desktop": "electron out/main/index.cjs"
+    "desktop": "electron out/main/index.cjs",
+    "smoke:screens": "node screens/smoke.mjs"
   },
   "engines": {
     "node": ">=22.18"
@@ -26,6 +27,7 @@
     "@types/react-dom": "^19.2.4",
     "electron": "^43.4.0",
     "esbuild": "^0.28.1",
+    "playwright": "^1.56.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3"
   },
