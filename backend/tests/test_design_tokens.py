@@ -1303,3 +1303,58 @@ def test_the_calendar_today_survives_forced_colors() -> None:
         "오늘에 `CanvasText` 를 줬습니다 — 보통 칸이 덮이는 색과 같아서 "
         "여전히 구별되지 않습니다"
     )
+
+
+def test_the_shared_tap_target_owns_after_alone(spa: str):
+    """⭐ 공용 44px 표적이 실린 선택자는 `::after` 를 **다시 선언하지 않는다** (결함 445).
+
+    `.why, .kcard__menu-btn, .cal__nav, …::after` 하나가 「보이는 크기는
+    그대로, 누를 넓이만 44px」를 만듭니다. 그 방식은 상자를 가운데로
+    옮기는 `transform: translate(-50%, -50%)` 에 기대고 있습니다.
+
+    같은 선택자에 `::after` 를 한 번 더 적으면 **특성도가 같아**(0,1,1)
+    나중 것이 이기는데, **이긴 쪽이 안 적은 속성은 그대로 남습니다.**
+    실제로 `.why::after { inset: -13px }` 가 뒤에 한 줄 더 있어서
+    `inset` 만 갈아타고 `transform` 은 남았고, 44x44 표적이 자기 크기의
+    절반(22px)만큼 위로 밀려 **버튼보다 35px 위**에 앉았습니다. 그래서
+    보이는 `?` 의 아래쪽을 누르면 **다음 회의의 팝오버**가 열렸습니다 —
+    홈에서 세 줄이 그랬습니다(브라우저에서 y 를 1px 씩 훑어 잡았습니다).
+
+    ⚠️ 순서가 반대면 아무 일도 안 납니다 — `.cal__nav::after { inset: -8px }`
+    는 공용 규칙보다 **앞**에 있어서 져 있었고, 재 보니 다섯 점 다
+    자기가 잡혔습니다(0/5). **져서 무사했을 뿐**이라 같이 지웠습니다
+    (결함 443 의 `min-h-0` 과 같은 부류).
+
+    ⚠️ 이 자가 **못 보는 것**: `::after` 말고 다른 길로 같은 상자를
+    옮기는 것(예: `.why` 자신에 `transform` 을 주는 것)은 안 걸립니다.
+    그건 눈으로/브라우저로 재야 합니다.
+    """
+    body = re.sub(r"/\*.*?\*/", " ", spa, flags=re.S)
+
+    # 공용 규칙의 선택자 목록을 **읽어 옵니다** — 손으로 적으면 목록이
+    # 늘 때 이 자가 조용히 낡습니다.
+    shared = re.search(
+        r"((?:\s*\.[\w-]+::after\s*,)+\s*\.[\w-]+::after)\s*\{([^{}]*translate\(-50%[^{}]*)\}",
+        body,
+    )
+    assert shared is not None, (
+        "공용 44px 표적 규칙(`…::after { … translate(-50%, -50%) }`)을 못 찾았습니다 — "
+        "자가 낡았습니다"
+    )
+    names = re.findall(r"\.([\w-]+)::after", shared.group(1))
+    assert len(names) >= 2, f"공용 규칙에 선택자가 {len(names)}개뿐입니다 — 자가 낡았습니다"
+
+    shared_span = shared.span()
+    offenders: list[str] = []
+    for name in names:
+        for hit in re.finditer(rf"\.{re.escape(name)}::after", body):
+            if shared_span[0] <= hit.start() < shared_span[1]:
+                continue
+            offenders.append(f".{name}::after (줄 {body[: hit.start()].count(chr(10)) + 1})")
+    assert not offenders, (
+        "공용 44px 표적이 실린 선택자에 `::after` 를 또 적었습니다: "
+        + ", ".join(offenders)
+        + " — 같은 특성도라 나중 것이 이기는데 **이긴 쪽이 안 적은 속성은 남습니다**. "
+        "`transform` 이 남으면 표적이 버튼 밖으로 밀려 옆 줄이 눌립니다(결함 445). "
+        "표적을 바꿔야 하면 공용 규칙을 고치고, 다른 것을 그리려면 `::before` 를 쓰십시오."
+    )

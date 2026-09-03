@@ -374,13 +374,68 @@ describe('meetingWhen · describeMeetingWhen — 이 회의는 언제인가 (결
     strictEqual(step.label, '회의 로비로');
   });
 
-  it('⭐ 아직 아무도 안 마쳤으면 그대로 「동의를 받고 시작합니다」', () => {
+  /* ⚠️ 제목을 좁혔습니다 — 예전에는 「아직 아무도 안 마쳤으면」이었는데,
+     그 뒤 **들어와 있는 사람**을 가르는 갈래가 생겨(결함 444) 그 문장이
+     더는 참이 아닙니다. 검사 이름이 재는 것과 다르면 그 갈래는 아무도
+     다시 안 봅니다(결함 323). */
+  it('⭐ 아무도 안 마쳤고 아무도 안 들어왔으면 그대로 「동의를 받고 시작합니다」', () => {
     for (const coverage of [null, undefined]) {
-      const step = nextStepFor(meeting({
-        status: 'pending', started_at: '2026-09-01T01:00:00Z', scheduled_at: null, coverage,
-      }), 4);
-      ok(/시작합니다/.test(step.reason), `coverage=${String(coverage)} — ${step.reason}`);
+      for (const recording_tracks of [0, undefined]) {
+        const step = nextStepFor(meeting({
+          status: 'pending', started_at: '2026-09-01T01:00:00Z', scheduled_at: null,
+          coverage, recording_tracks,
+        }), 4);
+        ok(
+          /시작합니다/.test(step.reason),
+          `coverage=${String(coverage)} tracks=${String(recording_tracks)} — ${step.reason}`,
+        );
+      }
     }
+  });
+
+  /*
+   * 결함 444 — `pending` 의 **네 번째** 국면.
+   *
+   * 405 가 「누가 마쳤나」를 갈랐는데, 아무도 아직 안 마쳤지만 **사람이
+   * 녹음 화면에 들어와 있는** 국면이 남아 있었습니다 — 그게 회의가 도는
+   * 내내 이어지는 상태입니다. 셋이 동의하고 한 사람이 조각 셋을 올리는
+   * 동안 홈은 계속 「동의를 받고 녹음을 시작합니다」였습니다(브라우저로
+   * 로비와 나란히 놓고 쟀습니다).
+   */
+  it('⭐ 녹음에 들어와 있는 사람이 있으면 「시작합니다」라고 하지 않는다', () => {
+    const step = nextStepFor(meeting({
+      status: 'pending', started_at: '2026-09-01T01:00:00Z', scheduled_at: null,
+      coverage: null, recording_tracks: 2,
+    }), 4);
+    strictEqual(/시작합니다/.test(step.reason), false, step.reason);
+    ok(/2명/.test(step.reason), step.reason);
+    strictEqual(step.actionable, true);
+    strictEqual(step.label, '회의 로비로');
+  });
+
+  /* ⚠️ **「소리가 오고 있다」고 말하면 안 됩니다** — 트랙의 `recording` 은
+     참가할 때 붙으므로 조각이 0개여도 이 값에 들어갑니다. 결함 404 가
+     통화 화면에서 정확히 그것을 「녹음 중입니다」로 읽어, 같은 순간 로비가
+     「2분째 녹음이 한 조각도 안 왔습니다」라고 말하는 것과 어긋났습니다. */
+  it('⭐ 「들어와 있다」까지만 말한다 — 소리가 오는지는 로비가 말한다', () => {
+    const step = nextStepFor(meeting({
+      status: 'pending', started_at: '2026-09-01T01:00:00Z', scheduled_at: null,
+      coverage: null, recording_tracks: 1,
+    }), 4);
+    strictEqual(
+      /녹음\s*(중|하고)/.test(step.reason),
+      false,
+      `소리가 오는지는 이 값으로 알 수 없습니다(결함 404) — ${step.reason}`,
+    );
+  });
+
+  /* 마친 사람이 있으면 그쪽이 먼저입니다 — 그때는 「남은 사람」이 할 일입니다. */
+  it('⚠️ 마친 사람이 있으면 그 갈래가 이긴다', () => {
+    const step = nextStepFor(meeting({
+      status: 'pending', started_at: '2026-09-01T01:00:00Z', scheduled_at: null,
+      coverage: 1.0, recording_tracks: 1,
+    }), 4);
+    ok(/마친|남은/.test(step.reason), step.reason);
   });
 
   it('⚠️ 잡아만 둔 회의가 먼저다 — 커버리지가 있어도 「예정」이 이긴다', () => {

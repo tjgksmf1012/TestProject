@@ -56,6 +56,18 @@ export interface Meeting {
    * `?? 0` 을 적으면 「모른다」와 「잰 0」이 같아집니다.
    */
   coverage?: number | null;
+  /**
+   * 지금 **녹음 화면에 들어와 있는 사람 수**. 서버가 언제나 보냅니다.
+   *
+   * ⚠️ **「참가했다」이지 「소리가 오고 있다」가 아닙니다** — 트랙의
+   * `recording` 은 참가할 때 붙으므로 조각이 0개여도 셉니다(결함 404).
+   * 그래서 이 값으로 만드는 문장도 「들어와 있다」까지만 말하고, 소리가
+   * 오는지는 로비가 말합니다.
+   *
+   * ⚠️ 못 받았으면(`undefined`) **아무 말도 하지 않는 쪽**으로 둡니다 —
+   * `?? 0` 을 적으면 「모른다」와 「잰 0」이 같아집니다.
+   */
+  recording_tracks?: number;
 }
 
 /**
@@ -225,6 +237,24 @@ export function nextStepFor(meeting: Meeting, projectId: number): NextStep {
           href: `/lobby.html?meeting=${id}`,
           label: '회의 로비로',
           reason: '녹음을 마친 사람이 있습니다 — 로비에서 남은 사람을 확인하세요',
+          actionable: true,
+        };
+      }
+      /* ⚠️ **지금 녹음 중인데 「시작합니다」라고 했습니다** (결함 444).
+         405 가 「누가 마쳤나」를 갈랐는데, 아무도 아직 안 마쳤지만 **사람이
+         녹음 화면에 들어와 있는** 국면이 남아 있었습니다 — 그게 회의가
+         도는 내내 이어지는 상태입니다. 셋이 동의하고 한 사람이 조각을
+         올리는 동안 홈은 계속 「동의를 받고 녹음을 시작합니다」였습니다.
+
+         ⚠️ **「들어와 있다」까지만 말합니다.** 트랙의 `recording` 은
+         참가할 때 붙으므로 소리가 한 조각도 안 왔을 수 있습니다 —
+         결함 404 가 통화 화면에서 그것을 「녹음 중입니다」로 읽어 로비와
+         어긋났습니다. 누가 조용한지는 로비가 말합니다. */
+      if (meeting.recording_tracks !== undefined && meeting.recording_tracks > 0) {
+        return {
+          href: `/lobby.html?meeting=${id}`,
+          label: '회의 로비로',
+          reason: `${meeting.recording_tracks}명이 녹음에 들어와 있습니다 — 로비에서 진행 상황을 봅니다`,
           actionable: true,
         };
       }

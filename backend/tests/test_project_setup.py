@@ -860,3 +860,64 @@ def test_an_outsider_cannot_set_a_role(client: TestClient, people: dict):
         f"/api/projects/{project_id}/members/me",
         json={"role_shares": {"planner": 1.0}},
     ).status_code in (403, 404)
+
+
+def test_the_home_list_says_how_many_are_in_the_recording_screen(
+    client: TestClient, engine, people: dict
+):
+    """⭐ 목록이 **지금 녹음 화면에 들어와 있는 사람 수**를 싣는다 (결함 444).
+
+    이 칸이 없어서 홈은 「아직 아무도 안 들어왔다」와 「지금 녹음 중이다」를
+    못 갈랐습니다. 셋이 동의하고 한 사람이 조각을 올리는 동안 홈은 계속
+    「동의를 받고 녹음을 시작합니다」였고, 같은 순간 로비는 세 사람이 전부
+    「동의함」이라고 적고 있었습니다 — 브라우저로 나란히 놓고 쟀습니다.
+
+    ⚠️ **칸 이름을 맞추는 짝 가드로는 이걸 못 잡습니다.** 서버가 칸을
+    선언해 놓고 **안 채우면** 언제나 기본값 0 이 나가는데, 이름은 세 곳에
+    다 있으므로 그 가드는 초록입니다 (결함 312 의 모양). 심어서 확인했고
+    그때 빨간 것은 이 검사뿐이었습니다 — API 를 통과한 뒤를 재는 검사가
+    따로 있어야 합니다 (결함 370).
+
+    ⚠️ **`recording` 은 「참가했다」이지 「소리가 오고 있다」가 아닙니다.**
+    `join_track` 에서 붙으므로 조각이 0개여도 셉니다 — 결함 404 가 통화
+    화면에서 정확히 그것을 「녹음 중입니다」로 읽었습니다. 그래서 이 칸의
+    이름도 문장도 「들어와 있다」까지만 말합니다.
+    """
+    from sqlalchemy.orm import Session
+
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+    def open_meeting(title: str) -> int:
+        made = client.post(f"/api/projects/{project_id}/meetings", json={"title": title})
+        return int(made.json()["meeting_id"])
+
+    live = open_meeting("지금 녹음 중")
+    idle = open_meeting("아직 안 들어옴")
+    done = open_meeting("다 끝남")
+
+    with Session(engine) as session:
+        # 들어와 있는 사람 둘. ⚠️ 한 회의에 같은 사람의 트랙은 하나뿐입니다.
+        for who in (people["founder"], people["joiner"]):
+            session.add(
+                m.MeetingTrack(
+                    meeting_id=live, user_id=who, started_at=NOW, status="recording", coverage=None
+                )
+            )
+        # 끝난 트랙은 안 셉니다 — 그 갈래는 `coverage` 가 말합니다(결함 405).
+        session.add(
+            m.MeetingTrack(
+                meeting_id=done,
+                user_id=people["founder"],
+                started_at=NOW,
+                status="completed",
+                coverage=1.0,
+            )
+        )
+        session.commit()
+
+    rows = {r["meeting_id"]: r for r in client.get(f"/api/projects/{project_id}/meetings").json()}
+    assert rows[live]["recording_tracks"] == 2
+    assert rows[idle]["recording_tracks"] == 0, "트랙이 없으면 0 입니다"
+    assert rows[done]["recording_tracks"] == 0, (
+        "끝난 트랙을 여기 세면 회의가 끝난 뒤에도 홈이 「들어와 있습니다」라고 합니다"
+    )
