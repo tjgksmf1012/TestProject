@@ -144,6 +144,24 @@ function Lobby() {
   const refresh = useCallback(async (): Promise<void> => {
     const first = !loaded.current;
     try {
+      /* ⚠️ **회의 자신도 다시 읽습니다** (결함 440). 예전에는 이 요청이
+         마운트 때 **한 번만** 나가서 `meetingStatus` 가 첫 로드 값에
+         얼어붙었습니다. 「강제 종료」를 누르면 서버는 `pending → queued` 로
+         옮기는데, 15초를 기다려도 화면은 여전히 「1명이 참가하지 않아 회의가
+         끝나지 않습니다 — 강제 종료할 수 있습니다」였고 「녹음 화면으로」가
+         계속 눌렸습니다(누르면 `POST /tracks` 409). 새로고침해야 맞게
+         나왔습니다 — 즉 **폴링이 국면을 안 보고 있었습니다.**
+         ⚠️ 제목도 여기서 받습니다 — 회의 이름은 고칠 수 있습니다(결함 268). */
+      const meeting = (await getJson(`/api/meetings/${meetingId}`).catch(() => null)) as {
+        project_id: number;
+        title: string | null;
+        status: string | null;
+      } | null;
+      if (meeting !== null) {
+        setProjectId(meeting.project_id);
+        setMeetingTitle(meeting.title);
+        setMeetingStatus(meeting.status);
+      }
       const [consent, trackBody] = await whileLoading(
         Promise.all([
           getJson(`/api/meetings/${meetingId}/consent`) as Promise<{
@@ -218,16 +236,8 @@ function Lobby() {
         return;
       }
       setMe((await response.json()) as Me);
-      const meeting = (await getJson(`/api/meetings/${meetingId}`).catch(() => null)) as {
-        project_id: number;
-        title: string | null;
-        status: string | null;
-      } | null;
-      if (meeting !== null) {
-        setProjectId(meeting.project_id);
-        setMeetingTitle(meeting.title);
-        setMeetingStatus(meeting.status);
-      }
+      // 회의 자신은 `refresh()` 가 읽습니다 — 여기서 또 읽으면 두 벌이 되고,
+      // 폴링이 안 보는 값이 마운트 때만 맞는 상태로 돌아갑니다 (결함 440).
       await refresh();
       timer = setInterval(() => void refresh(), POLL_MS) as unknown as number;
     })();

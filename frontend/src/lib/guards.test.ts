@@ -11524,3 +11524,70 @@ describe('결함 395 — 확신도 알약이 **축 이름을 글자로** 단다'
     strictEqual(confidenceReading(0.925), '확신 93%');
   });
 });
+
+describe('⭐ 로비가 `roomStatus` 에 **국면을 넘기는가** (결함 441)', () => {
+  /* 결함 309 가 「끝난 회의에 「**아직** 아무도 참가하지 않았습니다」라고
+     하지 않기」 위해 `canStart` 를 인자로 만들었고, 결함 436 이 「끝난
+     회의에 강제 종료를 권하지 않기」 위해 그 인자를 하나 더 쓰게 했습니다.
+
+     ⚠️ **그런데 SPA 는 그 인자를 넘긴 적이 없습니다.** 기본값이 `true` 라
+     둘 다 SPA 에서는 아무 일도 안 하고 있었고, 오류도 안 나고 화면도
+     멀쩡해서 **양쪽을 나란히 놓기 전에는 안 보였습니다.** 이 저장소의
+     대표 실패가 **인자 하나**에서 난 것입니다.
+
+     낱말이 아니라 **인자 개수**를 셉니다. ⚠️ `Function.length` 로 세면
+     기본값이 붙은 인자는 안 잡힙니다(AGENTS.md) — 여기서는 **부르는 쪽**의
+     소스를 읽으므로 그 함정은 없지만, 대신 **최상위 쉼표**로 갈라야
+     합니다: `roomStatus(memberStatuses(a, b), c)` 를 쉼표로 그냥 쪼개면
+     인자가 셋으로 보입니다. */
+  const topLevelArgs = (call: string): number => {
+    let depth = 0;
+    let count = 1;
+    for (const ch of call) {
+      if ('([{'.includes(ch)) depth += 1;
+      else if (')]}'.includes(ch)) depth -= 1;
+      else if (ch === ',' && depth === 0) count += 1;
+    }
+    return call.trim() === '' ? 0 : count;
+  };
+
+  const callsIn = (code: string): string[] => {
+    const out: string[] = [];
+    let at = code.indexOf('roomStatus(');
+    while (at !== -1) {
+      let i = at + 'roomStatus('.length;
+      let depth = 1;
+      const start = i;
+      while (i < code.length && depth > 0) {
+        if ('([{'.includes(code[i]!)) depth += 1;
+        else if (')]}'.includes(code[i]!)) depth -= 1;
+        if (depth > 0) i += 1;
+      }
+      out.push(code.slice(start, i));
+      at = code.indexOf('roomStatus(', i);
+    }
+    return out;
+  };
+
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'lobby.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Lobby.tsx')],
+  ];
+
+  for (const [name, file] of ROOTS) {
+    it(`${name} 로비는 세 번째 인자(canStart)까지 넘긴다`, () => {
+      const calls = callsIn(readFileSync(file, 'utf8'));
+      // ⚠️ **한 뿌리에서 한 건도 못 보면 실패입니다** (결함 286) — 화면을
+      //    옮기면 이 자가 조용히 눈을 감습니다.
+      ok(calls.length > 0, `${name}: \`roomStatus(\` 를 부르는 곳을 못 찾았습니다`);
+      for (const call of calls) {
+        strictEqual(
+          topLevelArgs(call) >= 3,
+          true,
+          `${name}: \`roomStatus(${call.trim()})\` — 국면(canStart)을 안 넘깁니다. ` +
+            '기본값이 `true` 라 결함 309·436 이 이 뿌리에서 아무 일도 안 합니다.',
+        );
+      }
+    });
+  }
+});
