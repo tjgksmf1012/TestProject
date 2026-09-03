@@ -1240,10 +1240,45 @@ details.disc > .disc__body {
   gap: var(--sp-5);
   flex-wrap: wrap;
 }
+/* 사람이 많아도 바가 창을 다 먹지 않게 (결함 434).
+ *
+ * ⚠️ 재현한 것: 팀원 23명 · 창 720×450(확대 200%)에서 바가 **401px = 창의
+ * 89%** 를 먹고 목록칸에 **24px** 만 남았습니다. `.main` 이 `overflow:
+ * hidden` 이라 넘친 174px 은 굴려도 안 나오고(휠 20번 → scrollTop 0),
+ * 입력칸 다섯과 「이 값으로 확정」(bottom=528)이 **창 밖**이었습니다 —
+ * 키보드로는 Tab 으로 닿는데 **마우스만 못 닿습니다**(결함 373 의 거울상).
+ *
+ * ⚠️ 버튼은 이 상자 **밖**에 둡니다. 안에 두면 같이 굴러가서, 사람이
+ * 「바 안에서 또 굴려야 한다」는 것을 알아채야 합니다.
+ *
+ * ⚠️ 단위는 `vh` 입니다. 데스크톱(900px)에서 216px 이라 지금 쓰는
+ * 164~208px 을 안 건드리고, 창이 낮아질 때만 조입니다 — px 로 박으면
+ * 정작 좁은 창에서 아무 일도 안 합니다. */
+.confirmbar__people {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+  /* ⚠️ basis 는 **0** 입니다. `auto` 면 이 상자가 max-content 폭을 요구해
+     줄을 다 차지하고, 「확정」 버튼이 **다음 줄로 밀려나** 바가 44px 더
+     높아집니다 (데스크톱 269 → 313px 로 한 번 나빠졌습니다). */
+  flex: 1 1 0;
+  min-width: 0;
+  max-height: 24vh;
+  overflow-y: auto;
+}
 .confirmbar__person { display: inline-flex; align-items: baseline; gap: var(--sp-3); }
 /* 구간 placeholder("32~52% (시스템 추정)")가 다 보여야 합니다 (v2 F1-4). */
 .confirmbar__person .input--num { width: 11rem; }
-.confirmbar__reasons { margin-top: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); }
+/* 사유 칸도 사람 수만큼 자랍니다 — 같은 이유로 상한을 둡니다 (결함 434). */
+.confirmbar__reasons {
+  margin-top: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-height: 22vh;
+  overflow-y: auto;
+}
 .confirmbar__reason { display: flex; align-items: center; gap: var(--sp-4); }
 .confirmbar__reason .input { flex: 1; max-width: 32rem; }
 
