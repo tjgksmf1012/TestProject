@@ -85,6 +85,12 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: python -m venv .venv && .venv/bin/pip install -e ".[dev]"
       - run: npm --prefix frontend ci
-      - run: npx --prefix frontend playwright install --with-deps chromium
+      # ⚠️ `npx --prefix frontend playwright …` 로 쓰지 마십시오 — 그건 로컬
+      #    설치를 안 보고 **레지스트리에서 다른 버전을 받아 옵니다**(재 봤습니다:
+      #    "package was not found and will be installed: playwright@1.62.1").
+      #    그러면 받은 브라우저와 `import('playwright')` 가 푸는 버전이 갈려
+      #    실행 시점에 「브라우저가 없다」로 죽습니다. 설치된 바이너리를
+      #    **직접** 부릅니다.
+      - run: ./frontend/node_modules/.bin/playwright install --with-deps chromium
       # 스모크가 스스로 서버를 띄웁니다 (DB·오디오를 지우고 새로 심습니다).
       - run: npm --prefix frontend run smoke:screens

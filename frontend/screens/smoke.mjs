@@ -35,17 +35,29 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const FRONTEND = join(HERE, '..');
 const ROOT = join(FRONTEND, '..');
 
-/** playwright 는 devDependency 이지만 전역 설치도 받습니다 (이 컨테이너). */
+/**
+ * playwright 는 `frontend` 의 devDependency 입니다.
+ *
+ * ⚠️ 여기 **컨테이너의 전역 경로를 후보로 적어 두었다가** 한 번 당했습니다.
+ * 그 후보가 있으니 로컬에서는 늘 통과했고, 그래서 「`npm ci` 뒤에 맨
+ * 이름으로 풀리는가」라는 **CI 가 실제로 밟는 경로**를 한 번도 안 재고
+ * 있었습니다. 후보를 지우면 안 깔렸을 때 그 자리에서 터집니다 —
+ * 그게 정직한 쪽입니다.
+ *
+ * ⚠️ 버전은 캐럿이 아니라 **정확히** 못 박습니다. 브라우저 빌드 번호가
+ * 버전에 매여 있어서, `playwright install` 이 받은 것과 `import` 가 푸는
+ * 것이 다르면 「브라우저가 없다」로 죽습니다.
+ */
 async function loadChromium() {
-  for (const spec of ['playwright', '/opt/node22/lib/node_modules/playwright/index.js']) {
-    try {
-      const mod = await import(spec);
-      return (mod.default ?? mod).chromium;
-    } catch {
-      /* 다음 후보 */
-    }
+  try {
+    const mod = await import('playwright');
+    return (mod.default ?? mod).chromium;
+  } catch (err) {
+    throw new Error(
+      'playwright 를 못 찾았습니다 — `npm --prefix frontend ci` 를 먼저 돌리세요.\n' +
+        String(err),
+    );
   }
-  throw new Error('playwright 를 못 찾았습니다 — `npm --prefix frontend install`');
 }
 
 // ── 화면 목록은 **소스에서** 뽑습니다 ────────────────────────────
