@@ -2,6 +2,9 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  MAX_PER_KIND,
+  mayHaveMore,
+  moreNote,
   blockedReason,
   canSearch,
   describeKind,
@@ -206,5 +209,32 @@ describe('⭐ 거르개가 **어디까지 걸렸는지** 말한다 (결함 390)'
       ok(listed.includes(describeKind(kind)), `${kind} 이 빠졌습니다: ${said}`);
     }
     ok(!listed.includes(describeKind('task')), `업무는 걸린 쪽입니다: ${said}`);
+  });
+});
+
+describe('잘렸을 수 있는가 (결함 435)', () => {
+  it('⭐ 상한만큼 왔으면 **잘렸을 수 있다** — 그 수를 총계로 적으면 안 된다', () => {
+    // 재현: DB 에 41건인데 API 는 30건을 주고 화면은 「회의 30」 이라 적었습니다.
+    strictEqual(mayHaveMore(MAX_PER_KIND), true);
+    ok(moreNote(MAX_PER_KIND) !== null);
+  });
+
+  it('상한보다 적으면 그것이 전부다 — 없는 말을 붙이지 않는다', () => {
+    strictEqual(mayHaveMore(MAX_PER_KIND - 1), false);
+    strictEqual(moreNote(MAX_PER_KIND - 1), null);
+    strictEqual(moreNote(0), null);
+  });
+
+  it('⭐ 문장이 「더 있다」고 **단언하지 않는다** — 딱 30건일 수도 있다', () => {
+    const note = moreNote(MAX_PER_KIND) ?? '';
+    ok(note.includes('있을 수'), `「있을 수」로 말해야 합니다: ${note}`);
+    ok(!/그 밖에 \d/.test(note), '세지 않고 개수를 지어내면 안 됩니다');
+  });
+
+  it('⭐ 할 수 있는 일을 말한다 — 없는 자리로 데려가지 않는다', () => {
+    const note = moreNote(MAX_PER_KIND) ?? '';
+    // 「전부 보기」 같은 자리는 이 제품에 없습니다 (결함 306).
+    ok(!/전부 보|모두 보/.test(note), `없는 자리를 가리키면 안 됩니다: ${note}`);
+    ok(note.includes('좁혀'), `할 수 있는 일을 적어야 합니다: ${note}`);
   });
 });

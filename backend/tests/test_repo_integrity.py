@@ -794,6 +794,16 @@ PAIRED_CONSTANTS = [
         "frontend/src/lib/auth/session.ts",
         "MIN_PASSWORD_LENGTH",
     ),
+    (
+        # 결함 435. 화면은 이 값으로 「잘렸을 수 있다」를 판정합니다.
+        # 작아지면 잘리지도 않은 결과에 「더 있습니다」를 붙이고, 커지면
+        # **잘린 것을 총계로 단언합니다** — 뒤엣것이 그 결함이었습니다.
+        "검색 한 종류당 상한 — 갈라지면 화면이 잘림을 잘못 말합니다",
+        "backend/teamflow/services/search_service.py",
+        "MAX_PER_KIND",
+        "frontend/src/lib/search/view.ts",
+        "MAX_PER_KIND",
+    ),
 ]
 
 

@@ -69,7 +69,7 @@ const SHELL = [
   '/chunk-ENHUCZXL.js',
   '/chunk-FKLUUZLM.js',
   '/chunk-FLPN24SJ.js',
-  '/chunk-GS7YL6BG.js',
+  '/chunk-FZNUQFQE.js',
   '/chunk-IL6JNG3A.js',
   '/chunk-KPFCUBU5.js',
   '/chunk-N343A6OC.js',
