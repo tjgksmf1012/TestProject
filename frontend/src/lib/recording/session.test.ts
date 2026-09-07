@@ -112,6 +112,12 @@ describe('사전 조건', () => {
     const state = reduce(ready(), { type: 'PERMISSION', state: 'denied' });
     assert.equal(state.phase, 'idle');
   });
+
+  it('마이크 장치를 찾을 수 없으면 not_found 로 남고 장치 확인을 요구한다', () => {
+    const state = reduce(ready(), { type: 'PERMISSION', state: 'not_found' });
+    assert.equal(state.phase, 'idle');
+    assert.ok(blockers(state).some((r) => r.includes('마이크(녹음) 장치를 찾을 수 없습니다')));
+  });
 });
 
 describe('끝난 준비 단계 (결함 274)', () => {
@@ -151,6 +157,7 @@ describe('끝난 준비 단계 (결함 274)', () => {
 
   it('마이크 단계는 끝난 뒤에도 **하는 일이 있다** — 감추지 않고 말만 바꾼다', () => {
     assert.equal(permissionStepLabel(false), '마이크 권한 허용');
+    assert.equal(permissionStepLabel(false, 'not_found'), '마이크 다시 찾기');
     assert.equal(permissionStepLabel(true), '마이크 다시 고르기');
   });
 });

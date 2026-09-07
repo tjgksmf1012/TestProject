@@ -50,13 +50,20 @@ def _build_steps(capture_mode: str):
     """
     settings = get_settings()
 
-    from teamflow.meeting.llm import FakeLLMClient, LlamaCppClient, VLLMClient
+    from teamflow.meeting.llm import (
+        FakeLLMClient,
+        LlamaCppClient,
+        TransformersLLMClient,
+        VLLMClient,
+    )
     from teamflow.meeting.schema import MeetingAnalysis
 
     if settings.llm_backend == "vllm":
         client = VLLMClient(base_url=settings.llm_base_url, model=settings.llm_model)
     elif settings.llm_backend == "llamacpp":
         client = LlamaCppClient(base_url=settings.llm_base_url, model=settings.llm_model)
+    elif settings.llm_backend == "transformers":
+        client = TransformersLLMClient(model_id=settings.llm_model)
     else:
         client = FakeLLMClient(MeetingAnalysis(summary="", decisions=[], tasks=[]))
 

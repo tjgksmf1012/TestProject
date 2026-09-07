@@ -256,7 +256,7 @@ function render(): void {
   $('step-consent').dataset.done = String(done.consent);
   $('step-permission').dataset.done = String(done.permission);
   $('consent').textContent = consentStepLabel(entryStep, done.consent);
-  $('permission').textContent = permissionStepLabel(done.permission);
+  $('permission').textContent = permissionStepLabel(done.permission, state.permission);
 
   const warnings = client.warnings;
   const note = describeCaptureCheck(client.appliedSettings, warnings);
@@ -420,6 +420,16 @@ $('permission').addEventListener('click', async () => {
   await client.syncClock();
   render();
 });
+
+if (typeof navigator !== 'undefined' && navigator.mediaDevices?.addEventListener) {
+  navigator.mediaDevices.addEventListener('devicechange', async () => {
+    if (client.state.permission === 'not_found') {
+      await client.requestMicrophone();
+      await client.syncClock();
+      render();
+    }
+  });
+}
 
 $('start').addEventListener('click', async () => {
   // ⚠️ **잠금을 잡기 전에 막힌 국면부터 봅니다.** 순서가 반대였을 때는

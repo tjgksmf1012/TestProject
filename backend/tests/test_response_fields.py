@@ -71,10 +71,6 @@ UNREAD_FIELDS: dict[str, str] = {
     "UtteranceOut.speaker_id": (
         "화면은 번호가 아니라 **이름**을 그립니다(결함 293·297)"
     ),
-    "ChannelOut.position": (
-        "CHANNEL-005 채널 순서 — 서버만 있고 화면에 아직 안 이었습니다. "
-        "라우트 예외 표(`test_repo_integrity.py`)에도 같은 줄이 있습니다"
-    ),
     "MeOut.email": "화면이 이메일을 어디에도 안 그립니다",
     "TaskGithubOut.event_id": (
         "서버가 `github/presenting.py` 로 사람이 읽을 라벨을 만들어 "

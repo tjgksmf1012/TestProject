@@ -127,6 +127,12 @@ def test_a_real_sentence_that_starts_with_a_backchannel_is_not_social():
     assert label_of("네, 그럼 로그인부터 하기로 하죠") == DECISION
 
 
+def test_a_real_sentence_that_starts_with_a_greeting_is_not_social():
+    """인사말로 시작해도 본문이 있으면 단순 맞장구가 아닌 본문의 라벨을 따릅니다."""
+    assert label_of("안녕하세요, 제가 로그인 API 를 개발하겠습니다") == COMMITMENT
+    assert label_of("반갑습니다 그러면 이번 주는 스키마 정리로 갑시다") == DECISION
+
+
 # ══════════════════════════════════════════════════════════════
 # 비싼 라벨 — 좁게 잡는가
 # ══════════════════════════════════════════════════════════════

@@ -305,13 +305,17 @@ export default function Kanban() {
     <AppShell
       title="칸반"
       meta={
-        <>
-          회의에서 {countText(known ? s.fromMeetings : null)} · PR 연결{' '}
-          {countText(known ? s.withPulls : null)} · 지연{' '}
-          {countText(known ? s.overdue : null)}
-          {/* ⭐ 표식 규칙은 **여기서 한 번만** 말합니다. 예전에는 카드마다
-              같은 안내를 적어 넉 장이면 네 번(106자) 반복됐고, 늘 있는
-              글자는 배경이 되어 아무도 안 읽었습니다. */}
+        <span className="meta-chips">
+          <span className="meta-chip">
+            회의 출처 <strong>{countText(known ? s.fromMeetings : null)}</strong>
+          </span>
+          <span className="meta-chip">
+            PR 연결 <strong>{countText(known ? s.withPulls : null)}</strong>
+          </span>
+          <span className="meta-chip">
+            지연 <strong>{countText(known ? s.overdue : null)}</strong>
+          </span>
+          {/* ⭐ 표식 규칙은 **여기서 한 번만** 말합니다. */}
           <Why
             about="PR 자동 연결"
             lines={[
@@ -319,7 +323,7 @@ export default function Kanban() {
               '표식 없이 병합된 PR은 제목이 비슷하면 추정으로 붙고, 카드에 "추정" 으로 표시됩니다.',
             ]}
           />
-        </>
+        </span>
       }
     >
       <div className="board">

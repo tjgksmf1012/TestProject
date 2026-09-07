@@ -86,8 +86,9 @@ class Settings(BaseSettings):
     # ── AI ────────────────────────────────────────────────
     hf_token: str | None = None  # pyannote community-1은 gated
 
-    # llm_backend: vllm | llamacpp | fake
+    # llm_backend: vllm | llamacpp | transformers | fake
     # RAM 32GB 환경에서는 llamacpp(CPU)가 1순위. docs/02 §5 전략 C
+    # GPU 24GB(RTX 4090)에서는 transformers(인프로세스 GPU) 또는 vllm 지원
     llm_backend: str = "llamacpp"
     llm_base_url: str = "http://localhost:8080/v1"
     llm_model: str = "local"

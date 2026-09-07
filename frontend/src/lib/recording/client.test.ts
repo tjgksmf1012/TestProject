@@ -104,6 +104,7 @@ interface Harness {
 function harness({
   secure = true,
   denyMic = false,
+  micError,
   settings = CLEAN_SETTINGS,
   oneWayDelay = 10,
   failSeqs = new Set<number>(),
@@ -111,6 +112,7 @@ function harness({
 }: {
   secure?: boolean;
   denyMic?: boolean;
+  micError?: Error;
   settings?: AppliedAudioSettings;
   oneWayDelay?: number;
   failSeqs?: Set<number>;
@@ -124,6 +126,7 @@ function harness({
   const media: MediaAdapter = {
     isSecureContext: () => secure,
     requestMicrophone: async () => {
+      if (micError) throw micError;
       if (denyMic) throw new Error('NotAllowedError');
       return track;
     },
@@ -189,6 +192,14 @@ describe('RecordingClient — 준비 단계', () => {
   it('마이크 권한이 거부되면 denied 로 남는다', async () => {
     const { client } = await prepared({ denyMic: true });
     assert.equal(client.state.permission, 'denied');
+    assert.equal(client.start(), false);
+  });
+
+  it('마이크 장치를 찾을 수 없으면 not_found 로 남는다', async () => {
+    const notFound = new Error('Requested device not found');
+    notFound.name = 'NotFoundError';
+    const { client } = await prepared({ micError: notFound });
+    assert.equal(client.state.permission, 'not_found');
     assert.equal(client.start(), false);
   });
 

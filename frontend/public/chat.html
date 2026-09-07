@@ -84,6 +84,72 @@
     background: var(--surface);
   }
 
+  .crow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-1);
+    border-radius: var(--r-card);
+  }
+
+  .crow.current {
+    background: var(--surface);
+  }
+
+  .crow .citem {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .ctools {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding-right: var(--sp-2);
+  }
+
+  .cbtn {
+    padding: var(--sp-1) var(--sp-2);
+    font-size: var(--fs-caption);
+    min-height: 28px;
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: var(--r-ctrl);
+    color: var(--text-subtle);
+    cursor: pointer;
+  }
+
+  .cbtn:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--line-strong);
+  }
+
+  .cbtn.cdanger:hover:not(:disabled) {
+    color: var(--bad);
+    border-color: var(--bad);
+  }
+
+  .crename-box {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    width: 100%;
+    padding: var(--sp-1);
+  }
+
+  .crename-box input {
+    flex: 1;
+    min-width: 0;
+    padding: var(--sp-1) var(--sp-2);
+    font-size: var(--fs-input);
+  }
+
+  .crename-box button {
+    padding: var(--sp-1) var(--sp-2);
+    font-size: var(--fs-caption);
+    min-height: 28px;
+  }
+
   /* ── 만들기·찾기 ───────────────────────────────────── */
   .cnew { display: grid; gap: var(--sp-2); margin: 0 0 var(--sp-5); }
   .clabel { font-size: var(--fs-caption); color: var(--text-subtle); }

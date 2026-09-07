@@ -295,9 +295,6 @@ class ScriptedTranscriber:
 def build_transcriber(settings: Settings):
     """ASR 구현을 고른다.
 
-    ⚠️ 실제 모델 구현은 아직 없습니다. `docs/09` 실험 1로 모델을 확정한 뒤
-    실제 머신에서 붙이세요.
-
     확정된 1순위: `Qwen/Qwen3-ASR-1.7B` (Apache 2.0, 타임스탬프 내장,
     Transformers v5.13+ 네이티브, 공식 vLLM 툴킷).
     """
@@ -307,6 +304,22 @@ def build_transcriber(settings: Settings):
             "시연·개발 전용입니다 (asr_backend=fake)."
         )
         return ScriptedTranscriber()
+
+    if settings.asr_backend in ("qwen3", "real"):
+        try:
+            from teamflow.pipeline.asr import Qwen3Transcriber
+
+            return Qwen3Transcriber(model_id=settings.asr_model)
+        except (ImportError, ModuleNotFoundError) as exc:
+            raise NotImplementedError(
+                f"ASR 구현이 아직 없습니다 (설정: {settings.asr_model}).\n"
+                "1. python3 scripts/check_env.py 로 GPU 환경 확인\n"
+                '2. pip install -e ".[ai]"\n'
+                "3. backend/teamflow/pipeline/runtime.py 의 build_transcriber 구현\n"
+                "4. docs/09 실험 1(한국어 ASR 비교)로 모델 확정\n"
+                "\n"
+                "GPU 없이 전 구간을 돌려 보려면 ASR_BACKEND=fake 로 두세요."
+            ) from exc
 
     raise NotImplementedError(
         f"ASR 구현이 아직 없습니다 (설정: {settings.asr_model}).\n"

@@ -144,6 +144,27 @@ export function recomputeAfterRecovery(
   };
 }
 
+export function isNotFoundError(err: unknown): boolean {
+  if (err && typeof err === 'object') {
+    const name = (err as { name?: string }).name;
+    const message = (err as { message?: string }).message;
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      return true;
+    }
+    if (
+      typeof message === 'string' &&
+      (message.includes('NotFoundError') ||
+        message.includes('DevicesNotFoundError') ||
+        message.includes('오디오 트랙을 찾을 수 없습니다') ||
+        message.includes('Requested device not found') ||
+        message.includes('장치를 찾을 수 없습니다'))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // ══════════════════════════════════════════════════════════════
 
 export class RecordingClient {
@@ -297,8 +318,9 @@ export class RecordingClient {
         this.#dispatch({ type: 'TRACK_MUTE', muted, atMs: this.#clock.now() });
       });
       this.#dispatch({ type: 'PERMISSION', state: 'granted' });
-    } catch {
-      this.#dispatch({ type: 'PERMISSION', state: 'denied' });
+    } catch (err: unknown) {
+      const notFound = isNotFoundError(err);
+      this.#dispatch({ type: 'PERMISSION', state: notFound ? 'not_found' : 'denied' });
     }
   }
 

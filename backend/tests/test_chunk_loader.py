@@ -359,11 +359,15 @@ def test_single_mic_meetings_use_the_wav_loader(tmp_path: Path):
     assert isinstance(loader, runtime.FileSystemAudioLoader)
 
 
-def test_multitrack_without_ffmpeg_fails_loudly(tmp_path: Path):
+def test_multitrack_without_ffmpeg_fails_loudly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """⭐ 조용히 모드 B 로 떨어뜨리면 안 된다.
 
     청크가 있는데 WAV 를 찾다가 빈 결과를 내고, 회의가 통째로 비어 보인다.
     """
+    import shutil
+
     from teamflow.audio.decode import DecoderUnavailable
     from teamflow.config import Settings
     from teamflow.pipeline import runtime
@@ -375,6 +379,6 @@ def test_multitrack_without_ffmpeg_fails_loudly(tmp_path: Path):
         audio_storage_root=tmp_path,
     )
 
-    # 이 환경에는 ffmpeg 이 없으므로 실제로 터진다
+    monkeypatch.setattr(shutil, "which", lambda _: None)
     with pytest.raises(DecoderUnavailable):
         runtime.build_audio_loader(settings, "multitrack")

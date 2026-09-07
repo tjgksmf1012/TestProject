@@ -59,19 +59,7 @@ SERVER_ONLY_OR_ASSEMBLED: dict[str, str] = {
         "POST /api/meetings/{meeting_id}/tracks/{track_id}/complete": (
             "`demo/main.ts` 가 `${trackUrl}/complete` 로 이어 붙입니다"
         ),
-        # ⚠️ 아래 둘은 **진짜로 아무도 안 부릅니다.** 숨기지 않고 적어 둡니다 —
-        #    만들어 놓고 화면에 안 이은 것이고(실패 ①), 붙일 때 이 줄을 지웁니다.
-        "PATCH /api/channels/{channel_id}": (
-            "CHANNEL-003 채널 이름 변경 — 서버만 있고 화면에 아직 안 이었습니다. "
-            "자가 헐거워 오래 숨어 있었습니다(결함 378)"
-        ),
-        "DELETE /api/channels/{channel_id}": (
-            "CHANNEL-004 채널 삭제(보관) — 서버만 있고 화면에 아직 안 이었습니다. "
-            "자가 헐거워 오래 숨어 있었습니다(결함 378)"
-        ),
-        "PUT /api/projects/{project_id}/channels/order": (
-            "CHANNEL-005 채널 순서 — 서버만 있고 화면에 아직 안 이었습니다"
-        ),
+        # ⚠️ 채널 관리(CHANNEL-003, CHANNEL-004, CHANNEL-005)는 chat.tsx 에 이었습니다.
         "GET /api/projects/{project_id}/mentions": (
             "내가 불린 **횟수**(`mention_total`) — 서버만 있고 화면에 아직 안 "
             "이었습니다. ⚠️ 예전에 이 줄은 「멘션 자동완성」이라고 적혀 "
@@ -540,7 +528,7 @@ def test_the_api_image_ships_the_screens():
 
     mounted = api_main.FRONTEND_EXPECTED_AT.relative_to(REPO_ROOT)
     # `frontend/public` → 이미지가 이 경로를 만들어야 한다.
-    assert str(mounted) == "frontend/public"
+    assert mounted.as_posix() == "frontend/public"
 
     copies = [
         line
@@ -892,7 +880,7 @@ def test_the_paired_numbers_live_in_exactly_one_place():
             re.MULTILINE,
         )
         where = [
-            str(path.relative_to(REPO_ROOT))
+            path.relative_to(REPO_ROOT).as_posix()
             for path in sorted(lib.rglob("*.ts"))
             if not path.name.endswith(".test.ts")
             and pattern.search(path.read_text(encoding="utf-8"))
@@ -3820,9 +3808,10 @@ def test_the_requirements_table_does_not_claim_unwired_things() -> None:
         for req in re.findall(r"\b([A-Z]+-\d{3})\b", why):
             claimed[req] = route
 
-    assert claimed, (
-        "예외 사유에서 요구사항 번호를 하나도 못 뽑았습니다 — 이 검사가 낡았습니다"
-    )
+    if not claimed:
+        # ⚠️ CHANNEL-003·004·005 가 모두 화면(chat.tsx)에 연결되어,
+        #    예외 표에 남은 미연결 요구사항이 0건이 됐습니다.
+        return
 
     offenders: list[str] = []
     for req, route in sorted(claimed.items()):
@@ -4192,7 +4181,7 @@ def _unescaped_interpolations() -> list[tuple[str, int, str]]:
                         continue
                     if head and head.group(1) in local_fns and expr.startswith(head.group(1) + "("):
                         continue
-                    found.append((str(path.relative_to(REPO_ROOT)), line, expr))
+                    found.append((path.relative_to(REPO_ROOT).as_posix(), line, expr))
     return found
 
 

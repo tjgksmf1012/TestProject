@@ -439,6 +439,45 @@ button.rail__item {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.meta-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 2px var(--sp-3);
+  background: var(--c-sunken);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--c-ink-muted);
+  line-height: 1.2;
+}
+.meta-chip strong {
+  color: var(--c-ink);
+  font-weight: var(--fw-medium);
+}
+.meta-chip--highlight {
+  background: var(--c-evidence-tint);
+  border-color: var(--c-evidence-line);
+  color: var(--c-evidence);
+}
+.meta-chip--highlight strong {
+  color: var(--c-evidence-active);
+}
+.meta-chip--warn {
+  background: var(--c-unknown-tint);
+  border-color: var(--c-unknown-line);
+  color: var(--c-unknown);
+}
+.meta-chip--warn strong {
+  color: var(--c-unknown);
+}
 .appbar__spacer { flex: 1; }
 /* 머리줄 오른쪽의 행동 묶음.
    ⚠️ 홈·로비·검토가 **각자 인라인 `style` 로** 같은 것을 적고 있었습니다.
@@ -1199,6 +1238,11 @@ details.disc > .disc__body {
   border-radius: var(--r-md);
   background: var(--c-surface);
   margin-bottom: var(--sp-6);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.crow:hover {
+  border-color: var(--c-line-strong);
+  box-shadow: 0 2px 6px rgba(21, 23, 30, 0.04);
 }
 /* 카드 = 넉 칸. 문장이 아니라 **값들**이 나란히 섭니다.
    [이름·역할] [구간] [모르는 폭] [근거 사슬]
@@ -1324,6 +1368,10 @@ details.disc > .disc__body {
   padding: var(--sp-5) var(--sp-6);
   margin-bottom: var(--sp-5);
   cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.cand:hover:not(.cand--selected) {
+  border-color: var(--c-line-strong);
 }
 .cand:focus-visible { outline: 2px solid var(--c-evidence); outline-offset: 1px; }
 .cand--selected { border-color: var(--c-evidence); box-shadow: 0 0 0 1px var(--c-evidence); }
@@ -1532,8 +1580,13 @@ details.disc > .disc__body {
   grid-template-columns: 7.5rem minmax(0, max-content) minmax(6.25rem, 1fr) 16.25rem 3.75rem 8.75rem;
   gap: var(--sp-6);
   align-items: center;
-  padding: var(--sp-4) 0;
+  padding: var(--sp-4) var(--sp-3);
+  border-radius: var(--r-sm);
   border-bottom: 1px dashed var(--c-line);
+  transition: background 0.15s;
+}
+.mrow:hover {
+  background: var(--c-sunken);
 }
 .mrow:last-child { border-bottom: 0; }
 /* 제목이 길어도 **자기 칸을 못 넘습니다** — 말줄임으로 끝냅니다. */
@@ -1663,6 +1716,11 @@ details.disc > .disc__body {
   padding: var(--sp-4) var(--sp-5);
   margin-bottom: var(--sp-4);
   cursor: grab;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.kcard:hover {
+  border-color: var(--c-line-strong);
+  box-shadow: 0 2px 5px rgba(21, 23, 30, 0.04);
 }
 .kcard:focus-visible { outline: 2px solid var(--c-evidence); outline-offset: 1px; }
 .kcard__top { display: flex; align-items: flex-start; gap: var(--sp-3); }

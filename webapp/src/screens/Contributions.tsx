@@ -285,7 +285,16 @@ export default function Contributions() {
   return (
     <AppShell
       title="기여도"
-      meta={`${team.algo_version} · ${fmtComputedAt(team.computed_at)}`}
+      meta={
+        <span className="meta-chips">
+          <span className="meta-chip">
+            엔진 <strong>{team.algo_version}</strong>
+          </span>
+          <span className="meta-chip">
+            계산 <strong>{fmtComputedAt(team.computed_at)}</strong>
+          </span>
+        </span>
+      }
     >
       <div className="panes">
         <section className="pane">

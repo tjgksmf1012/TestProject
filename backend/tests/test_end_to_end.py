@@ -526,7 +526,15 @@ def test_approval_puts_it_on_the_kanban(processed: dict, client: TestClient):
     login_as(client, processed["user_ids"][1])
     response = client.post(
         f"/api/meetings/{processed['meeting_id']}/candidates/review",
-        json={"items": [{"candidate_id": candidate["id"], "approve": True}]},
+        json={
+            "items": [
+                {
+                    "candidate_id": candidate["id"],
+                    "approve": True,
+                    "deadline_override": "2030-01-01",
+                }
+            ]
+        },
     )
 
     assert response.status_code == 200, response.text

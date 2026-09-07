@@ -297,13 +297,25 @@ def classify_by_rules(text: str) -> Classification:
     if not stripped:
         return Classification(OTHER, 1.0, "빈 발화")
 
+    eval_text = stripped
     # 맞장구를 **가장 먼저** 봅니다. "네, 그럼 그렇게 하죠" 같은 것이
     # 아니라 "네." 하나만 있는 경우를 걸러 내는 게 목적이라, 짧은 것부터
     # 확실하게 처리해야 뒤 규칙이 오작동하지 않습니다.
     if (why := _match(stripped, _SOCIAL)) is not None:
-        return Classification(SOCIAL, 0.9, why)
+        # 단, 인사말(안녕하세요 등)로 시작했는데 뒤에 의미 있는 본문이 이어지는 복합 문장이면
+        # 인사말을 떼고 본문을 평가합니다.
+        greeting_match = re.match(
+            r"^(수고\S*|고생\S*|안녕\S*|반갑\S*)[,.~!\s]+(.+)$", stripped
+        )
+        if (
+            greeting_match
+            and len(greeting_match.group(2).strip()) >= MIN_MEANINGFUL_CHARS
+        ):
+            eval_text = greeting_match.group(2).strip()
+        else:
+            return Classification(SOCIAL, 0.9, why)
 
-    if len(stripped) < MIN_MEANINGFUL_CHARS:
+    if len(eval_text) < MIN_MEANINGFUL_CHARS:
         return Classification(OTHER, 0.8, "너무 짧아 내용을 판단할 수 없음")
 
     # 비싼 라벨부터. 아래로 갈수록 흔하고 값이 쌉니다.
@@ -327,7 +339,7 @@ def classify_by_rules(text: str) -> Classification:
         (_OPINION, OPINION, 0.65),
         (_ANSWER, ANSWER, 0.6),
     ):
-        if (why := _match(stripped, rules)) is not None:
+        if (why := _match(eval_text, rules)) is not None:
             return Classification(label, confidence, why)
 
     # ⚠️ 여기 오면 **모릅니다.** 아무 라벨이나 찍지 않습니다.

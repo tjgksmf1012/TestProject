@@ -41,7 +41,7 @@ export type Phase =
   | 'completed'
   | 'failed';
 
-export type PermissionState = 'unknown' | 'granted' | 'denied';
+export type PermissionState = 'unknown' | 'granted' | 'denied' | 'not_found';
 
 /** docs/07 §2.3 의 동의 단계 ① */
 export type ConsentState =
@@ -162,7 +162,9 @@ export function blockers(state: SessionState): string[] {
   if (!state.secureContext) {
     reasons.push('HTTPS 연결이 필요합니다 (마이크는 보안 연결에서만 열립니다)');
   }
-  if (state.permission === 'denied') {
+  if (state.permission === 'not_found') {
+    reasons.push('마이크(녹음) 장치를 찾을 수 없습니다. 마이크 연결을 확인해 주세요');
+  } else if (state.permission === 'denied') {
     reasons.push('마이크 권한이 거부됐습니다. 브라우저 설정에서 허용해 주세요');
   } else if (state.permission !== 'granted') {
     reasons.push('마이크 권한을 아직 허용하지 않았습니다');
@@ -346,8 +348,10 @@ export function consentStepLabel(step: ConsentStep, done: boolean): string {
  * 끝난 뒤에도 이 단추는 **하는 일이 있습니다** — 헤드셋을 바꿔 꽂은 사람이
  * 다시 잡을 자리입니다. 그래서 감추지 않고 말만 바꿉니다.
  */
-export function permissionStepLabel(done: boolean): string {
-  return done ? '마이크 다시 고르기' : '마이크 권한 허용';
+export function permissionStepLabel(done: boolean, state?: PermissionState): string {
+  if (done) return '마이크 다시 고르기';
+  if (state === 'not_found') return '마이크 다시 찾기';
+  return '마이크 권한 허용';
 }
 
 /**

@@ -237,6 +237,7 @@ def test_completing_a_task_creates_a_contribution_event(client: TestClient, boar
 
 def test_meeting_the_deadline_is_recorded(client: TestClient, board: dict):
     """마감 준수도 기여도 항목이다 (docs/05 §2.4)."""
+    patch(client, board, board["from_meeting"], {"deadline": "2030-01-01"})
     patch(client, board, board["from_meeting"], {"status": "done"})
     kinds = {e["event_type"] for e in events(board["member"])}
     assert "deadline_met" in kinds

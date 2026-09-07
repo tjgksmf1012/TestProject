@@ -32,12 +32,29 @@ export class BrowserMediaAdapter implements MediaAdapter {
   }
 
   async requestMicrophone(): Promise<AudioTrackHandle> {
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.enumerateDevices) {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const hasAudioInput = devices.some((d) => d.kind === 'audioinput');
+        if (!hasAudioInput && devices.length > 0) {
+          const err = new Error('마이크(녹음) 장치를 찾을 수 없습니다');
+          err.name = 'NotFoundError';
+          throw err;
+        }
+      } catch (e: unknown) {
+        if ((e as { name?: string })?.name === 'NotFoundError') throw e;
+      }
+    }
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: MULTITRACK_AUDIO_CONSTRAINTS,
       video: false,
     });
     const track = stream.getAudioTracks()[0];
-    if (!track) throw new Error('오디오 트랙을 찾을 수 없습니다');
+    if (!track) {
+      const err = new Error('오디오 트랙을 찾을 수 없습니다');
+      err.name = 'NotFoundError';
+      throw err;
+    }
     return new BrowserAudioTrack(stream, track);
   }
 

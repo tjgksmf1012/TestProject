@@ -348,6 +348,22 @@ export default function Review() {
       /* ⚠️ 머리줄도 **숫자를 단언하면 안 됩니다** (결함 224). 못 받았는데
          「업무 후보 0건」 이라고 적으면 판을 가려 놓은 것이 무색합니다. */
       title={cannotLoad === null ? `${title} · 업무 후보 ${lanes.all}건` : title}
+      meta={
+        cannotLoad === null ? (
+          <span className="meta-chips">
+            {lanes.pending > 0 ? (
+              <span className="meta-chip meta-chip--highlight">
+                검토 필요 <strong>{lanes.pending}</strong>
+              </span>
+            ) : (
+              <span className="meta-chip">검토 완료</span>
+            )}
+            <span className="meta-chip">
+              등록 <strong>{lanes.approve}</strong> · 거절 <strong>{lanes.reject}</strong>
+            </span>
+          </span>
+        ) : undefined
+      }
       projectId={meeting.data?.project_id}
       actions={
         <div className="appbar__actions">

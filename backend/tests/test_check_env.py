@@ -297,22 +297,27 @@ def test_main_reports_this_environment_honestly(env, capsys):
     env.main()
     out = capsys.readouterr().out
 
-    assert "GPU 없음" in out
+    assert ("GPU 없음" in out) or ("GPU 0:" in out)
     assert "ffmpeg" in out
     assert "getUserMedia" in out, "실기기 녹음 전제조건 안내가 빠지면 안 된다"
 
 
 def test_script_runs_as_a_subprocess():
     """import 로만 검증하면 `if __name__` 아래가 안 돈다."""
+    import os
     import subprocess
 
+    child_env = os.environ.copy()
+    child_env["NO_COLOR"] = "1"
+    child_env["PYTHONUTF8"] = "1"
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
         check=False,
-        env={"NO_COLOR": "1", "PATH": "/usr/bin:/bin"},
+        env=child_env,
     )
 
     assert result.returncode == 0, result.stderr

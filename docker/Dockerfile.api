@@ -46,6 +46,7 @@ COPY alembic.ini ./
 # 프런트에는 런타임 의존성이 0개이고 번들(`*.js`)을 커밋하므로,
 # **Node 를 이미지에 넣을 필요 없이 파일만 복사하면 됩니다.**
 COPY frontend/public/ frontend/public/
+COPY webapp/dist/ webapp/dist/
 
 # 오디오는 별도 볼륨으로 마운트된다 (docs/07 P4 — 분리 보관).
 # 디렉터리가 없으면 첫 업로드에서 만들어지지만, 권한 문제를 미리 없앤다.

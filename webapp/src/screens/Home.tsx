@@ -363,9 +363,25 @@ export default function Home() {
       projectId={project?.project_id}
       title={project?.title ?? '홈'}
       meta={
-        project !== undefined
-          ? `팀원 ${project.member_count} · 회의 ${project.meeting_count} · 검토할 회의 ${project.needs_review}`
-          : undefined
+        project !== undefined ? (
+          <span className="meta-chips">
+            <span className="meta-chip">
+              팀원 <strong>{project.member_count}</strong>
+            </span>
+            <span className="meta-chip">
+              회의 <strong>{project.meeting_count}</strong>
+            </span>
+            {project.needs_review > 0 ? (
+              <span className="meta-chip meta-chip--highlight">
+                검토 필요 <strong>{project.needs_review}</strong>
+              </span>
+            ) : (
+              <span className="meta-chip">
+                검토 필요 <strong>0</strong>
+              </span>
+            )}
+          </span>
+        ) : undefined
       }
       actions={
         <div className="appbar__actions">

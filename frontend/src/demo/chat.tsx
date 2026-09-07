@@ -377,6 +377,8 @@ function App() {
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   const [sending, setSending] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
+  const [editingChannelId, setEditingChannelId] = useState<number | null>(null);
+  const [editChannelName, setEditChannelName] = useState('');
   const [newName, setNewName] = useState('');
   /* ⚠️ **종류를 서버에서 받아 옵니다** (결함 360). 예전에는 만드는 자리에
      종류가 아예 없었고 `kind: 'text'` 가 박혀 있었습니다 — 서버는 처음부터
@@ -442,6 +444,7 @@ function App() {
     }
     setFailure(null);
     const rows = (await response.json()) as ChatChannel[];
+    rows.sort((a, b) => a.position - b.position);
     setChannels(rows);
     setOpenId((current) => {
       if (current !== null && rows.some((c) => c.id === current)) return current;
@@ -764,6 +767,118 @@ function App() {
        그 값을 받아 **201** 을 줍니다. 화면에는 아무 오류도 안 납니다. */
   }, [newName, newKind, loadChannels]);
 
+  const startRenameChannel = (channel: ChatChannel): void => {
+    setEditingChannelId(channel.id);
+    setEditChannelName(channel.name);
+  };
+
+  const saveRenameChannel = useCallback(
+    async (channelId: number): Promise<void> => {
+      const trimmed = editChannelName.trim();
+      if (trimmed === '') return;
+      setSending(true);
+      try {
+        const response = await sendJson(`/api/channels/${channelId}`, 'PATCH', { name: trimmed });
+        if (response === null) {
+          setNote({ text: unreachableText('채널 이름을 못 바꿨습니다'), tone: 'bad' });
+          return;
+        }
+        if (isSessionExpired(response.status)) {
+          goToLogin();
+          return;
+        }
+        if (!response.ok) {
+          setNote({
+            text: await failureText(response, '채널 이름을 못 바꿨습니다'),
+            tone: 'bad',
+          });
+          return;
+        }
+        setNote(null);
+        setEditingChannelId(null);
+        setEditChannelName('');
+        await loadChannels();
+      } finally {
+        setSending(false);
+      }
+    },
+    [editChannelName, loadChannels],
+  );
+
+  const archiveChannel = useCallback(
+    async (channel: ChatChannel): Promise<void> => {
+      if (!window.confirm(`'${channel.name}' 채널을 보관하시겠습니까?`)) return;
+      setSending(true);
+      try {
+        const response = await sendJson(`/api/channels/${channel.id}`, 'DELETE');
+        if (response === null) {
+          setNote({ text: unreachableText('채널을 삭제하지 못했습니다'), tone: 'bad' });
+          return;
+        }
+        if (isSessionExpired(response.status)) {
+          goToLogin();
+          return;
+        }
+        if (!response.ok) {
+          setNote({
+            text: await failureText(response, '채널을 삭제하지 못했습니다'),
+            tone: 'bad',
+          });
+          return;
+        }
+        setNote(null);
+        if (openId === channel.id) {
+          setOpenId(null);
+        }
+        await loadChannels();
+      } finally {
+        setSending(false);
+      }
+    },
+    [loadChannels, openId],
+  );
+
+  const moveChannel = useCallback(
+    async (index: number, direction: -1 | 1): Promise<void> => {
+      if (channels === null) return;
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= channels.length) return;
+      const reordered = [...channels];
+      const temp = reordered[index]!;
+      reordered[index] = reordered[targetIndex]!;
+      reordered[targetIndex] = temp;
+      const channelIds = reordered.map((c) => c.id);
+      setSending(true);
+      try {
+        const response = await sendJson(`/api/projects/${projectId}/channels/order`, 'PUT', {
+          channel_ids: channelIds,
+        });
+        if (response === null) {
+          setNote({ text: unreachableText('채널 순서를 바꾸지 못했습니다'), tone: 'bad' });
+          return;
+        }
+        if (isSessionExpired(response.status)) {
+          goToLogin();
+          return;
+        }
+        if (!response.ok) {
+          setNote({
+            text: await failureText(response, '채널 순서를 바꾸지 못했습니다'),
+            tone: 'bad',
+          });
+          return;
+        }
+        setNote(null);
+        const updated = (await response.json()) as ChatChannel[];
+        updated.sort((a, b) => a.position - b.position);
+        setChannels(updated);
+      } finally {
+        setSending(false);
+      }
+    },
+    [channels],
+  );
+
   const runSearch = useCallback(async (): Promise<void> => {
     // ⚠️ 그리는 자리와 **같은 판단**을 씁니다 (결함 375).
     if (!canSearch(query, null)) {
@@ -846,16 +961,90 @@ function App() {
             />
           ) : (
             <ul className="clist">
-              {channels.map((channel) => (
-                <li key={channel.id}>
-                  <button
-                    type="button"
-                    className={channel.id === openId ? 'citem current' : 'citem'}
-                    {...(channel.id === openId ? { 'aria-current': 'true' as const } : {})}
-                    onClick={() => setOpenId(channel.id)}
-                  >
-                    {channelTitle(channel)}
-                  </button>
+              {channels.map((channel, index) => (
+                <li key={channel.id} className={channel.id === openId ? 'crow current' : 'crow'}>
+                  {editingChannelId === channel.id ? (
+                    <form
+                      className="crename-box"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void saveRenameChannel(channel.id);
+                      }}
+                    >
+                      <input
+                        value={editChannelName}
+                        maxLength={100}
+                        aria-label="채널 새 이름"
+                        onChange={(event) => setEditChannelName(event.target.value)}
+                        autoFocus
+                      />
+                      <button type="submit" disabled={editChannelName.trim() === '' || sending}>
+                        저장
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingChannelId(null);
+                          setEditChannelName('');
+                        }}
+                      >
+                        취소
+                      </button>
+                    </form>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className={channel.id === openId ? 'citem current' : 'citem'}
+                        {...(channel.id === openId ? { 'aria-current': 'true' as const } : {})}
+                        onClick={() => setOpenId(channel.id)}
+                      >
+                        {channelTitle(channel)}
+                      </button>
+                      <div className="ctools" aria-label={`${channel.name} 채널 관리`}>
+                        <button
+                          type="button"
+                          className="cbtn"
+                          title="위로 이동"
+                          aria-label={`${channel.name} 채널 위로 이동`}
+                          disabled={index === 0 || sending}
+                          onClick={() => void moveChannel(index, -1)}
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          className="cbtn"
+                          title="아래로 이동"
+                          aria-label={`${channel.name} 채널 아래로 이동`}
+                          disabled={index === channels.length - 1 || sending}
+                          onClick={() => void moveChannel(index, 1)}
+                        >
+                          ▼
+                        </button>
+                        <button
+                          type="button"
+                          className="cbtn"
+                          title="이름 수정"
+                          aria-label={`${channel.name} 채널 이름 수정`}
+                          disabled={sending}
+                          onClick={() => startRenameChannel(channel)}
+                        >
+                          수정
+                        </button>
+                        <button
+                          type="button"
+                          className="cbtn cdanger"
+                          title="채널 보관"
+                          aria-label={`${channel.name} 채널 보관`}
+                          disabled={sending}
+                          onClick={() => void archiveChannel(channel)}
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>

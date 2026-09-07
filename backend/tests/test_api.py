@@ -141,7 +141,7 @@ def seeded(engine, client: TestClient) -> dict[str, int]:
                 meeting_id=meeting.id,
                 title="로그인 API 구현",
                 assignee_id=users[0].id,
-                deadline=datetime(2026, 9, 4, tzinfo=UTC),
+                deadline=datetime(2026, 9, 15, tzinfo=UTC),
                 confidence=0.94,
                 evidence_utterance_ids=[101],
             ),

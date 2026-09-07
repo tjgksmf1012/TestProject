@@ -478,11 +478,17 @@ def test_the_seeds_schedule_scores_actually_diverge(seeded: dict):
 
 
 def test_fake_asr_is_opt_in():
-    """기본값은 여전히 막혀 있어야 한다. 실수로 켜지면 안 된다."""
-    from teamflow.pipeline.runtime import build_transcriber
+    """기본값은 여전히 막혀 있어야 한다 (fake 가 아니어야 한다). 실수로 켜지면 안 된다."""
+    from teamflow.pipeline.runtime import ScriptedTranscriber, build_transcriber
 
-    with pytest.raises(NotImplementedError, match="ASR 구현이 아직 없습니다"):
-        build_transcriber(Settings(github_webhook_secret="x"))
+    settings = Settings(_env_file=None, github_webhook_secret="x")
+    assert settings.asr_backend != "fake"
+    try:
+        transcriber = build_transcriber(settings)
+        assert not isinstance(transcriber, ScriptedTranscriber)
+    except NotImplementedError:
+        # ai 엑스트라가 없는 환경(CI)에서는 NotImplementedError 가 발생해야 한다
+        pass
 
 
 def test_fake_asr_returns_a_script():

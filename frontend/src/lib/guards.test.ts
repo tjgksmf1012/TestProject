@@ -3801,7 +3801,7 @@ describe('신뢰도 한 줄은 **누구를 잰 값인지** 말한다 (결함 384
           const code = codeOf(readFileSync(full, 'utf8'));
           // 타입 선언(`confidence_label: string;`)은 「그리는 것」이 아닙니다.
           if (/confidence_label(?!\s*:)/.test(code))
-            out.push({ rel: full.slice(base.length + 1), code });
+            out.push({ rel: full.slice(base.length + 1).replace(/\\/g, '/'), code });
         }
       }
     };
@@ -4095,7 +4095,7 @@ describe('SPA 화면은 쓰기를 **한 자리로** 보낸다 (결함 426)', () 
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
         else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
-          out.push({ rel: full.slice(WEBAPP.length + 1), code: codeOf(readFileSync(full, 'utf8')) });
+          out.push({ rel: full.slice(WEBAPP.length + 1).replace(/\\/g, '/'), code: codeOf(readFileSync(full, 'utf8')) });
         }
       }
     };
@@ -4498,7 +4498,7 @@ describe('미해결 사안의 근거도 **문**이다 (결함 420)', () => {
         if (entry.isDirectory()) walk(full);
         else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
           const code = codeOf(readFileSync(full, 'utf8'));
-          if (/\bissueViews\(/.test(code)) out.push({ rel: full.slice(base.length + 1), code });
+          if (/\bissueViews\(/.test(code)) out.push({ rel: full.slice(base.length + 1).replace(/\\/g, '/'), code });
         }
       }
     };
@@ -4791,7 +4791,7 @@ describe('SPA 의 「안 됩니다」 는 들려야 한다 (docs/22 · WCAG 4.1.
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
         else if (/\.tsx?$/.test(entry.name))
-          out.push({ rel: full.slice(base.length + 1), code: readFileSync(full, 'utf8') });
+          out.push({ rel: full.slice(base.length + 1).replace(/\\/g, '/'), code: readFileSync(full, 'utf8') });
       }
     };
     if (!existsSync(base)) return out;
@@ -4809,7 +4809,7 @@ describe('SPA 의 「안 됩니다」 는 들려야 한다 (docs/22 · WCAG 4.1.
     // 자리 자체를 `components/Problem.tsx` 한 벌로 올렸고, 이 검사가
     // **되돌아가는 것**을 막습니다.
     const offenders = spaSources()
-      .filter(({ rel }) => rel !== join('components', 'Problem.tsx'))
+      .filter(({ rel }) => rel !== 'components/Problem.tsx')
       .filter(({ code }) => /className=(?:"|\{`)[^"`]*disabled-reason/.test(code))
       .map(({ rel }) => rel);
     strictEqual(
@@ -4952,7 +4952,7 @@ describe('베타 체험 QA — 화면이 터졌을 때·프로젝트가 둘일 �
             .replace(/\/\*[\s\S]*?\*\//g, ' ')
             .replace(/\/\/[^\n]*/g, ' ');
           if (/navigate\(0\)|location\.reload\(/.test(code)) {
-            offenders.push(full.slice(base.length + 1));
+            offenders.push(full.slice(base.length + 1).replace(/\\/g, '/'));
           }
         }
       }
@@ -4973,7 +4973,7 @@ describe('리본 옆의 값 (결함 336)', () => {
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
         else if (/\.tsx?$/.test(entry.name))
-          out.push({ rel: full.slice(base.length + 1), code: readFileSync(full, 'utf8') });
+          out.push({ rel: full.slice(base.length + 1).replace(/\\/g, '/'), code: readFileSync(full, 'utf8') });
       }
     };
     if (!existsSync(base)) return out;

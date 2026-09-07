@@ -15,7 +15,7 @@ docs/02 §5 전략 C에 따라 CPU 경로가 기본이 될 수 있으므로,
 from __future__ import annotations
 
 import json
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from teamflow.meeting.schema import (
     SYSTEM_PROMPT,
@@ -25,6 +25,7 @@ from teamflow.meeting.schema import (
 )
 
 
+@runtime_checkable
 class LLMClient(Protocol):
     def analyze_meeting(
         self,
@@ -172,6 +173,114 @@ class LlamaCppClient:
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
         return MeetingAnalysis.model_validate_json(content)
+
+
+class TransformersLLMClient:
+    """HuggingFace Transformers 기반 로컬 인프로세스 LLM 클라이언트.
+
+    별도의 서버(vLLM, llama.cpp 등) 프로세스를 띄우지 않고도
+    RTX 4090 GPU에서 직접 Qwen2.5 / Qwen3 계열 모델로 회의를 분석합니다.
+    """
+
+    def __init__(
+        self,
+        model_id: str = "Qwen/Qwen2.5-1.5B-Instruct",
+        device: str | None = None,
+        torch_dtype: object = None,
+        *,
+        max_tokens: int = 4096,
+    ) -> None:
+        self.model_id = model_id
+        self.device = device
+        self.torch_dtype = torch_dtype
+        self.max_tokens = max_tokens
+        self._model: object = None
+        self._tokenizer: object = None
+
+    def _ensure_loaded(self) -> None:
+        if self._model is not None and self._tokenizer is not None:
+            return
+
+        import os
+
+        os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        if self.device is None:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if self.torch_dtype is None:
+            self.torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
+
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+        self._model = AutoModelForCausalLM.from_pretrained(
+            self.model_id,
+            dtype=self.torch_dtype,
+            device_map=self.device,
+        )
+        self._model.eval()
+
+    def analyze_meeting(
+        self,
+        transcript: str,
+        *,
+        prior_decisions: list[str] | None = None,
+        open_tasks: list[str] | None = None,
+    ) -> MeetingAnalysis:
+        self._ensure_loaded()
+        import json
+
+        import torch
+
+        schema_str = json.dumps(json_schema(), ensure_ascii=False, indent=2)
+        system_content = (
+            f"{SYSTEM_PROMPT}\n\n"
+            f"다음 JSON Schema 형태를 엄격히 준수하여 순수 JSON 문자열만 출력하세요:\n"
+            f"```json\n{schema_str}\n```\n"
+            f"규칙:\n"
+            f"- 반드시 summary, decisions, tasks, unresolved_issues, "
+            f"next_agenda 키를 모두 포함하세요.\n"
+            f"- 발언자가 맡기로 한 구체적 작업은 반드시 tasks 배열에 "
+            f"TaskCandidate로 추출하세요."
+        )
+
+        messages = [
+            {"role": "system", "content": system_content},
+            {
+                "role": "user",
+                "content": build_user_prompt(
+                    transcript, prior_decisions=prior_decisions, open_tasks=open_tasks
+                ),
+            },
+        ]
+
+        text = self._tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        raw_inputs = self._tokenizer(text, return_tensors="pt")
+        inputs = {
+            k: (v.to(self.device) if hasattr(v, "to") else v)
+            for k, v in raw_inputs.items()
+        }
+
+        with torch.inference_mode():
+            outputs = self._model.generate(
+                **inputs,
+                max_new_tokens=self.max_tokens,
+                do_sample=False,
+            )
+
+        input_len = inputs["input_ids"].shape[-1]
+        response_text = self._tokenizer.decode(
+            outputs[0][input_len:], skip_special_tokens=True
+        ).strip()
+
+        if "```json" in response_text:
+            response_text = response_text.split("```json", 1)[-1].split("```", 1)[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```", 1)[-1].split("```", 1)[0].strip()
+
+        return MeetingAnalysis.model_validate_json(response_text)
 
 
 def export_schema(path: str) -> None:

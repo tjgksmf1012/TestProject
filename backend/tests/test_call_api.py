@@ -270,7 +270,7 @@ def test_the_mesh_limit_is_reported_to_the_one_who_is_turned_away(
     import asyncio
 
     for i in range(MAX_PEERS):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             call_rooms.rooms.try_join(
                 Peer(
                     user_id=1000 + i,
