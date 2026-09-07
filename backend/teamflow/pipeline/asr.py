@@ -103,19 +103,22 @@ class Qwen3Transcriber:
         if max_amp < 1e-4:
             return []
 
-        self._ensure_loaded()
-
-        import torch
-        import torchaudio.functional as F
-
-        tensor_samples = torch.from_numpy(samples).float()
-        if sample_rate != TARGET_SAMPLE_RATE:
-            tensor_samples = F.resample(tensor_samples, sample_rate, TARGET_SAMPLE_RATE)
-        audio_16k = tensor_samples.numpy()
-
-        total_duration_sec = len(audio_16k) / TARGET_SAMPLE_RATE
+        total_duration_sec = len(samples) / sample_rate
         if total_duration_sec < MIN_SPEECH_DURATION_SEC:
             return []
+
+        if sample_rate != TARGET_SAMPLE_RATE:
+            self._ensure_loaded()
+            import torch
+            import torchaudio.functional as F
+
+            tensor_samples = torch.from_numpy(samples).float()
+            tensor_samples = F.resample(tensor_samples, sample_rate, TARGET_SAMPLE_RATE)
+            audio_16k = tensor_samples.numpy()
+        else:
+            audio_16k = samples.astype(np.float32)
+
+        self._ensure_loaded()
 
         lang_name = LANGUAGE_MAP.get(language.lower(), "Korean")
 
@@ -147,7 +150,12 @@ class Qwen3Transcriber:
 
     def _transcribe_chunk(self, chunk: np.ndarray, lang_name: str) -> tuple[str, float]:
         """단일 오디오 청크(<=30초)를 Qwen3-ASR로 전사합니다."""
-        import torch
+        try:
+            import torch
+            inference_ctx = torch.inference_mode()
+        except ImportError:
+            from contextlib import nullcontext
+            inference_ctx = nullcontext()
 
         messages = [{"role": "user", "content": [{"type": "audio", "audio": chunk}]}]
         prompt = (
@@ -164,12 +172,15 @@ class Qwen3Transcriber:
             pad_to_multiple_of=100,
         )
 
-        inputs = {
-            k: v.to(device=self.device, dtype=self.torch_dtype if v.is_floating_point() else None)
-            for k, v in raw_inputs.items()
-        }
+        def _to_device_tensor(v):
+            if not hasattr(v, "to"):
+                return v
+            is_fp = hasattr(v, "is_floating_point") and v.is_floating_point()
+            return v.to(device=self.device, dtype=self.torch_dtype if is_fp else None)
 
-        with torch.inference_mode():
+        inputs = {k: _to_device_tensor(v) for k, v in raw_inputs.items()}
+
+        with inference_ctx:
             outputs = self._model.generate(
                 **inputs,
                 max_new_tokens=256,

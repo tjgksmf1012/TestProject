@@ -230,7 +230,12 @@ class TransformersLLMClient:
         self._ensure_loaded()
         import json
 
-        import torch
+        try:
+            import torch
+            inference_ctx = torch.inference_mode()
+        except ImportError:
+            from contextlib import nullcontext
+            inference_ctx = nullcontext()
 
         schema_str = json.dumps(json_schema(), ensure_ascii=False, indent=2)
         system_content = (
@@ -263,7 +268,7 @@ class TransformersLLMClient:
             for k, v in raw_inputs.items()
         }
 
-        with torch.inference_mode():
+        with inference_ctx:
             outputs = self._model.generate(
                 **inputs,
                 max_new_tokens=self.max_tokens,

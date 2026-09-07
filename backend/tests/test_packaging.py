@@ -233,7 +233,7 @@ def test_every_task_module_is_imported_by_the_worker():
         name = f"teamflow.tasks.{module.name}"
         source = (
             Path(tasks_package.__path__[0]) / f"{module.name}.py"
-        ).read_text()
+        ).read_text(encoding="utf-8")
         # 태스크가 하나라도 있는 모듈만 본다. dispatch.py 처럼 태스크가
         # 없는 모듈은 import 할 이유가 없다.
         if not re.search(r"@(app|shared)\.task|@app\.task", source):
