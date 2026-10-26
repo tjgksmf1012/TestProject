@@ -13,7 +13,7 @@ import inspect
 import json
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -141,7 +141,7 @@ def seeded(engine, client: TestClient) -> dict[str, int]:
                 meeting_id=meeting.id,
                 title="로그인 API 구현",
                 assignee_id=users[0].id,
-                deadline=datetime(2026, 9, 15, tzinfo=UTC),
+                deadline=datetime.now(UTC) + timedelta(days=14),
                 confidence=0.94,
                 evidence_utterance_ids=[101],
             ),
@@ -456,7 +456,9 @@ def test_human_override_completes_candidate(client: TestClient, seeded):
                     "candidate_id": cid,
                     "approve": True,
                     "assignee_override": seeded["user_ids"][1],
-                    "deadline_override": "2026-09-15",
+                    "deadline_override": (
+                        datetime.now(UTC) + timedelta(days=7)
+                    ).strftime("%Y-%m-%d"),
                 }
             ],
         },
@@ -1073,7 +1075,7 @@ def test_candidate_without_evidence_cannot_be_approved(client: TestClient, seede
             meeting_id=seeded["meeting_id"],
             title="회의에 없던 업무",
             assignee_id=seeded["user_ids"][0],
-            deadline=datetime(2026, 9, 20, tzinfo=UTC),
+            deadline=datetime.now(UTC) + timedelta(days=14),
             confidence=0.9,
             evidence_utterance_ids=[],  # 근거 없음
         )

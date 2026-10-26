@@ -95,7 +95,7 @@ def test_our_modules_all_log_under_the_teamflow_prefix():
 
     offenders = []
     for path in (BACKEND / "teamflow").rglob("*.py"):
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -331,6 +331,6 @@ def test_log_settings_are_visible_on_health():
 
 
 def test_env_example_documents_the_log_settings():
-    text = (BACKEND.parent / ".env.example").read_text()
+    text = (BACKEND.parent / ".env.example").read_text(encoding="utf-8")
     assert "LOG_LEVEL" in text
     assert "LOG_FORMAT" in text

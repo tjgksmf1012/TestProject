@@ -40,7 +40,7 @@ from teamflow.auth import passwords
 from teamflow.call import rooms as call_rooms
 from teamflow.call import signaling as call_signaling_module
 from teamflow.chat import hub as chat_hub
-from teamflow.clock import as_utc
+from teamflow.clock import as_utc, local_date
 from teamflow.config import Settings, get_settings, safe_dump
 from teamflow.db import live, vocab
 from teamflow.db import models as m
@@ -444,6 +444,96 @@ def signup(
     return _me_out(user)
 
 
+_LOGIN_WINDOW_SEC = 60.0
+_LOGIN_MAX_IP_ATTEMPTS = 30
+_LOGIN_MAX_EMAIL_ATTEMPTS = 10
+_LOGIN_IP_FAILURES: dict[str, list[float]] = {}
+_LOGIN_EMAIL_FAILURES: dict[str, list[float]] = {}
+
+
+def _prune_expired_failures(store: dict[str, list[float]], now_mono: float) -> None:
+    expired = [
+        k for k, ts in store.items() if not ts or (now_mono - ts[-1] >= _LOGIN_WINDOW_SEC)
+    ]
+    for k in expired:
+        store.pop(k, None)
+
+
+def _check_login_rate_limit(client_host: str, email: str, settings: AppSettings) -> None:
+    # 1. Redis 가 살아 있으면 분산 환경 기준 검사
+    try:
+        redis = progress_service.progress_client(settings.redis_url)
+        if redis is not None:
+            ip_count = int(redis.get(f"rate:login:ip:{client_host}") or 0)
+            email_count = int(redis.get(f"rate:login:email:{email}") or 0)
+            if ip_count >= _LOGIN_MAX_IP_ATTEMPTS or email_count >= _LOGIN_MAX_EMAIL_ATTEMPTS:
+                raise HTTPException(
+                    status.HTTP_429_TOO_MANY_REQUESTS,
+                    "로그인 시도가 너무 많습니다 — 잠시 뒤 다시 시도해 주세요",
+                )
+            return
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    # 2. Redis 부재 시 제한 용량 슬라이딩 윈도우 인메모리 폴백
+    now_mono = time.monotonic()
+    if len(_LOGIN_IP_FAILURES) > 2000:
+        _prune_expired_failures(_LOGIN_IP_FAILURES, now_mono)
+    if len(_LOGIN_EMAIL_FAILURES) > 2000:
+        _prune_expired_failures(_LOGIN_EMAIL_FAILURES, now_mono)
+
+    ip_recent = [
+        t for t in _LOGIN_IP_FAILURES.get(client_host, []) if now_mono - t < _LOGIN_WINDOW_SEC
+    ]
+    email_recent = [
+        t for t in _LOGIN_EMAIL_FAILURES.get(email, []) if now_mono - t < _LOGIN_WINDOW_SEC
+    ]
+    if len(ip_recent) >= _LOGIN_MAX_IP_ATTEMPTS or len(email_recent) >= _LOGIN_MAX_EMAIL_ATTEMPTS:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "로그인 시도가 너무 많습니다 — 잠시 뒤 다시 시도해 주세요",
+        )
+
+
+def _record_login_failure(client_host: str, email: str, settings: AppSettings) -> None:
+    try:
+        redis = progress_service.progress_client(settings.redis_url)
+        if redis is not None:
+            ip_key = f"rate:login:ip:{client_host}"
+            email_key = f"rate:login:email:{email}"
+            redis.incr(ip_key)
+            redis.expire(ip_key, int(_LOGIN_WINDOW_SEC))
+            redis.incr(email_key)
+            redis.expire(email_key, int(_LOGIN_WINDOW_SEC))
+    except Exception:
+        pass
+
+    now_mono = time.monotonic()
+    ip_list = [
+        t for t in _LOGIN_IP_FAILURES.get(client_host, []) if now_mono - t < _LOGIN_WINDOW_SEC
+    ]
+    ip_list.append(now_mono)
+    _LOGIN_IP_FAILURES[client_host] = ip_list
+
+    email_list = [
+        t for t in _LOGIN_EMAIL_FAILURES.get(email, []) if now_mono - t < _LOGIN_WINDOW_SEC
+    ]
+    email_list.append(now_mono)
+    _LOGIN_EMAIL_FAILURES[email] = email_list
+
+
+def _clear_login_failure(email: str, settings: AppSettings) -> None:
+    try:
+        redis = progress_service.progress_client(settings.redis_url)
+        if redis is not None:
+            redis.delete(f"rate:login:email:{email}")
+    except Exception:
+        pass
+    _LOGIN_EMAIL_FAILURES.pop(email, None)
+
+
 @app.post("/api/auth/login", response_model=MeOut)
 def login(
     payload: LoginIn,
@@ -452,15 +542,21 @@ def login(
     session: DbSession,
     settings: AppSettings,
 ) -> MeOut:
+    client_host = request.client.host if request.client else "unknown"
+    normalized_email = payload.email.strip().lower()
+    _check_login_rate_limit(client_host, normalized_email, settings)
+
     try:
         user = auth_service.authenticate(
             session, email=payload.email, password=payload.password
         )
     except auth_service.AuthError as exc:
+        _record_login_failure(client_host, normalized_email, settings)
         # 이메일이 없는 것과 비밀번호가 틀린 것을 **같은 문구**로 답합니다.
         # 구분해 주면 누가 가입돼 있는지 알아낼 수 있습니다.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
 
+    _clear_login_failure(normalized_email, settings)
     token, _ = auth_service.issue_session(
         session, user_id=user.id, user_agent=request.headers.get("user-agent")
     )
@@ -507,7 +603,7 @@ def read_me(user: CurrentUser) -> MeOut:
 
 
 class ProfileIn(BaseModel):
-    """프로필 이미지·자기소개 (`USER-004`).
+    """프로필 이미지·자기소개·이름·비밀번호 (`USER-004`).
 
     `GithubLoginIn` 과 같은 규칙 — `None` 은 "안 건드림", `""` 는
     "지움" 입니다. 지울 방법이 없으면 잘못 올린 사진이 영영 남습니다.
@@ -515,13 +611,16 @@ class ProfileIn(BaseModel):
 
     bio: str | None = None
     avatar: str | None = None
+    name: str | None = None
+    current_password: str | None = None
+    new_password: str | None = None
 
     model_config = {"extra": "forbid"}
 
 
 @app.patch("/api/auth/me/profile", response_model=MeOut)
 def set_my_profile(payload: ProfileIn, session: DbSession, user: CurrentUser) -> MeOut:
-    """내 프로필 이미지·자기소개를 적는다 (`USER-004`).
+    """내 프로필 이미지·자기소개·이름·비밀번호를 적는다 (`USER-004`).
 
     ## ⚠️ 파일 업로드 통로가 아닙니다
 
@@ -544,6 +643,15 @@ def set_my_profile(payload: ProfileIn, session: DbSession, user: CurrentUser) ->
     from teamflow.users.profile import clean_avatar, clean_bio
 
     try:
+        if payload.name is not None:
+            cleaned_name = payload.name.strip()
+            if not (1 <= len(cleaned_name) <= 80):
+                raise ValueError("이름은 1~80자로 적어 주세요")
+            user.name = cleaned_name
+        if payload.new_password is not None:
+            if not passwords.verify_password(payload.current_password or "", user.password_hash):
+                raise ValueError("지금 비밀번호가 올바르지 않습니다")
+            user.password_hash = passwords.hash_password(payload.new_password)
         if payload.bio is not None:
             user.bio = clean_bio(payload.bio)
         if payload.avatar is not None:
@@ -933,6 +1041,8 @@ class ProjectDetail(BaseModel):
     #: 화면에 보여줄 형태(`ABCD-EFGH`). 코드가 없으면 빈 문자열.
     invite_code: str
     member_count: int
+    started_at: date | None = None
+    deadline: date | None = None
 
 
 @app.get("/api/projects/{project_id}", response_model=ProjectDetail)
@@ -958,6 +1068,8 @@ def get_project(project_id: int, session: DbSession, user: CurrentUser) -> Proje
         github_connected=project.github_verified_at is not None,
         invite_code=invites.format_code(project.invite_code or ""),
         member_count=int(count or 0),
+        started_at=local_date(project.started_at) if project.started_at else None,
+        deadline=project.deadline.date() if project.deadline else None,
     )
 
 
@@ -965,6 +1077,8 @@ class ProjectPatch(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     #: `owner/repo`. 빈 문자열이면 연결을 끊습니다.
     github_repo: str | None = Field(default=None, max_length=255)
+    started_at: date | None = None
+    deadline: date | None = None
 
     # ⚠️ `github_installation_id` 는 **일부러 없습니다.**
     #
@@ -1052,6 +1166,27 @@ def patch_project(
 
         project.github_repo = repo or None
         project.github_connected_at = datetime.now(UTC) if repo else None
+
+    if "started_at" in payload.model_fields_set:
+        project.started_at = (
+            datetime.combine(payload.started_at, datetime.min.time(), tzinfo=UTC)
+            if payload.started_at
+            else None
+        )
+    if "deadline" in payload.model_fields_set:
+        project.deadline = (
+            datetime.combine(payload.deadline, datetime.min.time(), tzinfo=UTC)
+            if payload.deadline
+            else None
+        )
+    if (
+        project.started_at is not None
+        and project.deadline is not None
+        and local_date(project.started_at) > project.deadline.date()
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "마감일은 시작일 이후여야 합니다"
+        )
 
     session.flush()
     return get_project(project_id, session, user)
@@ -2696,9 +2831,11 @@ def change_member_role(
         )
     # ⚠️ **올려 주는 것도 자기 위로는 못 합니다.** 안 막으면 관리자가
     #    팀원을 소유자로 만들어 놓고 그 사람을 통해 자기를 올릴 수 있습니다.
-    if permissions.ROLE_RANK[wanted] >= permissions.ROLE_RANK[
-        vocab.ProjectRole(actor.project_role)
-    ]:
+    #    단, 소유자는 다른 팀원을 공동 소유자로 올려 소유권을 넘길 수 있습니다.
+    actor_role = vocab.ProjectRole(actor.project_role)
+    if not (
+        actor_role == vocab.ProjectRole.OWNER and wanted == vocab.ProjectRole.OWNER
+    ) and permissions.ROLE_RANK[wanted] >= permissions.ROLE_RANK[actor_role]:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "자기보다 높거나 같은 권한은 줄 수 없습니다"
         )
@@ -3114,6 +3251,20 @@ def set_my_github_login(
                 at=datetime.now(UTC),
             )
         )
+        if cleaned:
+            # 소급 적용: 기존에 저장된 GitHub 이벤트 중 작성자 아이디가 일치하지만
+            # actor_user_id 가 비어 있던 이벤트를 찾아 연결한다.
+            unlinked = session.scalars(
+                select(m.GithubEvent).where(
+                    m.GithubEvent.project_id == project_id,
+                    m.GithubEvent.actor_user_id.is_(None),
+                )
+            ).all()
+            for evt in unlinked:
+                if evt.actor_login and evt.actor_login.lower() == cleaned.lower():
+                    evt.actor_user_id = user.id
+                    if evt.event_type == str(vocab.GithubEventKind.PR_MERGED):
+                        _enqueue_github_after_commit(session, evt.id)
     session.flush()
 
     return MemberOut(
@@ -3649,7 +3800,7 @@ async def github_webhook(
     actor_user_id = session.scalar(
         select(m.Member.user_id).where(
             m.Member.project_id == project.id,
-            m.Member.github_login == normalized.actor_login,
+            func.lower(m.Member.github_login) == normalized.actor_login.lower(),
         )
     )
 
@@ -3751,9 +3902,12 @@ class TaskOut(BaseModel):
     status: str
     #: 무엇부터 볼 것인가. **작을수록 급합니다** (`vocab.TaskPriority`).
     priority: int
+    start_date: date | None = None
     deadline: date | None
     completed_at: UtcDatetime | None
     origin: TaskOriginOut | None
+    #: 선행 업무 ID 목록 (`ANALYTICS-005`).
+    blocked_by: list[int] = Field(default_factory=list)
     #: 사람이 PR 에 적어야 하는 표식. 안 보여주면 아무도 안 적습니다.
     marker: str = ""
     github: list[TaskGithubOut] = Field(default_factory=list)
@@ -3845,13 +3999,67 @@ def list_tasks(project_id: int, session: DbSession, user: CurrentUser) -> TaskBo
     )
 
 
+class TaskCreateIn(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    status: str = Field(default="todo")
+    priority: int = Field(default=int(vocab.TASK_PRIORITY_DEFAULT))
+    start_date: date | None = None
+    deadline: date | None = None
+    assignee_ids: list[int] = Field(default_factory=list)
+
+
+@app.post(
+    "/api/projects/{project_id}/tasks",
+    response_model=TaskOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_task(
+    project_id: int,
+    payload: TaskCreateIn,
+    session: DbSession,
+    user: CurrentUser,
+) -> TaskOut:
+    """새 업무를 생성한다 (수동 생성)."""
+    if session.get(m.Project, project_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "프로젝트를 찾을 수 없습니다")
+    _require_project_member(session, project_id, user)
+
+    try:
+        task = task_service.create_task(
+            session,
+            project_id=project_id,
+            actor_id=user.id,
+            title=payload.title,
+            status=payload.status,
+            priority=payload.priority,
+            start_date=payload.start_date,
+            deadline=payload.deadline,
+            assignee_ids=payload.assignee_ids,
+        )
+    except task_service.TaskError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    rows = task_service.list_tasks(session, project_id)
+    created = next((row for row in rows if row["id"] == task.id), None)
+    if created is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "업무 생성 실패")
+    return TaskOut(
+        **created,
+        marker=gh_linking.task_marker(task.id),
+        github=[],
+    )
+
+
 class TaskPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=300)
     status: str | None = None
+    start_date: date | None = None
     # `deadline` 은 None 이 두 뜻이라 따로 받는다 — 아래 엔드포인트 주석 참조.
     deadline: date | None = None
     #: `TASK-007`. 넷 중 하나(0 긴급 ~ 3 낮음). 지울 수 있는 값이 아니라
     #: `deadline` 같은 "있었는가" 구분이 필요 없습니다.
     priority: int | None = None
+    blocked_by: list[int] | None = None
     reason: str | None = Field(default=None, max_length=300)
 
 
@@ -3921,6 +4129,7 @@ async def patch_task(
     except Exception:
         raw = {}
     deadline_provided = isinstance(raw, dict) and "deadline" in raw
+    start_date_provided = isinstance(raw, dict) and "start_date" in raw
 
     try:
         task = task_service.change_task(
@@ -3928,10 +4137,14 @@ async def patch_task(
             project_id=project_id,
             task_id=task_id,
             actor_id=user.id,
+            title=payload.title,
             status=payload.status,
+            start_date=payload.start_date,
+            start_date_provided=start_date_provided,
             deadline=payload.deadline,
             deadline_provided=deadline_provided,
             priority=payload.priority,
+            blocked_by=payload.blocked_by,
             reason=payload.reason,
         )
     except task_service.TaskError as exc:

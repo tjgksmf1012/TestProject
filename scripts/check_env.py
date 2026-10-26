@@ -18,6 +18,17 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 GREEN, YELLOW, RED, DIM, BOLD, RESET = (
     "\033[32m",
     "\033[33m",
@@ -101,9 +112,40 @@ def detect_ram_gb() -> float | None:
         pass
     if platform.system() == "Windows":
         try:
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return stat.ullTotalPhys / 1024**3
+        except Exception:
+            pass
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum"],
+                capture_output=True, text=True, timeout=5, check=False,
+            ).stdout.strip()
+            if out.isdigit():
+                return int(out) / 1024**3
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
             out = subprocess.run(
                 ["wmic", "computersystem", "get", "TotalPhysicalMemory"],
-                capture_output=True, text=True, timeout=10, check=False,
+                capture_output=True, text=True, timeout=5, check=False,
             ).stdout
             nums = [int(t) for t in out.split() if t.isdigit()]
             if nums:
@@ -111,6 +153,24 @@ def detect_ram_gb() -> float | None:
         except (OSError, subprocess.SubprocessError):
             pass
     return None
+
+
+def detect_other_gpus() -> list[str]:
+    """NVIDIA 외의 GPU(AMD, Intel 등)를 감지하여 안내한다."""
+    names: list[str] = []
+    if platform.system() == "Windows":
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"],
+                capture_output=True, text=True, timeout=5, check=False,
+            ).stdout
+            for line in out.strip().splitlines():
+                line = line.strip()
+                if line and "nvidia" not in line.lower() and "virtual" not in line.lower():
+                    names.append(line)
+        except Exception:
+            pass
+    return names
 
 
 def detect_gpu_via_nvidia_smi() -> list[Gpu]:
@@ -258,7 +318,12 @@ def check_hardware() -> tuple[float, float | None]:
         if smi_gpus:
             print(f"{WARN} nvidia-smi는 GPU를 보는데 torch가 못 씁니다 → CUDA 빌드 불일치")
         else:
-            print(f"{WARN} 사용 가능한 GPU 없음 — CPU 전용 구성으로 진행합니다")
+            other = detect_other_gpus()
+            if other:
+                print(f"{INFO} 감지된 그래픽 장치: {', '.join(other)}")
+                print(f"{WARN} PyTorch CUDA 가속은 NVIDIA GPU 전용입니다 — CPU 전용 구성으로 진행합니다")
+            else:
+                print(f"{WARN} 사용 가능한 GPU 없음 — CPU 전용 구성으로 진행합니다")
         return 0.0, ram
 
     # 합이 아니라 **가장 큰 한 장**이다. 모델 하나는 카드 하나에 올라가므로

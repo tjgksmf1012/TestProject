@@ -13,12 +13,14 @@ import type {
 import type { GithubHealth } from '@lib/github/health.ts';
 import type { Task } from '@lib/kanban/board.ts';
 import type { RosterEntry } from '@lib/lobby/room.ts';
+import type { Analytics } from '@lib/analytics/view.ts';
 
 /** 서버 `TaskBoardOut` 과 같은 모양. */
 export interface TaskBoard {
   project_id: number;
   statuses: string[];
   tasks: Task[];
+  former_assignees?: { user_id: number; name: string }[];
 }
 import type { TeamScore } from '@lib/contribution/view.ts';
 import type { FinalRow, Payload } from '@lib/contribution/final.ts';
@@ -119,6 +121,23 @@ export function useFinals(projectId: number | undefined) {
     queryKey: ['projects', projectId, 'finals'],
     queryFn: () => api.get<FinalsOut>(`/api/projects/${projectId}/contributions/final`),
     enabled: projectId !== undefined,
+  });
+}
+
+export function useAnalytics(projectId: number | undefined) {
+  return useQuery({
+    queryKey: ['projects', projectId, 'analytics'],
+    queryFn: () => api.get<Analytics>(`/api/projects/${projectId}/analytics`),
+    enabled: projectId !== undefined,
+  });
+}
+
+export function useUnreadNotifications(projectId: number | undefined) {
+  return useQuery({
+    queryKey: ['projects', projectId, 'notifications', 'unread'],
+    queryFn: () => api.get<{ unread_count: number }>(`/api/projects/${projectId}/notifications/unread`),
+    enabled: projectId !== undefined,
+    refetchInterval: 15_000,
   });
 }
 
@@ -287,19 +306,29 @@ export function useSettingsMutations(projectId: number | undefined) {
       onSuccess: refreshMembers,
     }),
     saveProfile: useMutation({
-      mutationFn: (payload: { bio?: string; avatar?: string }) =>
-        api.patch<Me>('/api/auth/me/profile', payload),
+      mutationFn: (payload: {
+        bio?: string;
+        avatar?: string;
+        name?: string;
+        current_password?: string;
+        new_password?: string;
+      }) => api.patch<Me>('/api/auth/me/profile', payload),
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: ['me'] });
         refreshMembers();
       },
     }),
     saveProject: useMutation({
-      mutationFn: (payload: { title?: string; github_repo?: string }) =>
-        api.patch<ProjectDetail>(`/api/projects/${projectId}`, payload),
+      mutationFn: (payload: {
+        title?: string;
+        github_repo?: string;
+        started_at?: string | null;
+        deadline?: string | null;
+      }) => api.patch<ProjectDetail>(`/api/projects/${projectId}`, payload),
       onSuccess: () => {
         refreshProject();
         void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'github'] });
+        void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'analytics'] });
       },
     }),
     rotateInvite: useMutation({
@@ -434,13 +463,29 @@ export function useTaskMutations(projectId: number | undefined) {
     void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'tasks'] });
   };
   return {
+    createTask: useMutation({
+      mutationFn: (payload: {
+        title: string;
+        status?: string;
+        priority?: number;
+        start_date?: string | null;
+        deadline?: string | null;
+        assignee_ids?: number[];
+      }) => api.post<Task>(`/api/projects/${projectId}/tasks`, payload),
+      onSuccess: refresh,
+    }),
     patchTask: useMutation({
       // ⚠️ 값이 문자열만은 아닙니다 — `priority` 는 숫자입니다 (`TASK-007`).
       //    `Record<string, string>` 로 두면 화면이 `String(priority)` 를
       //    보내게 되고, 서버는 `"0"` 을 받아 pydantic 이 강제 변환합니다.
       //    운 좋게 돌지만 계약이 거짓말을 하게 됩니다.
-      mutationFn: ({ taskId, patch }: { taskId: number; patch: Record<string, string | number | null> }) =>
-        api.patch<Task>(`/api/projects/${projectId}/tasks/${taskId}`, patch),
+      mutationFn: ({
+        taskId,
+        patch,
+      }: {
+        taskId: number;
+        patch: Record<string, string | number | number[] | null>;
+      }) => api.patch<Task>(`/api/projects/${projectId}/tasks/${taskId}`, patch),
       onSuccess: refresh,
     }),
     setAssignees: useMutation({

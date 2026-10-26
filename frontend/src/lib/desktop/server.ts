@@ -13,7 +13,7 @@
  */
 
 /** 아무 주소도 안 주면 여기. 개발용 로컬 서버입니다. */
-export const DEFAULT_SERVER = 'http://127.0.0.1:8811/home.html';
+export const DEFAULT_SERVER = 'http://127.0.0.1:8811/app/';
 
 /**
  * 띄워도 되는 주소인가. 아니면 던집니다.

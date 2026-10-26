@@ -150,6 +150,45 @@ function App() {
     }
   }, [unread, load]);
 
+  const markOneRead = useCallback(
+    async (notificationId: number): Promise<void> => {
+      setSending(true);
+      try {
+        const response = await trySend(() =>
+          fetch(`${apiBase}/api/projects/${projectId}/notifications/read`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notification_ids: [notificationId], all_unread: false }),
+          }),
+        );
+        if (response === null) {
+          setNote({ text: unreachableText('읽음 표시를 못 보냈습니다'), tone: 'bad' });
+          return;
+        }
+        if (isSessionExpired(response.status)) {
+          goToLogin();
+          return;
+        }
+        if (!response.ok) {
+          setNote({
+            text: detailText(
+              await response.json().catch(() => null),
+              describeHttpStatus(response.status) ?? '읽음 표시를 못 보냈습니다',
+            ),
+            tone: 'bad',
+          });
+          return;
+        }
+        setNote(null);
+        await load();
+      } finally {
+        setSending(false);
+      }
+    },
+    [load],
+  );
+
   const badge = badgeText(unread);
 
   const header = (
@@ -225,9 +264,27 @@ function App() {
                 {href === null ? (
                   <span className="ntext">{notice.text}</span>
                 ) : (
-                  <a className="ntext" href={href}>
+                  <a
+                    className="ntext"
+                    href={href}
+                    onClick={() => {
+                      if (!notice.read && notice.notification_id !== null) {
+                        void markOneRead(notice.notification_id);
+                      }
+                    }}
+                  >
                     {notice.text}
                   </a>
+                )}
+                {!notice.read && notice.notification_id !== null && (
+                  <button
+                    type="button"
+                    className="nread"
+                    disabled={sending}
+                    onClick={() => void markOneRead(notice.notification_id!)}
+                  >
+                    읽음
+                  </button>
                 )}
               </li>
             );

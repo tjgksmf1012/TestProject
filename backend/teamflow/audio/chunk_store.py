@@ -23,13 +23,53 @@ docs/03-시스템-아키텍처.md §3, docs/07-법적-윤리-요구사항.md P4
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 # 청크 하나의 상한. Opus 32kbps × 5초 ≈ 20KB 이므로 2MB 면 충분히 넉넉하다.
 # 상한이 없으면 디스크가 찰 때까지 아무나 밀어넣을 수 있다.
 MAX_CHUNK_BYTES = 2 * 1024 * 1024
+_ENC_MAGIC = b"TFGCM1:"
+
+
+def _derive_key(secret: str) -> bytes:
+    return hashlib.sha256(secret.encode("utf-8")).digest()
+
+
+def _maybe_encrypt(data: bytes) -> bytes:
+    secret = os.environ.get("AUDIO_ENCRYPTION_SECRET", "").strip()
+    if not secret:
+        return data
+    key = _derive_key(secret)
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)  # NIST SP 800-38D 권장 96비트 nonce
+    ciphertext = aesgcm.encrypt(nonce, data, None)
+    return _ENC_MAGIC + nonce + ciphertext
+
+
+def _maybe_decrypt(raw: bytes) -> bytes:
+    if not raw.startswith(_ENC_MAGIC):
+        return raw
+    secret = os.environ.get("AUDIO_ENCRYPTION_SECRET", "").strip()
+    if not secret:
+        raise ValueError(
+            "암호화된 청크를 복호화하려면 AUDIO_ENCRYPTION_SECRET 환경변수가 필요합니다"
+        )
+    body = raw[len(_ENC_MAGIC) :]
+    if len(body) < 28:  # 12B nonce + 16B tag
+        raise ValueError("손상된 암호화 청크입니다")
+    nonce = body[:12]
+    ciphertext = body[12:]
+    key = _derive_key(secret)
+    aesgcm = AESGCM(key)
+    try:
+        return aesgcm.decrypt(nonce, ciphertext, None)
+    except Exception as exc:
+        raise ValueError("암호화 청크 복호화 또는 무결성 검증에 실패했습니다") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +132,7 @@ class ChunkStore:
 
         # 임시 이름에 pid 를 넣어 동시 업로드가 서로를 밟지 않게 한다
         tmp = path.with_suffix(f".part.{os.getpid()}")
-        tmp.write_bytes(data)
+        tmp.write_bytes(_maybe_encrypt(data))
         os.replace(tmp, path)
         return path
 
@@ -115,7 +155,8 @@ class ChunkStore:
         return sorted(seqs)
 
     def read(self, meeting_id: int, track_id: int, seq: int) -> bytes:
-        return self.chunk_path(meeting_id, track_id, seq).read_bytes()
+        raw = self.chunk_path(meeting_id, track_id, seq).read_bytes()
+        return _maybe_decrypt(raw)
 
     def total_bytes(self, meeting_id: int, track_id: int) -> int:
         directory = self.track_dir(meeting_id, track_id)

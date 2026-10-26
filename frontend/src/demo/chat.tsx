@@ -879,6 +879,30 @@ function App() {
     [channels],
   );
 
+  const openVoiceMeeting = useCallback(async (channelName: string): Promise<void> => {
+    setSending(true);
+    try {
+      const response = await sendJson(`/api/projects/${projectId}/meetings`, 'POST', {
+        title: channelName,
+      });
+      if (response === null) {
+        setNote({ text: unreachableText('회의를 열지 못했습니다'), tone: 'bad' });
+        return;
+      }
+      if (!response.ok) {
+        setNote({
+          text: await failureText(response, '회의를 열지 못했습니다'),
+          tone: 'bad',
+        });
+        return;
+      }
+      const created = (await response.json()) as { meeting_id: number };
+      location.href = `/app/meeting/${created.meeting_id}/lobby`;
+    } finally {
+      setSending(false);
+    }
+  }, []);
+
   const runSearch = useCallback(async (): Promise<void> => {
     // ⚠️ 그리는 자리와 **같은 판단**을 씁니다 (결함 375).
     if (!canSearch(query, null)) {
@@ -1185,7 +1209,18 @@ function App() {
           ) : !carriesMessages(open) ? (
             // ⚠️ 음성 채널에 입력창을 그려 놓고 보내면 빨간 줄이 뜨는
             //    화면을 만들지 않습니다 — 할 수 없는 일은 안 그립니다.
-            <p className="bempty">{voiceChannelNote(open)}</p>
+            <div className="bempty" style={{ textAlign: 'center', padding: '24px 0' }}>
+              <p>{voiceChannelNote(open)}</p>
+              <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  disabled={sending}
+                  onClick={() => void openVoiceMeeting(open.name)}
+                >
+                  새 회의 로비 열기
+                </button>
+              </div>
+            </div>
           ) : messages === null ? (
             slow && <div aria-busy="true" dangerouslySetInnerHTML={{ __html: rowSkeleton(4) }} />
           ) : messages.length === 0 ? (
@@ -1301,6 +1336,14 @@ function App() {
                 maxLength={MAX_BODY}
                 placeholder="@이름으로 팀원을 부를 수 있습니다"
                 onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    if (canSend(draft, open) && !sending) {
+                      void submit();
+                    }
+                  }
+                }}
               />
               {/* ⚠️ 버튼만 흐려 두면 왜 안 되는지 모른 채 계속 누릅니다. */}
               {blocked !== null && <p className="cwhy">{blocked}</p>}

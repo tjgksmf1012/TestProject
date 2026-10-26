@@ -190,6 +190,67 @@ def process_meeting_task(self: Task, meeting_id: int) -> dict:
     }
 
 
+def process_meeting_sync(meeting_id: int) -> dict:
+    """인프로세스 동기 회의 처리 (로컬 개발/Celery 가 없을 때 백그라운드 스레드에서 직접 실행)."""
+    settings = get_settings()
+    with session_scope() as session:
+        meeting = session.get(m.Meeting, meeting_id)
+        if meeting is None:
+            return {"meeting_id": meeting_id, "status": "not_found"}
+
+        if meeting.status == m.MeetingStatus.CONFIRMED:
+            return {"meeting_id": meeting_id, "status": "already_done"}
+
+        meeting.status = "processing"
+        project_id = meeting.project_id
+        capture_mode = meeting.capture_mode
+        meeting_date = local_date(meeting.started_at)
+
+        members = [
+            TeamMemberName(user_id=user_id, name=name)
+            for user_id, name in session.execute(
+                select(m.Member.user_id, m.User.name)
+                .join(m.User, m.User.id == m.Member.user_id)
+                .where(m.Member.project_id == project_id)
+            ).all()
+        ]
+        prior_decisions = list(
+            session.scalars(
+                select(m.Decision.content).where(
+                    m.Decision.project_id == project_id,
+                    m.Decision.status == "active",
+                )
+            ).all()
+        )
+        open_tasks = list(
+            session.scalars(
+                select(m.Task.title).where(
+                    live.not_deleted(),
+                    m.Task.project_id == project_id,
+                    m.Task.status.in_(("todo", "in_progress")),
+                )
+            ).all()
+        )
+
+    loader, transcriber, analyzer = _build_steps(capture_mode)
+    result = process_meeting(
+        meeting_id,
+        loader=loader,
+        transcriber=transcriber,
+        analyzer=analyzer,
+        members=members,
+        meeting_date=meeting_date,
+        lock_backend=None,
+        progress=None,
+        prior_decisions=prior_decisions,
+        open_tasks=open_tasks,
+        existing_task_titles=open_tasks,
+        gpu_ttl=settings.gpu_lock_ttl,
+    )
+    serialized = _serialize(result)
+    return persist_results_task(meeting_id, serialized)
+
+
 def _serialize(result: PipelineResult) -> dict:
     """Celery 로 넘길 수 있게 직렬화한다. numpy 배열은 넘기지 않는다."""
     validation = result.validation

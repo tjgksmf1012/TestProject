@@ -27,7 +27,8 @@
  *   - 양이 늘 때 — 씨앗 크기에서만 봅니다
  */
 import { spawn } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -108,13 +109,18 @@ async function waitFor(url, seconds = 90) {
 }
 
 async function bootServer(port, dbPath, audioRoot) {
+  const normalizedDb = dbPath.replace(/\\/g, '/');
   const env = {
     ...process.env,
-    DATABASE_URL: `sqlite:///${dbPath}`,
+    DATABASE_URL: `sqlite:///${normalizedDb}`,
     AUDIO_STORAGE_ROOT: audioRoot,
     ASR_BACKEND: 'fake',
+    PYTHONUTF8: '1',
+    PYTHONIOENCODING: 'utf-8',
   };
-  const py = join(ROOT, '.venv', 'bin', 'python');
+  const winPy = join(ROOT, '.venv', 'Scripts', 'python.exe');
+  const unixPy = join(ROOT, '.venv', 'bin', 'python');
+  const py = existsSync(winPy) ? winPy : unixPy;
   const run = (args) =>
     new Promise((res, rej) => {
       const p = spawn(py, args, { cwd: ROOT, env, stdio: 'inherit' });
@@ -372,7 +378,7 @@ async function visit(page, url) {
 
 async function main() {
   const chromium = await loadChromium();
-  const scratch = process.env.SMOKE_SCRATCH ?? '/tmp/teamflow-smoke';
+  const scratch = process.env.SMOKE_SCRATCH ?? join(tmpdir(), 'teamflow-smoke');
   let server = null;
   if (!process.env.SMOKE_BASE) {
     const { mkdirSync, rmSync } = await import('node:fs');

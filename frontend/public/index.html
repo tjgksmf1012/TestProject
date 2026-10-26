@@ -268,6 +268,9 @@
         </li>
         <li id="step-permission">
           <button id="permission">마이크 권한 허용</button>
+          <div id="mic-meter" style="height:6px;border-radius:4px;margin-top:8px;background:var(--sunken);border:1px solid var(--line-strong);overflow:hidden" hidden aria-label="마이크 입력 볼륨">
+            <span id="mic-level" style="display:block;height:100%;width:0%;background:var(--ok);transition:width .1s linear"></span>
+          </div>
         </li>
         <li>
           <span class="steps__label">캡처 설정 확인</span>

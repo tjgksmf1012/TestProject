@@ -344,7 +344,7 @@ def run_e2e_demo():
             start_ms, end_ms = _span(session, matched_evidence)
             ev = m.MeetingEvent(
                 meeting_id=meeting_id,
-                event_type="unresolved_issue",
+                event_type="unanswered_question",
                 severity="info",
                 start_ms=start_ms,
                 end_ms=end_ms,

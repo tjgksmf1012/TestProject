@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { MAIN_LANDMARK_ID, SKIP_HREF, SKIP_TEXT } from '@lib/nav/skip.ts';
 import type { ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { useProjects } from '../api/hooks.ts';
+import { useProjects, useUnreadNotifications } from '../api/hooks.ts';
 import { pageTitle } from '@lib/shell/title.ts';
 import { appScreenOf } from '@lib/nav/links.ts';
 import { appRailHref, railAriaLabel, railIsWorthIt, railItems } from '@lib/nav/rail.ts';
@@ -92,6 +92,8 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
   const pid =
     projectId ??
     (params['projectId'] !== undefined ? Number(params['projectId']) : projects?.[0]?.project_id);
+  const { data: unread } = useUnreadNotifications(pid);
+  const unreadCount = unread?.unread_count ?? 0;
 
   // ⭐ **프로젝트가 둘 이상이면 바꿀 자리를 준다.**
   //
@@ -271,6 +273,56 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
           <h1 className="appbar__title">{title}</h1>
           {meta !== undefined && <span className="appbar__meta">{meta}</span>}
           <div className="appbar__spacer" />
+          <nav className="appbar__tools" aria-label="부가 도구" style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+            <a
+              href={pid !== undefined ? `/chat.html?project=${pid}` : '/chat.html'}
+              className="btn btn--ghost"
+              style={{ minHeight: '28px', padding: '0 7px', fontSize: '12px' }}
+              title="채팅 화면으로 이동"
+            >
+              채팅
+            </a>
+            <a
+              href={pid !== undefined ? `/calendar.html?project=${pid}` : '/calendar.html'}
+              className="btn btn--ghost"
+              style={{ minHeight: '28px', padding: '0 7px', fontSize: '12px' }}
+              title="일정 화면으로 이동"
+            >
+              일정
+            </a>
+            <a
+              href={pid !== undefined ? `/reports.html?project=${pid}` : '/reports.html'}
+              className="btn btn--ghost"
+              style={{ minHeight: '28px', padding: '0 7px', fontSize: '12px' }}
+              title="보고서 화면으로 이동"
+            >
+              보고서
+            </a>
+            <a
+              href={pid !== undefined ? `/notifications.html?project=${pid}` : '/notifications.html'}
+              className="btn btn--ghost"
+              style={{ minHeight: '28px', padding: '0 7px', fontSize: '12px' }}
+              title="알림 화면으로 이동"
+            >
+              알림{unreadCount > 0 ? ` (${unreadCount})` : ''}
+            </a>
+            <a
+              href={pid !== undefined ? `/activity.html?project=${pid}` : '/activity.html'}
+              className="btn btn--ghost"
+              style={{ minHeight: '28px', padding: '0 7px', fontSize: '12px' }}
+              title="활동 기록 화면으로 이동"
+            >
+              활동
+            </a>
+            <a
+              href={pid !== undefined ? `/search.html?project=${pid}` : '/search.html'}
+              className="btn btn--ghost"
+              style={{ minHeight: '28px', padding: '0 7px', fontSize: '12px' }}
+              title="검색 화면으로 이동"
+            >
+              검색
+            </a>
+          </nav>
           {actions}
         </header>
         {children}

@@ -98,7 +98,15 @@ def list_tasks(session: Session, project_id: int) -> list[dict]:
 
     # 담당자는 여럿일 수 있습니다 (`TASK-006`). 카드마다 물으면 N+1 이라
     # 한 번에 끌어옵니다. 순서는 이름 순이고 **화면은 그대로 그립니다.**
-    who = assignees.of_tasks(session, [t.id for t in rows])
+    task_ids = [t.id for t in rows]
+    who = assignees.of_tasks(session, task_ids)
+
+    blocked_map: dict[int, list[int]] = {}
+    if task_ids:
+        for dep in session.scalars(
+            select(m.TaskDependency).where(m.TaskDependency.successor_id.in_(task_ids))
+        ).all():
+            blocked_map.setdefault(dep.successor_id, []).append(dep.predecessor_id)
 
     return [
         {
@@ -109,12 +117,14 @@ def list_tasks(session: Session, project_id: int) -> list[dict]:
             #: 작을수록 급합니다 (`vocab.TaskPriority`). 화면은 이 값으로
             #: 정렬하지 않습니다 — 칸반 열 안 순서는 사람이 끌어 정합니다.
             "priority": task.priority,
+            "start_date": task.start_date.date().isoformat() if task.start_date else None,
             "deadline": task.deadline.date().isoformat() if task.deadline else None,
             "completed_at": (
                 _aware(task.completed_at).isoformat() if task.completed_at else None
             ),
             # None 이면 사람이 손으로 만든 업무다. 화면이 그 둘을 구분한다.
             "origin": origins.get(task.origin_candidate_id or -1),
+            "blocked_by": sorted(blocked_map.get(task.id, [])),
         }
         for task in rows
     ]
@@ -237,6 +247,11 @@ def _record_completion(
     completed_before = _completed_before(session, task.id)
 
     for user_id in who:
+        meta: dict[str, object] = {
+            "origin": "meeting" if task.origin_candidate_id else "manual",
+        }
+        if actor_id is not None:
+            meta["completed_by"] = actor_id
         _emit(
             session,
             project_id=task.project_id,
@@ -244,7 +259,7 @@ def _record_completion(
             event_type=EventType.TASK_COMPLETED,
             source_id=task.id,
             occurred_at=completed_at,
-            metadata={"completed_by": actor_id} if actor_id is not None else None,
+            metadata=meta,
         )
 
     # ⚠️ **마감 준수는 업무 하나당 딱 한 번만 판정한다.**
@@ -307,19 +322,97 @@ def _record_completion(
         )
 
 
+def create_task(
+    session: Session,
+    *,
+    project_id: int,
+    actor_id: int,
+    title: str,
+    status: str = "todo",
+    priority: int = 1,
+    start_date: date | None = None,
+    deadline: date | None = None,
+    assignee_ids: list[int] | None = None,
+) -> m.Task:
+    """새 업무를 생성한다 (수동 생성).
+
+    회의 결정 후보 외에도 칸반 보드에서 직접 업무(핫픽스, 수동 작업 등)를
+    추가할 수 있습니다. origin_candidate_id=None 으로 저장됩니다.
+    """
+    clean_title = (title or "").strip()
+    if not clean_title:
+        raise TaskError("업무 제목은 필수입니다")
+    if len(clean_title) > 300:
+        raise TaskError("업무 제목은 300자 이하여야 합니다")
+
+    if status not in STATUSES:
+        raise TaskError(f"알 수 없는 상태입니다: {status}")
+
+    if priority not in PRIORITIES:
+        raise TaskError(f"알 수 없는 우선순위입니다: {priority}")
+
+    if start_date is not None and deadline is not None and start_date > deadline:
+        raise TaskError("마감일은 시작일 이후여야 합니다")
+
+    wanted = assignees.normalize(assignee_ids or [])
+    if wanted:
+        members = set(
+            session.scalars(
+                select(m.Member.user_id).where(
+                    m.Member.project_id == project_id,
+                    m.Member.user_id.in_(wanted),
+                )
+            ).all()
+        )
+        missing = [uid for uid in wanted if uid not in members]
+        if missing:
+            raise TaskError(
+                "이 프로젝트의 팀원이 아닌 사람은 담당자로 지정할 수 없습니다"
+            )
+
+    start_val = (
+        datetime.combine(start_date, datetime.min.time(), tzinfo=UTC) if start_date else None
+    )
+    deadline_val = (
+        datetime.combine(deadline, datetime.min.time(), tzinfo=UTC) if deadline else None
+    )
+
+    task = m.Task(
+        project_id=project_id,
+        title=clean_title,
+        status=status,
+        priority=priority,
+        start_date=start_val,
+        deadline=deadline_val,
+        origin_candidate_id=None,
+    )
+    session.add(task)
+    session.flush()
+
+    if wanted:
+        assignees.replace(session, task.id, wanted)
+
+    session.flush()
+    return task
+
+
 def change_task(
     session: Session,
     *,
     project_id: int,
     task_id: int,
     actor_id: int,
+    title: str | None = None,
     status: str | None = None,
+    start_date: date | None = None,
+    start_date_provided: bool = False,
     deadline: date | None = None,
     deadline_provided: bool = False,
     priority: int | None = None,
+    blocked_by: list[int] | None = None,
     reason: str | None = None,
 ) -> m.Task:
-    """상태·마감일·우선순위 변경.
+    """제목·상태·마감일·우선순위 변경.
 
     `deadline_provided` 를 따로 받는 이유: `deadline=None` 이 "마감일을
     지운다" 인지 "마감일은 안 건드린다" 인지 구분해야 하기 때문입니다.
@@ -346,6 +439,14 @@ def change_task(
     if task is None or task.project_id != project_id or task.deleted_at is not None:
         raise TaskError("업무를 찾을 수 없습니다")
 
+    if title is not None:
+        clean_title = title.strip()
+        if not clean_title:
+            raise TaskError("업무 제목은 비어 있을 수 없습니다")
+        if len(clean_title) > 300:
+            raise TaskError("업무 제목은 300자 이하여야 합니다")
+        task.title = clean_title
+
     if status is not None and status not in STATUSES:
         raise TaskError(f"알 수 없는 상태입니다: {status}")
 
@@ -357,11 +458,49 @@ def change_task(
     if deadline_provided:
         _change_deadline(session, task, deadline, actor_id, reason)
 
+    if start_date_provided:
+        new_start = (
+            datetime.combine(start_date, datetime.min.time(), tzinfo=UTC)
+            if start_date
+            else None
+        )
+        if (
+            new_start is not None
+            and task.deadline is not None
+            and new_start.date() > task.deadline.date()
+        ):
+            raise TaskError("마감일은 시작일 이후여야 합니다")
+        task.start_date = new_start
+
     if status is not None and status != task.status:
         _change_status(session, task, status, actor_id)
 
     if priority is not None:
         task.priority = priority
+
+    if blocked_by is not None:
+        clean_preds = sorted(set(blocked_by))
+        if task.id in clean_preds:
+            raise TaskError("자기 자신을 선행 업무로 지정할 수 없습니다")
+        if clean_preds:
+            valid_ids = set(
+                session.scalars(
+                    live.live_task_ids().where(
+                        m.Task.project_id == project_id,
+                        m.Task.id.in_(clean_preds),
+                    )
+                ).all()
+            )
+            if len(valid_ids) != len(clean_preds):
+                raise TaskError("이 프로젝트의 업무만 선행 업무로 지정할 수 있습니다")
+        existing = session.scalars(
+            select(m.TaskDependency).where(m.TaskDependency.successor_id == task.id)
+        ).all()
+        for row in existing:
+            session.delete(row)
+        session.flush()
+        for pred_id in clean_preds:
+            session.add(m.TaskDependency(predecessor_id=pred_id, successor_id=task.id))
 
     session.flush()
     return task

@@ -12,6 +12,7 @@ import {
   useMeetings,
   useProjects,
   useSettingsMutations,
+  useAnalytics,
 } from '../api/hooks.ts';
 import { ApiError } from '../api/client.ts';
 import type { MeetingSummary } from '../api/types.ts';
@@ -27,9 +28,26 @@ import {
   sectionMeetings,
   describeMeetingWhen,
 } from '@lib/home/next.ts';
+import {
+  progressText,
+  overdueText,
+  PROGRESS_NOTE,
+  LOAD_NOTE,
+  NOTHING_FOUND,
+  signalViews,
+  type Analytics,
+} from '@lib/analytics/view.ts';
+import {
+  allQuiet,
+  notMeasurableText,
+  QUIET_TEXT,
+  TRENDS_NOTE,
+  trendLine,
+} from '@lib/analytics/trends.ts';
 import { codeProblem, normalizeCode, titleProblem } from '@lib/project/setup.ts';
 import { describeActionFailure } from '@lib/ui/load.ts';
 import { meetingLabel } from '@lib/ui/naming.ts';
+import { plainText } from '@lib/ui/plain.ts';
 import { Problem } from '../components/Problem.tsx';
 
 // 홈 — "다음에 뭘 해야 하는가" 에 대한 답 (지시서 기타-6 §홈).
@@ -168,6 +186,157 @@ function MeetingRow({
         />
       </span>
     </div>
+  );
+}
+
+/** 프로젝트 현황 판 — 진행률, 부하, 감지된 위험 신호 (불변식: 순위표/막대 금지) */
+function ProjectHealthPane({
+  projectId,
+  analytics,
+}: {
+  projectId: number;
+  analytics?: Analytics;
+}) {
+  if (!analytics) return null;
+  const views = signalViews(analytics.signals);
+  const late = overdueText(analytics.progress);
+
+  return (
+    <section className="pane pane--evidence" aria-label="프로젝트 현황">
+      <div className="pane__head">
+        <h2 className="pane__title">프로젝트 현황</h2>
+        <span className="pane__hint">업무 및 신호</span>
+      </div>
+      <div className="pane__body">
+        <div style={{ marginBottom: 'var(--sp-5)' }}>
+          <h3 style={{ fontSize: 'var(--fs-13)', fontWeight: 'var(--fw-semibold)', margin: '0 0 var(--sp-2)' }}>
+            업무 진행률
+          </h3>
+          <p style={{ margin: '0 0 var(--sp-1)', fontSize: 'var(--fs-14)', fontWeight: 'var(--fw-medium)' }}>
+            {progressText(analytics.progress)}
+          </p>
+          <p style={{ margin: 0, fontSize: 'var(--fs-11)', color: 'var(--c-ink-faint)' }}>
+            {PROGRESS_NOTE}
+          </p>
+          {late !== null && (
+            <p style={{ margin: 'var(--sp-2) 0 0', fontSize: 'var(--fs-12)', color: 'var(--c-gap)' }}>
+              ⚠️ {late}
+            </p>
+          )}
+        </div>
+
+        <div style={{ marginBottom: 'var(--sp-5)' }}>
+          <h3 style={{ fontSize: 'var(--fs-13)', fontWeight: 'var(--fw-semibold)', margin: '0 0 var(--sp-1)' }}>
+            현재 맡은 업무
+          </h3>
+          <p style={{ margin: '0 0 var(--sp-2)', fontSize: 'var(--fs-11)', color: 'var(--c-ink-faint)' }}>
+            {plainText(LOAD_NOTE)}
+          </p>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+            {analytics.load.map((row) => (
+              <li
+                key={row.user_id ?? 'none'}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: 'var(--fs-13)',
+                  padding: 'var(--sp-2) var(--sp-3)',
+                  background: 'var(--c-surface)',
+                  borderRadius: 'var(--radius-sm)',
+                }}
+              >
+                <span>{row.name}</span>
+                <span className="num" style={{ fontWeight: 'var(--fw-semibold)' }}>{row.open_tasks}건</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <h3 style={{ fontSize: 'var(--fs-13)', fontWeight: 'var(--fw-semibold)', margin: '0 0 var(--sp-1)' }}>
+            감지된 신호
+          </h3>
+          {views.length === 0 ? (
+            <p style={{ margin: 0, fontSize: 'var(--fs-12)', color: 'var(--c-ink-faint)' }}>
+              {NOTHING_FOUND}
+            </p>
+          ) : (
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+              {views.map((v) => (
+                <li
+                  key={v.kind}
+                  style={{
+                    padding: 'var(--sp-3)',
+                    background: 'var(--c-surface)',
+                    border: '1px solid var(--c-line)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                >
+                  <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-13)', marginBottom: 'var(--sp-1)' }}>
+                    {v.title}
+                  </div>
+                  {v.reason !== null && (
+                    <div style={{ fontSize: 'var(--fs-12)', color: 'var(--c-ink-muted)', marginBottom: 'var(--sp-2)' }}>
+                      {v.reason}
+                    </div>
+                  )}
+                  {v.taskIds.length > 0 && (
+                    <div style={{ fontSize: 'var(--fs-11)', color: 'var(--c-ink-faint)', display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
+                      <span>관련:</span>
+                      {v.taskIds.slice(0, 5).map((tid) => (
+                        <Link
+                          key={tid}
+                          to={`/project/${projectId}/kanban`}
+                          style={{ color: 'var(--c-brand)', textDecoration: 'underline' }}
+                        >
+                          #{tid}
+                        </Link>
+                      ))}
+                      {v.taskIds.length > 5 && <span>외 {v.taskIds.length - 5}건</span>}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div style={{ marginTop: 'var(--sp-5)' }}>
+          <h3 style={{ fontSize: 'var(--fs-13)', fontWeight: 'var(--fw-semibold)', margin: '0 0 var(--sp-1)' }}>
+            회의에서 눈에 띈 것의 추세
+          </h3>
+          <p style={{ margin: '0 0 var(--sp-2)', fontSize: 'var(--fs-11)', color: 'var(--c-ink-faint)' }}>
+            {TRENDS_NOTE}
+          </p>
+          {!analytics.meeting_trends.measurable ? (
+            <p style={{ margin: 0, fontSize: 'var(--fs-12)', color: 'var(--c-gap)' }}>
+              {notMeasurableText(analytics.meeting_trends)}
+            </p>
+          ) : allQuiet(analytics.meeting_trends.kinds) ? (
+            <p style={{ margin: 0, fontSize: 'var(--fs-12)', color: 'var(--c-ink-faint)' }}>
+              {QUIET_TEXT}
+            </p>
+          ) : (
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+              {analytics.meeting_trends.kinds.map((kind) => (
+                <li
+                  key={kind.kind}
+                  style={{
+                    fontSize: 'var(--fs-12)',
+                    padding: 'var(--sp-2) var(--sp-3)',
+                    background: 'var(--c-surface)',
+                    borderRadius: 'var(--radius-sm)',
+                  }}
+                >
+                  {trendLine(kind)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -337,6 +506,7 @@ export default function Home() {
     [projectsQuery.data, search],
   );
   const meetings = useMeetings(project?.project_id);
+  const analytics = useAnalytics(project?.project_id);
   const m = useSettingsMutations(project?.project_id);
   /* 어느 손잡이로 열었는가 (결함 270). 참가하러 온 사람은 **참가 칸에
      초점이 앉은 채** 시작해야 합니다 — 문이 하나뿐이라 이름만 다릅니다. */
@@ -389,6 +559,9 @@ export default function Home() {
           <button type="button" className="btn btn--ghost" onClick={start('create')}>
             + 새 프로젝트
           </button>
+          <button type="button" className="btn btn--ghost" onClick={start('join')}>
+            초대 코드로 참가
+          </button>
           {project !== undefined && (
             /* ⚠️ 사람을 기다리는 회의가 있으면 **그 줄의 버튼이 primary**
                이고 이 버튼은 양보합니다 (v2 F9). 지금 해야 할 일이 검토인데
@@ -412,7 +585,7 @@ export default function Home() {
       }
     >
       <div className="panes">
-        <section className="pane">
+        <section className="pane" style={project !== undefined ? { flex: '1 1 65%' } : undefined}>
           <div className="pane__body">
             {/* ⛔ **참가하러 온 사람에게 참가할 자리를 안 줬습니다**
                 (결함 270). 초대 코드로 막 들어온 사람이 되어 보니, 가입
@@ -446,6 +619,45 @@ export default function Home() {
               <div className="empty">
                 아직 회의가 없습니다. “회의 열기”로 첫 회의를 시작하면 여기서 녹음
                 상태와 할 일이 보입니다.
+              </div>
+            )}
+
+            {(projectsQuery.data?.length ?? 0) >= 2 && (
+              <div style={{ marginBottom: 'var(--sp-5)' }}>
+                <details
+                  className="disc"
+                  style={{
+                    padding: 'var(--sp-2) var(--sp-3)',
+                    background: 'var(--c-surface-sunken)',
+                    borderRadius: 'var(--r-md)',
+                  }}
+                >
+                  <summary style={{ cursor: 'pointer', fontWeight: 'var(--fw-medium)', fontSize: 'var(--fs-13)' }}>
+                    전체 프로젝트 현황 ({projectsQuery.data!.length}개 · 가나다순)
+                  </summary>
+                  <div className="sec__list" style={{ marginTop: 'var(--sp-3)' }}>
+                    {[...projectsQuery.data!]
+                      .sort((a, b) => a.title.localeCompare(b.title, 'ko'))
+                      .map((p) => (
+                        <div key={p.project_id} className="mrow">
+                          <span className="mrow__title">
+                            <Link to={`/?project=${p.project_id}`}>{p.title}</Link>
+                          </span>
+                          <span className="mrow__when">
+                            팀원 {p.member_count} · 회의 {p.meeting_count}
+                          </span>
+                          <span className="mrow__state">
+                            {p.needs_review > 0 ? `검토 필요 ${p.needs_review}건` : '검토 대기 없음'}
+                          </span>
+                          <span className="mrow__action">
+                            <Link className="btn btn--secondary btn--sm" to={`/?project=${p.project_id}`}>
+                              열기
+                            </Link>
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </details>
               </div>
             )}
             {/* 사람을 기다리는 것만 따로. 머리말은 **여기 한 번**뿐이고,
@@ -494,6 +706,9 @@ export default function Home() {
             )}
           </div>
         </section>
+        {project !== undefined && (
+          <ProjectHealthPane projectId={project.project_id} analytics={analytics.data} />
+        )}
       </div>
       <StartDialog
         focus={starting}

@@ -87,7 +87,7 @@ def _ignored(paths: list[Path]) -> list[str]:
     result = subprocess.run(
         ["git", "check-ignore", "--stdin"],
         cwd=REPO_ROOT,
-        input="\n".join(str(p) for p in paths),
+        input="\n".join(p.as_posix() for p in paths),
         capture_output=True,
         text=True,
         check=False,
@@ -95,7 +95,17 @@ def _ignored(paths: list[Path]) -> list[str]:
     # 종료코드 0 = 무시되는 게 있음, 1 = 없음, 그 외 = 오류
     if result.returncode not in (0, 1):
         pytest.skip(f"git check-ignore 를 쓸 수 없습니다: {result.stderr.strip()}")
-    return [line for line in result.stdout.splitlines() if line]
+    return [
+        (
+            line.strip('\r\n "')
+            .replace(r"\r", "")
+            .replace(r"\n", "")
+            .replace("\\\\", "/")
+            .replace("\\", "/")
+        )
+        for line in result.stdout.splitlines()
+        if line.strip()
+    ]
 
 
 def _tracked() -> set[Path]:
@@ -204,7 +214,7 @@ def test_every_script_the_screens_load_is_in_the_repository():
     missing = []
 
     for page in sorted(public.glob("*.html")):
-        for src in re.findall(r'<script[^>]+src="([^"]+)"', page.read_text()):
+        for src in re.findall(r'<script[^>]+src="([^"]+)"', page.read_text(encoding="utf-8")):
             if src.startswith(("http://", "https://", "//")):
                 continue
             target = (public / src.lstrip("./").lstrip("/")).resolve()
@@ -337,7 +347,7 @@ def test_every_value_the_server_sends_has_a_korean_word_on_the_screen():
 
     problems: list[str] = []
     for name, expected, rel, table in _screen_vocabularies():
-        source = (REPO_ROOT / rel).read_text()
+        source = (REPO_ROOT / rel).read_text(encoding="utf-8")
         # 키 타입이 `string` 이 아니라 좁은 유니온(`Record<BlockerCode, …>`)
         # 인 표도 있다. 이름만 보고 찾으면 표가 바뀔 때 조용히 못 찾는다.
         block = re.search(
@@ -417,7 +427,7 @@ def test_the_two_copies_of_each_label_say_the_same_word():
     assert len(pairs) >= 5, f"짝을 {len(pairs)}개밖에 안 재고 있습니다 — 표가 낡았습니다"
 
     for name, server, rel, table in pairs:
-        source = (REPO_ROOT / rel).read_text()
+        source = (REPO_ROOT / rel).read_text(encoding="utf-8")
         block = re.search(
             rf"{table}: Record<[^,>]+, string> = \{{(.*?)\}};", source, re.DOTALL
         )
@@ -461,7 +471,9 @@ def test_the_screens_have_a_next_step_for_every_meeting_status():
 
     from teamflow.db.models import MeetingStatus
 
-    source = (REPO_ROOT / "frontend" / "src" / "lib" / "home" / "next.ts").read_text()
+    source = (
+        REPO_ROOT / "frontend" / "src" / "lib" / "home" / "next.ts"
+    ).read_text(encoding="utf-8")
     cases = set(re.findall(r"case '([a-z_]+)':", source))
     missing = sorted({s.value for s in MeetingStatus} - cases)
     assert missing == [], f"`nextStepFor` 에 가지가 없는 상태입니다: {missing}"
@@ -522,7 +534,7 @@ def test_the_api_image_ships_the_screens():
     그래서 파일에 그 COPY 가 있는지만 본다. 약한 검사지만, 없는 것보다
     낫다 — 없을 때는 아무도 몰랐다.
     """
-    dockerfile = (REPO_ROOT / "docker" / "Dockerfile.api").read_text()
+    dockerfile = (REPO_ROOT / "docker" / "Dockerfile.api").read_text(encoding="utf-8")
 
     from teamflow.api import main as api_main
 
@@ -612,7 +624,7 @@ def test_the_recording_screen_marks_where_the_shell_hook_goes():
     ⚠️ 지금은 **호출이 아니라 표시**를 봅니다. 없는 함수를 부르는 척하면
     그게 더 나쁩니다.
     """
-    screen = (REPO_ROOT / "frontend" / "src" / "demo" / "main.ts").read_text()
+    screen = (REPO_ROOT / "frontend" / "src" / "demo" / "main.ts").read_text(encoding="utf-8")
     assert screen.count("Phase 2") >= 2, (
         "녹음 시작·멈춤 자리의 `docs/21` Phase 2 표시가 사라졌습니다 — "
         "데스크톱 셸에게 알릴 자리를 다음 사람이 못 찾습니다"
@@ -677,10 +689,10 @@ def test_the_seed_writes_gaps_in_the_same_shape_production_does():
     """
     import re
 
-    seed = (REPO_ROOT / "scripts" / "seed_demo.py").read_text()
+    seed = (REPO_ROOT / "scripts" / "seed_demo.py").read_text(encoding="utf-8")
     service = (
         REPO_ROOT / "backend" / "teamflow" / "services" / "recording_service.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
 
     # 운영이 쓰는 키를 코드에서 **읽어 옵니다** — 손으로 적으면 한쪽만 바뀝니다.
     written = re.search(
@@ -828,8 +840,8 @@ def test_the_same_number_on_both_sides_really_is_the_same():
     """
     problems = []
     for meaning, rel, back_name, front_rel, front_name in PAIRED_CONSTANTS:
-        back = (REPO_ROOT / rel).read_text()
-        front = (REPO_ROOT / front_rel).read_text()
+        back = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        front = (REPO_ROOT / front_rel).read_text(encoding="utf-8")
         back_value = _number_after(back, back_name)
         front_value = _number_after(front, front_name)
         if back_value is None:
@@ -1063,11 +1075,6 @@ def test_status_columns_are_compared_against_their_own_vocabulary():
 #: 세어 이 표와 **똑같은지** 봅니다. 새로 생기면 빨개지고, 채우기
 #: 시작해도 빨개집니다(결함 306 의 「예외가 낡는 것도 재라」).
 TABLES_NOBODY_FILLS: dict[str, str] = {
-    "TaskDependency": (
-        "선행/후행 관계를 넣는 라우트·화면·씨앗이 0곳. `blocked_by_late`"
-        "(ANALYTICS-005)가 이 표만 보므로 그 신호는 **언제나 `None`** 입니다"
-        " — `docs/20` 은 오래도록 ✅ 였습니다 (결함 382)."
-    ),
     "PeerReview": (
         "동료평가를 제출하는 길이 0곳. 신뢰도의 `peer_completion` 은 분모가"
         " 0이면 **계산에서 빠지도록** 설계돼 있어(`compute_confidence`) 조용히"
@@ -1210,7 +1217,7 @@ def test_the_pipeline_does_not_put_a_python_exception_on_the_screen():
 
     source = (
         REPO_ROOT / "backend" / "teamflow" / "pipeline" / "meeting_pipeline.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
 
     offenders = [
         line.strip()
@@ -1244,7 +1251,7 @@ def test_the_reprocessing_cleanup_names_every_table_it_rewrites():
 
     source = (
         REPO_ROOT / "backend" / "teamflow" / "tasks" / "meeting_tasks.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     tree = ast.parse(source)
 
     # `m.Xxx(...)` 로 **만드는** 표
@@ -1429,7 +1436,7 @@ def test_the_defect_log_does_not_claim_a_stale_count():
     """
     import re
 
-    doc = (REPO_ROOT / "docs" / "17-결함-기록.md").read_text()
+    doc = (REPO_ROOT / "docs" / "17-결함-기록.md").read_text(encoding="utf-8")
 
     header = re.search(
         r"\*\*(\d+)건\*\*\s*·\s*(\d+)~(\d+)번\s*·\s*(\d+)번은 비어 있습니다", doc
@@ -1494,7 +1501,7 @@ def test_agents_md_names_the_react_screens_that_actually_exist():
         s for s in screens if (REPO_ROOT / "frontend" / "src" / "demo" / f"{s}.tsx").exists()
     }
 
-    agents = (REPO_ROOT / "AGENTS.md").read_text()
+    agents = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     section = agents.partition("### React 로 옮긴 화면")[2].partition("###")[0]
     assert section, "AGENTS.md 에서 'React 로 옮긴 화면' 절을 못 찾았습니다"
 
@@ -1536,7 +1543,7 @@ def test_the_requirements_summary_lists_every_section_once():
     """
     import re
 
-    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text()
+    doc = (REPO_ROOT / "docs" / "20-요구사항-대조.md").read_text(encoding="utf-8")
 
     summary = re.findall(r"^\|\s*§(\d+)\s[^|]*\|[^|]*\|[^|]*\|\s*$", doc, re.MULTILINE)
     listed = [int(n) for n in summary]
@@ -1582,8 +1589,10 @@ def test_the_team_calendar_is_the_same_on_both_sides():
     """
     import re
 
-    back = (REPO_ROOT / "backend" / "teamflow" / "config.py").read_text()
-    front = (REPO_ROOT / "frontend" / "src" / "lib" / "time" / "calendar.ts").read_text()
+    back = (REPO_ROOT / "backend" / "teamflow" / "config.py").read_text(encoding="utf-8")
+    front = (
+        REPO_ROOT / "frontend" / "src" / "lib" / "time" / "calendar.ts"
+    ).read_text(encoding="utf-8")
 
     back_hit = re.search(r"project_timezone:\s*str\s*=\s*['\"]([^'\"]+)['\"]", back)
     front_hit = re.search(r"TEAM_TIMEZONE\s*=\s*['\"]([^'\"]+)['\"]", front)
@@ -1623,7 +1632,7 @@ def test_the_screens_read_the_calendar_from_one_place():
         rel = path.relative_to(REPO_ROOT / "frontend").as_posix()
         if rel in allowed or rel.endswith(".test.ts") or rel.endswith(".test.tsx"):
             continue
-        source = path.read_text()
+        source = path.read_text(encoding="utf-8")
         for number, line in enumerate(source.splitlines(), 1):
             # ⚠️ **낱말이 아니라 요구를 잽니다** (결함 295·334). 예전에는
             #    `getMonth()` 류만 막았는데, 브라우저 달력으로 가는 길은
@@ -1735,7 +1744,7 @@ def test_the_seed_track_numbers_agree_with_the_production_formula():
     from itertools import pairwise
 
     seed_path = REPO_ROOT / "scripts" / "seed_demo.py"
-    seed = seed_path.read_text()
+    seed = seed_path.read_text(encoding="utf-8")
 
     # ── ① 손으로 적은 숫자가 없는가 ──────────────────────────
     #
@@ -1798,7 +1807,7 @@ def test_the_seed_track_numbers_agree_with_the_production_formula():
     # 시연에서 보여줄 수 있습니다.
     service = (
         REPO_ROOT / "backend" / "teamflow" / "services" / "recording_service.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     threshold = re.search(r"MIN_USABLE_COVERAGE = ([0-9.]+)", service)
     assert threshold, "MIN_USABLE_COVERAGE 를 못 찾았습니다"
     limit = float(threshold.group(1))
@@ -1854,7 +1863,9 @@ def _event_type_names() -> list[str]:
     """
     import re
 
-    src = (REPO_ROOT / "backend" / "teamflow" / "contribution" / "events.py").read_text()
+    src = (
+        REPO_ROOT / "backend" / "teamflow" / "contribution" / "events.py"
+    ).read_text(encoding="utf-8")
     body = re.search(r"^class EventType\b.*?(?=^class |\Z)", src, re.M | re.S)
     assert body, "EventType 클래스를 못 찾았습니다"
     return re.findall(r"^    ([A-Z][A-Z_0-9]*) = \"", body.group(0), re.M)
@@ -1882,7 +1893,7 @@ def test_every_event_type_has_something_that_creates_it():
         for path in (REPO_ROOT / "backend" / "teamflow").rglob("*.py")
         if path.relative_to(REPO_ROOT).as_posix() not in CONSUMERS_ONLY
     ]
-    blob = "\n".join(p.read_text() for p in sources)
+    blob = "\n".join(p.read_text(encoding="utf-8") for p in sources)
 
     # 발언 여덟 종은 라벨에서 **만들어집니다** — `EventType.UTT_SOCIAL` 이라고
     # 적힌 곳이 없습니다. 그래서 글자가 아니라 **동작**을 봅니다.
@@ -1941,7 +1952,7 @@ def test_the_readme_table_count_is_not_stale():
     from teamflow.db.models import Base
 
     actual = len(Base.metadata.tables)
-    readme = (REPO_ROOT / "README.md").read_text()
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
     claims = {int(n) for n in re.findall(r"(\d+)개 테이블", readme)}
     assert claims, "README 에서 테이블 수 주장을 못 찾았습니다"
@@ -1967,7 +1978,9 @@ def test_nothing_claims_the_audio_is_encrypted_while_it_is_plaintext():
     이 테스트는 **둘이 어긋나는 것**을 잡습니다. 나중에 암호화를 붙이면
     첫 번째 가지로 넘어가고, 이 테스트는 그때 자연스럽게 통과합니다.
     """
-    store = (REPO_ROOT / "backend" / "teamflow" / "audio" / "chunk_store.py").read_text()
+    store = (
+        REPO_ROOT / "backend" / "teamflow" / "audio" / "chunk_store.py"
+    ).read_text(encoding="utf-8")
 
     # 실제로 암·복호를 하는가? 라이브러리 호출로 판단한다 — 주석의 단어가
     # 아니라 코드를 본다.
@@ -1978,8 +1991,8 @@ def test_nothing_claims_the_audio_is_encrypted_while_it_is_plaintext():
     if encrypts:
         return  # 첫 번째 가지. 이 테스트가 할 일은 없다.
 
-    config = (REPO_ROOT / "backend" / "teamflow" / "config.py").read_text()
-    docs = (REPO_ROOT / "docs" / "07-법적-윤리-요구사항.md").read_text()
+    config = (REPO_ROOT / "backend" / "teamflow" / "config.py").read_text(encoding="utf-8")
+    docs = (REPO_ROOT / "docs" / "07-법적-윤리-요구사항.md").read_text(encoding="utf-8")
 
     assert "평문" in config, (
         "오디오를 암호화하지 않는데 `config.py` 가 그 사실을 말하지 않습니다. "
@@ -2914,7 +2927,7 @@ def test_api_times_say_which_calendar_they_are_in():
     """
     import re
 
-    source = (REPO_ROOT / "backend" / "teamflow" / "api" / "main.py").read_text()
+    source = (REPO_ROOT / "backend" / "teamflow" / "api" / "main.py").read_text(encoding="utf-8")
     # 주석·문서화 문자열은 걷어냅니다 — 이 결함을 **설명하는 글**이 스스로 걸립니다.
     code = re.sub(r'"""[\s\S]*?"""', " ", source)
     code = re.sub(r"^\s*#.*$", " ", code, flags=re.M)
@@ -3844,6 +3857,7 @@ _TASK_PATCH_CALL = re.compile(
     r"""
     (?:                                  # 업무 PATCH 를 부르는 두 모양
         patchTask\s*\(                   #   레거시: 공용 헬퍼
+      | patchTask\.mutate\s*\(           #   SPA: React Query mutation
       | api\.patch\s*<[^>]*>\s*\(        #   SPA: 타입 붙은 헬퍼
       | api\.patch\s*\(
     )

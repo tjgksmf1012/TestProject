@@ -206,14 +206,28 @@ function GithubSection({ mine, save }: { mine: Member | undefined; save: ReturnT
 // ── 내 설정 > 내 정보 (홈에서 옮겨 옴 — 홈에 프로필 편집기가 있을 이유가 없음) ──
 function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations>['saveProfile'] }) {
   const { data: me } = useMe();
+  const [name, setName] = useState<string | null>(null);
   const [bio, setBio] = useState<string | null>(null);
   const [avatar, setAvatar] = useState<string | null>(null);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const nameValue = name ?? me?.name ?? '';
   const bioValue = bio ?? me?.bio ?? '';
   // 빈 글은 「지움」입니다 — 판단은 `@lib` (결함 265).
   const avatarValue = avatarToShow(avatar, me?.avatar ?? null);
-  const problem = bioProblem(bioValue);
-  const dirty = bio !== null || avatar !== null;
+  const nameBad =
+    name !== null && (nameValue.trim().length < 1 || nameValue.trim().length > 80)
+      ? '이름은 1~80자로 적어 주세요'
+      : null;
+  const pwBad =
+    newPassword !== '' && currentPassword === ''
+      ? '지금 비밀번호를 함께 적어 주세요'
+      : newPassword !== '' && newPassword.length < 8
+        ? '새 비밀번호는 8자 이상이어야 합니다'
+        : null;
+  const problem = nameBad ?? bioProblem(bioValue) ?? pwBad;
+  const dirty = name !== null || bio !== null || avatar !== null || newPassword !== '';
   const profileBlocked = whyCannotSave({ problem, dirty, saving: save.isPending });
 
   const onFile = (file: File | undefined) => {
@@ -275,6 +289,15 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
         </div>
       </div>
       <label className="field" style={{ marginTop: 'var(--sp-5)' }}>
+        <span className="field__label">이름</span>
+        <input
+          className="input"
+          value={nameValue}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={80}
+        />
+      </label>
+      <label className="field" style={{ marginTop: 'var(--sp-4)' }}>
         <span className="field__label">
           자기소개 <span className="num">{bioValue.length}/{MAX_BIO}</span>
         </span>
@@ -285,6 +308,30 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
           onChange={(e) => setBio(e.target.value)}
         />
       </label>
+      <div className="two-col" style={{ marginTop: 'var(--sp-4)', gap: 'var(--sp-4)' }}>
+        <label className="field">
+          <span className="field__label">지금 비밀번호 (비밀번호 변경 시)</span>
+          <input
+            type="password"
+            className="input"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            placeholder="바꾸지 않으면 비워 두세요"
+          />
+        </label>
+        <label className="field">
+          <span className="field__label">새 비밀번호 (8자 이상)</span>
+          <input
+            type="password"
+            className="input"
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="바꾸지 않으면 비워 두세요"
+          />
+        </label>
+      </div>
       <div className="sec__row">
         {/* 결함 234 — `disabled` 는 초점을 못 받습니다. */}
         <button
@@ -295,13 +342,27 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
           onClick={() => {
             if (save.isPending) return;
             if (profileBlocked !== null) return;
-            const payload: { bio?: string; avatar?: string } = {};
+            const payload: {
+              bio?: string;
+              avatar?: string;
+              name?: string;
+              current_password?: string;
+              new_password?: string;
+            } = {};
+            if (name !== null) payload.name = nameValue.trim();
             if (bio !== null) payload.bio = bio;
             if (avatar !== null) payload.avatar = avatar;
+            if (newPassword !== '') {
+              payload.current_password = currentPassword;
+              payload.new_password = newPassword;
+            }
             save.mutate(payload, {
               onSuccess: () => {
+                setName(null);
                 setBio(null);
                 setAvatar(null);
+                setCurrentPassword('');
+                setNewPassword('');
               },
             });
           }}
@@ -312,7 +373,13 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
             아무 말도 안 됩니다 — 사유가 없는 것보다 나쁩니다. 처음에
             이 자리를 안 만들어 놓고 가리켰습니다 (결함 234). */}
         <Problem id="profile-problem" tone="incomplete" inline>{profileBlocked}</Problem>
+        {dirty && profileBlocked === null && (
+          <span className="t12 muted" role="status">
+            변경 사항이 있습니다 — 저장을 눌러야 반영됩니다
+          </span>
+        )}
         {save.isSuccess && !dirty && <span className="status-ok" role="status">저장됐습니다</span>}
+        <Problem inline>{save.isError ? mutationError(save.error) : null}</Problem>
       </div>
     </div>
   );
@@ -437,6 +504,24 @@ function MembersSection({
                 }}
               >
                 내보내기
+              </button>
+            )}
+            {myRole === 'owner' && !isMe && member.project_role !== 'owner' && (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                disabled={changeRole.isPending}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `${labelInList(member, ordered)} 님에게 소유자 권한을 부여합니다. 공동 소유자가 되면 기존 소유자도 프로젝트를 나가거나 등급을 조정할 수 있습니다. 계속할까요?`,
+                    )
+                  ) {
+                    changeRole.mutate({ userId: member.user_id, role: 'owner' });
+                  }
+                }}
+              >
+                소유권 넘기기
               </button>
             )}
           </div>
@@ -626,27 +711,40 @@ function RepoSection({
 function GeneralSection({
   title,
   inviteCode,
+  startedAt,
+  deadline,
   save,
   rotate,
   myRole,
 }: {
   title: string;
   inviteCode: string;
+  startedAt: string | null | undefined;
+  deadline: string | null | undefined;
   /** 내 권한. **관리자만 되는 일**을 막을 때 씁니다 (결함 225). */
   myRole: string | null | undefined;
   save: ReturnType<typeof useSettingsMutations>['saveProject'];
   rotate: ReturnType<typeof useSettingsMutations>['rotateInvite'];
 }) {
   const [value, setValue] = useState<string | null>(null);
+  const [startVal, setStartVal] = useState<string | null>(null);
+  const [deadlineVal, setDeadlineVal] = useState<string | null>(null);
   const input = value ?? title;
+  const startInput = startVal ?? startedAt ?? '';
+  const deadlineInput = deadlineVal ?? deadline ?? '';
   const problem = titleProblem(input);
+  const dateProblem =
+    startInput !== '' && deadlineInput !== '' && startInput > deadlineInput
+      ? '마감일은 시작일 이후여야 합니다'
+      : null;
   /* ⚠️ 관리자만 되는 일 — 판단은 `@lib/project/roles.ts` 에 처음부터
      있었고 이 화면만 안 불렀습니다 (결함 225). */
   const renameBlocked = manageBlockedBecause(myRole, '프로젝트 이름 바꾸기');
+  const dirty = value !== null || startVal !== null || deadlineVal !== null;
   const titleBlocked = whyCannotSave({
     noPermission: renameBlocked,
-    problem: value !== null ? problem : null,
-    dirty: value !== null,
+    problem: (value !== null ? problem : null) ?? dateProblem,
+    dirty,
     saving: save.isPending,
   });
   const rotateBlocked = manageBlockedBecause(myRole, '초대 코드 새로 만들기');
@@ -687,13 +785,47 @@ function GeneralSection({
                 document.getElementById('title-input')?.focus();
                 return;
               }
-              save.mutate({ title: input.trim() }, { onSuccess: () => setValue(null) });
+              const patch: {
+                title?: string;
+                started_at?: string | null;
+                deadline?: string | null;
+              } = {};
+              if (value !== null) patch.title = input.trim();
+              if (startVal !== null) patch.started_at = startInput || null;
+              if (deadlineVal !== null) patch.deadline = deadlineInput || null;
+              save.mutate(patch, {
+                onSuccess: () => {
+                  setValue(null);
+                  setStartVal(null);
+                  setDeadlineVal(null);
+                },
+              });
             }}
           >
             저장
           </button>
         </div>
       </label>
+      <div className="two-col" style={{ marginTop: 'var(--sp-4)', gap: 'var(--sp-4)' }}>
+        <label className="field">
+          <span className="field__label">프로젝트 시작일</span>
+          <input
+            type="date"
+            className="input"
+            value={startInput}
+            onChange={(e) => setStartVal(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field__label">프로젝트 마감일 (달력·일정 진단에 반영)</span>
+          <input
+            type="date"
+            className="input"
+            value={deadlineInput}
+            onChange={(e) => setDeadlineVal(e.target.value)}
+          />
+        </label>
+      </div>
       <Problem id="title-problem" tone="incomplete">{titleBlocked}</Problem>
       <h3 className="pane__title" style={{ margin: 'var(--sp-6) 0 var(--sp-3)' }}>
         팀원 초대
@@ -977,9 +1109,11 @@ export default function Settings() {
             )}
             {section === 'general' && project.data && (
               <GeneralSection
-                  myRole={myRole}
+                myRole={myRole}
                 title={project.data.title}
                 inviteCode={project.data.invite_code}
+                startedAt={project.data.started_at}
+                deadline={project.data.deadline}
                 save={m.saveProject}
                 rotate={m.rotateInvite}
               />

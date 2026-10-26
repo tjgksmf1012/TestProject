@@ -276,7 +276,11 @@ function paintNav(context: NavContext): void {
     .map((note) => `<span class="miss">${escapeHtml(note)}</span>`)
     .join('');
 
-  host.innerHTML = links + notes;
+  const returnToApp = context.projectId
+    ? `<a href="/app/project/${escapeHtml(String(context.projectId))}/kanban" class="nav-return" style="font-weight:600;color:var(--primary);margin-right:var(--sp-2);">← 보드로 복귀</a>`
+    : `<a href="/app/" class="nav-return" style="font-weight:600;color:var(--primary);margin-right:var(--sp-2);">← 앱으로 복귀</a>`;
+
+  host.innerHTML = returnToApp + links + notes;
 }
 
 // ══════════════════════════════════════════════════════════════

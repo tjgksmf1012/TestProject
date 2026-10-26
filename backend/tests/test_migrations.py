@@ -286,7 +286,7 @@ def test_every_check_constraint_appears_in_some_migration():
     """
     import re
 
-    models = (REPO_ROOT / "backend" / "teamflow" / "db" / "models.py").read_text()
+    models = (REPO_ROOT / "backend" / "teamflow" / "db" / "models.py").read_text(encoding="utf-8")
     declared = set(re.findall(r'name="(ck_\w+)"', models))
     assert len(declared) >= 14, (
         f"CHECK 제약을 {len(declared)}개만 찾았습니다 — 찾는 방법이 낡았는지 "
@@ -295,7 +295,7 @@ def test_every_check_constraint_appears_in_some_migration():
 
     written = ""
     for path in (REPO_ROOT / "backend" / "migrations" / "versions").glob("*.py"):
-        written += path.read_text()
+        written += path.read_text(encoding="utf-8")
 
     missing = sorted(name for name in declared if name not in written)
     assert missing == [], (

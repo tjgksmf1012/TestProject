@@ -15,6 +15,7 @@ dependencies = [
     "redis>=5.2",
     "httpx>=0.28",
     "pyjwt[crypto]>=2.10",
+    "cryptography>=42.0",
     # 선택 의존성이 아니다. api.main → recording_service → audio.assembly 가
     # 모듈 최상위에서 numpy 를 쓴다. ai 엑스트라에만 두면 기본 설치로는
     # API 가 import 조차 되지 않는다. (test_packaging.py 가 잡는다)
@@ -65,7 +66,6 @@ pythonpath = ["backend"]
 #    starlette 이 고치면 그 검사가 빨개지고, 그때 이 줄을 지우면 됩니다.
 filterwarnings = [
     "error::DeprecationWarning",
-    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
 ]
 
 [tool.ruff]

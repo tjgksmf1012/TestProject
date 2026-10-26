@@ -100,6 +100,8 @@ export interface ProjectDetail {
   github_connected: boolean;
   invite_code: string;
   member_count: number;
+  started_at?: string | null;
+  deadline?: string | null;
 }
 
 /**

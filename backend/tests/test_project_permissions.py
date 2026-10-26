@@ -208,7 +208,7 @@ def test_every_action_is_actually_asked_somewhere():
     for path in root.rglob("*.py"):
         if path == here:
             continue
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         for action in Action:
             # ⚠️ 낱말이 아니라 **묻는 문법**으로 좁힙니다 (결함 240) —
             #    `"delete_project"` 라는 글자는 시연 도구에도 있습니다.
@@ -251,7 +251,7 @@ def test_the_role_vocabulary_does_not_claim_capabilities_in_prose():
 
     source = (
         Path(__file__).resolve().parents[1] / "teamflow" / "db" / "vocab.py"
-    ).read_text()
+    ).read_text(encoding="utf-8")
 
     # ⚠️ **`.*?\n\n` 로 잘랐다가 아무것도 안 재고 있었습니다.** 클래스
     #    docstring 에 빈 줄이 있어서 블록이 값 줄까지 못 갔고, 고치기 전

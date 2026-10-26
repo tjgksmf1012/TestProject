@@ -1022,8 +1022,8 @@ def test_no_screen_is_a_dead_end(client: TestClient):
         page.name
         for page in sorted(public.glob("*.html"))
         if page.name not in exempt
-        and 'id="tabs"' not in page.read_text()
-        and 'id="sparail"' not in page.read_text()
+        and 'id="tabs"' not in page.read_text(encoding="utf-8")
+        and 'id="sparail"' not in page.read_text(encoding="utf-8")
     ]
     assert not missing, f"빠져나올 길이 없는 화면: {missing}"
 

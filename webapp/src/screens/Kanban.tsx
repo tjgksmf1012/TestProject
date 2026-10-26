@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import * as Menu from '@radix-ui/react-dropdown-menu';
+import * as Dialog from '@radix-ui/react-dialog';
 import { AppShell } from '../components/AppShell.tsx';
 import { Chain } from '../components/Chain.tsx';
 import { Why } from '../components/Why.tsx';
@@ -61,6 +62,7 @@ function Card({
   onMove,
   onToggleAssignee,
   onPriority,
+  onEdit,
   onDelete,
 }: {
   task: Task;
@@ -69,6 +71,7 @@ function Card({
   onMove: (task: Task, to: string) => void;
   onToggleAssignee: (task: Task, userId: number) => void;
   onPriority: (task: Task, priority: number) => void;
+  onEdit: (task: Task) => void;
   onDelete: (task: Task) => void;
 }) {
   const today = todayInTeamCalendar();
@@ -157,6 +160,13 @@ function Card({
               ))}
               <div className="menu__sep" />
               <Menu.Item
+                className="menu__item"
+                onSelect={() => onEdit(task)}
+              >
+                ✏️ 제목·마감 수정
+              </Menu.Item>
+              <div className="menu__sep" />
+              <Menu.Item
                 className="menu__item menu__item--danger"
                 onSelect={() => onDelete(task)}
               >
@@ -168,10 +178,17 @@ function Card({
       </div>
       <div className="kcard__meta">
         <span>{assigneeText(task.assignee_ids, people)}</span>
-        {task.deadline !== null && (
+        {(task.start_date != null || task.deadline !== null) && (
           <span className="num">
-            {task.deadline}
+            {task.start_date != null && task.deadline !== null
+              ? `${task.start_date} ~ ${task.deadline}`
+              : task.deadline ?? `시작 ${task.start_date}`}
             {overdue && <span className="kcard__late">지남</span>}
+          </span>
+        )}
+        {(task.blocked_by ?? []).length > 0 && (
+          <span className="num" title={`선행 업무: ${(task.blocked_by ?? []).map((id) => `#${id}`).join(', ')}`}>
+            선행 {(task.blocked_by ?? []).length}건
           </span>
         )}
         {/* 표식은 사람이 PR 에 적어야 하는 값입니다 — 설명 대신 값만 둡니다.
@@ -247,8 +264,24 @@ export default function Kanban() {
       ? null
       : describeLoadFailure('칸반', board.error instanceof ApiError ? board.error.status : null);
   const membersQuery = useMembers(projectId);
-  const { patchTask, setAssignees, deleteTask } = useTaskMutations(projectId);
+  const { createTask, patchTask, setAssignees, deleteTask } = useTaskMutations(projectId);
   const [overCol, setOverCol] = useState<string | null>(null);
+  const [selectedAssignee, setSelectedAssignee] = useState<number | null>(null);
+
+  // 새 업무 만들기 모달
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newPriority, setNewPriority] = useState(1);
+  const [newStartDate, setNewStartDate] = useState('');
+  const [newDeadline, setNewDeadline] = useState('');
+  const [newAssignees, setNewAssignees] = useState<number[]>([]);
+
+  // 업무 수정 모달
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editDeadline, setEditDeadline] = useState('');
+  const [editBlockedBy, setEditBlockedBy] = useState<number[]>([]);
 
   const statuses = board.data?.statuses ?? [];
   const tasks = board.data?.tasks ?? [];
@@ -258,35 +291,52 @@ export default function Kanban() {
   //    사슬은 "빈 칸을 0 으로 그리지 않습니다" 라고 적어 두고 `—` 를
   //    그리는데 머리말이 반대로 말하고 있었습니다(불변식 셋째).
   const known = board.data !== undefined;
-  const people: Person[] = (membersQuery.data ?? []).map((m) => ({
+  const currentPeople: Person[] = (membersQuery.data ?? []).map((m) => ({
     user_id: m.user_id,
     name: m.name,
   }));
-  const columns = toColumns(tasks, statuses);
+  const formerPeople: Person[] = (board.data?.former_assignees ?? []).map((f) => ({
+    user_id: f.user_id,
+    name: f.name,
+  }));
+  const people: Person[] = [
+    ...currentPeople,
+    ...formerPeople.filter((f) => !currentPeople.some((c) => c.user_id === f.user_id)),
+  ];
+  const filteredTasks = selectedAssignee !== null
+    ? tasks.filter((t) => t.assignee_ids.includes(selectedAssignee))
+    : tasks;
+  const columns = toColumns(filteredTasks, statuses);
   const s = summarize(tasks, todayInTeamCalendar());
 
   /* 어느 일이 실패했는지에 따라 **할 말이 다릅니다** — 담당자를 못 바꾼
      것과 업무를 못 지운 것은 다른 사실입니다. 판단·문구는 `@lib`. */
   const failed =
-    patchTask.error != null
+    createTask.error != null
       ? {
-          what: '업무 바꾸기',
-          status: statusOf(patchTask.error),
-          detail: detailOf(patchTask.error),
+          what: '새 업무 만들기',
+          status: statusOf(createTask.error),
+          detail: detailOf(createTask.error),
         }
-      : setAssignees.error != null
+      : patchTask.error != null
         ? {
-            what: '담당자 바꾸기',
-            status: statusOf(setAssignees.error),
-            detail: detailOf(setAssignees.error),
+            what: '업무 바꾸기',
+            status: statusOf(patchTask.error),
+            detail: detailOf(patchTask.error),
           }
-        : deleteTask.error != null
+        : setAssignees.error != null
           ? {
-              what: '업무 지우기',
-              status: statusOf(deleteTask.error),
-              detail: detailOf(deleteTask.error),
+              what: '담당자 바꾸기',
+              status: statusOf(setAssignees.error),
+              detail: detailOf(setAssignees.error),
             }
-          : null;
+          : deleteTask.error != null
+            ? {
+                what: '업무 지우기',
+                status: statusOf(deleteTask.error),
+                detail: detailOf(deleteTask.error),
+              }
+            : null;
 
   const move = (task: Task, to: string) => {
     patchTask.mutate({ taskId: task.id, patch: statusPatch(to) });
@@ -300,10 +350,141 @@ export default function Kanban() {
   const remove = (task: Task) => {
     if (window.confirm(deleteTaskConfirm(task.title))) deleteTask.mutate(task.id);
   };
+  const startEdit = (task: Task) => {
+    setEditingTask(task);
+    setEditTitle(task.title);
+    setEditStartDate(task.start_date ?? '');
+    setEditDeadline(task.deadline ?? '');
+    setEditBlockedBy(task.blocked_by ?? []);
+  };
+
+  const handleCreateTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim()) return;
+    createTask.mutate(
+      {
+        title: newTitle.trim(),
+        priority: newPriority,
+        start_date: newStartDate ? newStartDate : null,
+        deadline: newDeadline ? newDeadline : null,
+        assignee_ids: newAssignees,
+      },
+      {
+        onSuccess: () => {
+          setShowCreateModal(false);
+          setNewTitle('');
+          setNewPriority(1);
+          setNewStartDate('');
+          setNewDeadline('');
+          setNewAssignees([]);
+        },
+      }
+    );
+  };
+
+  const exportTasksCsv = () => {
+    if (filteredTasks.length === 0) return;
+    const esc = (v: string | number | null | undefined): string => {
+      const s = v == null ? '' : String(v);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = ['표식', '제목', '상태', '우선순위', '담당자', '마감일', '출처회의', '연결PR수'];
+    const lines = [headers.join(',')];
+    for (const t of filteredTasks) {
+      lines.push(
+        [
+          esc(t.marker),
+          esc(t.title),
+          esc(describeStatus(t.status)),
+          esc(describePriority(t.priority)),
+          esc(assigneeText(t.assignee_ids, people)),
+          esc(t.deadline ?? ''),
+          esc(
+            t.origin !== null
+              ? meetingLabel(t.origin.meeting_title, t.origin.meeting_id)
+              : '직접 등록',
+          ),
+          esc((t.github ?? []).length),
+        ].join(','),
+      );
+    }
+    const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `teamflow-tasks-project-${projectId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSaveEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTask || !editTitle.trim()) return;
+    patchTask.mutate(
+      {
+        taskId: editingTask.id,
+        patch: {
+          title: editTitle.trim(),
+          start_date: editStartDate ? editStartDate : null,
+          deadline: editDeadline ? editDeadline : null,
+          blocked_by: editBlockedBy,
+        },
+      },
+      {
+        onSuccess: () => setEditingTask(null),
+      }
+    );
+  };
 
   return (
     <AppShell
       title="칸반"
+      actions={
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <select
+            className="input"
+            style={{
+              padding: '4px 8px',
+              fontSize: '12px',
+              borderRadius: 'var(--r-sm)',
+              border: '1px solid var(--c-line)',
+              background: 'var(--c-surface)',
+              color: 'var(--c-ink)',
+            }}
+            value={selectedAssignee ?? ''}
+            onChange={(e) => setSelectedAssignee(e.target.value ? Number(e.target.value) : null)}
+            aria-label="담당자별 필터"
+          >
+            <option value="">전체 담당자 ({tasks.length})</option>
+            {people.map((p) => {
+              const count = tasks.filter((t) => t.assignee_ids.includes(p.user_id)).length;
+              return (
+                <option key={p.user_id} value={p.user_id}>
+                  {p.name} ({count})
+                </option>
+              );
+            })}
+          </select>
+          {filteredTasks.length > 0 && (
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={exportTasksCsv}
+            >
+              CSV 내보내기
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn--primary btn--sm"
+            onClick={() => setShowCreateModal(true)}
+          >
+            + 새 업무
+          </button>
+        </div>
+      }
       meta={
         <span className="meta-chips">
           <span className="meta-chip">
@@ -380,6 +561,7 @@ export default function Kanban() {
                     onMove={move}
                     onToggleAssignee={toggleAssignee}
                     onPriority={setPriority}
+                    onEdit={startEdit}
                     onDelete={remove}
                   />
                 ))}
@@ -407,6 +589,258 @@ export default function Kanban() {
           <Problem>{describeActionFailure(failed.what, failed.status, failed.detail)}</Problem>
         </div>
       )}
+
+      <Dialog.Root open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-backdrop" />
+          <Dialog.Content className="dialog" aria-label="새 업무 추가">
+            <Dialog.Title className="sec__title" style={{ margin: '0 0 16px', fontSize: '16px', fontWeight: 600 }}>
+              새 업무 추가
+            </Dialog.Title>
+            <form onSubmit={handleCreateTask} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
+                <span>제목 (필수)</span>
+                <input
+                  type="text"
+                  required
+                  className="input"
+                  style={{
+                    padding: '6px 8px',
+                    border: '1px solid var(--c-line)',
+                    borderRadius: 'var(--r-sm)',
+                    background: 'var(--c-surface)',
+                    color: 'var(--c-ink)',
+                  }}
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="할 일을 입력하세요"
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
+                <span>우선순위</span>
+                <select
+                  className="input"
+                  style={{
+                    padding: '6px 8px',
+                    border: '1px solid var(--c-line)',
+                    borderRadius: 'var(--r-sm)',
+                    background: 'var(--c-surface)',
+                    color: 'var(--c-ink)',
+                  }}
+                  value={newPriority}
+                  onChange={(e) => setNewPriority(Number(e.target.value))}
+                >
+                  <option value={0}>긴급</option>
+                  <option value={1}>보통</option>
+                  <option value={2}>낮음</option>
+                </select>
+              </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
+                <span>담당자 (복수 선택 가능)</span>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '8px',
+                    padding: '6px 8px',
+                    border: '1px solid var(--c-line)',
+                    borderRadius: 'var(--r-sm)',
+                    background: 'var(--c-surface)',
+                  }}
+                >
+                  {people.map((p) => {
+                    const checked = newAssignees.includes(p.user_id);
+                    return (
+                      <label
+                        key={p.user_id}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setNewAssignees((prev) => toggled(prev, p.user_id))}
+                        />
+                        <span>{labelInList(p, people)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
+                  <span>시작일</span>
+                  <input
+                    type="date"
+                    className="input"
+                    style={{
+                      padding: '6px 8px',
+                      border: '1px solid var(--c-line)',
+                      borderRadius: 'var(--r-sm)',
+                      background: 'var(--c-surface)',
+                      color: 'var(--c-ink)',
+                    }}
+                    value={newStartDate}
+                    onChange={(e) => setNewStartDate(e.target.value)}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
+                  <span>마감일</span>
+                  <input
+                    type="date"
+                    className="input"
+                    style={{
+                      padding: '6px 8px',
+                      border: '1px solid var(--c-line)',
+                      borderRadius: 'var(--r-sm)',
+                      background: 'var(--c-surface)',
+                      color: 'var(--c-ink)',
+                    }}
+                    value={newDeadline}
+                    onChange={(e) => setNewDeadline(e.target.value)}
+                  />
+                </label>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+                <Dialog.Close asChild>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                  >
+                    취소
+                  </button>
+                </Dialog.Close>
+                <button
+                  type="submit"
+                  className="btn btn--primary btn--sm"
+                  disabled={createTask.isPending}
+                >
+                  {createTask.isPending ? '생성 중…' : '만들기'}
+                </button>
+              </div>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={editingTask !== null} onOpenChange={(open) => { if (!open) setEditingTask(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-backdrop" />
+          <Dialog.Content className="dialog" aria-label="업무 수정">
+            <Dialog.Title className="sec__title" style={{ margin: '0 0 16px', fontSize: '16px', fontWeight: 600 }}>
+              업무 수정
+            </Dialog.Title>
+            <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
+                <span>제목</span>
+                <input
+                  type="text"
+                  required
+                  className="input"
+                  style={{
+                    padding: '6px 8px',
+                    border: '1px solid var(--c-line)',
+                    borderRadius: 'var(--r-sm)',
+                    background: 'var(--c-surface)',
+                    color: 'var(--c-ink)',
+                  }}
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                />
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
+                  <span>시작일</span>
+                  <input
+                    type="date"
+                    className="input"
+                    style={{
+                      padding: '6px 8px',
+                      border: '1px solid var(--c-line)',
+                      borderRadius: 'var(--r-sm)',
+                      background: 'var(--c-surface)',
+                      color: 'var(--c-ink)',
+                    }}
+                    value={editStartDate}
+                    onChange={(e) => setEditStartDate(e.target.value)}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
+                  <span>마감일</span>
+                  <input
+                    type="date"
+                    className="input"
+                    style={{
+                      padding: '6px 8px',
+                      border: '1px solid var(--c-line)',
+                      borderRadius: 'var(--r-sm)',
+                      background: 'var(--c-surface)',
+                      color: 'var(--c-ink)',
+                    }}
+                    value={editDeadline}
+                    onChange={(e) => setEditDeadline(e.target.value)}
+                  />
+                </label>
+              </div>
+              {tasks.filter((t) => t.id !== editingTask?.id).length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
+                  <span>선행 업무 (이 업무보다 먼저 끝나야 하는 일)</span>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      maxHeight: '120px',
+                      overflowY: 'auto',
+                      padding: '6px 8px',
+                      border: '1px solid var(--c-line)',
+                      borderRadius: 'var(--r-sm)',
+                      background: 'var(--c-surface)',
+                    }}
+                  >
+                    {tasks
+                      .filter((t) => t.id !== editingTask?.id)
+                      .map((t) => {
+                        const checked = editBlockedBy.includes(t.id);
+                        return (
+                          <label
+                            key={t.id}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => setEditBlockedBy((prev) => toggled(prev, t.id))}
+                            />
+                            <span>
+                              #{t.id} {t.title}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+                <Dialog.Close asChild>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                  >
+                    취소
+                  </button>
+                </Dialog.Close>
+                <button
+                  type="submit"
+                  className="btn btn--primary btn--sm"
+                  disabled={patchTask.isPending}
+                >
+                  {patchTask.isPending ? '저장 중…' : '저장'}
+                </button>
+              </div>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </AppShell>
   );
 }

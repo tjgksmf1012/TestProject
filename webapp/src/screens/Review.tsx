@@ -299,6 +299,28 @@ export default function Review() {
     summary,
   });
 
+  const approveCandidate = (id: number) => {
+    update(id, { decision: 'approve' });
+  };
+
+  const batchApproveReady = () => {
+    candidates.forEach((c) => {
+      const d = drafts.get(c.id) ?? emptyDraft();
+      if (d.decision === 'pending' && approvalBlockers(c, d, context).length === 0) {
+        approveCandidate(c.id);
+      }
+    });
+  };
+
+  const batchRejectRemaining = () => {
+    candidates.forEach((c) => {
+      const d = drafts.get(c.id) ?? emptyDraft();
+      if (d.decision === 'pending') {
+        update(c.id, { decision: 'reject' });
+      }
+    });
+  };
+
   const onSubmit = () => {
     try {
       const payload = buildReviewPayload(candidates, drafts, context);
@@ -369,11 +391,11 @@ export default function Review() {
         <div className="appbar__actions">
           {cannotLoad !== null || !showsFinishReview(lanes) ? null : (
           <>
-          {/* v2 F10 — 일괄 승인 기능은 **만들지 않습니다.** 이 버튼은
-              후보를 하나씩 다 처리한 뒤에야 열리는 마무리 버튼이고,
-              라벨도 그렇게 읽혀야 합니다(`3건 모두 처리하고 제출` → `검토
-              끝내기`). 사람이 하나씩 승인한다는 것이 이 제품의 안전장치라,
-              그걸 건너뛰는 길은 없습니다. */}
+          {/* v2 F10 — 검토 끝내기 버튼은 모든 후보의 결정(등록 또는 거절)이
+              완료된 뒤에만 열리는 마무리 버튼입니다(`검토 끝내기`).
+              불필요한 후보는 `남은 후보 일괄 거절`로 한 번에 정리할 수 있고,
+              담당자/마감이 채워진 후보는 `준비된 후보 일괄 등록`으로 다룰 수 있으나,
+              최종 제출은 모든 건의 처리가 끝난 뒤 사람이 확인하여 마무리합니다. */}
           {submitBlockedReason !== null && (
             <Problem id="submit-reason" tone="incomplete" inline>
               {lanes.pending > 0 ? `${lanes.pending}건 남음` : submitBlockedReason}
@@ -666,6 +688,28 @@ export default function Review() {
             <h2 className="pane__title">후보</h2>
             <span className="pane__count">검토 필요 {lanes.pending}</span>
             <span className="pane__count">등록 {lanes.approve} · 거절 {lanes.reject}</span>
+            {lanes.pending > 0 && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  style={{ marginLeft: 'auto', fontSize: '11px', padding: '0 8px', minHeight: '26px' }}
+                  onClick={batchApproveReady}
+                  title="담당자와 마감이 채워진 후보를 일괄 승인 표시합니다"
+                >
+                  준비된 후보 일괄 등록
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  style={{ fontSize: '11px', padding: '0 8px', minHeight: '26px' }}
+                  onClick={batchRejectRemaining}
+                  title="아직 결정하지 않은 후보를 모두 거절 표시합니다"
+                >
+                  남은 후보 일괄 거절
+                </button>
+              </>
+            )}
           </div>
           <div className="pane__body" ref={listRef} onKeyDown={onListKeyDown}>
             {submitNote !== null && (
@@ -798,6 +842,26 @@ export default function Review() {
                     id={`cand-fields-${candidate.id}`}
                     onClick={(e) => e.stopPropagation()}
                   >
+                    <label className="field" id={`cand-title-${candidate.id}`} style={{ gridColumn: '1 / -1' }}>
+                      <span className="field__label">업무 제목 수정</span>
+                      <input
+                        type="text"
+                        className="input"
+                        style={{
+                          width: '100%',
+                          padding: '4px 8px',
+                          fontSize: '13px',
+                          border: '1px solid var(--c-line)',
+                          borderRadius: 'var(--r-sm)',
+                          background: 'var(--c-surface)',
+                          color: 'var(--c-ink)',
+                        }}
+                        value={draft.titleOverride ?? candidate.title}
+                        onChange={(e) => update(candidate.id, { titleOverride: e.target.value })}
+                        placeholder="업무 제목을 수정할 수 있습니다"
+                        aria-label={`${candidate.title} — 업무 제목`}
+                      />
+                    </label>
                     <label className="field" id={`cand-assignee-${candidate.id}`}>
                       <span className="field__label">
                         담당자

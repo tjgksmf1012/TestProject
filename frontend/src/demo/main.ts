@@ -415,9 +415,46 @@ if (meetingId) {
   showNote($('join-note'), solo.text, solo.tone);
 }
 
+let micMeterStarted = false;
+
+async function startMicVolumeMeter(): Promise<void> {
+  if (micMeterStarted) return;
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return;
+  if (typeof AudioContext === 'undefined') return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const ctx = new AudioContext();
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const meter = document.getElementById('mic-meter');
+    const level = document.getElementById('mic-level');
+    if (!meter || !level) return;
+    meter.hidden = false;
+    micMeterStarted = true;
+    const tick = (): void => {
+      analyser.getByteFrequencyData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i] ?? 0;
+      const avg = data.length > 0 ? sum / data.length : 0;
+      const pct = Math.min(100, Math.round((avg / 96) * 100));
+      level.style.width = `${pct}%`;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  } catch {
+    // 권한 거부 또는 지원되지 않는 환경에서는 볼륨 미터를 생략합니다.
+  }
+}
+
 $('permission').addEventListener('click', async () => {
   await client.requestMicrophone();
   await client.syncClock();
+  if (client.state.permission === 'granted') {
+    void startMicVolumeMeter();
+  }
   render();
 });
 
@@ -538,7 +575,7 @@ async function tellServerWeAreDone(result: RecordingSummary): Promise<void> {
   // 걸 화면이 말해 주지 않으면 사람은 여기서 멈춘다.
   if (meetingId) {
     $('finish-next').hidden = false;
-    ($('finish-next') as HTMLAnchorElement).href = `/lobby.html?meeting=${meetingId}`;
+    ($('finish-next') as HTMLAnchorElement).href = `/app/meeting/${meetingId}/lobby`;
   }
 }
 

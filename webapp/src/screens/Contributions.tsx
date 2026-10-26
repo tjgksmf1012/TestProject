@@ -295,6 +295,39 @@ export default function Contributions() {
           </span>
         </span>
       }
+      actions={
+        <button
+          type="button"
+          className="btn btn--secondary btn--sm"
+          aria-label="기여도 요약 CSV 다운로드"
+          onClick={() => {
+            const rows = [
+              ['이름', '역할', '기여도 구간', '신뢰도', '총 근거 건수', '회의', '업무', '코드'].join(','),
+              ...members.map((m) => {
+                const name = nameOf(m.user_id, people, formerPeople);
+                const role = roleOf(m, people);
+                const range = `"${describeRange(m)}"`;
+                const conf = `"${teamConfidenceLine(m.confidence_label)}"`;
+                const meetingEv = m.categories.find((c) => c.category === 'meeting')?.event_count ?? 0;
+                const taskEv = m.categories.find((c) => c.category === 'task')?.event_count ?? 0;
+                const codeEv = m.categories.find((c) => c.category === 'code')?.event_count ?? 0;
+                const totalEv = m.categories.reduce((acc, c) => acc + (c.event_count ?? 0), 0);
+                return [name, role, range, conf, totalEv, meetingEv, taskEv, codeEv].join(',');
+              }),
+            ];
+            const csv = '\uFEFF' + rows.join('\r\n');
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `project-${projectId ?? 'team'}-contributions.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+        >
+          CSV 내보내기
+        </button>
+      }
     >
       <div className="panes">
         <section className="pane">

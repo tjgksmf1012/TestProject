@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from teamflow.clock import local_date
 from teamflow.db import assignees
 from teamflow.db import models as m
 from teamflow.meeting.approval import (
@@ -75,7 +76,13 @@ def review_candidates(
     호출자가 `outcome.failures` 를 보고 해당 항목만 다시 요청하면 된다.
     """
     now = now or datetime.now(UTC)
-    today = today or now.date()
+    if today is None:
+        meeting = session.get(m.Meeting, meeting_id)
+        today = (
+            local_date(meeting.started_at)
+            if meeting and meeting.started_at
+            else now.date()
+        )
 
     candidates = load_candidates(session, meeting_id)
     members = project_member_ids(session, project_id)

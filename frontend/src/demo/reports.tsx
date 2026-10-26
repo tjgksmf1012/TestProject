@@ -488,10 +488,35 @@ function App() {
             )
           ) : (
             <>
-              <div className="rbar">
-                <h2 className="rhead">{content.title}</h2>
+              <div className="rbar" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <h2 className="rhead" style={{ flex: 1 }}>{content.title}</h2>
                 <button type="button" id="copy" onClick={() => void copy()}>
                   글자로 복사
+                </button>
+                <button
+                  type="button"
+                  id="download-md"
+                  onClick={() => {
+                    const text = toPlainText(content);
+                    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${content.title || 'report'}.md`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  title="마크다운 파일(.md) 다운로드"
+                >
+                  .md 다운로드
+                </button>
+                <button
+                  type="button"
+                  id="print-report"
+                  onClick={() => window.print()}
+                  title="인쇄 또는 PDF로 저장"
+                >
+                  인쇄 / PDF
                 </button>
               </div>
               <NoteLine note={copyNote} id="copy-note" />

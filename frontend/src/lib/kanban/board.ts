@@ -55,10 +55,14 @@ export interface Task {
    */
   priority: number;
   /** ISO 날짜 `YYYY-MM-DD`. */
+  start_date?: string | null;
+  /** ISO 날짜 `YYYY-MM-DD`. */
   deadline: string | null;
   completed_at: string | null;
   /** null 이면 사람이 손으로 만든 업무다. */
   origin: TaskOrigin | null;
+  /** 선행 업무 ID 목록 (`ANALYTICS-005`). */
+  blocked_by?: number[];
   /** PR 에 적어야 하는 표식 (`TASK-12`). */
   marker: string;
   github: TaskGithubLink[];

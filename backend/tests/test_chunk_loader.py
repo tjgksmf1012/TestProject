@@ -382,3 +382,17 @@ def test_multitrack_without_ffmpeg_fails_loudly(
     monkeypatch.setattr(shutil, "which", lambda _: None)
     with pytest.raises(DecoderUnavailable):
         runtime.build_audio_loader(settings, "multitrack")
+
+
+def test_chunk_store_encryption_at_rest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """AUDIO_ENCRYPTION_SECRET 이 설정되면 디스크에 암호화되어 저장되고 투명하게 복호화된다."""
+    monkeypatch.setenv("AUDIO_ENCRYPTION_SECRET", "super-secret-key-12345")
+    store = ChunkStore(tmp_path)
+    sample_data = b"raw-opus-audio-payload-12345"
+    p = store.write(1, 1, 0, sample_data)
+    raw_on_disk = p.read_bytes()
+    assert raw_on_disk.startswith(b"TFGCM1:")
+    assert sample_data not in raw_on_disk
+    assert store.read(1, 1, 0) == sample_data

@@ -172,11 +172,11 @@ def record_utterance_events(
 
         # 제안이 실제로 결정으로 이어졌는가 (2.0 → 5.0).
         #
-        # 같은 회의 안에서 이 제안 **뒤에** 결정이 있었으면 이어진 것으로
-        # 봅니다. 어떤 결정이 어떤 제안에서 나왔는지는 표면형으로 알 수
-        # 없으므로 이건 **추정**이고, 메타데이터에 그렇게 적어 둡니다.
+        # 같은 회의 안에서 이 제안 **뒤 5분 이내에** 결정이 있었으면 이어진
+        # 것으로 봅니다. 회의 초반 제안이 30분 뒤 무관한 결정 때문에 이어진
+        # 것으로 둔갑하지 않게 시간 창을 둡니다.
         if label == ut.PROPOSAL:
-            led = any(at > utterance.start_ms for at in decisions)
+            led = any(0 < (at - utterance.start_ms) <= 300_000 for at in decisions)
             metadata["led_to_decision"] = led
             metadata["led_to_decision_is_a_guess"] = True
 

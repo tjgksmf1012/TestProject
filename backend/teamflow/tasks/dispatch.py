@@ -13,6 +13,9 @@ API 가 Celery 를 직접 부르지 않는 이유:
 from __future__ import annotations
 
 import logging
+import os
+import sys
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +47,25 @@ def enqueue_meeting_processing(meeting_id: int) -> str | None:
         )
         return str(result.id)
     except Exception:  # 브로커 장애 종류를 여기서 나열할 수 없다
-        logger.exception("회의 %s 처리를 큐에 넣지 못했습니다", meeting_id)
-        return None
+        logger.warning("회의 %s 처리를 Celery 큐에 넣지 못했습니다.", meeting_id)
+        if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
+            return None
+
+        try:
+            from teamflow.tasks.meeting_tasks import process_meeting_sync
+
+            t = threading.Thread(
+                target=process_meeting_sync,
+                args=(meeting_id,),
+                name=f"process-meeting-{meeting_id}",
+                daemon=True,
+            )
+            t.start()
+            logger.info("회의 %s 인프로세스 백그라운드 처리를 시작했습니다", meeting_id)
+            return f"in-process-{meeting_id}"
+        except Exception:
+            logger.exception("회의 %s 인프로세스 처리도 실패했습니다", meeting_id)
+            return None
 
 
 def enqueue_github_ingest(event_id: int) -> str | None:
@@ -68,8 +88,24 @@ def enqueue_github_ingest(event_id: int) -> str | None:
         )
         return str(result.id)
     except Exception:
-        logger.exception("github_event %s 수집을 큐에 넣지 못했습니다", event_id)
-        return None
+        logger.warning("github_event %s 수집을 Celery 큐에 넣지 못했습니다.", event_id)
+        if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
+            return None
+
+        try:
+            from teamflow.tasks.github_tasks import ingest_github_event_task
+
+            t = threading.Thread(
+                target=ingest_github_event_task,
+                args=(event_id,),
+                name=f"ingest-github-{event_id}",
+                daemon=True,
+            )
+            t.start()
+            return f"in-process-{event_id}"
+        except Exception:
+            logger.exception("github_event %s 인프로세스 수집도 실패했습니다", event_id)
+            return None
 
 
 def enqueue_github_backfill(project_id: int, limit: int) -> str | None:

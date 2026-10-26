@@ -39,7 +39,7 @@ import {
 import { isSessionExpired, loginUrlFor, safeApiBase } from '../lib/auth/session.ts';
 import { detailText } from '../lib/http/detail.ts';
 import { tryGet, trySend, unreachableText } from '../lib/http/send.ts';
-import { teamInstantOf, todayInTeamCalendar } from '../lib/time/calendar.ts';
+import { teamDateOf, teamDateTime, teamInstantOf, todayInTeamCalendar } from '../lib/time/calendar.ts';
 import { emptyHtml } from '../lib/ui/empty.ts';
 import { describeHttpStatus, failureHtml } from '../lib/ui/failure.ts';
 import { whileLoading } from '../lib/ui/pending.ts';
@@ -113,6 +113,7 @@ function App() {
   const [note, setNote] = useState<Note | null>(null);
   const [title, setTitle] = useState('');
   const [when, setWhen] = useState('');
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
 
   const today = todayInTeamCalendar();
@@ -220,16 +221,25 @@ function App() {
     }
     setSending(true);
     try {
+      const isEditing = editingId !== null;
       const response = await trySend(() =>
-        fetch(`${apiBase}/api/projects/${projectId}/scheduled-meetings`, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, at: instant }),
-        }),
+        fetch(
+          isEditing
+            ? `${apiBase}/api/scheduled-meetings/${editingId}`
+            : `${apiBase}/api/projects/${projectId}/scheduled-meetings`,
+          {
+            method: isEditing ? 'PATCH' : 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, at: instant }),
+          },
+        ),
       );
       if (response === null) {
-        setNote({ text: unreachableText('일정을 못 잡았습니다'), tone: 'bad' });
+        setNote({
+          text: unreachableText(isEditing ? '일정을 못 고쳤습니다' : '일정을 못 잡았습니다'),
+          tone: 'bad',
+        });
         return;
       }
       if (isSessionExpired(response.status)) {
@@ -244,20 +254,25 @@ function App() {
         setNote({
           text: detailText(
             await response.json().catch(() => null),
-            describeHttpStatus(response.status) ?? '일정을 못 잡았습니다',
+            describeHttpStatus(response.status) ??
+              (isEditing ? '일정을 못 고쳤습니다' : '일정을 못 잡았습니다'),
           ),
           tone: 'bad',
         });
         return;
       }
-      setNote({ text: '회의 일정을 잡았습니다.', tone: 'plain' });
+      setNote({
+        text: isEditing ? '회의 일정을 고쳤습니다.' : '회의 일정을 잡았습니다.',
+        tone: 'plain',
+      });
+      setEditingId(null);
       setTitle('');
       setWhen('');
       await load(at.year, at.month);
     } finally {
       setSending(false);
     }
-  }, [title, when, at, load]);
+  }, [title, when, at, load, editingId]);
 
   const header = (
     <header className="head">
@@ -386,16 +401,33 @@ function App() {
                         </a>
                       )}
                       {thing.who !== null && <span className="iwho">{thing.who}</span>}
-                      {/* 잡아 둔 일정은 **무를 자리**가 있어야 합니다 (결함 298). */}
+                      {/* 잡아 둔 일정은 **고치거나 무를 자리**가 있어야 합니다 (결함 298). */}
                       {canCancelMeeting(thing) && (
-                        <button
-                          type="button"
-                          className="icancel"
-                          disabled={sending}
-                          onClick={() => void cancelMeeting(thing.meeting_id!, thing.title)}
-                        >
-                          무르기
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="iedit"
+                            disabled={sending}
+                            onClick={() => {
+                              setEditingId(thing.meeting_id!);
+                              setTitle(thing.title);
+                              const d = teamDateOf(thing.at);
+                              const dt = teamDateTime(thing.at);
+                              setWhen(d !== null && dt !== null ? `${d}T${dt.split(' ')[1] ?? '10:00'}` : '');
+                              document.getElementById('mtitle')?.focus();
+                            }}
+                          >
+                            고치기
+                          </button>
+                          <button
+                            type="button"
+                            className="icancel"
+                            disabled={sending}
+                            onClick={() => void cancelMeeting(thing.meeting_id!, thing.title)}
+                          >
+                            무르기
+                          </button>
+                        </>
                       )}
                     </li>
                   );
@@ -405,7 +437,7 @@ function App() {
           </section>
 
           <section className="detail">
-            <h2 className="shead">회의 일정 잡기</h2>
+            <h2 className="shead">{editingId !== null ? '회의 일정 고치기' : '회의 일정 잡기'}</h2>
             <p className="lede">
               잡아만 두는 것이고 <b>녹음은 시작되지 않습니다</b> — 회의를 여는 것은
               로비에서 동의를 받은 뒤입니다.
@@ -442,8 +474,22 @@ function App() {
                 id="schedule"
                 disabled={title.trim() === '' || when === '' || sending}
               >
-                일정 잡기
+                {editingId !== null ? '일정 고치기' : '일정 잡기'}
               </button>
+              {editingId !== null && (
+                <button
+                  type="button"
+                  className="icancel"
+                  disabled={sending}
+                  onClick={() => {
+                    setEditingId(null);
+                    setTitle('');
+                    setWhen('');
+                  }}
+                >
+                  고치기 취소
+                </button>
+              )}
             </form>
           </section>
         </>

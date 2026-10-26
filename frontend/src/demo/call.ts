@@ -34,8 +34,8 @@ import { escapeHtml } from '../lib/html.ts';
 import type { TrackHealth } from '../lib/lobby/room.ts';
 import { tryGet, unreachableText } from '../lib/http/send.ts';
 import { showNote } from '../lib/ui/failure.ts';
-import { bootApp } from './pwa.ts';
 import { plainText } from '../lib/ui/plain.ts';
+import { bootApp } from './pwa.ts';
 
 const params = new URLSearchParams(location.search);
 // ⚠️ 주소창의 `?api=` 를 그대로 쓰면 회의 음성이 어디로 가는지를 링크
@@ -329,7 +329,7 @@ function openSocket(): void {
 // ══════════════════════════════════════════════════════════════
 
 $('record').addEventListener('click', () => {
-  location.href = `/index.html?meeting=${meetingId}`;
+  window.open(`/?meeting=${meetingId}`, '_blank');
 });
 
 // 권한 대기 상태의 행동 버튼 — 다시 getUserMedia 를 시도한다.
@@ -350,7 +350,7 @@ $('leave').addEventListener('click', () => {
   socket?.close();
   for (const pc of peers.values()) pc.close();
   for (const track of localStream?.getAudioTracks() ?? []) track.stop();
-  location.href = `/lobby.html?meeting=${meetingId}`;
+  location.href = `/app/meeting/${meetingId}/lobby`;
 });
 
 async function start(): Promise<void> {
