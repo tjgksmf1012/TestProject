@@ -109,6 +109,23 @@ class Settings(BaseSettings):
     # ── 기여도 ────────────────────────────────────────────
     scoring_algo_version: str = "scoring-v1"
 
+    # ── WebRTC / 통화 ─────────────────────────────────────
+    # 기본값은 구글 공개 STUN (docs/15 §3.2: 비용 0원).
+    # 대칭 NAT 또는 폐쇄망 운영 시 TURN 서버(coturn 등)를 JSON 문자열로 설정할 수 있다.
+    # 예: '[{"urls": ["stun:..."]}, {"urls": ["turn:..."], "username": "..."}]'
+    webrtc_ice_servers: str = '[{"urls": ["stun:stun.l.google.com:19302"]}]'
+
+    def parse_ice_servers(self) -> list[dict[str, object]]:
+        import json
+
+        try:
+            parsed = json.loads(self.webrtc_ice_servers)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+        return [{"urls": ["stun:stun.l.google.com:19302"]}]
+
     # ── 로그 ──────────────────────────────────────────────
     # 이 프로젝트의 결함은 대부분 **조용히** 일어난다 — 트랙 하나가 버려지고,
     # 회의가 큐에서 멈추고, 후보가 승인되지 않는다. 예외가 안 나므로 로그가

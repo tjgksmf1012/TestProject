@@ -1827,6 +1827,77 @@ def test_utterances_with_no_ids_returns_empty(client: TestClient, seeded):
     assert client.get(f"/api/meetings/{seeded['meeting_id']}/utterances").json() == []
 
 
+def test_patch_utterance_speaker_reassigns_to_member(client: TestClient, engine, seeded):
+    """사람이 화자를 지정하면 speaker_source='manual' 과 확정 신뢰도로 바뀐다."""
+    ids = _seed_utterances(engine, seeded["meeting_id"], seeded["user_ids"][0])
+    user_id = seeded["user_ids"][0]
+    res = client.patch(
+        f"/api/meetings/{seeded['meeting_id']}/utterances/{ids[1]}",
+        json={"speaker_id": user_id},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["speaker_id"] == user_id
+    assert body["speaker_source"] == "manual"
+    assert body["speaker_confidence"] == 1.0
+    assert body["speaker_name"] is not None
+
+    got = client.get(f"/api/meetings/{seeded['meeting_id']}/utterances?ids={ids[1]}").json()
+    assert got[0]["speaker_id"] == user_id
+    assert got[0]["speaker_source"] == "manual"
+    assert got[0]["speaker_confidence"] == 1.0
+
+
+def test_patch_utterance_speaker_clears_speaker(client: TestClient, engine, seeded):
+    """화자를 None 으로 비우면 speaker_source='manual' 과 confidence=None 이 된다."""
+    ids = _seed_utterances(engine, seeded["meeting_id"], seeded["user_ids"][0])
+    res = client.patch(
+        f"/api/meetings/{seeded['meeting_id']}/utterances/{ids[0]}",
+        json={"speaker_id": None},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["speaker_id"] is None
+    assert body["speaker_source"] == "manual"
+    assert body["speaker_confidence"] is None
+    assert body["speaker_name"] is None
+
+
+def test_patch_utterance_speaker_rejects_non_project_member(client: TestClient, engine, seeded):
+    """프로젝트 구성원이 아닌 사람을 화자로 지정할 수 없다."""
+    ids = _seed_utterances(engine, seeded["meeting_id"], seeded["user_ids"][0])
+    with Session(engine) as s:
+        stranger = m.User(name="외부인", email="stranger@example.com", password_hash="x")
+        s.add(stranger)
+        s.commit()
+        stranger_id = stranger.id
+
+    res = client.patch(
+        f"/api/meetings/{seeded['meeting_id']}/utterances/{ids[0]}",
+        json={"speaker_id": stranger_id},
+    )
+    assert res.status_code == 400
+    assert "해당 사용자는 프로젝트의 구성원이 아닙니다" in res.json()["detail"]
+
+
+def test_patch_utterance_speaker_rejects_outsider(client: TestClient, engine, seeded):
+    """회의/프로젝트 멤버가 아닌 사용자는 화자를 수정할 수 없다."""
+    ids = _seed_utterances(engine, seeded["meeting_id"], seeded["user_ids"][0])
+    with Session(engine) as s:
+        outsider = m.User(name="남2", email="outsider2@example.com", password_hash="x")
+        s.add(outsider)
+        s.commit()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    res = client.patch(
+        f"/api/meetings/{seeded['meeting_id']}/utterances/{ids[0]}",
+        json={"speaker_id": seeded["user_ids"][0]},
+    )
+    assert res.status_code in (403, 404)
+
+
+
 # ══════════════════════════════════════════════════════════════
 # 결함 252 — 「검토할 회의」를 상태로만 세던 것
 # ══════════════════════════════════════════════════════════════

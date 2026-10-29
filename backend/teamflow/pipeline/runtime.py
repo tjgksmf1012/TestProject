@@ -337,12 +337,17 @@ def build_diarizer(settings: Settings):
 
     멀티트랙(모드 A)이면 트랙이 곧 화자라 필요 없다 — 그게 이 프로젝트의
     핵심 설계 결정이다 (docs/04 §2).
-
-    ⚠️ 아직 구현되지 않았습니다.
-    pyannote community-1 은 HuggingFace gated 이므로 HF_TOKEN 이 필요하고,
-    **CC-BY-4.0 이라 서비스 크레딧에 귀속 표시 의무**가 있습니다.
     """
-    raise NotImplementedError(
-        f"화자 분리 구현이 아직 없습니다 (설정: {settings.diarization_model}).\n"
-        "멀티트랙 모드에서는 필요하지 않습니다 — docs/04 §2 참조."
-    )
+    try:
+        from teamflow.pipeline.diarize import PyannoteDiarizer
+
+        return PyannoteDiarizer(
+            model_id=settings.diarization_model,
+            token=settings.hf_token,
+        )
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise NotImplementedError(
+            f"화자 분리 구현을 로드할 수 없습니다 (설정: {settings.diarization_model}).\n"
+            "1. .venv\\Scripts\\python.exe -m pip install pyannote.audio\n"
+            "2. Hugging Face 토큰(HF_TOKEN) 설정 확인\n"
+        ) from exc

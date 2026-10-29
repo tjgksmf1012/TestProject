@@ -7,6 +7,7 @@ import type {
   ProjectDetail,
   ProjectSummary,
   RevokeResult,
+  Utterance,
   TracksResponse,
   TypeTally,
 } from './types.ts';
@@ -135,7 +136,13 @@ export function useAnalytics(projectId: number | undefined) {
 export function useUnreadNotifications(projectId: number | undefined) {
   return useQuery({
     queryKey: ['projects', projectId, 'notifications', 'unread'],
-    queryFn: () => api.get<{ unread_count: number }>(`/api/projects/${projectId}/notifications/unread`),
+    queryFn: async () => {
+      const res = await api.get<{ unread?: number; unread_count?: number }>(
+        `/api/projects/${projectId}/notifications/unread`,
+      );
+      const count = res.unread_count ?? res.unread ?? 0;
+      return { unread_count: count, unread: count };
+    },
     enabled: projectId !== undefined,
     refetchInterval: 15_000,
   });
@@ -324,6 +331,7 @@ export function useSettingsMutations(projectId: number | undefined) {
         github_repo?: string;
         started_at?: string | null;
         deadline?: string | null;
+        status?: string;
       }) => api.patch<ProjectDetail>(`/api/projects/${projectId}`, payload),
       onSuccess: () => {
         refreshProject();
@@ -566,4 +574,35 @@ export function useTracks(meetingId: number | undefined, refetchMs?: number) {
     enabled: meetingId !== undefined,
     refetchInterval: refetchMs ?? false,
   });
+}
+
+
+export function useUtteranceMutations(meetingId: number) {
+  const queryClient = useQueryClient();
+  return {
+    reassignSpeaker: useMutation({
+      mutationFn: ({
+        utteranceId,
+        speakerId,
+      }: {
+        utteranceId: number;
+        speakerId: number | null;
+      }) =>
+        api.patch<Utterance>(
+          `/api/meetings/${meetingId}/utterances/${utteranceId}`,
+          { speaker_id: speakerId },
+        ),
+      onSuccess: () => {
+        void queryClient.invalidateQueries({
+          queryKey: ['meetings', meetingId, 'timeline'],
+        });
+        void queryClient.invalidateQueries({
+          queryKey: ['meetings', meetingId, 'utterances'],
+        });
+        void queryClient.invalidateQueries({
+          queryKey: ['meetings', meetingId, 'utterance-types'],
+        });
+      },
+    }),
+  };
 }

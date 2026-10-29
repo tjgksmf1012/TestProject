@@ -2846,7 +2846,7 @@ describe('서비스 워커 캐시 목록 (docs/19 §24)', () => {
    */
   function generatedShell(): string[] {
     const sw = readFileSync(join(PUBLIC, 'sw.js'), 'utf8');
-    const block = /\/\* <<< 자동 생성[^*]*\*\/\n([\s\S]*?)\n\s*\/\* >>> \*\//.exec(sw);
+    const block = /\/\* <<< 자동 생성[^*]*\*\/\r?\n([\s\S]*?)\r?\n\s*\/\* >>> \*\//.exec(sw);
     strictEqual(block !== null, true, 'sw.js 에서 자동 생성 구간을 못 찾았습니다');
     return [...(block?.[1] ?? '').matchAll(/'(\/[^']+)'/g)].map((m) => m[1] as string);
   }
@@ -10473,7 +10473,7 @@ describe('근거 칩을 그리는 자리는 **전부** 접는 판단을 거친�
          **맞는** 자리입니다 — 그것까지 세면 고쳐 놓고도 빨갛습니다(실제로
          한 번 그렇게 잡혔고, 「왜 빨간지」를 읽어서 알았습니다). */
       source = source.replace(
-        /function EvidenceChips[\s\S]*?\n\}\n/,
+        /function EvidenceChips[\s\S]*?\r?\n\}\r?\n/,
         '',
       );
       // `…map(` 과 `<EvidenceChip` 이 같은 식 안에 있으면 낱개 나열입니다.

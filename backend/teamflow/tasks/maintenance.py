@@ -7,7 +7,7 @@ Celery beat 에 등록돼 있고, 실패하면 로그에 남는다.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -15,8 +15,9 @@ from teamflow.config import get_settings
 from teamflow.db import models as m
 from teamflow.db import vocab
 from teamflow.db.session import session_scope
+from teamflow.github.client import GitHubClient, GitHubError, build_client
 from teamflow.jobs.retention import purge_expired_audio, revoke_project_voiceprints
-from teamflow.services import notification_service
+from teamflow.services import github_backfill_service, notification_service
 from teamflow.tasks import app
 
 logger = logging.getLogger(__name__)
@@ -68,27 +69,90 @@ def revoke_finished_project_voiceprints_task() -> dict:
 
 
 @app.task(name="teamflow.tasks.maintenance.reconcile_github_task")
-def reconcile_github_task(lookback_days: int = 7) -> dict:
+def reconcile_github_task(
+    lookback_days: int = 7,
+    client: GitHubClient | None = None,
+    now: datetime | None = None,
+) -> dict:
     """웹훅 유실 대비 정합성 확인. 매일 05:00.
 
     웹훅은 유실될 수 있다. REST API로 최근 기간을 다시 훑어
     빠진 이벤트를 채운다. `delivery_id` 유니크 제약이 중복을 막아준다.
-
-    ⚠️ GitHub App 자격증명이 필요해 이 개발 환경에서는 검증되지 않았습니다.
     """
-    now = datetime.now(UTC)
-    logger.info("GitHub 정합성 확인 시작 (최근 %d일, 기준 %s)", lookback_days, now)
+    settings = get_settings()
+    current_time = now or datetime.now(UTC)
+    logger.info("GitHub 정합성 확인 시작 (최근 %d일, 기준 %s)", lookback_days, current_time)
 
     with session_scope() as session:
         linked = session.scalars(
             select(m.Project).where(m.Project.github_repo.isnot(None))
         ).all()
+        project_ids = [p.id for p in linked]
         repos = [p.github_repo for p in linked]
 
-    # TODO: GitHub App 설치 토큰으로 REST API 백필.
-    #       구현 전까지는 연결된 저장소 목록만 보고한다.
-    logger.info("연결된 저장소 %d개: %s", len(repos), repos)
-    return {"repos": len(repos), "backfilled": 0, "implemented": False}
+    total_stored = 0
+    total_events = 0
+    total_tasks = 0
+    total_failed = 0
+    skipped = 0
+
+    since = current_time - timedelta(days=lookback_days)
+
+    for project_id in project_ids:
+        with session_scope() as session:
+            project = session.get(m.Project, project_id)
+            if project is None or not project.github_repo:
+                continue
+
+            proj_client = client or build_client(
+                settings, project.github_installation_id
+            )
+            if proj_client is None:
+                logger.info(
+                    "project=%s 에 GitHub App 자격 증명 또는 설치 id 가 없어 "
+                    "정합성 조회를 건너뜁니다",
+                    project_id,
+                )
+                skipped += 1
+                continue
+
+            try:
+                result = github_backfill_service.run_backfill(
+                    session,
+                    proj_client,
+                    project_id=project_id,
+                    since=since,
+                    now=current_time,
+                )
+                total_stored += result.stored
+                total_events += result.events_written
+                total_tasks += result.tasks_linked
+                total_failed += result.failed
+            except (GitHubError, Exception) as exc:
+                logger.warning(
+                    "project=%s GitHub 정합성 확인 실패: %s", project_id, exc
+                )
+                total_failed += 1
+
+    logger.info(
+        "GitHub 정합성 확인 완료: 저장소 %d개, 백필 %d건, 기여 이벤트 %d건, "
+        "업무 연결 %d건, 실패 %d건, 건너뜀 %d건",
+        len(repos),
+        total_stored,
+        total_events,
+        total_tasks,
+        total_failed,
+        skipped,
+    )
+    return {
+        "repos": len(repos),
+        "backfilled": total_stored,
+        "events_written": total_events,
+        "tasks_linked": total_tasks,
+        "failed": total_failed,
+        "skipped": skipped,
+        "implemented": True,
+    }
 
 
 @app.task(name="teamflow.tasks.maintenance.announce_upcoming_meetings_task")

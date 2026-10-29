@@ -1043,6 +1043,7 @@ class ProjectDetail(BaseModel):
     member_count: int
     started_at: date | None = None
     deadline: date | None = None
+    status: str = str(vocab.ProjectStatus.ACTIVE)
 
 
 @app.get("/api/projects/{project_id}", response_model=ProjectDetail)
@@ -1070,6 +1071,7 @@ def get_project(project_id: int, session: DbSession, user: CurrentUser) -> Proje
         member_count=int(count or 0),
         started_at=local_date(project.started_at) if project.started_at else None,
         deadline=project.deadline.date() if project.deadline else None,
+        status=str(project.status or vocab.ProjectStatus.ACTIVE),
     )
 
 
@@ -1079,6 +1081,7 @@ class ProjectPatch(BaseModel):
     github_repo: str | None = Field(default=None, max_length=255)
     started_at: date | None = None
     deadline: date | None = None
+    status: str | None = None
 
     # ⚠️ `github_installation_id` 는 **일부러 없습니다.**
     #
@@ -1187,6 +1190,20 @@ def patch_project(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "마감일은 시작일 이후여야 합니다"
         )
+
+    if "status" in payload.model_fields_set and payload.status is not None:
+        valid_statuses = {str(s) for s in vocab.PROJECT_STATUSES}
+        if payload.status not in valid_statuses:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"유효하지 않은 프로젝트 상태: {payload.status}. 허용: {sorted(valid_statuses)}",
+            )
+        old_status = project.status
+        project.status = payload.status
+        if payload.status == str(vocab.ProjectStatus.FINISHED) and old_status != str(
+            vocab.ProjectStatus.FINISHED
+        ):
+            retention.revoke_project_voiceprints(session, project_id)
 
     session.flush()
     return get_project(project_id, session, user)
@@ -1563,6 +1580,20 @@ async def call_signaling(websocket: WebSocket, meeting_id: int) -> None:
     finally:
         await call_rooms.rooms.part(meeting_id, peer.connection_id)
         await call_rooms.rooms.announce(meeting_id)
+
+
+@app.get("/api/meetings/{meeting_id}/call/ice-servers")
+def get_call_ice_servers(
+    meeting_id: int,
+    session: DbSession,
+    user: CurrentUser,
+) -> dict[str, Any]:
+    """통화 ICE 서버(STUN/TURN) 목록 반환.
+
+    로그인과 해당 프로젝트 구성원 권한이 필요합니다.
+    """
+    _load_meeting_for(session, meeting_id, user)
+    return {"ice_servers": get_settings().parse_ice_servers()}
 
 
 class MeetingIn(BaseModel):
@@ -3404,6 +3435,55 @@ def _utterances_out(session: Session, rows: list[m.Utterance]) -> list[Utterance
         )
         for r in rows
     ]
+
+
+class UtterancePatch(BaseModel):
+    speaker_id: int | None = None
+    model_config = {"extra": "forbid"}
+
+
+@app.patch(
+    "/api/meetings/{meeting_id}/utterances/{utterance_id}",
+    response_model=UtteranceOut,
+)
+def patch_utterance_speaker(
+    meeting_id: int,
+    utterance_id: int,
+    payload: UtterancePatch,
+    session: DbSession,
+    user: CurrentUser,
+) -> UtteranceOut:
+    """사람이 발화의 화자를 직접 지정한다 (docs/07 §2.3 ③).
+
+    화자를 사람이 지정하면 `speaker_source='manual'` 로 남고,
+    확정된 화자로 세어 기여도 신뢰도에 반영됩니다.
+    """
+    meeting = _load_meeting_for(session, meeting_id, user)
+    utterance = session.get(m.Utterance, utterance_id)
+    if utterance is None or utterance.meeting_id != meeting_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "발화를 찾을 수 없습니다")
+
+    if payload.speaker_id is not None:
+        member = session.scalar(
+            select(m.Member).where(
+                m.Member.project_id == meeting.project_id,
+                m.Member.user_id == payload.speaker_id,
+            )
+        )
+        if member is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "해당 사용자는 프로젝트의 구성원이 아닙니다"
+            )
+        utterance.speaker_id = payload.speaker_id
+        utterance.speaker_source = "manual"
+        utterance.speaker_confidence = 1.0
+    else:
+        utterance.speaker_id = None
+        utterance.speaker_source = "manual"
+        utterance.speaker_confidence = None
+
+    session.flush()
+    return _utterances_out(session, [utterance])[0]
 
 
 # ── 타임라인 (`REVIEW-002`) · 구간 재생 (`REVIEW-004`) ─────────

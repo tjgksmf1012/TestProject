@@ -73,9 +73,13 @@ let localStream: MediaStream | null = null;
 const peers = new Map<string, RTCPeerConnection>();
 const states = new Map<number, PeerState>();
 
-// 공개 STUN. 자체 호스팅이 아니라 비용 0원 (docs/15 §3.2).
-const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+// 공개 STUN 기본값 (docs/15 §3.2). 서버에서 ice_servers가 전달되면 그것으로 갱신된다.
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+];
+
+let rtcConfig: RTCConfiguration = {
+  iceServers: DEFAULT_ICE_SERVERS,
 };
 
 function goToLogin(): void {
@@ -223,7 +227,7 @@ function send(body: Record<string, unknown>): void {
 }
 
 function connectionFor(userId: number, initiate: boolean): RTCPeerConnection {
-  const pc = new RTCPeerConnection(RTC_CONFIG);
+  const pc = new RTCPeerConnection(rtcConfig);
   peers.set(String(userId), pc);
   states.set(userId, 'connecting');
 
@@ -269,6 +273,9 @@ function connectionFor(userId: number, initiate: boolean): RTCPeerConnection {
 }
 
 function applyRoster(next: Roster): void {
+  if (next.ice_servers && Array.isArray(next.ice_servers) && next.ice_servers.length > 0) {
+    rtcConfig = { ...rtcConfig, iceServers: next.ice_servers };
+  }
   roster = next.peers;
   serverWarnings = next.warnings ?? [];
 
@@ -353,6 +360,16 @@ $('leave').addEventListener('click', () => {
   location.href = `/app/meeting/${meetingId}/lobby`;
 });
 
+async function fetchIceServers(): Promise<void> {
+  if (!meetingId) return;
+  const response = await tryGet(`${apiBase}/api/meetings/${meetingId}/call/ice-servers`);
+  if (response === null || !response.ok) return;
+  const data = (await response.json()) as { ice_servers?: RTCIceServer[] };
+  if (data.ice_servers && Array.isArray(data.ice_servers) && data.ice_servers.length > 0) {
+    rtcConfig = { ...rtcConfig, iceServers: data.ice_servers };
+  }
+}
+
 async function start(): Promise<void> {
   // ⚠️ 닿지 못한 것을 로그인 만료로 읽으면 안 됩니다 (결함 102).
   const response = await tryGet(`${apiBase}/api/auth/me`);
@@ -369,6 +386,7 @@ async function start(): Promise<void> {
   $('sub').innerHTML = bylineHtml(who.name, '참여 중');
   $('sub').hidden = false;
 
+  await fetchIceServers();
   await openMic();
   openSocket();
   // 5초를 기다리지 않고 **처음부터** 사실을 말합니다.

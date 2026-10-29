@@ -975,3 +975,55 @@ def test_the_home_list_carries_the_utterance_count_it_declares(
         "발화가 없으면 0 입니다 — 그리고 그 0 은 「잰 0」이라 화면이 "
         "「소리가 하나도 안 잡혔습니다」라고 말할 수 있습니다"
     )
+
+
+def test_patch_project_status_transitions_and_revokes_voiceprints(
+    client: TestClient, engine, people: dict
+):
+    """프로젝트 종료 상태 전환 시 성문이 폐기되는지 검증 (docs/07 §2.4)."""
+    from sqlalchemy.orm import Session
+
+    login_as(client, people["founder"])
+    project_id = create_project(client)["project_id"]
+
+    # 성문 데이터를 미리 심는다
+    with Session(engine) as session:
+        vp = m.Voiceprint(
+            project_id=project_id,
+            user_id=people["founder"],
+            embedding=[0.1, 0.2, 0.3],
+            created_at=NOW,
+        )
+        session.add(vp)
+        session.commit()
+        vp_id = vp.id
+
+    # 1. status 를 finished 로 전환
+    resp = client.patch(f"/api/projects/{project_id}", json={"status": "finished"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "finished"
+
+    # 2. 성문이 폐기되었는지 DB 확인
+    with Session(engine) as session:
+        checked_vp = session.get(m.Voiceprint, vp_id)
+        assert checked_vp is not None
+        assert checked_vp.revoked_at is not None
+        assert checked_vp.embedding == []
+
+        audit = session.scalar(
+            select(m.AuditLog).where(
+                m.AuditLog.project_id == project_id,
+                m.AuditLog.action == "voiceprint_revoked",
+            )
+        )
+        assert audit is not None
+        assert audit.target == f"voiceprints/{vp_id}"
+
+    # 3. status 를 active 로 다시 전환
+    resp_active = client.patch(f"/api/projects/{project_id}", json={"status": "active"})
+    assert resp_active.status_code == 200
+    assert resp_active.json()["status"] == "active"
+
+    # 4. 유효하지 않은 status 는 400 거절
+    resp_bad = client.patch(f"/api/projects/{project_id}", json={"status": "completed"})
+    assert resp_bad.status_code == 400

@@ -113,6 +113,8 @@ class CallRooms:
         누가 들어오고 나갈 때마다 부릅니다. 이걸 안 하면 화면이 처음 붙을
         때의 명단으로 멈춰 있고, 나간 사람에게 계속 offer 를 보냅니다.
         """
+        from teamflow.config import get_settings
+
         state = self.state(meeting_id)
         view = describe(state)
         body = {
@@ -120,6 +122,7 @@ class CallRooms:
             "meeting_id": view.meeting_id,
             "peers": view.peers,
             "warnings": view.warnings,
+            "ice_servers": get_settings().parse_ice_servers(),
         }
         for peer in state.peers:
             send = self._senders.get(peer.connection_id)

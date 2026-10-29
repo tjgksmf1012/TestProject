@@ -203,7 +203,7 @@ export function writeShellList(): number {
   const files = shellFiles();
   const body = files.map((url) => `  '${url}',`).join('\n');
   const next = source.replace(
-    /(\/\* <<< 자동 생성[^*]*\*\/\n)[\s\S]*?(\n\s*\/\* >>> \*\/)/,
+    /(\/\* <<< 자동 생성[^*]*\*\/\r?\n)[\s\S]*?(\r?\n\s*\/\* >>> \*\/)/,
     `$1${body}$2`,
   );
   if (next === source && !source.includes(body)) {

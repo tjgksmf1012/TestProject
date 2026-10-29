@@ -3580,7 +3580,9 @@ def test_both_review_screens_ask_for_the_same_meeting_facts() -> None:
     #: 부르는 **늦은 호출**이라, 네트워크만 보고 「SPA 만 부른다」로 읽었던
     #: 것입니다. 예외는 **재 보고** 적으십시오.
     EXCUSED_LEGACY_ONLY: dict[str, str] = {}
-    EXCUSED_SPA_ONLY: dict[str, str] = {}
+    EXCUSED_SPA_ONLY: dict[str, str] = {
+        "utterances": "화자 수동 재배정(PATCH)은 리디자인 SPA 검토 화면에서 제공합니다",
+    }
 
     missing = sorted(legacy - spa - set(EXCUSED_LEGACY_ONLY))
     assert missing == [], (

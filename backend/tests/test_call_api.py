@@ -115,6 +115,14 @@ def test_the_roster_never_carries_connection_ids(client: TestClient, seeded):
     assert "connection_id" not in str(roster)
 
 
+def test_the_roster_carries_ice_servers(client: TestClient, seeded):
+    with client.websocket_connect(url(seeded["meeting_id"])) as ws:
+        roster = ws.receive_json()
+    assert "ice_servers" in roster
+    assert isinstance(roster["ice_servers"], list)
+    assert any("stun:" in str(s) for s in roster["ice_servers"])
+
+
 def test_a_second_person_makes_everyone_see_the_new_roster(client: TestClient, seeded):
     """⭐ 명단을 다시 안 보내면 화면이 처음 붙을 때로 멈추고,
     **나간 사람에게 계속 offer 를 보냅니다.**"""
@@ -291,3 +299,37 @@ def test_the_mesh_limit_is_reported_to_the_one_who_is_turned_away(
         assert answer["kind"] == "rejected"
         assert answer["code"] == "room_full"
         ws.receive_json()
+
+
+# ══════════════════════════════════════════════════════════════
+# ICE 서버 엔드포인트
+# ══════════════════════════════════════════════════════════════
+
+
+def test_get_call_ice_servers_returns_config_for_member(client: TestClient, seeded):
+    login_as(client, seeded["user_ids"][0])
+    res = client.get(f"/api/meetings/{seeded['meeting_id']}/call/ice-servers")
+    assert res.status_code == 200
+    data = res.json()
+    assert "ice_servers" in data
+    assert isinstance(data["ice_servers"], list)
+    assert any("stun:" in str(s) for s in data["ice_servers"])
+
+
+def test_get_call_ice_servers_requires_authentication(client: TestClient, seeded):
+    client.cookies.clear()
+    res = client.get(f"/api/meetings/{seeded['meeting_id']}/call/ice-servers")
+    assert res.status_code == 401
+
+
+def test_get_call_ice_servers_forbids_outsiders(client: TestClient, seeded):
+    with db_session.session_scope() as s:
+        outsider = m.User(name="외부인", email="ice_outsider@test.com")
+        s.add(outsider)
+        s.flush()
+        outsider_id = outsider.id
+
+    login_as(client, outsider_id)
+    res = client.get(f"/api/meetings/{seeded['meeting_id']}/call/ice-servers")
+    assert res.status_code == 403
+

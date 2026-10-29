@@ -29,6 +29,7 @@ import {
   useMeetingMembers,
   useSpeaking,
   useUtteranceTypes,
+  useUtteranceMutations,
   useSubmitReview,
   useTimeline,
 } from '../api/hooks.ts';
@@ -167,6 +168,9 @@ export default function Review() {
   const tally = useUtteranceTypes(meetingId);
   const speaking = useSpeaking(meetingId);
   const submit = useSubmitReview(meetingId);
+  const utteranceMutations = useUtteranceMutations(meetingId);
+  const [editingSpeakerUtteranceId, setEditingSpeakerUtteranceId] = useState<number | null>(null);
+  const [reassignError, setReassignError] = useState<string | null>(null);
 
   const candidates = useMemo(
     () => sortForReview(candidatesQuery.data ?? []),
@@ -599,6 +603,7 @@ export default function Review() {
                 <Why about="이 회의의 소리" lines={[note]} />
               </p>
             )}
+            {reassignError !== null && <Problem>{reassignError}</Problem>}
             {rows.length === 0 && <div className="empty">{emptyTimelineNote(meeting.data?.status)}</div>}
             {rows.map((row, i) =>
               row.kind === 'finding' ? (
@@ -660,6 +665,60 @@ export default function Review() {
                       {row.view.speaker}
                       {row.view.type !== null && ` · ${row.view.type}`}
                       {row.view.overlap && ' · 동시 발화'}
+                      {editingSpeakerUtteranceId === row.view.id ? (
+                        <span style={{ marginLeft: 'var(--sp-2)', display: 'inline-flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
+                          <select
+                            className="input input--sm"
+                            aria-label="화자 선택"
+                            defaultValue={members.find((m) => m.name === row.view.speaker)?.user_id ?? ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const newSpeakerId = val === '' ? null : Number(val);
+                              utteranceMutations.reassignSpeaker.mutate(
+                                { utteranceId: row.view.id, speakerId: newSpeakerId },
+                                {
+                                  onError: (error) => {
+                                    setReassignError(
+                                      describeActionFailure(
+                                        '화자 변경',
+                                        error instanceof ApiError ? error.status : null,
+                                        error instanceof ApiError ? error.detail : null,
+                                      ),
+                                    );
+                                  },
+                                  onSuccess: () => setReassignError(null),
+                                  onSettled: () => setEditingSpeakerUtteranceId(null),
+                                },
+                              );
+                            }}
+                          >
+                            <option value="">화자 미확정</option>
+                            {members.map((m) => (
+                              <option key={m.user_id} value={m.user_id}>
+                                {labelInList(m, members)}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => setEditingSpeakerUtteranceId(null)}
+                          >
+                            취소
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--xs"
+                          style={{ marginLeft: 'var(--sp-2)', padding: '0 4px', fontSize: '11px' }}
+                          title="화자 변경"
+                          aria-label={`발화 #${row.view.id} 화자 변경`}
+                          onClick={() => setEditingSpeakerUtteranceId(row.view.id)}
+                        >
+                          화자 변경
+                        </button>
+                      )}
                     </span>
                     <p className="tlrow__text">{row.view.text}</p>
                     {row.view.speakerNote !== null && (

@@ -37,6 +37,7 @@ export interface Roster {
   meeting_id: number;
   peers: RosterPeer[];
   warnings: string[];
+  ice_servers?: RTCIceServer[];
 }
 
 /**

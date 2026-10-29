@@ -81,9 +81,14 @@ NOT_STORED_YET: frozenset[SpeakerSource] = frozenset(
 #: `EVENT_PRODUCED`/`EVENT_NOT_PRODUCED_YET` 과 그것을 대조하는 검사가
 #: 있습니다 — 같은 표의 옆 칸은 따로 재야 합니다.
 #:
-#: 세어 보니 `STORED` 는 넷을 주장하는데 `speaker_source=` 로 쓰는 자리는
-#: **`track` 하나뿐**이었습니다.
-WRITTEN: frozenset[SpeakerSource] = frozenset({SpeakerSource.TRACK})
+#: `track`(멀티트랙 기본)과 `manual`(수동 지정:
+#: `PATCH /api/meetings/{id}/utterances/{id}`)을 씁니다.
+WRITTEN: frozenset[SpeakerSource] = frozenset(
+    {
+        SpeakerSource.TRACK,
+        SpeakerSource.MANUAL,
+    }
+)
 
 #: 저장은 **할 수 있는데** 지금 쓰는 코드가 없는 값과 **그 이유**.
 #:
@@ -94,9 +99,6 @@ WRITTEN: frozenset[SpeakerSource] = frozenset({SpeakerSource.TRACK})
 #: · `voiceprint` — `Voiceprint(` 를 만드는 프로덕션 코드가 0곳입니다.
 #:   멀티트랙이면 성문이 필요 없기 때문이고, 그런데도 **동의는 먼저**
 #:   받습니다 (`docs/07` P3·§2.3, `docs/17` 의 닫은 결정).
-#: · `manual` — 사람이 화자를 지정하는 자리가 **서버 갈래 0곳 · 화면
-#:   0곳**입니다. `docs/07` §2.3 이 "③ 거부 → 수동 매핑. **멀티트랙
-#:   모드면 애초에 불필요**" 라고 적어 둔 그 이유입니다.
 #: · `diarization` — 단일 트랙·혼합 녹음 경로가 없어 나올 자리가 없습니다.
 #:
 #: ⚠️ **여기 있는 값에도 화면은 제 가지를 가집니다** (`review/evidence.ts`).
@@ -105,7 +107,6 @@ WRITTEN: frozenset[SpeakerSource] = frozenset({SpeakerSource.TRACK})
 NOT_WRITTEN_YET: frozenset[SpeakerSource] = frozenset(
     {
         SpeakerSource.VOICEPRINT,
-        SpeakerSource.MANUAL,
         SpeakerSource.DIARIZATION,
     }
 )
@@ -632,19 +633,13 @@ class ProjectStatus(StrEnum):
     베껴 온 글자이고, 프로젝트에는 그런 값이 **없습니다.** 둘 중 많아야
     하나가 맞고, 지금은 **쓰는 코드가 0곳**이라 둘 다 영원히 거짓입니다.
 
-    ⚠️ **`FINISHED` 를 쓰는 코드는 아직 0곳입니다.** 없는 기능을 만들지
-    않았습니다 — 프로젝트를 끝내는 길(화면·라우트)은 이 저장소에 없고,
-    `projects.deadline` 도 읽기만 하고 쓰는 곳이 0곳입니다. 그래서
-    달력의 `project_due` 는 **한 번도 그려진 적이 없습니다.**
-
-    그 길을 만드는 사람에게: 여기 값을 쓰기 시작하면 그 순간
-    **달력의 지연 표시**(`calendar/month.ts` 의 `isOverdue`)와
-    **성문 폐기**(`docs/07` §2.4)가 같이 살아납니다. 둘 다 이미 이
-    어휘를 봅니다.
+    `PATCH /api/projects/{id}` 로 상태를 `finished` 로 변경할 수 있으며,
+    프로젝트가 종료되면 **성문 폐기**(`docs/07` §2.4)가 실행되고,
+    **달력의 지연 표시**(`calendar/month.ts` 의 `isOverdue`)도 이 값을 봅니다.
     """
 
     ACTIVE = "active"  # 기본값 — 만들면 이 상태입니다
-    FINISHED = "finished"  # 끝남 — 아직 이 값을 **쓰는 코드는 없습니다**
+    FINISHED = "finished"  # 끝남 — `PATCH /api/projects/{id}` 로 전환, 성문 폐기 연동
 
 
 #: `projects.status` 가 받는 값 전부.

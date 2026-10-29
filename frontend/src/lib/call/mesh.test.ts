@@ -22,6 +22,7 @@ import {
   shouldInitiate,
   type PeerState,
   type PeerView,
+  type Roster,
   type RosterPeer,
 } from './mesh.ts';
 
@@ -97,6 +98,18 @@ describe('planPeers', () => {
   it('4명이면 나를 뺀 3명과 연결한다 (메시)', () => {
     const actions = planPeers([peer(1), peer(2), peer(3), peer(4)], 2, new Set());
     strictEqual(actions.filter((a) => a.type === 'open').length, 3);
+  });
+
+  it('roster can carry dynamic ice_servers', () => {
+    const r: Roster = {
+      kind: 'roster',
+      meeting_id: 1,
+      peers: [peer(1)],
+      warnings: [],
+      ice_servers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    };
+    strictEqual(r.ice_servers?.length, 1);
+    strictEqual(r.ice_servers?.[0]?.urls, 'stun:stun.l.google.com:19302');
   });
 });
 

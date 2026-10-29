@@ -102,6 +102,20 @@ export interface ProjectDetail {
   member_count: number;
   started_at?: string | null;
   deadline?: string | null;
+  status?: string;
+}
+
+export interface Utterance {
+  id: number;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  speaker_id: number | null;
+  speaker_name: string | null;
+  speaker_source: string;
+  speaker_confidence: number | null;
+  is_overlap: boolean;
+  utterance_type: string | null;
 }
 
 /**

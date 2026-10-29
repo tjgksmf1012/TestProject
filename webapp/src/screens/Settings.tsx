@@ -713,6 +713,7 @@ function GeneralSection({
   inviteCode,
   startedAt,
   deadline,
+  status,
   save,
   rotate,
   myRole,
@@ -721,6 +722,7 @@ function GeneralSection({
   inviteCode: string;
   startedAt: string | null | undefined;
   deadline: string | null | undefined;
+  status: string | null | undefined;
   /** 내 권한. **관리자만 되는 일**을 막을 때 씁니다 (결함 225). */
   myRole: string | null | undefined;
   save: ReturnType<typeof useSettingsMutations>['saveProject'];
@@ -729,9 +731,11 @@ function GeneralSection({
   const [value, setValue] = useState<string | null>(null);
   const [startVal, setStartVal] = useState<string | null>(null);
   const [deadlineVal, setDeadlineVal] = useState<string | null>(null);
+  const [statusVal, setStatusVal] = useState<string | null>(null);
   const input = value ?? title;
   const startInput = startVal ?? startedAt ?? '';
   const deadlineInput = deadlineVal ?? deadline ?? '';
+  const statusInput = statusVal ?? status ?? 'active';
   const problem = titleProblem(input);
   const dateProblem =
     startInput !== '' && deadlineInput !== '' && startInput > deadlineInput
@@ -740,7 +744,7 @@ function GeneralSection({
   /* ⚠️ 관리자만 되는 일 — 판단은 `@lib/project/roles.ts` 에 처음부터
      있었고 이 화면만 안 불렀습니다 (결함 225). */
   const renameBlocked = manageBlockedBecause(myRole, '프로젝트 이름 바꾸기');
-  const dirty = value !== null || startVal !== null || deadlineVal !== null;
+  const dirty = value !== null || startVal !== null || deadlineVal !== null || statusVal !== null;
   const titleBlocked = whyCannotSave({
     noPermission: renameBlocked,
     problem: (value !== null ? problem : null) ?? dateProblem,
@@ -789,15 +793,18 @@ function GeneralSection({
                 title?: string;
                 started_at?: string | null;
                 deadline?: string | null;
+                status?: string;
               } = {};
               if (value !== null) patch.title = input.trim();
               if (startVal !== null) patch.started_at = startInput || null;
               if (deadlineVal !== null) patch.deadline = deadlineInput || null;
+              if (statusVal !== null) patch.status = statusInput;
               save.mutate(patch, {
                 onSuccess: () => {
                   setValue(null);
                   setStartVal(null);
                   setDeadlineVal(null);
+                  setStatusVal(null);
                 },
               });
             }}
@@ -825,6 +832,44 @@ function GeneralSection({
             onChange={(e) => setDeadlineVal(e.target.value)}
           />
         </label>
+      </div>
+      <div className="field" style={{ marginTop: 'var(--sp-4)' }}>
+        <span className="field__label">프로젝트 상태</span>
+        <div className="sec__row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="project-status"
+              value="active"
+              checked={statusInput === 'active'}
+              onChange={() => setStatusVal('active')}
+            />
+            <span>진행 중 (active)</span>
+          </label>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="project-status"
+              value="finished"
+              checked={statusInput === 'finished'}
+              onChange={() => {
+                if (
+                  window.confirm(
+                    '프로젝트를 종료 상태로 전환하면 팀원의 음성 성문 데이터가 영구 폐기됩니다 (개인정보보호 원칙). 계속하시겠습니까?',
+                  )
+                ) {
+                  setStatusVal('finished');
+                }
+              }}
+            />
+            <span>종료됨 (finished)</span>
+          </label>
+        </div>
+        {statusInput === 'finished' && (
+          <p className="t12 muted" style={{ marginTop: 'var(--sp-2)' }}>
+            ⚠️ 종료된 프로젝트는 성문 데이터가 폐기되며 달력 지연 표시가 중단됩니다.
+          </p>
+        )}
       </div>
       <Problem id="title-problem" tone="incomplete">{titleBlocked}</Problem>
       <h3 className="pane__title" style={{ margin: 'var(--sp-6) 0 var(--sp-3)' }}>
@@ -1114,6 +1159,7 @@ export default function Settings() {
                 inviteCode={project.data.invite_code}
                 startedAt={project.data.started_at}
                 deadline={project.data.deadline}
+                status={project.data.status}
                 save={m.saveProject}
                 rotate={m.rotateInvite}
               />
