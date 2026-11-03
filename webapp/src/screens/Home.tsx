@@ -516,10 +516,78 @@ export default function Home() {
                 </div>
               </div>
             )}
-            {meetings.isSuccess && (meetings.data?.length ?? 0) === 0 && (
-              <div className="empty">
-                아직 회의가 없습니다. “회의 열기”로 첫 회의를 시작하면 여기서 녹음
-                상태와 할 일이 보입니다.
+            {project !== undefined && meetings.isSuccess && (meetings.data?.length ?? 0) === 0 && (
+              <div
+                className="card tf-onboarding-card"
+                style={{
+                  padding: '24px',
+                  marginBottom: '24px',
+                  border: '1px solid var(--c-accent)',
+                  borderRadius: 'var(--r-lg)',
+                  background: 'var(--c-surface-sunken)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '20px' }}>🚀</span>
+                    <h2 style={{ fontSize: 'var(--fs-16)', fontWeight: 'var(--fw-bold)', margin: 0 }}>
+                      TeamFlow AI 첫 발자국 가이드 (30초 온보딩)
+                    </h2>
+                  </div>
+                  <span className="dc-badge dc-badge--ok">클린 워크스페이스 준비됨</span>
+                </div>
+                <p className="t13 muted" style={{ margin: '0 0 16px 0', lineHeight: 1.6 }}>
+                  TeamFlow AI는 <strong>“회의에서 나온 말이 칸반과 기여도 기록까지 자동으로 이어지는 도구”</strong>입니다.
+                  새 워크스페이스에서 아래 3단계를 따라 첫 회의를 시작하고 기여도를 쌓아보세요.
+                </p>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                  <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                      <span className="dc-badge dc-badge--ok num">1단계</span>
+                      <strong style={{ fontSize: '13px' }}>음성 회의 & 화자 분리</strong>
+                    </div>
+                    <p className="t12 muted" style={{ margin: 0, lineHeight: 1.5 }}>
+                      회의를 열어 팀원별 트랙 음성을 녹음하고, AI가 성문 기반으로 발언자를 자동 분리합니다.
+                    </p>
+                  </div>
+                  <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                      <span className="dc-badge dc-badge--warn num">2단계</span>
+                      <strong style={{ fontSize: '13px' }}>AI 후보 검토 & 승인</strong>
+                    </div>
+                    <p className="t12 muted" style={{ margin: 0, lineHeight: 1.5 }}>
+                      LLM이 도출한 의사결정과 할 일 후보를 원문 대화록과 대조하며 담당자와 마감일을 확정합니다.
+                    </p>
+                  </div>
+                  <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                      <span className="dc-badge dc-badge--info num">3단계</span>
+                      <strong style={{ fontSize: '13px' }}>칸반 보드 & 기여도 산출</strong>
+                    </div>
+                    <p className="t12 muted" style={{ margin: 0, lineHeight: 1.5 }}>
+                      승인된 업무가 칸반으로 넘어가고, GitHub PR과 함께 4대 불변식 기여도 구간으로 기록됩니다.
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={m.openMeeting.isPending}
+                    onClick={() =>
+                      m.openMeeting.mutate(undefined, {
+                        onSuccess: (meeting) => navigate(`/meeting/${meeting.meeting_id}/lobby`),
+                      })
+                    }
+                  >
+                    🎤 첫 회의 시작하기
+                  </button>
+                  <Link to="/demo" className="btn btn--secondary">
+                    🧪 AI 기능 체험관 (Demo Lab) 둘러보기 →
+                  </Link>
+                </div>
               </div>
             )}
 

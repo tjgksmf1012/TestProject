@@ -4831,3 +4831,53 @@ input[type="checkbox"] {
 
 
 
+
+
+/* Review Screen Mobile 3-Pane Tab Switcher */
+.tf-mobile-review-tabs {
+  display: none;
+}
+
+@media (max-width: 48rem) {
+  .tf-mobile-review-tabs {
+    display: flex;
+    background: var(--c-surface);
+    border-bottom: 1px solid var(--c-border);
+    padding: 8px 12px;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .tf-mobile-review-tab {
+    flex: 1;
+    padding: 8px 12px;
+    font-size: var(--fs-13);
+    font-weight: 500;
+    border-radius: var(--r-md);
+    border: 1px solid var(--c-border);
+    background: var(--c-surface-sunken);
+    color: var(--c-ink-muted);
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .tf-mobile-review-tab.is-active {
+    background: var(--c-evidence);
+    color: var(--c-ink-inverse);
+    border-color: var(--c-evidence);
+    font-weight: 700;
+  }
+
+  .panes .tf-mobile-pane-hidden {
+    display: none !important;
+  }
+
+  .panes .pane {
+    flex: 1 1 100% !important;
+    max-height: none !important;
+    width: 100% !important;
+  }
+}

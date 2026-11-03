@@ -468,21 +468,42 @@ export default function Contributions() {
                     <span className="t13">{name}</span>
                     {/* 단일 점수를 미리 주지 않습니다 — placeholder 는 **구간**입니다
                         (v2 F1-4). 값은 팀이 적고, 적어야 확정이 열립니다. */}
-                    <input
-                      id={`final-${member.user_id}`}
-                      className="input input--num"
-                      inputMode="decimal"
-                      placeholder={`${describeRange(member)} (시스템 추정)`}
-                      aria-label={`${name} 확정값 (%) — 시스템 추정 ${describeRange(member)}`}
-                      value={values[member.user_id] ?? ''}
-                      onChange={(e) =>
-                        setValues((prev) => ({ ...prev, [member.user_id]: e.target.value }))
-                      }
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        id={`final-${member.user_id}`}
+                        className="input input--num"
+                        inputMode="decimal"
+                        placeholder={`${describeRange(member)} (시스템 추정)`}
+                        aria-label={`${name} 확정값 (%) — 시스템 추정 ${describeRange(member)}`}
+                        value={values[member.user_id] ?? ''}
+                        onChange={(e) =>
+                          setValues((prev) => ({ ...prev, [member.user_id]: e.target.value }))
+                        }
+                      />
+                      <span className="num faint" style={{ fontSize: '12px', fontWeight: 600 }}>%</span>
+                    </div>
                   </label>
                 );
               })}
               </div>
+              {members.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 8px' }}>
+                  <span className="t12" style={{ whiteSpace: 'nowrap' }}>
+                    현재 합계: <strong className="num" style={{ color: allFilled && !sumOff ? 'var(--c-ok)' : 'var(--c-ink)' }}>{effectiveSum.toFixed(1)}%</strong> / 100%
+                  </span>
+                  {allFilled ? (
+                    !sumOff ? (
+                      <span className="dc-badge dc-badge--ok" style={{ fontSize: '11px', padding: '1px 6px' }}>✓ 100% 합치</span>
+                    ) : effectiveSum < 100 ? (
+                      <span className="dc-badge dc-badge--warn" style={{ fontSize: '11px', padding: '1px 6px' }}>{(100 - effectiveSum).toFixed(1)}% 부족</span>
+                    ) : (
+                      <span className="dc-badge dc-badge--danger" style={{ fontSize: '11px', padding: '1px 6px' }}>{(effectiveSum - 100).toFixed(1)}% 초과</span>
+                    )
+                  ) : (
+                    unfilled > 0 && <span className="t12 faint num" style={{ fontSize: '11px' }}>({unfilled}명 미입력)</span>
+                  )}
+                </div>
+              )}
               <span className="appbar__spacer" />
               {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 — 검토 화면의
                   `검토 끝내기` 와 같은 규칙입니다. 비활성 버튼은 **초점을 못

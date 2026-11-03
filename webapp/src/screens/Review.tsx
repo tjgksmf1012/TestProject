@@ -199,6 +199,7 @@ export default function Review() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playingId, setPlayingId] = useState<number | null>(null);
+  const [mobileTab, setMobileTab] = useState<'candidates' | 'transcript' | 'evidence'>('candidates');
   const members = membersQuery.data ?? [];
   const context: ReviewContext = useMemo(
     () => ({ memberIds: members.map((m) => m.user_id), today: todayInTeamCalendar() }),
@@ -437,6 +438,37 @@ export default function Review() {
       }
     >
       <audio ref={audioRef} hidden />
+      {cannotLoad === null && (
+        <div className="tf-mobile-review-tabs" role="tablist" aria-label="검토 패널 전환">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileTab === 'transcript'}
+            className={`tf-mobile-review-tab ${mobileTab === 'transcript' ? 'is-active' : ''}`}
+            onClick={() => setMobileTab('transcript')}
+          >
+            💬 대화록 ({rows.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileTab === 'candidates'}
+            className={`tf-mobile-review-tab ${mobileTab === 'candidates' ? 'is-active' : ''}`}
+            onClick={() => setMobileTab('candidates')}
+          >
+            ⚡ 후보 ({candidates.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mobileTab === 'evidence'}
+            className={`tf-mobile-review-tab ${mobileTab === 'evidence' ? 'is-active' : ''}`}
+            onClick={() => setMobileTab('evidence')}
+          >
+            📌 근거
+          </button>
+        </div>
+      )}
       <div className="panes">
         {cannotLoad !== null ? (
           <section className="pane">
@@ -447,7 +479,7 @@ export default function Review() {
         ) : (
         <>
         {/* 좌 — 회의 내용. 통계·요약은 접고 전사가 주인공. */}
-        <section className="pane pane--transcript" aria-label="회의 내용">
+        <section className={`pane pane--transcript${mobileTab !== 'transcript' ? ' tf-mobile-pane-hidden' : ''}`} aria-label="회의 내용">
           <div className="pane__head">
             <h2 className="pane__title">회의 내용</h2>
             <span className="pane__count">{rows.length}</span>
@@ -742,7 +774,7 @@ export default function Review() {
         </section>
 
         {/* 중 — 후보. 주 작업. */}
-        <section className="pane pane--candidates" aria-label="업무 후보">
+        <section className={`pane pane--candidates${mobileTab !== 'candidates' ? ' tf-mobile-pane-hidden' : ''}`} aria-label="업무 후보">
           <div className="pane__head">
             <h2 className="pane__title">후보</h2>
             <span className="pane__count">검토 필요 {lanes.pending}</span>
@@ -813,6 +845,17 @@ export default function Review() {
               //    툴팁은 "등록할 수 있습니다" 인데 버튼은 안 눌렸습니다.
               //    막는 목록에서 파생시키면 갈라질 수 없습니다.
               const conditions: Condition[] = approvalConditions(candidate, draft, context);
+
+              // ⚡ 발언자 또는 언급된 팀원 원클릭 자동 배정 감지
+              const currentAssignee = effectiveAssignee(candidate, draft);
+              const evId = candidate.evidence_utterance_ids[0];
+              const evUtterance = evId !== undefined ? timeline.data?.utterances?.find((u) => u.id === evId) : undefined;
+              const speakerMember = evUtterance?.speaker_id != null ? members.find((m) => m.user_id === evUtterance.speaker_id) : undefined;
+              const hintMember = candidate.assignee_hint
+                ? members.find((m) => m.name.includes(candidate.assignee_hint!) || candidate.assignee_hint!.includes(m.name))
+                : undefined;
+              const suggestedMember = hintMember ?? speakerMember;
+
               return (
                 <article
                   key={candidate.id}
@@ -879,6 +922,7 @@ export default function Review() {
                       ids={candidate.evidence_utterance_ids}
                       onOpen={(id) => {
                             select(candidate);
+                            setMobileTab('evidence');
                             /* ⚠️ **다음 프레임에 해야 먹습니다.** `select` 가
                                먼저 자기 스크롤(첫 근거)을 시작하는데, 같은
                                task 안에서 두 번째 `scrollIntoView` 를 부르면
@@ -922,12 +966,39 @@ export default function Review() {
                       />
                     </label>
                     <label className="field" id={`cand-assignee-${candidate.id}`}>
-                      <span className="field__label">
-                        담당자
-                        {candidate.assignee_id === null && candidate.assignee_hint && (
-                          <> — 회의에서는 “{candidate.assignee_hint}”</>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
+                        <span className="field__label" style={{ margin: 0 }}>
+                          담당자
+                          {candidate.assignee_id === null && candidate.assignee_hint && (
+                            <> — 회의에서는 “{candidate.assignee_hint}”</>
+                          )}
+                        </span>
+                        {suggestedMember && currentAssignee !== suggestedMember.user_id && (
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
+                            style={{
+                              padding: '2px 8px',
+                              fontSize: '11px',
+                              height: 'auto',
+                              borderRadius: 'var(--r-sm)',
+                            }}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              update(candidate.id, { assigneeOverride: suggestedMember.user_id });
+                            }}
+                            title={`회의 발언자(${suggestedMember.name} 님)로 즉시 지정합니다`}
+                          >
+                            ⚡ 발언자({suggestedMember.name})로 배정
+                          </button>
                         )}
-                      </span>
+                        {suggestedMember && currentAssignee === suggestedMember.user_id && (
+                          <span className="dc-badge dc-badge--ok" style={{ fontSize: '11px', padding: '1px 6px' }}>
+                            ✓ 발언자({suggestedMember.name}) 배정됨
+                          </span>
+                        )}
+                      </div>
                       {/* v2 F8 — 네이티브 `<select>` 는 브라우저가 그려서
                           나머지 UI 와 톤이 어긋나고, 다크에서 목록만 밝게
                           떴습니다. 직접 만들지 않고 Radix 를 씁니다 —
@@ -1046,7 +1117,7 @@ export default function Review() {
         </section>
 
         {/* 우 — 선택된 후보의 근거만. */}
-        <section className="pane pane--evidence" aria-label="근거">
+        <section className={`pane pane--evidence${mobileTab !== 'evidence' ? ' tf-mobile-pane-hidden' : ''}`} aria-label="근거">
           <div className="pane__head">
             <h2 className="pane__title">근거</h2>
             {selected !== null && (

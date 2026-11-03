@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import * as Dialog from '@radix-ui/react-dialog';
 import { AppShell } from '../components/AppShell.tsx';
@@ -65,6 +65,7 @@ function Card({
   onPriority,
   onEdit,
   onDelete,
+  onPreviewEvidence,
 }: {
   task: Task;
   statuses: string[];
@@ -74,6 +75,7 @@ function Card({
   onPriority: (task: Task, priority: number) => void;
   onEdit: (task: Task) => void;
   onDelete: (task: Task) => void;
+  onPreviewEvidence?: (task: Task) => void;
 }) {
   const today = todayInTeamCalendar();
   const warnings = taskWarnings(task, today);
@@ -216,6 +218,30 @@ function Card({
             },
           ]}
         />
+        {task.origin !== null && onPreviewEvidence && (
+          <button
+            type="button"
+            style={{
+              background: 'var(--c-surface-sunken)',
+              border: '1px solid var(--c-line)',
+              borderRadius: 'var(--r-sm)',
+              padding: '2px 6px',
+              fontSize: '11px',
+              color: 'var(--c-ink-muted)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '2px',
+            }}
+            title="페이지 이동 없이 회의 맥락 미리보기"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPreviewEvidence(task);
+            }}
+          >
+            🔍 미리보기
+          </button>
+        )}
         {(task.github ?? []).length > 0 && (
           <Why
             about={`${task.title}에 붙은 PR`}
@@ -258,6 +284,7 @@ export default function Kanban() {
   // 업무 수정 모달
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [previewEvidenceTask, setPreviewEvidenceTask] = useState<Task | null>(null);
   const [editStartDate, setEditStartDate] = useState('');
   const [editDeadline, setEditDeadline] = useState('');
   const [editBlockedBy, setEditBlockedBy] = useState<number[]>([]);
@@ -533,6 +560,7 @@ export default function Kanban() {
                       onPriority={setPriority}
                       onEdit={startEdit}
                       onDelete={remove}
+                      onPreviewEvidence={setPreviewEvidenceTask}
                     />
                   ))
                 )}
@@ -684,6 +712,66 @@ export default function Kanban() {
                 </button>
               </div>
             </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* 회의 근거 인라인 미리보기 모달 */}
+      <Dialog.Root open={previewEvidenceTask !== null} onOpenChange={(open) => { if (!open) setPreviewEvidenceTask(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-backdrop" />
+          <Dialog.Content className="dialog" aria-label="회의 근거 미리보기">
+            <Dialog.Title className="sec__title" style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: 600 }}>
+              📌 회의 근거 및 맥락 미리보기
+            </Dialog.Title>
+            {previewEvidenceTask && previewEvidenceTask.origin && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ background: 'var(--c-surface-sunken)', padding: '12px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
+                  <span className="t12 faint">업무명</span>
+                  <p style={{ margin: '4px 0 0 0', fontWeight: 600, fontSize: '14px' }}>
+                    {previewEvidenceTask.title}
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="t12 faint">출처 회의</span>
+                    <span className="dc-badge dc-badge--ok">승인된 정식 업무</span>
+                  </div>
+                  <strong style={{ fontSize: '14px' }}>
+                    {meetingLabel(previewEvidenceTask.origin.meeting_title, previewEvidenceTask.origin.meeting_id)}
+                  </strong>
+                  <span className="t12 muted">
+                    연계 발화 번호: {previewEvidenceTask.origin.evidence_utterance_ids.map((id) => `#${id}`).join(', ')} ({previewEvidenceTask.origin.evidence_utterance_ids.length}건 근거)
+                  </span>
+                </div>
+
+                <div style={{ background: 'var(--c-surface)', padding: '12px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
+                  <span className="t12" style={{ color: 'var(--c-evidence)', fontWeight: 600 }}>
+                    💡 근거 사슬(Provenance Chain) 안내
+                  </span>
+                  <p className="t12 muted" style={{ margin: '6px 0 0 0', lineHeight: 1.5 }}>
+                    이 업무는 회의 대화록에서 도출되어 검토자가 승인한 정식 태스크입니다.
+                    수정이나 상태 이동은 보드에서 즉시 가능하며, 기여도 산출 시 증빙 데이터로 보호됩니다.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
+                  <Link
+                    to={`/meeting/${previewEvidenceTask.origin.meeting_id}/review`}
+                    className="btn btn--secondary btn--sm"
+                    onClick={() => setPreviewEvidenceTask(null)}
+                  >
+                    전체 회의록 & 음성 재생 보기 →
+                  </Link>
+                  <Dialog.Close asChild>
+                    <button type="button" className="btn btn--primary btn--sm">
+                      닫기
+                    </button>
+                  </Dialog.Close>
+                </div>
+              </div>
+            )}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
