@@ -14,6 +14,7 @@ import pytest
 from teamflow.audio.multitrack import (
     DEFAULT_SAMPLE_RATE,
     SpeakerFrame,
+    TrackAnalysis,
     analyze_tracks,
     apply_offsets,
     estimate_noise_floor_db,
@@ -27,6 +28,37 @@ from teamflow.audio.multitrack import (
 
 SR = DEFAULT_SAMPLE_RATE
 RNG = np.random.default_rng(20260901)
+
+
+def test_nonoverlapping_recordings_keep_server_timeline():
+    # 같은 문장을 반복해 상관이 높아도 녹음 구간 자체가 겹치지 않습니다.
+    voice = speech_like(1.0, seed=415)
+    offsets = estimate_offsets([voice, voice.copy()], server_offsets_sec=[0.0, 2.0])
+    assert offsets[1].method == "server_timestamp"
+    assert offsets[1].offset_sec == 2.0
+
+
+def test_server_timeline_is_used_before_fine_alignment():
+    room = speech_like(4.0, seed=416)
+    tracks = [room[:3 * SR], room[SR:]]
+    offsets = estimate_offsets(tracks, server_offsets_sec=[0.0, 1.0])
+    assert offsets[1].offset_sec == pytest.approx(1.0, abs=0.015)
+    aligned = apply_offsets(tracks, offsets)
+    assert np.mean((aligned[0][SR:3 * SR] - aligned[1][SR:3 * SR]) ** 2) < 1e-6
+
+
+def test_crosstalk_keeps_quiet_consonants_and_both_overlapping_voices():
+    # 에너지 문턱 아래인 자음과 동시 발화는 '다른 사람만의 발화'가 아닙니다.
+    signal = np.full(640, 0.01, dtype=np.float32)
+    analysis = TrackAnalysis(
+        energy_db=np.zeros((2, 3)), noise_floor_db=np.zeros(2),
+        primary=np.array([SpeakerFrame.SILENCE, 0, 1]),
+        overlap=np.array([False, True, False]),
+    )
+    cleaned = suppress_crosstalk([signal, signal.copy()], analysis)
+    assert np.array_equal(cleaned[0][:320], signal[:320])
+    assert np.array_equal(cleaned[1], signal)
+    assert np.max(cleaned[0][320:]) <= 0.0001
 
 
 # ── 합성 신호 도구 ────────────────────────────────────────────

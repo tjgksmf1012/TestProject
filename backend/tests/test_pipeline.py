@@ -222,7 +222,10 @@ def test_alignment_offsets_are_reported():
 
 
 def test_validation_resolves_assignee_and_deadline():
-    result = run()
+    # 날짜는 LLM 응답만이 아니라 실제 인용된 발화에도 있어야 합니다.
+    result = run(transcriber=FakeTranscriber(texts=[
+        "로그인 API 구현은 김민수가 맡고 마감은 이번 주 금요일입니다."
+    ]))
     candidates = result.validation.candidates
     assert candidates
     assert candidates[0].assignee.user_id == 1  # 김민수

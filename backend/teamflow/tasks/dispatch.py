@@ -30,6 +30,11 @@ def enqueue_meeting_processing(meeting_id: int) -> str | None:
     처리는 나중에 다시 걸 수 있다. 여기서 500 을 내면 사용자는 녹음이
     날아간 줄 알고 다시 녹음한다 — 그게 더 나쁘다.
     """
+    from teamflow.config import get_settings
+
+    if get_settings().local_processing:
+        # queued는 이미 커밋됐습니다. 별도 프로세스가 읽으므로 API 재시작에도 남습니다.
+        return f"local-{meeting_id}"
     try:
         from teamflow.tasks.meeting_tasks import process_meeting_task
 
@@ -80,6 +85,10 @@ def enqueue_github_ingest(event_id: int) -> str | None:
     큐에 못 넣어도 잃지 않습니다 — 웹훅 본문은 이미 DB 에 저장돼 있으므로
     나중에 이 잡을 event_id 로 다시 걸면 됩니다.
     """
+    from teamflow.config import get_settings
+
+    if get_settings().local_processing:
+        return _local_github("ingest", event_id)
     try:
         from teamflow.tasks.github_tasks import ingest_github_event_task
 
@@ -119,6 +128,10 @@ def enqueue_github_backfill(project_id: int, limit: int) -> str | None:
     실패하면 None 을 돌려주고 로그를 남깁니다. 다시 누르면 됩니다 —
     백필은 이미 있는 PR 을 건너뛰므로 두 번 눌러도 안전합니다.
     """
+    from teamflow.config import get_settings
+
+    if get_settings().local_processing:
+        return _local_github("backfill", project_id, limit)
     try:
         from teamflow.tasks.github_tasks import backfill_project_task
 
@@ -129,3 +142,11 @@ def enqueue_github_backfill(project_id: int, limit: int) -> str | None:
     except Exception:
         logger.exception("project %s 백필을 큐에 넣지 못했습니다", project_id)
         return None
+
+
+def _local_github(kind: str, identifier: int, limit: int | None = None) -> str | None:
+    if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    from teamflow.jobs.local_github import enqueue
+
+    return enqueue(kind, identifier, limit)

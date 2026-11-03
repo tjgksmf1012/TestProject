@@ -11,6 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,6 +48,8 @@ class Settings(BaseSettings):
     # ── 인프라 ────────────────────────────────────────────
     database_url: str = "postgresql+psycopg://teamflow:teamflow@localhost:5432/teamflow"
     redis_url: str = "redis://localhost:6379/0"
+    # Windows 로컬 실행은 별도 직렬 워커가 DB에 남은 큐를 처리합니다.
+    local_processing: bool = False
 
     # ── 오디오 저장 ───────────────────────────────────────
     # 개인정보보호법상 생체인식정보는 다른 개인정보와 분리 보관해야 한다.
@@ -54,21 +57,11 @@ class Settings(BaseSettings):
     # docs/07-법적-윤리-요구사항.md P4
     audio_storage_root: Path = Path("/var/teamflow/audio")
 
-    # ⚠️ **이 값은 암호화를 켜지 않습니다.** 지금 오디오는 평문으로 저장됩니다.
-    #
-    # P4 는 "별도 볼륨 + 별도 키" 를 요구하는데, 지금 된 것은 **볼륨 분리
-    # 절반**뿐입니다. 이 필드는 `audio_assets.encryption_key_id` 에 그대로
-    # 복사돼 "어느 키로 썼는가" 를 나중에 추적하려고 만든 자리이고, 실제로
-    # 암·복호를 하는 코드는 저장소에 없습니다.
-    #
-    # 이름만 보고 "암호화돼 있구나" 로 읽히면 안 되므로 여기 적어 둡니다.
-    # 하다 만 암호화는 안 한 것보다 나쁩니다 — 없는 보호를 믿게 만듭니다.
-    #
-    # 왜 지금 안 했나: 봉투 암호화는 키 보관·회전·기존 파일 이관까지
-    # 같이 정해야 하고, 그걸 대충 하면(예: 환경변수에 원문 키 하나)
-    # 감사에서 "암호화했다" 고 적을 근거가 되면서 실제 보호는 없습니다.
-    # 직접 만들 영역도 아닙니다. `docs/07` §2.2 P4 에 남은 것으로 적어 뒀습니다.
+    # key_id는 식별자입니다. 실제 AES-GCM 키는 secret으로부터 파생합니다.
+    # 두 값 모두 Settings를 통해 읽어 .env와 프로세스 환경의 동작을 맞춥니다.
+    # 키 교체 시 기존 청크를 복호화할 수 있어야 하므로 자동 교체하지 않습니다.
     audio_encryption_key_id: str = "dev-only"
+    audio_encryption_secret: str | None = Field(default=None, repr=False)
 
     # 보존기간. 만료 시 원본 오디오만 지우고 전사 텍스트는 남긴다.
     # docs/07 §2.4
@@ -79,17 +72,19 @@ class Settings(BaseSettings):
     # ── GitHub App ────────────────────────────────────────
     # OAuth App이 아니라 GitHub App을 쓴다. docs/03 §4.1
     github_app_id: str | None = None
-    github_private_key: str | None = None
+    github_private_key: str | None = Field(default=None, repr=False)
+    # 기존 키 파일을 직접 읽는 경로. 키 본문을 환경 파일에 복사할 필요가 없습니다.
+    github_private_key_path: Path | None = None
     # 웹훅 서명 검증용. 없으면 누구나 가짜 이벤트를 주입할 수 있다.
-    github_webhook_secret: str | None = None
+    github_webhook_secret: str | None = Field(default=None, repr=False)
 
     # ── Google OAuth 2.0 ──────────────────────────────────
     google_client_id: str | None = None
-    google_client_secret: str | None = None
-    google_redirect_uri: str = "https://teamflow-ai.stream/api/auth/google/callback"
+    google_client_secret: str | None = Field(default=None, repr=False)
+    google_redirect_uri: str | None = None
 
     # ── AI ────────────────────────────────────────────────
-    hf_token: str | None = None  # pyannote community-1은 gated
+    hf_token: str | None = Field(default=None, repr=False)  # pyannote community-1은 gated
 
     # llm_backend: vllm | llamacpp | transformers | fake
     # RAM 32GB 환경에서는 llamacpp(CPU)가 1순위. docs/02 §5 전략 C

@@ -320,3 +320,35 @@ def resolve_deadline(hint: str | None, meeting_date: date) -> DeadlineMatch:
         )
 
     return DeadlineMatch(None, 0.0, f"해석할 수 없는 표현: {hint!r}")
+
+
+def grounded_deadline(
+    hint: str | None, evidence: list[str], meeting_date: date,
+) -> DeadlineMatch:
+    """LLM이 줄이거나 빠뜨린 마감은 근거에 명시된 유일한 표현으로 확인합니다."""
+    pattern = (
+        r"\d{4}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}월\s*\d{1,2}일|"
+        rf"(?:(?:{_NEXT_WEEK}|{_THIS_WEEK})\s*)?[월화수목금토일]요일|"
+        r"오늘|내일|모레|글피|\d+일\s*(?:안에|이내|뒤|후)"
+    )
+    found: dict[date, DeadlineMatch] = {}
+    for text in evidence:
+        for sentence in re.split(r"(?<=[.!?。])\s+|\n", text):
+            if not re.search(r"마감|기한|까지", sentence):
+                continue
+            for match in re.finditer(pattern, sentence):
+                phrase = match.group()
+                resolved = resolve_deadline(phrase, meeting_date)
+                if resolved.value is not None:
+                    found[resolved.value] = DeadlineMatch(
+                        resolved.value, resolved.confidence, f"근거 발화에서 확인: {phrase}",
+                    )
+    if len(found) == 1:
+        return next(iter(found.values()))
+    if len(found) > 1:
+        return DeadlineMatch(None, 0.0, "근거에 마감이 여러 개 있어 사람이 확인해야 합니다")
+    normalized = re.sub(r"\s+", "", " ".join(evidence))
+    stem = re.sub(r"(?:까지|입니다|에)$", "", re.sub(r"\s+", "", hint or ""))
+    if stem and stem in normalized:
+        return resolve_deadline(hint, meeting_date)
+    return DeadlineMatch(None, 0.0, "마감 표현을 근거 발화에서 확인하지 못했습니다")

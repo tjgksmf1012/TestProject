@@ -10,11 +10,10 @@
 #   2. docker compose --profile gpu build
 #   3. docker compose --profile gpu up
 #
-# CUDA 12.4 런타임을 고른 이유: 개발 머신이 Ampere/Ada 세대로 확인됐고
-# (docs/09 실험 0), 그 구간은 PyTorch 기본 휠이 그대로 동작합니다.
-# Blackwell(sm_120) 이면 베이스 이미지와 torch 인덱스를 함께 올려야 합니다.
+# pyannote 4 및 TorchCodec 0.17과 호환되는 torch/torchaudio 2.11을 함께 고정합니다.
+# CUDA 런타임과 휠 인덱스도 같은 12.8 계열을 사용합니다.
 
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 
 # python3.11 은 우분투 22.04 기본(3.10)이 아니라 deadsnakes 에서 받는다.
 # pyproject 가 requires-python >=3.11 이다.
@@ -43,8 +42,9 @@ COPY backend/teamflow/__init__.py backend/teamflow/__init__.py
 # torch 를 먼저 따로 깐다. 여기서 실패하면 원인이 명확하고,
 # 뒤 의존성 해석에 끌려다니지 않는다.
 RUN python3 -m pip install --upgrade pip \
-    && python3 -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124 \
-    && python3 -m pip install -e ".[ai]"
+    && python3 -m pip install torch==2.11.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu128 \
+    && python3 -m pip install -e ".[ai]" "torch==2.11.0" "torchaudio==2.11.0" "torchcodec==0.17.0" \
+    && python3 -m pip check
 
 COPY backend/ backend/
 COPY alembic.ini ./

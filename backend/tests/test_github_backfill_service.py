@@ -256,7 +256,7 @@ def test_a_pull_request_already_known_from_a_webhook_is_skipped(world):
                 event_type=normalized.event_type,
                 actor_login=normalized.actor_login,
                 ref=normalized.ref,
-                payload=normalized.payload,
+                payload={**normalized.payload, "_teamflow_ingested": True},
                 occurred_at=normalized.occurred_at,
             )
         )
@@ -470,3 +470,27 @@ def test_the_fake_client_raises_the_error_type_we_handle(world):
     """이 파일의 실패 테스트들이 진짜 오류 경로를 타는지 확인합니다."""
     with pytest.raises(GitHubError):
         FakeGitHubClient().pull_request_details(REPO, 1)
+
+
+def test_failed_details_are_retried_without_duplicate_delivery_or_false_coverage(
+    world, monkeypatch
+):
+    client = client_for([7])
+    original = client.pull_request_details
+    monkeypatch.setattr(
+        client,
+        "pull_request_details",
+        lambda *args: (_ for _ in ()).throw(GitHubError("temporary", status=503, retryable=True)),
+    )
+    first = run(world, client)
+    assert first.failed == 1 and first.stored == 1
+    with db_session.session_scope() as session:
+        project = session.get(m.Project, world["project_id"])
+        assert project.github_backfilled_to is None
+        assert project.github_backfilled_at is None
+    monkeypatch.setattr(client, "pull_request_details", original)
+    recovered = run(world, client)
+    assert recovered.failed == 0 and recovered.events_written > 0
+    assert recovered.stored == 0 and len(events(world["project_id"])) == 1
+    again = run(world, client)
+    assert again.events_written == 0 and again.already_have == 1

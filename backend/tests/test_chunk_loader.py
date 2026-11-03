@@ -388,7 +388,11 @@ def test_chunk_store_encryption_at_rest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """AUDIO_ENCRYPTION_SECRET 이 설정되면 디스크에 암호화되어 저장되고 투명하게 복호화된다."""
-    monkeypatch.setenv("AUDIO_ENCRYPTION_SECRET", "super-secret-key-12345")
+    from teamflow.config import Settings
+
+    monkeypatch.setattr("teamflow.audio.chunk_store.get_settings", lambda: Settings(
+        _env_file=None, audio_encryption_secret="synthetic-test-key",
+    ))
     store = ChunkStore(tmp_path)
     sample_data = b"raw-opus-audio-payload-12345"
     p = store.write(1, 1, 0, sample_data)

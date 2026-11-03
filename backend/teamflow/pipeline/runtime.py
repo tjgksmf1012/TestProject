@@ -1,14 +1,7 @@
 """실행 환경에 맞는 파이프라인 단계 구현을 고른다.
 
-⚠️ **ASR·화자분리 실제 구현은 아직 없습니다.**
-이 개발 환경에 GPU도 모델도 없어 검증할 수 없기 때문입니다.
-인터페이스(`pipeline/steps.py`)만 확정해 두고, 실제 머신에서 붙입니다.
-
-붙이는 순서:
-    1. `python3 scripts/check_env.py` 로 환경 확인
-    2. `pip install -e ".[ai]"`
-    3. 아래 `NotImplementedError` 자리에 실제 구현
-    4. `docs/09` 실험 1(한국어 ASR 비교)로 모델 확정
+Qwen3-ASR·Transformers LLM·FFmpeg 구현과 시연용 fake 구현을 설정으로
+구분합니다. 실환경 검증 범위는 docs/27에 기록합니다.
 """
 
 from __future__ import annotations
@@ -125,8 +118,7 @@ class ChunkDecoder(Protocol):
     """청크 바이트 → PCM.
 
     실제 구현은 FFmpeg 호출이다 (webm/opus, mp4/aac → 16kHz 모노 float32).
-    ⚠️ 이 개발 환경에는 ffmpeg 이 없어 구현을 넣지 않았습니다.
-    인터페이스만 확정하고, 순수 계산(배치·패딩)은 전부 검증했습니다.
+    실제 구현은 audio/decode.py의 FfmpegChunkDecoder입니다.
     """
 
     def decode(self, data: bytes, *, target_sample_rate: int) -> np.ndarray: ...
@@ -170,14 +162,36 @@ class ChunkAudioLoader:
             earliest = min(t.started_at for t in tracks)
             loaded: list[LoadedTrack] = []
             for track in tracks:
-                plan = recording_service.build_plan(
-                    session, track, timeslice_ms=self.timeslice_ms
+                plan = recording_service.build_plan(session, track, timeslice_ms=self.timeslice_ms)
+                decoded = self._decode_chunks(meeting_id, track.id, plan)
+                samples = assembly.render(plan, decoded, sample_rate=self.sample_rate)
+                decoded_ms = (
+                    sum(
+                        min(
+                            len(decoded.get(p.seq, [])),
+                            round(p.duration_ms * self.sample_rate / 1000),
+                        )
+                        for p in plan.placements
+                    )
+                    * 1000
+                    / self.sample_rate
                 )
-                samples = assembly.render(
-                    plan,
-                    self._decode_chunks(meeting_id, track.id, plan),
-                    sample_rate=self.sample_rate,
+                coverage = (
+                    min(plan.coverage, decoded_ms / plan.duration_ms) if plan.duration_ms else 0
                 )
+                if coverage < self.min_usable_coverage:
+                    track.status = "unusable"
+                if decoded_ms + 100 < sum(p.duration_ms for p in plan.placements):
+                    warning = {
+                        "setting": "decode",
+                        "severity": "warning",
+                        "message": ("녹음 일부를 해석하지 못했습니다. "
+                                    "원본과 전사 내용을 확인해 주세요"),
+                    }
+                    warnings = list(track.capture_warnings or [])
+                    if warning not in warnings:
+                        warnings.append(warning)
+                    track.capture_warnings = warnings
                 loaded.append(
                     LoadedTrack(
                         track_id=track.id,
@@ -185,8 +199,8 @@ class ChunkAudioLoader:
                         samples=samples,
                         sample_rate=self.sample_rate,
                         started_at_offset_sec=(track.started_at - earliest).total_seconds(),
-                        coverage=plan.coverage,
-                        usable=plan.coverage >= self.min_usable_coverage,
+                        coverage=coverage,
+                        usable=coverage >= self.min_usable_coverage,
                     )
                 )
             return loaded
@@ -195,6 +209,16 @@ class ChunkAudioLoader:
         self, meeting_id: int, track_id: int, plan: assembly.TrackPlan
     ) -> dict[int, np.ndarray]:
         decoded: dict[int, np.ndarray] = {}
+        if isinstance(self.decoder, decode.FfmpegChunkDecoder):
+            chunks = []
+            for placement in plan.placements:
+                try:
+                    chunks.append((placement, self.store.read(meeting_id, track_id, placement.seq)))
+                except (OSError, ValueError):
+                    logger.warning(
+                        "청크를 읽지 못했습니다 track=%s seq=%s", track_id, placement.seq
+                    )
+            return self.decoder.decode_chunks(chunks, target_sample_rate=self.sample_rate)
         for placement in plan.placements:
             try:
                 raw = self.store.read(meeting_id, track_id, placement.seq)

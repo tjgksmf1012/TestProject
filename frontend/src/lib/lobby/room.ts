@@ -547,6 +547,9 @@ export function captureAlerts(track: TrackHealth | undefined): string[] {
  *
  * ⛔ **화면에서 이 글을 다시 적지 마십시오.** 두 로비가 여기서 읽습니다.
  */
+/** 아직 응답하지 않은 선택 동의는 미리 체크하지 않습니다. */
+export const DEFAULT_OPTIONAL_CONSENT = false;
+
 export const EXTRA_CONSENTS = [
   {
     key: 'rawAudio',
@@ -558,7 +561,7 @@ export const EXTRA_CONSENTS = [
     key: 'voiceprint',
     id: 'keep-voiceprint',
     label: '목소리 특징 저장',
-    hint: '거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다',
+    hint: '거부해도 됩니다 — 트랙별 녹음이라 화자는 이미 확정입니다. 성문 저장·자동 매칭은 아직 지원하지 않습니다',
   },
 ] as const;
 

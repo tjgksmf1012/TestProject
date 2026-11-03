@@ -55,13 +55,18 @@ def db(engine) -> Iterator[Session]:
 
 
 @pytest.fixture
-def client(engine) -> Iterator[TestClient]:
+def client(engine, tmp_path) -> Iterator[TestClient]:
     from teamflow.api.main import app
 
     def _settings() -> Settings:
         return Settings(
             environment="test",
             github_webhook_secret=WEBHOOK_SECRET,
+            github_app_id=None,
+            github_private_key=None,
+            github_private_key_path=None,
+            local_processing=False,
+            audio_storage_root=tmp_path / "audio",
             database_url="sqlite://",
         )
 
@@ -274,6 +279,29 @@ def post_webhook(
     elif secret is not None:
         headers["X-Hub-Signature-256"] = sign(body, secret)
     return client.post("/api/github/webhook", content=body, headers=headers)
+
+
+def test_installation_verifies_selected_repositories_and_revokes_removed_access(client, seeded):
+    payload = {"action": "created", "installation": {"id": 451},
+               "repositories": [{"full_name": "team/teamflow"}]}
+    # 서명 없는 설치 주장은 연결 상태를 바꾸지 않습니다.
+    assert post_webhook(client, payload, event="installation", secret=None).status_code == 401
+    with db_session.session_scope() as session:
+        project = session.get(m.Project, seeded["project_id"])
+        assert project.github_installation_id is None
+    assert post_webhook(client, payload, event="installation").status_code == 202
+    with db_session.session_scope() as session:
+        project = session.get(m.Project, seeded["project_id"])
+        assert project.github_installation_id == 451
+        assert project.github_verified_at is not None
+        assert list(session.scalars(select(m.GithubEvent))) == []
+    payload = {"action": "removed", "installation": {"id": 451},
+               "repositories_removed": [{"full_name": "team/teamflow"}]}
+    assert post_webhook(client, payload, event="installation_repositories").status_code == 202
+    with db_session.session_scope() as session:
+        project = session.get(m.Project, seeded["project_id"])
+        assert project.github_installation_id is None
+        assert project.github_verified_at is None
 
 
 def test_webhook_accepts_valid_signature(client: TestClient, seeded):

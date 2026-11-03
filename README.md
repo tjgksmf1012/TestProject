@@ -3,18 +3,18 @@
 > AI 기반 팀 프로젝트 협업 및 회의 리뷰 통합 플랫폼
 > 회의에서 나온 결정을 실제 업무와 코드 활동까지 연결한다.
 
-**현재 상태: 프로덕션 현행화 완료 + 실운영 Cloudflare 라이브 서비스 상시 가동 중.**
-- **실운영 접속 도메인**: [https://teamflow-ai.stream/app](https://teamflow-ai.stream/app) (모바일 / PC 겸용)
+**현재 상태: PC 웹·PC 앱의 실제 회의 흐름 구현 및 Google·GitHub 실계정 연동 검증.**
+- **접속 도메인**: [https://teamflow-ai.stream/app/](https://teamflow-ai.stream/app/) (좁은 창·확대 화면 대응)
 - **로컬 개발 주소**: `http://127.0.0.1:8811/app`
-- **검증 완료 상태**: 프런트엔드 단위 테스트 **2,170개 전원 통과** (`pass 2170`), 백엔드 테스트 **150개 통과**, 타입체크 및 린터 무결성 100% 충족.
+- **2026-11-03 검증**: 백엔드 **2,301개**, 프런트엔드 **2,170개** 통과. 타입·린트·빌드·22화면 검사 통과.
 
-> 🌟 **2026-11 프로덕션 현행화 및 AI 데모 랩 오픈**
-> - **클린 프로덕션 워크스페이스**: 시연용 더미 계정·하드코딩 데이터 전면 제거 및 클린 DB 초기화 (`scripts/init_clean_db.py`).
-> - **Google OAuth 2.0 공식 로그인**: 공식 계정 선택(`accounts.google.com`) 및 HttpOnly 보안 세션 발급.
-> - **독립 AI 기능 체험관 (`/demo`)**: 마이크 파형 시각화, 192D 성문 추출, 코사인 유사도 화자 분리, 실시간 한국어 ASR 전사, 회의 분석 & 칸반 파이프라인.
-> - **실사용자 피드백 기반 5대 UX 고도화**: 발언자 원클릭 자동 배정, 기여도 실시간 합계 배지, 모바일 3단 탭 전환, 온보딩 가이드, 칸반 근거 인라인 미리보기 모달 반영.
-> - **무중단 운영 감독(Watchdog)**: 장애 발생 시 3초 이내 자동 복구 (`start_live.bat`).
-> 자세한 현행화 내역 및 향후 로드맵은 **[docs/25 현행화 완료 내역 및 잔여 과제 로드맵](docs/25-현행화-및-잔여과제-로드맵.md)** 을 참고하세요.
+> **실제 제공하는 기능과 검증 범위**
+> - Google 로그인은 실제 계정 선택부터 서비스 복귀까지 확인했습니다. 새 계정은 기존 프로젝트에 자동 참가하지 않습니다.
+> - 각자의 녹음 트랙으로 발언자를 구분합니다. 실제 Qwen3-ASR·Qwen2.5-3B 모델로 합성 한국어 음성의 업무·담당자·마감과 승인 흐름을 확인했습니다.
+> - GitHub App 읽기 권한·서명된 설치 웹훅·기존 PR 12건의 기여 근거 반영을 확인했습니다.
+> - `/app/demo`는 192개 주파수 값 비교와 텍스트 키워드 예시입니다. 성문 인식·실시간 ASR·LLM 정확도를 시연하는 화면은 아닙니다.
+> - 워치독은 서버·터널·회의·GitHub·보존기간 실행기를 감시합니다. 무중단이나 일정 시간 안의 복구를 보장하지 않습니다.
+> 상세 결과와 남은 실기기 검증은 **[docs/27 실환경 검증과 릴리스](docs/27-실환경-검증-및-릴리스.md)** 를 참고하세요.
 
 이 저장소는 "무엇을 어떻게 만들 것인가"를 검증·기록하고, 검증된 것부터 코드로 옮기는 곳입니다.
 
@@ -159,7 +159,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | **회의 처리 파이프라인 오케스트레이션** | ✅ | `backend/teamflow/pipeline/` |
 | **Celery 앱 · 태스크 · beat 스케줄** | ✅ | `backend/teamflow/tasks/` |
 | 오디오 로더 (WAV, 경로 탈출 차단) | ✅ | `backend/teamflow/pipeline/runtime.py` |
-| LLM 클라이언트 (vLLM / llama.cpp) | ⚠️ 미검증 | `backend/teamflow/meeting/llm.py` |
+| LLM 클라이언트 (Transformers / vLLM / llama.cpp) | ✅ Transformers 실제 합성 회의 검증 / 나머지 서버는 별도 검증 | `backend/teamflow/meeting/llm.py` |
 | ASR·화자분리 **모델 구현** | ⬜ | 인터페이스 확정, 실제 GPU 머신에서 |
 | **서버 시각 동기화 (NTP 방식)** | ✅ | `frontend/src/lib/recording/clock.ts` + `GET /api/time` |
 | **트랙 공백 탐지 · 커버리지 판정** | ✅ | `frontend/src/lib/recording/timeline.ts` |
@@ -174,7 +174,7 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | 청크 → 정렬된 트랙 로더 | ✅ | `backend/teamflow/pipeline/runtime.py` |
 | **청크 디코더 (FFmpeg)** | ⚠️ 명령·오류처리만 검증 | `backend/teamflow/audio/decode.py` |
 | HTTP 전송기 (시각 헤더·캐시 금지) | ✅ | `frontend/src/lib/recording/browser-adapter.ts` |
-| 브라우저 미디어 어댑터 (getUserMedia/MediaRecorder) | ⚠️ 미검증 | 〃 |
+| 브라우저 미디어 어댑터 (getUserMedia/MediaRecorder) | ✅ 실제 Chromium 청크·3인 120초 동시 녹음 및 끊김 복귀 | 〃 |
 | **실기기 녹음 테스트 페이지** (실험 5용) | ✅ | `frontend/src/demo/`, `frontend/public/` |
 | 타입 검사 (`tsc --noEmit`, strict) | ✅ | `frontend/tsconfig.json` |
 | **업무 후보 승인 화면** | ✅ | `frontend/src/lib/review/`, `frontend/public/review.html` |
@@ -198,20 +198,20 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | ~~안드로이드 셸~~ | ⛔ **접었습니다** — 실기기가 없고 `gradlew` 조차 없어 **빌드 자체가 불가능**했습니다 | [docs/14](docs/14-모바일.md) 머리말 |
 | **브라우저 통화로 회의** (WebRTC 메시 5명 · 헤드폰 확인) | ✅ 같은 기기 3인 통화로 확인 / **실제 네트워크는 미검증** | `backend/teamflow/call/`, `frontend/src/lib/call/`, `public/call.html` |
 | **PC 화면** (48rem↑ 상단 탭·칸반 3열 가로) | ✅ | `frontend/public/app.css`, [docs/15](docs/15-PC-우선-방향.md) §4.7 |
-| **GitHub 백필** (연결 전 활동 + 커버리지 표시) | ✅ 배선·멱등·잘림 처리 / **실제 HTTP 미검증** | `backend/teamflow/github/backfill.py`, [docs/15](docs/15-PC-우선-방향.md) §4.8 |
+| **GitHub 백필** (연결 전 활동 + 커버리지 표시) | ✅ 실제 PR 12건 수집·재실행 중복 방지 확인 | `backend/teamflow/github/backfill.py`, [docs/27](docs/27-실환경-검증-및-릴리스.md) |
 | 프로젝트 만들기·회의 열기·저장소 연결 **화면** | ✅ | `public/home.html`(만들기·초대코드 참가), `public/project.html`(회의 열기·저장소 연결), `frontend/src/lib/project/setup.ts` |
 | **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
 | **보고서** (회의록·주간·최종 · 글자로 내보내기) | ✅ | `backend/teamflow/reports/`, `services/report_service.py`, `public/reports.html` |
-| **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ⚠️ 실측 미검증 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
+| **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ✅ 실제 이력의 기여 근거 12건 저장 / 새 병합 웹훅은 다음 정상 PR에서 확인 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest backend/tests -q      # 개수는 명령이 직접 셉니다
-.venv/bin/ruff check backend/ scripts/
+LOCAL_PROCESSING=false .venv/bin/python -m pytest backend/tests -q
+.venv/bin/ruff check backend
 python3 scripts/check_env.py                     # 하드웨어 진단
 
 npm --prefix frontend test                       # 설치 불필요 — 개수는 명령이 셉니다
-npm --prefix frontend install && npm --prefix frontend run check   # 타입 검사까지
+npm --prefix frontend ci && npm --prefix frontend run typecheck
 .venv/bin/python scripts/make_icons.py           # 앱 아이콘 (stdlib 만 씀)
 
 TEAMFLOW_SERVER_URL=http://127.0.0.1:8811/home.html \
@@ -229,15 +229,18 @@ docker compose --profile app --profile llm up -d  # 앱 + LLM
 ```bat
 start_live.bat
 ```
-더블클릭 한 번으로 백엔드 서버(FastAPI / 8811), 자동 복구 워치독, Cloudflare 터널이 일괄 기동됩니다.
+기존 Python 환경·DB·AI 모델·Cloudflare의 `teamflow` 터널 설정이 준비돼 있어야 합니다.
+서버(8811), 터널과 로컬 작업 실행기가 기동됩니다. 이미 서버가 실행 중이면 중복으로 띄우지 않습니다.
+로컬 서버만 쓰려면 `.venv/Scripts/python.exe scripts/run_app.py`를 실행합니다.
+이 로컬 시연 런처는 DB가 없을 때 시연 자료를 만들므로 운영 DB와 구분하세요.
 
 - 🌐 **공식 라이브 웹앱**: [https://teamflow-ai.stream/app](https://teamflow-ai.stream/app)
 - 🧪 **독립 AI 기능 체험관**: [https://teamflow-ai.stream/app/demo](https://teamflow-ai.stream/app/demo)
 - 💻 **로컬 개발 주소**: [http://127.0.0.1:8811/app](http://127.0.0.1:8811/app)
   - `/app/login` — Google 공식 OAuth 2.0 및 이메일 로그인
   - `/app/` — 프로젝트 홈 대시보드 & 3단계 온보딩 가이드
-  - `/app/meeting/:id/lobby` — 회의 로비 & 트랙 상태 & GDPR 3단계 동의
-  - `/app/meeting/:id/review` — AI 회의 검토 (발언자 원클릭 배정, 모바일 3단 탭)
+  - `/app/meeting/:id/lobby` — 회의 로비·트랙 상태·본인의 개별 녹음 동의
+  - `/app/meeting/:id/review` — AI 회의 검토·담당자·마감·원문 근거 확인
   - `/app/project/:id/kanban` — 칸반 보드 (근거 인라인 미리보기 모달 지원)
   - `/app/project/:id/contributions` — 기여도 분석 및 팀 합의 (실시간 잔여 합계 배지)
 
@@ -261,8 +264,8 @@ start_live.bat
 > ⚠️ `ASR_BACKEND=fake` 는 오디오를 읽지 않고 대본을 돌려줍니다. 시연·개발
 > 전용이며 `/health` 에 그대로 노출되므로 켜져 있으면 바로 보입니다.
 
-> ⚠️ `--profile llm` 을 빼면 회의 처리가 **분석 단계에서 전부 실패합니다.**
-> ASR 까지는 돌고 요약·업무추출에서 연결 거부가 납니다.
+> Docker에서 `llamacpp`·`vllm` 백엔드를 쓰면 해당 LLM 서버가 필요합니다.
+> `transformers` 백엔드는 모델을 처리 프로세스에 적재하므로 별도 LLM 서버를 쓰지 않습니다.
 > `app` 프로필에는 `beat` 도 들어 있습니다 — 이게 없으면 보존기간이 지난
 > 원본 오디오가 **영영 삭제되지 않습니다** (법적 요구사항, docs/07 P5).
 >
@@ -270,9 +273,10 @@ start_live.bat
 > 큐까지 읽으므로 전 구간이 돕니다 — 다만 ASR·화자분리는 CPU 로 돌아
 > 느립니다.
 
-**핵심 흐름이 전 구간 테스트로 검증됩니다.** `test_end_to_end.py` 는 **폰이 HTTP로 올린
-청크가 칸반 업무가 될 때까지**를 한 번에 돌립니다 — 가짜로 바꾸는 건 이 환경에 없는 셋
-(ffmpeg·ASR·LLM)뿐이고, 동의 게이트·청크 저장·무음 패딩·GCC-PHAT 정렬·주화자 판정·
+**핵심 흐름이 전 구간 테스트로 검증됩니다.** `test_end_to_end.py` 는 **기기가 HTTP로 올린
+청크가 칸반 업무가 될 때까지**를 한 번에 돌립니다. 모델을 모사하는 회귀 검사와
+실제 FFmpeg·GPU 모델 검사(`scripts/verify_ai_pipeline.py`)를 구분합니다.
+동의 게이트·청크 저장·무음 패딩·GCC-PHAT 정렬·주화자 판정·
 환각 검증·승인 규칙은 전부 진짜입니다.
 
 > 이 파일이 따로 있는 이유가 있습니다. 구간별 테스트가 전부 통과하는데도

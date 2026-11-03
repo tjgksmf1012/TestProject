@@ -26,6 +26,7 @@ import {
   discardAffordance,
   DISCARD_CONFIRM,
   EXTRA_CONSENTS,
+  DEFAULT_OPTIONAL_CONSENT,
   lobbyPhase,
   memberStatuses,
   recordAffordance,
@@ -127,8 +128,8 @@ function Lobby() {
   const [roomNote, setRoomNote] = useState<Note | null>(null);
   const [reprocessNote, setReprocessNote] = useState<Note | null>(null);
   const [minutesNote, setMinutesNote] = useState<Note | null>(null);
-  const [keepAudio, setKeepAudio] = useState(true);
-  const [keepVoiceprint, setKeepVoiceprint] = useState(true);
+  const [keepAudio, setKeepAudio] = useState<boolean>(DEFAULT_OPTIONAL_CONSENT);
+  const [keepVoiceprint, setKeepVoiceprint] = useState<boolean>(DEFAULT_OPTIONAL_CONSENT);
   const [slow, setSlow] = useState(false);
   // 누르는 동안 잠급니다 (결함 89). 동의는 멱등이지만, 두 번 누르면 두
   // 요청이 겹쳐 **나중에 도착한 쪽의 명단**이 화면에 남습니다.

@@ -37,6 +37,23 @@ def test_qwen3_transcriber_handles_sub_200ms_noise():
     assert transcriber.transcribe(short_signal, 16000) == []
 
 
+def test_alignment_padding_is_trimmed_but_timestamps_keep_the_offset(monkeypatch):
+    transcriber = Qwen3Transcriber()
+    monkeypatch.setattr(transcriber, "_ensure_loaded", lambda: None)
+    seen = []
+
+    def recognize(chunk, _language):
+        seen.append(len(chunk))
+        return "합성 발화", 0.8
+
+    monkeypatch.setattr(transcriber, "_transcribe_chunk", recognize)
+    signal = np.zeros(25 * 16000, dtype=np.float32)
+    signal[2 * 16000:4 * 16000] = 0.1
+    result = transcriber.transcribe(signal, 16000)
+    assert seen == [35200]
+    assert result == [(1900, 4100, "합성 발화", 0.8)]
+
+
 def test_language_map_coverage():
     assert LANGUAGE_MAP["ko"] == "Korean"
     assert LANGUAGE_MAP["en"] == "English"

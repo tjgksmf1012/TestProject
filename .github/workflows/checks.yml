@@ -28,6 +28,8 @@ jobs:
           python-version: '3.11'          # pyproject 의 requires-python
           cache: pip
       - run: python -m venv .venv && .venv/bin/pip install -e ".[dev]"
+      - name: 실제 브라우저 녹음 회귀 검사에 필요한 디코더
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       # ⚠️ 검사는 **스스로 SQLite 를 만듭니다** — DATABASE_URL 이 필요 없습니다.
       - run: .venv/bin/python -m pytest backend/tests -q
       - run: .venv/bin/ruff check backend
@@ -92,5 +94,5 @@ jobs:
       #    실행 시점에 「브라우저가 없다」로 죽습니다. 설치된 바이너리를
       #    **직접** 부릅니다.
       - run: ./frontend/node_modules/.bin/playwright install --with-deps chromium
-      # 스모크가 스스로 서버를 띄웁니다 (DB·오디오를 지우고 새로 심습니다).
+      # 스모크가 새 검사 전용 DB·오디오 폴더로 서버를 띄웁니다.
       - run: npm --prefix frontend run smoke:screens

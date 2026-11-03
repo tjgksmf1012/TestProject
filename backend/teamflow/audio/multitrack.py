@@ -146,12 +146,26 @@ def estimate_offsets(
             offsets.append(TrackOffset(index, 0.0, 1.0, "gcc_phat"))
             continue
 
+        fallback = 0.0
+        common_track, common_ref = track, ref_signal
+        if server_offsets_sec is not None:
+            fallback = server_offsets_sec[index] - server_offsets_sec[reference]
+            # 서버 시각으로 겹치는 구간에서만 미세 정렬합니다. 녹음 시각이
+            # 다른 두 발화를 원점에 놓고 비교하면 우연한 음절 상관이
+            # 실제 시작 시각을 덮어써 발언 순서를 바꿀 수 있습니다.
+            shift = round(fallback * sample_rate)
+            ref_start, track_start = max(0, shift), max(0, -shift)
+            common_size = min(len(ref_signal) - ref_start, len(track) - track_start)
+            if common_size < round(sample_rate * 0.2):
+                offsets.append(TrackOffset(index, fallback, 0.0, "server_timestamp"))
+                continue
+            common_ref = ref_signal[ref_start : ref_start + common_size]
+            common_track = track[track_start : track_start + common_size]
         tau, confidence = gcc_phat(
-            track, ref_signal, sample_rate=sample_rate, max_tau=max_tau
+            common_track, common_ref, sample_rate=sample_rate, max_tau=max_tau
         )
 
         if confidence < MIN_ALIGNMENT_CONFIDENCE and server_offsets_sec:
-            fallback = server_offsets_sec[index] - server_offsets_sec[reference]
             offsets.append(TrackOffset(index, fallback, confidence, "server_timestamp"))
         else:
             # ⚠️ **부호를 뒤집는다.** 이게 없으면 정렬이 반대로 간다.
@@ -177,7 +191,7 @@ def estimate_offsets(
             # 기존 테스트가 못 잡은 이유: `gcc_phat` 이 지연을 맞히는지(맞다),
             # `apply_offsets` 가 길이를 맞추는지(맞다)만 봤고 **왕복**을 본
             # 테스트가 없었다.
-            offsets.append(TrackOffset(index, -tau, confidence, "gcc_phat"))
+            offsets.append(TrackOffset(index, fallback - tau, confidence, "gcc_phat"))
 
     return offsets
 
@@ -463,13 +477,13 @@ def suppress_crosstalk(
     sample_rate: int = DEFAULT_SAMPLE_RATE,
     attenuation_db: float = -40.0,
 ) -> list[np.ndarray]:
-    """각 트랙에서 그 사람이 말하지 않은 구간을 감쇠시킨다.
+    """다른 사람이 단독 발화한 것으로 확인된 구간만 감쇠시킨다.
 
     ASR에 넣기 전에 적용한다. 이렇게 하지 않으면 옆사람 목소리가 그대로
     전사되어 **같은 발언이 여러 트랙에서 중복 인식**된다.
 
-    완전히 0으로 만들지 않고 감쇠만 하는 이유: 경계에서 딱 끊으면
-    클릭 노이즈가 생기고 ASR이 오히려 더 헷갈려한다.
+    무음 판정은 작은 자음까지 포함할 수 있고 동시 발언은 양쪽 원음을
+    필요로 하므로 유지한다. 완전히 0으로 만들지 않고 감쇠만 한다.
     """
     gain = 10 ** (attenuation_db / 20.0)
     hop = int(sample_rate * analysis.hop_ms / 1000)
@@ -477,11 +491,12 @@ def suppress_crosstalk(
 
     out: list[np.ndarray] = []
     for index, track in enumerate(tracks):
-        mask = np.full(len(track), gain, dtype=np.float32)
+        mask = np.ones(len(track), dtype=np.float32)
         for i in range(analysis.n_frames):
-            if analysis.primary[i] == index:
+            if (analysis.primary[i] >= 0 and analysis.primary[i] != index
+                    and not analysis.overlap[i]):
                 begin = i * hop
-                mask[begin : begin + frame_len] = 1.0
+                mask[begin : begin + frame_len] = gain
         out.append((track * mask[: len(track)]).astype(np.float32))
     return out
 

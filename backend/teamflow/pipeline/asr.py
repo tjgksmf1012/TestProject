@@ -142,6 +142,15 @@ class Qwen3Transcriber:
             if float(np.max(np.abs(chunk))) < 1e-4:
                 continue
 
+            # 내부 공백은 유지하고 ASR에 전달할 앞뒤 무음 패딩만 자릅니다.
+            audible = np.flatnonzero(np.abs(chunk) >= 1e-4)
+            padding = int(TARGET_SAMPLE_RATE * 0.1)
+            first = max(0, int(audible[0]) - padding)
+            last = min(len(chunk), int(audible[-1]) + padding + 1)
+            chunk_start_ms += round(first * 1000 / TARGET_SAMPLE_RATE)
+            chunk_end_ms = round((start_idx + last) * 1000 / TARGET_SAMPLE_RATE)
+            chunk = chunk[first:last]
+
             text, confidence = self._transcribe_chunk(chunk, lang_name)
             if text.strip():
                 results.append((chunk_start_ms, chunk_end_ms, text.strip(), confidence))

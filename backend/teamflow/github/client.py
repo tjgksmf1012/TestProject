@@ -38,6 +38,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -327,6 +328,13 @@ def _classify(response: httpx.Response, message: str) -> GitHubError:
     )
 
 
+def credentials_present(settings: object) -> bool:
+    path = getattr(settings, "github_private_key_path", None)
+    return bool(getattr(settings, "github_app_id", None) and (
+        getattr(settings, "github_private_key", None) or (path and Path(path).is_file())
+    ))
+
+
 def build_client(settings: object, installation_id: int | None) -> GitHubClient | None:
     """설정에서 클라이언트를 만든다. 쓸 수 없으면 None.
 
@@ -340,6 +348,13 @@ def build_client(settings: object, installation_id: int | None) -> GitHubClient 
     """
     app_id = getattr(settings, "github_app_id", None)
     private_key = getattr(settings, "github_private_key", None)
+    key_path = getattr(settings, "github_private_key_path", None)
+    if not private_key and key_path:
+        try:
+            private_key = Path(key_path).read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            logger.warning("GitHub 개인키 파일을 읽지 못했습니다")
+            return None
     if not app_id or not private_key or not installation_id:
         return None
     return HttpGitHubClient(

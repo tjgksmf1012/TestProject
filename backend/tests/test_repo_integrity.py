@@ -43,32 +43,43 @@ SOURCE_PATTERNS = (
 #: 사본을 만들면 「서버만 있다」와 「✅ 다 됐다」가 갈라집니다 — 실제로
 #: `docs/20` 의 CHANNEL-005 가 ✅ 인 채로 그렇게 갈라져 있었습니다(결함 377).
 SERVER_ONLY_OR_ASSEMBLED: dict[str, str] = {
-        "POST /api/github/webhook": "GitHub 이 부릅니다 — 화면이 부르는 갈래가 아닙니다",
+    "GET /api/auth/google/callback": (
+        "Google의 외부 콜백입니다. test_auth가 state와 신규/기존 계정 로그인을 검증합니다"
+    ),
+    "POST /api/auth/oauth": "이전 시제품 경로는 test_auth가 410 거절을 검증합니다",
+    "POST /api/auth/email-code/send": "메일 발송 전에는 503 거절. test_auth가 검증합니다",
+    "POST /api/auth/email-code/verify": "메일 인증 전에는 503 거절. test_auth가 검증합니다",
+    "POST /api/projects/{project_id}/me/voiceprint": "미지원 등록은 409. test_auth가 검증합니다",
+    "POST /api/meetings/{meeting_id}/instant-join": (
+        "이전 클라이언트 호환 경로. test_auth가 본인의 명시적 동의만 쓰는지 검증합니다"
+    ),
+    "POST /api/github/webhook": "GitHub 이 부릅니다 — 화면이 부르는 갈래가 아닙니다",
     "GET /health": (
         "컨테이너·배포가 살아 있는지 묻는 갈래입니다 — 화면이 부르는 것이 "
         "아닙니다. ⚠️ 오래도록 「불린다」로 잡혀 있었는데, 그건 `/health` 가 "
         "`../lib/github/health.ts` 라는 **import 경로 안**에 걸린 것이었습니다"
         "(결함 379)"
     ),
-        "PUT /api/meetings/{meeting_id}/tracks/{track_id}/chunks/{seq}": (
-            "`browser-adapter.ts` 가 `${trackUrl}/chunks/${seq}` 로 이어 붙입니다"
-        ),
-        "GET /api/meetings/{meeting_id}/tracks/{track_id}/chunks": (
-            "`demo/main.ts` 가 `${trackUrl}/chunks` 로 이어 붙입니다"
-        ),
-        "POST /api/meetings/{meeting_id}/tracks/{track_id}/complete": (
-            "`demo/main.ts` 가 `${trackUrl}/complete` 로 이어 붙입니다"
-        ),
-        # ⚠️ 채널 관리(CHANNEL-003, CHANNEL-004, CHANNEL-005)는 chat.tsx 에 이었습니다.
-        "GET /api/projects/{project_id}/mentions": (
-            "내가 불린 **횟수**(`mention_total`) — 서버만 있고 화면에 아직 안 "
-            "이었습니다. ⚠️ 예전에 이 줄은 「멘션 자동완성」이라고 적혀 "
-            "있었는데 **거짓**입니다: 이 갈래가 돌려주는 것은 후보 목록이 "
-            "아니라 숫자 하나라, 이었어도 자동완성은 못 만듭니다(결함 417 "
-            "회차에 세다가 찾았습니다). 멘션 자체는 서버가 본문에서 찾아 "
-            "내므로 동작하고, 자동완성은 이 저장소에 아예 없습니다"
-        ),
-    }
+    "PUT /api/meetings/{meeting_id}/tracks/{track_id}/chunks/{seq}": (
+        "`browser-adapter.ts` 가 `${trackUrl}/chunks/${seq}` 로 이어 붙입니다"
+    ),
+    "GET /api/meetings/{meeting_id}/tracks/{track_id}/chunks": (
+        "`demo/main.ts` 가 `${trackUrl}/chunks` 로 이어 붙입니다"
+    ),
+    "POST /api/meetings/{meeting_id}/tracks/{track_id}/complete": (
+        "`demo/main.ts` 가 `${trackUrl}/complete` 로 이어 붙입니다"
+    ),
+    # ⚠️ 채널 관리(CHANNEL-003, CHANNEL-004, CHANNEL-005)는 chat.tsx 에 이었습니다.
+    "GET /api/projects/{project_id}/mentions": (
+        "내가 불린 **횟수**(`mention_total`) — 서버만 있고 화면에 아직 안 "
+        "이었습니다. ⚠️ 예전에 이 줄은 「멘션 자동완성」이라고 적혀 "
+        "있었는데 **거짓**입니다: 이 갈래가 돌려주는 것은 후보 목록이 "
+        "아니라 숫자 하나라, 이었어도 자동완성은 못 만듭니다(결함 417 "
+        "회차에 세다가 찾았습니다). 멘션 자체는 서버가 본문에서 찾아 "
+        "내므로 동작하고, 자동완성은 이 저장소에 아예 없습니다"
+    ),
+}
+
 
 def _source_files() -> list[Path]:
     found: set[Path] = set()
@@ -2483,7 +2494,10 @@ def test_no_document_makes_the_bundle_a_required_setup_step():
     **필수 단계로** 적고 &#34;건너뛰면 빈 화면&#34; 이라고까지 했습니다. 네트워크가
     없는 평가용 PC 에서 그대로 따라 하면 **거기서 멈춥니다.**
     """
-    tracked = {p for p in _tracked() if str(p).startswith("frontend/public/") and p.suffix == ".js"}
+    tracked = {
+        p for p in _tracked()
+        if p.as_posix().startswith("frontend/public/") and p.suffix == ".js"
+    }
     if not tracked:
         pytest.skip("번들이 커밋돼 있지 않습니다 — 이 검사의 전제가 사라졌습니다")
 
@@ -3404,7 +3418,7 @@ def test_every_server_route_has_a_caller() -> None:
         "POST": r"POST|\.post\b",
         "PUT": r"PUT|\.put\b",
         "PATCH": r"PATCH|\.patch\b",
-        "DELETE": r"DELETE|\.delete\b",
+        "DELETE": r"DELETE|\.(?:delete|del)\b",
     }
 
     #: ⚠️ **`{id}` 자리는 형제 갈래의 「글자 그대로」도 삼킵니다.**
