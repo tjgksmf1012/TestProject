@@ -959,20 +959,6 @@ def _enqueue_github_after_commit(session: Session, event_id: int) -> None:
         dispatch.enqueue_github_ingest(event_id)
 
 
-def _enqueue_backfill_after_commit(
-    session: Session, project_id: int, limit: int
-) -> None:
-    """커밋 뒤에 백필을 큐에 넣는다.
-
-    같은 이유입니다 — 워커가 커밋보다 먼저 도착하면 방금 정한 상한도,
-    저장소 이름 변경도 못 본 채로 시작합니다.
-    """
-
-    @event.listens_for(session, "after_commit", once=True)
-    def _fire(_session: Session) -> None:  # pragma: no cover - 커밋 시점에 실행된다
-        dispatch.enqueue_github_backfill(project_id, limit)
-
-
 # ══════════════════════════════════════════════════════════════
 # 프로젝트·회의 생성
 # ══════════════════════════════════════════════════════════════
@@ -1604,7 +1590,19 @@ def start_github_backfill(
         raise HTTPException(status.HTTP_409_CONFLICT, blocked)
 
     limit = gh_backfill.clamp_limit(body.limit)
-    _enqueue_backfill_after_commit(session, project_id, limit)
+    # 이 요청은 이미 저장된 프로젝트를 읽기만 합니다. 새 이벤트를 만드는
+    # 웹훅과 달리 커밋을 기다릴 필요가 없으며, 큐 접수를 확인한 뒤 응답합니다.
+    try:
+        task_id = dispatch.enqueue_github_backfill(project_id, limit)
+    except OSError:
+        logger.exception("GitHub 백필 큐 저장 실패 — project_id=%s", project_id)
+        task_id = None
+    if task_id is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "가져오기 작업을 등록하지 못했습니다. "
+            "잠시 뒤 다시 시도하거나 관리자에게 문의해 주세요.",
+        )
     return {"status": "queued", "project_id": project_id, "limit": limit}
 
 

@@ -10,7 +10,12 @@ import time
 from contextlib import suppress
 from pathlib import Path
 
+from sqlalchemy import func, select
+
 from teamflow.config import get_settings
+from teamflow.db import models as m
+from teamflow.db import vocab
+from teamflow.db.session import session_scope
 from teamflow.jobs.local_worker import worker_lease
 from teamflow.logging_config import configure_logging
 
@@ -61,6 +66,29 @@ def recover(root: Path) -> int:
         pending = path.with_suffix(".json")
         _return_pending(path, pending)
         restored += 1
+    return restored
+
+
+def restore_missing_ingest(root: Path) -> int:
+    """DB 커밋 뒤 최초 큐 쓰기가 실패한 병합 PR도 다시 처리합니다."""
+    restored = 0
+    with session_scope() as session:
+        rows = session.execute(
+            select(m.GithubEvent.id, m.GithubEvent.payload)
+            .join(m.Project, m.Project.id == m.GithubEvent.project_id)
+            .where(
+                m.GithubEvent.event_type == str(vocab.GithubEventKind.PR_MERGED),
+                m.Project.github_installation_id.is_not(None),
+                func.lower(m.GithubEvent.repo) == m.Project.github_repo_key,
+            )
+        )
+        for identifier, payload in rows:
+            if (payload or {}).get("_teamflow_ingested") is True:
+                continue
+            name = root / f"ingest-{identifier}"
+            if not name.with_suffix(".json").exists() and not name.with_suffix(".running").exists():
+                enqueue("ingest", identifier, root=root)
+                restored += 1
     return restored
 
 
@@ -116,11 +144,18 @@ def main() -> None:
     configure_logging()
     root = queue_root()
     with worker_lease(root):
+        next_scan = 0.0
         while True:
             try:
                 restored = recover(root)
                 if restored:
                     logger.info("중단된 GitHub 작업 %s건 복구", restored)
+                at = time.monotonic()
+                if at >= next_scan:
+                    restored = restore_missing_ingest(root)
+                    if restored:
+                        logger.info("DB에 남은 미처리 GitHub 작업 %s건 복구", restored)
+                    next_scan = at + 30
                 run_once(root)
             except Exception:
                 logger.exception("로컬 GitHub 큐 조회 실패")
