@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import * as Dialog from '@radix-ui/react-dialog';
 import { AppShell } from '../components/AppShell.tsx';
+import { DiscordSelect } from '../components/SettingsModal.tsx';
 import { Chain } from '../components/Chain.tsx';
 import { Why } from '../components/Why.tsx';
 import { useMembers, useTaskMutations, useTasks } from '../api/hooks.ts';
@@ -103,16 +104,14 @@ function Card({
       aria-label={`${task.title} — ${describeStatus(task.status)}. 1~${statuses.length} 키로 이동`}
     >
       <div className="kcard__top">
-        <span className="kcard__title">{task.title}</span>
-        {/* 우선순위는 **표식**이라 제목 줄에 섭니다 — meta 줄에 넣었더니
-            이미 꽉 찬 줄이 접혀 카드가 한 줄 커졌습니다(렌더해서 봤습니다).
-            ⚠️ `보통` 은 안 그립니다: 넷 중 셋에 배지가 붙으면 배지가 배경이
-            되고 정작 `긴급` 이 안 보입니다. 그 판단은 `@lib` 에. */}
+        <span className="kcard__marker num">{task.marker}</span>
         {showsBadge(task.priority) && (
           <span className={`kprio kprio--${priorityTone(task.priority)}`}>
             {describePriority(task.priority)}
           </span>
         )}
+        <div style={{ flex: 1 }} />
+        <Why about={task.title} lines={warnings} />
         <Menu.Root>
           <Menu.Trigger asChild>
             <button type="button" className="kcard__menu-btn" aria-label={`${task.title} 메뉴`}>
@@ -140,14 +139,10 @@ function Card({
                   onSelect={() => onToggleAssignee(task, person.user_id)}
                 >
                   {task.assignee_ids.includes(person.user_id) ? '✓ ' : ''}
-                  {/* 결함 345 — 여기서 잘못 고르면 남의 기여로 셉니다. */}
                   {labelInList(person, people)}
                 </Menu.Item>
               ))}
               <div className="menu__sep" />
-              {/* 우선순위 (`TASK-007`) — 값을 **정할 자리**입니다.
-                  이 칸은 오래 DB 에만 있었고 검색 API 가 거르기까지 했는데
-                  사람이 정할 자리도 볼 자리도 없었습니다. */}
               {priorityChoices(task.priority).map((choice) => (
                 <Menu.Item
                   key={choice.value}
@@ -176,10 +171,16 @@ function Card({
           </Menu.Portal>
         </Menu.Root>
       </div>
+      <div className="kcard__title">{task.title}</div>
       <div className="kcard__meta">
-        <span>{assigneeText(task.assignee_ids, people)}</span>
+        <span className="kcard__assignee">
+          <span className="kcard__avatar" aria-hidden="true">
+            {assigneeText(task.assignee_ids, people).slice(0, 1)}
+          </span>
+          <span>{assigneeText(task.assignee_ids, people)}</span>
+        </span>
         {(task.start_date != null || task.deadline !== null) && (
-          <span className="num">
+          <span className="kcard__date num">
             {task.start_date != null && task.deadline !== null
               ? `${task.start_date} ~ ${task.deadline}`
               : task.deadline ?? `시작 ${task.start_date}`}
@@ -191,64 +192,42 @@ function Card({
             선행 {(task.blocked_by ?? []).length}건
           </span>
         )}
-        {/* 표식은 사람이 PR 에 적어야 하는 값입니다 — 설명 대신 값만 둡니다.
-            무엇에 쓰는지는 열 머리말에서 **한 번** 말합니다. */}
-        <span className="kcard__marker num">{task.marker}</span>
-        <Why about={task.title} lines={warnings} />
       </div>
-      {/* 회의 → 이 업무 → PR. **빈 고리가 "아직 안 이어졌다" 를 말합니다** —
-          카드마다 반복하던 안내 문장(26자 × 카드 수)이 이걸로 사라집니다. */}
-      <Chain
-        links={[
-          {
-            label: '근거',
-            value:
-              task.origin === null
-                ? null
-                : String(task.origin.evidence_utterance_ids.length),
-            ...(task.origin !== null
-              ? {
-                  to: `/meeting/${task.origin.meeting_id}/review`,
-                  hint: `${meetingLabel(task.origin.meeting_title, task.origin.meeting_id)}에서 나온 업무입니다 — 근거 발화 보기`,
-                }
-              /* ⛔ 예전에는 「사람이 손으로 만든 업무입니다」였습니다
-                 (결함 317). 레거시 셋을 고치고 **여기 네 번째**가 남아
-                 있었는데, 자를 「손으로」까지 넓히고 나서야 잡혔습니다.
-                 문장은 `@lib` 한 벌입니다. */
-              : { hint: unknownOriginNote() }),
-          },
-          {
-            label: 'PR',
-            value: (task.github ?? []).length === 0 ? null : String(task.github.length),
-            hint: describeLinkState(task),
-          },
-        ]}
-      />
-      {/* ⭐ **개수만 보여 주고 끝내지 않습니다.**
-          서버는 저장소·PR 번호·제목·병합 시각·확정 여부를 전부 주는데
-          카드는 `1` 이라는 숫자 하나만 그리고 있었습니다. 어느 PR 인지,
-          확정으로 붙은 것인지 추정인지, 열어 볼 방법이 없었습니다 —
-          docs/08 §5.1 필수 경로의 마지막 눈에 보이는 칸이 숫자 하나로
-          줄어 있던 것입니다.
-
-          판단은 처음부터 `@lib/kanban/board.ts` 에 있었습니다
-          (`sortLinks` 는 **확정을 위로** 올립니다 — 추정이 위에 있으면
-          그게 사실로 보입니다). 레거시 화면만 그걸 부르고 있었습니다.
-
-          ⚠️ 목록을 늘 펼쳐 두지 않습니다. v2 는 카드에서 글자를 걷어낸
-          화면이고, 여기서 줄을 다시 깔면 그 결정을 되돌리는 것입니다.
-          **필요할 때 여는** `Why` 자리를 씁니다. */}
-      {(task.github ?? []).length > 0 && (
-        <Why
-          about={`${task.title}에 붙은 PR`}
-          countsAs="건"
-          lines={sortLinks(task.github).map(
-            (link) =>
-              `${link.confirmed ? '확정' : '추정'} · ${describePull(link)}` +
-              (link.why ? ` — ${link.why}` : ''),
-          )}
+      <div className="kcard__foot">
+        <Chain
+          links={[
+            {
+              label: '근거',
+              value:
+                task.origin === null
+                  ? null
+                  : String(task.origin.evidence_utterance_ids.length),
+              ...(task.origin !== null
+                ? {
+                    to: `/meeting/${task.origin.meeting_id}/review`,
+                    hint: `${meetingLabel(task.origin.meeting_title, task.origin.meeting_id)}에서 나온 업무입니다 — 근거 발화 보기`,
+                  }
+                : { hint: unknownOriginNote() }),
+            },
+            {
+              label: 'PR',
+              value: (task.github ?? []).length === 0 ? null : String(task.github.length),
+              hint: describeLinkState(task),
+            },
+          ]}
         />
-      )}
+        {(task.github ?? []).length > 0 && (
+          <Why
+            about={`${task.title}에 붙은 PR`}
+            countsAs="건"
+            lines={sortLinks(task.github).map(
+              (link) =>
+                `${link.confirmed ? '확정' : '추정'} · ${describePull(link)}` +
+                (link.why ? ` — ${link.why}` : ''),
+            )}
+          />
+        )}
+      </div>
     </article>
   );
 }
@@ -358,6 +337,8 @@ export default function Kanban() {
     setEditBlockedBy(task.blocked_by ?? []);
   };
 
+  const [activeMobileCol, setActiveMobileCol] = useState<string>('todo');
+
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
@@ -380,43 +361,6 @@ export default function Kanban() {
         },
       }
     );
-  };
-
-  const exportTasksCsv = () => {
-    if (filteredTasks.length === 0) return;
-    const esc = (v: string | number | null | undefined): string => {
-      const s = v == null ? '' : String(v);
-      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const headers = ['표식', '제목', '상태', '우선순위', '담당자', '마감일', '출처회의', '연결PR수'];
-    const lines = [headers.join(',')];
-    for (const t of filteredTasks) {
-      lines.push(
-        [
-          esc(t.marker),
-          esc(t.title),
-          esc(describeStatus(t.status)),
-          esc(describePriority(t.priority)),
-          esc(assigneeText(t.assignee_ids, people)),
-          esc(t.deadline ?? ''),
-          esc(
-            t.origin !== null
-              ? meetingLabel(t.origin.meeting_title, t.origin.meeting_id)
-              : '직접 등록',
-          ),
-          esc((t.github ?? []).length),
-        ].join(','),
-      );
-    }
-    const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `teamflow-tasks-project-${projectId}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   };
 
   const handleSaveEdit = (e: React.FormEvent) => {
@@ -442,40 +386,25 @@ export default function Kanban() {
     <AppShell
       title="칸반"
       actions={
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <select
-            className="input"
-            style={{
-              padding: '4px 8px',
-              fontSize: '12px',
-              borderRadius: 'var(--r-sm)',
-              border: '1px solid var(--c-line)',
-              background: 'var(--c-surface)',
-              color: 'var(--c-ink)',
-            }}
-            value={selectedAssignee ?? ''}
-            onChange={(e) => setSelectedAssignee(e.target.value ? Number(e.target.value) : null)}
-            aria-label="담당자별 필터"
-          >
-            <option value="">전체 담당자 ({tasks.length})</option>
-            {people.map((p) => {
-              const count = tasks.filter((t) => t.assignee_ids.includes(p.user_id)).length;
-              return (
-                <option key={p.user_id} value={p.user_id}>
-                  {p.name} ({count})
-                </option>
-              );
-            })}
-          </select>
-          {filteredTasks.length > 0 && (
-            <button
-              type="button"
-              className="btn btn--secondary btn--sm"
-              onClick={exportTasksCsv}
-            >
-              CSV 내보내기
-            </button>
-          )}
+        <div className="kboard-actions">
+          <div style={{ minWidth: '154px' }}>
+            <DiscordSelect
+              compact
+              ariaLabel="담당자별 필터"
+              value={selectedAssignee !== null ? String(selectedAssignee) : ''}
+              onChange={(val) => setSelectedAssignee(val ? Number(val) : null)}
+              options={[
+                { value: '', label: `전체 담당자 (${tasks.length})` },
+                ...people.map((p) => {
+                  const count = tasks.filter((t) => t.assignee_ids.includes(p.user_id)).length;
+                  return {
+                    value: String(p.user_id),
+                    label: `${p.name} (${count})`,
+                  };
+                }),
+              ]}
+            />
+          </div>
           <button
             type="button"
             className="btn btn--primary btn--sm"
@@ -507,6 +436,28 @@ export default function Kanban() {
         </span>
       }
     >
+      {cannotLoad === null && tasks.length > 0 && (
+        <div className="mobile-col-pills" role="tablist" aria-label="칸반 열 선택">
+          {columns.map((c) => (
+            <button
+              key={c.status}
+              type="button"
+              role="tab"
+              aria-selected={activeMobileCol === c.status}
+              className={`mobile-col-pill ${activeMobileCol === c.status ? 'mobile-col-pill--active' : ''}`}
+              onClick={() => {
+                setActiveMobileCol(c.status);
+                const el = document.getElementById(`col-${c.status}`);
+                el?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+              }}
+            >
+              <span className="col__dot" data-status={c.status} aria-hidden="true" />
+              <span>{c.label}</span>
+              <span className="mobile-col-pill__count">{c.tasks.length}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="board">
         {/* ⚠️ **못 받았는데 빈 칸반을 그리고 있었습니다** (결함 224). 새로
             가입한 사람이 남의 프로젝트 주소를 열면 서버는 403 을 주는데,
@@ -530,6 +481,7 @@ export default function Kanban() {
           columns.map((column) => (
             <section
               key={column.status}
+              id={`col-${column.status}`}
               className={`col${overCol === column.status ? ' col--over' : ''}`}
               aria-label={`${column.label} ${column.tasks.length}건`}
               onDragOver={(e) => {
@@ -549,22 +501,41 @@ export default function Kanban() {
               }}
             >
               <div className="col__head">
-                {column.label} <span className="col__count">{column.tasks.length}</span>
+                <span className="col__head-left">
+                  <span className="col__dot" data-status={column.status} aria-hidden="true" />
+                  <span>{column.label}</span>
+                  <span className="col__count">{column.tasks.length}</span>
+                </span>
+                <button
+                  type="button"
+                  className="col__add-btn"
+                  onClick={() => setShowCreateModal(true)}
+                  title={`${column.label}에 새 업무 추가`}
+                  aria-label={`${column.label}에 새 업무 추가`}
+                >
+                  +
+                </button>
               </div>
               <div className="col__body">
-                {column.tasks.map((task) => (
-                  <Card
-                    key={task.id}
-                    task={task}
-                    statuses={statuses}
-                    people={people}
-                    onMove={move}
-                    onToggleAssignee={toggleAssignee}
-                    onPriority={setPriority}
-                    onEdit={startEdit}
-                    onDelete={remove}
-                  />
-                ))}
+                {column.tasks.length === 0 ? (
+                  <div className="col__empty-drop">
+                    카드를 끌어다 놓으세요
+                  </div>
+                ) : (
+                  column.tasks.map((task) => (
+                    <Card
+                      key={task.id}
+                      task={task}
+                      statuses={statuses}
+                      people={people}
+                      onMove={move}
+                      onToggleAssignee={toggleAssignee}
+                      onPriority={setPriority}
+                      onEdit={startEdit}
+                      onDelete={remove}
+                    />
+                  ))
+                )}
               </div>
             </section>
           ))}
@@ -616,25 +587,20 @@ export default function Kanban() {
                   placeholder="할 일을 입력하세요"
                 />
               </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
                 <span>우선순위</span>
-                <select
-                  className="input"
-                  style={{
-                    padding: '6px 8px',
-                    border: '1px solid var(--c-line)',
-                    borderRadius: 'var(--r-sm)',
-                    background: 'var(--c-surface)',
-                    color: 'var(--c-ink)',
-                  }}
-                  value={newPriority}
-                  onChange={(e) => setNewPriority(Number(e.target.value))}
-                >
-                  <option value={0}>긴급</option>
-                  <option value={1}>보통</option>
-                  <option value={2}>낮음</option>
-                </select>
-              </label>
+                <DiscordSelect
+                  compact
+                  ariaLabel="우선순위"
+                  value={String(newPriority)}
+                  onChange={(val) => setNewPriority(Number(val))}
+                  options={[
+                    { value: '0', label: '긴급' },
+                    { value: '1', label: '보통' },
+                    { value: '2', label: '낮음' },
+                  ]}
+                />
+              </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
                 <span>담당자 (복수 선택 가능)</span>
                 <div

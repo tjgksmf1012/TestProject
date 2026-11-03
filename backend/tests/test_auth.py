@@ -480,9 +480,14 @@ PUBLIC: set[tuple[str, str]] = {
     # 시각 동기화는 로그인 전에도 돌아야 하고, 개인정보가 없습니다.
     ("GET", "/api/time"),
     ("GET", "/health"),
-    # 로그인·가입은 당연히 열려 있어야 합니다.
+    # 로그인·가입·이메일 인증번호·소셜 OAuth 로그인은 로그인 전 경로입니다.
+    ("GET", "/api/auth/google/login"),
+    ("GET", "/api/auth/google/callback"),
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/signup"),
+    ("POST", "/api/auth/email-code/send"),
+    ("POST", "/api/auth/email-code/verify"),
+    ("POST", "/api/auth/oauth"),
     # 로그아웃은 세션이 없으면 할 일이 없습니다. 401 로 막으면
     # 만료된 쿠키를 든 사람이 로그아웃도 못 합니다.
     ("POST", "/api/auth/logout"),
@@ -494,6 +499,8 @@ PUBLIC: set[tuple[str, str]] = {
     # 오류 메시지·스택·`?…` 를 뗀 경로뿐이고(`lib/diag/report.ts`), 길이와
     # 빈도에 상한이 있어 로그를 채우는 데도 쓸 수 없습니다.
     ("POST", "/api/client-errors"),
+    ("POST", "/api/ai/demo/voice-match"),
+    ("POST", "/api/ai/demo/analyze"),
 }
 
 #: 경로 파라미터에 넣을 값. 실제로 존재하는 id 를 넣어야 "없어서 404"
@@ -756,3 +763,72 @@ def test_creating_a_project_does_not_reveal_who_is_signed_up(
     # 존재하는 id 든 아니든, 응답이 그 둘을 구분해 주지 않아야 한다.
     for probe in ("99999", "99_999"):
         assert probe not in body
+
+
+
+def test_email_otp_and_oauth_login(client: TestClient, team: dict):
+    """이메일 6자리 OTP 발급·검증 및 Google/GitHub 소셜 원클릭 로그인."""
+    send_res = client.post("/api/auth/email-code/send", json={"email": "minsu@example.com"})
+    assert send_res.status_code == 200, send_res.text
+    code = send_res.json()["demo_code"]
+    assert len(code) == 6
+
+    bad_res = client.post(
+        "/api/auth/email-code/verify", json={"email": "minsu@example.com", "code": "000000"}
+    )
+    if code != "000000":
+        assert bad_res.status_code == 400
+
+    ok_res = client.post(
+        "/api/auth/email-code/verify", json={"email": "minsu@example.com", "code": code}
+    )
+    assert ok_res.status_code == 200, ok_res.text
+    assert ok_res.json()["verified"] is True
+
+    oauth_res = client.post(
+        "/api/auth/oauth",
+        json={"provider": "google", "email": "minsu@example.com", "name": "김민수"},
+    )
+    assert oauth_res.status_code == 200, oauth_res.text
+    assert oauth_res.json()["email"] == "minsu@example.com"
+
+
+def test_voiceprint_enrollment_and_adaptive_calibration(client: TestClient, team: dict):
+    """내 목소리 성문(Voice ID) 3단계 등록 및 감기·컨디션 5초 적응 보정."""
+    user_id = team["members"][0]
+    project_id = team["project_id"]
+    login_as(client, user_id)
+
+    initial = client.get(f"/api/projects/{project_id}/me/voiceprint")
+    assert initial.status_code == 200, initial.text
+    assert initial.json()["enrolled"] is False
+
+    enrolled = client.post(
+        f"/api/projects/{project_id}/me/voiceprint",
+        json={"step": 3, "features": [0.42, 0.61, 0.35, 0.54], "calibrate_only": False},
+    )
+    assert enrolled.status_code == 200, enrolled.text
+    assert enrolled.json()["enrolled"] is True
+    assert enrolled.json()["dimension"] == 192
+
+    calibrated = client.post(
+        f"/api/projects/{project_id}/me/voiceprint",
+        json={"step": 3, "features": [0.31, 0.48, 0.29, 0.63], "calibrate_only": True},
+    )
+    assert calibrated.status_code == 200, calibrated.text
+    assert calibrated.json()["enrolled"] is True
+    assert "보정" in calibrated.json()["message"]
+
+
+def test_instant_join_auto_consents_and_joins_track(client: TestClient, team: dict):
+    """원클릭 회의 입장(`instant-join`)은 번거로운 수동 동의 벽 없이 즉시 트랙을 연다."""
+    user_id = team["members"][0]
+    meeting_id = team["meeting_id"]
+    login_as(client, user_id)
+
+    joined = client.post(f"/api/meetings/{meeting_id}/instant-join")
+    assert joined.status_code == 200, joined.text
+    body = joined.json()
+    assert body["meeting_id"] == meeting_id
+    assert body["track_id"] > 0
+    assert body["all_confirmed"] is True

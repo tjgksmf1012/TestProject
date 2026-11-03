@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
+import { DiscordSelect } from '../components/SettingsModal.tsx';
 import { Disclosure } from '../components/Disclosure.tsx';
 import {
   useGithubHealth,
@@ -465,28 +466,23 @@ function MembersSection({
               <span className="presence">● {presenceLabel(member.presence)}</span>
             )}
             {canGive.length > 0 && (
-              <label className="member-row__act">
+              <div className="member-row__act" style={{ minWidth: '132px' }}>
                 <span className="vh">{labelInList(member, ordered)} 등급</span>
-                <select
-                  className="input input--sm"
+                <DiscordSelect
+                  compact
+                  ariaLabel={`${labelInList(member, ordered)} 등급`}
                   value={member.project_role}
-                  disabled={changeRole.isPending}
-                  onChange={(e) =>
-                    changeRole.mutate({ userId: member.user_id, role: e.target.value })
+                  onChange={(val) =>
+                    changeRole.mutate({ userId: member.user_id, role: val })
                   }
-                >
-                  {/* 지금 등급이 내가 줄 수 있는 목록 밖일 수 있습니다
-                      (소유자를 관리자가 볼 때) — 그때도 값이 비지 않게 둡니다. */}
-                  {!canGive.includes(member.project_role as (typeof canGive)[number]) && (
-                    <option value={member.project_role}>{roleLabel(member.project_role)}</option>
-                  )}
-                  {canGive.map((r) => (
-                    <option key={r} value={r}>
-                      {roleLabel(r)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  options={[
+                    ...(!canGive.includes(member.project_role as (typeof canGive)[number])
+                      ? [{ value: member.project_role, label: roleLabel(member.project_role) }]
+                      : []),
+                    ...canGive.map((r) => ({ value: r, label: roleLabel(r) })),
+                  ]}
+                />
+              </div>
             )}
             {mayRemove && (
               /* ⛔ **화면에서 제일 약한 것이 제일 위험한 행동이었습니다**

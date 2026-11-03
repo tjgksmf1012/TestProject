@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     # 웹훅 서명 검증용. 없으면 누구나 가짜 이벤트를 주입할 수 있다.
     github_webhook_secret: str | None = None
 
+    # ── Google OAuth 2.0 ──────────────────────────────────
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_redirect_uri: str = "https://teamflow-ai.stream/api/auth/google/callback"
+
     # ── AI ────────────────────────────────────────────────
     hf_token: str | None = None  # pyannote community-1은 gated
 

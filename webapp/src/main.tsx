@@ -18,8 +18,18 @@ import Contributions from './screens/Contributions.tsx';
 import Lobby from './screens/Lobby.tsx';
 import Review from './screens/Review.tsx';
 import Crashed from './screens/Crashed.tsx';
+import AiDemoLab from './screens/AiDemoLab.tsx';
 import { watchForUncaught } from './api/diag.ts';
 import './app.css';
+
+try {
+  const savedTheme = window.localStorage.getItem('tf_theme');
+  if (savedTheme === 'dark' || savedTheme === 'light') {
+    document.documentElement.dataset.theme = savedTheme;
+  }
+} catch {
+  // ignore storage access issues
+}
 
 /**
  * ⛔ **세션이 죽으면 그 사실을 `me` 에 반영합니다** (결함 227).
@@ -139,11 +149,14 @@ function RequireAuth() {
 const router = createBrowserRouter(
   [
     { path: '/login', element: <Login />, errorElement: <Crashed /> },
+    { path: '/demo', element: <AiDemoLab />, errorElement: <Crashed /> },
     {
       element: <RequireAuth />,
       errorElement: <Crashed />,
       children: [
         { path: '/', element: <Home /> },
+        { path: '/demo', element: <AiDemoLab /> },
+        { path: '/project/:projectId/demo', element: <AiDemoLab /> },
         { path: '/project/:projectId/settings/:section', element: <Settings /> },
         { path: '/project/:projectId/settings', element: <Navigate to="role" replace /> },
         { path: '/project/:projectId/kanban', element: <Kanban /> },

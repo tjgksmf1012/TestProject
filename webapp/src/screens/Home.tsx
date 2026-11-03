@@ -2,8 +2,8 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { AppShell } from '../components/AppShell.tsx';
-import { TrackRibbon, type RibbonSegment } from '../components/TrackRibbon.tsx';
+import { AppShell, triggerInstantCall } from '../components/AppShell.tsx';
+import { TrackRibbon } from '../components/TrackRibbon.tsx';
 import { StatusChip } from '../components/StatusChip.tsx';
 import { Why } from '../components/Why.tsx';
 import {
@@ -50,15 +50,6 @@ import { meetingLabel } from '@lib/ui/naming.ts';
 import { plainText } from '@lib/ui/plain.ts';
 import { Problem } from '../components/Problem.tsx';
 
-// 홈 — "다음에 뭘 해야 하는가" 에 대한 답 (지시서 기타-6 §홈).
-//
-// ⚠️ **상태별 묶음을 걷어냈습니다** (v2 F4). 회의 다섯에 그룹이 다섯이면
-// 그건 묶음이 아니라 머리말 다섯이고, 목록 높이의 절반을 머리말이 먹었습니다.
-// 게다가 그룹 순서가 상태 순서라 날짜가 뒤죽박죽이 되어 시간 감각이
-// 사라졌습니다. 이제 **사람을 기다리는 것(검토 필요)만** 위로 올리고,
-// 나머지는 최근 것부터 한 덩어리입니다. 가르는 판단은 `@lib` 에 있습니다.
-
-/** lib 의 MPA 주소를 SPA 라우트로. 판단(어디로·왜)은 lib 에 있습니다. */
 function spaHref(href: string, projectId: number): string {
   const meeting = /meeting=(\d+)/.exec(href)?.[1];
   if (href.startsWith('/lobby.html') && meeting) return `/meeting/${meeting}/lobby`;
@@ -67,27 +58,6 @@ function spaHref(href: string, projectId: number): string {
   return '/';
 }
 
-/* ⛔ 여기서 `new Date(iso).getMonth()` 로 그리고 있었습니다 — **브라우저
-   달력**입니다. 같은 회의를 서울 사람은 09-02 로, 뉴욕 사람은 09-01 로
-   봅니다. 마감일·달력은 팀 달력이라 한 화면에 달력이 둘이었습니다
-   (결함 246). 판단은 `@lib`. */
-/* ⚠️ 예전에는 `shortTeamDate(meeting.started_at)` 이었습니다 (결함 287).
-   잡아만 둔 회의는 `started_at` 이 없어 「—」가 떴고, 레거시 홈은 아예
-   **브라우저 달력**으로 다른 날을 그렸습니다. 「이 회의는 언제인가」는
-   `@lib` 한 벌(`describeMeetingWhen`)이 답합니다. */
-
-/**
- * 회의 한 줄.
- *
- * 칸은 여섯이고 **폭이 고정**입니다 (v2 F6) —
- * `[상태 120] [제목 1fr] [날짜 100] [레인 260] [수치 60] [액션 140]`.
- * 예전에는 설명 텍스트가 x=1264 까지 뻗어 버튼 열을 침범했고, 버튼 우측
- * 끝이 행마다 1264~1268px 로 제각각이라 세로로 훑을 수가 없었습니다.
- *
- * `waiting` 이면 상태 칸을 **비웁니다** — 「검토 필요」 덩어리 안에서는
- * 머리말이 이미 그 말을 했습니다. 칸 자체는 남으므로 두 덩어리의 액션 열
- * 우측 끝은 같은 x 에 섭니다.
- */
 function MeetingRow({
   meeting,
   projectId,
@@ -95,22 +65,9 @@ function MeetingRow({
 }: {
   meeting: MeetingSummary;
   projectId: number;
-  /**
-   * 이 줄이 「검토 필요」 덩어리 안에 있는가 = **지금 사람을 기다리는가.**
-   * 참이면 상태 칸을 비우고(머리말이 이미 말했습니다) 버튼을 primary 로.
-   */
   waiting: boolean;
 }) {
   const step = nextStepFor({ ...meeting, title: meeting.title }, projectId);
-
-  // ⚠️ 예전에는 **줄마다** `GET /api/meetings/{id}/tracks` 를 불렀습니다.
-  //    회의 다섯짜리 시연 데이터로 홈 한 번에 요청 7건이었고(재서 확인),
-  //    회의 서른인 팀이면 33건입니다 — 브라우저는 호스트당 여섯 개씩만
-  //    동시에 여니 나머지는 줄을 섭니다. 목록이 길수록 홈이 느려지는
-  //    구조였습니다.
-  //
-  //    이제 목록 응답이 `coverage` 를 함께 줍니다. **`null` 은 0 이 아니라
-  //    "못 쟀다" 입니다** — `hasLane` 이 그때 레인을 안 그립니다.
   const coverage = meeting.coverage;
 
   return (
@@ -118,11 +75,6 @@ function MeetingRow({
       <span className="mrow__status">{!waiting && <StatusChip status={meeting.status} />}</span>
       <span className="mrow__title">{meetingLabel(meeting.title, meeting.meeting_id)}</span>
       <span className="mrow__date num">{describeMeetingWhen(meeting)}</span>
-      {/* ⚠️ **잴 게 없으면 레인을 안 그립니다** (v2 F3). 예전에는 회의
-          다섯 중 넷이 빈 회색 막대였고, 값 없는 요소가 목록의 시각적
-          무게중심을 차지했습니다. 레인은 "아는 것 / 모르는 것" 을 말하는
-          문법인데, 잴 게 없을 때 빈 막대를 그리면 그 문법이 무너집니다.
-          이 줄의 상태는 상태 칸이 이미 말하고 있습니다. */}
       <span className="mrow__ribbon">
         {hasLane(coverage) && (
           <TrackRibbon
@@ -138,35 +90,11 @@ function MeetingRow({
           />
         )}
       </span>
-      {/* ⭐ **축에 이름을 붙입니다** (결함 336). 예전에는 `80%` 뿐이라
-          `aria-label` 만 「녹음 커버리지」를 알고 있었고, 「처리 중」·
-          「검토 필요」가 적힌 줄들 사이에서 그 막대는 **처리 진행률**로
-          읽혔습니다. 형제 자리인 기여도는 이미 `ribbonReading()` 으로
-          「확신 45% · 모름 55%」를 눈에도 적고 있었습니다. */}
       <span className="mrow__cov num">
         {hasLane(coverage) ? coverageReading(coverage as number) : ''}
       </span>
-      {/* ⭐ **이유는 `?` 아래에 둡니다 — `title` 이 아니라** (결함 406).
-          `docs/22` 의 처방 ③ 이 「문장을 지우지 않고 `?` 한 겹 아래로
-          (`Why`)」이고, 같은 문서가 `Why` 를 WCAG 1.4.13 세 조건으로 재
-          두었습니다(ESC 로 닫힘 · 위로 옮겨도 안 사라짐 · 2.5초 뒤에도
-          떠 있음 · **키보드로도 열림**).
-
-          그런데 이 화면만 그 문장을 `title=` 에 넣고 있었습니다 — 다섯
-          줄 전부. 렌더해서 재니 본문에 그 문장이 **0곳**, 홈의 `Why` 도
-          **0개**, 링크에 `aria-label`·`aria-describedby` 도 없어서
-          **마우스를 쓰는 사람에게만** 보였습니다. 같은 사실을 레거시 홈은
-          눈에 보이는 글로 적고 있습니다(결함 290). SPA 의 다른 화면 넷은
-          이미 `Why` 를 열 곳에서 씁니다 — 여기만 예외였습니다. */}
       <span className="mrow__action">
         {step.href !== null ? (
-          /* ⚠️ **primary 는 「검토 필요」 줄에만** (v2 F9). 예전에는
-             `actionable` 인 줄이 전부 인디고라 한 화면에 primary 가 셋이었고,
-             셋이 다 강조면 아무것도 강조가 아닙니다.
-
-             ⛔ 그런데 그 규칙을 화면이 직접 적었더니 `waiting` 이 `actionable`
-             **위로 올라갔습니다** — 후보 0건인 회의의 「칸반 보기」가 화면에서
-             제일 센 버튼이었습니다 (결함 252). 이제 `@lib` 이 정합니다. */
           <Link
             className={`btn btn--sm btn--${emphasisFor(step, waiting)}`}
             to={spaHref(step.href, projectId)}
@@ -174,9 +102,6 @@ function MeetingRow({
             {step.label}
           </Link>
         ) : (
-          /* 갈 곳이 없는 상태(처리 중)입니다. 자리는 비워 두지 않고
-             `—` 로 예약합니다 — 행마다 우측 끝이 어긋나면 세로 스캔이
-             죽습니다. */
           <span className="mrow__none">—</span>
         )}
         <Why
@@ -189,7 +114,7 @@ function MeetingRow({
   );
 }
 
-/** 프로젝트 현황 판 — 진행률, 부하, 감지된 위험 신호 (불변식: 순위표/막대 금지) */
+/** 프로젝트 현황 판 — 장황한 설명문은 `?` 팝오버와 접힘 메뉴로 숨기고 핵심 지표만 깔끔한 카드로 표시 */
 function ProjectHealthPane({
   projectId,
   analytics,
@@ -202,98 +127,73 @@ function ProjectHealthPane({
   const late = overdueText(analytics.progress);
 
   return (
-    <section className="pane pane--evidence" aria-label="프로젝트 현황">
+    <section className="pane pane--evidence tf-health-pane" aria-label="프로젝트 현황">
       <div className="pane__head">
-        <h2 className="pane__title">프로젝트 현황</h2>
-        <span className="pane__hint">업무 및 신호</span>
+        <h2 className="pane__title">프로젝트 요약</h2>
+        <span className="pane__hint">실시간 지표</span>
       </div>
-      <div className="pane__body">
-        <div style={{ marginBottom: 'var(--sp-5)' }}>
-          <h3 style={{ fontSize: 'var(--fs-13)', fontWeight: 'var(--fw-semibold)', margin: '0 0 var(--sp-2)' }}>
-            업무 진행률
-          </h3>
-          <p style={{ margin: '0 0 var(--sp-1)', fontSize: 'var(--fs-14)', fontWeight: 'var(--fw-medium)' }}>
+      <div className="pane__body tf-health-body">
+        {/* 1. 업무 진행률 카드 */}
+        <div className="tf-health-card">
+          <div className="tf-health-card__hdr">
+            <h3 className="tf-health-card__title">업무 진행률</h3>
+            <Why about="업무 진행률 집계 기준" lines={[PROGRESS_NOTE]} countsAs="안내" />
+          </div>
+          <div className="tf-health-card__metric num">
             {progressText(analytics.progress)}
-          </p>
-          <p style={{ margin: 0, fontSize: 'var(--fs-11)', color: 'var(--c-ink-faint)' }}>
-            {PROGRESS_NOTE}
-          </p>
+          </div>
           {late !== null && (
-            <p style={{ margin: 'var(--sp-2) 0 0', fontSize: 'var(--fs-12)', color: 'var(--c-gap)' }}>
-              ⚠️ {late}
-            </p>
+            <div className="tf-late-pill">
+              <span aria-hidden="true">⚠</span> {late}
+            </div>
           )}
         </div>
 
-        <div style={{ marginBottom: 'var(--sp-5)' }}>
-          <h3 style={{ fontSize: 'var(--fs-13)', fontWeight: 'var(--fw-semibold)', margin: '0 0 var(--sp-1)' }}>
-            현재 맡은 업무
-          </h3>
-          <p style={{ margin: '0 0 var(--sp-2)', fontSize: 'var(--fs-11)', color: 'var(--c-ink-faint)' }}>
-            {plainText(LOAD_NOTE)}
-          </p>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+        {/* 2. 담당 업무 현황 (2열 컴팩트 그리드) */}
+        <div className="tf-health-card">
+          <div className="tf-health-card__hdr">
+            <h3 className="tf-health-card__title">담당 중인 업무</h3>
+            <Why about="담당 업무 수 안내" lines={[plainText(LOAD_NOTE)]} countsAs="안내" />
+          </div>
+          <ul className="tf-load-grid">
             {analytics.load.map((row) => (
-              <li
-                key={row.user_id ?? 'none'}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  fontSize: 'var(--fs-13)',
-                  padding: 'var(--sp-2) var(--sp-3)',
-                  background: 'var(--c-surface)',
-                  borderRadius: 'var(--radius-sm)',
-                }}
-              >
-                <span>{row.name}</span>
-                <span className="num" style={{ fontWeight: 'var(--fw-semibold)' }}>{row.open_tasks}건</span>
+              <li key={row.user_id ?? 'none'} className="tf-load-chip">
+                <span className="tf-load-chip__name">{row.name}</span>
+                <span className="tf-load-chip__val num">{row.open_tasks}건</span>
               </li>
             ))}
           </ul>
         </div>
 
-        <div>
-          <h3 style={{ fontSize: 'var(--fs-13)', fontWeight: 'var(--fw-semibold)', margin: '0 0 var(--sp-1)' }}>
-            감지된 신호
-          </h3>
+        {/* 3. 감지된 신호 */}
+        <div className="tf-health-card">
+          <div className="tf-health-card__hdr">
+            <h3 className="tf-health-card__title">감지된 신호</h3>
+          </div>
           {views.length === 0 ? (
-            <p style={{ margin: 0, fontSize: 'var(--fs-12)', color: 'var(--c-ink-faint)' }}>
-              {NOTHING_FOUND}
-            </p>
+            <p className="t12 muted">{NOTHING_FOUND}</p>
           ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+            <ul className="tf-signal-list">
               {views.map((v) => (
-                <li
-                  key={v.kind}
-                  style={{
-                    padding: 'var(--sp-3)',
-                    background: 'var(--c-surface)',
-                    border: '1px solid var(--c-line)',
-                    borderRadius: 'var(--radius-sm)',
-                  }}
-                >
-                  <div style={{ fontWeight: 'var(--fw-semibold)', fontSize: 'var(--fs-13)', marginBottom: 'var(--sp-1)' }}>
-                    {v.title}
-                  </div>
+                <li key={v.kind} className="tf-signal-item">
+                  <div className="tf-signal-item__title">{v.title}</div>
                   {v.reason !== null && (
-                    <div style={{ fontSize: 'var(--fs-12)', color: 'var(--c-ink-muted)', marginBottom: 'var(--sp-2)' }}>
-                      {v.reason}
-                    </div>
+                    <div className="tf-signal-item__reason">{v.reason}</div>
                   )}
                   {v.taskIds.length > 0 && (
-                    <div style={{ fontSize: 'var(--fs-11)', color: 'var(--c-ink-faint)', display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
-                      <span>관련:</span>
+                    <div className="tf-signal-item__links">
                       {v.taskIds.slice(0, 5).map((tid) => (
                         <Link
                           key={tid}
+                          className="chip chip--evidence"
                           to={`/project/${projectId}/kanban`}
-                          style={{ color: 'var(--c-brand)', textDecoration: 'underline' }}
                         >
                           #{tid}
                         </Link>
                       ))}
-                      {v.taskIds.length > 5 && <span>외 {v.taskIds.length - 5}건</span>}
+                      {v.taskIds.length > 5 && (
+                        <span className="t12 muted">+{v.taskIds.length - 5}</span>
+                      )}
                     </div>
                   )}
                 </li>
@@ -302,57 +202,40 @@ function ProjectHealthPane({
           )}
         </div>
 
-        <div style={{ marginTop: 'var(--sp-5)' }}>
-          <h3 style={{ fontSize: 'var(--fs-13)', fontWeight: 'var(--fw-semibold)', margin: '0 0 var(--sp-1)' }}>
-            회의에서 눈에 띈 것의 추세
-          </h3>
-          <p style={{ margin: '0 0 var(--sp-2)', fontSize: 'var(--fs-11)', color: 'var(--c-ink-faint)' }}>
-            {TRENDS_NOTE}
-          </p>
-          {!analytics.meeting_trends.measurable ? (
-            <p style={{ margin: 0, fontSize: 'var(--fs-12)', color: 'var(--c-gap)' }}>
-              {notMeasurableText(analytics.meeting_trends)}
-            </p>
-          ) : allQuiet(analytics.meeting_trends.kinds) ? (
-            <p style={{ margin: 0, fontSize: 'var(--fs-12)', color: 'var(--c-ink-faint)' }}>
-              {QUIET_TEXT}
-            </p>
-          ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-              {analytics.meeting_trends.kinds.map((kind) => (
-                <li
-                  key={kind.kind}
-                  style={{
-                    fontSize: 'var(--fs-12)',
-                    padding: 'var(--sp-2) var(--sp-3)',
-                    background: 'var(--c-surface)',
-                    borderRadius: 'var(--radius-sm)',
-                  }}
-                >
-                  {trendLine(kind)}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        {/* 4. 회의 품질 추세 (기본 접힘 처리로 화면 난잡함 방지) */}
+        <details className="disc tf-trend-disc">
+          <summary>
+            <span>회의 추세 분석 요약</span>
+            <Why about="회의 추세 비교 방식" lines={[TRENDS_NOTE]} countsAs="안내" />
+          </summary>
+          <div className="disc__body">
+            {!analytics.meeting_trends.measurable ? (
+              <p className="t12 gap">{notMeasurableText(analytics.meeting_trends)}</p>
+            ) : allQuiet(analytics.meeting_trends.kinds) ? (
+              <p className="t12 muted">{QUIET_TEXT}</p>
+            ) : (
+              <ul className="tf-trend-list">
+                {analytics.meeting_trends.kinds.map((kind) => (
+                  <li key={kind.kind} className="tf-trend-item">
+                    {trendLine(kind)}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
       </div>
     </section>
   );
 }
 
-/** 프로젝트 만들기/참가 — 상시 노출할 이유가 없어 헤더 뒤 대화 상자로. */
 function StartDialog({
   focus,
   onClose,
   onClosed,
 }: {
-  /** `null` 이면 닫힌 상태. ⚠️ **닫혔다고 이 컴포넌트를 떼지 마십시오** —
-      Radix 가 닫을 때 「열기 전에 초점이 있던 곳」으로 되돌리는데, 같은
-      순간에 통째로 떼면 그 일이 못 끝나고 초점이 `body` 로 떨어집니다
-      (결함 280). 여는 것과 닫는 것은 `open` 하나로만 말합니다. */
   focus: 'create' | 'join' | null;
   onClose: () => void;
-  /** 닫히고 나서 초점을 어디로 돌려놓을 것인가. */
   onClosed: () => void;
 }) {
   const navigate = useNavigate();
@@ -362,29 +245,12 @@ function StartDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  /**
-   * 만들었으면 **거기로 데려갑니다.**
-   *
-   * ⚠️ 예전에는 `navigate(0)` — 즉 **문서 전체 새로고침**이었습니다.
-   *    재 봤더니 3.5초 동안 `/app/` · `index-*.js` · `index-*.css` 를 다시
-   *    받으며 앱이 통째로 재부팅됐고, 그러고 나서도 홈은 **첫 번째
-   *    프로젝트**를 보여 줬습니다 — 방금 만든 것이 아니라.
-   *
-   *    TanStack Query 가 이미 `['projects']` 를 들고 있으므로 무효화 한
-   *    줄이면 됩니다. 그리고 주소로 어느 프로젝트인지 말합니다.
-   */
   const land = async (projectId: number) => {
     await queryClient.invalidateQueries({ queryKey: ['projects'] });
     navigate(`/?project=${projectId}`);
     onClose();
   };
 
-  /* ⚠️ **`useMutation` 을 거칩니다** (결함 426). 예전에는 여기서
-     `api.post(...)` 를 직접 불렀고, 그러면 `main.tsx` 의
-     `mutationCache.onError` 를 **안 거칩니다** — 세션이 죽은 채 누르면
-     대화상자가 「로그인이 필요합니다」라고 말하는데 **로그인으로 가는
-     자리가 없습니다**(결함 227 이 고친 그 병). 실패를 한 자리에서 받는다는
-     결정은 그 한 자리를 지나갈 때만 참입니다. */
   const createProject = useCreateProject();
   const joinProject = useJoinProject();
 
@@ -419,19 +285,6 @@ function StartDialog({
     }
   };
 
-  /* ⛔ **손으로 만든 `role="dialog"` 였습니다** (결함 280).
-     `aria-modal="true"` 라고 적어 두면 낭독기는 뒤쪽을 안 읽지만,
-     **키보드는 그 말을 안 듣습니다.** 재현했습니다 —
-
-       · Escape 를 눌러도 **안 닫혔습니다** (듣는 곳이 없었습니다)
-       · 안에서 Tab 을 누르면 **뒤쪽 화면**으로 새어 나갔고, 그 자리는
-         `dialog-backdrop` 에 **가려져 눈에 안 보입니다.** 거기서 Enter 를
-         눌렀더니 `/app/meeting/6/lobby` 로 **가 버렸습니다** — 사람은
-         왜 회의 로비에 와 있는지 모릅니다
-
-     `@radix-ui/react-dialog` 는 **이미 의존성에 있었고 아무도 안 썼습니다**
-     (대표 실패 ①). 초점 가두기·Escape·닫은 뒤 초점 되돌리기가 전부 거기
-     들어 있습니다. 손으로 다시 짜지 않습니다. */
   return (
     <Dialog.Root
       open={focus !== null}
@@ -444,50 +297,47 @@ function StartDialog({
         <Dialog.Content
           className="dialog"
           aria-label="프로젝트 시작하기"
-          /* ⚠️ Radix 의 기본 되돌리기는 이 화면에서 `body` 로 떨어졌습니다 —
-             손잡이가 `Dialog.Trigger` 가 아니라 따로 선 단추 셋이라서.
-             어디로 돌아갈지 **부르는 쪽이** 압니다. */
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             onClosed();
           }}
         >
-        <Dialog.Title className="sec__title">프로젝트 시작하기</Dialog.Title>
-        <label className="field">
-          <span className="field__label">새 프로젝트 이름</span>
-          <div className="sec__row">
-            <input
-              className="input"
-              autoFocus={focus === 'create'}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-            <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void create()}>
-              만들기
+          <Dialog.Title className="sec__title">프로젝트 시작하기</Dialog.Title>
+          <label className="field">
+            <span className="field__label">새 프로젝트 이름</span>
+            <div className="sec__row">
+              <input
+                className="input"
+                autoFocus={focus === 'create'}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+              <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void create()}>
+                만들기
+              </button>
+            </div>
+          </label>
+          <label className="field">
+            <span className="field__label">또는 초대 코드로 참가</span>
+            <div className="sec__row">
+              <input
+                className="input input--num"
+                placeholder="ABCD-EFGH"
+                autoFocus={focus === 'join'}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+              />
+              <button type="button" className="btn btn--secondary" disabled={busy} onClick={() => void join()}>
+                참가
+              </button>
+            </div>
+          </label>
+          <Problem>{error}</Problem>
+          <Dialog.Close asChild>
+            <button type="button" className="btn btn--ghost btn--sm">
+              닫기
             </button>
-          </div>
-        </label>
-        <label className="field">
-          <span className="field__label">또는 초대 코드로 참가</span>
-          <div className="sec__row">
-            <input
-              className="input input--num"
-              placeholder="ABCD-EFGH"
-              autoFocus={focus === 'join'}
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-            />
-            <button type="button" className="btn btn--secondary" disabled={busy} onClick={() => void join()}>
-              참가
-            </button>
-          </div>
-        </label>
-        <Problem>{error}</Problem>
-        <Dialog.Close asChild>
-          <button type="button" className="btn btn--ghost btn--sm">
-            닫기
-          </button>
-        </Dialog.Close>
+          </Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -498,9 +348,6 @@ export default function Home() {
   const navigate = useNavigate();
   const { search } = useLocation();
   const projectsQuery = useProjects();
-  // ⭐ **주소가 어느 프로젝트인지 말합니다** (`?project=`). 없으면 예전처럼
-  //    할 일이 있는 것부터. 판단은 `@lib/home/next.ts` 에 있습니다 —
-  //    "내 목록에 없는 id 는 조용히 첫 번째로" 까지 거기서 정합니다.
   const project = useMemo(
     () => homeProject(projectsQuery.data ?? [], requestedProjectId(search)),
     [projectsQuery.data, search],
@@ -508,12 +355,7 @@ export default function Home() {
   const meetings = useMeetings(project?.project_id);
   const analytics = useAnalytics(project?.project_id);
   const m = useSettingsMutations(project?.project_id);
-  /* 어느 손잡이로 열었는가 (결함 270). 참가하러 온 사람은 **참가 칸에
-     초점이 앉은 채** 시작해야 합니다 — 문이 하나뿐이라 이름만 다릅니다. */
   const [starting, setStarting] = useState<'create' | 'join' | null>(null);
-  /* 닫은 뒤 초점을 **열었던 단추로** 돌려놓습니다 (결함 280). 안 그러면
-     Escape 를 누른 사람이 `body` 에 떨어져, Tab 을 처음부터 다시 밟아야
-     합니다. 손잡이가 셋이라 어느 것으로 열었는지 기억해 둡니다. */
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const start =
     (which: 'create' | 'join') => (event: MouseEvent<HTMLButtonElement>) => {
@@ -521,15 +363,10 @@ export default function Home() {
       setStarting(which);
     };
 
-  // 가르는 판단은 `@lib` 에 있습니다 — 화면은 그리기만.
   const sections = useMemo(() => sectionMeetings(meetings.data ?? []), [meetings.data]);
 
   return (
     <AppShell
-      /* ⚠️ 이 줄이 없으면 레일의 「지금 보는 프로젝트」 표시가 **거짓말을
-         합니다.** 홈 주소에는 `:projectId` 가 없어서 셸이 목록 첫 번째로
-         떨어지고, `?project=2` 를 보고 있는데 1번에 표시가 붙습니다.
-         렌더해서 잡았습니다 — 코드만 봤을 때는 안 보였습니다. */
       projectId={project?.project_id}
       title={project?.title ?? '홈'}
       meta={
@@ -555,19 +392,13 @@ export default function Home() {
       }
       actions={
         <div className="appbar__actions">
-          {/* v2 F9 — 화면당 primary 는 하나. 주된 행동은 `회의 열기` 입니다. */}
-          <button type="button" className="btn btn--ghost" onClick={start('create')}>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={start('create')}>
             + 새 프로젝트
           </button>
-          <button type="button" className="btn btn--ghost" onClick={start('join')}>
-            초대 코드로 참가
+          <button type="button" className="btn btn--ghost btn--sm" onClick={start('join')}>
+            초대 코드
           </button>
           {project !== undefined && (
-            /* ⚠️ 사람을 기다리는 회의가 있으면 **그 줄의 버튼이 primary**
-               이고 이 버튼은 양보합니다 (v2 F9). 지금 해야 할 일이 검토인데
-               `회의 열기` 가 같이 인디고면 어느 쪽이 먼저인지 화면이 말해
-               주지 않습니다. 검토할 게 없으면 새 회의를 여는 것이 다음
-               행동이므로 이 버튼이 primary 로 돌아옵니다. */
             <button
               type="button"
               className={`btn ${sections.needsReview.length > 0 ? 'btn--secondary' : 'btn--primary'}`}
@@ -585,15 +416,85 @@ export default function Home() {
       }
     >
       <div className="panes">
-        <section className="pane" style={project !== undefined ? { flex: '1 1 65%' } : undefined}>
+        <section className="pane" style={project !== undefined ? { flex: '1 1 68%' } : undefined}>
           <div className="pane__body">
-            {/* ⛔ **참가하러 온 사람에게 참가할 자리를 안 줬습니다**
-                (결함 270). 초대 코드로 막 들어온 사람이 되어 보니, 가입
-                직후 이 화면에서 누를 수 있는 것이 넷이고 **입력칸은
-                0개**였습니다. 참가 칸은 「+ 새 프로젝트」 **안**에 있는데
-                그 단추 이름은 만드는 쪽만 말합니다.
-                문구는 `@lib` 한 벌을 쓰고(예전에는 여기 따로 적혀
-                있었습니다 — 실패 ②), 참가라는 **이름의 손잡이**를 답니다. */}
+            {/* 상단 워크스페이스 퀵 액션 벤토 카드 */}
+            {project !== undefined && (
+              <div className="tf-home-bento">
+                <div className="tf-bento-card tf-bento-card--call">
+                  <div className="tf-bento-card__top">
+                    <span className="tf-bento-icon tf-bento-icon--green">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <polygon points="23 7 16 12 23 17 23 7" />
+                        <rect x="1" y="5" width="15" height="14" rx="2" />
+                      </svg>
+                    </span>
+                    <span className="tf-bento-badge">실시간 회의</span>
+                  </div>
+                  <div className="tf-bento-card__title">화상 회의실</div>
+                  <div className="tf-bento-card__sub">
+                    카메라·마이크 상태를 확인하고 화면 공유 및 회의를 시작합니다
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn--primary btn--sm tf-bento-btn"
+                    onClick={() => triggerInstantCall(false)}
+                  >
+                    회의실 열기
+                  </button>
+                </div>
+
+                <div className="tf-bento-card">
+                  <div className="tf-bento-card__top">
+                    <span className="tf-bento-icon">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <rect x="3" y="4" width="5" height="16" rx="1" />
+                        <rect x="10" y="4" width="5" height="11" rx="1" />
+                        <rect x="17" y="4" width="4" height="14" rx="1" />
+                      </svg>
+                    </span>
+                    <span className="tf-bento-badge num">
+                      {analytics.data ? progressText(analytics.data.progress) : '업무 보드'}
+                    </span>
+                  </div>
+                  <div className="tf-bento-card__title">칸반 보드</div>
+                  <div className="tf-bento-card__sub">
+                    할 일 배정, 진행 상태, GitHub PR 연결 내역을 관리합니다
+                  </div>
+                  <Link
+                    className="btn btn--secondary btn--sm tf-bento-btn"
+                    to={`/project/${project.project_id}/kanban`}
+                  >
+                    칸반 보드 열기 →
+                  </Link>
+                </div>
+
+                <div className="tf-bento-card">
+                  <div className="tf-bento-card__top">
+                    <span className="tf-bento-icon">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M4 6h16M4 12h16M4 18h16" />
+                        <circle cx="9" cy="6" r="2" fill="currentColor" />
+                        <circle cx="14" cy="12" r="2" fill="currentColor" />
+                        <circle cx="11" cy="18" r="2" fill="currentColor" />
+                      </svg>
+                    </span>
+                    <span className="tf-bento-badge">활동 요약</span>
+                  </div>
+                  <div className="tf-bento-card__title">팀원별 기여도</div>
+                  <div className="tf-bento-card__sub">
+                    회의 참여, 업무 완료, 코드 기여 내역을 한눈에 확인합니다
+                  </div>
+                  <Link
+                    className="btn btn--secondary btn--sm tf-bento-btn"
+                    to={`/project/${project.project_id}/contributions`}
+                  >
+                    기여도 보기 →
+                  </Link>
+                </div>
+              </div>
+            )}
+
             {projectsQuery.isSuccess && project === undefined && (
               <div className="empty">
                 <p style={{ margin: 0 }}>{emptyProjectsMessage()}</p>
@@ -624,16 +525,9 @@ export default function Home() {
 
             {(projectsQuery.data?.length ?? 0) >= 2 && (
               <div style={{ marginBottom: 'var(--sp-5)' }}>
-                <details
-                  className="disc"
-                  style={{
-                    padding: 'var(--sp-2) var(--sp-3)',
-                    background: 'var(--c-surface-sunken)',
-                    borderRadius: 'var(--r-md)',
-                  }}
-                >
-                  <summary style={{ cursor: 'pointer', fontWeight: 'var(--fw-medium)', fontSize: 'var(--fs-13)' }}>
-                    전체 프로젝트 현황 ({projectsQuery.data!.length}개 · 가나다순)
+                <details className="disc tf-proj-disc">
+                  <summary>
+                    전체 프로젝트 전환 ({projectsQuery.data!.length}개 · 가나다순)
                   </summary>
                   <div className="sec__list" style={{ marginTop: 'var(--sp-3)' }}>
                     {[...projectsQuery.data!]
@@ -660,8 +554,7 @@ export default function Home() {
                 </details>
               </div>
             )}
-            {/* 사람을 기다리는 것만 따로. 머리말은 **여기 한 번**뿐이고,
-                이 덩어리의 줄들은 상태 칸을 비웁니다. */}
+
             {sections.needsReview.length > 0 && (
               <section className="mgroup">
                 <h2 className="mgroup__title">
@@ -678,11 +571,10 @@ export default function Home() {
                 ))}
               </section>
             )}
-            {/* 나머지는 묶지 않고 최근 것부터. 상태는 줄마다 자기 칸에서
-                말합니다 — 그룹 머리말 다섯 개가 목록의 절반을 먹던 것을
-                걷어낸 자리입니다. */}
+
             {sections.rest.length > 0 && (
               <section className="mgroup mgroup--flat">
+                <div className="tf-section-subhdr">최근 회의 목록</div>
                 {sections.rest.map((meeting) => (
                   <MeetingRow
                     key={meeting.meeting_id}
@@ -693,8 +585,7 @@ export default function Home() {
                 ))}
               </section>
             )}
-            {/* ⛔ 서버가 준 글자를 그대로 붙이고 있었습니다 (결함 283) —
-                위 기여도 화면과 같은 자리입니다. 문구는 `@lib` 한 벌. */}
+
             {m.openMeeting.isError && (
               <Problem>
                 {describeActionFailure(

@@ -667,13 +667,20 @@ export default function Review() {
                       {row.view.overlap && ' · 동시 발화'}
                       {editingSpeakerUtteranceId === row.view.id ? (
                         <span style={{ marginLeft: 'var(--sp-2)', display: 'inline-flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
-                          <select
-                            className="input input--sm"
-                            aria-label="화자 선택"
-                            defaultValue={members.find((m) => m.name === row.view.speaker)?.user_id ?? ''}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              const newSpeakerId = val === '' ? null : Number(val);
+                          <Picker
+                            ariaLabel="화자 선택"
+                            emptyLabel="화자 미확정"
+                            value={
+                              members.find((m) => m.name === row.view.speaker)?.user_id !== undefined
+                                ? String(members.find((m) => m.name === row.view.speaker)?.user_id)
+                                : null
+                            }
+                            options={members.map((m) => ({
+                              value: String(m.user_id),
+                              label: labelInList(m, members),
+                            }))}
+                            onChange={(val) => {
+                              const newSpeakerId = val === null ? null : Number(val);
                               utteranceMutations.reassignSpeaker.mutate(
                                 { utteranceId: row.view.id, speakerId: newSpeakerId },
                                 {
@@ -691,14 +698,7 @@ export default function Review() {
                                 },
                               );
                             }}
-                          >
-                            <option value="">화자 미확정</option>
-                            {members.map((m) => (
-                              <option key={m.user_id} value={m.user_id}>
-                                {labelInList(m, members)}
-                              </option>
-                            ))}
-                          </select>
+                          />
                           <button
                             type="button"
                             className="btn btn--ghost btn--sm"

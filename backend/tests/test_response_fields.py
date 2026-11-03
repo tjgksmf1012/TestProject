@@ -68,10 +68,6 @@ UNREAD_FIELDS: dict[str, str] = {
         "0..40 을 건너뛰면 **새로 녹음한 소리 41개를 버립니다**」라며 "
         "**같은 세션에서만** 건너뛰도록 못 박고 있습니다"
     ),
-    "UtteranceOut.speaker_id": (
-        "화면은 번호가 아니라 **이름**을 그립니다(결함 293·297)"
-    ),
-    "MeOut.email": "화면이 이메일을 어디에도 안 그립니다",
     "TaskGithubOut.event_id": (
         "서버가 `github/presenting.py` 로 사람이 읽을 라벨을 만들어 "
         "내려보냅니다(결함 347) — 번호는 화면이 쓸 일이 없습니다"

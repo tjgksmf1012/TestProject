@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="TeamFlow">
+  <!--
+    회의(위의 점 셋) → 하나로 모이는 흐름(가운데) → 갈라져 나가는 업무(아래).
+    이 앱이 하는 일이 그것입니다. 아이콘 파일을 따로 만들지 않고 SVG 하나로
+    두는 이유는 이 프로젝트에 이미지 편집 도구가 없기 때문입니다 —
+    `scripts/make_icons.py` 가 이걸 PNG 로 굽습니다.
+  -->
+  <rect width="512" height="512" rx="112" fill="#2563eb"/>
+  <g fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M136 150 L256 214 L376 150"/>
+    <path d="M256 214 L256 300"/>
+    <path d="M156 384 L156 336 L356 336 L356 384"/>
+    <path d="M256 300 L256 336"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="136" cy="150" r="34"/>
+    <circle cx="256" cy="150" r="34"/>
+    <circle cx="376" cy="150" r="34"/>
+    <rect x="122" y="384" width="68" height="46" rx="12"/>
+    <rect x="222" y="384" width="68" height="46" rx="12"/>
+    <rect x="322" y="384" width="68" height="46" rx="12"/>
+  </g>
+</svg>
