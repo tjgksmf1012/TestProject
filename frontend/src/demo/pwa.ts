@@ -111,6 +111,16 @@ addEventListener('beforeinstallprompt', (event) => {
 
 /** 모든 화면이 부르는 것. `nav.ts` 와 짝입니다. */
 export function bootApp(): void {
+  if (window.self !== window.top && new URLSearchParams(location.search).get('embedded') === '1') {
+    document.documentElement.dataset.embedded = 'true';
+    // 도구 안의 링크가 장치 화면을 덮어쓰지 않도록 별도 창에서 엽니다.
+    document.addEventListener('click', (event) => {
+      const anchor = event.target instanceof Element ? event.target.closest('a') : null;
+      if (anchor && !anchor.target && !anchor.getAttribute('href')?.startsWith('#')) {
+        anchor.target = '_blank'; anchor.rel = 'noopener noreferrer';
+      }
+    });
+  }
   registerServiceWorker();
   renderInstallHint();
 }

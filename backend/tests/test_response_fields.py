@@ -42,13 +42,6 @@ UNREAD_FIELDS: dict[str, str] = {
         "정규화 **전** 값입니다. 화면이 그리면 불변식 ②(단일 점수 금지)를 "
         "어기고, 백분율로 읽으면 2990% 같은 값이 나옵니다"
     ),
-    "ConsentOut.all_confirmed": (
-        "화면이 `roster` 로 같은 답을 셉니다(`consentStateFrom`). 재 보니 "
-        "roster 는 **프로젝트 구성원 전원**(21명)이라 서버의 "
-        "`granted == total` 과 같은 답입니다 — 갈라질 수 있는 자리이지 "
-        "틀린 것은 아닙니다. ⚠️ `consent_roster` 가 전원을 안 주기 시작하면 "
-        "그때 갈라집니다"
-    ),
     "FinishMeetingOut.aborted_track_ids": (
         "`message` 가 「N개 트랙을 강제 종료했습니다」로 **개수**를 말합니다. "
         "번호는 사람에게 보여 줄 것이 아닙니다(결함 293)"

@@ -83,6 +83,38 @@ def record_delivery(
     return project
 
 
+def record_installation(session: Session, event: str, payload: dict) -> None:
+    """서명 검증 뒤 호출합니다. 설치 이벤트는 repository 대신 목록을 보냅니다."""
+    installation_id = (payload.get("installation") or {}).get("id")
+    if not isinstance(installation_id, int) or isinstance(installation_id, bool):
+        return
+    action = payload.get("action")
+    removed = []
+    added = []
+    if event == "installation":
+        if action in {"created", "unsuspend", "new_permissions_accepted"}:
+            added = payload.get("repositories") or []
+        elif action in {"deleted", "suspend"}:
+            for project in session.scalars(select(m.Project).where(
+                m.Project.github_installation_id == installation_id
+            )):
+                project.github_installation_id = None
+                project.github_verified_at = None
+    elif event == "installation_repositories":
+        added = payload.get("repositories_added") or []
+        removed = payload.get("repositories_removed") or []
+    for item in added:
+        if isinstance(item, dict) and isinstance(item.get("full_name"), str):
+            record_delivery(session, repo=item["full_name"], installation_id=installation_id)
+    for item in removed:
+        if not isinstance(item, dict):
+            continue
+        project = find_project_for_repo(session, item.get("full_name", ""))
+        if project is not None and project.github_installation_id == installation_id:
+            project.github_installation_id = None
+            project.github_verified_at = None
+
+
 def _remember_unlinked(session: Session, *, repo: str, now: datetime) -> None:
     """어느 프로젝트에도 안 붙은 배달. **오타의 유일한 증거입니다.**
 

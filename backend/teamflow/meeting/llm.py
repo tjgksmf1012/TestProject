@@ -184,7 +184,7 @@ class TransformersLLMClient:
 
     def __init__(
         self,
-        model_id: str = "Qwen/Qwen2.5-1.5B-Instruct",
+        model_id: str = "Qwen/Qwen2.5-3B-Instruct",
         device: str | None = None,
         torch_dtype: object = None,
         *,

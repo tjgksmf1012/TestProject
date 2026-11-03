@@ -36,7 +36,7 @@ def main():
     print("• 모던 리디자인 SPA : http://127.0.0.1:8811/app/")
     print("• 시연 계정 로그인  : http://127.0.0.1:8811/login.html")
     print("  (계정: minsu@example.com / 암호: teamflow-demo)")
-    print("• AI E2E 검토 화면  : http://127.0.0.1:8811/app/meeting/6/review")
+    print("• 회의 처리 워커와 보존기간 점검도 함께 시작합니다")
     print("=" * 60)
     print("서버를 종료하려면 Ctrl+C 를 누르세요.\n")
 
@@ -44,13 +44,8 @@ def main():
         str(VENV_PYTHON),
         "-X",
         "utf8",
-        "-m",
-        "uvicorn",
-        "teamflow.api.main:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "8811",
+        "scripts/watchdog.py",
+        "--no-tunnel",
     ]
     try:
         subprocess.run(cmd, cwd=ROOT)

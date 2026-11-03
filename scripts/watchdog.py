@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import datetime
+import argparse
 import os
 import signal
 import socket
@@ -52,23 +53,10 @@ def log(level: str, msg: str) -> None:
 
 
 def free_port(port: int = 8811) -> None:
-    """포트가 이미 점유되어 있다면 충돌을 방지하기 위해 정리합니다."""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("127.0.0.1", port)) == 0:
-                log("WARN", f"포트 {port}를 점유 중인 기존 프로세스를 정리합니다...")
-                subprocess.run(
-                    [
-                        "powershell",
-                        "-NoProfile",
-                        "-Command",
-                        f"Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue | ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}",
-                    ],
-                    capture_output=True,
-                )
-                time.sleep(1)
-    except Exception:
-        pass
+    """남의 프로세스를 죽이지 않고 중복 기동을 알려 줍니다."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+        if connection.connect_ex(("127.0.0.1", port)) == 0:
+            raise RuntimeError(f"포트 {port}가 사용 중입니다. 기존 서버를 확인해 주세요")
 
 
 def check_health(url: str = "http://127.0.0.1:8811/health", timeout: float = 4.0) -> bool:
@@ -81,7 +69,28 @@ def check_health(url: str = "http://127.0.0.1:8811/health", timeout: float = 4.0
         return False
 
 
+def stop_process(proc: subprocess.Popen) -> None:
+    """Windows venv 실행기가 만든 실제 Python 자식도 함께 종료합니다."""
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True, check=False,
+        )
+    else:
+        proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--no-tunnel", action="store_true", help="로컬 서버와 워커만 실행")
+    args = parser.parse_args()
     print(f"\n{C_BOLD}{C_CYAN}==================================================================={C_RESET}")
     print(f"{C_BOLD}{C_CYAN}    TeamFlow AI - 자동 복구 및 무중단 가동 워치독(Watchdog)        {C_RESET}")
     print(f"{C_BOLD}{C_CYAN}==================================================================={C_RESET}")
@@ -90,6 +99,8 @@ def main() -> None:
     print(f" * 감시 대상             : Backend Server(8811) + Cloudflare Tunnel")
     print(f" * 상태 정책             : 비정상 종료 / 응답 지연 발생 시 즉각 자동 복구")
     print(f"{C_GRAY}종료하려면 Ctrl+C 를 누르세요.{C_RESET}\n")
+
+    free_port(8811)
 
     # DB 확인
     if not (ROOT / "demo.db").exists():
@@ -101,13 +112,17 @@ def main() -> None:
     env["TEAMFLOW_DB_URL"] = "sqlite:///./demo.db"
     env["PYTHONPATH"] = "backend"
     env["PYTHONUTF8"] = "1"
+    env["DEBUG"] = "false"
+    env["LOCAL_PROCESSING"] = "true"
 
     backend_proc: subprocess.Popen | None = None
     tunnel_proc: subprocess.Popen | None = None
+    maintenance_proc: subprocess.Popen | None = None
+    worker_proc: subprocess.Popen | None = None
+    github_proc: subprocess.Popen | None = None
     health_failures = 0
 
     def start_backend() -> subprocess.Popen:
-        free_port(8811)
         log("OK", "백엔드 서버(FastAPI/Uvicorn) 시작 중...")
         cmd = [
             str(VENV_PYTHON),
@@ -132,15 +147,23 @@ def main() -> None:
         log("OK", f"Cloudflare Tunnel 기동 완료 (PID: {proc.pid})")
         return proc
 
+    def start_maintenance() -> subprocess.Popen:
+        log("OK", "보존기간 삭제·성문 폐기·알림 점검을 시작합니다")
+        return subprocess.Popen(
+            [str(VENV_PYTHON), "-m", "teamflow.jobs.local_maintenance"], cwd=ROOT, env=env,
+        )
+
+    def start_worker() -> subprocess.Popen:
+        log("OK", "서버와 분리된 회의 처리 워커를 시작합니다")
+        return subprocess.Popen(
+            [str(VENV_PYTHON), "-m", "teamflow.jobs.local_worker"], cwd=ROOT, env=env,
+        )
+
     def shutdown(signum=None, frame=None):
         print(f"\n{C_YELLOW}[!] 워치독 종료 신호를 수신했습니다. 프로세스들을 안전하게 정리합니다...{C_RESET}")
-        for p, name in [(backend_proc, "백엔드"), (tunnel_proc, "터널")]:
+        for p, name in [(backend_proc, "백엔드"), (tunnel_proc, "터널"), (maintenance_proc, "유지보수"), (worker_proc, "회의 워커"), (github_proc, "GitHub 워커")]:
             if p and p.poll() is None:
-                try:
-                    p.terminate()
-                    p.wait(timeout=3)
-                except Exception:
-                    p.kill()
+                stop_process(p)
         log("OK", "모든 서비스가 안전하게 종료되었습니다.")
         sys.exit(0)
 
@@ -150,7 +173,12 @@ def main() -> None:
     # 1. 초기 가동
     backend_proc = start_backend()
     time.sleep(2)
-    tunnel_proc = start_tunnel()
+    tunnel_proc = None if args.no_tunnel else start_tunnel()
+    maintenance_proc = start_maintenance()
+    worker_proc = start_worker()
+    github_proc = subprocess.Popen(
+        [str(VENV_PYTHON), "-m", "teamflow.jobs.local_github"], cwd=ROOT, env=env,
+    )
 
     last_health_check = time.time()
 
@@ -169,12 +197,26 @@ def main() -> None:
                 health_failures = 0
 
             # B. 터널 종료 감지
-            if tunnel_proc is None or tunnel_proc.poll() is not None:
+            if not args.no_tunnel and (tunnel_proc is None or tunnel_proc.poll() is not None):
                 code = tunnel_proc.poll() if tunnel_proc else "None"
                 log("ERR", f"Cloudflare 터널 비정상 종료 감지! (종료코드: {code})")
                 log("WARN", "2초 후 터널을 자동으로 다시 기동합니다...")
                 time.sleep(2)
                 tunnel_proc = start_tunnel()
+
+            if maintenance_proc is None or maintenance_proc.poll() is not None:
+                log("WARN", "유지보수 실행기를 다시 시작합니다")
+                maintenance_proc = start_maintenance()
+
+            if worker_proc is None or worker_proc.poll() is not None:
+                log("WARN", "회의 처리 워커를 다시 시작합니다")
+                worker_proc = start_worker()
+
+            if github_proc is None or github_proc.poll() is not None:
+                log("WARN", "GitHub 수집 워커를 다시 시작합니다")
+                github_proc = subprocess.Popen(
+                    [str(VENV_PYTHON), "-m", "teamflow.jobs.local_github"], cwd=ROOT, env=env,
+                )
 
             # C. 응답 상태(Health Check) 감시 (12초 주기)
             if time.time() - last_health_check >= 12:
@@ -188,8 +230,7 @@ def main() -> None:
                     if health_failures >= 3:
                         log("ERR", "서버가 3회 연속 무응답(Freeze/Deadlock) 상태입니다! 프로세스를 강제 재시작합니다.")
                         try:
-                            backend_proc.kill()
-                            backend_proc.wait(timeout=3)
+                            stop_process(backend_proc)
                         except Exception:
                             pass
                         backend_proc = start_backend()

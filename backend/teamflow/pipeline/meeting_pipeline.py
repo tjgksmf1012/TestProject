@@ -183,6 +183,7 @@ def process_meeting(
             members=members,
             meeting_date=meeting_date,
             existing_task_titles=existing_task_titles,
+            utterance_texts={i: segment.text for i, segment in enumerate(result.segments, start=1)},
         )
         if result.validation.rejection_rate > 0.5:
             logger.warning(

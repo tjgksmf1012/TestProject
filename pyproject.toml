@@ -48,6 +48,7 @@ build-backend = "setuptools.build_meta"
 where = ["backend"]
 
 [tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["backend/tests"]
 pythonpath = ["backend"]
 # 우리 코드의 DeprecationWarning 은 **오류**입니다 — 그래야 안 밀립니다.

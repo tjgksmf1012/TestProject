@@ -411,6 +411,19 @@ def test_worker_builds_the_chunk_loader_for_multitrack(monkeypatch, fake_ffmpeg)
     assert isinstance(loader, runtime.ChunkAudioLoader)
 
 
+def test_processing_setup_failure_can_be_retried(project, monkeypatch):
+    from teamflow.tasks import meeting_tasks
+
+    def broken_setup(_capture_mode):
+        raise RuntimeError("model setup failed")
+
+    monkeypatch.setattr(meeting_tasks, "_build_steps", broken_setup)
+    with pytest.raises(RuntimeError, match="model setup failed"):
+        meeting_tasks.process_meeting_sync(project["meeting_id"])
+    with db_session.session_scope() as session:
+        assert session.get(m.Meeting, project["meeting_id"]).status == "failed"
+
+
 # ══════════════════════════════════════════════════════════════
 # 2. 청크가 발화가 되는가
 # ══════════════════════════════════════════════════════════════

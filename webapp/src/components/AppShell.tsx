@@ -9,7 +9,8 @@ import { describeLogoutFailure, logoutOutcome } from '@lib/auth/session.ts';
 import { api, ApiError } from '../api/client.ts';
 import { Problem } from './Problem.tsx';
 import { SettingsModal } from './SettingsModal.tsx';
-import { CallStageModal } from './CallStageModal.tsx';
+import { triggerInstantCall } from './CallStageModal.tsx';
+export { triggerInstantCall } from './CallStageModal.tsx';
 import { CommandPalette } from './CommandPalette.tsx';
 
 // 앱 셸 — 레일 72px + 헤더 56px + 판. R1: body 는 스크롤하지 않습니다.
@@ -72,17 +73,6 @@ interface AppShellProps {
 
 const RAIL_BLOCKED_WHY = '프로젝트를 만들거나 초대 코드로 참가하면 열립니다';
 
-// 모듈 수준 공유 상태 — 화면(홈 ↔ 칸반 ↔ 기여도)을 이동해도 화상 통화 PIP가 끊기지 않고 유지됩니다.
-let sharedCallOpen = false;
-let sharedCallMin = false;
-const callListeners = new Set<() => void>();
-
-export function triggerInstantCall(minimized = false): void {
-  sharedCallOpen = true;
-  sharedCallMin = minimized;
-  callListeners.forEach((fn) => fn());
-}
-
 export function AppShell({ title, docTitle, actions, meta, projectId, children }: AppShellProps) {
   const params = useParams();
   const { pathname } = useLocation();
@@ -97,40 +87,25 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'voice' | 'account' | 'display'>('voice');
   const [cmdOpen, setCmdOpen] = useState(false);
-  const [callState, setCallState] = useState({ open: sharedCallOpen, min: sharedCallMin });
   const [isDark, setIsDark] = useState(
     () => document.documentElement.dataset.theme === 'dark',
   );
 
   const toggleTheme = () => {
-    const next = isDark ? 'light' : 'dark';
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
     try {
       window.localStorage.setItem('tf_theme', next);
     } catch {
       // ignore
     }
-    setIsDark(!isDark);
+    setIsDark(next === 'dark');
   };
-
   useEffect(() => {
-    const sync = () => setCallState({ open: sharedCallOpen, min: sharedCallMin });
-    callListeners.add(sync);
-    return () => {
-      callListeners.delete(sync);
-    };
+    const observer = new MutationObserver(() => setIsDark(document.documentElement.dataset.theme === 'dark'));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
   }, []);
-
-  const setCallOpen = (open: boolean) => {
-    sharedCallOpen = open;
-    if (!open) sharedCallMin = false;
-    callListeners.forEach((fn) => fn());
-  };
-
-  const setCallMin = (min: boolean) => {
-    sharedCallMin = min;
-    callListeners.forEach((fn) => fn());
-  };
 
   const projectRail = railIsWorthIt(projects ?? [])
     ? railItems(projects ?? [], appScreenOf(pathname), pid ?? null, appRailHref)
@@ -281,7 +256,7 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
             <Link
               to="/demo"
               className="tf-lab-pill"
-              title="AI 음성인식 · 성문 화자분리 기술 체험관"
+              title="음향 벡터와 키워드 규칙 예시 체험"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -336,10 +311,9 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
               type="button"
               className="tf-call-pill"
               onClick={() => {
-                setCallMin(false);
-                setCallOpen(true);
+                triggerInstantCall(pid);
               }}
-              title="화상 회의실 열기 (카메라·마이크 점검 및 입장)"
+              title="음성 회의실 열기 (개별 동의·통화·녹음)"
             >
               <svg
                 width="15"
@@ -353,7 +327,7 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
                 <polygon points="23 7 16 12 23 17 23 7" />
                 <rect x="1" y="5" width="15" height="14" rx="2" />
               </svg>
-              <span>화상회의</span>
+              <span>음성 회의</span>
             </button>
 
             <button
@@ -406,24 +380,11 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
         {children}
       </main>
 
-      {/* 실시간 화상·화면 공유 스테이지 및 플로팅 PIP */}
-      <CallStageModal
-        open={callState.open}
-        minimized={callState.min}
-        projectId={pid ?? 1}
-        onMinimize={(min) => setCallMin(min)}
-        onClose={() => setCallOpen(false)}
-        onOpenSettings={() => {
-          setSettingsTab('voice');
-          setSettingsOpen(true);
-        }}
-      />
-
       {/* 환경설정 모달 (CallStageModal 보다 뒤에 렌더링 + z-index: 250 으로 항상 최상단에 표시) */}
       <SettingsModal
         open={settingsOpen}
         initialTab={settingsTab}
-        projectId={pid ?? 1}
+        projectId={pid}
         onClose={() => setSettingsOpen(false)}
       />
 
@@ -433,8 +394,7 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
         projectId={pid}
         onClose={() => setCmdOpen(false)}
         onOpenCall={() => {
-          setCallMin(false);
-          setCallOpen(true);
+          triggerInstantCall(pid);
         }}
         onOpenSettings={(tab) => {
           setSettingsTab(tab);

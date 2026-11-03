@@ -36,19 +36,19 @@
  * 재는 것은 「창을 숨겨도 산다」까지고, 「뚜껑을 덮어도 산다」는 실기기
  * 몫입니다 (docs/21 §5).
  */
-import { execSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const FRONTEND = dirname(dirname(fileURLToPath(import.meta.url)));
 
-// ⚠️ playwright 는 이 프로젝트의 의존성이 **아닙니다**(프런트 런타임
-//    의존성을 셋으로 묶어 두는 규칙 때문). 전역에 설치된 것을 씁니다 —
-//    `PLAYWRIGHT_ROOT` 로 바꿀 수 있습니다.
-const pwRoot =
-  process.env.PLAYWRIGHT_ROOT ?? execSync('npm root -g', { encoding: 'utf8' }).trim();
-const { _electron: electron } = await import(join(pwRoot, 'playwright', 'index.mjs'));
+// playwright는 런타임 번들에 들어가지 않는 이 프로젝트의 개발 의존성입니다.
+const require = createRequire(join(FRONTEND, 'package.json'));
+const { _electron: electron } = require('playwright');
+const BASE = process.env.SMOKE_BASE ?? 'http://127.0.0.1:8811';
 
 /**
  * 길이를 **아는** 오디오를 만든다 — 16bit PCM 모노 WAV, 440Hz.
@@ -79,16 +79,19 @@ function makeWav(path, seconds) {
   writeFileSync(path, Buffer.concat([head, data]));
 }
 
-const SP = process.env.SP ?? '/tmp';
+const SP = process.env.SP ?? tmpdir();
+mkdirSync(SP, { recursive: true });
+const profile = mkdtempSync(join(SP, 'electron-profile-'));
 const wavPath = join(SP, 'smoke-tone.wav');
 makeWav(wavPath, 20);
 
 const app = await electron.launch({
   // ⚠️ Playwright 는 **제 node_modules** 에서 electron 을 찾습니다. 이
   //    프로젝트에 설치한 것을 쓰려면 경로를 직접 줘야 합니다.
-  executablePath: join(FRONTEND, 'node_modules', 'electron', 'dist', 'electron'),
+  executablePath: join(FRONTEND, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron'),
   args: [
     'out/main/index.cjs',
+    `--user-data-dir=${profile}`,
     '--no-sandbox',
     // ⭐ 아래 셋은 **이 하네스에만** 붙는 가짜 마이크입니다. 앱 코드가 아니라
     //    Chromium 에게 주는 것이라 Electron 이 그대로 넘깁니다.
@@ -97,9 +100,10 @@ const app = await electron.launch({
     `--use-file-for-fake-audio-capture=${wavPath}`,
   ],
   cwd: FRONTEND,
-  env: { ...process.env, TEAMFLOW_SERVER_URL: 'http://127.0.0.1:8811/home.html' },
+  env: { ...process.env, TEAMFLOW_SERVER_URL: `${BASE}/home.html` },
 });
 
+try {
 const page = await app.firstWindow();
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e)));
@@ -125,21 +129,23 @@ console.log('격리      :', JSON.stringify(isolated), '(전부 undefined 여야
 
 // ⭐ 로그인해서 **실제 데이터 화면**까지 갑니다. 껍데기가 뜨는 것과
 //    `/api/...` 가 same-origin 으로 도는 것은 다른 이야기입니다.
-// ⚠️ **이미 로그인돼 있을 수 있습니다.** Electron 은 쿠키를 userData 에
-//    남기므로, 브라우저 테스트와 달리 두 번째 실행부터는 로그인 화면이
-//    안 나옵니다. 없으면 그냥 넘어갑니다 — 있다고 가정하면 이 검사가
-//    **앱이 아니라 제 가정 때문에** 실패합니다.
-if (await page.locator('#email').count()) {
-  await page.fill('#email', 'minsu@example.com');
-  await page.fill('#password', 'teamflow-demo');
-  await page.click('button[type=submit]');
-  await page.waitForTimeout(1500);
-}
-await page.goto('http://127.0.0.1:8811/kanban.html?project=1');
+// 매 실행이 새 프로필입니다. 리다이렉트 도중 입력칸 개수를 세지 않고
+// 로그인 화면과 인증 응답을 직접 기다립니다.
+await page.goto(`${BASE}/login.html`);
+await page.locator('#email').waitFor();
+await page.fill('#email', 'minsu@example.com');
+await page.fill('#password', 'teamflow-demo');
+const loginResponse = page.waitForResponse((response) =>
+  response.url().includes('/api/auth/login') && response.request().method() === 'POST');
+await page.click('button[type=submit]');
+assert.equal((await loginResponse).status(), 200, '시연 계정 로그인');
+await page.waitForURL('**/home.html');
+await page.goto(`${BASE}/kanban.html?project=1`);
 await page.waitForTimeout(1800);
+await page.locator('.task .title').first().waitFor();
 const cards = await page.locator('.task .title').allInnerTexts();
 console.log('칸반 카드 :', cards.length, '장 —', cards.join(' / '));
-await page.screenshot({ path: join(process.env.SP ?? '/tmp', 'desktop-phase0.png'), fullPage: true });
+await page.screenshot({ path: join(SP, 'desktop-phase0.png'), fullPage: true });
 
 // ⭐ 청크 보관소를 **실제로 써 봅니다** (docs/21 Phase 1).
 //    "채널을 열었다" 와 "바이트가 디스크에 앉는다" 는 다른 이야기입니다.
@@ -197,7 +203,7 @@ const awakeGood = JSON.stringify(awakeSeq) === JSON.stringify(awakeWant);
 console.log('절전 방지  :', JSON.stringify(awakeSeq), awakeGood ? 'OK' : '⚠️ 기대와 다름');
 
 // ⭐ 녹음 화면의 안전 배너 — keepsAwake=true 가 실제 문구로 이어지는가.
-await page.goto('http://127.0.0.1:8811/index.html');
+await page.goto(`${BASE}/index.html`);
 await page.waitForTimeout(1500);
 const banner = await page.locator('#safety').innerText().catch(() => '(못 읽음)');
 console.log('안전 배너  :', banner.slice(0, 44), banner.includes('화면을 꺼도') ? '(desktop-awake OK)' : '⚠️ 꺼도 됩니다가 아님');
@@ -288,4 +294,16 @@ await page.evaluate(() => { location.href = 'https://example.com/'; });
 await page.waitForTimeout(1200);
 console.log('이동 잠금 :', page.url() === before ? '막힘 (그대로)' : `샘 → ${page.url()}`);
 console.log('페이지 오류:', errs.length, errs.slice(0, 2).join(' / '));
-await app.close();
+assert.deepEqual(isolated, { require: 'undefined', process: 'undefined', module: 'undefined' });
+assert(cards.length > 0, '실제 칸반 카드가 열리지 않았습니다');
+assert.equal(store.readBytes, '1,2,3,4,5');
+assert.equal(store.afterDrop, 0);
+assert(awakeGood, '절전 방지의 획득·해제 값이 다릅니다');
+assert(closeOk, '녹음 중 닫기 확인이 작동하지 않습니다');
+assert(survived, '숨긴 창에서 청크가 늘거나 99% 이상 복원되지 않았습니다');
+assert.equal(page.url(), before, '허용하지 않은 주소로 이동했습니다');
+assert.deepEqual(errs, []);
+console.log('✅ Electron 장치·보관소·절전 방지·닫기 보호·녹음 생존 검사 통과');
+} finally {
+  await app.close();
+}

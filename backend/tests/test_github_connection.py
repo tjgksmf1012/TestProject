@@ -353,6 +353,19 @@ def test_after_a_backfill_the_warning_goes_away():
     assert not any("가져오기" in w for w in state.warnings), state.warnings
 
 
+def test_signed_installation_allows_history_import_before_first_activity():
+    from teamflow.github.connection import describe_coverage
+
+    facts = ConnectionFacts(
+        repo="team/teamflow", verified_at=AT, delivery_count=0,
+        app_credentials_present=True, webhook_secret_present=True,
+        installation_present=True, member_logins=frozenset({"minsu"}),
+    )
+    assert can_backfill(facts)
+    assert any("누르면 채웁니다" in warning for warning in diagnose(facts).warnings)
+    assert "아직 가져오지 않았습니다" in describe_coverage(facts)
+
+
 def test_no_deliveries_means_the_headline_already_said_it():
     """배달이 0건이면 더 급한 것을 headline 이 말하고 있습니다.
     여기서 또 말하면 어느 쪽을 고쳐야 하는지 흐려집니다."""

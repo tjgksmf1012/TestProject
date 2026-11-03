@@ -34,6 +34,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
+from teamflow.audio.chunk_store import ChunkStore
 from teamflow.config import Settings, get_settings
 from teamflow.db import models as m
 from teamflow.db import session as db_session
@@ -47,6 +48,16 @@ NOW = datetime(2026, 9, 1, 10, 0, tzinfo=UTC)
 #: 여덟 개가 **줄을 서서** 이 값의 여덟 배가 됩니다.
 SLOW_SECONDS = 0.2
 CONCURRENT = 8
+
+
+def test_same_chunk_concurrent_retries_use_distinct_temporary_files(tmp_path):
+    store = ChunkStore(tmp_path)
+    payloads = [f"synthetic-audio-{index}".encode() * 100 for index in range(160)]
+    with ThreadPoolExecutor(max_workers=CONCURRENT) as pool:
+        paths = list(pool.map(lambda payload: store.write(1, 1, 0, payload), payloads))
+    assert len(set(paths)) == 1
+    assert store.read(1, 1, 0) in payloads
+    assert list(tmp_path.rglob("*.part.*")) == []
 
 
 @pytest.fixture

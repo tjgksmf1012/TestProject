@@ -449,8 +449,17 @@ def test_backfill_without_credentials_says_so_instead_of_pretending(
 
 
 def test_backfill_is_queued_when_everything_is_ready(
-    configured_client: TestClient, seeded
+    configured_client: TestClient, seeded, monkeypatch
 ):
+    from teamflow.tasks import dispatch
+
+    queued = []
+
+    def accept(project_id, limit):
+        queued.append((project_id, limit))
+        return "synthetic-job"
+
+    monkeypatch.setattr(dispatch, "enqueue_github_backfill", accept)
     set_repo(seeded["project_id"], "team/teamflow")
     post_webhook(configured_client, ping_payload(repo="team/teamflow"))
 
@@ -463,10 +472,37 @@ def test_backfill_is_queued_when_everything_is_ready(
         "project_id": seeded["project_id"],
         "limit": 25,
     }
+    assert queued == [(seeded["project_id"], 25)]
 
 
-def test_backfill_limit_is_clamped_by_the_api(configured_client: TestClient, seeded):
+@pytest.mark.parametrize("failure", ["missing_job", "write_error"])
+def test_backfill_reports_queue_failure_instead_of_accepting(
+    configured_client, seeded, monkeypatch, failure
+):
+    from teamflow.tasks import dispatch
+
+    set_repo(seeded["project_id"], "team/teamflow")
+    post_webhook(configured_client, ping_payload(repo="team/teamflow"))
+
+    def unavailable(*args):
+        if failure == "write_error":
+            raise OSError("synthetic queue storage failure")
+        return None
+
+    monkeypatch.setattr(dispatch, "enqueue_github_backfill", unavailable)
+    response = configured_client.post(
+        f"/api/projects/{seeded['project_id']}/github/backfill", json={}
+    )
+    assert response.status_code == 503
+    assert "다시 시도" in response.json()["detail"]
+    assert "synthetic" not in response.text
+
+
+def test_backfill_limit_is_clamped_by_the_api(configured_client: TestClient, seeded, monkeypatch):
     """⚠️ 상한이 없으면 저장소 하나가 rate limit 창을 통째로 먹습니다."""
+    from teamflow.tasks import dispatch
+
+    monkeypatch.setattr(dispatch, "enqueue_github_backfill", lambda *args: "synthetic-job")
     set_repo(seeded["project_id"], "team/teamflow")
     post_webhook(configured_client, ping_payload(repo="team/teamflow"))
 

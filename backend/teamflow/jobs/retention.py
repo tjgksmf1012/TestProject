@@ -259,6 +259,16 @@ def purge_unconsented_audio(
     return report
 
 
+def purge_revoked_voiceprints(session: Session) -> int:
+    """과거 재등록 결함으로 폐기 표시 뒤에 남은 벡터도 실제로 비웁니다."""
+    cleared = 0
+    for vp in session.scalars(select(m.Voiceprint).where(m.Voiceprint.revoked_at.is_not(None))):
+        if vp.embedding:
+            vp.embedding = []
+            cleared += 1
+    return cleared
+
+
 def revoke_project_voiceprints(
     session: Session, project_id: int, *, now: datetime | None = None
 ) -> PurgeReport:
@@ -273,12 +283,13 @@ def revoke_project_voiceprints(
     prints = session.scalars(
         select(m.Voiceprint).where(
             m.Voiceprint.project_id == project_id,
-            m.Voiceprint.revoked_at.is_(None),
         )
     ).all()
 
     for vp in prints:
-        vp.revoked_at = now
+        if vp.revoked_at is not None and not vp.embedding:
+            continue
+        vp.revoked_at = vp.revoked_at or now
         # 임베딩 자체를 비운다. revoked 플래그만으로는 데이터가 남는다.
         vp.embedding = []
         report.revoked_voiceprints.append(vp.id)
@@ -391,11 +402,12 @@ def revoke_project_voiceprints_for_user(
         select(m.Voiceprint).where(
             m.Voiceprint.user_id == user_id,
             m.Voiceprint.project_id == project_id,
-            m.Voiceprint.revoked_at.is_(None),
         )
     ).all()
     for vp in prints:
-        vp.revoked_at = now
+        if vp.revoked_at is not None and not vp.embedding:
+            continue
+        vp.revoked_at = vp.revoked_at or now
         vp.embedding = []
         report.revoked_voiceprints.append(vp.id)
     return report
