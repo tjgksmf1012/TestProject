@@ -24,17 +24,19 @@ def queue_root() -> Path:
 
 def _write(path: Path, job: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
-    ) as handle:
-        temporary = Path(handle.name)
-        json.dump(job, handle)
-        handle.flush()
-        os.fsync(handle.fileno())
+    temporary = None
     try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(job, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def enqueue(
@@ -102,7 +104,7 @@ def run_once(root: Path, *, execute=None, now: float | None = None) -> bool:
             job["retry_at"] = at + 120
             _write(running, job)
             _return_pending(running, pending)
-        finally:
+        else:
             running.unlink(missing_ok=True)
         return True
     return False
@@ -114,9 +116,11 @@ def main() -> None:
     configure_logging()
     root = queue_root()
     with worker_lease(root):
-        logger.info("중단된 GitHub 작업 %s건 복구", recover(root))
         while True:
             try:
+                restored = recover(root)
+                if restored:
+                    logger.info("중단된 GitHub 작업 %s건 복구", restored)
                 run_once(root)
             except Exception:
                 logger.exception("로컬 GitHub 큐 조회 실패")
