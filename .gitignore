@@ -66,6 +66,9 @@ checkpoints/
 # 저장 디렉터리만 가리키도록 앵커링합니다.
 /audio/
 /recordings/
+/audio_storage/
+*.chunk
+*.part.*
 /uploads/
 /var/
 data/audio/

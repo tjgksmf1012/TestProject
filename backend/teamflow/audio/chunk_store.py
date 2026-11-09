@@ -25,15 +25,35 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
+from uuid import uuid4
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from teamflow.config import get_settings
 
 # 청크 하나의 상한. Opus 32kbps × 5초 ≈ 20KB 이므로 2MB 면 충분히 넉넉하다.
 # 상한이 없으면 디스크가 찰 때까지 아무나 밀어넣을 수 있다.
 MAX_CHUNK_BYTES = 2 * 1024 * 1024
 _ENC_MAGIC = b"TFGCM1:"
+_REPLACE_LOCKS = tuple(Lock() for _ in range(64))
+
+
+def _atomic_replace(source: Path, target: Path) -> None:
+    # Windows는 동시에 같은 파일을 교체하면 고유 임시 이름이어도 거절합니다.
+    # 짧은 교체만 직렬화하고, 다른 프로세스/바이러스 검사기의 일시 점유는 재시도합니다.
+    with _REPLACE_LOCKS[hash(str(target.resolve())) % len(_REPLACE_LOCKS)]:
+        for attempt in range(7):
+            try:
+                os.replace(source, target)
+                return
+            except PermissionError:
+                if os.name != "nt" or attempt == 6:
+                    raise
+                time.sleep(0.005 * 2**attempt)
 
 
 def _derive_key(secret: str) -> bytes:
@@ -41,7 +61,7 @@ def _derive_key(secret: str) -> bytes:
 
 
 def _maybe_encrypt(data: bytes) -> bytes:
-    secret = os.environ.get("AUDIO_ENCRYPTION_SECRET", "").strip()
+    secret = (get_settings().audio_encryption_secret or "").strip()
     if not secret:
         return data
     key = _derive_key(secret)
@@ -54,7 +74,7 @@ def _maybe_encrypt(data: bytes) -> bytes:
 def _maybe_decrypt(raw: bytes) -> bytes:
     if not raw.startswith(_ENC_MAGIC):
         return raw
-    secret = os.environ.get("AUDIO_ENCRYPTION_SECRET", "").strip()
+    secret = (get_settings().audio_encryption_secret or "").strip()
     if not secret:
         raise ValueError(
             "암호화된 청크를 복호화하려면 AUDIO_ENCRYPTION_SECRET 환경변수가 필요합니다"
@@ -130,10 +150,13 @@ class ChunkStore:
         path = self.chunk_path(meeting_id, track_id, seq)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        # 임시 이름에 pid 를 넣어 동시 업로드가 서로를 밟지 않게 한다
-        tmp = path.with_suffix(f".part.{os.getpid()}")
-        tmp.write_bytes(_maybe_encrypt(data))
-        os.replace(tmp, path)
+        # 같은 프로세스의 동시 재시도도 서로 다른 임시 파일을 씁니다.
+        tmp = path.with_suffix(f".part.{os.getpid()}.{uuid4().hex}")
+        try:
+            tmp.write_bytes(_maybe_encrypt(data))
+            _atomic_replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
         return path
 
     def stored_seqs(self, meeting_id: int, track_id: int) -> list[int]:
@@ -174,12 +197,15 @@ class ChunkStore:
         """
         target.parent.mkdir(parents=True, exist_ok=True)
         written = 0
-        tmp = target.with_suffix(f".part.{os.getpid()}")
-        with tmp.open("wb") as out:
-            for seq in self.stored_seqs(meeting_id, track_id):
-                out.write(self.read(meeting_id, track_id, seq))
-                written += 1
-        os.replace(tmp, target)
+        tmp = target.with_suffix(f".part.{os.getpid()}.{uuid4().hex}")
+        try:
+            with tmp.open("wb") as out:
+                for seq in self.stored_seqs(meeting_id, track_id):
+                    out.write(self.read(meeting_id, track_id, seq))
+                    written += 1
+            _atomic_replace(tmp, target)
+        finally:
+            tmp.unlink(missing_ok=True)
         return written
 
 

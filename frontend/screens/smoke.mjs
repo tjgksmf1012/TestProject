@@ -27,10 +27,11 @@
  *   - 양이 늘 때 — 씨앗 크기에서만 봅니다
  */
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { exerciseUserFlows } from './user-flows.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FRONTEND = join(HERE, '..');
@@ -115,6 +116,9 @@ async function bootServer(port, dbPath, audioRoot) {
     DATABASE_URL: `sqlite:///${normalizedDb}`,
     AUDIO_STORAGE_ROOT: audioRoot,
     ASR_BACKEND: 'fake',
+    LLM_BACKEND: 'fake',
+    LOCAL_PROCESSING: 'false',
+    DEBUG: 'false',
     PYTHONUTF8: '1',
     PYTHONIOENCODING: 'utf-8',
   };
@@ -139,10 +143,24 @@ async function bootServer(port, dbPath, audioRoot) {
   const up = await waitFor(`http://127.0.0.1:${port}/home.html`);
   // ⚠️ 200 은 「내 서버가 떴다」가 아니라 「누가 거기 있다」입니다 (결함 182).
   if (!up || /address already in use/i.test(log)) {
-    server.kill();
+    await stopServer(server);
     throw new Error(`서버가 안 떴습니다 (포트 ${port}). 로그:\n${log.slice(-800)}`);
   }
   return server;
+}
+
+async function stopServer(server) {
+  if (!server || server.exitCode !== null) return;
+  if (process.platform === 'win32') {
+    // venv 실행기만 죽이면 실제 Python 서버가 포트를 계속 차지합니다.
+    await new Promise((resolve) => {
+      const cleanup = spawn('taskkill', ['/PID', String(server.pid), '/T', '/F'], {
+        windowsHide: true, stdio: 'ignore',
+      });
+      cleanup.once('exit', resolve);
+      cleanup.once('error', resolve);
+    });
+  } else server.kill();
 }
 
 // ── 브라우저 안에서 도는 자들 ──────────────────────────────────
@@ -378,11 +396,13 @@ async function visit(page, url) {
 
 async function main() {
   const chromium = await loadChromium();
-  const scratch = process.env.SMOKE_SCRATCH ?? join(tmpdir(), 'teamflow-smoke');
+  const scratch = process.env.SMOKE_SCRATCH ?? mkdtempSync(join(tmpdir(), 'teamflow-smoke-'));
   let server = null;
   if (!process.env.SMOKE_BASE) {
-    const { mkdirSync, rmSync } = await import('node:fs');
-    rmSync(scratch, { recursive: true, force: true });
+    const { mkdirSync } = await import('node:fs');
+    if (existsSync(scratch) && readdirSync(scratch).length > 0) {
+      throw new Error('SMOKE_SCRATCH는 비어 있는 검사 전용 폴더여야 합니다');
+    }
     mkdirSync(scratch, { recursive: true });
     server = await bootServer(PORT, `${scratch}/smoke.db`, `${scratch}/audio`);
   }
@@ -390,7 +410,8 @@ async function main() {
   const failures = [];
   const excusedFired = new Set();
   const note = (screen, why) => failures.push(`${screen}: ${why}`);
-  const browser = await chromium.launch({ args: ['--no-sandbox', '--lang=ko-KR'] });
+  let targetCount = 0;
+  const browser = await chromium.launch({ args: ['--no-sandbox', '--lang=ko-KR', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
 
   try {
     const targets = [
@@ -405,6 +426,7 @@ async function main() {
         needsLogin: p !== '/login',
       })),
     ];
+    targetCount = targets.length;
 
     // ⚠️ **대비 루프 밖**에 둡니다. 안에 두면 고대비 회차에서 새 Map 이
     //    되어 보통 회차의 값이 버려지고, 비교가 `undefined` 와 이뤄져
@@ -484,9 +506,10 @@ async function main() {
       }
       await ctx.close();
     }
+    await exerciseUserFlows(browser, BASE);
   } finally {
     await browser.close();
-    server?.kill();
+    await stopServer(server);
   }
 
   // ⚠️ **예외가 낡는 것도 잽니다.** 고쳐서 더 이상 안 뭉개지는데 표에
@@ -505,7 +528,7 @@ async function main() {
     for (const f of failures) console.error('  ' + f);
     process.exit(1);
   }
-  console.log('✅ 화면 스모크 통과');
+  console.log(`✅ 화면 스모크 통과 (${targetCount}개 화면 × 보통·고대비)`);
 }
 
 await main();

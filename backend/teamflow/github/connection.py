@@ -173,7 +173,7 @@ def _missing_history_warning(facts: ConnectionFacts) -> str | None:
     이미 더 급한 것을 말하고 있고, 여기서 또 말하면 어느 쪽을 고쳐야
     하는지 흐려집니다.
     """
-    if facts.delivery_count <= 0:
+    if facts.delivery_count <= 0 and facts.verified_at is None:
         return None
     if facts.backfilled_at is not None:
         return None
@@ -242,10 +242,10 @@ def backfill_blocked_because(
 def can_backfill(facts: ConnectionFacts) -> bool:
     """지난 활동 가져오기가 **지금 실제로** 될 것인가.
 
-    아직 한 번도 안 돌렸고, 받은 배달이 있고, 서버 쪽 조건이 갖춰졌을
-    때만입니다.
+    아직 한 번도 안 돌렸고 서명된 설치나 배달을 확인했으며, 서버 쪽
+    조건이 갖춰졌을 때만입니다. 첫 PR을 요구하면 초기 수집을 시작할 수 없습니다.
     """
-    if facts.delivery_count <= 0 or facts.backfilled_at is not None:
+    if facts.verified_at is None or facts.backfilled_at is not None:
         return False
     return (
         backfill_blocked_because(
@@ -275,7 +275,7 @@ def describe_coverage(facts: ConnectionFacts) -> str:
     """
     if not facts.repo:
         return "GitHub 활동은 이 계산에 들어 있지 않습니다."
-    if facts.delivery_count <= 0:
+    if facts.delivery_count <= 0 and facts.verified_at is None:
         return "이 저장소에서 받은 활동이 아직 없습니다."
     if facts.backfilled_to is not None:
         when = facts.backfilled_to.date().isoformat()

@@ -96,7 +96,7 @@ def known_pull_request_numbers(session: Session, project_id: int) -> set[int]:
     numbers: set[int] = set()
     for row in rows:
         number = ((row.payload or {}).get("pull_request") or {}).get("number")
-        if isinstance(number, int):
+        if isinstance(number, int) and (row.payload or {}).get("_teamflow_ingested") is True:
             numbers.add(number)
     return numbers
 
@@ -191,10 +191,18 @@ def run_backfill(
     failed = 0
 
     for pull in plan.fetch:
-        row = _store_one(session, project, pull)
+        # 수신된 배달과 상세 수집 완료는 다릅니다. 실패한 기존 배달도 다시 처리합니다.
+        row = next((event for event in session.scalars(
+            select(m.GithubEvent).where(
+                m.GithubEvent.project_id == project_id,
+                m.GithubEvent.event_type == str(vocab.GithubEventKind.PR_MERGED),
+            )
+        ) if ((event.payload or {}).get("pull_request") or {}).get("number") == pull.number), None)
+        if row is None:
+            row = _store_one(session, project, pull)
+            stored += int(row is not None)
         if row is None:
             continue
-        stored += 1
 
         # 업무 연결은 API 도 자격 증명도 필요 없습니다. 아래 상세 조회가
         # 실패해도 **이건 남아야** 합니다 — 그래서 먼저 합니다.
@@ -209,6 +217,7 @@ def run_backfill(
                 number=pull.number,
             )
             events_written += int(outcome.get("written", 0))
+            row.payload = {**(row.payload or {}), "_teamflow_ingested": True}
         except GitHubError as exc:
             # ⚠️ 하나가 실패해도 나머지를 계속합니다. 여기서 던지면 지금까지
             # 채운 것이 통째로 롤백되고, 다시 실행해도 같은 PR 에서 또
@@ -228,8 +237,9 @@ def run_backfill(
     # 적으면 다음 실행이 그 앞을 안 봅니다 — 못 가져온 구간이 영구히
     # 빈 채로 굳습니다.
     stamped = now or datetime.now(UTC)
-    project.github_backfilled_at = stamped
-    if not plan.truncated:
+    if not failed:
+        project.github_backfilled_at = stamped
+    if not plan.truncated and not failed:
         oldest = plan.covered_since
         current = project.github_backfilled_to
         # 더 오래된 쪽으로만 넓힙니다. 좁히면 이미 채운 구간을 안 채운

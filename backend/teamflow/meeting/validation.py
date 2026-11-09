@@ -18,6 +18,7 @@ from teamflow.meeting.resolve import (
     AssigneeMatch,
     DeadlineMatch,
     TeamMemberName,
+    grounded_deadline,
     resolve_assignee,
     resolve_deadline,
 )
@@ -114,9 +115,7 @@ class ValidationResult:
         return [c for c in self.candidates if not c.is_complete]
 
 
-def _check_evidence(
-    ids: list[int], known: set[int]
-) -> tuple[tuple[int, ...] | None, str | None]:
+def _check_evidence(ids: list[int], known: set[int]) -> tuple[tuple[int, ...] | None, str | None]:
     if not ids:
         return None, RejectReason.NO_EVIDENCE
     unknown = [i for i in ids if i not in known]
@@ -139,6 +138,7 @@ def validate_analysis(
     members: list[TeamMemberName],
     meeting_date: date,
     existing_task_titles: list[str] | None = None,
+    utterance_texts: dict[int, str] | None = None,
 ) -> ValidationResult:
     """LLM 출력을 검증하고 담당자·마감일을 해석한다.
 
@@ -158,7 +158,7 @@ def validate_analysis(
 
     for task in analysis.tasks:
         rejected = _validate_task(
-            task, known_utterance_ids, members, meeting_date, seen_titles
+            task, known_utterance_ids, members, meeting_date, seen_titles, utterance_texts
         )
         if isinstance(rejected, Rejected):
             result.rejected.append(rejected)
@@ -205,6 +205,7 @@ def _validate_task(
     members: list[TeamMemberName],
     meeting_date: date,
     seen_titles: set[str],
+    utterance_texts: dict[int, str] | None = None,
 ) -> ResolvedCandidate | Rejected:
     payload = {"title": task.title, "assignee_hint": task.assignee_hint}
 
@@ -225,7 +226,13 @@ def _validate_task(
         return Rejected("task", RejectReason.DUPLICATE, "이미 존재하는 업무", payload)
 
     assignee = resolve_assignee(task.assignee_hint, members)
-    deadline = resolve_deadline(task.deadline_hint, meeting_date)
+    deadline = (
+        grounded_deadline(
+            task.deadline_hint, [utterance_texts.get(i, "") for i in evidence], meeting_date
+        )
+        if utterance_texts is not None
+        else resolve_deadline(task.deadline_hint, meeting_date)
+    )
 
     warnings: list[str] = []
     if task.assignee_hint and assignee.user_id is None:
@@ -233,9 +240,11 @@ def _validate_task(
     elif not task.assignee_hint:
         warnings.append("회의에서 담당자가 지정되지 않았습니다")
 
-    if task.deadline_hint and deadline.value is None:
+    if (utterance_texts is not None and deadline.value is None) or (
+        task.deadline_hint and deadline.value is None
+    ):
         warnings.append(f"마감일 미확정 — {deadline.reason}")
-    elif not task.deadline_hint:
+    elif not task.deadline_hint and deadline.value is None:
         warnings.append("회의에서 마감일이 언급되지 않았습니다")
 
     if deadline.value and deadline.value < meeting_date:

@@ -367,6 +367,17 @@ def test_revoke_is_idempotent(session: Session):
     assert second.revoked_voiceprints == []
 
 
+def test_old_revoked_vectors_are_actually_cleared(session: Session):
+    from teamflow.jobs.retention import purge_revoked_voiceprints
+
+    project_id, _, user_id = seed_meeting(session)
+    vp = add_voiceprint(session, user_id, project_id)
+    vp.revoked_at = NOW
+    assert purge_revoked_voiceprints(session) == 1
+    assert vp.embedding == [] and vp.revoked_at == NOW
+    assert purge_revoked_voiceprints(session) == 0
+
+
 def test_revoke_is_audited(session: Session):
     project_id, _, user_id = seed_meeting(session)
     add_voiceprint(session, user_id, project_id)

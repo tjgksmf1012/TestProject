@@ -2269,6 +2269,16 @@ pre {
    `<nav id="sparail">` 를 함께 답니다 — guards.test.ts 의 "막다른 길 금지"
    가드가 #tabs 대신 이 레일을 셉니다. */
 
+html[data-embedded='true'] #sparail,
+html[data-embedded='true'] #nav,
+html[data-embedded='true'] #tabs { display: none; }
+html[data-embedded='true'] body.sparail-page {
+  padding-left: var(--sp-6);
+  padding-bottom: var(--sp-6);
+}
+html[data-embedded='true'] .spabar { left: 0; }
+html[data-embedded='true'] body.sparail-page .actionbar { left: 0; }
+
 body.sparail-page {
   max-width: none;
   margin: 0;

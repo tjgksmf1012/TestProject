@@ -9,7 +9,7 @@ import logging
 import re
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -32,7 +32,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, PlainSerializer
-from sqlalchemy import delete, event, func, insert, select
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.orm import Session
 
 from teamflow.audio.chunk_store import ChunkStore
@@ -50,6 +50,7 @@ from teamflow.github import backfill as gh_backfill
 from teamflow.github import connection as gh_connection
 from teamflow.github import linking as gh_linking
 from teamflow.github import webhook as gh
+from teamflow.github.client import credentials_present
 from teamflow.jobs import retention
 from teamflow.logging_config import configure_logging
 from teamflow.meeting import speaking
@@ -437,29 +438,6 @@ def signup(
     except passwords.WeakPassword as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
-    first_proj = session.get(m.Project, 1)
-    if first_proj is not None:
-        member_count = session.scalars(
-            select(func.count()).select_from(m.Member).where(m.Member.project_id == first_proj.id)
-        ).one()
-        assigned_role = "owner" if member_count == 0 else "member"
-        is_mem = session.scalars(
-            select(m.Member).where(
-                m.Member.project_id == first_proj.id,
-                m.Member.user_id == user.id,
-            )
-        ).first()
-        if is_mem is None:
-            session.execute(
-                insert(m.Member).values(
-                    project_id=first_proj.id,
-                    user_id=user.id,
-                    role_shares={"developer": 1.0},
-                    project_role=assigned_role,
-                )
-            )
-            session.flush()
-
     token, _ = auth_service.issue_session(
         session, user_id=user.id, user_agent=request.headers.get("user-agent")
     )
@@ -598,239 +576,132 @@ def logout(request: Request, response: Response, session: DbSession) -> dict[str
     response.delete_cookie(auth_service.COOKIE_NAME, path="/")
     return {"status": "logged_out"}
 
-_EMAIL_CODES: dict[str, str] = {}
+# Retired prototype endpoints remain explicit failures for older clients.
+# A displayed code is not email verification; an email string is not OAuth proof.
+@app.post("/api/auth/email-code/send", include_in_schema=False)
+def send_email_code() -> None:
+    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                        "이메일 인증 발송은 아직 지원하지 않습니다")
 
 
-class EmailCodeSendIn(BaseModel):
-    email: str
+@app.post("/api/auth/email-code/verify", include_in_schema=False)
+def verify_email_code() -> None:
+    raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                        "이메일 인증은 아직 지원하지 않습니다")
 
 
-class EmailCodeVerifyIn(BaseModel):
-    email: str
-    code: str
-
-
-class OAuthDirectIn(BaseModel):
-    provider: str
-    email: str
-    name: str = ""
-
-
-@app.post("/api/auth/email-code/send")
-def send_email_code(payload: EmailCodeSendIn) -> dict[str, Any]:
-    """이메일 6자리 인증번호 발송."""
-    import secrets
-
-    code = f"{secrets.randbelow(900000) + 100000}"
-    norm = payload.email.strip().lower()
-    _EMAIL_CODES[norm] = code
-    return {
-        "sent": True,
-        "email": payload.email,
-        "expires_in_sec": 300,
-        "demo_code": code,
-        "message": f"인증번호가 발송되었습니다: {code}",
-    }
-
-
-@app.post("/api/auth/email-code/verify")
-def verify_email_code(payload: EmailCodeVerifyIn) -> dict[str, Any]:
-    """이메일 6자리 인증번호 검증."""
-    norm = payload.email.strip().lower()
-    stored = _EMAIL_CODES.get(norm)
-    if not stored or stored != payload.code.strip():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "인증번호가 일치하지 않습니다")
-    return {"verified": True, "email": payload.email}
-
-
-@app.post("/api/auth/oauth")
-def direct_oauth_login(
-    payload: OAuthDirectIn,
-    request: Request,
-    response: Response,
-    session: DbSession,
-    settings: AppSettings,
-) -> MeOut:
-    """OAuth 소셜 로그인 및 세션 생성."""
-    norm_email = payload.email.strip().lower()
-    user = session.scalars(select(m.User).where(m.User.email == norm_email)).first()
-    if user is None:
-        user = auth_service.signup(
-            session,
-            name=payload.name.strip() or norm_email.split("@")[0],
-            email=norm_email,
-            password="teamflow-social-oauth-user",
-        )
-        session.flush()
-
-        first_proj = session.get(m.Project, 1)
-        if first_proj is not None:
-            member_count = session.scalars(
-                select(func.count())
-                .select_from(m.Member)
-                .where(m.Member.project_id == first_proj.id)
-            ).one()
-            assigned_role = "owner" if member_count == 0 else "member"
-            session.execute(
-                insert(m.Member).values(
-                    project_id=first_proj.id,
-                    user_id=user.id,
-                    role_shares={"developer": 1.0},
-                    project_role=assigned_role,
-                )
-            )
-            session.flush()
-
-    token, _ = auth_service.issue_session(
-        session, user_id=user.id, user_agent=request.headers.get("user-agent")
-    )
-    _set_session_cookie(response, token, settings, request)
-    return _me_out(user)
+@app.post("/api/auth/oauth", include_in_schema=False)
+def direct_oauth_login() -> None:
+    raise HTTPException(status.HTTP_410_GONE,
+                        "로그인 화면에서 공식 Google 로그인을 이용해 주세요")
 
 
 @app.get("/api/auth/google/login")
 def google_oauth_login(request: Request, settings: AppSettings) -> Response:
-    """Google 공식 OAuth 2.0 로그인 페이지(accounts.google.com)로 리다이렉트."""
-    import os
+    """검증할 state를 브라우저에 남기고 공식 인증 페이지로 이동합니다."""
     import secrets
     import urllib.parse
 
     from fastapi.responses import RedirectResponse
 
-    client_id = settings.google_client_id or os.environ.get("GOOGLE_CLIENT_ID")
-    if not client_id:
-        return RedirectResponse(url="/app/login?oauth_error=no_client_id", status_code=307)
-
-    host = request.headers.get("host", "teamflow-ai.stream")
-    is_https = "stream" in host or request.headers.get("x-forwarded-proto") == "https"
-    scheme = "https" if is_https else "http"
-    redirect_uri = settings.google_redirect_uri or f"{scheme}://{host}/api/auth/google/callback"
-
-    state = secrets.token_urlsafe(16)
+    if not settings.google_client_id:
+        return RedirectResponse("/app/login?oauth_error=no_client_id", status_code=303)
+    state = secrets.token_urlsafe(32)
     params = {
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
+        "client_id": settings.google_client_id,
+        "redirect_uri": settings.google_redirect_uri
+        or str(request.url_for("google_oauth_callback")),
         "response_type": "code",
         "scope": "openid email profile",
-        "access_type": "online",
         "prompt": "select_account",
         "state": state,
     }
-    google_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
-    resp = RedirectResponse(url=google_url, status_code=307)
-    resp.set_cookie("tf_oauth_state", state, max_age=600, httponly=True, samesite="lax")
-    return resp
+    response = RedirectResponse(
+        "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params),
+        status_code=303,
+    )
+    response.set_cookie(
+        "tf_oauth_state",
+        state,
+        max_age=600,
+        httponly=True,
+        samesite="lax",
+        secure=should_mark_cookie_secure(
+            is_production=settings.is_production,
+            scheme=request.url.scheme,
+            forwarded_proto=request.headers.get("x-forwarded-proto"),
+        ),
+        path="/api/auth/google",
+    )
+    return response
 
 
 @app.get("/api/auth/google/callback")
 def google_oauth_callback(
-    request: Request,
-    session: DbSession,
-    settings: AppSettings,
-    code: str | None = None,
-    state: str | None = None,
-    error: str | None = None,
+    request: Request, session: DbSession, settings: AppSettings,
+    code: str | None = None, state: str | None = None, error: str | None = None,
 ) -> Response:
-    """Google OAuth 2.0 승인 콜백 처리 및 자동 로그인."""
+    """인증을 시작한 브라우저와 검증된 Google 신원만으로 로그인합니다."""
     import json
-    import os
+    import secrets
     import urllib.parse
     import urllib.request
 
     from fastapi.responses import RedirectResponse
-    from sqlalchemy import insert
 
+    def failed(reason: str) -> Response:
+        response = RedirectResponse("/app/login?oauth_error=" + reason, status_code=303)
+        response.delete_cookie("tf_oauth_state", path="/api/auth/google")
+        return response
+
+    expected = request.cookies.get("tf_oauth_state")
+    if not state or not expected or not secrets.compare_digest(state, expected):
+        return failed("invalid_state")
     if error or not code:
-        err_msg = error or "cancelled"
-        return RedirectResponse(url=f"/app/login?oauth_error={err_msg}", status_code=307)
-
-    client_id = settings.google_client_id or os.environ.get("GOOGLE_CLIENT_ID")
-    client_secret = settings.google_client_secret or os.environ.get("GOOGLE_CLIENT_SECRET")
-    if not client_id or not client_secret:
-        return RedirectResponse(url="/app/login?oauth_error=no_credentials", status_code=307)
-
-    host = request.headers.get("host", "teamflow-ai.stream")
-    is_https = "stream" in host or request.headers.get("x-forwarded-proto") == "https"
-    scheme = "https" if is_https else "http"
-    redirect_uri = settings.google_redirect_uri or f"{scheme}://{host}/api/auth/google/callback"
-
+        return failed("cancelled")
+    if not settings.google_client_id or not settings.google_client_secret:
+        return failed("no_credentials")
+    redirect_uri = settings.google_redirect_uri or str(request.url_for("google_oauth_callback"))
     try:
-        token_data = urllib.parse.urlencode({
-            "code": code,
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code",
-        }).encode("utf-8")
         token_req = urllib.request.Request(
             "https://oauth2.googleapis.com/token",
-            data=token_data,
+            data=urllib.parse.urlencode({
+                "code": code, "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "redirect_uri": redirect_uri, "grant_type": "authorization_code",
+            }).encode(),
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-        with urllib.request.urlopen(token_req, timeout=10) as t_resp:
-            token_json = json.loads(t_resp.read().decode("utf-8"))
-            access_token = token_json.get("access_token")
-    except Exception as exc:
-        logger.warning("Google Token 교환 실패: %s", exc)
-        return RedirectResponse(url="/app/login?oauth_error=token_exchange_failed", status_code=307)
-
-    if not access_token:
-        return RedirectResponse(url="/app/login?oauth_error=no_access_token", status_code=307)
-
-    try:
+        with urllib.request.urlopen(token_req, timeout=10) as response:
+            access_token = json.loads(response.read()).get("access_token")
+        if not access_token:
+            return failed("no_access_token")
         user_req = urllib.request.Request(
             "https://www.googleapis.com/oauth2/v3/userinfo",
             headers={"Authorization": f"Bearer {access_token}"},
         )
-        with urllib.request.urlopen(user_req, timeout=10) as u_resp:
-            user_info = json.loads(u_resp.read().decode("utf-8"))
-    except Exception as exc:
-        logger.warning("Google UserInfo 조회 실패: %s", exc)
-        return RedirectResponse(url="/app/login?oauth_error=userinfo_failed", status_code=307)
-
-    google_email = (user_info.get("email") or "").strip().lower()
-    google_name = (user_info.get("name") or google_email.split("@")[0] or "Google 사용자").strip()
-    google_picture = user_info.get("picture")
-
-    if not google_email:
-        return RedirectResponse(url="/app/login?oauth_error=no_email", status_code=307)
-
-    user = session.scalars(select(m.User).where(m.User.email == google_email)).first()
+        with urllib.request.urlopen(user_req, timeout=10) as response:
+            info = json.loads(response.read())
+    except Exception:
+        logger.warning("Google 인증 응답을 받지 못했습니다")
+        return failed("provider_unavailable")
+    email = auth_service.normalize_email(str(info.get("email") or ""))
+    if info.get("email_verified") is not True or not info.get("sub") or "@" not in email:
+        return failed("unverified_email")
+    user = session.scalar(select(m.User).where(m.User.email == email))
     if user is None:
-        user = auth_service.signup(
-            session,
-            name=google_name[:80],
-            email=google_email,
-            password="teamflow-google-oauth-user",
-        )
-        if google_picture and not user.avatar:
-            user.avatar = google_picture
+        # OAuth 전용 계정에는 공통/고정 비밀번호를 만들지 않습니다.
+        user = m.User(name=(str(info.get("name") or email.split("@")[0]).strip()[:80]
+                            or "Google 사용자"), email=email, password_hash=None)
+        session.add(user)
         session.flush()
-
-        first_proj = session.get(m.Project, 1)
-        if first_proj is not None:
-            member_count = session.scalars(
-                select(func.count())
-                .select_from(m.Member)
-                .where(m.Member.project_id == first_proj.id)
-            ).one()
-            assigned_role = "owner" if member_count == 0 else "member"
-            session.execute(
-                insert(m.Member).values(
-                    project_id=first_proj.id,
-                    user_id=user.id,
-                    role_shares={"developer": 1.0},
-                    project_role=assigned_role,
-                )
-            )
-            session.flush()
-
     token, _ = auth_service.issue_session(
         session, user_id=user.id, user_agent=request.headers.get("user-agent")
     )
-    redirect_resp = RedirectResponse(url="/app/", status_code=307)
-    _set_session_cookie(redirect_resp, token, settings, request)
-    return redirect_resp
+    response = RedirectResponse("/app/", status_code=303)
+    response.delete_cookie("tf_oauth_state", path="/api/auth/google")
+    _set_session_cookie(response, token, settings, request)
+    return response
 
 
 def optional_user(request: Request, session: DbSession) -> m.User | None:
@@ -1086,20 +957,6 @@ def _enqueue_github_after_commit(session: Session, event_id: int) -> None:
     @event.listens_for(session, "after_commit", once=True)
     def _fire(_session: Session) -> None:  # pragma: no cover - 커밋 시점에 실행된다
         dispatch.enqueue_github_ingest(event_id)
-
-
-def _enqueue_backfill_after_commit(
-    session: Session, project_id: int, limit: int
-) -> None:
-    """커밋 뒤에 백필을 큐에 넣는다.
-
-    같은 이유입니다 — 워커가 커밋보다 먼저 도착하면 방금 정한 상한도,
-    저장소 이름 변경도 못 본 채로 시작합니다.
-    """
-
-    @event.listens_for(session, "after_commit", once=True)
-    def _fire(_session: Session) -> None:  # pragma: no cover - 커밋 시점에 실행된다
-        dispatch.enqueue_github_backfill(project_id, limit)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1592,10 +1449,7 @@ def github_health(
     facts = github_connection_service.collect_facts(
         session,
         project_id,
-        app_credentials_present=bool(
-            getattr(settings, "github_app_id", None)
-            and getattr(settings, "github_private_key", None)
-        ),
+        app_credentials_present=credentials_present(settings),
         webhook_secret_present=bool(getattr(settings, "github_webhook_secret", None)),
     )
     state = gh_connection.diagnose(facts)
@@ -1729,17 +1583,26 @@ def start_github_backfill(
     # 서버는 409 를 줬습니다. 같은 함수를 진단 갈래도 부릅니다.
     blocked = gh_connection.backfill_blocked_because(
         repo=project.github_repo,
-        app_credentials_present=bool(
-            getattr(settings, "github_app_id", None)
-            and getattr(settings, "github_private_key", None)
-        ),
+        app_credentials_present=credentials_present(settings),
         installation_present=bool(project.github_installation_id),
     )
     if blocked is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, blocked)
 
     limit = gh_backfill.clamp_limit(body.limit)
-    _enqueue_backfill_after_commit(session, project_id, limit)
+    # 이 요청은 이미 저장된 프로젝트를 읽기만 합니다. 새 이벤트를 만드는
+    # 웹훅과 달리 커밋을 기다릴 필요가 없으며, 큐 접수를 확인한 뒤 응답합니다.
+    try:
+        task_id = dispatch.enqueue_github_backfill(project_id, limit)
+    except OSError:
+        logger.exception("GitHub 백필 큐 저장 실패 — project_id=%s", project_id)
+        task_id = None
+    if task_id is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "가져오기 작업을 등록하지 못했습니다. "
+            "잠시 뒤 다시 시도하거나 관리자에게 문의해 주세요.",
+        )
     return {"status": "queued", "project_id": project_id, "limit": limit}
 
 
@@ -2039,44 +1902,22 @@ def join_track(
 
 @app.post("/api/meetings/{meeting_id}/instant-join")
 def instant_join_meeting(
-    meeting_id: int,
-    request: Request,
-    session: DbSession,
-    settings: AppSettings,
-    user: CurrentUser,
+    meeting_id: int, session: DbSession, user: CurrentUser,
 ) -> dict[str, Any]:
-    """원클릭 회의 입장(instant-join). 사전 동의 자동 등록 후 트랙 생성/재개."""
-    meeting = _load_meeting_for(session, meeting_id, user)
-    host = request.client.host if request.client else None
-    member_ids = session.scalars(
-        select(m.Member.user_id).where(m.Member.project_id == meeting.project_id)
-    ).all()
-    for uid in member_ids:
-        for ct in ("recording", "raw_audio_retention", "voiceprint_storage"):
-            with suppress(Exception):
-                recording_service.submit_consent(
-                    session,
-                    meeting_id=meeting.id,
-                    user_id=uid,
-                    consent_type=ct,
-                    consented=True,
-                    ip_address=host,
-                )
-
-    track = recording_service.join_track(
-        session,
-        meeting_id=meeting.id,
-        user_id=user.id,
-        started_at=datetime.now(UTC),
-        device_label="WebRTC Stage Input",
-        sample_rate=48000,
-    )
-    return {
-        "meeting_id": meeting.id,
-        "track_id": track.id,
-        "all_confirmed": True,
-        "status": track.status,
-    }
+    """기존 클라이언트용 입장. 동의는 본인이 별도 제출한 기록만 사용합니다."""
+    _load_meeting_for(session, meeting_id, user)
+    try:
+        track = recording_service.join_track(
+            session, meeting_id=meeting_id, user_id=user.id,
+            started_at=datetime.now(UTC), device_label="WebRTC Stage Input", sample_rate=48000,
+        )
+    except recording_service.ConsentError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except recording_service.TrackError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"meeting_id": meeting_id, "track_id": track.id,
+            "all_confirmed": recording_service.consent_status(session, meeting_id).all_confirmed,
+            "status": track.status}
 
 
 def _own_track(session: Session, meeting_id: int, track_id: int, user: m.User) -> m.MeetingTrack:
@@ -3605,74 +3446,44 @@ def set_my_github_login(
     )
 
 
-class VoiceprintEnrollPayload(BaseModel):
-    step: int = 3
-    features: list[float] = Field(default_factory=list)
-    calibrate_only: bool = False
-
-
 @app.get("/api/projects/{project_id}/me/voiceprint")
-def get_my_voiceprint(
-    project_id: int,
-    session: DbSession,
-    user: CurrentUser,
-) -> dict[str, Any]:
-    """내 목소리 성문(Voiceprint) 등록 상태 조회."""
+def get_my_voiceprint(project_id: int, session: DbSession, user: CurrentUser) -> dict[str, Any]:
+    """과거 저장 상태. 멀티트랙에서는 성문으로 본인을 판정하지 않습니다."""
     _require_project_member(session, project_id, user)
-    vp = session.scalars(
+    vp = session.scalar(
         select(m.Voiceprint).where(
             m.Voiceprint.project_id == project_id,
             m.Voiceprint.user_id == user.id,
         )
-    ).first()
+    )
     return {
-        "enrolled": vp is not None,
-        "user_id": user.id,
-        "project_id": project_id,
-        "dimension": len(vp.embedding) if vp and vp.embedding else 192,
-        "created_at": vp.created_at.isoformat() if vp and vp.created_at else None,
+        "enrolled": vp is not None and vp.revoked_at is None and bool(vp.embedding),
+        "has_stored_data": vp is not None and bool(vp.embedding),
+        "supported": False,
+        "dimension": len(vp.embedding) if vp and vp.revoked_at is None else 0,
+        "message": ("회의 발언자는 각자의 녹음 트랙으로 구분합니다. "
+                    "성문 자동 매칭은 아직 지원하지 않습니다."),
     }
 
 
-@app.post("/api/projects/{project_id}/me/voiceprint")
-def enroll_my_voiceprint(
-    project_id: int,
-    payload: VoiceprintEnrollPayload,
-    session: DbSession,
-    user: CurrentUser,
-) -> dict[str, Any]:
-    """내 목소리 성문(Voiceprint) 3단계 등록 및 5초 적응 보정."""
+@app.post("/api/projects/{project_id}/me/voiceprint", include_in_schema=False)
+def enroll_my_voiceprint(project_id: int, session: DbSession, user: CurrentUser) -> None:
+    """FFT 값을 화자 임베딩으로 저장하던 시제품 경로는 받지 않습니다."""
     _require_project_member(session, project_id, user)
-    vp = session.scalars(
-        select(m.Voiceprint).where(
-            m.Voiceprint.project_id == project_id,
-            m.Voiceprint.user_id == user.id,
-        )
-    ).first()
+    raise HTTPException(
+        status.HTTP_409_CONFLICT,
+        "성문 자동 매칭은 아직 지원하지 않습니다. 각자의 녹음 트랙으로 참가해 주세요",
+    )
 
-    if payload.calibrate_only:
-        return {
-            "enrolled": vp is not None,
-            "dimension": 192,
-            "message": "감기·컨디션 5초 적응 보정이 완료되었습니다.",
-        }
 
-    if vp is None:
-        vp = m.Voiceprint(
-            project_id=project_id,
-            user_id=user.id,
-            embedding=payload.features,
-        )
-        session.add(vp)
-    else:
-        vp.embedding = payload.features
-    session.flush()
-
-    return {
-        "enrolled": True,
-        "dimension": 192,
-        "message": "성문 등록이 완료되었습니다.",
-    }
+@app.delete("/api/projects/{project_id}/me/voiceprint", status_code=204)
+def delete_my_voiceprint(project_id: int, session: DbSession, user: CurrentUser) -> Response:
+    """예전에 저장한 성문만 폐기합니다. 회의 오디오는 건드리지 않습니다."""
+    _require_project_member(session, project_id, user)
+    retention.revoke_project_voiceprints_for_user(
+        session, user.id, project_id, now=datetime.now(UTC)
+    )
+    return Response(status_code=204)
 
 
 @app.get("/api/meetings/{meeting_id}/members", response_model=list[MemberOut])
@@ -4214,6 +4025,8 @@ async def github_webhook(
     # 특히 `ping` — App 을 설치하면 GitHub 이 **가장 먼저** 보내는 것이고
     # 아래 `normalize` 는 이걸 버립니다. 여기서 안 잡으면 방금 연결을 마친
     # 팀에게도 "아직 아무 배달도 없습니다" 가 나갑니다.
+    if x_github_event in {"installation", "installation_repositories"}:
+        github_connection_service.record_installation(session, x_github_event, payload)
     delivered_repo = (payload.get("repository") or {}).get("full_name")
     project = None
     if delivered_repo:
@@ -6143,22 +5956,20 @@ class _SpaStaticFiles(StaticFiles):
 
 
 class VoiceMatchIn(BaseModel):
-    sample_a: list[float]
-    sample_b: list[float]
+    sample_a: list[float] = Field(min_length=1, max_length=192)
+    sample_b: list[float] = Field(min_length=1, max_length=192)
     speaker_names: list[str] = Field(default_factory=lambda: ["화자 A", "화자 B"])
 
 
 class VoiceMatchOut(BaseModel):
     similarity: float
-    is_same_speaker: bool
-    confidence: float
     speaker_verdict: str
     dimension: int
 
 
 @app.post("/api/ai/demo/voice-match", response_model=VoiceMatchOut)
 def demo_voice_match(payload: VoiceMatchIn) -> VoiceMatchOut:
-    """AI 데모 랩: 성문 임베딩 벡터 간 코사인 유사도 및 화자 일치 판정."""
+    """데모의 주파수 벡터를 비교합니다. 사람의 신원은 판정하지 않습니다."""
     import math
 
     a = payload.sample_a
@@ -6166,7 +5977,9 @@ def demo_voice_match(payload: VoiceMatchIn) -> VoiceMatchOut:
     if not a or not b:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "샘플 벡터가 비어 있습니다")
 
-    min_len = min(len(a), len(b))
+    if len(a) != len(b) or not all(math.isfinite(v) for v in [*a, *b]):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "같은 차원의 유한한 벡터가 필요합니다")
+    min_len = len(a)
     dot = sum(a[i] * b[i] for i in range(min_len))
     norm_a = math.sqrt(sum(x * x for x in a[:min_len]))
     norm_b = math.sqrt(sum(y * y for y in b[:min_len]))
@@ -6175,58 +5988,44 @@ def demo_voice_match(payload: VoiceMatchIn) -> VoiceMatchOut:
     if norm_a > 1e-9 and norm_b > 1e-9:
         sim = max(-1.0, min(1.0, dot / (norm_a * norm_b)))
 
-    score = (sim + 1.0) / 2.0
-    is_match = score >= 0.75
-
-    name_a = payload.speaker_names[0] if len(payload.speaker_names) > 0 else "화자 A"
-    name_b = payload.speaker_names[1] if len(payload.speaker_names) > 1 else "화자 B"
-
-    if is_match:
-        pct = int(score * 100)
-        verdict = f"{name_a}와 {name_b}는 동일 인물(성문 일치 {pct}%)로 판별되었습니다."
-    else:
-        pct = int(score * 100)
-        verdict = f"{name_a}와 {name_b}는 다른 화자(유사도 {pct}%)로 분리되었습니다."
+    score = sim
+    name_a = payload.speaker_names[0] if payload.speaker_names else "샘플 A"
+    name_b = payload.speaker_names[1] if len(payload.speaker_names) > 1 else "샘플 B"
+    verdict = (f"{name_a}와 {name_b} 벡터의 코사인 유사도입니다. "
+               "사람의 신원을 판정하지 않습니다.")
 
     return VoiceMatchOut(
         similarity=round(score, 4),
-        is_same_speaker=is_match,
-        confidence=round(score if is_match else (1.0 - score), 4),
         speaker_verdict=verdict,
         dimension=min_len,
     )
 
 
 class DemoUtteranceIn(BaseModel):
-    speaker: str
-    text: str
+    speaker: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1, max_length=2000)
     start_sec: float = 0.0
     end_sec: float = 5.0
 
 
 class DemoAnalyzeIn(BaseModel):
-    script: list[DemoUtteranceIn]
+    script: list[DemoUtteranceIn] = Field(max_length=100)
 
 
 class DemoCandidateTaskOut(BaseModel):
     title: str
-    assignee_name: str
-    deadline: str
-    confidence: float
     evidence_text: str
-    category: str
 
 
 class DemoAnalyzeOut(BaseModel):
     decisions: list[str]
     tasks: list[DemoCandidateTaskOut]
     diarization_summary: str
-    total_speakers: int
 
 
 @app.post("/api/ai/demo/analyze", response_model=DemoAnalyzeOut)
 def demo_analyze_meeting(payload: DemoAnalyzeIn) -> DemoAnalyzeOut:
-    """AI 데모 랩: 발화 내용 기반 화자 분리 요약, 의사결정 및 업무 후보 자동 추출."""
+    """입력된 문장의 키워드 규칙 예시입니다. 업무나 기여도에 저장하지 않습니다."""
     speakers = list(dict.fromkeys(u.speaker for u in payload.script))
 
     decisions: list[str] = []
@@ -6239,55 +6038,27 @@ def demo_analyze_meeting(payload: DemoAnalyzeIn) -> DemoAnalyzeOut:
 
         keywords = ("까지", "구현", "작성", "검토", "맡을게요", "하겠습니다")
         if any(kw in txt for kw in keywords):
-            assignee = u.speaker
-            for sp in speakers:
-                if f"{sp} 님이" in txt or f"{sp}님이" in txt or f"{sp}가" in txt:
-                    assignee = sp
-
-            deadline = "다음 주"
-            if "금요일까지" in txt or "금요일" in txt:
-                deadline = "이번 주 금요일"
-            elif "토요일까지" in txt or "토요일" in txt:
-                deadline = "이번 주 토요일"
-            elif "화요일까지" in txt or "화요일" in txt:
-                deadline = "다음 주 화요일"
-
             title = txt.split("까지")[-1].strip() if "까지" in txt else txt
             for ending in ("하기로 하죠", "하겠습니다", "맡을게요", "할게요", "부탁드립니다"):
                 title = title.replace(ending, "").strip()
             if not title:
                 title = txt
 
-            category = "developer"
-            if "디자인" in txt or "UI" in txt or "화면" in txt:
-                category = "designer"
-            elif "기획" in txt or "일정" in txt:
-                category = "planner"
-            elif "DB" in txt or "인프라" in txt or "배포" in txt:
-                category = "infrastructure"
-
             tasks.append(
                 DemoCandidateTaskOut(
                     title=title[:80],
-                    assignee_name=assignee,
-                    deadline=deadline,
-                    confidence=0.94,
-                    evidence_text=f"{u.speaker}: \"{txt}\"",
-                    category=category,
+                    evidence_text=f'{u.speaker}: "{txt}"',
                 )
             )
 
-    if not decisions:
-        decisions.append("발화 맥락에서 도출된 핵심 결정 사항 1건")
-
     sp_list = ", ".join(speakers)
-    summary = f"총 {len(speakers)}명의 화자({sp_list}) 발화가 성공적으로 분리되었습니다."
+    summary = (f"입력에 적힌 발언자 {len(speakers)}명({sp_list})을 묶었습니다. "
+               "음성 모델을 실행한 결과는 아닙니다.")
 
     return DemoAnalyzeOut(
         decisions=decisions,
         tasks=tasks,
         diarization_summary=summary,
-        total_speakers=len(speakers),
     )
 
 

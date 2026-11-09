@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, date, datetime, time
+from functools import wraps
+from inspect import signature
 
 from celery import Task
+from celery.exceptions import Retry
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -36,6 +39,25 @@ logger = logging.getLogger(__name__)
 # 회의 처리가 보통 5~15분이라 30초 간격이면 과하지 않다.
 GPU_RETRY_COUNTDOWN = 30
 GPU_MAX_RETRIES = 120  # 최대 1시간 대기
+
+
+def _record_processing_failure(function):
+    """준비/저장 예외도 실패 상태를 남겨 화면에서 재시도할 수 있게 합니다."""
+    @wraps(function)
+    def run(*args, **kwargs):
+        meeting_id = signature(function).bind(*args, **kwargs).arguments["meeting_id"]
+        try:
+            return function(*args, **kwargs)
+        except (GpuBusy, Retry):
+            raise
+        except Exception:
+            logger.exception("meeting=%s 처리 작업이 중단됐습니다", meeting_id)
+            with session_scope() as session:
+                meeting = session.get(m.Meeting, meeting_id)
+                if meeting is not None and meeting.status in ("processing", "queued"):
+                    meeting.status = "failed"
+            raise
+    return run
 
 
 def _build_steps(capture_mode: str):
@@ -93,6 +115,7 @@ def _build_steps(capture_mode: str):
     autoretry_for=(),
     max_retries=GPU_MAX_RETRIES,
 )
+@_record_processing_failure
 def process_meeting_task(self: Task, meeting_id: int) -> dict:
     """회의 하나를 처리한다. GPU 큐에서 동시성 1로 돈다."""
     settings = get_settings()
@@ -190,6 +213,7 @@ def process_meeting_task(self: Task, meeting_id: int) -> dict:
     }
 
 
+@_record_processing_failure
 def process_meeting_sync(meeting_id: int) -> dict:
     """인프로세스 동기 회의 처리 (로컬 개발/Celery 가 없을 때 백그라운드 스레드에서 직접 실행)."""
     settings = get_settings()

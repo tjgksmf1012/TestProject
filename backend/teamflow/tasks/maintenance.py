@@ -16,7 +16,11 @@ from teamflow.db import models as m
 from teamflow.db import vocab
 from teamflow.db.session import session_scope
 from teamflow.github.client import GitHubClient, GitHubError, build_client
-from teamflow.jobs.retention import purge_expired_audio, revoke_project_voiceprints
+from teamflow.jobs.retention import (
+    purge_expired_audio,
+    purge_revoked_voiceprints,
+    revoke_project_voiceprints,
+)
 from teamflow.services import github_backfill_service, notification_service
 from teamflow.tasks import app
 
@@ -57,6 +61,7 @@ def revoke_finished_project_voiceprints_task() -> dict:
     """
     revoked = 0
     with session_scope() as session:
+        revoked += purge_revoked_voiceprints(session)
         finished = session.scalars(
             select(m.Project.id).where(m.Project.status == vocab.ProjectStatus.FINISHED)
         ).all()

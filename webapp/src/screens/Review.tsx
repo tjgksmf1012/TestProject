@@ -803,6 +803,9 @@ export default function Review() {
             )}
           </div>
           <div className="pane__body" ref={listRef} onKeyDown={onListKeyDown}>
+            {candidates.length > 0 && <p className="notice">
+              등록·거절은 선택 표시입니다. 모든 후보를 정한 뒤 ‘검토 끝내기’를 눌러야 서버에 저장됩니다.
+            </p>}
             {submitNote !== null && (
               <p className="notice" role="status">
                 {submitNote}

@@ -188,9 +188,11 @@ def ingest_github_event(session: Session, client: GitHubClient, event_id: int) -
         return {"status": "ignored", "reason": "no_pr_number"}
 
     try:
-        return ingest_merged_pull_request(
+        outcome = ingest_merged_pull_request(
             session, client, project_id=row.project_id, repo=row.repo, number=int(number)
         )
+        row.payload = {**(row.payload or {}), "_teamflow_ingested": True}
+        return outcome
     except GitHubError as exc:
         # 재시도 가능 여부를 호출자(Celery 태스크)에게 그대로 넘깁니다.
         # 여기서 삼키면 rate limit 한 번에 그 PR 의 기여가 사라집니다.

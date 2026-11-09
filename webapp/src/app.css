@@ -1384,6 +1384,19 @@ details.disc > .disc__body {
 .confirmbar__reason { display: flex; align-items: center; gap: var(--sp-4); }
 .confirmbar__reason .input { flex: 1; max-width: 32rem; }
 
+@media (max-width: 36rem) {
+  /* 고정 폭 세 칸은 반쪽 창에서 모름 값과 근거를 상자 밖으로 밀었습니다. */
+  .crow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5); }
+  .crow__id, .crow .chain { grid-column: 1 / -1; }
+  .crow__name { overflow-wrap: anywhere; }
+  /* 사람 입력칸을 합계·확정 버튼이 먹고 남은 몇 px 안에 접지 않습니다. */
+  .confirmbar__people { flex-basis: 100%; }
+  .confirmbar__person { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .confirmbar__person > div { min-width: 0; max-width: 100%; }
+  .confirmbar__person .input--num { max-width: 100%; }
+  .confirmbar__reason { flex-wrap: wrap; }
+}
+
 /* ==========================================================================
    화면 — 업무 후보 검토 (3판: 전사 34 | 후보 41 | 근거 25)
    ========================================================================== */
@@ -4881,3 +4894,24 @@ input[type="checkbox"] {
     width: 100% !important;
   }
 }
+
+/* 회의 장치 화면은 루트에 유지되어 라우트 이동으로 녹음이 끊기지 않습니다. */
+.meeting-room { width: min(94vw, 80rem); max-width: 80rem; height: min(90dvh, 56rem); display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+.meeting-room[hidden], .meeting-room__panel[hidden], .dialog-backdrop[hidden] { display: none; }
+.meeting-room__header, .meeting-room__actions, .meeting-room__tabs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.meeting-room__header { justify-content: space-between; }
+.meeting-room__setup { display: grid; gap: 16px; overflow: auto; }
+.meeting-room__consents { display: grid; gap: 8px; padding: 12px; }
+.meeting-room__consents label { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.meeting-room__list { display: grid; gap: 8px; list-style: none; padding: 0; }
+.meeting-room__panel { flex: 1; min-height: 20rem; }
+.meeting-room__panel iframe { width: 100%; height: 100%; min-height: 24rem; border: 1px solid var(--c-line); border-radius: var(--r-sm); }
+.meeting-mini { position: fixed; bottom: 16px; right: 16px; z-index: 120; max-width: calc(100vw - 32px); display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--c-surface); border: 1px solid var(--c-line); border-radius: var(--r-md); box-shadow: var(--shadow-pop); flex-wrap: wrap; }
+
+.settings-room { width: min(94vw, 44rem); max-height: 90dvh; display: flex; flex-direction: column; gap: 16px; }
+.settings-room__body { overflow: auto; display: grid; gap: 16px; }
+.settings-room form { display: grid; gap: 12px; }
+
+.demo-lab { overflow: auto; max-width: 64rem; margin-inline: auto; }
+.demo-lab__section { display: grid; gap: 16px; padding: 20px; margin-block: 16px; }
+.demo-lab form { display: grid; gap: 12px; }

@@ -12,6 +12,11 @@ export class ApiError extends Error {
   }
 }
 
+/** 화면의 실패 문구가 서버 설명을 버리지 않도록 한 곳에서 읽습니다. */
+export function apiFailureText(error: unknown): string {
+  return error instanceof ApiError ? error.detail : '처리하지 못했습니다. 연결을 확인하고 다시 시도해 주세요';
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const init: RequestInit = {
     method,

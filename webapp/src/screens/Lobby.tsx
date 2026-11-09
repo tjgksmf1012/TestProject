@@ -32,6 +32,7 @@ import {
   discardAffordance,
   DISCARD_CONFIRM,
   EXTRA_CONSENTS,
+  DEFAULT_OPTIONAL_CONSENT,
 } from '@lib/lobby/room.ts';
 import { axisTicks, buildDiagram, describeGap, meetingWindow, type TrackInput } from '@lib/track/diagram.ts';
 import {
@@ -144,8 +145,8 @@ export default function Lobby() {
   const saved = me !== null && me !== undefined ? savedExtraConsents(roster, me.user_id) : { rawAudio: null, voiceprint: null };
   const [rawAudio, setRawAudio] = useState<boolean | null>(null);
   const [voiceprint, setVoiceprint] = useState<boolean | null>(null);
-  const rawAudioValue = rawAudio ?? saved.rawAudio ?? true;
-  const voiceprintValue = voiceprint ?? saved.voiceprint ?? true;
+  const rawAudioValue = rawAudio ?? saved.rawAudio ?? DEFAULT_OPTIONAL_CONSENT;
+  const voiceprintValue = voiceprint ?? saved.voiceprint ?? DEFAULT_OPTIONAL_CONSENT;
   const iAgreed = mine !== undefined && mine.recording === true;
 
   // 녹음 화면으로 넘어가는 두 관문. 문장이 아니라 **칩**으로 버튼 옆에 섭니다.

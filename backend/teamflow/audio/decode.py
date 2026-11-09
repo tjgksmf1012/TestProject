@@ -150,11 +150,49 @@ class FfmpegChunkDecoder:
     ffmpeg: str = "ffmpeg"
     timeout_sec: float = DEFAULT_TIMEOUT_SEC
 
-    def decode(self, data: bytes, *, target_sample_rate: int = DEFAULT_SAMPLE_RATE) -> np.ndarray:
+    def decode_chunks(self, chunks, *, target_sample_rate: int) -> dict[int, np.ndarray]:
+        """MediaRecorder 조각은 한 스트림으로 읽고 원래 시간축에 다시 배치합니다.
+
+        새 컨테이너 헤더는 녹음기 재시작 경계입니다. 누락된 조각의 시간은
+        컨테이너 타임스탬프와 resampler로 보존하고, 없는 헤더를 지어내지 않습니다.
+        """
+        groups: list[list] = []
+        for placement, raw in chunks:
+            starts_stream = (
+                raw.startswith((b"\x1aE\xdf\xa3", b"RIFF"))
+                or raw[4:8] == b"ftyp"
+                or (raw.startswith(b"OggS") and len(raw) > 5 and raw[5] & 2)
+            )
+            if not groups or starts_stream:
+                groups.append([])
+            groups[-1].append((placement, raw))
+        decoded: dict[int, np.ndarray] = {}
+        for group in groups:
+            try:
+                audio = self.decode(
+                    b"".join(raw for _, raw in group), target_sample_rate=target_sample_rate,
+                    _continuous=True,
+                )
+            except DecodeError:
+                # 손상된 스트림을 정상 수신으로 계산하지 않습니다.
+                continue
+            base = group[0][0].start_ms
+            for placement, _ in group:
+                start = round((placement.start_ms - base) * target_sample_rate / 1000)
+                end = start + round(placement.duration_ms * target_sample_rate / 1000)
+                decoded[placement.seq] = audio[start:end]
+        return decoded
+
+    def decode(
+        self, data: bytes, *, target_sample_rate: int = DEFAULT_SAMPLE_RATE,
+        _continuous: bool = False,
+    ) -> np.ndarray:
         if not data:
             raise DecodeError("빈 청크입니다")
 
         args = ffmpeg_command(sample_rate=target_sample_rate, ffmpeg=self.ffmpeg)
+        if _continuous:
+            args[-1:] = ["-af", "aresample=async=1:first_pts=0", "pipe:1"]
         try:
             code, stdout, stderr = self.runner.run(
                 args, stdin=data, timeout=self.timeout_sec
