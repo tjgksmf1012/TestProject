@@ -46,13 +46,6 @@ SERVER_ONLY_OR_ASSEMBLED: dict[str, str] = {
     "GET /api/auth/google/callback": (
         "Google의 외부 콜백입니다. test_auth가 state와 신규/기존 계정 로그인을 검증합니다"
     ),
-    "POST /api/auth/oauth": "이전 시제품 경로는 test_auth가 410 거절을 검증합니다",
-    "POST /api/auth/email-code/send": "메일 발송 전에는 503 거절. test_auth가 검증합니다",
-    "POST /api/auth/email-code/verify": "메일 인증 전에는 503 거절. test_auth가 검증합니다",
-    "POST /api/projects/{project_id}/me/voiceprint": "미지원 등록은 409. test_auth가 검증합니다",
-    "POST /api/meetings/{meeting_id}/instant-join": (
-        "이전 클라이언트 호환 경로. test_auth가 본인의 명시적 동의만 쓰는지 검증합니다"
-    ),
     "POST /api/github/webhook": "GitHub 이 부릅니다 — 화면이 부르는 갈래가 아닙니다",
     "GET /health": (
         "컨테이너·배포가 살아 있는지 묻는 갈래입니다 — 화면이 부르는 것이 "

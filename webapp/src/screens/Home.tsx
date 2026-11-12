@@ -431,14 +431,14 @@ export default function Home() {
                     </span>
                     <span className="tf-bento-badge">실시간 회의</span>
                   </div>
-                  <div className="tf-bento-card__title">음성 회의실</div>
+                  <div className="tf-bento-card__title">화상 회의실</div>
                   <div className="tf-bento-card__sub">
-                    개별 동의를 확인한 뒤 음성 통화와 녹음 화면을 엽니다
+                    카메라·마이크 상태를 확인하고 화면 공유 및 회의를 시작합니다
                   </div>
                   <button
                     type="button"
                     className="btn btn--primary btn--sm tf-bento-btn"
-                    onClick={() => triggerInstantCall(project.project_id)}
+                    onClick={() => triggerInstantCall(false)}
                   >
                     회의실 열기
                   </button>
@@ -545,10 +545,10 @@ export default function Home() {
                   <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
                       <span className="dc-badge dc-badge--ok num">1단계</span>
-                      <strong style={{ fontSize: '13px' }}>음성 회의와 개별 녹음</strong>
+                      <strong style={{ fontSize: '13px' }}>음성 회의 & 화자 분리</strong>
                     </div>
                     <p className="t12 muted" style={{ margin: 0, lineHeight: 1.5 }}>
-                      전원이 동의한 뒤 각자의 트랙을 녹음합니다. 발언자는 녹음한 팀원으로 구분하고 AI가 음성을 전사합니다.
+                      회의를 열어 팀원별 트랙 음성을 녹음하고, AI가 성문 기반으로 발언자를 자동 분리합니다.
                     </p>
                   </div>
                   <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>

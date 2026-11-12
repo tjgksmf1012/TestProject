@@ -36,7 +36,7 @@ export function CommandPalette({
   const commands = [
     {
       id: 'call',
-      label: '음성 회의실 열기',
+      label: '화상 회의실 열기',
       category: '회의',
       shortcut: 'Enter',
       run: () => {

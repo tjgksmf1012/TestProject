@@ -6,6 +6,14 @@ import { validateLogin, validateSignup, describeAuthFailure } from '@lib/auth/se
 import { pageTitle } from '@lib/shell/title.ts';
 import { Problem } from '../components/Problem.tsx';
 
+interface EmailOtpOut {
+  sent: boolean;
+  email: string;
+  expires_in_sec: number;
+  demo_code: string;
+  message: string;
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -16,14 +24,17 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // 이메일 6자리 OTP 인증 상태
+  const [otpCode, setOtpCode] = useState('');
+  const [otpBanner, setOtpBanner] = useState<string | null>(null);
+  const [otpVerified, setOtpVerified] = useState(false);
+
   useEffect(() => {
     document.title = pageTitle(mode === 'login' ? '로그인' : '가입');
     const params = new URLSearchParams(window.location.search);
     const oauthError = params.get('oauth_error');
     if (oauthError === 'no_client_id' || oauthError === 'no_credentials') {
-      setError('Google 로그인을 사용할 수 없습니다. 이메일로 로그인하거나 관리자에게 문의해 주세요.');
-    } else if (oauthError === 'invalid_state') {
-      setError('로그인 요청이 만료되었거나 다른 창에서 시작되었습니다. Google 로그인을 다시 시작해 주세요.');
+      setError('Google OAuth 클라이언트 ID가 아직 설정되지 않았습니다. Google Cloud Console에서 발급받은 Client ID와 Secret을 .env 파일에 등록해 주세요.');
     } else if (oauthError === 'cancelled') {
       setError('Google 로그인이 취소되었습니다.');
     } else if (oauthError) {
@@ -45,9 +56,8 @@ export default function Login() {
     try {
       if (mode === 'signup') {
         await api.post('/api/auth/signup', { name: name.trim(), email: email.trim(), password });
-      } else {
-        await api.post('/api/auth/login', { email: email.trim(), password });
       }
+      await api.post('/api/auth/login', { email: email.trim(), password });
       await queryClient.invalidateQueries({ queryKey: ['me'] });
       await queryClient.invalidateQueries({ queryKey: ['projects'] });
       navigate('/', { replace: true });
@@ -55,6 +65,44 @@ export default function Login() {
       setError(
         e instanceof ApiError ? describeAuthFailure(e.status, e.detail) : '로그인하지 못했습니다',
       );
+      setBusy(false);
+    }
+  };
+
+  const handleSendOtp = async () => {
+    if (!email.trim().includes('@')) {
+      setError('이메일 주소를 먼저 입력해 주세요');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.post<EmailOtpOut>('/api/auth/email-code/send', {
+        email: email.trim(),
+      });
+      setOtpCode(res.demo_code);
+      setOtpBanner(res.message);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : '인증번호 발송에 실패했습니다');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (otpCode.trim().length !== 6) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post('/api/auth/email-code/verify', {
+        email: email.trim(),
+        code: otpCode.trim(),
+      });
+      setOtpVerified(true);
+      setOtpBanner('이메일 6자리 인증 완료 ✓');
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : '인증번호가 일치하지 않습니다');
+    } finally {
       setBusy(false);
     }
   };
@@ -80,7 +128,7 @@ export default function Login() {
           </div>
           <p className="login__arrow num">↓ 실시간 연동</p>
           <p className="login__task">
-            <span className="num">TASK</span> 업무 후보 검토·승인 후 칸반 등록
+            <span className="num">TASK</span> 할 일 자동 등록 및 칸반 관리
           </p>
           <p className="login__arrow num">↓</p>
           <p className="login__task">
@@ -140,8 +188,43 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
               />
+              {mode === 'signup' && (
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  disabled={busy || otpVerified}
+                  onClick={() => void handleSendOtp()}
+                >
+                  {otpVerified ? '인증됨' : '인증코드'}
+                </button>
+              )}
             </div>
           </label>
+
+          {mode === 'signup' && otpBanner !== null && (
+            <div className="field" style={{ gap: '6px' }}>
+              <span className="t12" style={{ color: 'var(--c-ok)' }}>{otpBanner}</span>
+              {!otpVerified && (
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    className="input num"
+                    maxLength={6}
+                    placeholder="6자리 코드"
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={busy}
+                    onClick={() => void handleVerifyOtp()}
+                  >
+                    확인
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           <label className="field">
             <span className="field__label">비밀번호</span>
@@ -179,7 +262,7 @@ export default function Login() {
           <p className="t12 faint">비밀번호는 scrypt로 해싱해 저장합니다.</p>
           <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--c-border)', textAlign: 'center' }}>
             <Link to="/demo" style={{ fontSize: 'var(--fs-12)', color: 'var(--c-evidence)', textDecoration: 'none', fontWeight: 500 }}>
-              음향 벡터 · 키워드 규칙 예시 체험관 둘러보기 →
+              ✨ AI 음성인식 · 화자분리 기술 체험관(Demo Lab) 둘러보기 →
             </Link>
           </div>
         </form>

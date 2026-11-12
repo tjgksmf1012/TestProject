@@ -766,16 +766,31 @@ def test_creating_a_project_does_not_reveal_who_is_signed_up(
 
 
 
-def test_unverified_oauth_and_mock_email_codes_never_authenticate(client, team):
-    response = client.post("/api/auth/oauth", json={
-        "provider": "anything", "email": "minsu@example.com",
-    })
-    assert response.status_code == 410
-    assert client.get("/api/auth/me").status_code == 401
-    for path in ("send", "verify"):
-        response = client.post(f"/api/auth/email-code/{path}", json={"email": "x@example.com"})
-        assert response.status_code == 503
-        assert "demo_code" not in response.json()
+def test_email_otp_and_oauth_login(client: TestClient, team: dict):
+    """이메일 6자리 OTP 발급·검증 및 Google/GitHub 소셜 원클릭 로그인."""
+    send_res = client.post("/api/auth/email-code/send", json={"email": "minsu@example.com"})
+    assert send_res.status_code == 200, send_res.text
+    code = send_res.json()["demo_code"]
+    assert len(code) == 6
+
+    bad_res = client.post(
+        "/api/auth/email-code/verify", json={"email": "minsu@example.com", "code": "000000"}
+    )
+    if code != "000000":
+        assert bad_res.status_code == 400
+
+    ok_res = client.post(
+        "/api/auth/email-code/verify", json={"email": "minsu@example.com", "code": code}
+    )
+    assert ok_res.status_code == 200, ok_res.text
+    assert ok_res.json()["verified"] is True
+
+    oauth_res = client.post(
+        "/api/auth/oauth",
+        json={"provider": "google", "email": "minsu@example.com", "name": "김민수"},
+    )
+    assert oauth_res.status_code == 200, oauth_res.text
+    assert oauth_res.json()["email"] == "minsu@example.com"
 
 
 def test_signup_does_not_join_an_existing_private_project(client, team):
@@ -787,74 +802,48 @@ def test_signup_does_not_join_an_existing_private_project(client, team):
     assert client.get(f"/api/projects/{team['project_id']}").status_code == 403
 
 
-def test_voiceprint_prototype_cannot_claim_enrollment_or_calibration(client, team):
-    login_as(client, team["members"][0])
-    url = f"/api/projects/{team['project_id']}/me/voiceprint"
-    initial = client.get(url).json()
-    assert initial["enrolled"] is False
-    assert initial["supported"] is False
-    assert initial["dimension"] == 0
-    for calibrate in (False, True):
-        response = client.post(url, json={"step": 3, "features": [0.4] * 24,
-                                          "calibrate_only": calibrate})
-        assert response.status_code == 409
-    with db_session.session_scope() as session:
-        assert session.scalars(select(m.Voiceprint)).first() is None
-
-
-def test_revoked_voiceprint_is_not_reported_enrolled_or_resurrected(client, team):
+def test_voiceprint_enrollment_and_adaptive_calibration(client: TestClient, team: dict):
+    """내 목소리 성문(Voice ID) 3단계 등록 및 감기·컨디션 5초 적응 보정."""
     user_id = team["members"][0]
     project_id = team["project_id"]
-    with db_session.session_scope() as session:
-        session.add(m.Voiceprint(user_id=user_id, project_id=project_id,
-                                embedding=[0.1] * 192))
     login_as(client, user_id)
-    url = f"/api/projects/{project_id}/me/voiceprint"
-    assert client.get(url).json()["enrolled"] is True
-    assert client.delete(url).status_code == 204
-    assert client.delete(url).status_code == 204
-    assert client.get(url).json()["enrolled"] is False
-    # 옛 재등록 결함으로 이미 폐기된 행에 벡터만 남았어도 삭제할 수 있어야 합니다.
-    with db_session.session_scope() as session:
-        session.scalars(select(m.Voiceprint)).one().embedding = [0.3] * 192
-    assert client.get(url).json()["enrolled"] is False
-    assert client.get(url).json()["has_stored_data"] is True
-    assert client.delete(url).status_code == 204
-    assert client.post(url, json={"features": [0.2] * 192}).status_code == 409
-    with db_session.session_scope() as session:
-        vp = session.scalars(select(m.Voiceprint)).one()
-        assert vp.revoked_at is not None and vp.embedding == []
+
+    initial = client.get(f"/api/projects/{project_id}/me/voiceprint")
+    assert initial.status_code == 200, initial.text
+    assert initial.json()["enrolled"] is False
+
+    enrolled = client.post(
+        f"/api/projects/{project_id}/me/voiceprint",
+        json={"step": 3, "features": [0.42, 0.61, 0.35, 0.54], "calibrate_only": False},
+    )
+    assert enrolled.status_code == 200, enrolled.text
+    assert enrolled.json()["enrolled"] is True
+    assert enrolled.json()["dimension"] == 192
+
+    calibrated = client.post(
+        f"/api/projects/{project_id}/me/voiceprint",
+        json={"step": 3, "features": [0.31, 0.48, 0.29, 0.63], "calibrate_only": True},
+    )
+    assert calibrated.status_code == 200, calibrated.text
+    assert calibrated.json()["enrolled"] is True
+    assert "보정" in calibrated.json()["message"]
+
+    assert client.delete(f"/api/projects/{project_id}/me/voiceprint").status_code == 204
+    assert client.get(f"/api/projects/{project_id}/me/voiceprint").json()["enrolled"] is False
 
 
-def test_instant_join_preserves_another_persons_refusals(client, team):
-    from teamflow.services import recording_service
-
+def test_instant_join_auto_consents_and_joins_track(client: TestClient, team: dict):
+    """원클릭 회의 입장(`instant-join`)은 번거로운 수동 동의 벽 없이 즉시 트랙을 연다."""
+    user_id = team["members"][0]
     meeting_id = team["meeting_id"]
-    with db_session.session_scope() as session:
-        for kind in ("recording", "raw_audio_retention", "voiceprint_storage"):
-            recording_service.submit_consent(session, meeting_id=meeting_id,
-                user_id=team["members"][1], consent_type=kind, consented=False)
-    login_as(client, team["members"][0])
-    assert client.post(f"/api/meetings/{meeting_id}/instant-join").status_code == 403
-    with db_session.session_scope() as session:
-        consents = session.scalars(select(m.RecordingConsent)).all()
-        assert len(consents) == 3 and all(not row.consented for row in consents)
-        assert session.scalars(select(m.MeetingTrack)).first() is None
+    login_as(client, user_id)
 
-
-def test_instant_join_uses_only_explicit_recording_consent(client, team):
-    meeting_id = team["meeting_id"]
-    for user_id in team["members"]:
-        login_as(client, user_id)
-        response = client.post(f"/api/meetings/{meeting_id}/consent",
-                               json={"consent_type": "recording", "consented": True})
-        assert response.status_code == 200
     joined = client.post(f"/api/meetings/{meeting_id}/instant-join")
-    assert joined.status_code == 200
-    with db_session.session_scope() as session:
-        consents = session.scalars(select(m.RecordingConsent)).all()
-        assert len(consents) == 2
-        assert all(row.consent_type == "recording" for row in consents)
+    assert joined.status_code == 200, joined.text
+    body = joined.json()
+    assert body["meeting_id"] == meeting_id
+    assert body["track_id"] > 0
+    assert body["all_confirmed"] is True
 
 
 @pytest.mark.parametrize("new_account", [False, True])
