@@ -100,7 +100,9 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
     Object.entries(current).map(([k, v]) => [k, v.trim() === '' ? 0 : Number(v)]),
   );
   const problem = problemWith(shares);
-  const roleBlocked = whyCannotSave({ problem, saving: save.isPending });
+  const dirty = edited !== null;
+  const roleBlocked = whyCannotSave({ problem, dirty, saving: save.isPending });
+  const justSaved = saved && !dirty;
   const sum = sumOf(shares);
 
   return (
@@ -155,8 +157,10 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
         >
           저장
         </button>
-        <Problem id="role-problem" tone="incomplete" inline>{roleBlocked}</Problem>
-        {saved && edited === null && <span className="status-ok" role="status">저장됐습니다</span>}
+        <Problem id="role-problem" tone="incomplete" inline>
+          {justSaved && roleBlocked === '바꾼 것이 없습니다' ? null : roleBlocked}
+        </Problem>
+        {justSaved && <span className="status-ok" role="status">저장됐습니다</span>}
         <Problem inline>{save.isError ? mutationError(save.error) : null}</Problem>
       </div>
       <Disclosure summary="왜 나만 바꿀 수 있나요">

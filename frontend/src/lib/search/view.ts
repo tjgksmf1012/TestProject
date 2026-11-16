@@ -10,6 +10,8 @@
  * (`AGENTS.md` 불변식 1).
  */
 
+import { appRailHref } from '../nav/rail.ts';
+
 export interface Hit {
   kind: string;
   task_id: number | null;
@@ -72,6 +74,25 @@ export function hrefFor(hit: Hit, projectId: number): string | null {
     return `/lobby.html?meeting=${hit.meeting_id}&project=${projectId}`;
   }
   if (hit.task_id !== null) return `/kanban.html?project=${projectId}`;
+  return null;
+}
+
+/**
+ * 같은 갈 곳 판단의 SPA 경로 (`/app` basename 제외).
+ *
+ * ⚠️ `CommandPalette` 와 화면 코드가 `hrefFor` 와 같은 규칙을 따로 적으면
+ *    반드시 갈라집니다(대표 실패 ②). GitHub 결과는 레거시와 마찬가지로 `null`.
+ */
+export function appHrefForHit(hit: Hit, projectId: number): string | null {
+  if (hit.kind === 'utterance' && hit.meeting_id !== null) {
+    return `/meeting/${hit.meeting_id}/review`;
+  }
+  if (hit.meeting_id !== null) {
+    return `/meeting/${hit.meeting_id}/lobby`;
+  }
+  if (hit.task_id !== null) {
+    return `${appRailHref('kanban', projectId)}?task=${hit.task_id}`;
+  }
   return null;
 }
 

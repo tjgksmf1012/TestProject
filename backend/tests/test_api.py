@@ -543,6 +543,66 @@ def test_rejection_creates_no_task(client: TestClient, seeded):
         assert row.review_status == "rejected"
 
 
+def test_create_candidate_from_utterance_adds_pending_candidate_not_task(
+    client: TestClient, seeded, engine
+):
+    """전사 발화에서 직접 추가해도 칸반 직행은 금지 — pending 후보만 추가되고 검토를 거쳐야 한다."""
+    uids = _seed_utterances(engine, seeded["meeting_id"], seeded["user_ids"][0])
+    with db_session.session_scope() as s:
+        meeting = s.get(m.Meeting, seeded["meeting_id"])
+        assert meeting is not None
+        meeting.status = "confirmed"
+
+    resp = client.post(
+        f"/api/meetings/{seeded['meeting_id']}/candidates",
+        json={
+            "title": "  배포 체크리스트 정리  ",
+            "source_utterance_id": uids[0],
+            "assignee_id": seeded["user_ids"][1],
+            "deadline": "2026-09-15",
+        },
+    )
+    assert resp.status_code == 201
+    created = resp.json()
+    assert created["title"] == "배포 체크리스트 정리"
+    assert created["assignee_id"] == seeded["user_ids"][1]
+    assert created["deadline"] == "2026-09-15"
+    assert created["evidence_utterance_ids"] == [uids[0]]
+    assert created["review_status"] == "pending"
+
+    listed = client.get(f"/api/meetings/{seeded['meeting_id']}/candidates").json()
+    assert any(c["id"] == created["id"] for c in listed)
+
+    with db_session.session_scope() as s:
+        assert s.scalar(select(m.Task).where(m.Task.origin_candidate_id == created["id"])) is None
+        meeting = s.get(m.Meeting, seeded["meeting_id"])
+        assert meeting is not None and meeting.status == "needs_review"
+
+
+def test_create_candidate_validates_utterance_title_and_member(
+    client: TestClient, seeded, engine
+):
+    uids = _seed_utterances(engine, seeded["meeting_id"], seeded["user_ids"][0])
+
+    blank = client.post(
+        f"/api/meetings/{seeded['meeting_id']}/candidates",
+        json={"title": "   ", "source_utterance_id": uids[0]},
+    )
+    assert blank.status_code == 400
+
+    missing_utt = client.post(
+        f"/api/meetings/{seeded['meeting_id']}/candidates",
+        json={"title": "제목", "source_utterance_id": 999999},
+    )
+    assert missing_utt.status_code == 404
+
+    outsider_assignee = client.post(
+        f"/api/meetings/{seeded['meeting_id']}/candidates",
+        json={"title": "제목", "source_utterance_id": uids[0], "assignee_id": 999999},
+    )
+    assert outsider_assignee.status_code == 400
+
+
 def test_partial_batch_failure_still_commits_successes(client: TestClient, seeded):
     response = client.post(
         f"/api/meetings/{seeded['meeting_id']}/candidates/review",

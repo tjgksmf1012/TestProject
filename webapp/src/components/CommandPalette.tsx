@@ -4,13 +4,13 @@ import { useNavigate } from 'react-router-dom';
 import { appRailHref } from '@lib/nav/rail.ts';
 import { appSecondaryHref } from '@lib/nav/links.ts';
 import {
+  appHrefForHit,
   blockedReason,
   canSearch,
   describeKind,
   excerpt,
   groupByKind,
   mayHaveMore,
-  type Hit,
 } from '@lib/search/view.ts';
 import { useProjectSearch, useUnreadNotifications } from '../api/hooks.ts';
 
@@ -28,20 +28,8 @@ interface PaletteItem {
   label: string;
   detail?: string;
   hint?: string;
+  disabled?: boolean;
   run: () => void;
-}
-
-function hitHref(hit: Hit, projectId: number): string {
-  if (hit.kind === 'utterance' && hit.meeting_id !== null) {
-    return `/meeting/${hit.meeting_id}/review`;
-  }
-  if (hit.meeting_id !== null) {
-    return `/meeting/${hit.meeting_id}/lobby`;
-  }
-  if (hit.kind === 'github') {
-    return appRailHref('contributions', projectId);
-  }
-  return appRailHref('kanban', projectId);
 }
 
 /** `Ctrl+K` 전역 빠른 이동·실행 및 프로젝트 통합 검색 팔레트. */
@@ -158,6 +146,17 @@ export function CommandPalette({
                 closeAnd(() => navigate(appSecondaryHref('reports', projectId))),
             },
             {
+              id: 'activity',
+              category: '활동',
+              label: '활동 기록 (감사 로그)',
+              detail: '업무 변경, 후보 승인, 기여 확정 이력을 확인합니다 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
+              hint: '새 탭',
+              run: () =>
+                closeAnd(() =>
+                  window.open(`/activity.html?project=${projectId}`, '_blank', 'noopener,noreferrer'),
+                ),
+            },
+            {
               id: 'full-search',
               category: '검색',
               label: '전체 통합 검색 화면 열기',
@@ -226,16 +225,25 @@ export function CommandPalette({
   const searchItems = useMemo<PaletteItem[]>(() => {
     if (projectId === undefined || !canSearch(debouncedQuery, null)) return [];
     return hits.map((hit, index) => {
-      const target = hitHref(hit, projectId);
+      const target = appHrefForHit(hit, projectId);
       const snippet = hit.body ? excerpt(hit.body, debouncedQuery, 68) : '';
       const detailParts = [hit.who, snippet, hit.status].filter(Boolean);
+      const disabled = target === null;
       return {
         id: `hit-${hit.kind}-${hit.task_id ?? hit.meeting_id ?? index}-${index}`,
         category: describeKind(hit.kind),
         label: hit.title || snippet || describeKind(hit.kind),
         detail: detailParts.join(' · '),
-        hint: hit.kind === 'utterance' ? '검토로 이동' : hit.kind === 'meeting' ? '로비로 이동' : '이동',
+        hint: disabled
+          ? '연결 없음'
+          : hit.kind === 'utterance'
+            ? '검토로 이동'
+            : hit.kind === 'meeting'
+              ? '로비로 이동'
+              : '이동',
+        disabled,
         run: () => {
+          if (target === null) return;
           suppressRestoreRef.current = true;
           onClose();
           navigate(target);
@@ -324,7 +332,7 @@ export function CommandPalette({
                 setActiveIndex(items.length - 1);
               } else if (event.key === 'Enter' && items[activeIndex]) {
                 event.preventDefault();
-                items[activeIndex].run();
+                if (!items[activeIndex].disabled) items[activeIndex].run();
               }
             }}
           />
@@ -390,6 +398,7 @@ export function CommandPalette({
                   type="button"
                   role="option"
                   aria-selected={idx === activeIndex}
+                  aria-disabled={item.disabled}
                   className={`dc-cmdk__item ${idx === activeIndex ? 'dc-cmdk__item--active' : ''}`}
                   onMouseEnter={() => setActiveIndex(idx)}
                   onClick={item.run}

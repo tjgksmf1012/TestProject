@@ -365,6 +365,26 @@ export default function Home() {
 
   const [meetingFilter, setMeetingFilter] = useState<'all' | 'active' | 'done' | 'failed'>('all');
   const [showAllMeetings, setShowAllMeetings] = useState(false);
+  const [quickCompactPref, setQuickCompactPref] = useState<boolean | null>(() => {
+    try {
+      const saved = window.localStorage.getItem('tf_home_quick_compact');
+      if (saved === 'true') return true;
+      if (saved === 'false') return false;
+      return null;
+    } catch {
+      return null;
+    }
+  });
+  const hasMeetings = (meetings.data?.length ?? 0) > 0;
+  const isQuickCompact = hasMeetings && (quickCompactPref ?? true);
+  const toggleQuickCompact = (compact: boolean) => {
+    setQuickCompactPref(compact);
+    try {
+      window.localStorage.setItem('tf_home_quick_compact', String(compact));
+    } catch {
+      // storage 접근이 막힌 경우에도 현재 세션 상태만 전환합니다.
+    }
+  };
   const sections = useMemo(() => sectionMeetings(meetings.data ?? []), [meetings.data]);
   const filteredRestMeetings = useMemo(() => {
     const base = sections.rest;
@@ -434,9 +454,55 @@ export default function Home() {
       <div className="panes tf-home-panes">
         <section className="pane" style={project !== undefined ? { flex: '1 1 68%' } : undefined}>
           <div className="pane__body">
-            {/* 상단 워크스페이스 퀵 액션 벤토 카드 */}
-            {project !== undefined && (
-              <div className="tf-home-bento">
+            {/* 상단 워크스페이스 퀵 액션 벤토 카드 — 회의가 있으면 기본 접힘 한 줄 바로 표시 */}
+            {project !== undefined && isQuickCompact && (
+              <div className="tf-home-quickbar" role="region" aria-label="빠른 이동">
+                <div className="tf-home-quickbar__links">
+                  <button
+                    type="button"
+                    className="btn btn--primary btn--sm"
+                    onClick={() => triggerInstantCall(project.project_id)}
+                  >
+                    회의실 열기
+                  </button>
+                  <Link
+                    className="btn btn--secondary btn--sm"
+                    to={`/project/${project.project_id}/kanban`}
+                  >
+                    칸반 보드 →
+                  </Link>
+                  <Link
+                    className="btn btn--secondary btn--sm"
+                    to={`/project/${project.project_id}/contributions`}
+                  >
+                    기여도 보기 →
+                  </Link>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  aria-expanded="false"
+                  onClick={() => toggleQuickCompact(false)}
+                >
+                  빠른 안내 펼치기
+                </button>
+              </div>
+            )}
+            {project !== undefined && !isQuickCompact && (
+              <>
+                {hasMeetings && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 'var(--sp-2)' }}>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      aria-expanded="true"
+                      onClick={() => toggleQuickCompact(true)}
+                    >
+                      빠른 안내 접기
+                    </button>
+                  </div>
+                )}
+                <div className="tf-home-bento">
                 <div className="tf-bento-card tf-bento-card--call">
                   <div className="tf-bento-card__top">
                     <span className="tf-bento-icon tf-bento-icon--green">
@@ -509,6 +575,7 @@ export default function Home() {
                   </Link>
                 </div>
               </div>
+              </>
             )}
 
             {projectsQuery.isSuccess && project === undefined && (

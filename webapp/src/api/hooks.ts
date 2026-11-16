@@ -466,6 +466,25 @@ export function useSubmitReview(meetingId: number | undefined) {
   });
 }
 
+export function useCreateCandidate(meetingId: number | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: {
+      title: string;
+      source_utterance_id: number;
+      assignee_id?: number | null;
+      deadline?: string | null;
+    }) => api.post<Candidate>(`/api/meetings/${meetingId}/candidates`, payload),
+    onSuccess: (created) => {
+      queryClient.setQueryData<Candidate[]>(['meetings', meetingId, 'candidates'], (old) =>
+        old ? (old.some((c) => c.id === created.id) ? old : [...old, created]) : [created],
+      );
+      void queryClient.invalidateQueries({ queryKey: ['meetings', meetingId, 'candidates'] });
+      void queryClient.invalidateQueries({ queryKey: ['meetings', meetingId] });
+    },
+  });
+}
+
 export function useTasks(projectId: number | undefined) {
   return useQuery({
     queryKey: ['projects', projectId, 'tasks'],

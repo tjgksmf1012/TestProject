@@ -132,6 +132,11 @@ export default function Contributions() {
      이 뜹니다. 서버가 이름을 같이 보내 주므로 합쳐서 씁니다. */
   const formerPeople = useMemo(() => score.data?.former_members ?? [], [score.data]);
   const everyone = useMemo(() => [...people, ...formerPeople], [people, formerPeople]);
+  const peopleLabels = useMemo(
+    // 결함 345 — 이름표는 `@lib` 한 곳에서.
+    () => new Map(everyone.map((p) => [p.user_id, labelInList(p, everyone)])),
+    [everyone],
+  );
 
   const members = useMemo(
     () => (score.data ? orderForDisplay(score.data.members, everyone) : []),
@@ -140,18 +145,26 @@ export default function Contributions() {
   const spans = useMemo(() => uncertaintySpans(members), [members]);
 
   // 남이 조정해 둔 값을 빈칸으로 그리면 다음 확정에서 조용히 지워집니다 (결함 97).
+  // 이미 확정한 값이 있으면 시스템 값으로 확정한 칸도 그대로 복원해 새로고침 후
+  // "3칸 남음"으로 보이지 않게 합니다.
   if (!restored && finals.data && finals.data.finals.length > 0) {
     const restore = adjustmentsToRestore(finals.data.finals);
-    if (restore.size > 0) {
-      const v: Record<number, string> = {};
-      const r: Record<number, string> = {};
-      for (const [id, item] of restore) {
-        v[id] = String(item.final_value);
-        r[id] = item.reason;
+    const v: Record<number, string> = {};
+    const r: Record<number, string> = {};
+    for (const f of finals.data.finals) {
+      const item = restore.get(f.user_id);
+      if (item !== undefined) {
+        v[f.user_id] = String(item.final_value);
+        r[f.user_id] = item.reason;
+      } else {
+        v[f.user_id] = Number.isInteger(f.final_value)
+          ? String(f.final_value)
+          : f.final_value.toFixed(1);
+        if (f.reason?.trim()) r[f.user_id] = f.reason;
       }
-      setValues(v);
-      setReasons(r);
     }
+    setValues(v);
+    setReasons(r);
     setRestored(true);
   }
 
@@ -444,6 +457,11 @@ export default function Contributions() {
             {/* 예전에는 여기 안내 한 문장(37자)과 아래 비활성 사유 한
                 문장(33자)이 **같은 말을 두 번** 하고 있었습니다. 한 줄만
                 남기고 전문은 `?` 로. */}
+            {finals.data && finals.data.finals.length > 0 && (
+              <p className="confirmbar__status status-ok" role="status">
+                <strong>확정 완료</strong> · {describeFinals(finals.data.finals, peopleLabels)}
+              </p>
+            )}
             <p className="confirmbar__notice">
               확정값은 팀이 정합니다
               <Why
@@ -451,11 +469,7 @@ export default function Contributions() {
                 lines={[
                   team.notice,
                   ...(finals.data && finals.data.finals.length > 0
-                    ? [describeFinals(
-                        finals.data.finals,
-                        // 결함 345 — 이름표는 `@lib` 한 곳에서.
-                        new Map(people.map((p) => [p.user_id, labelInList(p, people)])),
-                      )]
+                    ? [describeFinals(finals.data.finals, peopleLabels)]
                     : []),
                 ]}
               />

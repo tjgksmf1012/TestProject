@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import * as Dialog from '@radix-ui/react-dialog';
 import { AppShell } from '../components/AppShell.tsx';
@@ -75,6 +75,7 @@ function Card({
   onEdit,
   onDelete,
   onPreviewEvidence,
+  focused,
 }: {
   task: Task;
   allTasks: readonly Task[];
@@ -86,6 +87,7 @@ function Card({
   onEdit: (task: Task) => void;
   onDelete: (task: Task) => void;
   onPreviewEvidence?: (task: Task) => void;
+  focused?: boolean;
 }) {
   const today = todayInTeamCalendar();
   const warnings = taskWarnings(task, today);
@@ -105,7 +107,8 @@ function Card({
 
   return (
     <article
-      className="kcard"
+      id={`task-${task.id}`}
+      className={`kcard${focused ? ' kcard--focused' : ''}`}
       tabIndex={0}
       draggable
       onDragStart={(e) => {
@@ -304,7 +307,10 @@ type QuickFilter = 'all' | 'mine' | 'meeting' | 'manual' | 'overdue';
 
 export default function Kanban() {
   const params = useParams();
+  const [searchParams] = useSearchParams();
   const projectId = Number(params['projectId']);
+  const taskParam = Number(searchParams.get('task'));
+  const focusedTaskId = Number.isInteger(taskParam) && taskParam > 0 ? taskParam : null;
   const board = useTasks(projectId);
   const { data: me } = useMe();
   /* 못 불러왔으면 **무슨 일이 있었는지** 말합니다. 문구는 한 벌
@@ -358,18 +364,26 @@ export default function Kanban() {
     ...currentPeople,
     ...formerPeople.filter((f) => !currentPeople.some((c) => c.user_id === f.user_id)),
   ];
+  const assigneeFiltered = useMemo(
+    () =>
+      selectedAssignee === null
+        ? tasks
+        : tasks.filter((t) => t.assignee_ids.includes(selectedAssignee)),
+    [tasks, selectedAssignee],
+  );
   const filteredTasks = useMemo(() => {
-    return tasks.filter((t) => {
-      if (selectedAssignee !== null && !t.assignee_ids.includes(selectedAssignee)) return false;
+    return assigneeFiltered.filter((t) => {
       if (quickFilter === 'mine') return me != null && t.assignee_ids.includes(me.user_id);
       if (quickFilter === 'meeting') return t.origin !== null;
       if (quickFilter === 'manual') return t.origin === null;
       if (quickFilter === 'overdue') return isOverdue(t, today);
       return true;
     });
-  }, [tasks, selectedAssignee, quickFilter, me, today]);
+  }, [assigneeFiltered, quickFilter, me, today]);
   const columns = toColumns(filteredTasks, statuses);
   const s = summarize(tasks, today);
+  const quickSummary = summarize(assigneeFiltered, today);
+  const hasActiveFilter = selectedAssignee !== null || quickFilter !== 'all';
   const openCreateModal = (defaultStatus = 'todo') => {
     setNewStatus(statuses.includes(defaultStatus) ? defaultStatus : (statuses[0] ?? 'todo'));
     setShowCreateModal(true);
@@ -433,6 +447,23 @@ export default function Kanban() {
   };
 
   const [activeMobileCol, setActiveMobileCol] = useState<string>('todo');
+  const scrolledTaskRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!board.isSuccess || focusedTaskId === null) return;
+    if (scrolledTaskRef.current === focusedTaskId) return;
+    const target = tasks.find((t) => t.id === focusedTaskId);
+    if (target === undefined) return;
+    scrolledTaskRef.current = focusedTaskId;
+    setActiveMobileCol(target.status);
+    requestAnimationFrame(() => {
+      document.getElementById(`task-${target.id}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+        inline: 'center',
+      });
+    });
+  }, [board.isSuccess, focusedTaskId, tasks]);
 
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();
@@ -536,17 +567,17 @@ export default function Kanban() {
       {cannotLoad === null && tasks.length > 0 && (
         <div className="kboard-filters" role="group" aria-label="빠른 업무 필터">
           {[
-            { id: 'all' as const, label: `전체 (${countText(known ? tasks.length : null)})` },
+            { id: 'all' as const, label: `전체 (${countText(known ? assigneeFiltered.length : null)})` },
             {
               id: 'mine' as const,
-              label: `내 업무만 (${countText(known && me != null ? tasks.filter((t) => t.assignee_ids.includes(me.user_id)).length : null)})`,
+              label: `내 업무만 (${countText(known && me != null ? assigneeFiltered.filter((t) => t.assignee_ids.includes(me.user_id)).length : null)})`,
             },
-            { id: 'meeting' as const, label: `회의 출처 (${countText(known ? s.fromMeetings : null)})` },
+            { id: 'meeting' as const, label: `회의 출처 (${countText(known ? quickSummary.fromMeetings : null)})` },
             {
               id: 'manual' as const,
-              label: `${MANUAL_TASK_BADGE} (${countText(known ? tasks.length - s.fromMeetings : null)})`,
+              label: `${MANUAL_TASK_BADGE} (${countText(known ? assigneeFiltered.length - quickSummary.fromMeetings : null)})`,
             },
-            { id: 'overdue' as const, label: `지연됨 (${countText(known ? s.overdue : null)})` },
+            { id: 'overdue' as const, label: `지연됨 (${countText(known ? quickSummary.overdue : null)})` },
           ].map((chip) => (
             <button
               key={chip.id}
@@ -558,6 +589,19 @@ export default function Kanban() {
               {chip.label}
             </button>
           ))}
+          {hasActiveFilter && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => {
+                setQuickFilter('all');
+                setSelectedAssignee(null);
+              }}
+            >
+              필터 초기화
+            </button>
+          )}
         </div>
       )}
       {cannotLoad === null && tasks.length > 0 && (
@@ -677,6 +721,7 @@ export default function Kanban() {
                       onEdit={startEdit}
                       onDelete={remove}
                       onPreviewEvidence={setPreviewEvidenceTask}
+                      focused={task.id === focusedTaskId}
                     />
                   ))
                 )}

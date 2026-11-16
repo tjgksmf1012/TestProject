@@ -886,6 +886,17 @@ class ReviewResult(BaseModel):
     failures: dict[int, list[str]]
 
 
+class CandidateCreateIn(BaseModel):
+    """전사 발화에서 사람이 직접 업무 후보로 등록할 때 쓴다."""
+
+    title: str = Field(min_length=1, max_length=300)
+    source_utterance_id: int
+    assignee_id: int | None = None
+    deadline: date | None = None
+
+    model_config = {"extra": "forbid"}
+
+
 def _load_meeting(session: Session, meeting_id: int) -> m.Meeting:
     meeting = session.get(m.Meeting, meeting_id)
     if meeting is None:
@@ -3913,6 +3924,20 @@ def read_speaking_shares(
     )
 
 
+def _candidate_out(r: m.MeetingTaskCandidate) -> CandidateOut:
+    return CandidateOut(
+        id=r.id,
+        title=r.title,
+        assignee_hint=r.assignee_hint,
+        assignee_id=r.assignee_id,
+        deadline=r.deadline.date() if isinstance(r.deadline, datetime) else r.deadline,
+        confidence=float(r.confidence),
+        evidence_utterance_ids=list(r.evidence_utterance_ids or []),
+        review_status=r.review_status,
+        warnings=list(r.warnings or []),
+    )
+
+
 @app.get("/api/meetings/{meeting_id}/candidates", response_model=list[CandidateOut])
 def list_candidates(
     meeting_id: int, session: DbSession, user: CurrentUser
@@ -3920,20 +3945,68 @@ def list_candidates(
     """검토 대기 중인 업무 후보. 확신도가 낮은 것부터 나온다."""
     _load_meeting_for(session, meeting_id, user)
     rows = approval_service.pending_candidates(session, meeting_id)
-    return [
-        CandidateOut(
-            id=r.id,
-            title=r.title,
-            assignee_hint=r.assignee_hint,
-            assignee_id=r.assignee_id,
-            deadline=r.deadline.date() if isinstance(r.deadline, datetime) else r.deadline,
-            confidence=float(r.confidence),
-            evidence_utterance_ids=list(r.evidence_utterance_ids or []),
-            review_status=r.review_status,
-            warnings=list(r.warnings or []),
-        )
-        for r in rows
-    ]
+    return [_candidate_out(r) for r in rows]
+
+
+@app.post(
+    "/api/meetings/{meeting_id}/candidates",
+    response_model=CandidateOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_candidate(
+    meeting_id: int, payload: CandidateCreateIn, session: DbSession, user: CurrentUser
+) -> CandidateOut:
+    """전사 발화를 근거로 대기 중인 업무 후보를 추가한다.
+
+    **칸반 업무로 곧바로 만들지 않고** `pending` 후보로만 추가해, 반드시
+    사람의 검토·승인 흐름(`candidates/review`)을 거치도록 한다.
+    """
+    meeting = _load_meeting_for(session, meeting_id, user)
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "업무 제목을 입력하세요")
+
+    utterance = session.get(m.Utterance, payload.source_utterance_id)
+    if utterance is None or utterance.meeting_id != meeting_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "이 회의의 발화를 찾을 수 없습니다")
+
+    assignee_hint: str | None = None
+    if payload.assignee_id is not None:
+        member = session.scalars(
+            select(m.Member).where(
+                m.Member.project_id == meeting.project_id,
+                m.Member.user_id == payload.assignee_id,
+            )
+        ).first()
+        if member is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "프로젝트 팀원만 담당자로 고를 수 있습니다"
+            )
+        assignee_user = session.get(m.User, payload.assignee_id)
+        assignee_hint = assignee_user.name if assignee_user is not None else None
+
+    deadline_dt = (
+        datetime(payload.deadline.year, payload.deadline.month, payload.deadline.day, tzinfo=UTC)
+        if payload.deadline is not None
+        else None
+    )
+
+    row = m.MeetingTaskCandidate(
+        meeting_id=meeting_id,
+        title=title,
+        assignee_hint=assignee_hint,
+        assignee_id=payload.assignee_id,
+        deadline=deadline_dt,
+        confidence=1.0,
+        evidence_utterance_ids=[utterance.id],
+        warnings=[],
+        review_status=approval_service.CandidateStatus.PENDING.value,
+    )
+    session.add(row)
+    if meeting.status == m.MeetingStatus.CONFIRMED.value:
+        meeting.status = m.MeetingStatus.NEEDS_REVIEW.value
+    session.flush()
+    return _candidate_out(row)
 
 
 @app.post("/api/meetings/{meeting_id}/candidates/review", response_model=ReviewResult)

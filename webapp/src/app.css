@@ -5687,7 +5687,100 @@ input[type="checkbox"] {
   color: var(--c-unknown);
 }
 
+.confirmbar__status {
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  background: var(--c-ok-tint);
+  font-size: var(--fs-13);
+  line-height: var(--lh-13);
+}
+
+.kcard--focused {
+  border-color: var(--c-evidence);
+  box-shadow: 0 0 0 2px var(--c-evidence);
+}
+
+.tlrow__acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.tlrow__cand-form {
+  margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-sunken);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.tlrow__cand-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.tf-home-quickbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+}
+
+.tf-home-quickbar__links {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
 @media print {
+  /* 다크 모드에서 인쇄할 때도 종이 위 가독성을 위해 밝은 인쇄 팔레트로 재설정 */
+  :root,
+  :root[data-theme="dark"],
+  :root:not([data-theme="light"]) {
+    --c-paper: #ffffff;
+    --c-surface: #ffffff;
+    --c-surface-raised: #ffffff;
+    --c-sunken: #f4f5f7;
+    --c-line: #d6d9e0;
+    --c-line-strong: #6f7582;
+    --c-ink: #15171e;
+    --c-ink-muted: #4b5060;
+    --c-ink-faint: #5b6172;
+    --c-evidence: #3d3aae;
+    --c-evidence-tint: #ececf9;
+    --c-evidence-line: #c9c7ee;
+    --c-unknown: #8a5a14;
+    --c-unknown-tint: #faf1e0;
+    --c-unknown-line: #e8d3ac;
+    --c-danger: #b02e2e;
+    --c-danger-tint: #fceeee;
+    --c-ok: #1f6b45;
+    --c-ok-tint: #e9f5ee;
+    color-scheme: light;
+  }
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #15171e !important;
+  }
   .rail,
   .appbar,
   .tf-reports-list-pane,
@@ -5704,8 +5797,20 @@ input[type="checkbox"] {
     overflow: visible !important;
     display: block !important;
     border: 0 !important;
+    background: #ffffff !important;
+    color: #15171e !important;
   }
   .tf-rep-doc {
     max-width: 100%;
+    color: #15171e !important;
+  }
+  .tf-rep-person {
+    background: #ffffff !important;
+    color: #15171e !important;
+  }
+  .tf-rep-fact {
+    background: #f4f5f7 !important;
+    color: #15171e !important;
+    border-color: #d6d9e0 !important;
   }
 }

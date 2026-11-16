@@ -584,10 +584,9 @@ export default function Lobby() {
                   잡았습니다 — 그런데 그때 고친 것은 **레거시 로비뿐**이라
                   `/app` 으로 들어온 사람에게는 여전히 갈 곳이 없었습니다.
 
-                  ⚠️ **만들고 나면 볼 자리로 데려갑니다.** SPA 에는 아직
-                  보고서 화면이 없으므로 레거시 `/reports.html` 로 보냅니다
-                  (`/call.html`·`/index.html` 과 같은 방식). 안 데려가면
-                  만들어 놓고 어디 있는지 안 알려 주는 실패 ③ 입니다. */}
+                  ⚠️ **만들고 나면 볼 자리로 데려갑니다.** SPA 보고서 화면이
+                  생겼으므로 `/project/:id/reports?report=...` 로 이동합니다.
+                  안 데려가면 만들어 놓고 어디 있는지 안 알려 주는 실패 ③ 입니다. */}
               <p className="phase-act">
                 <button
                   type="button"

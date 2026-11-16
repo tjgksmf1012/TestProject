@@ -12,6 +12,7 @@ import {
   filterScopeNote,
   groupByKind,
   hrefFor,
+  appHrefForHit,
   KINDS,
   type Hit,
 } from './view.ts';
@@ -96,6 +97,19 @@ describe('갈 곳', () => {
 
   it('⭐ GitHub 은 갈 곳이 없다 — 추측 주소를 링크로 걸지 않는다', () => {
     strictEqual(hrefFor(hit({ kind: 'github', task_id: null }), 3), null);
+    strictEqual(appHrefForHit(hit({ kind: 'github', task_id: null }), 3), null);
+  });
+
+  it('SPA 경로도 같은 갈 곳 규칙을 따른다', () => {
+    strictEqual(
+      appHrefForHit(hit({ kind: 'utterance', task_id: null, meeting_id: 9 }), 3),
+      '/meeting/9/review',
+    );
+    strictEqual(
+      appHrefForHit(hit({ kind: 'meeting', task_id: null, meeting_id: 9 }), 3),
+      '/meeting/9/lobby',
+    );
+    strictEqual(appHrefForHit(hit(), 3), '/project/3/kanban?task=7');
   });
 });
 

@@ -34,7 +34,7 @@ export default function Notifications() {
   const list = useNotifications(Number.isFinite(projectId) ? projectId : undefined);
   const unreadQuery = useUnreadNotifications(Number.isFinite(projectId) ? projectId : undefined);
   const markRead = useMarkNotificationsRead(Number.isFinite(projectId) ? projectId : undefined);
-  const [filter, setFilter] = useState<'all' | 'unread'>('all');
+  const [filter, setFilter] = useState<'all' | 'unread' | 'deadline'>('all');
 
   const cannotLoad =
     list.error == null ? null : describeLoadFailure('알림', statusOf(list.error));
@@ -42,7 +42,15 @@ export default function Notifications() {
   const unreadCount = unreadQuery.data?.unread_count ?? 0;
   const canReadAll = canMarkAllRead(unreadCount);
   const all = list.data ?? [];
-  const items = filter === 'unread' ? all.filter((n) => !n.read) : all;
+  const isStoredUnread = (n: Notice) => n.notification_id !== null && !n.read;
+  const storedUnreadCount = all.filter(isStoredUnread).length;
+  const deadlineCount = all.filter((n) => n.notification_id === null).length;
+  const items =
+    filter === 'unread'
+      ? all.filter(isStoredUnread)
+      : filter === 'deadline'
+        ? all.filter((n) => n.notification_id === null)
+        : all;
   const empty = emptyNote();
 
   const spaTarget = (notice: Notice): { internal: string } | { external: string } | null => {
@@ -50,7 +58,7 @@ export default function Notifications() {
       return { internal: `/meeting/${notice.meeting_id}/lobby` };
     }
     if (notice.task_id !== null) {
-      return { internal: appRailHref('kanban', projectId) };
+      return { internal: `${appRailHref('kanban', projectId)}?task=${notice.task_id}` };
     }
     const legacy = hrefFor(notice, projectId);
     return legacy !== null ? { external: legacy } : null;
@@ -63,53 +71,58 @@ export default function Notifications() {
       meta={
         <span className="meta-chips">
           <span className="meta-chip">
-            미확인 <strong className="num">{unreadQuery.isSuccess ? unreadCount : '—'}</strong>
+            미확인 <strong className="num">{cannotLoad === null && unreadQuery.isSuccess ? unreadCount : '—'}</strong>
           </span>
           <span className="meta-chip">
-            전체 <strong className="num">{list.isSuccess ? all.length : '—'}</strong>
+            전체 <strong className="num">{cannotLoad === null && list.isSuccess ? all.length : '—'}</strong>
           </span>
         </span>
       }
       actions={
-        <div className="appbar__actions">
-          <button
-            type="button"
-            className={`btn btn--secondary btn--sm${!canReadAll ? ' btn--unmet' : ''}`}
-            aria-disabled={!canReadAll || markRead.isPending}
-            aria-describedby={!canReadAll ? 'mark-all-why' : undefined}
-            onClick={() => {
-              if (!canReadAll || markRead.isPending) return;
-              markRead.mutate({ notification_ids: [], all_unread: true });
-            }}
-          >
-            {markRead.isPending ? '처리 중…' : '모두 읽음으로'}
-          </button>
-        </div>
+        cannotLoad === null && list.isSuccess ? (
+          <div className="appbar__actions">
+            <button
+              type="button"
+              className={`btn btn--secondary btn--sm${!canReadAll ? ' btn--unmet' : ''}`}
+              aria-disabled={!canReadAll || markRead.isPending}
+              aria-describedby={!canReadAll ? 'mark-all-why' : undefined}
+              onClick={() => {
+                if (!canReadAll || markRead.isPending) return;
+                markRead.mutate({ notification_ids: [], all_unread: true });
+              }}
+            >
+              {markRead.isPending ? '처리 중…' : '모두 읽음으로'}
+            </button>
+          </div>
+        ) : undefined
       }
     >
       <div className="panes">
         <section className="pane">
           <div className="pane__head">
             <h2 className="pane__title">알림 함</h2>
-            <div className="kboard-filters" style={{ padding: 0, borderBottom: 0, background: 'transparent', marginLeft: 'auto' }} role="group" aria-label="알림 필터">
-              {[
-                { id: 'all' as const, label: `전체 (${all.length})` },
-                { id: 'unread' as const, label: `안 읽음 (${all.filter((n) => !n.read).length})` },
-              ].map((chip) => (
-                <button
-                  key={chip.id}
-                  type="button"
-                  className={`kboard-filter-chip${filter === chip.id ? ' is-active' : ''}`}
-                  aria-pressed={filter === chip.id}
-                  onClick={() => setFilter(chip.id)}
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
+            {cannotLoad === null && list.isSuccess && (
+              <div className="kboard-filters" style={{ padding: 0, borderBottom: 0, background: 'transparent', marginLeft: 'auto' }} role="group" aria-label="알림 필터">
+                {[
+                  { id: 'all' as const, label: `전체 (${all.length})` },
+                  { id: 'unread' as const, label: `안 읽음 (${storedUnreadCount})` },
+                  { id: 'deadline' as const, label: `마감 알림 (${deadlineCount})` },
+                ].map((chip) => (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    className={`kboard-filter-chip${filter === chip.id ? ' is-active' : ''}`}
+                    aria-pressed={filter === chip.id}
+                    onClick={() => setFilter(chip.id)}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="pane__body">
-            {!canReadAll && (
+            {cannotLoad === null && list.isSuccess && !canReadAll && (
               <p className="t12 faint" id="mark-all-why" style={{ marginBottom: 'var(--sp-3)' }}>
                 읽지 않은 저장 알림이 없습니다 (마감 임박·지연 알림은 업무 상태가 바뀌면 자동으로 사라집니다).
               </p>
@@ -130,7 +143,11 @@ export default function Notifications() {
             ) : items.length === 0 ? (
               <div className="empty">
                 <p style={{ margin: '0 0 6px', fontWeight: 600 }}>
-                  {filter === 'unread' ? '읽지 않은 알림이 없습니다' : empty.what}
+                  {filter === 'unread'
+                    ? '읽지 않은 저장 알림이 없습니다'
+                    : filter === 'deadline'
+                      ? '임박했거나 지난 마감 알림이 없습니다'
+                      : empty.what}
                 </p>
                 <p className="t12 muted" style={{ margin: '0 0 4px' }}>{empty.why}</p>
                 <p className="t12 faint" style={{ margin: 0 }}>{empty.how}</p>

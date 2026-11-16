@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { Problem } from '../components/Problem.tsx';
 import { ApiError } from '../api/client.ts';
@@ -232,31 +232,33 @@ export default function Reports() {
         </span>
       }
       actions={
-        <div className="appbar__actions">
-          <button
-            type="button"
-            className="btn btn--secondary btn--sm"
-            disabled={generate.isPending}
-            onClick={() => make('weekly')}
-          >
-            이번 주 보고서 만들기
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary btn--sm"
-            disabled={generate.isPending}
-            onClick={() => make('final')}
-          >
-            최종 보고서 만들기
-          </button>
-        </div>
+        listError === null && reports.isSuccess ? (
+          <div className="appbar__actions">
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              disabled={generate.isPending}
+              onClick={() => make('weekly')}
+            >
+              이번 주 보고서 만들기
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              disabled={generate.isPending}
+              onClick={() => make('final')}
+            >
+              최종 보고서 만들기
+            </button>
+          </div>
+        ) : undefined
       }
     >
       <div className="panes tf-reports-panes">
         <section className="pane tf-reports-list-pane" aria-label="보고서 목록">
           <div className="pane__head">
             <h2 className="pane__title">만든 보고서</h2>
-            <span className="pane__count">{rows.length}</span>
+            <span className="pane__count">{reports.isSuccess ? rows.length : '—'}</span>
           </div>
           <div className="pane__body">
             {actionMsg !== null && (
@@ -314,6 +316,22 @@ export default function Reports() {
             <h2 className="pane__title">미리보기 & 내보내기</h2>
             {detail.data && (
               <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto', flexWrap: 'wrap' }}>
+                {detail.data.meeting_id !== null && (
+                  <>
+                    <Link
+                      to={`/meeting/${detail.data.meeting_id}/review`}
+                      className="btn btn--ghost btn--sm"
+                    >
+                      원본 회의 검토 보기 →
+                    </Link>
+                    <Link
+                      to={`/meeting/${detail.data.meeting_id}/lobby`}
+                      className="btn btn--ghost btn--sm"
+                    >
+                      회의 로비 →
+                    </Link>
+                  </>
+                )}
                 <button type="button" className="btn btn--secondary btn--sm" onClick={() => void copyMarkdown()}>
                   텍스트 복사
                 </button>
@@ -332,7 +350,11 @@ export default function Reports() {
                 {copyNote}
               </p>
             )}
-            {selectedId === null ? (
+            {listError !== null ? (
+              <p className="t13 muted">보고서 목록을 불러오지 못해 미리보기를 열 수 없습니다.</p>
+            ) : reports.isPending ? (
+              <p className="t13 muted">보고서 목록을 확인하는 중입니다…</p>
+            ) : selectedId === null ? (
               <div className="empty">왼쪽 목록에서 보고서를 고르거나 상단에서 새 보고서를 만드세요.</div>
             ) : detailError !== null ? (
               <Problem>{detailError}</Problem>

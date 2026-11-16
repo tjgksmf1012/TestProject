@@ -30,6 +30,7 @@ import {
   useSpeaking,
   useUtteranceTypes,
   useUtteranceMutations,
+  useCreateCandidate,
   useSubmitReview,
   useTimeline,
 } from '../api/hooks.ts';
@@ -168,9 +169,16 @@ export default function Review() {
   const tally = useUtteranceTypes(meetingId);
   const speaking = useSpeaking(meetingId);
   const submit = useSubmitReview(meetingId);
+  const createCandidate = useCreateCandidate(meetingId);
   const utteranceMutations = useUtteranceMutations(meetingId);
   const [editingSpeakerUtteranceId, setEditingSpeakerUtteranceId] = useState<number | null>(null);
   const [reassignError, setReassignError] = useState<string | null>(null);
+  const [candidateUtteranceId, setCandidateUtteranceId] = useState<number | null>(null);
+  const [candTitle, setCandTitle] = useState('');
+  const [candAssigneeId, setCandAssigneeId] = useState<string | null>(null);
+  const [candDeadline, setCandDeadline] = useState('');
+  const [candNote, setCandNote] = useState<string | null>(null);
+  const [candError, setCandError] = useState<string | null>(null);
 
   const candidates = useMemo(
     () => sortForReview(candidatesQuery.data ?? []),
@@ -200,6 +208,7 @@ export default function Review() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playingId, setPlayingId] = useState<number | null>(null);
   const [audioPaused, setAudioPaused] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = useState<1 | 1.25 | 1.5 | 2>(1);
   const [audioProgress, setAudioProgress] = useState<{
     id: number;
@@ -276,10 +285,19 @@ export default function Review() {
     }
   };
 
+  const hasAudio = timeline.data?.has_audio ?? false;
+
   const playClip = (utteranceId: number) => {
     const clip = clipByUtterance.get(utteranceId);
     const audio = audioRef.current;
-    if (!clip || !audio) return;
+    if (!hasAudio || !clip || !audio) return;
+    setAudioError(null);
+    const handlePlayError = () => {
+      setPlayingId(null);
+      setAudioPaused(false);
+      setAudioProgress(null);
+      setAudioError('원본 녹음 파일을 재생할 수 없습니다 — 파일이 삭제되었거나 브라우저가 오디오 형식을 지원하지 않습니다.');
+    };
     if (playingId === utteranceId && !audio.paused) {
       audio.pause();
       setAudioPaused(true);
@@ -287,7 +305,7 @@ export default function Review() {
     }
     if (playingId === utteranceId && audio.paused) {
       audio.playbackRate = playbackRate;
-      void audio.play();
+      void audio.play().catch(handlePlayError);
       setAudioPaused(false);
       return;
     }
@@ -313,7 +331,7 @@ export default function Review() {
       setPlayingId(null);
       setAudioPaused(false);
     };
-    void audio.play();
+    void audio.play().catch(handlePlayError);
     setPlayingId(utteranceId);
   };
 
@@ -481,7 +499,16 @@ export default function Review() {
         </div>
       }
     >
-      <audio ref={audioRef} hidden />
+      <audio
+        ref={audioRef}
+        hidden
+        onError={() => {
+          setPlayingId(null);
+          setAudioPaused(false);
+          setAudioProgress(null);
+          setAudioError('원본 녹음 파일을 재생할 수 없습니다 — 파일이 삭제되었거나 오디오를 불러오는 데 실패했습니다.');
+        }}
+      />
       {cannotLoad === null && (
         <div className="tf-mobile-review-tabs" role="tablist" aria-label="검토 패널 전환">
           <button
@@ -533,7 +560,7 @@ export default function Review() {
                 말합니다 (UI 패스 v3). */}
             <span className="pane__hint">시작 후 분:초</span>
           </div>
-          {audioProgress !== null && (
+          {hasAudio && audioProgress !== null && (
             <div className="tl-player" role="region" aria-label="발화 구간 재생 막대">
               <button
                 type="button"
@@ -731,6 +758,12 @@ export default function Review() {
               </p>
             )}
             {reassignError !== null && <Problem>{reassignError}</Problem>}
+            {audioError !== null && <Problem>{audioError}</Problem>}
+            {candNote !== null && (
+              <p className="status-ok" role="status" style={{ marginBottom: 'var(--sp-3)' }}>
+                {candNote}
+              </p>
+            )}
             {rows.length === 0 && <div className="empty">{emptyTimelineNote(meeting.data?.status)}</div>}
             {rows.map((row, i) =>
               row.kind === 'finding' ? (
@@ -851,14 +884,131 @@ export default function Review() {
                     {row.view.speakerNote !== null && (
                       <span className="t12 crow__flags">{row.view.speakerNote}</span>
                     )}
-                    {row.clip !== null && (
+                    <div className="tlrow__acts">
+                      {hasAudio && row.clip !== null && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={() => playClip(row.view.id)}
+                        >
+                          {playingId === row.view.id && !audioPaused ? '⏸ 일시정지' : playingId === row.view.id ? '▶ 이어 듣기' : '▶ 듣기'}
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn--ghost btn--sm"
-                        onClick={() => playClip(row.view.id)}
+                        aria-expanded={candidateUtteranceId === row.view.id}
+                        onClick={() => {
+                          if (candidateUtteranceId === row.view.id) {
+                            setCandidateUtteranceId(null);
+                            setCandError(null);
+                            return;
+                          }
+                          setCandidateUtteranceId(row.view.id);
+                          setCandTitle(row.view.text.slice(0, 80));
+                          const matchedMember = members.find((m) => m.name === row.view.speaker);
+                          setCandAssigneeId(
+                            matchedMember !== undefined ? String(matchedMember.user_id) : null,
+                          );
+                          setCandDeadline('');
+                          setCandError(null);
+                          setCandNote(null);
+                        }}
                       >
-                        {playingId === row.view.id && !audioPaused ? '⏸ 일시정지' : playingId === row.view.id ? '▶ 이어 듣기' : '▶ 듣기'}
+                        {candidateUtteranceId === row.view.id ? '입력 닫기' : '+ 업무 후보'}
                       </button>
+                    </div>
+                    {candidateUtteranceId === row.view.id && (
+                      <form
+                        className="tlrow__cand-form"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const trimmed = candTitle.trim();
+                          if (!trimmed) {
+                            setCandError('업무 제목을 입력하세요');
+                            return;
+                          }
+                          if (createCandidate.isPending) return;
+                          setCandError(null);
+                          createCandidate.mutate(
+                            {
+                              title: trimmed,
+                              source_utterance_id: row.view.id,
+                              assignee_id: candAssigneeId !== null ? Number(candAssigneeId) : null,
+                              deadline: candDeadline || null,
+                            },
+                            {
+                              onSuccess: (created) => {
+                                setCandidateUtteranceId(null);
+                                setSelectedId(created.id);
+                                setMobileTab('candidates');
+                                setCandNote(`후보 "${created.title}" 을(를) 추가했습니다. 검토 후 '검토 끝내기' 로 칸반에 등록하세요.`);
+                                requestAnimationFrame(() => {
+                                  document.getElementById(`cand-${created.id}`)?.scrollIntoView({
+                                    behavior: reduceMotion ? 'auto' : 'smooth',
+                                    block: 'center',
+                                  });
+                                });
+                              },
+                              onError: (error) => {
+                                setCandError(
+                                  describeActionFailure(
+                                    '업무 후보 추가',
+                                    error instanceof ApiError ? error.status : null,
+                                    error instanceof ApiError ? error.detail : null,
+                                  ),
+                                );
+                              },
+                            },
+                          );
+                        }}
+                      >
+                        <input
+                          type="text"
+                          className="input"
+                          value={candTitle}
+                          onChange={(e) => setCandTitle(e.target.value)}
+                          placeholder="후보 업무 제목"
+                          aria-label={`발화 #${row.view.id} 업무 후보 제목`}
+                        />
+                        <div className="tlrow__cand-row">
+                          <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
+                            <Picker
+                              value={candAssigneeId}
+                              onChange={setCandAssigneeId}
+                              options={members.map((m) => ({
+                                value: String(m.user_id),
+                                label: labelInList(m, members),
+                              }))}
+                              emptyLabel="담당자 미지정"
+                              ariaLabel={`발화 #${row.view.id} 후보 담당자`}
+                            />
+                          </div>
+                          <div style={{ minWidth: '140px', flex: '1 1 140px' }}>
+                            <DatePicker
+                              value={candDeadline || null}
+                              onChange={(next) => setCandDeadline(next ?? '')}
+                              ariaLabel={`발화 #${row.view.id} 후보 마감`}
+                            />
+                          </div>
+                        </div>
+                        {candError !== null && <Problem inline>{candError}</Problem>}
+                        <div className="tlrow__cand-row">
+                          <button type="submit" className="btn btn--primary btn--sm">
+                            {createCandidate.isPending ? '추가 중…' : '후보에 추가'}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => {
+                              setCandidateUtteranceId(null);
+                              setCandError(null);
+                            }}
+                          >
+                            취소
+                          </button>
+                        </div>
+                      </form>
                     )}
                   </div>
                   <span className="tlrow__dot" aria-hidden="true" />
