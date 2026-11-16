@@ -1,0 +1,53 @@
+name: TeamFlow 운영 상태
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+    inputs:
+      test_alert:
+        description: '실제 서비스를 끄지 않고 장애 알림 검증'
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  check:
+    name: 공개 앱과 API 응답 확인
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      TEST_ALERT: ${{ inputs.test_alert }}
+    steps:
+      - name: HTTPS 상태 확인
+        shell: bash
+        run: |
+          base=https://teamflow-ai.stream
+          health_path=/health
+          if [[ "$TEST_ALERT" == true ]]; then
+            health_path=/health/teamflow-monitor-test
+          fi
+          health="$RUNNER_TEMP/teamflow-health.json"
+          app="$RUNNER_TEMP/teamflow-app.html"
+
+          fetch() {
+            local status
+            status=$(curl --silent --show-error --connect-timeout 5 --max-time 12 \
+              --max-filesize 2000000 --proto '=https' --user-agent 'Mozilla/5.0' \
+              --output "$2" --write-out '%{http_code}' "$base$1") || return 1
+            echo "$1 HTTP $status"
+            [[ "$status" == 200 ]]
+          }
+
+          for attempt in 1 2 3; do
+            if fetch "$health_path" "$health" && \
+              python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1])).get("status") != "ok")' "$health" && \
+              fetch /app/ "$app" && grep -Fq 'id="root"' "$app"; then
+              echo 'TeamFlow public app and health endpoint responded successfully.'
+              exit 0
+            fi
+            if [[ "$attempt" != 3 ]]; then sleep 10; fi
+          done
+          echo '::error::TeamFlow health or public app failed three consecutive checks.'
+          exit 1

@@ -52,11 +52,59 @@ def log(level: str, msg: str) -> None:
     print(f"{C_GRAY}[{now}]{C_RESET} {color}[{level}]{C_RESET} {msg}", flush=True)
 
 
-def free_port(port: int = 8811) -> None:
-    """남의 프로세스를 죽이지 않고 중복 기동을 알려 줍니다."""
+def find_port_owner(port: int = 8811) -> tuple[int, str] | None:
+    """포트를 점유 중인 프로세스 ID와 이름을 찾습니다 (Windows 및 POSIX 지원)."""
+    if os.name == "nt":
+        try:
+            out = subprocess.check_output(
+                ["netstat", "-ano", "-p", "tcp"], text=True, stderr=subprocess.DEVNULL
+            )
+            for line in out.splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 5 and parts[1].endswith(f":{port}") and parts[3] == "LISTENING":
+                    pid = int(parts[4])
+                    try:
+                        p_info = subprocess.check_output(
+                            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                            text=True, stderr=subprocess.DEVNULL
+                        )
+                        p_name = p_info.split(",")[0].replace('"', "").strip()
+                    except Exception:
+                        p_name = "unknown"
+                    return pid, p_name
+        except Exception:
+            pass
+    return None
+
+
+def free_port(port: int = 8811, force: bool = False) -> None:
+    """포트 점유 상태를 확인하고, 충돌 시 원인 프로세스와 조치 방법을 안내합니다."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
-        if connection.connect_ex(("127.0.0.1", port)) == 0:
-            raise RuntimeError(f"포트 {port}가 사용 중입니다. 기존 서버를 확인해 주세요")
+        if connection.connect_ex(("127.0.0.1", port)) != 0:
+            return
+
+    owner = find_port_owner(port)
+    if owner:
+        pid, name = owner
+        if force and name.lower() in ("python.exe", "pythonw.exe", "uvicorn.exe"):
+            log("WARN", f"포트 {port}를 점유 중인 기존 프로세스(PID: {pid}, {name})를 안전하게 정리합니다...")
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, check=False)
+            time.sleep(1.5)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as check_conn:
+                if check_conn.connect_ex(("127.0.0.1", port)) != 0:
+                    log("OK", f"포트 {port}가 성공적으로 확보되었습니다.")
+                    return
+        msg = (
+            f"포트 {port}가 이미 사용 중입니다.\n"
+            f" * 점유 프로세스: {name} (PID: {pid})\n"
+            f" * Windows 작업 스케줄러(TeamFlow-Server)가 백그라운드에서 실행 중일 수 있습니다.\n"
+            f" * 조치 방법:\n"
+            f"   - 백그라운드 작업 중지: Stop-ScheduledTask -TaskName 'TeamFlow-Server'\n"
+            f"   - 또는 기존 프로세스 정리 후 시작: python scripts/watchdog.py --force"
+        )
+    else:
+        msg = f"포트 {port}가 사용 중입니다. 기존 서버를 확인해 주세요."
+    raise RuntimeError(msg)
 
 
 def check_health(url: str = "http://127.0.0.1:8811/health", timeout: float = 4.0) -> bool:
@@ -90,7 +138,16 @@ def stop_process(proc: subprocess.Popen) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--no-tunnel", action="store_true", help="로컬 서버와 워커만 실행")
+    parser.add_argument("--managed-windows", action="store_true", help="Windows 운영 예약 작업 모드")
+    parser.add_argument("--force", action="store_true", help="기존 TeamFlow 프로세스가 포트를 점유 중인 경우 강제 종료 후 시작")
     args = parser.parse_args()
+    if args.managed_windows:
+        if not (ROOT / "demo.db").is_file():
+            parser.exit(78, "운영 DB(demo.db)를 찾지 못했습니다. 저장 위치를 확인해 주세요.\n")
+        from run_windows_watchdog import contain_process_tree
+
+        # 이번 워치독이 죽으면 실행기가 살아 있어도 이전 워커가 남지 않습니다.
+        contain_process_tree()
     print(f"\n{C_BOLD}{C_CYAN}==================================================================={C_RESET}")
     print(f"{C_BOLD}{C_CYAN}    TeamFlow AI - 자동 복구 및 무중단 가동 워치독(Watchdog)        {C_RESET}")
     print(f"{C_BOLD}{C_CYAN}==================================================================={C_RESET}")
@@ -100,7 +157,7 @@ def main() -> None:
     print(f" * 상태 정책             : 비정상 종료 / 응답 지연 발생 시 즉각 자동 복구")
     print(f"{C_GRAY}종료하려면 Ctrl+C 를 누르세요.{C_RESET}\n")
 
-    free_port(8811)
+    free_port(8811, force=args.force)
 
     # DB 확인
     if not (ROOT / "demo.db").exists():
