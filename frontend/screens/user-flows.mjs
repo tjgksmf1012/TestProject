@@ -148,6 +148,29 @@ export async function exerciseUserFlows(browser, base) {
     await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '설정');
     assert.equal(await settingsButton.evaluate((button) => document.activeElement === button), true);
     assert.equal(await page.evaluate(() => window.__testStreams.at(-1).getTracks().every((track) => track.readyState === 'ended')), true);
+
+    await page.keyboard.press('Control+k');
+    const cmdDialog = page.getByRole('dialog', { name: '빠른 명령 및 통합 검색' });
+    await cmdDialog.waitFor();
+    await cmdDialog.getByRole('searchbox', { name: '검색어 입력' }).fill('로그인');
+    await cmdDialog.getByRole('option', { name: /로그인/ }).first().waitFor();
+    await page.keyboard.press('Escape');
+    await cmdDialog.waitFor({ state: 'hidden' });
+    await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '설정');
+    assert.equal(await settingsButton.evaluate((button) => document.activeElement === button), true);
+
+    await settingsButton.click();
+    await page.getByRole('tab', { name: '계정', exact: true }).click();
+    await page.getByRole('tab', { name: '화면', exact: true }).click();
+    await page.getByRole('radio', { name: /어두운 화면/ }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+    await page.getByRole('radio', { name: /밝은 화면/ }).click();
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'light');
+    await page.keyboard.press('Escape');
+    await page.getByRole('dialog', { name: '환경 설정' }).waitFor({ state: 'hidden' });
+    await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '설정');
+    assert.equal(await settingsButton.evaluate((button) => document.activeElement === button), true);
+
     assert.deepEqual(errors, []);
     const denied = await context();
     const demo = await denied.newPage();
@@ -162,7 +185,11 @@ export async function exerciseUserFlows(browser, base) {
     await demo.getByRole('button', { name: '규칙 예시 실행', exact: true }).click();
     await demo.getByText(/서버에 연결하지 못했습니다/).waitFor();
     assert.equal(await demo.getByRole('heading', { name: '업무 키워드가 있는 발언' }).count(), 0);
-    console.log('✅ 가입 격리·선택 동의 기본값·개별 동의·2인 통화·녹음/최소화/이동·필터·마이크 해제·초점·권한/연결 실패 통과');
+    await demo.unroute('**/api/ai/demo/analyze');
+    await demo.getByRole('button', { name: '예시: 스프린트 회의', exact: true }).click();
+    await demo.getByRole('button', { name: '규칙 예시 실행', exact: true }).click();
+    await demo.getByRole('heading', { name: '업무 키워드가 있는 발언' }).waitFor();
+    console.log('✅ 가입 격리·선택 동의 기본값·개별 동의·2인 통화·녹음/최소화/이동·필터·마이크 해제·초점·Ctrl+K·테마·권한/연결/데모 통과');
   } finally {
     for (const ctx of contexts) await ctx.close();
   }

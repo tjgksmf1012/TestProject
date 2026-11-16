@@ -21,6 +21,7 @@ import Crashed from './screens/Crashed.tsx';
 import AiDemoLab from './screens/AiDemoLab.tsx';
 import { watchForUncaught } from './api/diag.ts';
 import './app.css';
+import { CallStageModal } from './components/CallStageModal.tsx';
 
 try {
   const savedTheme = window.localStorage.getItem('tf_theme');
@@ -155,8 +156,7 @@ const router = createBrowserRouter(
       errorElement: <Crashed />,
       children: [
         { path: '/', element: <Home /> },
-        { path: '/demo', element: <AiDemoLab /> },
-        { path: '/project/:projectId/demo', element: <AiDemoLab /> },
+        { path: '/project/:projectId/demo', element: <Navigate to="/demo" replace /> },
         { path: '/project/:projectId/settings/:section', element: <Settings /> },
         { path: '/project/:projectId/settings', element: <Navigate to="role" replace /> },
         { path: '/project/:projectId/kanban', element: <Kanban /> },
@@ -208,6 +208,7 @@ createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
+      <CallStageModal />
     </QueryClientProvider>
   </StrictMode>,
 );

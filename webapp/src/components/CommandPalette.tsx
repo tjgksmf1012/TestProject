@@ -1,5 +1,17 @@
-import { useEffect, useState } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { appRailHref } from '@lib/nav/rail.ts';
+import {
+  blockedReason,
+  canSearch,
+  describeKind,
+  excerpt,
+  groupByKind,
+  mayHaveMore,
+  type Hit,
+} from '@lib/search/view.ts';
+import { useProjectSearch, useUnreadNotifications } from '../api/hooks.ts';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -9,161 +21,404 @@ interface CommandPaletteProps {
   onOpenSettings: (tab: 'voice' | 'account' | 'display') => void;
 }
 
+interface PaletteItem {
+  id: string;
+  category: string;
+  label: string;
+  detail?: string;
+  hint?: string;
+  run: () => void;
+}
+
+function hitHref(hit: Hit, projectId: number): string {
+  if (hit.kind === 'utterance' && hit.meeting_id !== null) {
+    return `/meeting/${hit.meeting_id}/review`;
+  }
+  if (hit.meeting_id !== null) {
+    return `/meeting/${hit.meeting_id}/lobby`;
+  }
+  if (hit.kind === 'github') {
+    return appRailHref('contributions', projectId);
+  }
+  return appRailHref('kanban', projectId);
+}
+
+/** `Ctrl+K` 전역 빠른 이동·실행 및 프로젝트 통합 검색 팔레트. */
 export function CommandPalette({
   open,
-  projectId = 1,
+  projectId,
   onClose,
   onOpenCall,
   onOpenSettings,
 }: CommandPaletteProps) {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const suppressRestoreRef = useRef(false);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const { data: unread } = useUnreadNotifications(projectId);
+  const unreadCount = unread?.unread_count ?? 0;
 
   useEffect(() => {
     if (!open) {
       setQuery('');
+      setDebouncedQuery('');
+      setActiveIndex(0);
       return;
     }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    suppressRestoreRef.current = false;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(query.trim());
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [open, query]);
+
+  const searchQuery = useProjectSearch(projectId, debouncedQuery);
+  const hits = searchQuery.data ?? [];
+
+  const commands = useMemo<PaletteItem[]>(() => {
+    const closeAnd = (fn: () => void, suppressRestore = true) => {
+      suppressRestoreRef.current = suppressRestore;
+      onClose();
+      fn();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
 
-  if (!open) return null;
+    const projectCommands: PaletteItem[] =
+      projectId !== undefined
+        ? [
+            {
+              id: 'call',
+              category: '회의',
+              label: '음성 회의실 열기',
+              detail: '개별 동의 확인 후 통화·녹음 화면을 엽니다',
+              hint: '모달',
+              run: () => closeAnd(onOpenCall),
+            },
+            {
+              id: 'kanban',
+              category: '업무',
+              label: '칸반 보드',
+              detail: '업무 상태와 회의·PR 근거를 확인합니다',
+              run: () => closeAnd(() => navigate(appRailHref('kanban', projectId))),
+            },
+            {
+              id: 'contributions',
+              category: '기여도',
+              label: '기여도 분석 및 팀 합의 확정',
+              detail: '기여 구간·신뢰도·조정 사유를 확인합니다',
+              run: () => closeAnd(() => navigate(appRailHref('contributions', projectId))),
+            },
+            {
+              id: 'project-settings',
+              category: '설정',
+              label: '프로젝트 설정 (역할·GitHub·팀원)',
+              run: () => closeAnd(() => navigate(appRailHref('project', projectId))),
+            },
+            {
+              id: 'notifications',
+              category: '알림',
+              label: unreadCount > 0 ? `알림 함 (미확인 ${unreadCount}건)` : '알림 함',
+              hint: '새 탭',
+              run: () =>
+                closeAnd(() => window.open(`/notifications.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
+            },
+            {
+              id: 'calendar',
+              category: '일정',
+              label: '일정 캘린더',
+              hint: '새 탭',
+              run: () =>
+                closeAnd(() => window.open(`/calendar.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
+            },
+            {
+              id: 'chat',
+              category: '채팅',
+              label: '프로젝트 채팅',
+              hint: '새 탭',
+              run: () =>
+                closeAnd(() => window.open(`/chat.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
+            },
+            {
+              id: 'reports',
+              category: '보고서',
+              label: '최종 기여도 보고서 (제출용)',
+              hint: '새 탭',
+              run: () =>
+                closeAnd(() => window.open(`/reports.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
+            },
+            {
+              id: 'full-search',
+              category: '검색',
+              label: '전체 통합 검색 화면 열기',
+              hint: '새 탭',
+              run: () =>
+                closeAnd(() => {
+                  const qs = new URLSearchParams({ project: String(projectId) });
+                  if (query.trim()) qs.set('q', query.trim());
+                  window.open(`/search.html?${qs.toString()}`, '_blank', 'noopener,noreferrer');
+                }),
+            },
+          ]
+        : [];
 
-  const commands = [
-    {
-      id: 'call',
-      label: '화상 회의실 열기',
-      category: '회의',
-      shortcut: 'Enter',
-      run: () => {
-        onClose();
-        onOpenCall();
+    const generalCommands: PaletteItem[] = [
+      {
+        id: 'home',
+        category: '탐색',
+        label: '프로젝트 홈 대시보드',
+        run: () =>
+          closeAnd(() =>
+            navigate(projectId !== undefined ? appRailHref('home', projectId) : '/'),
+          ),
       },
-    },
-    {
-      id: 'kanban',
-      label: '칸반 보드',
-      category: '업무',
-      shortcut: 'G B',
-      run: () => {
-        onClose();
-        navigate(`/project/${projectId}/kanban`);
+      {
+        id: 'ai-lab',
+        category: '체험',
+        label: 'AI 데모 랩 (음향 벡터 · 규칙 체험)',
+        run: () => closeAnd(() => navigate('/demo')),
       },
-    },
-    {
-      id: 'contributions',
-      label: '기여도 분석 및 팀 합의 확정',
-      category: '기여도',
-      shortcut: 'G C',
-      run: () => {
-        onClose();
-        navigate(`/project/${projectId}/contributions`);
+      {
+        id: 'voice-settings',
+        category: '환경 설정',
+        label: '마이크 점검 및 장치 설정',
+        hint: '모달',
+        run: () => closeAnd(() => onOpenSettings('voice')),
       },
-    },
-    {
-      id: 'ai-lab',
-      label: 'AI 기능 체험관 (Demo Lab) — 성문 인식 & 파이프라인',
-      category: 'AI',
-      shortcut: 'G D',
-      run: () => {
-        onClose();
-        navigate('/demo');
+      {
+        id: 'acct-settings',
+        category: '환경 설정',
+        label: '계정 이름·비밀번호 설정',
+        hint: '모달',
+        run: () => closeAnd(() => onOpenSettings('account')),
       },
-    },
-    {
-      id: 'home',
-      label: '프로젝트 홈 대시보드',
-      category: '탐색',
-      shortcut: 'G H',
-      run: () => {
-        onClose();
-        navigate(`/?project=${projectId}`);
+      {
+        id: 'display-settings',
+        category: '환경 설정',
+        label: '화면 테마 (밝은/어두운 화면)',
+        hint: '모달',
+        run: () => closeAnd(() => onOpenSettings('display')),
       },
-    },
-    {
-      id: 'reports',
-      label: '최종 기여도 보고서 (제출용)',
-      category: '보고서',
-      shortcut: 'G P',
-      run: () => {
-        onClose();
-        window.open('/reports.html', '_blank');
-      },
-    },
-    {
-      id: 'voice-settings',
-      label: '설정 (오디오·마이크·스피커)',
-      category: '설정',
-      shortcut: 'G V',
-      run: () => {
-        onClose();
-        onOpenSettings('voice');
-      },
-    },
-    {
-      id: 'acct-settings',
-      label: '설정 (계정·보안·초대 코드)',
-      category: '설정',
-      shortcut: 'G A',
-      run: () => {
-        onClose();
-        onOpenSettings('account');
-      },
-    },
-  ];
+    ];
 
-  const filtered = commands.filter((c) =>
-    c.label.toLowerCase().includes(query.trim().toLowerCase()) ||
-    c.category.toLowerCase().includes(query.trim().toLowerCase())
+    const needle = query.trim().toLowerCase();
+    const all = [...projectCommands, ...generalCommands];
+    if (!needle) return all;
+    return all.filter(
+      (cmd) =>
+        cmd.label.toLowerCase().includes(needle) ||
+        cmd.category.toLowerCase().includes(needle) ||
+        (cmd.detail?.toLowerCase().includes(needle) ?? false),
+    );
+  }, [navigate, onClose, onOpenCall, onOpenSettings, projectId, query, unreadCount]);
+
+  const searchItems = useMemo<PaletteItem[]>(() => {
+    if (projectId === undefined || !canSearch(debouncedQuery, null)) return [];
+    return hits.map((hit, index) => {
+      const target = hitHref(hit, projectId);
+      const snippet = hit.body ? excerpt(hit.body, debouncedQuery, 68) : '';
+      const detailParts = [hit.who, snippet, hit.status].filter(Boolean);
+      return {
+        id: `hit-${hit.kind}-${hit.task_id ?? hit.meeting_id ?? index}-${index}`,
+        category: describeKind(hit.kind),
+        label: hit.title || snippet || describeKind(hit.kind),
+        detail: detailParts.join(' · '),
+        hint: hit.kind === 'utterance' ? '검토로 이동' : hit.kind === 'meeting' ? '로비로 이동' : '이동',
+        run: () => {
+          suppressRestoreRef.current = true;
+          onClose();
+          navigate(target);
+        },
+      };
+    });
+  }, [debouncedQuery, hits, navigate, onClose, projectId]);
+
+  const items = useMemo(() => [...commands, ...searchItems], [commands, searchItems]);
+  const truncatedKinds = useMemo(
+    () =>
+      groupByKind(hits)
+        .filter((g) => mayHaveMore(g.hits.length))
+        .map((g) => describeKind(g.kind)),
+    [hits],
   );
 
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query, hits.length]);
+
+  useEffect(() => {
+    const activeEl = itemRefs.current[activeIndex];
+    activeEl?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex]);
+
+  const moveIndex = (delta: number) => {
+    if (items.length === 0) return;
+    setActiveIndex((prev) => (prev + delta + items.length) % items.length);
+  };
+
+  const searchHint = projectId !== undefined ? blockedReason(query, null) : null;
+
   return (
-    <div
-      className="dc-modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-label="빠른 명령어 팔레트"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+    <Dialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
       }}
     >
-      <div className="dc-cmdk">
-        <input
-          className="dc-cmdk__input"
-          placeholder="채널 이동 또는 기능 실행... (ESC로 닫기)"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          autoFocus
-        />
-        <div className="dc-cmdk__list">
-          {filtered.length === 0 ? (
-            <div style={{ padding: '16px', textAlign: 'center', color: 'var(--c-ink-muted)', fontSize: '13px' }}>
-              일치하는 기능이나 화면이 없습니다.
-            </div>
-          ) : (
-            filtered.map((cmd) => (
+      <Dialog.Portal>
+        <Dialog.Overlay className="dc-modal-backdrop dc-modal-backdrop--portal" />
+        <Dialog.Content
+          className="dc-cmdk dc-cmdk--portal"
+          onOpenAutoFocus={(event) => {
+            openerRef.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            event.preventDefault();
+            inputRef.current?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (!suppressRestoreRef.current && openerRef.current?.isConnected) {
+              openerRef.current.focus();
+            }
+          }}
+        >
+          <Dialog.Title className="visually-hidden">빠른 명령 및 통합 검색</Dialog.Title>
+          <Dialog.Description className="visually-hidden">
+            화면을 이동하거나 현재 프로젝트의 업무, 회의, 발언을 검색합니다.
+          </Dialog.Description>
+          <input
+            ref={inputRef}
+            type="search"
+            className="dc-cmdk__input"
+            placeholder={
+              projectId !== undefined
+                ? '화면 이동 또는 업무·회의·발언 검색… (2글자 이상)'
+                : '화면 이동 또는 빠른 실행 검색…'
+            }
+            aria-label="검색어 입력"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                moveIndex(1);
+              } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                moveIndex(-1);
+              } else if (event.key === 'Home') {
+                event.preventDefault();
+                setActiveIndex(0);
+              } else if (event.key === 'End' && items.length > 0) {
+                event.preventDefault();
+                setActiveIndex(items.length - 1);
+              } else if (event.key === 'Enter' && items[activeIndex]) {
+                event.preventDefault();
+                items[activeIndex].run();
+              }
+            }}
+          />
+
+          <div className="dc-cmdk__list" role="listbox" aria-label="실행 및 검색 결과">
+            {commands.length > 0 && (
+              <div className="dc-cmdk__section">빠른 이동 · 실행</div>
+            )}
+            {commands.map((cmd, idx) => (
               <button
                 key={cmd.id}
+                ref={(el) => {
+                  itemRefs.current[idx] = el;
+                }}
                 type="button"
-                className="dc-cmdk__item"
+                role="option"
+                aria-selected={idx === activeIndex}
+                className={`dc-cmdk__item ${idx === activeIndex ? 'dc-cmdk__item--active' : ''}`}
+                onMouseEnter={() => setActiveIndex(idx)}
                 onClick={cmd.run}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span className="dc-badge dc-badge--neutral" style={{ fontSize: '10px', padding: '1px 5px' }}>
-                    {cmd.category}
-                  </span>
-                  <span>{cmd.label}</span>
+                <div className="dc-cmdk__main">
+                  <span className="dc-badge">{cmd.category}</span>
+                  <div className="dc-cmdk__text">
+                    <span className="dc-cmdk__title">{cmd.label}</span>
+                    {cmd.detail && <span className="dc-cmdk__detail">{cmd.detail}</span>}
+                  </div>
                 </div>
-                <kbd className="dc-kbd">{cmd.shortcut}</kbd>
+                {cmd.hint && <kbd className="dc-kbd">{cmd.hint}</kbd>}
               </button>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
+            ))}
+
+            {projectId !== undefined && (searchHint !== null || canSearch(debouncedQuery, null)) && (
+              <div className="dc-cmdk__section">프로젝트 검색 결과</div>
+            )}
+
+            {searchHint !== null && (
+              <div className="dc-cmdk__status" role="status">
+                {searchHint}
+              </div>
+            )}
+
+            {canSearch(debouncedQuery, null) && searchQuery.isFetching && (
+              <div className="dc-cmdk__status" role="status">
+                프로젝트에서 찾는 중입니다…
+              </div>
+            )}
+
+            {canSearch(debouncedQuery, null) && searchQuery.isError && (
+              <div className="dc-cmdk__status dc-cmdk__status--error" role="alert">
+                검색 결과를 불러오지 못했습니다.
+              </div>
+            )}
+
+            {searchItems.map((item, hitOffset) => {
+              const idx = commands.length + hitOffset;
+              return (
+                <button
+                  key={item.id}
+                  ref={(el) => {
+                    itemRefs.current[idx] = el;
+                  }}
+                  type="button"
+                  role="option"
+                  aria-selected={idx === activeIndex}
+                  className={`dc-cmdk__item ${idx === activeIndex ? 'dc-cmdk__item--active' : ''}`}
+                  onMouseEnter={() => setActiveIndex(idx)}
+                  onClick={item.run}
+                >
+                  <div className="dc-cmdk__main">
+                    <span className="dc-badge dc-badge--ok">{item.category}</span>
+                    <div className="dc-cmdk__text">
+                      <span className="dc-cmdk__title">{item.label}</span>
+                      {item.detail && <span className="dc-cmdk__detail">{item.detail}</span>}
+                    </div>
+                  </div>
+                  {item.hint && <kbd className="dc-kbd">{item.hint}</kbd>}
+                </button>
+              );
+            })}
+
+            {truncatedKinds.length > 0 && (
+              <div className="dc-cmdk__status">
+                {truncatedKinds.join('·')} 결과는 최대 건수에 도달했습니다 — 검색어를 좁히거나 전체 통합 검색을 여세요.
+              </div>
+            )}
+
+            {items.length === 0 && !searchQuery.isFetching && searchHint === null && (
+              <div className="dc-cmdk__status">일치하는 기능이나 검색 결과가 없습니다.</div>
+            )}
+          </div>
+
+          <div className="dc-cmdk__foot">
+            <span>↑↓ 이동 · Enter 실행 · Esc 닫기</span>
+            {projectId === undefined && <span>프로젝트에 들어가면 업무·회의 검색이 열립니다</span>}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

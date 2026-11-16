@@ -15,6 +15,7 @@ import type { GithubHealth } from '@lib/github/health.ts';
 import type { Task } from '@lib/kanban/board.ts';
 import type { RosterEntry } from '@lib/lobby/room.ts';
 import type { Analytics } from '@lib/analytics/view.ts';
+import { canSearch, type Hit } from '@lib/search/view.ts';
 
 /** 서버 `TaskBoardOut` 과 같은 모양. */
 export interface TaskBoard {
@@ -612,55 +613,11 @@ export function useUtteranceMutations(meetingId: number) {
 }
 
 
-export interface VoiceprintStatus {
-  enrolled: boolean;
-  steps_completed: number;
-  adaptive_calibrated: boolean;
-  confidence_boost: string;
-  updated_at: string | null;
-  message: string;
-}
-
-export interface EmailCodeSendOut {
-  email: string;
-  sent: boolean;
-  demo_code: string;
-  expires_in_seconds: number;
-  message: string;
-}
-
-export interface EmailCodeVerifyOut {
-  email: string;
-  verified: boolean;
-  message: string;
-}
-
-export interface InstantJoinOut {
-  meeting_id: number;
-  track_id: number;
-  all_confirmed: boolean;
-  status: string;
-}
-
 export function useVoiceprint(projectId: number | undefined, enabled = true) {
   return useQuery({
     queryKey: ['projects', projectId, 'voiceprint'],
-    queryFn: () => api.get<VoiceprintStatus>(`/api/projects/${projectId}/me/voiceprint`),
+    queryFn: () => api.get<{ enrolled: boolean; has_stored_data: boolean; supported: boolean; dimension: number; message: string }>(`/api/projects/${projectId}/me/voiceprint`),
     enabled: projectId !== undefined && enabled,
-  });
-}
-
-export function useEnrollVoiceprint(projectId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (payload: {
-      step: number;
-      features: number[];
-      calibrate_only: boolean;
-    }) => api.post<VoiceprintStatus>(`/api/projects/${projectId}/me/voiceprint`, payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'voiceprint'] });
-    },
   });
 }
 
@@ -668,88 +625,17 @@ export function useDeleteVoiceprint(projectId: number | undefined) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => api.del<void>(`/api/projects/${projectId}/me/voiceprint`),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'voiceprint'] });
-    },
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'voiceprint'] }); },
   });
 }
 
 export function useAccountSecurityMutations() {
-  const queryClient = useQueryClient();
   return {
-    sendEmailCode: useMutation({
-      mutationFn: (email: string) =>
-        api.post<EmailCodeSendOut>('/api/auth/email-code/send', { email }),
-    }),
-    verifyEmailCode: useMutation({
-      mutationFn: (payload: { email: string; code: string }) =>
-        api.post<EmailCodeVerifyOut>('/api/auth/email-code/verify', payload),
-    }),
-    connectOAuth: useMutation({
-      mutationFn: (payload: {
-        provider: 'google' | 'github';
-        email?: string;
-        name?: string;
-      }) => api.post<Me>('/api/auth/oauth', payload),
-      onSuccess: () => {
-        void queryClient.invalidateQueries({ queryKey: ['me'] });
-      },
-    }),
     updatePassword: useMutation({
       mutationFn: (payload: { current_password: string; new_password: string }) =>
         api.patch<Me>('/api/auth/me/profile', payload),
     }),
   };
-}
-
-export function useInstantJoinMeeting() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (targetMeetingId: number) =>
-      api.post<InstantJoinOut>(`/api/meetings/${targetMeetingId}/instant-join`),
-    onSuccess: (_data, targetMeetingId) => {
-      void queryClient.invalidateQueries({ queryKey: ['meetings', targetMeetingId] });
-    },
-  });
-}
-
-export interface MeetingTextUtterance {
-  id: number;
-  meeting_id: number;
-  speaker_id: number;
-  speaker_name: string;
-  text: string;
-  utterance_type: string;
-  utterance_label: string;
-  created_task_marker: string | null;
-}
-
-export function useMeetingTextUtterances(meetingId: number | undefined, enabled = true) {
-  return useQuery({
-    queryKey: ['meetings', meetingId, 'text-utterances'],
-    queryFn: () =>
-      api.get<MeetingTextUtterance[]>(`/api/meetings/${meetingId}/text-utterances`),
-    enabled: meetingId !== undefined && enabled,
-  });
-}
-
-export function useCreateMeetingTextUtterance(meetingId: number, projectId: number) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (payload: { text: string; create_task: boolean }) =>
-      api.post<MeetingTextUtterance>(`/api/meetings/${meetingId}/text-utterances`, payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ['meetings', meetingId, 'text-utterances'],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ['projects', projectId, 'contributions'],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ['projects', projectId, 'tasks'],
-      });
-    },
-  });
 }
 
 export function useLogout() {
@@ -760,26 +646,19 @@ export function useLogout() {
 
 export interface VoiceMatchResult {
   similarity: number;
-  is_same_speaker: boolean;
-  confidence: number;
   speaker_verdict: string;
   dimension: number;
 }
 
 export interface DemoCandidateTask {
   title: string;
-  assignee_name: string;
-  deadline: string;
-  confidence: number;
   evidence_text: string;
-  category: string;
 }
 
 export interface DemoAnalyzeResult {
   decisions: string[];
   tasks: DemoCandidateTask[];
   diarization_summary: string;
-  total_speakers: number;
 }
 
 export function useDemoVoiceMatchMutation() {
@@ -797,6 +676,20 @@ export function useDemoAnalyzeMutation() {
     mutationFn: (payload: {
       script: Array<{ speaker: string; text: string; start_sec: number; end_sec: number }>;
     }) => api.post<DemoAnalyzeResult>('/api/ai/demo/analyze', payload),
+  });
+}
+
+export function useProjectSearch(projectId: number | undefined, query: string) {
+  const trimmed = query.trim();
+  const enabled = projectId !== undefined && canSearch(trimmed, null);
+  return useQuery({
+    queryKey: ['projects', projectId, 'search', trimmed],
+    queryFn: () => {
+      const qs = new URLSearchParams({ q: trimmed });
+      return api.get<Hit[]>(`/api/projects/${projectId}/search?${qs.toString()}`);
+    },
+    enabled,
+    staleTime: 15_000,
   });
 }
 

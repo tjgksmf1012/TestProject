@@ -506,6 +506,7 @@ async function main() {
       }
       await ctx.close();
     }
+    await exerciseUserFlows(browser, BASE);
   } finally {
     await browser.close();
     await stopServer(server);
