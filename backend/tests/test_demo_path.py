@@ -820,22 +820,11 @@ def test_kanban_response_has_the_fields_the_screen_reads(client: TestClient, see
 def test_seeded_board_shows_the_chain_and_the_exceptions(client: TestClient, seeded: dict):
     """⭐ 시연 보드에 네 가지가 다 있어야 화면이 무엇을 말하는지 보입니다.
 
-    회의에서 나온 업무 · 손으로 만든 업무 · 담당자 없는 업무 · 완료된 업무.
+    회의에서 나온 업무 · 수동 등록(`origin=None`) 업무 · 담당자 없는 업무 · 완료된 업무.
     전부 같은 모양이면 이 화면은 그냥 할 일 목록으로 보입니다.
 
-    ⚠️ **이 검사와 제품의 불변식이 서로 어긋나 있습니다** (결함 318).
-
-        approval_service.py  「승인 없이 tasks 에 쓰는 경로는 이 함수
-                              어디에도 없다 — 그게 불변식이다」
-        여기                  「손으로 만든 업무도 있어야 합니다」
-
-    즉 씨앗은 **실기가 만들 수 없는 값**을 만들고 있습니다 (결함 288 이
-    적어 둔 그 함정). 시연 칸반 다섯 중 셋이 그 상태이고, 카드를 열면
-    「어느 회의에서 나왔는지 기록이 없습니다」가 셋 뜹니다.
-
-    어느 쪽이 맞는지는 **제품 결정**이라 여기서 고르지 않았습니다 —
-    docs/17 318번에 「결정이 필요한 자리」로 적어 두었습니다. 한쪽만
-    조용히 바꾸지 마십시오.
+    수동 등록 업무(`+ 새 업무` / `POST /tasks`)는 `수동 등록` 배지로 근거 사슬과
+    시각적으로 격리되며, 완료되어도 자동 기여 점수 계산에서는 0점으로 처리됩니다.
     """
     tasks = client.get(f"/api/projects/{seeded['project_id']}/tasks").json()["tasks"]
 

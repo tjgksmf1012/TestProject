@@ -311,6 +311,7 @@ def _record_completion(
         met = local_date(completed_at) <= local_date(deadline)
         verdict = EventType.DEADLINE_MET if met else EventType.DEADLINE_MISSED
 
+    task_origin = "meeting" if task.origin_candidate_id else "manual"
     for user_id in who:
         _emit(
             session,
@@ -319,6 +320,7 @@ def _record_completion(
             event_type=verdict,
             source_id=task.id,
             occurred_at=completed_at,
+            metadata={"origin": task_origin},
         )
 
 

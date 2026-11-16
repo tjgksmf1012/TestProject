@@ -141,7 +141,7 @@ function MeetingRoom({
               </div>
               <span className="dc-pip__sub">통화와 녹음 화면이 열려 있습니다</span>
             </div>
-            <div style={{ display: 'flex', gap: '6px' }}>
+            <div className="dc-pip__actions">
               <button
                 type="button"
                 className="btn btn--secondary btn--sm"
@@ -230,7 +230,7 @@ function MeetingRoom({
                   <div className="dc-setup-grid">
                     <div className="dc-setup-card">
                       <h2 className="dc-sec-title">새 회의 시작 또는 대기 중 회의 참가</h2>
-                      <p className="dc-r-sub" style={{ marginBottom: '14px' }}>
+                      <p className="dc-r-sub dc-sub--lead">
                         모든 참여자의 녹음 동의를 확인한 뒤 실시간 음성 통화와 개별 트랙 녹음을
                         엽니다.
                       </p>
@@ -244,12 +244,12 @@ function MeetingRoom({
                       </button>
 
                       {meetings.isPending && (
-                        <p role="status" className="dc-r-sub" style={{ marginTop: '12px' }}>
+                        <p role="status" className="dc-r-sub dc-problem--spaced">
                           회의를 불러오는 중입니다
                         </p>
                       )}
                       {meetings.isError && (
-                        <div className="dc-problem" style={{ marginTop: '12px' }}>
+                        <div className="dc-problem dc-problem--spaced">
                           <Problem>
                             회의를 불러오지 못했습니다.{' '}
                             <button
@@ -273,8 +273,7 @@ function MeetingRoom({
                             <li key={meeting.meeting_id}>
                               <button
                                 type="button"
-                                className="dc-btn dc-btn--ghost"
-                                style={{ width: '100%', justifyContent: 'space-between' }}
+                                className="dc-btn dc-btn--ghost dc-btn--room-item"
                                 onClick={() => {
                                   setProblem(null);
                                   setMeetingId(meeting.meeting_id);
@@ -297,13 +296,12 @@ function MeetingRoom({
                   <div className="dc-prejoin-body">
                     <div className="dc-setup-card">
                       <div className="dc-sec-head-row">
-                        <h2 className="dc-sec-title" style={{ marginBottom: 0 }}>
+                        <h2 className="dc-sec-title dc-sec-title--flush">
                           팀원 녹음 동의 현황
                         </h2>
                         <a
                           href={`/app/meeting/${meetingId}/lobby`}
-                          className="dc-btn dc-btn--ghost"
-                          style={{ textDecoration: 'none' }}
+                          className="dc-btn dc-btn--ghost dc-btn--link"
                           target="_blank"
                           rel="noopener noreferrer"
                         >
@@ -312,7 +310,7 @@ function MeetingRoom({
                       </div>
 
                       {consent.isError && (
-                        <div className="dc-problem" style={{ marginTop: '10px' }}>
+                        <div className="dc-problem dc-status--spaced">
                           <Problem>
                             동의 현황을 불러오지 못했습니다.{' '}
                             <button
@@ -326,12 +324,12 @@ function MeetingRoom({
                         </div>
                       )}
                       {consent.isPending && (
-                        <p role="status" className="dc-r-sub" style={{ marginTop: '10px' }}>
+                        <p role="status" className="dc-r-sub dc-status--spaced">
                           동의 현황을 확인하는 중입니다
                         </p>
                       )}
 
-                      <div className="dc-peer-list" style={{ marginTop: '12px' }}>
+                      <div className="dc-peer-list dc-peer-list--spaced">
                         {(consent.data?.roster ?? []).map((member) => {
                           const badge = consentBadge(member.recording);
                           return (
@@ -385,7 +383,7 @@ function MeetingRoom({
                             </label>
                           </fieldset>
                         )}
-                        <p id="room-consent-help" role="status" className="dc-r-sub" style={{ marginTop: '10px' }}>
+                        <p id="room-consent-help" role="status" className="dc-r-sub dc-status--spaced">
                           {consent.data?.message ?? '본인의 동의만 변경할 수 있습니다'}
                         </p>
                       </div>
@@ -393,8 +391,7 @@ function MeetingRoom({
                       <div className="dc-prejoin-actions">
                         <button
                           type="button"
-                          className="dc-btn dc-btn--green"
-                          style={{ width: '100%', height: '44px' }}
+                          className="dc-btn dc-btn--green dc-btn--full-lg"
                           aria-disabled={!consent.data?.all_confirmed}
                           aria-describedby="room-consent-help"
                           onClick={() => {
@@ -410,8 +407,7 @@ function MeetingRoom({
                         </button>
                         <button
                           type="button"
-                          className="dc-btn dc-btn--ghost"
-                          style={{ width: '100%' }}
+                          className="dc-btn dc-btn--ghost dc-btn--full"
                           onClick={() => {
                             setProblem(null);
                             setMeetingId(undefined);

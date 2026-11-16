@@ -145,6 +145,11 @@
      `.kprio--urgent` 와 같은 결정입니다. */
   .kprio--urgent { color: var(--gap); border-color: var(--gap);
                    background: var(--gap-tint); }
+  .kmanual { display: inline-block; margin-left: var(--sp-2);
+             font-size: var(--fs-caption); font-weight: 500;
+             color: var(--text-subtle); border: 1px dashed var(--line);
+             border-radius: var(--r-badge); padding: 0 var(--sp-2);
+             white-space: nowrap; vertical-align: 1px; }
 
   /* 회의 → 업무 연결이 이 화면의 존재 이유다. 눈에 띄어야 한다. */
   /* ⚠️ `--ico` 만 정하면 안 됩니다 (결함 74). 그 변수를 **읽는** 규칙은

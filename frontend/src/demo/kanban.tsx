@@ -38,6 +38,7 @@ import {
   taskWarnings,
   toColumns,
   type Task,
+  MANUAL_TASK_BADGE,
   emptyBoard,
   unknownOriginNote,
 } from '../lib/kanban/board.ts';
@@ -377,6 +378,11 @@ function Card({
         {showsBadge(task.priority) && (
           <span className={`kprio kprio--${priorityTone(task.priority)}`}>
             {describePriority(task.priority)}
+          </span>
+        )}
+        {task.origin === null && (
+          <span className="kmanual" title={unknownOriginNote()}>
+            {MANUAL_TASK_BADGE}
           </span>
         )}
       </p>
@@ -800,7 +806,7 @@ function Kanban() {
             (결함 313). 빈 상자만 고치고 **여기를 놓칠 뻔했습니다** — 이 줄은
             비어 있지 않을 때도 늘 보이니 더 자주 읽힙니다. 같은 화면에서
             같은 모양을 몇 곳이나 쓰는지 세고 고칩니다(실패 ②). */}
-        <p className="lede">회의에서 승인된 업무가 단계별로 놓입니다.</p>
+        <p className="lede">회의에서 승인된 업무와 수동 등록 업무가 단계별로 놓입니다.</p>
         {me !== null && <Byline name={me.name} avatar={me.avatar} what="보는 중" />}
       </header>
     </>

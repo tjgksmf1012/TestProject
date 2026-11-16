@@ -931,3 +931,55 @@ def test_deleting_twice_is_still_fine(client: TestClient, board: dict):
     url = f"/api/projects/{board['project_id']}/tasks/{board['by_hand']}"
     assert client.delete(url).status_code == 204
     assert client.delete(url).status_code == 204
+
+
+def test_manual_task_completion_is_isolated_from_contribution_score(
+    client: TestClient, board: dict
+):
+    """⭐ 수동 등록(`+ 새 업무`) 완료는 기록은 남기되 자동 기여 점수 합산에서 격리된다.
+
+    회의 후보 승인 없이 만든 카드로 `완료`·`마감 준수`를 반복해 점수를
+    올리는 게이밍 경로를 차단한다. 팀이 반영하고 싶으면 기여도 확정에서
+    합의 사유와 함께 조정한다.
+    """
+    created = client.post(
+        f"/api/projects/{board['project_id']}/tasks",
+        json={
+            "title": "긴급 핫픽스 배포",
+            "status": "todo",
+            "priority": 0,
+            "deadline": "2099-12-31",
+            "assignee_ids": [board["other"]],
+        },
+    )
+    assert created.status_code == 201, created.text
+    manual_task = created.json()
+    assert manual_task["origin"] is None
+
+    done = patch(client, board, manual_task["id"], {"status": "done"})
+    assert done.status_code == 200, done.text
+
+    # 기록(감사 추적) 자체는 남아야 한다
+    with db_session.session_scope() as s:
+        rows = s.scalars(
+            select(m.ContributionEventRow).where(
+                m.ContributionEventRow.source_id == manual_task["id"],
+                m.ContributionEventRow.user_id == board["other"],
+            )
+        ).all()
+        assert {r.event_type for r in rows} == {"task_completed", "deadline_met"}
+        assert all((r.event_metadata or {}).get("origin") == "manual" for r in rows)
+
+        # 자동 기여 점수(task / schedule)에는 합산되지 않는다
+        from teamflow.contribution.confidence import CoverageStats
+        from teamflow.contribution.events import Category
+        from teamflow.contribution.scoring import score_team
+
+        by_user = scoring_service.load_events(s, board["project_id"])
+        profiles = scoring_service.load_profiles(s, board["project_id"])
+        result = score_team(by_user, profiles, CoverageStats())
+        other_score = result.members.get(board["other"])
+        if other_score is not None:
+            for cat in (Category.TASK, Category.SCHEDULE):
+                if cat in other_score.categories:
+                    assert other_score.categories[cat].raw == 0.0

@@ -21,6 +21,7 @@ import {
   toColumns,
   type Task,
   type TaskGithubLink,
+  MANUAL_TASK_BADGE,
   emptyBoard,
   emptyBoardLine,
   cardMarks,
@@ -515,20 +516,13 @@ describe('countText — 못 잰 것을 0 으로 말하지 않는다 (불변식 �
   });
 });
 
-describe('업무가 없을 때 뭐라고 적는가 (결함 313)', () => {
-  it('⛔ 「직접 만들」 길이 있다고 하지 않는다 — 이 제품에 그 길은 없다', () => {
-    /* 재서 확인한 것: 갓 만든 프로젝트의 레거시 칸반에서 보이는 컨트롤
-       열셋을 전부 세었는데 업무를 만드는 것이 하나도 없었습니다. 서버도
-       같습니다 — `approval_service.py` 가 유일한 자리이고 그 옆에
-       「승인 없이 tasks 에 쓰는 경로는 없다 — 그게 불변식이다」. */
+describe('칸반 빈 상자와 수동 등록 업무 안내 (결함 313·317·318 통합)', () => {
+  it('⭐ 빈 상자가 회의 승인과 수동 등록(+ 새 업무) 및 점수 격리를 함께 안내한다', () => {
     const empty = emptyBoard();
     const all = `${empty.what} ${empty.why} ${empty.how}`;
-    ok(!/직접 만들 수/.test(all), all);
-    ok(/승인/.test(all), `업무가 어디서 오는지 안 적습니다: ${all}`);
-  });
-
-  it('⭐ **왜** 그 길이 없는지 적는다 — 「안 됩니다」만 적으면 고장처럼 읽힌다', () => {
-    ok(/일부러/.test(emptyBoard().why), emptyBoard().why);
+    ok(/승인/.test(all), `회의 승인 경로 안내가 없습니다: ${all}`);
+    ok(/\+ 새 업무/.test(all), `수동 등록 경로 안내가 없습니다: ${all}`);
+    ok(/격리/.test(empty.why), `수동 업무 점수/근거 격리 안내가 없습니다: ${empty.why}`);
   });
 
   it('⛔ 마크다운 별표를 쓰지 않는다 — 이 자리는 글자 그대로 그려진다 (결함 292)', () => {
@@ -540,32 +534,16 @@ describe('업무가 없을 때 뭐라고 적는가 (결함 313)', () => {
   });
 
   it('⭐ 한 줄짜리와 세 줄짜리가 **같은 사실**을 말한다 — 두 화면이 갈라지지 않게', () => {
-    // 레거시는 세 줄, SPA 는 한 줄입니다. 갈라지면 결함 313 이 그대로입니다.
     ok(emptyBoardLine().includes(emptyBoard().how), `${emptyBoardLine()} ↔ ${emptyBoard().how}`);
   });
 });
 
-describe('출처 기록이 없는 카드 (결함 317)', () => {
-  it('⛔ 「손으로 만들었다」고 **단언하지 않는다** — 그 길은 없다', () => {
-    /* 결함 313 의 셋째·넷째 자리입니다. 레거시 카드 서랍과 SPA 카드 힌트가
-       `task.origin` 이 비면 「사람이 손으로 만든 업무입니다」라고 적었습니다. */
+describe('수동 등록 카드(origin=null) 격리 안내', () => {
+  it('⭐ 수동 등록 배지 상수와 격리 힌트가 일관된다', () => {
+    strictEqual(MANUAL_TASK_BADGE, '수동 등록');
     const note = unknownOriginNote();
-    ok(!/(직접|손으로|수동으로)\s*만[든들]/.test(note), note);
-  });
-
-  it('⭐ 모르는 것을 **모른다고** 적는다 (불변식 ③ 과 같은 자리)', () => {
-    ok(/기록이 없습니다/.test(unknownOriginNote()), unknownOriginNote());
-  });
-
-  it('⛔ **이유를 지어내지 않는다** (결함 318)', () => {
-    /* 처음에는 「기록이 지워졌거나 옛 자료입니다」라고 적었습니다. 그런데
-       시연 데이터가 이 상태를 **일부러** 만들고 그것을 못 박은 검사까지
-       있습니다(`test_demo_path.py`) — 제품의 불변식과 서로 어긋난 채로요.
-       어느 쪽이 맞는지는 제품 결정이라 화면은 **아는 것만** 말합니다.
-       결함 311 이 「결과를 옮겨 적는 자리에서 없는 이유를 붙이지 마라」고
-       적어 둔 그것입니다. */
-    const note = unknownOriginNote();
-    ok(!/지워졌|옛 자료|고장|오류/.test(note), `없는 이유를 붙였습니다: ${note}`);
+    ok(/수동 등록/.test(note), note);
+    ok(/격리/.test(note), note);
   });
 });
 

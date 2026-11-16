@@ -21,6 +21,7 @@ import {
   describePull,
   sortLinks,
   type Task,
+  MANUAL_TASK_BADGE,
   emptyBoardLine,
   unknownOriginNote,
 } from '@lib/kanban/board.ts';
@@ -112,7 +113,12 @@ function Card({
             {describePriority(task.priority)}
           </span>
         )}
-        <div style={{ flex: 1 }} />
+        {task.origin === null && (
+          <span className="kmanual" title={unknownOriginNote()}>
+            {MANUAL_TASK_BADGE}
+          </span>
+        )}
+        <div className="kcard__spacer" />
         <Why about={task.title} lines={warnings} />
         <Menu.Root>
           <Menu.Trigger asChild>
@@ -221,18 +227,7 @@ function Card({
         {task.origin !== null && onPreviewEvidence && (
           <button
             type="button"
-            style={{
-              background: 'var(--c-surface-sunken)',
-              border: '1px solid var(--c-line)',
-              borderRadius: 'var(--r-sm)',
-              padding: '2px 6px',
-              fontSize: '11px',
-              color: 'var(--c-ink-muted)',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '2px',
-            }}
+            className="kcard__preview-btn"
             title="페이지 이동 없이 회의 맥락 미리보기"
             onClick={(e) => {
               e.stopPropagation();

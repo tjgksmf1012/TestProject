@@ -79,6 +79,10 @@ def event_points(event: ContributionEvent) -> float:
 
     # ── task ──────────────────────────────────────────
     if et is EventType.TASK_COMPLETED:
+        if meta.get("origin") == "manual":
+            # 회의 근거 없이 수동 등록(`+ 새 업무`)으로 만든 업무는 칸반
+            # 진행 관리용으로만 남기며, 자동 기여 점수에는 합산하지 않는다.
+            return 0.0
         difficulty = float(meta.get("difficulty", 1))
         # ⭐ **여럿이 맡은 업무는 나눠 갖습니다** (`TASK-006`).
         #
@@ -171,8 +175,9 @@ _SCHEDULE_VOLUME_FLOOR = 5
 
 def _schedule_raw(events: list[ContributionEvent]) -> float:
     """일정 준수는 비율 기반. 단순 합산이 아니다."""
-    met = sum(1 for e in events if e.event_type is EventType.DEADLINE_MET)
-    missed = sum(1 for e in events if e.event_type is EventType.DEADLINE_MISSED)
+    scored = [e for e in events if e.metadata.get("origin") != "manual"]
+    met = sum(1 for e in scored if e.event_type is EventType.DEADLINE_MET)
+    missed = sum(1 for e in scored if e.event_type is EventType.DEADLINE_MISSED)
     total = met + missed
     if total == 0:
         return 0.0

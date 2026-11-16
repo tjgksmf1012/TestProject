@@ -4,6 +4,13 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom';
 import { appRailHref } from '@lib/nav/rail.ts';
 import { describeLogoutFailure, logoutOutcome } from '@lib/auth/session.ts';
+import {
+  AUDIO_PREFS_KEY,
+  defaultAudioPrefs,
+  parseAudioPrefs,
+  scaleMicLevel,
+  type AudioPrefs,
+} from '@lib/audio/prefs.ts';
 import { apiFailureText, ApiError } from '../api/client.ts';
 import {
   useAccountSecurityMutations,
@@ -21,35 +28,9 @@ export interface SelectOption {
   sublabel?: string;
 }
 
-export interface AudioPrefs {
-  inputDeviceId: string;
-  echoCancellation: boolean;
-  noiseSuppression: boolean;
-  micGain: number;
-}
-
-const PREFS_KEY = 'tf_audio_prefs_v1';
-
-function defaultAudioPrefs(): AudioPrefs {
-  return {
-    inputDeviceId: 'default',
-    echoCancellation: true,
-    noiseSuppression: true,
-    micGain: 100,
-  };
-}
-
 function loadAudioPrefs(): AudioPrefs {
   try {
-    const raw = window.localStorage.getItem(PREFS_KEY);
-    if (!raw) return defaultAudioPrefs();
-    const parsed = JSON.parse(raw) as Partial<AudioPrefs>;
-    return {
-      inputDeviceId: typeof parsed.inputDeviceId === 'string' ? parsed.inputDeviceId : 'default',
-      echoCancellation: parsed.echoCancellation !== false,
-      noiseSuppression: parsed.noiseSuppression !== false,
-      micGain: typeof parsed.micGain === 'number' ? Math.min(150, Math.max(50, parsed.micGain)) : 100,
-    };
+    return parseAudioPrefs(window.localStorage.getItem(AUDIO_PREFS_KEY));
   } catch {
     return defaultAudioPrefs();
   }
@@ -57,7 +38,7 @@ function loadAudioPrefs(): AudioPrefs {
 
 function saveAudioPrefs(prefs: AudioPrefs): void {
   try {
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    window.localStorage.setItem(AUDIO_PREFS_KEY, JSON.stringify(prefs));
   } catch {
     /* ignore storage quota failures */
   }
@@ -88,21 +69,6 @@ export function DiscordSelect({
   // 빈 문자열도 '전체 담당자'처럼 실제 선택지입니다. Radix의 미선택 값과 구분합니다.
   const encoded = (entry: string) => `option:${entry}`;
   const isDark = variant === 'dark';
-  const contentStyle = isDark
-    ? {
-        zIndex: 300,
-        background: '#111214',
-        color: '#f2f3f5',
-        border: '1px solid rgba(255, 255, 255, 0.16)',
-        padding: 8,
-      }
-    : {
-        zIndex: 300,
-        background: 'var(--c-surface)',
-        color: 'var(--c-ink)',
-        border: '1px solid var(--c-line)',
-        padding: 8,
-      };
   return (
     <Select.Root value={encoded(value)} onValueChange={(next) => onChange(next.slice(7))}>
       <Select.Trigger
@@ -118,14 +84,16 @@ export function DiscordSelect({
         <Select.Icon> ▾</Select.Icon>
       </Select.Trigger>
       <Select.Portal>
-        <Select.Content className="picker__content" position="popper" style={contentStyle}>
+        <Select.Content
+          className={`picker__content ${isDark ? 'picker__content--dark' : 'picker__content--surface'}`}
+          position="popper"
+        >
           <Select.Viewport>
             {options.map((option) => (
               <Select.Item
                 key={option.value}
                 value={encoded(option.value)}
-                className={isDark ? 'dc-cselect__opt' : 'btn btn--ghost'}
-                style={{ display: 'flex', minHeight: 44, alignItems: 'center', gap: 8 }}
+                className={`${isDark ? 'dc-cselect__opt' : 'btn btn--ghost'} picker__opt`}
               >
                 <div className={isDark ? 'dc-cselect__opt-text' : undefined}>
                   <Select.ItemText>{option.label}</Select.ItemText>
@@ -312,9 +280,7 @@ export function SettingsModal({
       const draw = () => {
         if (ticket !== generationRef.current) return;
         analyser.getFloatTimeDomainData(samples);
-        const rms = Math.sqrt(samples.reduce((sum, s) => sum + s * s, 0) / samples.length);
-        const scaled = Math.min(100, Math.round(rms * 300 * (prefs.micGain / 100)));
-        setLevel(scaled);
+        setLevel(scaleMicLevel(samples, prefs.micGain));
         frameRef.current = requestAnimationFrame(draw);
       };
       setTesting(true);
@@ -459,8 +425,7 @@ export function SettingsModal({
                 <div className="dc-nav-group">프로젝트</div>
                 <Link
                   to={appRailHref('project', projectId)}
-                  className="dc-nav-btn"
-                  style={{ textDecoration: 'none' }}
+                  className="dc-nav-btn dc-btn--link"
                   onClick={onClose}
                 >
                   역할·GitHub 상세 설정 →
@@ -496,10 +461,10 @@ export function SettingsModal({
                 {tab === 'voice' && (
                   <>
                     <div className="dc-sec-head-row">
-                      <h2 className="dc-sec-title" style={{ marginBottom: 0 }}>
+                      <h2 className="dc-sec-title dc-sec-title--flush">
                         마이크 점검
                       </h2>
-                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      <div className="dc-badge-group">
                         <span className={`dc-badge ${mics.length > 0 ? 'dc-badge--ok' : ''}`}>
                           {mics.length > 0 ? `마이크 ${mics.length}개` : '마이크 미확인'}
                         </span>
@@ -512,7 +477,7 @@ export function SettingsModal({
                       </div>
                     </div>
 
-                    <p className="dc-r-sub" style={{ marginBottom: '14px' }}>
+                    <p className="dc-r-sub dc-sub--lead">
                       점검 음성은 서버로 보내지 않습니다. 회의 녹음 장치는 음성 회의실의 녹음 탭에서
                       확인하세요.
                     </p>
@@ -540,8 +505,7 @@ export function SettingsModal({
                         <div className="dc-label">감지된 장치 새로고침</div>
                         <button
                           type="button"
-                          className="dc-btn dc-btn--ghost"
-                          style={{ width: '100%', height: '40px' }}
+                          className="dc-btn dc-btn--ghost dc-btn--full-md"
                           onClick={() => void probeDevicesWithPermission()}
                         >
                           장치 다시 확인
@@ -572,14 +536,14 @@ export function SettingsModal({
                     </div>
 
                     {testing && (
-                      <p role="status" className="dc-note-ok" style={{ marginTop: 0, marginBottom: '12px' }}>
+                      <p role="status" className="dc-note-ok dc-note-ok--mic">
                         입력 음량 {level}%{' '}
                         <meter
                           min={0}
                           max={100}
                           value={level}
                           aria-label="입력 음량"
-                          style={{ verticalAlign: 'middle', marginLeft: '6px' }}
+                          className="dc-meter-val"
                         />
                       </p>
                     )}
@@ -709,7 +673,7 @@ export function SettingsModal({
                       <label className="dc-label" htmlFor="settings-profile-name">
                         표시 이름
                       </label>
-                      <div style={{ display: 'flex', gap: '8px' }}>
+                      <div className="dc-name-row">
                         <input
                           id="settings-profile-name"
                           className="dc-input"
@@ -821,8 +785,7 @@ export function SettingsModal({
                       {projectId !== undefined && (
                         <Link
                           to={`/project/${projectId}/settings/github`}
-                          className="dc-btn dc-btn--ghost"
-                          style={{ textDecoration: 'none' }}
+                          className="dc-btn dc-btn--ghost dc-btn--link"
                           onClick={onClose}
                         >
                           GitHub 설정
@@ -830,7 +793,7 @@ export function SettingsModal({
                       )}
                     </div>
 
-                    <div className="dc-acct-row" style={{ borderBottom: 'none' }}>
+                    <div className="dc-acct-row dc-acct-row--last">
                       <div>
                         <div className="dc-r-title">로그아웃</div>
                         <div className="dc-r-sub">현재 기기의 인증 세션을 종료합니다</div>
@@ -850,7 +813,7 @@ export function SettingsModal({
                 {tab === 'display' && (
                   <>
                     <h2 className="dc-sec-title">화면 테마</h2>
-                    <p className="dc-r-sub" style={{ marginBottom: '14px' }}>
+                    <p className="dc-r-sub dc-sub--lead">
                       상단 툴바의 테마 버튼과 설정이 같은 상태를 공유합니다.
                     </p>
                     <div className="dc-radio-list" role="radiogroup" aria-label="화면 테마 선택">
@@ -891,7 +854,7 @@ export function SettingsModal({
                 )}
 
                 {error && (
-                  <div className="dc-problem" style={{ marginTop: '12px' }}>
+                  <div className="dc-problem dc-problem--spaced">
                     <Problem>{error}</Problem>
                   </div>
                 )}

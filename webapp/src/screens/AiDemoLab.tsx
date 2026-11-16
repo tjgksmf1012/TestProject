@@ -4,26 +4,7 @@ import { AppShell } from '../components/AppShell.tsx';
 import { Problem } from '../components/Problem.tsx';
 import { apiFailureText } from '../api/client.ts';
 import { useDemoAnalyzeMutation, useDemoVoiceMatchMutation } from '../api/hooks.ts';
-
-const PRESET_SCRIPTS = [
-  {
-    key: 'sprint',
-    label: '예시: 스프린트 회의',
-    script:
-      '이팀장: 다음 주 화요일 배포를 위해서 금요일까지 OAuth 로그인 API 구현을 마무리합시다.\n' +
-      '김민수: 네, 금요일까지 OAuth 로그인 연동과 테스트 코드 작성을 맡을게요.\n' +
-      '박지원: 그럼 토요일까지 DB 마이그레이션 스크립트를 작성하고 검토하겠습니다.\n' +
-      '이팀장: 배포 방식은 무중단 배포로 확정하겠습니다.',
-  },
-  {
-    key: 'arch',
-    label: '예시: 아키텍처 논의',
-    script:
-      '박지원: 동시 접속자 증가에 대비해 세션 캐시 레이어를 도입하기로 결정합시다.\n' +
-      '이팀장: 동의합니다. Redis 캐시 설정은 화요일까지 구현하겠습니다.\n' +
-      '김민수: 저는 장애 복구 시나리오 테스트를 금요일까지 검토하겠습니다.',
-  },
-] as const;
+import { DEMO_SCRIPT_PRESETS, parseDemoScript, similarityPercent } from '@lib/audio/demo.ts';
 
 export default function AiDemoLab() {
   const params = useParams();
@@ -180,10 +161,7 @@ export default function AiDemoLab() {
     }
   };
 
-  const similarityPct =
-    compare.data !== undefined
-      ? Math.max(0, Math.min(100, Math.round(((compare.data.similarity + 1) / 2) * 100)))
-      : 0;
+  const similarityPct = similarityPercent(compare.data?.similarity);
 
   return (
     <AppShell title="AI 데모 랩" projectId={pid}>
@@ -191,7 +169,7 @@ export default function AiDemoLab() {
         <div className="demo-lab__hero">
           <div>
             <h1 className="sec__title">음향과 업무 추출 원리 체험</h1>
-            <p className="notice" style={{ marginTop: 'var(--sp-3)' }}>
+            <p className="notice demo-lab__notice">
               이 페이지는 브라우저 주파수 벡터 비교와 문장 키워드 규칙을 체험하는 샌드박스입니다.
               실제 ASR·화자 성문 모델·LLM을 실행하거나 프로젝트 업무·기여도에 저장하지 않습니다.
             </p>
@@ -225,7 +203,7 @@ export default function AiDemoLab() {
                 className="demo-lab__canvas"
               />
               {recording && (
-                <p role="status" className="t12 num" style={{ margin: 'var(--sp-2) 0 0' }}>
+                <p role="status" className="t12 num demo-lab__wave-status">
                   샘플 {recording} 입력 중 · 음량 {volume}%
                 </p>
               )}
@@ -295,7 +273,7 @@ export default function AiDemoLab() {
                 <div className="demo-lab__bar" aria-hidden="true">
                   <span className="demo-lab__bar-fill" style={{ width: `${similarityPct}%` }} />
                 </div>
-                <p className="t13" style={{ margin: 0 }}>
+                <p className="t13 demo-lab__copy-reset">
                   {compare.data.dimension}개 값 비교 · {compare.data.speaker_verdict}
                 </p>
               </div>
@@ -315,7 +293,7 @@ export default function AiDemoLab() {
             </p>
 
             <div className="meeting-room__actions">
-              {PRESET_SCRIPTS.map((preset) => (
+              {DEMO_SCRIPT_PRESETS.map((preset) => (
                 <button
                   key={preset.key}
                   type="button"
@@ -335,25 +313,13 @@ export default function AiDemoLab() {
               onSubmit={async (event) => {
                 event.preventDefault();
                 setError(null);
-                const lines = script
-                  .split('\n')
-                  .map((line) => line.trim())
-                  .filter(Boolean);
-                if (!lines.length || lines.length > 100 || lines.some((line) => !line.includes(':'))) {
-                  setError('발언자: 내용 형식으로 1~100줄을 입력해 주세요');
+                const parsed = parseDemoScript(script);
+                if (!parsed.ok) {
+                  setError(parsed.message);
                   return;
                 }
-                const payloadScript = lines.map((line, index) => {
-                  const colon = line.indexOf(':');
-                  return {
-                    speaker: line.slice(0, colon).trim(),
-                    text: line.slice(colon + 1).trim(),
-                    start_sec: index * 5,
-                    end_sec: (index + 1) * 5,
-                  };
-                });
                 try {
-                  await analyze.mutateAsync({ script: payloadScript });
+                  await analyze.mutateAsync({ script: parsed.lines });
                 } catch (value) {
                   setError(apiFailureText(value));
                 }
@@ -364,7 +330,7 @@ export default function AiDemoLab() {
               </label>
               <textarea
                 id="demo-script"
-                className="input"
+                className="textarea"
                 rows={6}
                 maxLength={20000}
                 value={script}
@@ -382,7 +348,7 @@ export default function AiDemoLab() {
 
             {analyze.data && (
               <div className="demo-lab__result" aria-live="polite">
-                <p className="t13" style={{ margin: 0 }}>
+                <p className="t13 demo-lab__copy-reset">
                   {analyze.data.diarization_summary}
                 </p>
                 <div>
@@ -404,7 +370,7 @@ export default function AiDemoLab() {
                       {analyze.data.tasks.map((task, index) => (
                         <li key={index}>
                           <strong>{task.title}</strong>
-                          <p className="t12 muted" style={{ margin: '2px 0 0' }}>
+                          <p className="t12 muted demo-lab__ev-text">
                             {task.evidence_text}
                           </p>
                         </li>
@@ -414,7 +380,7 @@ export default function AiDemoLab() {
                     <p className="t13 muted">업무 키워드가 있는 발언이 없습니다.</p>
                   )}
                 </div>
-                <p className="t12 muted" style={{ margin: 0 }}>
+                <p className="t12 muted demo-lab__copy-reset">
                   정해진 낱말을 찾은 예시입니다. 실제 모델의 정확도나 신뢰도가 아니며 칸반과 기여도에
                   반영하지 않습니다.
                 </p>
@@ -457,7 +423,7 @@ export default function AiDemoLab() {
               </p>
             </article>
           </div>
-          <p className="t13 muted" style={{ marginTop: 'var(--sp-4)' }}>
+          <p className="t13 muted demo-lab__arch-foot">
             실제 회의 전사와 업무 추출은 로그인 후 프로젝트에서 회의를 열고 녹음·처리·검토 순서로
             진행합니다.
           </p>
