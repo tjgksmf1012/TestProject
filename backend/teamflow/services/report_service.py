@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from teamflow import clock
 from teamflow.contribution import events, profiles
+from teamflow.db import live
 from teamflow.db import models as m
 from teamflow.db.vocab import REPORT_SCOPE, ReportScope, ReportType
 from teamflow.people import labels as people_labels
@@ -297,6 +298,7 @@ def _counts(
     tasks_done = session.scalar(
         _window(
             select(func.count(m.Task.id)).where(
+                live.not_deleted(),
                 m.Task.project_id == project_id,
                 m.Task.completed_at.is_not(None),
             ),
@@ -305,6 +307,7 @@ def _counts(
     )
     tasks_open = session.scalar(
         select(func.count(m.Task.id)).where(
+            live.not_deleted(),
             m.Task.project_id == project_id,
             m.Task.completed_at.is_(None),
         )

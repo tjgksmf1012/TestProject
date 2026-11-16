@@ -1369,9 +1369,16 @@ details.disc > .disc__body {
   max-height: 24vh;
   overflow-y: auto;
 }
-.confirmbar__person { display: inline-flex; align-items: baseline; gap: var(--sp-3); }
-/* 구간 placeholder("32~52% (시스템 추정)")가 다 보여야 합니다 (v2 F1-4). */
-.confirmbar__person .input--num { width: 11rem; }
+.confirmbar__person { display: inline-flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap; }
+.confirmbar__sys {
+  font-size: var(--fs-11);
+  color: var(--c-ink-muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* 시스템 반올림값("37.1%")과 "직접 입력"이 여유 있게 들어가는 폭. */
+.confirmbar__person .input--num { width: 7.5rem; }
 /* 사유 칸도 사람 수만큼 자랍니다 — 같은 이유로 상한을 둡니다 (결함 434). */
 .confirmbar__reasons {
   margin-top: var(--sp-3);
@@ -4941,6 +4948,43 @@ input[type="checkbox"] {
     flex: 1 1 100% !important;
     max-height: none !important;
     width: 100% !important;
+  }
+
+  /* 좁은 화면 홈: 위아래 50:50 고정을 풀고 한 페이지로 자연스럽게 스크롤 */
+  .panes.tf-home-panes {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .panes.tf-home-panes > .pane {
+    flex: none;
+    height: auto;
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--c-line);
+  }
+  .panes.tf-home-panes > .pane:last-child {
+    border-bottom: 0;
+  }
+  .panes.tf-home-panes > .pane > .pane__body {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 48rem), (max-height: 44rem) {
+  /* 좁거나 낮은 화면(390x844·200% 확대)의 기여도 화면: 리본·카드·확정 바가 서로를 찌그러뜨리지 않고 함께 스크롤 */
+  .tf-contrib-pane {
+    overflow-y: auto;
+  }
+  .tf-contrib-pane > .pane__body {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+  .tf-contrib-pane .confirmbar__people,
+  .tf-contrib-pane .confirmbar__reasons {
+    max-height: none;
+    overflow: visible;
   }
 }
 

@@ -416,7 +416,7 @@ export default function Home() {
         </div>
       }
     >
-      <div className="panes">
+      <div className="panes tf-home-panes">
         <section className="pane" style={project !== undefined ? { flex: '1 1 68%' } : undefined}>
           <div className="pane__body">
             {/* 상단 워크스페이스 퀵 액션 벤토 카드 */}

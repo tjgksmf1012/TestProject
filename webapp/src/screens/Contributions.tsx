@@ -42,8 +42,9 @@ import {
   whyCannotConfirm,
   firstGapOf,
   describeFinals,
+  needsReasonFor,
   problemsWith,
-  sameValue,
+  systemLabel,
   toPayload,
   type ConfirmBlock,
   type Draft,
@@ -159,6 +160,11 @@ export default function Contributions() {
     [members],
   );
 
+  const unmeasured = useMemo(
+    () => new Set(members.filter(nothingMeasured).map((m) => m.user_id)),
+    [members],
+  );
+
   const drafts: Draft[] = members.map((m) => {
     const raw = values[m.user_id] ?? '';
     return {
@@ -167,12 +173,12 @@ export default function Contributions() {
       reason: reasons[m.user_id] ?? '',
     };
   });
-  const problems = problemsWith(drafts, systemValues);
+  const problems = problemsWith(drafts, systemValues, unmeasured);
   const changed = drafts.filter(
     (d) =>
       d.final_value !== null &&
       !Number.isNaN(d.final_value) &&
-      !sameValue(d.final_value, systemValues.get(d.user_id) ?? NaN),
+      (unmeasured.has(d.user_id) || needsReasonFor(d, systemValues)),
   );
 
   // 확정값은 시스템이 아니라 **팀이 적습니다** (v2 F1-4). 빈 칸은 더 이상
@@ -330,7 +336,7 @@ export default function Contributions() {
       }
     >
       <div className="panes">
-        <section className="pane">
+        <section className="pane tf-contrib-pane">
           {warnings.length > 0 && (
             /* ⭐ **경고문은 지우지 않습니다** (검수 D). 다만 셋을 한꺼번에
                펼쳐 두면 110px 짜리 글자 벽이 되고, 늘 있는 글자는 배경이
@@ -463,18 +469,19 @@ export default function Contributions() {
               <div className="confirmbar__people">
               {members.map((member) => {
                 const name = nameOf(member.user_id, people, formerPeople);
+                const measured = !nothingMeasured(member);
+                const system = systemLabel(systemValues.get(member.user_id), measured);
                 return (
                   <label className="confirmbar__person" key={member.user_id}>
                     <span className="t13">{name}</span>
-                    {/* 단일 점수를 미리 주지 않습니다 — placeholder 는 **구간**입니다
-                        (v2 F1-4). 값은 팀이 적고, 적어야 확정이 열립니다. */}
+                    <span className="confirmbar__sys">시스템 {system}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <input
                         id={`final-${member.user_id}`}
                         className="input input--num"
                         inputMode="decimal"
-                        placeholder={`${describeRange(member)} (시스템 추정)`}
-                        aria-label={`${name} 확정값 (%) — 시스템 추정 ${describeRange(member)}`}
+                        placeholder={measured ? system : '직접 입력'}
+                        aria-label={`${name} 확정값 (%) — 시스템 ${system}`}
                         value={values[member.user_id] ?? ''}
                         onChange={(e) =>
                           setValues((prev) => ({ ...prev, [member.user_id]: e.target.value }))
@@ -525,7 +532,7 @@ export default function Contributions() {
                     focusFirstGap();
                     return;
                   }
-                  confirm.mutate(toPayload(drafts, systemValues));
+                  confirm.mutate(toPayload(drafts, systemValues, unmeasured));
                 }}
               >
                 이 값으로 확정

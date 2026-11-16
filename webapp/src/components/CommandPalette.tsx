@@ -135,7 +135,7 @@ export function CommandPalette({
               id: 'calendar',
               category: '일정',
               label: '일정 캘린더',
-              detail: '업무 마감일 월간·주간 일정 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
+              detail: '업무 마감일 월간 달력과 예정된 회의 목록 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
               hint: '새 탭',
               run: () =>
                 closeAnd(() => window.open(`/calendar.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
@@ -144,7 +144,7 @@ export function CommandPalette({
               id: 'chat',
               category: '채팅',
               label: '프로젝트 채팅',
-              detail: '실시간 팀 대화 및 AI 요약 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
+              detail: '채널별 실시간 팀 대화와 스레드·검색 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
               hint: '새 탭',
               run: () =>
                 closeAnd(() => window.open(`/chat.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
@@ -153,7 +153,7 @@ export function CommandPalette({
               id: 'reports',
               category: '보고서',
               label: '최종 기여도 보고서 (제출용)',
-              detail: '회의록·주간·최종 보고서 및 CSV 내보내기 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
+              detail: '회의록·주간·최종 보고서 조회 및 텍스트 복사 (CSV는 기여도 화면 · 새 탭)',
               hint: '새 탭',
               run: () =>
                 closeAnd(() => window.open(`/reports.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),

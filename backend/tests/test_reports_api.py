@@ -723,3 +723,50 @@ def test_every_line_that_ignores_the_window_says_so(
     final = facts(report_type="final")
     for label in ignores_window:
         assert not final[label][1], f"기간이 없는 문서에 기간 이름표를 답니다: {label}"
+
+
+def test_deleted_tasks_are_excluded_from_report_counts(
+    client: TestClient, seeded, db: Session
+):
+    """⭐ 칸반에서 삭제(`deleted_at`)된 업무는 보고서의 완료/남은 업무 집계에서도 제외된다."""
+    from datetime import datetime
+
+    project_id = seeded["project_id"]
+    now = datetime.now(UTC)
+    db.add_all(
+        [
+            m.Task(
+                project_id=project_id,
+                title="살아있는 완료 업무",
+                status="done",
+                completed_at=now,
+            ),
+            m.Task(
+                project_id=project_id,
+                title="삭제된 완료 업무",
+                status="done",
+                completed_at=now,
+                deleted_at=now,
+            ),
+            m.Task(project_id=project_id, title="살아있는 남은 업무", status="todo"),
+            m.Task(
+                project_id=project_id,
+                title="삭제된 남은 업무",
+                status="todo",
+                deleted_at=now,
+            ),
+        ]
+    )
+    db.commit()
+
+    for report_type in ("weekly", "final"):
+        res = client.post(
+            f"/api/projects/{project_id}/reports",
+            json={"report_type": report_type},
+        )
+        assert res.status_code == 201, res.text
+        content = res.json()["content"]
+        facts = next(b for b in content["blocks"] if b["kind"] == "facts")["items"]
+        values = {item["label"]: item["value"] for item in facts}
+        assert values["완료한 업무"] == "1건", f"{report_type}: {values}"
+        assert values["남은 업무"] == "1건", f"{report_type}: {values}"

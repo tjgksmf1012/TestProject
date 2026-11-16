@@ -2571,10 +2571,10 @@ def test_every_place_that_reads_tasks_goes_through_live():
         if path.name == "live.py":
             continue
         body = path.read_text(encoding="utf-8")
-        # `select(m.Task)` · `select(m.Task, ...)` · `select(m.Task.id)` 처럼
-        # **업무 표를 고르는** 질의만 봅니다. `m.TaskGithubLink` 같은 다른
-        # 표는 대상이 아닙니다 — `\b` 로 끊습니다.
-        if not re.search(r"select\(\s*m\.Task\b(?!\w)", body):
+        # `select(m.Task)` · `select(m.Task, ...)` · `select(m.Task.id)` 뿐만 아니라
+        # `select(func.count(m.Task.id))` 처럼 **업무 표를 직접 읽는** 질의도 잡는다
+        # (`report_service.py` 에서 집계 누락으로 지워진 업무가 살아난 결함 재발 방지).
+        if not re.search(r"select\(\s*(?:func\.\w+\(\s*)*m\.Task\b(?!\w)", body):
             continue
         if "from teamflow.db import live" in body or "db import live" in body:
             continue

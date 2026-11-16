@@ -277,8 +277,8 @@ function paintNav(context: NavContext): void {
     .join('');
 
   const returnToApp = context.projectId
-    ? `<a href="/app/project/${escapeHtml(String(context.projectId))}/kanban" class="nav-return" style="font-weight:600;color:var(--primary);margin-right:var(--sp-2);">← 보드로 복귀</a>`
-    : `<a href="/app/" class="nav-return" style="font-weight:600;color:var(--primary);margin-right:var(--sp-2);">← 앱으로 복귀</a>`;
+    ? `<a href="/app/?project=${escapeHtml(String(context.projectId))}" class="nav-return" style="font-weight:600;color:var(--primary);margin-right:var(--sp-2);">← 새 앱으로 복귀</a>`
+    : `<a href="/app/" class="nav-return" style="font-weight:600;color:var(--primary);margin-right:var(--sp-2);">← 새 앱으로 복귀</a>`;
 
   host.innerHTML = returnToApp + links + notes;
 }

@@ -9525,28 +9525,41 @@ describe('⛔ 확정 줄이 **안 잰 사람에게 `0.0%`** 라고 적지 않는
          const system = (systemValues.get(ms.user_id) ?? 0).toFixed(1);
 
      `?? 0` 이 「모른다」를 「0」으로 바꿉니다. */
-  const screen = (): string => codeOf(readFileSync(join(DEMO, 'contributions.tsx'), 'utf8'));
+  const ROOTS: Array<[string, string]> = [
+    ['레거시', join(DEMO, 'contributions.tsx')],
+    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Contributions.tsx')],
+  ];
+  const screen = (path: string): string => codeOf(readFileSync(path, 'utf8'));
 
-  it('⭐ 시스템 값 글자를 **화면이 직접 짓지 않는다** — 판단은 `@lib`', () => {
-    const code = screen();
-    ok(/systemLabel\(/.test(code), '`systemLabel` 을 안 부릅니다 — 판단이 화면으로 돌아왔습니다');
-    ok(
-      !/systemValues\.get\([^)]*\)\s*\?\?\s*0/.test(code),
-      '`systemValues.get(...) ?? 0` — 「모른다」를 0 으로 바꾸고 있습니다 (결함 307)',
-    );
+  it('⭐ 두 뿌리 다 시스템 값 글자를 **화면이 직접 짓지 않는다** — 판단은 `@lib`', () => {
+    for (const [name, path] of ROOTS) {
+      const code = screen(path);
+      ok(/systemLabel\(/.test(code), `${name}: \`systemLabel\` 을 안 부릅니다 — 판단이 화면으로 돌아왔습니다`);
+      ok(
+        !/systemValues\.get\([^)]*\)\s*\?\?\s*0/.test(code),
+        `${name}: \`systemValues.get(...) ?? 0\` — 「모른다」를 0 으로 바꾸고 있습니다 (결함 307)`,
+      );
+    }
   });
 
-  it('⭐ **안 잰 사람**을 가르는 물음을 실제로 던진다', () => {
-    const code = screen();
-    ok(
-      /nothingMeasured\(/.test(code),
-      '`nothingMeasured` 를 안 묻습니다 — 카드와 확정 줄이 갈라집니다',
-    );
-    // 값을 서버로 보낼 때도 같은 물음을 넘겨야 합니다 (팀이 적은 0 이 접히지 않게).
-    ok(
-      /toPayload\(drafts, systemValues, unmeasured\)/.test(code),
-      '`toPayload` 에 안 잰 사람 목록을 안 넘깁니다 — 팀이 적은 0 이 「안 건드렸다」로 접힙니다',
-    );
+  it('⭐ 두 뿌리 다 **안 잰 사람**과 반올림 비교 가드를 실제로 부른다', () => {
+    for (const [name, path] of ROOTS) {
+      const code = screen(path);
+      ok(
+        /nothingMeasured\(/.test(code),
+        `${name}: \`nothingMeasured\` 를 안 묻습니다 — 카드와 확정 줄이 갈라집니다`,
+      );
+      ok(
+        /problemsWith\([^)]*unmeasured/.test(code),
+        `${name}: \`problemsWith\` 에 안 잰 사람 목록을 안 넘깁니다`,
+      );
+      ok(
+        /toPayload\(drafts, systemValues, unmeasured\)/.test(code),
+        `${name}: \`toPayload\` 에 안 잰 사람 목록을 안 넘깁니다 — 팀이 적은 0 이 「안 건드렸다」로 접힙니다`,
+      );
+    }
+    const spa = screen(ROOTS[1]![1]);
+    ok(/needsReasonFor\(/.test(spa), 'SPA: 반올림 값 비교(`needsReasonFor`) 대신 raw `sameValue` 를 쓰고 있습니다');
   });
 });
 
