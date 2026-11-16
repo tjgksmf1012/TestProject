@@ -121,14 +121,14 @@ function render(): void {
              있었습니다 (결함 216). 통화에 있는 것과 녹음이 도는 것은 다른
              일이고, 아무것도 안 남는데 남는다고 말하고 있었습니다. */
           const capture = describeMyCapture(myTrack);
-          return `<li><span class="face me">${escapeHtml(mine.name.slice(0, 1))}</span>
+          return `<li><span class="face me" data-peer-face="${escapeHtml(String(me))}">${escapeHtml(mine.name.slice(0, 1))}</span>
            <span class="who"><span class="name">${escapeHtml(mine.name)} (나)</span>
            <span class="state ${capture.tone}">${escapeHtml(capture.label)}</span></span>
            ${mine.headphones ? '' : '<span class="badge">헤드폰 없음</span>'}</li>`;
         })()
       : '',
     ...views.map(
-      (p) => `<li><span class="face">${escapeHtml(p.name.slice(0, 1))}</span>
+      (p) => `<li><span class="face" data-peer-face="${escapeHtml(String(p.user_id))}">${escapeHtml(p.name.slice(0, 1))}</span>
         <span class="who"><span class="name">${escapeHtml(p.name)}</span>
         <span class="state ${p.tone}">${escapeHtml(p.label)}</span></span>
         ${p.headphones ? '' : '<span class="badge">헤드폰 없음</span>'}</li>`,
@@ -213,9 +213,37 @@ function meterFrom(stream: MediaStream): void {
     let peak = 0;
     for (const value of buffer) peak = Math.max(peak, Math.abs(value - 128));
     $('level').style.width = `${Math.min(100, (peak / 128) * 240)}%`;
+    const face = me > 0 ? document.querySelector(`[data-peer-face="${me}"]`) : null;
+    if (face) face.classList.toggle('speaking', !micMuted && peak > 10);
     requestAnimationFrame(tick);
   };
   tick();
+}
+
+const peerMeters = new Map<number, AudioContext>();
+
+function meterPeerFace(userId: number, stream: MediaStream): void {
+  void peerMeters.get(userId)?.close().catch(() => undefined);
+  try {
+    const context = new AudioContext();
+    peerMeters.set(userId, context);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    context.createMediaStreamSource(stream).connect(analyser);
+    const buffer = new Uint8Array(analyser.frequencyBinCount);
+    const tick = (): void => {
+      if (peerMeters.get(userId) !== context) return;
+      analyser.getByteTimeDomainData(buffer);
+      let peak = 0;
+      for (const value of buffer) peak = Math.max(peak, Math.abs(value - 128));
+      const face = document.querySelector(`[data-peer-face="${userId}"]`);
+      if (face) face.classList.toggle('speaking', peak > 10);
+      requestAnimationFrame(tick);
+    };
+    tick();
+  } catch {
+    // 합성 오디오 환경 등에서 AudioContext 제한 시 조용히 무시
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -254,10 +282,12 @@ function connectionFor(userId: number, initiate: boolean): RTCPeerConnection {
   };
   pc.ontrack = (event) => {
     // 소리는 화면에 안 보이는 <audio> 로 흘린다.
+    const stream = event.streams[0] ?? new MediaStream([event.track]);
     const audio = new Audio();
-    audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+    audio.srcObject = stream;
     audio.autoplay = true;
     void audio.play().catch(() => undefined);
+    meterPeerFace(userId, stream);
   };
 
   if (initiate) {
@@ -287,6 +317,8 @@ function applyRoster(next: Roster): void {
       peers.get(String(action.user_id))?.close();
       peers.delete(String(action.user_id));
       states.delete(action.user_id);
+      void peerMeters.get(action.user_id)?.close().catch(() => undefined);
+      peerMeters.delete(action.user_id);
     }
   }
   render();
@@ -356,6 +388,8 @@ $('mic-toggle').addEventListener('click', () => {
 $('leave').addEventListener('click', () => {
   socket?.close();
   for (const pc of peers.values()) pc.close();
+  for (const ctx of peerMeters.values()) void ctx.close().catch(() => undefined);
+  peerMeters.clear();
   for (const track of localStream?.getAudioTracks() ?? []) track.stop();
   location.href = `/app/meeting/${meetingId}/lobby`;
 });

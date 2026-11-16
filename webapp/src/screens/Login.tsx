@@ -177,7 +177,7 @@ export default function Login() {
             )}
           </p>
           <p className="t12 faint">비밀번호는 scrypt로 해싱해 저장합니다.</p>
-          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--c-border)', textAlign: 'center' }}>
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--c-line)', textAlign: 'center' }}>
             <Link to="/demo" style={{ fontSize: 'var(--fs-12)', color: 'var(--c-evidence)', textDecoration: 'none', fontWeight: 500 }}>
               음향 벡터 · 키워드 규칙 예시 체험관 둘러보기 →
             </Link>

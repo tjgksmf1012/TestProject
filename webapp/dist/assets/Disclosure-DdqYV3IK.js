@@ -1,0 +1,1 @@
+import{en as e}from"./index-_jpdQwsg.js";var t=e();function n({summary:e,children:n,defaultOpen:r}){return(0,t.jsxs)(`details`,{className:`disc`,open:r,children:[(0,t.jsx)(`summary`,{children:e}),(0,t.jsx)(`div`,{className:`disc__body`,children:n})]})}export{n as t};

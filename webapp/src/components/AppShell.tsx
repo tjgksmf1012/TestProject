@@ -3,8 +3,9 @@ import { MAIN_LANDMARK_ID, SKIP_HREF, SKIP_TEXT } from '@lib/nav/skip.ts';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useProjects, useUnreadNotifications } from '../api/hooks.ts';
 import { pageTitle } from '@lib/shell/title.ts';
-import { appScreenOf } from '@lib/nav/links.ts';
+import { appScreenOf, appSecondaryHref } from '@lib/nav/links.ts';
 import { appRailHref, railAriaLabel, railIsWorthIt, railItems } from '@lib/nav/rail.ts';
+import { badgeText } from '@lib/notifications/view.ts';
 import { describeLogoutFailure, logoutOutcome } from '@lib/auth/session.ts';
 import { api, ApiError } from '../api/client.ts';
 import { Problem } from './Problem.tsx';
@@ -275,8 +276,8 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
                 gap: '5px',
                 padding: '4px 10px',
                 borderRadius: 'var(--r-full)',
-                background: 'var(--c-surface-sunken)',
-                border: '1px solid var(--c-border)',
+                background: 'var(--c-sunken)',
+                border: '1px solid var(--c-line)',
                 color: 'var(--c-ink)',
                 fontSize: 'var(--fs-12)',
                 fontWeight: 'var(--fw-medium)',
@@ -341,6 +342,34 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
               </svg>
               <span>음성 회의</span>
             </button>
+
+            {pid !== undefined && (() => {
+              const bellBadge = badgeText(unreadCount);
+              const bellLabel = bellBadge !== null ? `알림 (미확인 ${bellBadge}건)` : '알림';
+              return (
+                <Link
+                  to={appSecondaryHref('notifications', pid)}
+                  className="tf-icon-pill tf-bell-btn"
+                  aria-label={bellLabel}
+                  title={bellLabel}
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    aria-hidden="true"
+                  >
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                  </svg>
+                  <span>알림</span>
+                  {bellBadge !== null && <span className="tf-bell-badge num">{bellBadge}</span>}
+                </Link>
+              );
+            })()}
 
             <button
               type="button"

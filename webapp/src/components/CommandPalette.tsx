@@ -2,6 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { appRailHref } from '@lib/nav/rail.ts';
+import { appSecondaryHref } from '@lib/nav/links.ts';
 import {
   blockedReason,
   canSearch,
@@ -126,10 +127,9 @@ export function CommandPalette({
               id: 'notifications',
               category: '알림',
               label: unreadCount > 0 ? `알림 함 (미확인 ${unreadCount}건)` : '알림 함',
-              detail: '미확인 멘션·검토 알림 목록 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
-              hint: '새 탭',
+              detail: '미확인 멘션·배정·마감 알림을 확인하고 읽음 처리합니다',
               run: () =>
-                closeAnd(() => window.open(`/notifications.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
+                closeAnd(() => navigate(appSecondaryHref('notifications', projectId))),
             },
             {
               id: 'calendar',
@@ -153,10 +153,9 @@ export function CommandPalette({
               id: 'reports',
               category: '보고서',
               label: '최종 기여도 보고서 (제출용)',
-              detail: '회의록·주간·최종 보고서 조회 및 텍스트 복사 (CSV는 기여도 화면 · 새 탭)',
-              hint: '새 탭',
+              detail: '회의록·주간·최종 보고서 조회, 마크다운(.md) 저장 및 인쇄/PDF 내보내기',
               run: () =>
-                closeAnd(() => window.open(`/reports.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
+                closeAnd(() => navigate(appSecondaryHref('reports', projectId))),
             },
             {
               id: 'full-search',

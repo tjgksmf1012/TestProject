@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import * as Dialog from '@radix-ui/react-dialog';
 import { AppShell } from '../components/AppShell.tsx';
 import { DiscordSelect } from '../components/SettingsModal.tsx';
+import { DatePicker } from '../components/DatePicker.tsx';
 import { Chain } from '../components/Chain.tsx';
 import { Why } from '../components/Why.tsx';
-import { useMembers, useTaskMutations, useTasks } from '../api/hooks.ts';
+import { useMe, useMembers, useTaskMutations, useTasks, useTimeline } from '../api/hooks.ts';
 import {
   isOverdue,
   moveDirection,
@@ -51,6 +52,12 @@ import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { withJosa } from '@lib/text/josa.ts';
 import { Problem } from '../components/Problem.tsx';
 import { meetingLabel } from '@lib/ui/naming.ts';
+import { timelineRows } from '@lib/review/timeline.ts';
+
+function githubPullHref(repo: string, number: number | null): string | null {
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)) return null;
+  return number !== null ? `https://github.com/${repo}/pull/${number}` : `https://github.com/${repo}`;
+}
 
 // 칸반 — 카드에서 버튼을 걷어내고 드래그 + ⋯ 메뉴 + 숫자 키로 (지시서 기타-6 §칸반).
 //
@@ -59,6 +66,7 @@ import { meetingLabel } from '@lib/ui/naming.ts';
 
 function Card({
   task,
+  allTasks,
   statuses,
   people,
   onMove,
@@ -69,6 +77,7 @@ function Card({
   onPreviewEvidence,
 }: {
   task: Task;
+  allTasks: readonly Task[];
   statuses: string[];
   people: Person[];
   onMove: (task: Task, to: string) => void;
@@ -195,11 +204,30 @@ function Card({
             {overdue && <span className="kcard__late">지남</span>}
           </span>
         )}
-        {(task.blocked_by ?? []).length > 0 && (
-          <span className="num" title={`선행 업무: ${(task.blocked_by ?? []).map((id) => `#${id}`).join(', ')}`}>
-            선행 {(task.blocked_by ?? []).length}건
-          </span>
-        )}
+        {(task.blocked_by ?? []).length > 0 && (() => {
+          const blockers = (task.blocked_by ?? []).map((id) => ({
+            id,
+            ref: allTasks.find((t) => t.id === id),
+          }));
+          const waiting = blockers.filter((b) => b.ref?.status !== 'done');
+          const detailText = blockers
+            .map((b) =>
+              b.ref
+                ? `${b.ref.marker} ${b.ref.title} (${describeStatus(b.ref.status)})`
+                : `TASK-${b.id}`,
+            )
+            .join(' · ');
+          return (
+            <span
+              className={`kcard__prereq${waiting.length > 0 ? ' kcard__prereq--waiting' : ' kcard__prereq--clear'}`}
+              title={detailText}
+            >
+              {waiting.length > 0
+                ? `대기 선행 ${waiting.map((b) => b.ref?.marker ?? `TASK-${b.id}`).join(', ')}`
+                : `선행 완료 (${blockers.length}건)`}
+            </span>
+          );
+        })()}
       </div>
       <div className="kcard__foot">
         <Chain
@@ -237,26 +265,48 @@ function Card({
             🔍 미리보기
           </button>
         )}
-        {(task.github ?? []).length > 0 && (
-          <Why
-            about={`${task.title}에 붙은 PR`}
-            countsAs="건"
-            lines={sortLinks(task.github).map(
-              (link) =>
-                `${link.confirmed ? '확정' : '추정'} · ${describePull(link)}` +
-                (link.why ? ` — ${link.why}` : ''),
-            )}
-          />
-        )}
+        {(task.github ?? []).length > 0 && (() => {
+          const sortedPulls = sortLinks(task.github);
+          const first = sortedPulls[0];
+          const firstHref = first ? githubPullHref(first.repo, first.number) : null;
+          return (
+            <>
+              {first && firstHref && (
+                <a
+                  href={firstHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="kcard__pr-link num"
+                  title={`${describePull(first)} — GitHub에서 PR 열기`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  ↗ {first.number !== null ? `#${first.number}` : first.repo}
+                </a>
+              )}
+              <Why
+                about={`${task.title}에 붙은 PR`}
+                countsAs="건"
+                lines={sortedPulls.map(
+                  (link) =>
+                    `${link.confirmed ? '확정' : '추정'} · ${describePull(link)}` +
+                    (link.why ? ` — ${link.why}` : ''),
+                )}
+              />
+            </>
+          );
+        })()}
       </div>
     </article>
   );
 }
 
+type QuickFilter = 'all' | 'mine' | 'meeting' | 'manual' | 'overdue';
+
 export default function Kanban() {
   const params = useParams();
   const projectId = Number(params['projectId']);
   const board = useTasks(projectId);
+  const { data: me } = useMe();
   /* 못 불러왔으면 **무슨 일이 있었는지** 말합니다. 문구는 한 벌
      (`describeLoadFailure`)에서 옵니다 — 화면마다 지으면 갈라집니다. */
   const cannotLoad =
@@ -267,10 +317,12 @@ export default function Kanban() {
   const { createTask, patchTask, setAssignees, deleteTask } = useTaskMutations(projectId);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [selectedAssignee, setSelectedAssignee] = useState<number | null>(null);
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
 
   // 새 업무 만들기 모달
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [newStatus, setNewStatus] = useState('todo');
   const [newPriority, setNewPriority] = useState(1);
   const [newStartDate, setNewStartDate] = useState('');
   const [newDeadline, setNewDeadline] = useState('');
@@ -280,12 +332,14 @@ export default function Kanban() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [previewEvidenceTask, setPreviewEvidenceTask] = useState<Task | null>(null);
+  const previewTimeline = useTimeline(previewEvidenceTask?.origin?.meeting_id);
   const [editStartDate, setEditStartDate] = useState('');
   const [editDeadline, setEditDeadline] = useState('');
   const [editBlockedBy, setEditBlockedBy] = useState<number[]>([]);
 
   const statuses = board.data?.statuses ?? [];
   const tasks = board.data?.tasks ?? [];
+  const today = todayInTeamCalendar();
   // ⚠️ **아직 못 받은 것과 정말 0 인 것은 다릅니다.** 위의 `?? []` 때문에
   //    불러오는 중에도 못 받았을 때도 빈 배열이 되고, 그대로 세면 머리말이
   //    `회의에서 0 · PR 연결 0 · 지연 0` 이라고 **단언**합니다 — 바로 아래
@@ -304,11 +358,30 @@ export default function Kanban() {
     ...currentPeople,
     ...formerPeople.filter((f) => !currentPeople.some((c) => c.user_id === f.user_id)),
   ];
-  const filteredTasks = selectedAssignee !== null
-    ? tasks.filter((t) => t.assignee_ids.includes(selectedAssignee))
-    : tasks;
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      if (selectedAssignee !== null && !t.assignee_ids.includes(selectedAssignee)) return false;
+      if (quickFilter === 'mine') return me != null && t.assignee_ids.includes(me.user_id);
+      if (quickFilter === 'meeting') return t.origin !== null;
+      if (quickFilter === 'manual') return t.origin === null;
+      if (quickFilter === 'overdue') return isOverdue(t, today);
+      return true;
+    });
+  }, [tasks, selectedAssignee, quickFilter, me, today]);
   const columns = toColumns(filteredTasks, statuses);
-  const s = summarize(tasks, todayInTeamCalendar());
+  const s = summarize(tasks, today);
+  const openCreateModal = (defaultStatus = 'todo') => {
+    setNewStatus(statuses.includes(defaultStatus) ? defaultStatus : (statuses[0] ?? 'todo'));
+    setShowCreateModal(true);
+  };
+  const createDateProblem =
+    newStartDate !== '' && newDeadline !== '' && newStartDate > newDeadline
+      ? '마감일은 시작일 이후여야 합니다'
+      : null;
+  const editDateProblem =
+    editStartDate !== '' && editDeadline !== '' && editStartDate > editDeadline
+      ? '마감일은 시작일 이후여야 합니다'
+      : null;
 
   /* 어느 일이 실패했는지에 따라 **할 말이 다릅니다** — 담당자를 못 바꾼
      것과 업무를 못 지운 것은 다른 사실입니다. 판단·문구는 `@lib`. */
@@ -363,10 +436,11 @@ export default function Kanban() {
 
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim()) return;
+    if (!newTitle.trim() || createDateProblem !== null) return;
     createTask.mutate(
       {
         title: newTitle.trim(),
+        status: newStatus,
         priority: newPriority,
         start_date: newStartDate ? newStartDate : null,
         deadline: newDeadline ? newDeadline : null,
@@ -376,6 +450,7 @@ export default function Kanban() {
         onSuccess: () => {
           setShowCreateModal(false);
           setNewTitle('');
+          setNewStatus('todo');
           setNewPriority(1);
           setNewStartDate('');
           setNewDeadline('');
@@ -387,7 +462,7 @@ export default function Kanban() {
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingTask || !editTitle.trim()) return;
+    if (!editingTask || !editTitle.trim() || editDateProblem !== null) return;
     patchTask.mutate(
       {
         taskId: editingTask.id,
@@ -430,7 +505,7 @@ export default function Kanban() {
           <button
             type="button"
             className="btn btn--primary btn--sm"
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => openCreateModal('todo')}
           >
             + 새 업무
           </button>
@@ -458,6 +533,33 @@ export default function Kanban() {
         </span>
       }
     >
+      {cannotLoad === null && tasks.length > 0 && (
+        <div className="kboard-filters" role="group" aria-label="빠른 업무 필터">
+          {[
+            { id: 'all' as const, label: `전체 (${countText(known ? tasks.length : null)})` },
+            {
+              id: 'mine' as const,
+              label: `내 업무만 (${countText(known && me != null ? tasks.filter((t) => t.assignee_ids.includes(me.user_id)).length : null)})`,
+            },
+            { id: 'meeting' as const, label: `회의 출처 (${countText(known ? s.fromMeetings : null)})` },
+            {
+              id: 'manual' as const,
+              label: `${MANUAL_TASK_BADGE} (${countText(known ? tasks.length - s.fromMeetings : null)})`,
+            },
+            { id: 'overdue' as const, label: `지연됨 (${countText(known ? s.overdue : null)})` },
+          ].map((chip) => (
+            <button
+              key={chip.id}
+              type="button"
+              className={`kboard-filter-chip${quickFilter === chip.id ? ' is-active' : ''}`}
+              aria-pressed={quickFilter === chip.id}
+              onClick={() => setQuickFilter(chip.id)}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      )}
       {cannotLoad === null && tasks.length > 0 && (
         <div className="mobile-col-pills" role="tablist" aria-label="칸반 열 선택">
           {columns.map((c) => (
@@ -500,6 +602,24 @@ export default function Kanban() {
         )}
         {cannotLoad === null &&
           tasks.length > 0 &&
+          filteredTasks.length === 0 && (
+            <div className="empty" style={{ alignSelf: 'flex-start', flex: 1 }}>
+              선택한 조건에 해당하는 업무가 없습니다.{' '}
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => {
+                  setQuickFilter('all');
+                  setSelectedAssignee(null);
+                }}
+              >
+                필터 초기화
+              </button>
+            </div>
+          )}
+        {cannotLoad === null &&
+          tasks.length > 0 &&
+          filteredTasks.length > 0 &&
           columns.map((column) => (
             <section
               key={column.status}
@@ -531,7 +651,7 @@ export default function Kanban() {
                 <button
                   type="button"
                   className="col__add-btn"
-                  onClick={() => setShowCreateModal(true)}
+                  onClick={() => openCreateModal(column.status)}
                   title={`${column.label}에 새 업무 추가`}
                   aria-label={`${column.label}에 새 업무 추가`}
                 >
@@ -548,6 +668,7 @@ export default function Kanban() {
                     <Card
                       key={task.id}
                       task={task}
+                      allTasks={tasks}
                       statuses={statuses}
                       people={people}
                       onMove={move}
@@ -610,19 +731,33 @@ export default function Kanban() {
                   placeholder="할 일을 입력하세요"
                 />
               </label>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
-                <span>우선순위</span>
-                <DiscordSelect
-                  compact
-                  ariaLabel="우선순위"
-                  value={String(newPriority)}
-                  onChange={(val) => setNewPriority(Number(val))}
-                  options={[
-                    { value: '0', label: '긴급' },
-                    { value: '1', label: '보통' },
-                    { value: '2', label: '낮음' },
-                  ]}
-                />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
+                  <span>생성 열 (상태)</span>
+                  <DiscordSelect
+                    compact
+                    ariaLabel="생성 열 상태"
+                    value={newStatus}
+                    onChange={setNewStatus}
+                    options={(statuses.length > 0 ? statuses : ['todo', 'in_progress', 'review', 'done']).map(
+                      (st) => ({ value: st, label: describeStatus(st) }),
+                    )}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
+                  <span>우선순위</span>
+                  <DiscordSelect
+                    compact
+                    ariaLabel="우선순위"
+                    value={String(newPriority)}
+                    onChange={(val) => setNewPriority(Number(val))}
+                    options={[
+                      { value: '0', label: '긴급' },
+                      { value: '1', label: '보통' },
+                      { value: '2', label: '낮음' },
+                    ]}
+                  />
+                </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
                 <span>담당자 (복수 선택 가능)</span>
@@ -655,40 +790,27 @@ export default function Kanban() {
                   })}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1, minWidth: '140px' }}>
                   <span>시작일</span>
-                  <input
-                    type="date"
-                    className="input"
-                    style={{
-                      padding: '6px 8px',
-                      border: '1px solid var(--c-line)',
-                      borderRadius: 'var(--r-sm)',
-                      background: 'var(--c-surface)',
-                      color: 'var(--c-ink)',
-                    }}
-                    value={newStartDate}
-                    onChange={(e) => setNewStartDate(e.target.value)}
+                  <DatePicker
+                    id="create-start-date"
+                    ariaLabel="업무 시작일"
+                    value={newStartDate || null}
+                    onChange={(v) => setNewStartDate(v ?? '')}
                   />
-                </label>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1, minWidth: '140px' }}>
                   <span>마감일</span>
-                  <input
-                    type="date"
-                    className="input"
-                    style={{
-                      padding: '6px 8px',
-                      border: '1px solid var(--c-line)',
-                      borderRadius: 'var(--r-sm)',
-                      background: 'var(--c-surface)',
-                      color: 'var(--c-ink)',
-                    }}
-                    value={newDeadline}
-                    onChange={(e) => setNewDeadline(e.target.value)}
+                  <DatePicker
+                    id="create-deadline"
+                    ariaLabel="업무 마감일"
+                    value={newDeadline || null}
+                    onChange={(v) => setNewDeadline(v ?? '')}
                   />
-                </label>
+                </div>
               </div>
+              <Problem id="create-date-problem" tone="incomplete">{createDateProblem}</Problem>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                 <Dialog.Close asChild>
                   <button
@@ -700,8 +822,19 @@ export default function Kanban() {
                 </Dialog.Close>
                 <button
                   type="submit"
-                  className="btn btn--primary btn--sm"
-                  disabled={createTask.isPending}
+                  className={`btn btn--primary btn--sm${createDateProblem !== null ? ' btn--unmet' : ''}`}
+                  aria-disabled={createTask.isPending || createDateProblem !== null}
+                  aria-describedby={createDateProblem !== null ? 'create-date-problem' : undefined}
+                  onClick={(e) => {
+                    if (createTask.isPending) {
+                      e.preventDefault();
+                      return;
+                    }
+                    if (createDateProblem !== null) {
+                      e.preventDefault();
+                      document.getElementById('create-deadline')?.focus();
+                    }
+                  }}
                 >
                   {createTask.isPending ? '생성 중…' : '만들기'}
                 </button>
@@ -719,10 +852,18 @@ export default function Kanban() {
             <Dialog.Title className="sec__title" style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: 600 }}>
               📌 회의 근거 및 맥락 미리보기
             </Dialog.Title>
-            {previewEvidenceTask && previewEvidenceTask.origin && (
+            {previewEvidenceTask && previewEvidenceTask.origin && (() => {
+              const targetIds = new Set(previewEvidenceTask.origin.evidence_utterance_ids);
+              const evidenceRows = previewTimeline.data
+                ? timelineRows(previewTimeline.data.utterances, []).filter(
+                    (r): r is Extract<ReturnType<typeof timelineRows>[number], { kind: 'utterance' }> =>
+                      r.kind === 'utterance' && targetIds.has(r.view.id),
+                  )
+                : [];
+              return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                <div style={{ background: 'var(--c-surface-sunken)', padding: '12px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
-                  <span className="t12 faint">업무명</span>
+                <div style={{ background: 'var(--c-sunken)', padding: '12px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-line)' }}>
+                  <span className="t12 faint">업무명 ({previewEvidenceTask.marker})</span>
                   <p style={{ margin: '4px 0 0 0', fontWeight: 600, fontSize: '14px' }}>
                     {previewEvidenceTask.title}
                   </p>
@@ -737,18 +878,42 @@ export default function Kanban() {
                     {meetingLabel(previewEvidenceTask.origin.meeting_title, previewEvidenceTask.origin.meeting_id)}
                   </strong>
                   <span className="t12 muted">
-                    연계 발화 번호: {previewEvidenceTask.origin.evidence_utterance_ids.map((id) => `#${id}`).join(', ')} ({previewEvidenceTask.origin.evidence_utterance_ids.length}건 근거)
+                    근거 발화 {previewEvidenceTask.origin.evidence_utterance_ids.length}건
+                    {' · '}
+                    {previewEvidenceTask.origin.evidence_utterance_ids.map((id) => `#${id}`).join(', ')}
                   </span>
                 </div>
 
-                <div style={{ background: 'var(--c-surface)', padding: '12px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
+                <div style={{ background: 'var(--c-surface)', padding: '12px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-line)', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
                   <span className="t12" style={{ color: 'var(--c-evidence)', fontWeight: 600 }}>
-                    💡 근거 사슬(Provenance Chain) 안내
+                    근거 발화 원문
                   </span>
-                  <p className="t12 muted" style={{ margin: '6px 0 0 0', lineHeight: 1.5 }}>
-                    이 업무는 회의 대화록에서 도출되어 검토자가 승인한 정식 태스크입니다.
-                    수정이나 상태 이동은 보드에서 즉시 가능하며, 기여도 산출 시 증빙 데이터로 보호됩니다.
-                  </p>
+                  {previewTimeline.isPending && (
+                    <p className="t12 muted" style={{ margin: 0 }}>발화 내용을 불러오는 중입니다…</p>
+                  )}
+                  {previewTimeline.isError && (
+                    <Problem>
+                      {describeLoadFailure(
+                        '발화 원문',
+                        previewTimeline.error instanceof ApiError ? previewTimeline.error.status : null,
+                      )}
+                    </Problem>
+                  )}
+                  {previewTimeline.isSuccess && evidenceRows.length === 0 && (
+                    <p className="t12 muted" style={{ margin: 0 }}>
+                      연결된 발화 원문을 찾지 못했습니다 — 아래 링크에서 전체 회의록을 확인하세요.
+                    </p>
+                  )}
+                  {evidenceRows.map((row) => (
+                    <div key={row.view.id} className="tf-preview-utterance">
+                      <div className="tf-preview-utterance__head">
+                        <span className="num">{row.view.at}</span>
+                        <strong>{row.view.speaker ?? '미확인 화자'}</strong>
+                        <span className="t12 faint num">#{row.view.id}</span>
+                      </div>
+                      <p className="t13" style={{ margin: '4px 0 0 0', lineHeight: 1.5 }}>{row.view.text}</p>
+                    </div>
+                  ))}
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
@@ -766,7 +931,8 @@ export default function Kanban() {
                   </Dialog.Close>
                 </div>
               </div>
-            )}
+              );
+            })()}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -796,40 +962,27 @@ export default function Kanban() {
                   onChange={(e) => setEditTitle(e.target.value)}
                 />
               </label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1, minWidth: '140px' }}>
                   <span>시작일</span>
-                  <input
-                    type="date"
-                    className="input"
-                    style={{
-                      padding: '6px 8px',
-                      border: '1px solid var(--c-line)',
-                      borderRadius: 'var(--r-sm)',
-                      background: 'var(--c-surface)',
-                      color: 'var(--c-ink)',
-                    }}
-                    value={editStartDate}
-                    onChange={(e) => setEditStartDate(e.target.value)}
+                  <DatePicker
+                    id="edit-start-date"
+                    ariaLabel="업무 시작일"
+                    value={editStartDate || null}
+                    onChange={(v) => setEditStartDate(v ?? '')}
                   />
-                </label>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1, minWidth: '140px' }}>
                   <span>마감일</span>
-                  <input
-                    type="date"
-                    className="input"
-                    style={{
-                      padding: '6px 8px',
-                      border: '1px solid var(--c-line)',
-                      borderRadius: 'var(--r-sm)',
-                      background: 'var(--c-surface)',
-                      color: 'var(--c-ink)',
-                    }}
-                    value={editDeadline}
-                    onChange={(e) => setEditDeadline(e.target.value)}
+                  <DatePicker
+                    id="edit-deadline"
+                    ariaLabel="업무 마감일"
+                    value={editDeadline || null}
+                    onChange={(v) => setEditDeadline(v ?? '')}
                   />
-                </label>
+                </div>
               </div>
+              <Problem id="edit-date-problem" tone="incomplete">{editDateProblem}</Problem>
               {tasks.filter((t) => t.id !== editingTask?.id).length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
                   <span>선행 업무 (이 업무보다 먼저 끝나야 하는 일)</span>
@@ -861,7 +1014,7 @@ export default function Kanban() {
                               onChange={() => setEditBlockedBy((prev) => toggled(prev, t.id))}
                             />
                             <span>
-                              #{t.id} {t.title}
+                              <span className="num">{t.marker}</span> {t.title} · <span className="t12 muted">{describeStatus(t.status)}</span>
                             </span>
                           </label>
                         );
@@ -880,8 +1033,19 @@ export default function Kanban() {
                 </Dialog.Close>
                 <button
                   type="submit"
-                  className="btn btn--primary btn--sm"
-                  disabled={patchTask.isPending}
+                  className={`btn btn--primary btn--sm${editDateProblem !== null ? ' btn--unmet' : ''}`}
+                  aria-disabled={patchTask.isPending || editDateProblem !== null}
+                  aria-describedby={editDateProblem !== null ? 'edit-date-problem' : undefined}
+                  onClick={(e) => {
+                    if (patchTask.isPending) {
+                      e.preventDefault();
+                      return;
+                    }
+                    if (editDateProblem !== null) {
+                      e.preventDefault();
+                      document.getElementById('edit-deadline')?.focus();
+                    }
+                  }}
                 >
                   {patchTask.isPending ? '저장 중…' : '저장'}
                 </button>

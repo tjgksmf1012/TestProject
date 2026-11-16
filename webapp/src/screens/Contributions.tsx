@@ -494,9 +494,9 @@ export default function Contributions() {
               })}
               </div>
               {members.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 8px', flexWrap: 'wrap' }}>
                   <span className="t12" style={{ whiteSpace: 'nowrap' }}>
-                    현재 합계: <strong className="num" style={{ color: allFilled && !sumOff ? 'var(--c-ok)' : 'var(--c-ink)' }}>{effectiveSum.toFixed(1)}%</strong> / 100%
+                    현재 합계: <strong className="num" style={{ fontWeight: 500, color: allFilled && !sumOff ? 'var(--c-ok)' : 'var(--c-ink)' }}>{effectiveSum.toFixed(1)}%</strong> / 100%
                   </span>
                   {allFilled ? (
                     !sumOff ? (
@@ -508,6 +508,26 @@ export default function Contributions() {
                     )
                   ) : (
                     unfilled > 0 && <span className="t12 faint num" style={{ fontSize: '11px' }}>({unfilled}명 미입력)</span>
+                  )}
+                  {members.some((m) => !nothingMeasured(m)) && (
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      style={{ fontSize: '11px', padding: '2px 8px', minHeight: '28px' }}
+                      title="각 팀원 칸에 시스템 참고값을 참고용으로 채워 넣습니다 (저장은 직접 확정 버튼을 눌러야 합니다)"
+                      onClick={() => {
+                        const next: Record<number, string> = {};
+                        for (const m of members) {
+                          const sys = systemValues.get(m.user_id);
+                          if (!nothingMeasured(m) && sys !== undefined) {
+                            next[m.user_id] = sys.toFixed(1);
+                          }
+                        }
+                        setValues((prev) => ({ ...prev, ...next }));
+                      }}
+                    >
+                      시스템 참고값 채우기
+                    </button>
                   )}
                 </div>
               )}

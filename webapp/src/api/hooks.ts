@@ -16,6 +16,8 @@ import type { Task } from '@lib/kanban/board.ts';
 import type { RosterEntry } from '@lib/lobby/room.ts';
 import type { Analytics } from '@lib/analytics/view.ts';
 import { canSearch, type Hit } from '@lib/search/view.ts';
+import type { Notice } from '@lib/notifications/view.ts';
+import type { ReportContent, ReportSummary } from '@lib/reports/view.ts';
 
 /** 서버 `TaskBoardOut` 과 같은 모양. */
 export interface TaskBoard {
@@ -692,6 +694,63 @@ export function useProjectSearch(projectId: number | undefined, query: string) {
     },
     enabled,
     staleTime: 15_000,
+  });
+}
+
+export function useNotifications(projectId: number | undefined) {
+  return useQuery({
+    queryKey: ['projects', projectId, 'notifications', 'list'],
+    queryFn: () => api.get<Notice[]>(`/api/projects/${projectId}/notifications`),
+    enabled: projectId !== undefined,
+  });
+}
+
+export function useMarkNotificationsRead(projectId: number | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { notification_ids: number[]; all_unread: boolean }) =>
+      api.post<{ marked: number }>(`/api/projects/${projectId}/notifications/read`, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'notifications'] });
+    },
+  });
+}
+
+export interface ReportDetail {
+  id: number;
+  report_type: string;
+  meeting_id: number | null;
+  period_start: string | null;
+  period_end: string | null;
+  generated_at: string;
+  content: ReportContent;
+}
+
+export function useReports(projectId: number | undefined) {
+  return useQuery({
+    queryKey: ['projects', projectId, 'reports'],
+    queryFn: () => api.get<ReportSummary[]>(`/api/projects/${projectId}/reports`),
+    enabled: projectId !== undefined,
+  });
+}
+
+export function useReportDetail(reportId: number | null | undefined) {
+  return useQuery({
+    queryKey: ['reports', reportId],
+    queryFn: () => api.get<ReportDetail>(`/api/reports/${reportId}`),
+    enabled: reportId !== null && reportId !== undefined,
+  });
+}
+
+export function useGenerateReport(projectId: number | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (report_type: 'weekly' | 'final') =>
+      api.post<ReportDetail>(`/api/projects/${projectId}/reports`, { report_type }),
+    onSuccess: (created) => {
+      queryClient.setQueryData(['reports', created.id], created);
+      void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'reports'] });
+    },
   });
 }
 

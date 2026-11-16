@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   appScreenOf,
+  appSecondaryHref,
   contextFromSearch,
   labelOf,
   missingLinks,
@@ -275,6 +276,10 @@ describe('appScreenOf — SPA 주소가 어느 화면인가 (베타 QA)', () => 
     strictEqual(appScreenOf('/project/7/kanban'), 'kanban');
     strictEqual(appScreenOf('/project/7/contributions'), 'contributions');
     strictEqual(appScreenOf('/project/7/settings/role'), 'project');
+    strictEqual(appScreenOf('/project/7/notifications'), 'notifications');
+    strictEqual(appScreenOf('/app/project/7/reports'), 'reports');
+    strictEqual(appSecondaryHref('notifications', 7), '/project/7/notifications');
+    strictEqual(appSecondaryHref('reports', 7), '/project/7/reports');
   });
 
   it('⭐ 회의 화면 둘', () => {

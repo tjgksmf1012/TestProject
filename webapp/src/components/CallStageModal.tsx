@@ -130,6 +130,24 @@ function MeetingRoom({
         ? { text: `녹음 완료 · 청크 ${myTrack.chunk_count}개`, tone: 'dc-badge dc-badge--ok', recording: false }
         : { text: '녹음 전 · 녹음 탭에서 시작', tone: 'dc-badge', recording: false };
 
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const recStartedMs = myTrack?.started_at ? Date.parse(myTrack.started_at) : NaN;
+  useEffect(() => {
+    if (!trackBadge.recording) {
+      setElapsedSec(0);
+      return;
+    }
+    const baseMs = Number.isFinite(recStartedMs) ? recStartedMs : Date.now();
+    const update = () => {
+      setElapsedSec(Math.max(0, Math.floor((Date.now() - baseMs) / 1000)));
+    };
+    update();
+    const id = window.setInterval(update, 1000);
+    return () => window.clearInterval(id);
+  }, [trackBadge.recording, recStartedMs]);
+
+  const elapsedClock = `${String(Math.floor(elapsedSec / 60)).padStart(2, '0')}:${String(elapsedSec % 60).padStart(2, '0')}`;
+
   return (
     <>
       {state.minimized && (
@@ -143,7 +161,15 @@ function MeetingRoom({
               <div className={`dc-avatar dc-avatar--sm ${trackBadge.recording ? 'dc-avatar--speaking' : ''}`}>
                 {(userName || '나').slice(0, 1)}
               </div>
-              <span className="dc-pip__sub">통화와 녹음 화면이 열려 있습니다</span>
+              <span className="dc-pip__sub">
+                {trackBadge.recording ? (
+                  <>
+                    개별 트랙 녹음 중 · <span className="num">{elapsedClock}</span>
+                  </>
+                ) : (
+                  trackBadge.text
+                )}
+              </span>
             </div>
             <div className="dc-pip__actions">
               <button

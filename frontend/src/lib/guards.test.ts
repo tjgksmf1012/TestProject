@@ -5827,6 +5827,8 @@ describe('사람 목록은 이름표를 @lib 에서 받는다 (결함 345)', () 
       '보고서의 `Person` 은 서버가 만든 **기록**입니다. `reports.body` 에 저장된 ' +
       '글자를 그대로 그리므로 이름표는 서버가 붙입니다 — 화면에서 붙이면 저장된 ' +
       '기록과 사람이 읽는 글이 갈라집니다. 파이썬 쪽은 `people/labels.py`.',
+    'Reports.tsx':
+      'SPA 보고서도 같은 서버 `report_service.py` 기록(`reports.body`)을 그대로 그립니다.',
   };
 
   /** 목록을 돌며 사람 이름을 **그대로** 그리는 자리. */
@@ -5872,7 +5874,7 @@ describe('사람 목록은 이름표를 @lib 에서 받는다 (결함 345)', () 
       'reports.tsx 를 예외로 뒀는데 서버(report_service.py)가 이름표를 안 붙입니다',
     );
     ok(
-      Object.keys(EXEMPT).length === 1,
+      Object.keys(EXEMPT).length === 2,
       '예외가 늘었습니다 — 하나씩 근거를 확인하고 이 검사도 넓히세요',
     );
   });
@@ -11699,5 +11701,40 @@ describe('결함 442·443 — 화면이 적은 것과 화면에 나오는 것', 
           `${highest} 입니다 — 그 위에 서야 합니다.`,
       );
     }
+  });
+});
+
+describe('결함 예방 ㉔ — SPA(`webapp/src`)가 쓰는 `var(--x)` 가 전부 정의돼 있다', () => {
+  it('⭐ `webapp/src` 의 CSS·TS·TSX 가 정의되지 않은 CSS 변수를 쓰지 않는다', () => {
+    const spaDir = join(ROOT, '..', 'webapp', 'src');
+    const appCss = readFileSync(join(spaDir, 'app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const defined = new Set(
+      [...appCss.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1] as string),
+    );
+    const missing: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!/\.(css|tsx?)$/.test(entry.name)) continue;
+        const raw = readFileSync(full, 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/\/\/[^\n]*/g, '');
+        for (const [, name] of raw.matchAll(/var\((--[a-z0-9-]+)/g)) {
+          if (!defined.has(name as string)) {
+            missing.push(`${entry.name} → ${name}`);
+          }
+        }
+      }
+    };
+    walk(spaDir);
+    strictEqual(
+      [...new Set(missing)].join(', '),
+      '',
+      'webapp/src 에서 app.css 에 정의되지 않은 CSS 변수를 씁니다 (선언이 조용히 무시됩니다)',
+    );
   });
 });

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { DiscordSelect } from '../components/SettingsModal.tsx';
+import { DatePicker } from '../components/DatePicker.tsx';
 import { Disclosure } from '../components/Disclosure.tsx';
 import {
   useGithubHealth,
@@ -89,6 +90,7 @@ function mutationError(e: unknown): string {
 // ── 내 설정 > 역할과 가중치 ─────────────────────────────────────
 function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnType<typeof useSettingsMutations>['saveRole'] }) {
   const [edited, setEdited] = useState<Record<string, string> | null>(null);
+  const [saved, setSaved] = useState(false);
   const current: Record<string, string> =
     edited ??
     Object.fromEntries(
@@ -114,7 +116,10 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
             id={option.key === ROLE_OPTIONS[0]?.key ? 'role-first' : undefined}
             aria-label={`${option.label} 비중`}
             value={current[option.key] ?? '0'}
-            onChange={(e) => setEdited({ ...current, [option.key]: e.target.value })}
+            onChange={(e) => {
+              setSaved(false);
+              setEdited({ ...current, [option.key]: e.target.value });
+            }}
           />
           <span className="rolerow__hint">{option.hint}</span>
         </div>
@@ -140,13 +145,18 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
               document.getElementById('role-first')?.focus();
               return;
             }
-            save.mutate(toPayload(shares), { onSuccess: () => setEdited(null) });
+            save.mutate(toPayload(shares), {
+              onSuccess: () => {
+                setEdited(null);
+                setSaved(true);
+              },
+            });
           }}
         >
           저장
         </button>
         <Problem id="role-problem" tone="incomplete" inline>{roleBlocked}</Problem>
-        {save.isSuccess && edited === null && <span className="status-ok" role="status">저장됐습니다</span>}
+        {saved && edited === null && <span className="status-ok" role="status">저장됐습니다</span>}
         <Problem inline>{save.isError ? mutationError(save.error) : null}</Problem>
       </div>
       <Disclosure summary="왜 나만 바꿀 수 있나요">
@@ -159,8 +169,11 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
 // ── 내 설정 > GitHub 계정 ───────────────────────────────────────
 function GithubSection({ mine, save }: { mine: Member | undefined; save: ReturnType<typeof useSettingsMutations>['saveGithubLogin'] }) {
   const [value, setValue] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const login = value ?? mine?.github_login ?? '';
-  const ghBlocked = whyCannotSave({ dirty: value !== null, saving: save.isPending });
+  const dirty = value !== null;
+  const ghBlocked = whyCannotSave({ dirty, saving: save.isPending });
+  const justSaved = saved && !dirty;
   return (
     <div className="sec">
       <h2 className="sec__title">GitHub 계정</h2>
@@ -172,7 +185,10 @@ function GithubSection({ mine, save }: { mine: Member | undefined; save: ReturnT
           placeholder="github-id"
           aria-label="GitHub 아이디"
           value={login}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setSaved(false);
+            setValue(e.target.value);
+          }}
         />
         {/* 결함 234 — `disabled` 는 초점을 못 받습니다. */}
         <button
@@ -186,13 +202,19 @@ function GithubSection({ mine, save }: { mine: Member | undefined; save: ReturnT
               document.getElementById('gh-input')?.focus();
               return;
             }
-            save.mutate(login.trim(), { onSuccess: () => setValue(null) });
+            save.mutate(login.trim(), {
+              onSuccess: () => {
+                setValue(null);
+                setSaved(true);
+              },
+            });
           }}
         >
           저장
         </button>
+        {justSaved && <span className="status-ok" role="status">저장됐습니다</span>}
       </div>
-      <Problem id="gh-problem" tone="incomplete">{ghBlocked}</Problem>
+      <Problem id="gh-problem" tone="incomplete">{justSaved && ghBlocked === '바꾼 것이 없습니다' ? null : ghBlocked}</Problem>
       <p className={mine?.github_login ? 'status-ok' : 'micro muted'} style={{ marginTop: 'var(--sp-3)' }}>
         {githubLoginStatus(mine?.github_login ?? null)}
       </p>
@@ -213,6 +235,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const nameValue = name ?? me?.name ?? '';
   const bioValue = bio ?? me?.bio ?? '';
   // 빈 글은 「지움」입니다 — 판단은 `@lib` (결함 265).
@@ -280,6 +303,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
               className="btn btn--danger-quiet btn--sm"
               onClick={() => {
                 setPhotoError(null);
+                setSaved(false);
                 setAvatar('');
               }}
             >
@@ -294,7 +318,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
         <input
           className="input"
           value={nameValue}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => { setSaved(false); setName(e.target.value); }}
           maxLength={80}
         />
       </label>
@@ -306,7 +330,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
           className="textarea"
           rows={3}
           value={bioValue}
-          onChange={(e) => setBio(e.target.value)}
+          onChange={(e) => { setSaved(false); setBio(e.target.value); }}
         />
       </label>
       <div className="two-col" style={{ marginTop: 'var(--sp-4)', gap: 'var(--sp-4)' }}>
@@ -317,7 +341,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
             className="input"
             autoComplete="current-password"
             value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
+            onChange={(e) => { setSaved(false); setCurrentPassword(e.target.value); }}
             placeholder="바꾸지 않으면 비워 두세요"
           />
         </label>
@@ -328,7 +352,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
             className="input"
             autoComplete="new-password"
             value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
+            onChange={(e) => { setSaved(false); setNewPassword(e.target.value); }}
             placeholder="바꾸지 않으면 비워 두세요"
           />
         </label>
@@ -364,6 +388,7 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
                 setAvatar(null);
                 setCurrentPassword('');
                 setNewPassword('');
+                setSaved(true);
               },
             });
           }}
@@ -373,13 +398,15 @@ function ProfileSection({ save }: { save: ReturnType<typeof useSettingsMutations
         {/* ⚠️ `aria-describedby` 가 **없는 id 를 가리키면** 낭독기에는
             아무 말도 안 됩니다 — 사유가 없는 것보다 나쁩니다. 처음에
             이 자리를 안 만들어 놓고 가리켰습니다 (결함 234). */}
-        <Problem id="profile-problem" tone="incomplete" inline>{profileBlocked}</Problem>
+        <Problem id="profile-problem" tone="incomplete" inline>
+          {saved && !dirty && profileBlocked === '바꾼 것이 없습니다' ? null : profileBlocked}
+        </Problem>
         {dirty && profileBlocked === null && (
           <span className="t12 muted" role="status">
             변경 사항이 있습니다 — 저장을 눌러야 반영됩니다
           </span>
         )}
-        {save.isSuccess && !dirty && <span className="status-ok" role="status">저장됐습니다</span>}
+        {saved && !dirty && <span className="status-ok" role="status">저장됐습니다</span>}
         <Problem inline>{save.isError ? mutationError(save.error) : null}</Problem>
       </div>
     </div>
@@ -572,6 +599,7 @@ function RepoSection({
 }) {
   const health = useGithubHealth(projectId);
   const [value, setValue] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const input = value ?? repo ?? '';
   const problem = input.trim() === '' ? null : repoProblem(input);
   // 낱말이 **하는 일과 같아야** 합니다 (결함 256).
@@ -613,7 +641,10 @@ function RepoSection({
           aria-invalid={problem !== null}
           aria-describedby="repo-problem"
           value={input}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setSaved(false);
+            setValue(e.target.value);
+          }}
         />
         {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 — 비활성 버튼은
             초점을 못 받아 낭독기에 사유를 못 전합니다(GOV.UK). 사유(`problem`)
@@ -635,7 +666,15 @@ function RepoSection({
               return;
             }
             if (disconnecting && !window.confirm(disconnectConfirm(repo ?? ''))) return;
-            save.mutate({ github_repo: normalizeRepo(input) }, { onSuccess: () => setValue(null) });
+            save.mutate(
+              { github_repo: normalizeRepo(input) },
+              {
+                onSuccess: () => {
+                  setValue(null);
+                  setSaved(true);
+                },
+              },
+            );
           }}
         >
           {disconnecting ? '연결 해제' : '연결'}
@@ -644,7 +683,10 @@ function RepoSection({
       {/* 칸 옆 오류는 **그 칸과** 이어져 있어야 합니다 — 입력칸이
           `aria-describedby="repo-problem"` 으로 이 자리를 가리킵니다. */}
       <Problem id="repo-problem" tone="incomplete">{problem}</Problem>
-      <Problem id="repo-blocked" tone="incomplete">{connectBlocked}</Problem>
+      <Problem id="repo-blocked" tone="incomplete">
+        {saved && value === null && connectBlocked === '바꾼 것이 없습니다' ? null : connectBlocked}
+      </Problem>
+      {saved && value === null && <p className="status-ok" role="status">저장됐습니다</p>}
       <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
       {view !== null && (
         <div className={view.tone === 'ok' ? 'card' : 'notice'} style={{ marginTop: 'var(--sp-5)' }} role="note">
@@ -728,6 +770,7 @@ function GeneralSection({
   const [startVal, setStartVal] = useState<string | null>(null);
   const [deadlineVal, setDeadlineVal] = useState<string | null>(null);
   const [statusVal, setStatusVal] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const input = value ?? title;
   const startInput = startVal ?? startedAt ?? '';
   const deadlineInput = deadlineVal ?? deadline ?? '';
@@ -759,75 +802,43 @@ function GeneralSection({
       <h2 className="sec__title">이름과 초대</h2>
       <label className="field">
         <span className="field__label">프로젝트 이름</span>
-        <div className="sec__row">
-          <input
-            className="input"
-            id="title-input"
-            aria-invalid={problem !== null && value !== null}
-            aria-describedby="title-problem"
-            value={input}
-            onChange={(e) => setValue(e.target.value)}
-          />
-          {/* ⚠️ **구성원에게도 멀쩡히 눌렸습니다** (결함 225). 서버는 403
-              을 주는데 화면은 아무 말도 안 했습니다. `canManage` 는 처음부터
-              `@lib` 에 있었고 이 화면만 안 불렀습니다. */}
-          <button
-            type="button"
-            /* ⚠️ 권한(`renameBlocked`)은 `aria-disabled` 였는데 값 문제는
-               `disabled` 였습니다 (결함 234) — 소유자가 이름을 비우면
-               버튼이 **초점 밖으로** 사라졌습니다. */
-            className={`btn btn--primary${titleBlocked !== null ? ' btn--unmet' : ''}`}
-            aria-disabled={titleBlocked !== null}
-            aria-describedby={titleBlocked !== null ? 'title-problem' : undefined}
-            onClick={() => {
-              if (save.isPending) return;
-              if (titleBlocked !== null) {
-                document.getElementById('title-input')?.focus();
-                return;
-              }
-              const patch: {
-                title?: string;
-                started_at?: string | null;
-                deadline?: string | null;
-                status?: string;
-              } = {};
-              if (value !== null) patch.title = input.trim();
-              if (startVal !== null) patch.started_at = startInput || null;
-              if (deadlineVal !== null) patch.deadline = deadlineInput || null;
-              if (statusVal !== null) patch.status = statusInput;
-              save.mutate(patch, {
-                onSuccess: () => {
-                  setValue(null);
-                  setStartVal(null);
-                  setDeadlineVal(null);
-                  setStatusVal(null);
-                },
-              });
-            }}
-          >
-            저장
-          </button>
-        </div>
+        <input
+          className="input"
+          id="title-input"
+          aria-invalid={problem !== null && value !== null}
+          aria-describedby="title-problem"
+          value={input}
+          onChange={(e) => {
+            setSaved(false);
+            setValue(e.target.value);
+          }}
+        />
       </label>
       <div className="two-col" style={{ marginTop: 'var(--sp-4)', gap: 'var(--sp-4)' }}>
-        <label className="field">
+        <div className="field">
           <span className="field__label">프로젝트 시작일</span>
-          <input
-            type="date"
-            className="input"
-            value={startInput}
-            onChange={(e) => setStartVal(e.target.value)}
+          <DatePicker
+            id="project-start-date"
+            ariaLabel="프로젝트 시작일"
+            value={startInput || null}
+            onChange={(v) => {
+              setSaved(false);
+              setStartVal(v ?? '');
+            }}
           />
-        </label>
-        <label className="field">
+        </div>
+        <div className="field">
           <span className="field__label">프로젝트 마감일 (달력·일정 진단에 반영)</span>
-          <input
-            type="date"
-            className="input"
-            value={deadlineInput}
-            onChange={(e) => setDeadlineVal(e.target.value)}
+          <DatePicker
+            id="project-deadline-date"
+            ariaLabel="프로젝트 마감일"
+            value={deadlineInput || null}
+            onChange={(v) => {
+              setSaved(false);
+              setDeadlineVal(v ?? '');
+            }}
           />
-        </label>
+        </div>
       </div>
       <div className="field" style={{ marginTop: 'var(--sp-4)' }}>
         <span className="field__label">프로젝트 상태</span>
@@ -838,9 +849,12 @@ function GeneralSection({
               name="project-status"
               value="active"
               checked={statusInput === 'active'}
-              onChange={() => setStatusVal('active')}
+              onChange={() => {
+                setSaved(false);
+                setStatusVal('active');
+              }}
             />
-            <span>진행 중 (active)</span>
+            <span>진행 중</span>
           </label>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', cursor: 'pointer' }}>
             <input
@@ -849,25 +863,74 @@ function GeneralSection({
               value="finished"
               checked={statusInput === 'finished'}
               onChange={() => {
-                if (
-                  window.confirm(
-                    '프로젝트를 종료 상태로 전환하면 팀원의 음성 성문 데이터가 영구 폐기됩니다 (개인정보보호 원칙). 계속하시겠습니까?',
-                  )
-                ) {
-                  setStatusVal('finished');
-                }
+                setSaved(false);
+                setStatusVal('finished');
               }}
             />
-            <span>종료됨 (finished)</span>
+            <span>종료됨</span>
           </label>
         </div>
         {statusInput === 'finished' && (
           <p className="t12 muted" style={{ marginTop: 'var(--sp-2)' }}>
-            ⚠️ 종료된 프로젝트는 성문 데이터가 폐기되며 달력 지연 표시가 중단됩니다.
+            ⚠️ 종료됨으로 저장하면 성문 데이터가 영구 폐기되며 달력 지연 표시가 중단됩니다.
           </p>
         )}
       </div>
-      <Problem id="title-problem" tone="incomplete">{titleBlocked}</Problem>
+      <div className="sec__row" style={{ marginTop: 'var(--sp-5)' }}>
+        {/* ⚠️ **구성원에게도 멀쩡히 눌렸습니다** (결함 225). 서버는 403
+            을 주는데 화면은 아무 말도 안 했습니다. `canManage` 는 처음부터
+            `@lib` 에 있었고 이 화면만 안 불렀습니다. */}
+        <button
+          type="button"
+          /* ⚠️ 권한(`renameBlocked`)은 `aria-disabled` 였는데 값 문제는
+             `disabled` 였습니다 (결함 234) — 소유자가 이름을 비우면
+             버튼이 **초점 밖으로** 사라졌습니다. */
+          className={`btn btn--primary${titleBlocked !== null ? ' btn--unmet' : ''}`}
+          aria-disabled={titleBlocked !== null}
+          aria-describedby={titleBlocked !== null ? 'title-problem' : undefined}
+          onClick={() => {
+            if (save.isPending) return;
+            if (titleBlocked !== null) {
+              document.getElementById('title-input')?.focus();
+              return;
+            }
+            if (
+              statusInput === 'finished' &&
+              status !== 'finished' &&
+              !window.confirm(
+                '프로젝트를 종료 상태로 전환하면 팀원의 음성 성문 데이터가 영구 폐기됩니다 (개인정보보호 원칙). 계속하시겠습니까?',
+              )
+            ) {
+              return;
+            }
+            const patch: {
+              title?: string;
+              started_at?: string | null;
+              deadline?: string | null;
+              status?: string;
+            } = {};
+            if (value !== null) patch.title = input.trim();
+            if (startVal !== null) patch.started_at = startInput || null;
+            if (deadlineVal !== null) patch.deadline = deadlineInput || null;
+            if (statusVal !== null) patch.status = statusInput;
+            save.mutate(patch, {
+              onSuccess: () => {
+                setValue(null);
+                setStartVal(null);
+                setDeadlineVal(null);
+                setStatusVal(null);
+                setSaved(true);
+              },
+            });
+          }}
+        >
+          저장
+        </button>
+        <Problem id="title-problem" tone="incomplete" inline>
+          {saved && !dirty && titleBlocked === '바꾼 것이 없습니다' ? null : titleBlocked}
+        </Problem>
+        {saved && !dirty && <span className="status-ok" role="status">저장됐습니다</span>}
+      </div>
       <h3 className="pane__title" style={{ margin: 'var(--sp-6) 0 var(--sp-3)' }}>
         팀원 초대
       </h3>

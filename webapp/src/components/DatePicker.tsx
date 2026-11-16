@@ -37,9 +37,10 @@ interface DatePickerProps {
   onChange: (value: string | null) => void;
   ariaLabel: string;
   id?: string;
+  clearLabel?: string;
 }
 
-export function DatePicker({ value, onChange, ariaLabel, id }: DatePickerProps) {
+export function DatePicker({ value, onChange, ariaLabel, id, clearLabel = '날짜 지우기' }: DatePickerProps) {
   const today = todayInTeamCalendar();
   const [open, setOpen] = useState(false);
   // 열 때마다 고른 날의 달로 돌아갑니다. 안 골랐으면 이번 달.
@@ -195,7 +196,7 @@ export function DatePicker({ value, onChange, ariaLabel, id }: DatePickerProps) 
               setOpen(false);
             }}
           >
-            마감 지우기
+            {clearLabel}
           </button>
         </Pop.Content>
       </Pop.Portal>

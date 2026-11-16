@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   MutationCache,
@@ -11,14 +11,16 @@ import { useMe } from './api/hooks.ts';
 import { ApiError } from './api/client.ts';
 import { authGate, describeLoadFailure, sessionIsOver } from '@lib/ui/load.ts';
 import Login from './screens/Login.tsx';
-import Home from './screens/Home.tsx';
-import Settings from './screens/Settings.tsx';
-import Kanban from './screens/Kanban.tsx';
-import Contributions from './screens/Contributions.tsx';
-import Lobby from './screens/Lobby.tsx';
-import Review from './screens/Review.tsx';
 import Crashed from './screens/Crashed.tsx';
-import AiDemoLab from './screens/AiDemoLab.tsx';
+const Home = lazy(() => import('./screens/Home.tsx'));
+const Settings = lazy(() => import('./screens/Settings.tsx'));
+const Kanban = lazy(() => import('./screens/Kanban.tsx'));
+const Contributions = lazy(() => import('./screens/Contributions.tsx'));
+const Lobby = lazy(() => import('./screens/Lobby.tsx'));
+const Review = lazy(() => import('./screens/Review.tsx'));
+const AiDemoLab = lazy(() => import('./screens/AiDemoLab.tsx'));
+const Notifications = lazy(() => import('./screens/Notifications.tsx'));
+const Reports = lazy(() => import('./screens/Reports.tsx'));
 import { watchForUncaught } from './api/diag.ts';
 import './app.css';
 import { CallStageModal } from './components/CallStageModal.tsx';
@@ -161,6 +163,8 @@ const router = createBrowserRouter(
         { path: '/project/:projectId/settings', element: <Navigate to="role" replace /> },
         { path: '/project/:projectId/kanban', element: <Kanban /> },
         { path: '/project/:projectId/contributions', element: <Contributions /> },
+        { path: '/project/:projectId/notifications', element: <Notifications /> },
+        { path: '/project/:projectId/reports', element: <Reports /> },
         { path: '/meeting/:meetingId/lobby', element: <Lobby /> },
         { path: '/meeting/:meetingId/review', element: <Review /> },
         { path: '*', element: <Navigate to="/" replace /> },
@@ -207,7 +211,9 @@ function dropBootShell() {
 createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <Suspense fallback={<div className="boot" role="status"><span className="boot__dot" />화면을 불러오는 중입니다</div>}>
+        <RouterProvider router={router} />
+      </Suspense>
       <CallStageModal />
     </QueryClientProvider>
   </StrictMode>,

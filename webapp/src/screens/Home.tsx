@@ -363,7 +363,22 @@ export default function Home() {
       setStarting(which);
     };
 
+  const [meetingFilter, setMeetingFilter] = useState<'all' | 'active' | 'done' | 'failed'>('all');
+  const [showAllMeetings, setShowAllMeetings] = useState(false);
   const sections = useMemo(() => sectionMeetings(meetings.data ?? []), [meetings.data]);
+  const filteredRestMeetings = useMemo(() => {
+    const base = sections.rest;
+    if (meetingFilter === 'active') {
+      return base.filter((x) => x.status === 'pending' || x.status === 'queued' || x.status === 'processing');
+    }
+    if (meetingFilter === 'done') return base.filter((x) => x.status === 'confirmed');
+    if (meetingFilter === 'failed') return base.filter((x) => x.status === 'failed');
+    return base;
+  }, [sections.rest, meetingFilter]);
+  const visibleRestMeetings =
+    showAllMeetings || meetingFilter !== 'all'
+      ? filteredRestMeetings
+      : filteredRestMeetings.slice(0, 8);
 
   return (
     <AppShell
@@ -523,9 +538,9 @@ export default function Home() {
                 style={{
                   padding: '24px',
                   marginBottom: '24px',
-                  border: '1px solid var(--c-accent)',
+                  border: '1px solid var(--c-evidence)',
                   borderRadius: 'var(--r-lg)',
-                  background: 'var(--c-surface-sunken)',
+                  background: 'var(--c-sunken)',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
@@ -543,7 +558,7 @@ export default function Home() {
                 </p>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-                  <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
+                  <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-line)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
                       <span className="dc-badge dc-badge--ok num">1단계</span>
                       <strong style={{ fontSize: '13px' }}>음성 회의와 개별 녹음</strong>
@@ -552,7 +567,7 @@ export default function Home() {
                       전원이 동의한 뒤 각자의 트랙을 녹음합니다. 발언자는 녹음한 팀원으로 구분하고 AI가 음성을 전사합니다.
                     </p>
                   </div>
-                  <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
+                  <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-line)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
                       <span className="dc-badge dc-badge--warn num">2단계</span>
                       <strong style={{ fontSize: '13px' }}>AI 후보 검토 & 승인</strong>
@@ -561,7 +576,7 @@ export default function Home() {
                       LLM이 도출한 의사결정과 할 일 후보를 원문 대화록과 대조하며 담당자와 마감일을 확정합니다.
                     </p>
                   </div>
-                  <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-border)' }}>
+                  <div style={{ background: 'var(--c-surface)', padding: '14px', borderRadius: 'var(--r-md)', border: '1px solid var(--c-line)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
                       <span className="dc-badge dc-badge--info num">3단계</span>
                       <strong style={{ fontSize: '13px' }}>칸반 보드 & 기여도 산출</strong>
@@ -643,15 +658,56 @@ export default function Home() {
 
             {sections.rest.length > 0 && (
               <section className="mgroup mgroup--flat">
-                <div className="tf-section-subhdr">최근 회의 목록</div>
-                {sections.rest.map((meeting) => (
-                  <MeetingRow
-                    key={meeting.meeting_id}
-                    meeting={meeting as MeetingSummary}
-                    projectId={project?.project_id ?? 0}
-                    waiting={false}
-                  />
-                ))}
+                <div className="tf-section-subhdr" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                  <span>최근 회의 목록 ({sections.rest.length})</span>
+                  {sections.rest.length > 4 && (
+                    <div className="kboard-filters" style={{ padding: 0, borderBottom: 0, background: 'transparent' }} role="group" aria-label="회의 상태 필터">
+                      {[
+                        { id: 'all' as const, label: '전체' },
+                        { id: 'active' as const, label: '대기·처리 중' },
+                        { id: 'done' as const, label: '검토 완료' },
+                        { id: 'failed' as const, label: '실패·중단' },
+                      ].map((tab) => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          className={`kboard-filter-chip${meetingFilter === tab.id ? ' is-active' : ''}`}
+                          aria-pressed={meetingFilter === tab.id}
+                          onClick={() => setMeetingFilter(tab.id)}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {visibleRestMeetings.length === 0 ? (
+                  <p className="t12 muted" style={{ padding: '12px 0' }}>
+                    선택한 상태에 해당하는 회의가 없습니다.
+                  </p>
+                ) : (
+                  visibleRestMeetings.map((meeting) => (
+                    <MeetingRow
+                      key={meeting.meeting_id}
+                      meeting={meeting as MeetingSummary}
+                      projectId={project?.project_id ?? 0}
+                      waiting={false}
+                    />
+                  ))
+                )}
+                {meetingFilter === 'all' && filteredRestMeetings.length > 8 && (
+                  <div style={{ marginTop: 'var(--sp-3)', textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => setShowAllMeetings((prev) => !prev)}
+                    >
+                      {showAllMeetings
+                        ? '최근 8건만 접기'
+                        : `나머지 ${filteredRestMeetings.length - 8}건 더 보기`}
+                    </button>
+                  </div>
+                )}
               </section>
             )}
 

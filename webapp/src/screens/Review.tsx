@@ -199,6 +199,14 @@ export default function Review() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playingId, setPlayingId] = useState<number | null>(null);
+  const [audioPaused, setAudioPaused] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState<1 | 1.25 | 1.5 | 2>(1);
+  const [audioProgress, setAudioProgress] = useState<{
+    id: number;
+    currentSec: number;
+    startSec: number;
+    endSec: number;
+  } | null>(null);
   const [mobileTab, setMobileTab] = useState<'candidates' | 'transcript' | 'evidence'>('candidates');
   const members = membersQuery.data ?? [];
   const context: ReviewContext = useMemo(
@@ -272,21 +280,56 @@ export default function Review() {
     const clip = clipByUtterance.get(utteranceId);
     const audio = audioRef.current;
     if (!clip || !audio) return;
-    if (playingId === utteranceId) {
+    if (playingId === utteranceId && !audio.paused) {
       audio.pause();
-      setPlayingId(null);
+      setAudioPaused(true);
+      return;
+    }
+    if (playingId === utteranceId && audio.paused) {
+      audio.playbackRate = playbackRate;
+      void audio.play();
+      setAudioPaused(false);
       return;
     }
     audio.src = trackAudioUrl('', meetingId, clip.trackId);
+    audio.playbackRate = playbackRate;
     audio.currentTime = clip.startSec;
+    setAudioPaused(false);
+    setAudioProgress({ id: utteranceId, currentSec: clip.startSec, startSec: clip.startSec, endSec: clip.endSec });
     audio.ontimeupdate = () => {
+      setAudioProgress({
+        id: utteranceId,
+        currentSec: audio.currentTime,
+        startSec: clip.startSec,
+        endSec: clip.endSec,
+      });
       if (audio.currentTime >= clip.endSec) {
         audio.pause();
         setPlayingId(null);
+        setAudioPaused(false);
       }
+    };
+    audio.onended = () => {
+      setPlayingId(null);
+      setAudioPaused(false);
     };
     void audio.play();
     setPlayingId(utteranceId);
+  };
+
+  const stopClip = () => {
+    const audio = audioRef.current;
+    if (audio) audio.pause();
+    setPlayingId(null);
+    setAudioPaused(false);
+    setAudioProgress(null);
+  };
+
+  const cycleRate = () => {
+    const rates: Array<1 | 1.25 | 1.5 | 2> = [1, 1.25, 1.5, 2];
+    const next = rates[(rates.indexOf(playbackRate) + 1) % rates.length] ?? 1;
+    setPlaybackRate(next);
+    if (audioRef.current) audioRef.current.playbackRate = next;
   };
 
   /* ⛔ **화면이 회의 상태를 안 봤습니다** (결함 232). 후보가 0건이면
@@ -466,7 +509,7 @@ export default function Review() {
             className={`tf-mobile-review-tab ${mobileTab === 'evidence' ? 'is-active' : ''}`}
             onClick={() => setMobileTab('evidence')}
           >
-            📌 근거
+            📌 근거{selected ? ` (${selected.evidence_utterance_ids.length})` : ''}
           </button>
         </div>
       )}
@@ -490,6 +533,57 @@ export default function Review() {
                 말합니다 (UI 패스 v3). */}
             <span className="pane__hint">시작 후 분:초</span>
           </div>
+          {audioProgress !== null && (
+            <div className="tl-player" role="region" aria-label="발화 구간 재생 막대">
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => playClip(audioProgress.id)}
+              >
+                {playingId === audioProgress.id && !audioPaused ? '⏸ 일시정지' : '▶ 다시 재생'}
+              </button>
+              <span className="t12 num muted" style={{ whiteSpace: 'nowrap' }}>
+                발화 #{audioProgress.id}
+              </span>
+              <input
+                type="range"
+                className="tl-player__range"
+                aria-label="재생 위치 이동"
+                min={audioProgress.startSec}
+                max={Math.max(audioProgress.startSec + 0.1, audioProgress.endSec)}
+                step={0.1}
+                value={Math.min(
+                  Math.max(audioProgress.currentSec, audioProgress.startSec),
+                  Math.max(audioProgress.startSec + 0.1, audioProgress.endSec),
+                )}
+                onChange={(e) => {
+                  const sec = Number(e.target.value);
+                  if (audioRef.current) audioRef.current.currentTime = sec;
+                  setAudioProgress((prev) => (prev ? { ...prev, currentSec: sec } : null));
+                }}
+              />
+              <span className="t12 num" style={{ whiteSpace: 'nowrap' }}>
+                {Math.max(0, audioProgress.currentSec - audioProgress.startSec).toFixed(1)}s /{' '}
+                {Math.max(0.1, audioProgress.endSec - audioProgress.startSec).toFixed(1)}s
+              </span>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm num"
+                onClick={cycleRate}
+                title="재생 속도 바꾸기"
+              >
+                {playbackRate.toFixed(playbackRate % 1 === 0 ? 1 : 2).replace(/\.00$/, '.0')}x
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={stopClip}
+                aria-label="재생 막대 닫기"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           <div className="pane__body">
             {meeting.data && (
               <>
@@ -763,7 +857,7 @@ export default function Review() {
                         className="btn btn--ghost btn--sm"
                         onClick={() => playClip(row.view.id)}
                       >
-                        {playingId === row.view.id ? '⏹ 멈춤' : '▶ 듣기'}
+                        {playingId === row.view.id && !audioPaused ? '⏸ 일시정지' : playingId === row.view.id ? '▶ 이어 듣기' : '▶ 듣기'}
                       </button>
                     )}
                   </div>
@@ -926,13 +1020,11 @@ export default function Review() {
                       ids={candidate.evidence_utterance_ids}
                       onOpen={(id) => {
                             select(candidate);
-                            setMobileTab('evidence');
+                            setMobileTab('transcript');
                             /* ⚠️ **다음 프레임에 해야 먹습니다.** `select` 가
                                먼저 자기 스크롤(첫 근거)을 시작하는데, 같은
                                task 안에서 두 번째 `scrollIntoView` 를 부르면
-                               삼켜집니다 — 재서 확인했습니다. 처음 쓴 고침이
-                               바로 이래서 **아무 일도 안 했고**, 화면을 재
-                               보지 않았으면 고쳤다고 적을 뻔했습니다. */
+                               삼켜집니다 — 재서 확인했습니다. */
                             requestAnimationFrame(() => {
                               rowRefs.current.get(id)?.scrollIntoView({
                                 behavior: reduceMotion ? 'auto' : 'smooth',

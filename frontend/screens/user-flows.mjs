@@ -3,6 +3,92 @@
  */
 import assert from 'node:assert/strict';
 
+/** ㉕ 열린 대화상자(모달)의 글자·배경 대비와 뷰포트 넘침을 검증한다 (캔버스 픽셀로 color-mix/srgb 해결). */
+async function assertDialogReadable(page, dialog, label) {
+  await dialog.waitFor({ state: 'visible' });
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  );
+  const issues = await dialog.evaluate((root) => {
+    const cv = document.createElement('canvas');
+    cv.width = 1;
+    cv.height = 1;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    const parseColor = (cssColor) => {
+      if (!cssColor || cssColor === 'transparent' || !ctx) return [0, 0, 0, 0];
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = '#00000000';
+      ctx.fillStyle = cssColor;
+      ctx.fillRect(0, 0, 1, 1);
+      const d = ctx.getImageData(0, 0, 1, 1).data;
+      return [d[0], d[1], d[2], d[3] / 255];
+    };
+    const compositeOver = (fg, bg) => {
+      const a = fg[3];
+      return [
+        Math.round(fg[0] * a + bg[0] * (1 - a)),
+        Math.round(fg[1] * a + bg[1] * (1 - a)),
+        Math.round(fg[2] * a + bg[2] * (1 - a)),
+        1,
+      ];
+    };
+    const effectiveBg = (el) => {
+      const chain = [];
+      for (let cur = el; cur; cur = cur.parentElement) {
+        chain.push(parseColor(getComputedStyle(cur).backgroundColor));
+      }
+      let out = [255, 255, 255, 1];
+      for (let i = chain.length - 1; i >= 0; i -= 1) {
+        if (chain[i][3] > 0) out = compositeOver(chain[i], out);
+      }
+      return out;
+    };
+    const lum = ([r, g, b]) => {
+      const lin = [r, g, b].map((v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+    };
+    const ratio = (a, b) => {
+      const [la, lb] = [lum(a), lum(b)].sort((x, y) => y - x);
+      return (la + 0.05) / (lb + 0.05);
+    };
+    const out = [];
+    const box = root.getBoundingClientRect();
+    if (box.width < 100 || box.height < 80) {
+      out.push(`크기 비정상 (${Math.round(box.width)}x${Math.round(box.height)})`);
+    }
+    if (box.right > window.innerWidth + 2 || box.left < -2) {
+      out.push(`가로 뷰포트 이탈 (${Math.round(box.left)}..${Math.round(box.right)} / ${window.innerWidth})`);
+    }
+    const candidates = root.querySelectorAll(
+      'h1, h2, h3, button, [role="option"], [role="tab"], label, .dc-sec-title, .dc-cmdk__title, .dc-r-title',
+    );
+    for (const el of candidates) {
+      const st = getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) continue;
+      if (!(el.textContent ?? '').trim()) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const fg = parseColor(st.color);
+      const bg = effectiveBg(el);
+      const effFg = fg[3] < 1 ? compositeOver(fg, bg) : fg;
+      const cr = ratio(effFg, bg);
+      if (cr < 3.0) {
+        out.push(`저대비(${cr.toFixed(2)}:1): "${el.textContent.trim().slice(0, 24)}"`);
+      }
+    }
+    return out;
+  });
+  assert.deepEqual(issues, [], `${label} 모달 가독성/배치 실패: ${issues.join('; ')}`);
+}
+
 export async function exerciseUserFlows(browser, base) {
   const contexts = [];
   const context = async () => {
@@ -141,6 +227,7 @@ export async function exerciseUserFlows(browser, base) {
     await page.getByRole('button', { name: '작게 두기', exact: true }).click();
     const settingsButton = page.getByRole('button', { name: '환경 설정', exact: true });
     await settingsButton.click();
+    await assertDialogReadable(page, page.getByRole('dialog', { name: '환경 설정' }), '환경 설정(음성)');
     await page.getByRole('button', { name: '마이크 점검 시작', exact: true }).click();
     await page.getByRole('button', { name: '마이크 점검 종료', exact: true }).waitFor();
     await page.keyboard.press('Escape');
@@ -151,7 +238,7 @@ export async function exerciseUserFlows(browser, base) {
 
     await page.keyboard.press('Control+k');
     const cmdDialog = page.getByRole('dialog', { name: '빠른 명령 및 통합 검색' });
-    await cmdDialog.waitFor();
+    await assertDialogReadable(page, cmdDialog, '명령 팔레트(라이트)');
     await cmdDialog.getByRole('searchbox', { name: '검색어 입력' }).fill('로그인');
     await cmdDialog.getByRole('option', { name: /로그인/ }).first().waitFor();
     await page.keyboard.press('Escape');
@@ -164,6 +251,7 @@ export async function exerciseUserFlows(browser, base) {
     await page.getByRole('tab', { name: '화면', exact: true }).click();
     await page.getByRole('radio', { name: /어두운 화면/ }).click();
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+    await assertDialogReadable(page, page.getByRole('dialog', { name: '환경 설정' }), '환경 설정(다크)');
     await page.getByRole('radio', { name: /밝은 화면/ }).click();
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'light');
     await page.keyboard.press('Escape');

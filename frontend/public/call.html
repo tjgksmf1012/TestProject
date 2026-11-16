@@ -53,9 +53,10 @@
      그리는 방법이 둘이면 사람은 둘을 따로 배웁니다. */
   .face { width: var(--sp-12); height: var(--sp-12); border-radius: var(--r-round); flex: 0 0 auto;
           display: grid; place-items: center; font-weight: 700; font-size: var(--fs-title);
-          background: var(--sunken); color: var(--text-muted); }
+          background: var(--sunken); color: var(--text-muted); transition: box-shadow 120ms ease; }
   .face.me { background: color-mix(in srgb, var(--primary) 14%, transparent);
              color: var(--primary); }
+  .face.speaking { box-shadow: 0 0 0 3px var(--ok); }
   .who { min-width: 0; }
   .who .name { font-weight: 600; }
   .who .state { display: block; font-size: var(--fs-label); color: var(--text-subtle); }
@@ -109,6 +110,7 @@
      결함 393·399·400 이 같은 자리에서 배운 것). */
   @media (forced-colors: active) {
     .meter span { background: Highlight; }
+    .face.speaking { outline: 3px solid Highlight; outline-offset: 2px; }
   }
 
   /* ⚠️ **둘이 화면 폭을 반씩 채우고 있었습니다** (`flex: 1`). 통화에

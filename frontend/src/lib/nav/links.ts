@@ -96,10 +96,17 @@ export function appScreenOf(pathname: string): ScreenId {
   const path = (pathname || '/').replace(/^\/app(?=\/|$)/, '') || '/';
   if (/^\/project\/\d+\/kanban/.test(path)) return 'kanban';
   if (/^\/project\/\d+\/contributions/.test(path)) return 'contributions';
+  if (/^\/project\/\d+\/notifications/.test(path)) return 'notifications';
+  if (/^\/project\/\d+\/reports/.test(path)) return 'reports';
   if (/^\/project\/\d+\/settings/.test(path)) return 'project';
   if (/^\/meeting\/\d+\/lobby/.test(path)) return 'lobby';
   if (/^\/meeting\/\d+\/review/.test(path)) return 'review';
   return 'home';
+}
+
+/** SPA 보조 화면 주소 (`/app` 라우터 basename 제외). */
+export function appSecondaryHref(screen: 'notifications' | 'reports', projectId: number): string {
+  return `/project/${projectId}/${screen}`;
 }
 
 function positive(value: number | null | undefined): number | null {

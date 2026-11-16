@@ -43,6 +43,7 @@ import {
 import { Problem } from '../components/Problem.tsx';
 import { describeMeetingStatus } from '@lib/home/next.ts';
 import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
+import { appSecondaryHref } from '@lib/nav/links.ts';
 import { meetingLabel } from '@lib/ui/naming.ts';
 import { ApiError } from '../api/client.ts';
 
@@ -597,7 +598,7 @@ export default function Lobby() {
                       onSuccess: () => {
                         const project = meeting.data?.project_id;
                         if (project !== undefined) {
-                          window.location.href = `/reports.html?project=${project}`;
+                          navigate(appSecondaryHref('reports', project));
                         }
                       },
                     });
