@@ -197,6 +197,7 @@ export default function Lobby() {
   const consentBlocked = whyConsentBlocked({
     sending: m.consent.isPending,
     alreadyAgreed: iAgreed,
+    refuseLabel: consentAct.refuseLabel,
   });
 
   const submitConsent = async (consented: boolean) => {
@@ -275,7 +276,21 @@ export default function Lobby() {
               회의 강제 종료
             </button>
           )}
-          <a className="btn btn--secondary" href={`/call.html?meeting=${meetingId}`}>
+          <a
+            className={`btn btn--secondary${!canGoRecord ? ' btn--unmet btn--disabled-link' : ''}`}
+            href={canGoRecord ? `/call.html?meeting=${meetingId}` : undefined}
+            role={!canGoRecord ? 'link' : undefined}
+            aria-disabled={!canGoRecord}
+            tabIndex={0}
+            aria-describedby={
+              canGoRecord ? undefined : phase.canStart ? 'start-conds' : 'phase-note'
+            }
+            title={
+              !canGoRecord
+                ? (phase.note ?? describeConditions(startConditions))
+                : undefined
+            }
+          >
             통화 열기
           </a>
           {/* 못 넘어가는 이유는 **버튼 옆에** 둡니다 (GOV.UK 권고).

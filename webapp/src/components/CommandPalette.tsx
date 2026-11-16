@@ -126,6 +126,7 @@ export function CommandPalette({
               id: 'notifications',
               category: '알림',
               label: unreadCount > 0 ? `알림 함 (미확인 ${unreadCount}건)` : '알림 함',
+              detail: '미확인 멘션·검토 알림 목록 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
               hint: '새 탭',
               run: () =>
                 closeAnd(() => window.open(`/notifications.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
@@ -134,6 +135,7 @@ export function CommandPalette({
               id: 'calendar',
               category: '일정',
               label: '일정 캘린더',
+              detail: '업무 마감일 월간·주간 일정 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
               hint: '새 탭',
               run: () =>
                 closeAnd(() => window.open(`/calendar.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
@@ -142,6 +144,7 @@ export function CommandPalette({
               id: 'chat',
               category: '채팅',
               label: '프로젝트 채팅',
+              detail: '실시간 팀 대화 및 AI 요약 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
               hint: '새 탭',
               run: () =>
                 closeAnd(() => window.open(`/chat.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
@@ -150,6 +153,7 @@ export function CommandPalette({
               id: 'reports',
               category: '보고서',
               label: '최종 기여도 보고서 (제출용)',
+              detail: '회의록·주간·최종 보고서 및 CSV 내보내기 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
               hint: '새 탭',
               run: () =>
                 closeAnd(() => window.open(`/reports.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
@@ -158,6 +162,7 @@ export function CommandPalette({
               id: 'full-search',
               category: '검색',
               label: '전체 통합 검색 화면 열기',
+              detail: '발언·업무·보고서 통합 검색 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
               hint: '새 탭',
               run: () =>
                 closeAnd(() => {

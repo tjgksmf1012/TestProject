@@ -139,13 +139,13 @@ export async function exerciseUserFlows(browser, base) {
     }
 
     await page.getByRole('button', { name: '작게 두기', exact: true }).click();
-    const settingsButton = page.getByRole('button', { name: '설정', exact: true });
+    const settingsButton = page.getByRole('button', { name: '환경 설정', exact: true });
     await settingsButton.click();
     await page.getByRole('button', { name: '마이크 점검 시작', exact: true }).click();
     await page.getByRole('button', { name: '마이크 점검 종료', exact: true }).waitFor();
     await page.keyboard.press('Escape');
     await page.getByRole('dialog', { name: '환경 설정' }).waitFor({ state: 'hidden' });
-    await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '설정');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '환경 설정');
     assert.equal(await settingsButton.evaluate((button) => document.activeElement === button), true);
     assert.equal(await page.evaluate(() => window.__testStreams.at(-1).getTracks().every((track) => track.readyState === 'ended')), true);
 
@@ -156,7 +156,7 @@ export async function exerciseUserFlows(browser, base) {
     await cmdDialog.getByRole('option', { name: /로그인/ }).first().waitFor();
     await page.keyboard.press('Escape');
     await cmdDialog.waitFor({ state: 'hidden' });
-    await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '설정');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '환경 설정');
     assert.equal(await settingsButton.evaluate((button) => document.activeElement === button), true);
 
     await settingsButton.click();
@@ -168,7 +168,7 @@ export async function exerciseUserFlows(browser, base) {
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'light');
     await page.keyboard.press('Escape');
     await page.getByRole('dialog', { name: '환경 설정' }).waitFor({ state: 'hidden' });
-    await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '설정');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('title') === '환경 설정');
     assert.equal(await settingsButton.evaluate((button) => document.activeElement === button), true);
 
     assert.deepEqual(errors, []);

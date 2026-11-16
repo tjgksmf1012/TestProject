@@ -403,7 +403,7 @@ export default function Review() {
               최종 제출은 모든 건의 처리가 끝난 뒤 사람이 확인하여 마무리합니다. */}
           {submitBlockedReason !== null && (
             <Problem id="submit-reason" tone="incomplete" inline>
-              {lanes.pending > 0 ? `${lanes.pending}건 남음` : submitBlockedReason}
+              {lanes.pending > 0 ? `${lanes.pending}건 미결정 · 모두 승인·거절 필요` : submitBlockedReason}
             </Problem>
           )}
           {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 — 카드의 `등록`
@@ -415,6 +415,7 @@ export default function Review() {
             className={`btn btn--primary${submitBlockedReason !== null ? ' btn--unmet' : ''}`}
             aria-disabled={submitBlockedReason !== null || submit.isPending}
             aria-describedby={submitBlockedReason !== null ? 'submit-reason' : undefined}
+            title={submitBlockedReason ?? undefined}
             onClick={() => {
               if (submit.isPending) return;
               if (submitBlockedReason !== null) {

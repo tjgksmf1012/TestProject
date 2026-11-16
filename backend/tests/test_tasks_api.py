@@ -936,13 +936,21 @@ def test_deleting_twice_is_still_fine(client: TestClient, board: dict):
 def test_manual_task_completion_is_isolated_from_contribution_score(
     client: TestClient, board: dict
 ):
-    """⭐ 수동 등록(`+ 새 업무`) 완료는 기록은 남기되 자동 기여 점수 합산에서 격리된다.
+    """⭐ 수동 등록(`+ 새 업무`) 완료는 기록은 남기되 자동 기여 점수·근거 건수·플래그에서 격리된다.
 
-    회의 후보 승인 없이 만든 카드로 `완료`·`마감 준수`를 반복해 점수를
-    올리는 게이밍 경로를 차단한다. 팀이 반영하고 싶으면 기여도 확정에서
+    회의 후보 승인 없이 만든 카드로 `완료`·`마감 준수`·`업무 건수`·`마감 변경`이
+    자동 사슬에 섞이는 경로를 차단한다. 팀이 반영하고 싶으면 기여도 확정에서
     합의 사유와 함께 조정한다.
     """
-    created = client.post(
+    # 회의에서 승인된 업무 1건 완료 (기준 사슬: 업무 1건, 일정 1건)
+    with db_session.session_scope() as s:
+        meeting_task = s.get(m.Task, board["from_meeting"])
+        assert meeting_task is not None
+        meeting_task.deadline = datetime(2099, 12, 31, tzinfo=UTC)
+    assert patch(client, board, board["from_meeting"], {"status": "done"}).status_code == 200
+
+    # 1) 팀원(other): 회의 업무 없이 수동 업무만 완료
+    created_other = client.post(
         f"/api/projects/{board['project_id']}/tasks",
         json={
             "title": "긴급 핫픽스 배포",
@@ -952,25 +960,50 @@ def test_manual_task_completion_is_isolated_from_contribution_score(
             "assignee_ids": [board["other"]],
         },
     )
-    assert created.status_code == 201, created.text
-    manual_task = created.json()
-    assert manual_task["origin"] is None
+    assert created_other.status_code == 201, created_other.text
+    manual_other = created_other.json()
+    assert manual_other["origin"] is None
+    assert patch(client, board, manual_other["id"], {"status": "done"}).status_code == 200
 
-    done = patch(client, board, manual_task["id"], {"status": "done"})
-    assert done.status_code == 200, done.text
+    # 2) 기준 멤버(member): 이미 회의 업무 1건이 있는 상태에서 수동 업무를 만들고
+    #    마감을 여러 번 바꾼 뒤 완료해도 업무 건수(1)·근거 목록·플래그가 변하면 안 된다.
+    created_member = client.post(
+        f"/api/projects/{board['project_id']}/tasks",
+        json={
+            "title": "수동 잡무 정리",
+            "status": "todo",
+            "priority": 0,
+            "deadline": "2099-11-01",
+            "assignee_ids": [board["member"]],
+        },
+    )
+    assert created_member.status_code == 201, created_member.text
+    manual_member = created_member.json()
+    for day in ("2099-11-05", "2099-11-10", "2099-11-15"):
+        assert patch(client, board, manual_member["id"], {"deadline": day}).status_code == 200
+    assert patch(client, board, manual_member["id"], {"status": "done"}).status_code == 200
 
     # 기록(감사 추적) 자체는 남아야 한다
     with db_session.session_scope() as s:
-        rows = s.scalars(
+        other_rows = s.scalars(
             select(m.ContributionEventRow).where(
-                m.ContributionEventRow.source_id == manual_task["id"],
+                m.ContributionEventRow.source_id == manual_other["id"],
                 m.ContributionEventRow.user_id == board["other"],
             )
         ).all()
-        assert {r.event_type for r in rows} == {"task_completed", "deadline_met"}
-        assert all((r.event_metadata or {}).get("origin") == "manual" for r in rows)
+        assert {r.event_type for r in other_rows} == {"task_completed", "deadline_met"}
+        assert all((r.event_metadata or {}).get("origin") == "manual" for r in other_rows)
 
-        # 자동 기여 점수(task / schedule)에는 합산되지 않는다
+        member_rows = s.scalars(
+            select(m.ContributionEventRow).where(
+                m.ContributionEventRow.user_id == board["member"],
+                m.ContributionEventRow.event_type == "deadline_changed",
+            )
+        ).all()
+        assert len(member_rows) == 3
+        assert all((r.event_metadata or {}).get("origin") == "manual" for r in member_rows)
+
+        # 자동 기여 점수(task / schedule)·근거 건수·무결성 플래그에는 합산되지 않는다
         from teamflow.contribution.confidence import CoverageStats
         from teamflow.contribution.events import Category
         from teamflow.contribution.scoring import score_team
@@ -978,8 +1011,31 @@ def test_manual_task_completion_is_isolated_from_contribution_score(
         by_user = scoring_service.load_events(s, board["project_id"])
         profiles = scoring_service.load_profiles(s, board["project_id"])
         result = score_team(by_user, profiles, CoverageStats())
+
         other_score = result.members.get(board["other"])
         if other_score is not None:
             for cat in (Category.TASK, Category.SCHEDULE):
                 if cat in other_score.categories:
-                    assert other_score.categories[cat].raw == 0.0
+                    cs = other_score.categories[cat]
+                    assert cs.raw == 0.0
+                    assert cs.event_count == 0
+                    assert cs.evidence_ids == []
+
+        member_score = result.members[board["member"]]
+        for cat in (Category.TASK, Category.SCHEDULE):
+            cs = member_score.categories[cat]
+            assert cs.event_count == 1
+            assert cs.evidence_ids == [board["from_meeting"]]
+        assert not any(
+            f.code == "frequent_deadline_change" for f in member_score.integrity_flags
+        )
+
+    # HTTP /contributions API 응답에서도 건수·근거가 그대로 격리되는지 끝까지 확인
+    contrib_res = client.get(f"/api/projects/{board['project_id']}/contributions")
+    assert contrib_res.status_code == 200, contrib_res.text
+    members_by_id = {row["user_id"]: row for row in contrib_res.json()["members"]}
+    member_cats = {c["category"]: c for c in members_by_id[board["member"]]["categories"]}
+    assert member_cats["task"]["event_count"] == 1
+    assert member_cats["task"]["evidence_ids"] == [board["from_meeting"]]
+    assert member_cats["schedule"]["event_count"] == 1
+    assert member_cats["schedule"]["evidence_ids"] == [board["from_meeting"]]

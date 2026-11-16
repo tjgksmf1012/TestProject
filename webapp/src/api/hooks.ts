@@ -378,11 +378,13 @@ export function useSettingsMutations(projectId: number | undefined) {
       mutationFn: () => api.post<RevokeResult>(`/api/projects/${projectId}/me/data`),
     }),
     openMeeting: useMutation({
-      mutationFn: () =>
-        api.post<{ meeting_id: number; project_id: number; status: string; consent_url: string }>(
+      mutationFn: (title?: string) => {
+        const trimmed = title?.trim();
+        return api.post<{ meeting_id: number; project_id: number; status: string; consent_url: string }>(
           `/api/projects/${projectId}/meetings`,
-          {},
-        ),
+          trimmed ? { title: trimmed } : {},
+        );
+      },
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'meetings'] });
       },

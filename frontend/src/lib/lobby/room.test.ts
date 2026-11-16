@@ -611,6 +611,15 @@ describe('막아 놓고 말은 하는가 — 동의 단추 (결함 239)', () => 
     // 알아볼 이유가 없습니다 (실패 ③: 할 일을 알려 주고 자리를 안 줌).
     const said = whyConsentBlocked({ sending: false, alreadyAgreed: true });
     strictEqual(said?.includes('거부합니다'), true, String(said));
+
+    // 끝난 회의에서는 버튼 이름이 「거부로 바꾸기」 — 안내 문구도 그 이름과 일치해야 한다.
+    const ended = consentAffordance(false, true);
+    const endedSaid = whyConsentBlocked({
+      sending: false,
+      alreadyAgreed: true,
+      refuseLabel: ended.refuseLabel,
+    });
+    strictEqual(endedSaid?.includes('거부로 바꾸기'), true, String(endedSaid));
   });
 
   it('막는 국면마다 **말이 있다** — 빈 문자열도 아니다', () => {

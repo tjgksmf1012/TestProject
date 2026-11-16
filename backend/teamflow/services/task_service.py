@@ -248,7 +248,7 @@ def _record_completion(
 
     for user_id in who:
         meta: dict[str, object] = {
-            "origin": "meeting" if task.origin_candidate_id else "manual",
+            "origin": _task_origin(task),
         }
         if actor_id is not None:
             meta["completed_by"] = actor_id
@@ -311,7 +311,7 @@ def _record_completion(
         met = local_date(completed_at) <= local_date(deadline)
         verdict = EventType.DEADLINE_MET if met else EventType.DEADLINE_MISSED
 
-    task_origin = "meeting" if task.origin_candidate_id else "manual"
+    task_origin = _task_origin(task)
     for user_id in who:
         _emit(
             session,
@@ -322,6 +322,11 @@ def _record_completion(
             occurred_at=completed_at,
             metadata={"origin": task_origin},
         )
+
+
+def _task_origin(task: m.Task) -> str:
+    """업무가 회의 후보 승인으로 만들어졌는지(`meeting`) 수동 등록인지(`manual`)."""
+    return "meeting" if task.origin_candidate_id else "manual"
 
 
 def create_task(
@@ -676,7 +681,11 @@ def _change_deadline(
             source_id=change.id,
             occurred_at=_now(),
             magnitude=0.0,
-            metadata={"task_id": task.id, "changed_by": actor_id},
+            metadata={
+                "task_id": task.id,
+                "changed_by": actor_id,
+                "origin": _task_origin(task),
+            },
         )
 
 

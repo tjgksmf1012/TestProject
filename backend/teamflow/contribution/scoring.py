@@ -79,7 +79,7 @@ def event_points(event: ContributionEvent) -> float:
 
     # ── task ──────────────────────────────────────────
     if et is EventType.TASK_COMPLETED:
-        if meta.get("origin") == "manual":
+        if _is_manual_event(event):
             # 회의 근거 없이 수동 등록(`+ 새 업무`)으로 만든 업무는 칸반
             # 진행 관리용으로만 남기며, 자동 기여 점수에는 합산하지 않는다.
             return 0.0
@@ -173,9 +173,14 @@ def event_points(event: ContributionEvent) -> float:
 _SCHEDULE_VOLUME_FLOOR = 5
 
 
+def _is_manual_event(event: ContributionEvent) -> bool:
+    """회의 결정 사슬과 분리된 수동 등록(`+ 새 업무`) 이벤트인지 여부."""
+    return event.metadata.get("origin") == "manual"
+
+
 def _schedule_raw(events: list[ContributionEvent]) -> float:
     """일정 준수는 비율 기반. 단순 합산이 아니다."""
-    scored = [e for e in events if e.metadata.get("origin") != "manual"]
+    scored = [e for e in events if not _is_manual_event(e)]
     met = sum(1 for e in scored if e.event_type is EventType.DEADLINE_MET)
     missed = sum(1 for e in scored if e.event_type is EventType.DEADLINE_MISSED)
     total = met + missed
@@ -324,6 +329,10 @@ def _member_raw_by_category(
 
     by_category: dict[Category, list[ContributionEvent]] = {c: [] for c in Category}
     for ev in events:
+        if _is_manual_event(ev):
+            # 회의 근거 없이 수동 등록(`+ 새 업무`)한 업무 이벤트는 감사 기록에는 남기되
+            # 자동 기여 점수·근거 건수·근거 목록에서는 완전히 격리한다.
+            continue
         by_category[ev.category].append(ev)
 
     for category, evs in by_category.items():
@@ -344,11 +353,16 @@ def _member_raw_by_category(
 def _detect_integrity_flags(events: list[ContributionEvent]) -> list[IntegrityFlag]:
     flags: list[IntegrityFlag] = []
 
-    changes = sum(1 for e in events if e.event_type is EventType.DEADLINE_CHANGED)
+    changes = sum(
+        1
+        for e in events
+        if e.event_type is EventType.DEADLINE_CHANGED and not _is_manual_event(e)
+    )
     deadlines = sum(
         1
         for e in events
         if e.event_type in (EventType.DEADLINE_MET, EventType.DEADLINE_MISSED)
+        and not _is_manual_event(e)
     )
     if changes >= 3 and changes > deadlines * 0.5:
         flags.append(

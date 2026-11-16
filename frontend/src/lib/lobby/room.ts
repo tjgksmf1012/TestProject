@@ -125,6 +125,8 @@ export interface ConsentGate {
   sending: boolean;
   /** 이미 내 동의가 명부에 있다 */
   alreadyAgreed: boolean;
+  /** 되돌리는 단추의 실제 라벨 (`consentAffordance.refuseLabel`). 없으면 「거부합니다」. */
+  refuseLabel?: string;
 }
 
 /**
@@ -138,16 +140,17 @@ export interface ConsentGate {
  *
  * ## 왜 「이미 동의했습니다」에 되돌리는 법을 붙이나
  *
- * 되돌리는 단추 이름이 「거부합니다」입니다. 이미 동의한 사람이 그 말을
- * 「취소」로 알아볼 이유가 없습니다 — 이 저장소가 세 번째로 적어 둔 실패
- * (「할 일을 알려 주고 그 일을 할 자리를 안 줌」)를 피하려면 **여기서**
- * 말해야 합니다.
+ * 되돌리는 단추 이름이 상황에 따라 「거부합니다」 또는 「거부로 바꾸기」
+ * 입니다. 이미 동의한 사람이 그 말을 「취소」로 알아볼 이유가 없습니다 —
+ * 이 저장소가 세 번째로 적어 둔 실패(「할 일을 알려 주고 그 일을 할
+ * 자리를 안 줌」)를 피하려면 **실제 버튼 이름**을 여기서 말해야 합니다.
  */
 export function whyConsentBlocked(gate: ConsentGate): string | null {
   // 순서가 있습니다 — 보내는 중이면 그것이 지금의 사실입니다.
   if (gate.sending) return '동의를 남기는 중입니다 — 셋을 차례로 보냅니다';
   if (gate.alreadyAgreed) {
-    return '이미 동의했습니다. 되돌리려면 「거부합니다」를 누르세요';
+    const revertLabel = gate.refuseLabel ?? '거부합니다';
+    return `이미 동의했습니다. 되돌리려면 「${revertLabel}」를 누르세요`;
   }
   return null;
 }

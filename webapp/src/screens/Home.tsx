@@ -403,6 +403,7 @@ export default function Home() {
               type="button"
               className={`btn ${sections.needsReview.length > 0 ? 'btn--secondary' : 'btn--primary'}`}
               disabled={m.openMeeting.isPending}
+              title="새 회의를 열고 회의 로비(이름 수정·트랙·회의록 관리)로 이동합니다"
               onClick={() =>
                 m.openMeeting.mutate(undefined, {
                   onSuccess: (meeting) => navigate(`/meeting/${meeting.meeting_id}/lobby`),

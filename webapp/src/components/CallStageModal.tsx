@@ -9,6 +9,7 @@ import {
   useTracks,
 } from '../api/hooks.ts';
 import { apiFailureText } from '../api/client.ts';
+import { EXTRA_CONSENTS } from '@lib/lobby/room.ts';
 import { meetingLabel } from '@lib/ui/naming.ts';
 import { Problem } from './Problem.tsx';
 
@@ -68,6 +69,7 @@ function MeetingRoom({
   userName: string;
 }) {
   const [meetingId, setMeetingId] = useState<number>();
+  const [draftTitle, setDraftTitle] = useState('');
   const [started, setStarted] = useState(false);
   const [tab, setTab] = useState<'call' | 'record' | 'chat'>('call');
   const [problem, setProblem] = useState<string | null>(null);
@@ -104,7 +106,9 @@ function MeetingRoom({
   const chooseNew = async () => {
     setProblem(null);
     try {
-      setMeetingId((await openMeeting.mutateAsync()).meeting_id);
+      const created = await openMeeting.mutateAsync(draftTitle);
+      setDraftTitle('');
+      setMeetingId(created.meeting_id);
     } catch (error) {
       setProblem(apiFailureText(error));
     }
@@ -234,6 +238,17 @@ function MeetingRoom({
                         모든 참여자의 녹음 동의를 확인한 뒤 실시간 음성 통화와 개별 트랙 녹음을
                         엽니다.
                       </p>
+                      <label htmlFor="call-meeting-title" className="dc-label">
+                        새 회의 이름 (선택)
+                      </label>
+                      <input
+                        id="call-meeting-title"
+                        type="text"
+                        className="dc-input dc-input--spaced"
+                        value={draftTitle}
+                        placeholder="예: 스프린트 2 계획 (비우면 자동 이름)"
+                        onChange={(event) => setDraftTitle(event.target.value)}
+                      />
                       <button
                         type="button"
                         className="dc-btn dc-btn--green"
@@ -370,17 +385,28 @@ function MeetingRoom({
                               />
                               <span>회의 녹음과 전사에 동의합니다</span>
                             </label>
-                            <label className="dc-consent-check">
-                              <input
-                                type="checkbox"
-                                checked={mine.raw_audio_retention === true}
-                                disabled={mutations.consent.isPending}
-                                onChange={(event) =>
-                                  void giveConsent('raw_audio_retention', event.target.checked)
-                                }
-                              />
-                              <span>전사 후 원본 음성 보관에 동의합니다 (선택)</span>
-                            </label>
+                            {EXTRA_CONSENTS.map((item) => {
+                              const field =
+                                item.key === 'rawAudio' ? 'raw_audio_retention' : 'voiceprint_storage';
+                              const checked =
+                                item.key === 'rawAudio'
+                                  ? mine.raw_audio_retention === true
+                                  : mine.voiceprint_storage === true;
+                              return (
+                                <label key={item.key} className="dc-consent-check dc-consent-check--extra">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    disabled={mutations.consent.isPending}
+                                    onChange={(event) => void giveConsent(field, event.target.checked)}
+                                  />
+                                  <span className="dc-consent-copy">
+                                    <span>{item.label}</span>
+                                    <span className="dc-r-sub">{item.hint}</span>
+                                  </span>
+                                </label>
+                              );
+                            })}
                           </fieldset>
                         )}
                         <p id="room-consent-help" role="status" className="dc-r-sub dc-status--spaced">
