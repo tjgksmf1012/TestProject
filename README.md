@@ -244,6 +244,12 @@ start_live.bat
   - `/app/meeting/:id/review` — AI 회의 검토·담당자·마감·원문 근거 확인
   - `/app/project/:id/kanban` — 칸반 보드 (근거 인라인 미리보기 모달 지원)
   - `/app/project/:id/contributions` — 기여도 분석 및 팀 합의 (실시간 잔여 합계 배지)
+  - `/app/project/:id/calendar` — 팀 일정 달력 (회의 예약·일정 변경·마감 일람)
+  - `/app/project/:id/activity` — 팀 활동 기록 감사 로그 (읽기 전용 · 기여도 반영 여부)
+  - `/app/project/:id/search` — 프로젝트 통합 검색 (채팅·회의·업무·일정)
+  - `/app/project/:id/notifications` — 알림함 · 마감 주의 항목 확인
+  - `/app/project/:id/reports` — 회의록·주간 보고·최종 보고서 생성 및 인쇄
+  - `/app/project/:id/settings` — 프로젝트 멤버·가중치·개인 데이터 설정
 
 **주소에 자기가 누구인지 적지 않습니다.** 로그인 화면으로 넘어가고, 그
 뒤로는 서버가 세션 쿠키에서 신원을 읽습니다. 시연 계정은 `seed_demo.py` 가

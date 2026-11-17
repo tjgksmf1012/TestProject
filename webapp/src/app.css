@@ -6416,6 +6416,295 @@ input[type="checkbox"] {
   text-decoration: underline;
 }
 
+/* ---------- SPA 일정 캘린더 (Calendar.tsx) ---------- */
+.tf-cal-grid-pane {
+  flex: 1 1 58%;
+}
+.tf-cal-side-pane {
+  flex: 1 1 42%;
+}
+@media (max-width: 58rem) {
+  .tf-cal-panes {
+    flex-direction: column;
+  }
+}
+.tf-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.tf-cal-wd {
+  text-align: center;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink-muted);
+  padding: 4px 0;
+}
+.tf-cal-cell {
+  min-width: 0;
+  min-height: 68px;
+  padding: 6px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  text-align: left;
+  cursor: pointer;
+}
+.tf-cal-cell:hover {
+  border-color: var(--c-line-strong);
+  background: var(--c-sunken);
+}
+.tf-cal-cell.is-out {
+  background: var(--c-paper);
+  color: var(--c-ink-faint);
+}
+.tf-cal-cell.is-today {
+  border: 2px solid var(--c-evidence);
+}
+.tf-cal-cell.is-picked {
+  outline: 2px solid var(--c-ink);
+  outline-offset: 1px;
+  background: var(--c-evidence-tint);
+}
+.tf-cal-cell__top {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+.tf-cal-cell__num {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+}
+.tf-cal-cell__today {
+  font-size: 10px;
+  font-weight: var(--fw-bold);
+  color: var(--c-evidence);
+}
+.tf-cal-cell__badge {
+  font-size: var(--fs-11);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--c-line);
+  background: var(--c-sunken);
+  color: var(--c-ink);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tf-cal-cell__badge.is-late {
+  border-color: var(--c-danger);
+  background: var(--c-danger-tint);
+  color: var(--c-danger);
+  font-weight: var(--fw-semibold);
+}
+.tf-cal-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tf-cal-item {
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tf-cal-item.is-late {
+  border-left: 3px solid var(--c-danger);
+}
+.tf-cal-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.tf-cal-late-tag {
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--c-danger);
+  color: var(--c-danger);
+  background: var(--c-danger-tint);
+}
+.tf-cal-item__main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tf-cal-item__link {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--c-evidence);
+  text-decoration: none;
+}
+.tf-cal-item__link:hover {
+  text-decoration: underline;
+}
+.tf-cal-item__title {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink);
+}
+.tf-cal-form-card {
+  padding: var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-line);
+  background: var(--c-sunken);
+}
+.tf-cal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.tf-cal-form__row {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+@media (max-width: 30rem) {
+  .tf-cal-cell {
+    min-height: 52px;
+    padding: 4px;
+  }
+  .tf-cal-cell__today {
+    display: none;
+  }
+}
+
+/* ---------- SPA 활동 기록 (Activity.tsx) ---------- */
+.tf-act-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tf-act-item {
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tf-act-item.is-weighty {
+  border-left: 3px solid var(--c-evidence);
+  background: var(--c-evidence-tint);
+}
+.tf-act-item__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tf-act-tag {
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--c-evidence-line);
+  background: var(--c-surface);
+  color: var(--c-evidence);
+}
+.tf-act-who {
+  font-weight: var(--fw-semibold);
+  color: var(--c-ink);
+}
+.tf-act-item__body {
+  font-size: var(--fs-13);
+  color: var(--c-ink);
+}
+
+/* ---------- SPA 통합 검색 (Search.tsx) ---------- */
+.tf-search-form {
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-line);
+  background: var(--c-sunken);
+}
+.tf-search-form__main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: flex-end;
+}
+.tf-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+.tf-search-scope {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-unknown-line);
+  background: var(--c-unknown-tint);
+  color: var(--c-ink);
+}
+.tf-search-group__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+.tf-search-hits {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tf-search-hit {
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-line);
+  background: var(--c-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tf-search-hit__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tf-search-hit__title {
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  color: var(--c-evidence);
+  text-decoration: none;
+}
+a.tf-search-hit__title:hover {
+  text-decoration: underline;
+}
+.tf-search-hit__body {
+  margin: 0;
+  line-height: 1.5;
+}
+
 @media print {
   /* 다크 모드에서 인쇄할 때도 종이 위 가독성을 위해 밝은 인쇄 팔레트로 재설정 */
   :root,

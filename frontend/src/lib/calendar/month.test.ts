@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  appHrefFor,
   dayAriaLabel,
   describeKind,
   describeMonth,
@@ -393,5 +394,11 @@ describe('잡아 둔 일정 무르기 (결함 298)', () => {
     strictEqual(said.includes('주간 스탠드업'), true);
     // `deleteTaskConfirm` 과 달리 「되돌릴 수 없습니다」가 아닙니다.
     strictEqual(said.includes('되돌릴 수 없습니다'), false);
+  });
+
+  it('SPA 목적지(appHrefFor) — 회의는 로비로, 업무는 해당 카드(?task=)로, 마감을 못 누르면 null', () => {
+    strictEqual(appHrefFor(item(), 3), '/meeting/7/lobby');
+    strictEqual(appHrefFor(item({ kind: 'task_due', meeting_id: null, task_id: 9 }), 3), '/project/3/kanban?task=9');
+    strictEqual(appHrefFor(item({ kind: 'project_due', meeting_id: null, task_id: null }), 3), null);
   });
 });

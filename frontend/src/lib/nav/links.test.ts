@@ -274,13 +274,19 @@ describe('navTabs', () => {
 describe('appScreenOf — SPA 주소가 어느 화면인가 (베타 QA)', () => {
   it('⭐ 프로젝트 화면 셋', () => {
     strictEqual(appScreenOf('/project/7/chat'), 'chat');
+    strictEqual(appScreenOf('/project/7/calendar'), 'calendar');
     strictEqual(appScreenOf('/project/7/kanban'), 'kanban');
     strictEqual(appScreenOf('/project/7/contributions'), 'contributions');
     strictEqual(appScreenOf('/project/7/settings/role'), 'project');
     strictEqual(appScreenOf('/project/7/notifications'), 'notifications');
+    strictEqual(appScreenOf('/project/7/activity'), 'activity');
+    strictEqual(appScreenOf('/project/7/search'), 'search');
     strictEqual(appScreenOf('/app/project/7/reports'), 'reports');
     strictEqual(appSecondaryHref('chat', 7), '/project/7/chat');
+    strictEqual(appSecondaryHref('calendar', 7), '/project/7/calendar');
     strictEqual(appSecondaryHref('notifications', 7), '/project/7/notifications');
+    strictEqual(appSecondaryHref('activity', 7), '/project/7/activity');
+    strictEqual(appSecondaryHref('search', 7), '/project/7/search');
     strictEqual(appSecondaryHref('reports', 7), '/project/7/reports');
   });
 

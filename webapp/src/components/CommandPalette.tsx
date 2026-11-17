@@ -137,6 +137,30 @@ export function CommandPalette({
                 closeAnd(() => navigate(appSecondaryHref('chat', projectId))),
             },
             {
+              id: 'calendar',
+              category: '일정',
+              label: '팀 일정 달력',
+              detail: '월간 마감일·예정 회의를 확인하고 새 회의 일정을 잡습니다',
+              run: () =>
+                closeAnd(() => navigate(appSecondaryHref('calendar', projectId))),
+            },
+            {
+              id: 'activity',
+              category: '기록',
+              label: '팀 활동 감사 로그',
+              detail: '누가 언제 업무·기여도·역할을 바꿨는지 기록을 확인합니다',
+              run: () =>
+                closeAnd(() => navigate(appSecondaryHref('activity', projectId))),
+            },
+            {
+              id: 'search',
+              category: '검색',
+              label: '상세 통합 검색',
+              detail: '담당자·상태 조건과 함께 업무·회의·대화 전체를 찾습니다',
+              run: () =>
+                closeAnd(() => navigate(appSecondaryHref('search', projectId))),
+            },
+            {
               id: 'reports',
               category: '보고서',
               label: '회의록 · 제출용 기여도 보고서',
@@ -231,7 +255,19 @@ export function CommandPalette({
         navigate(`/project/${projectId}/chat?channel=${hit.channel_id}`);
       },
     }));
-    return [...base, ...chatResults];
+    const openFullSearch: PaletteItem = {
+      id: 'open-full-search',
+      category: '검색',
+      label: `통합 검색 화면에서 '${debouncedQuery}' 상세 필터로 찾기`,
+      detail: '업무 담당자·상태 조건과 전체 결과를 한 화면에서 봅니다',
+      hint: '이동',
+      run: () => {
+        suppressRestoreRef.current = true;
+        onClose();
+        navigate(`${appSecondaryHref('search', projectId)}?q=${encodeURIComponent(debouncedQuery)}`);
+      },
+    };
+    return [...base, ...chatResults, openFullSearch];
   }, [chatHits, debouncedQuery, hits, navigate, onClose, projectId]);
 
   const items = useMemo(() => [...commands, ...searchItems], [commands, searchItems]);

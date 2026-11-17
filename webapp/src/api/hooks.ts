@@ -12,6 +12,7 @@ import type {
   TypeTally,
 } from './types.ts';
 import type { GithubHealth } from '@lib/github/health.ts';
+import type { CalendarItem } from '@lib/calendar/month.ts';
 import type { Task } from '@lib/kanban/board.ts';
 import type { RosterEntry } from '@lib/lobby/room.ts';
 import type { Analytics } from '@lib/analytics/view.ts';
@@ -885,6 +886,88 @@ export function useChatMutations(projectId: number | undefined) {
         }),
     }),
   };
+}
+
+export interface ActivityEntry {
+  id: number;
+  at: string;
+  action: string;
+  label: string;
+  who: string | null;
+  target: string;
+  target_label: string;
+  touches_contribution: boolean;
+}
+
+export function useCalendar(
+  projectId: number | undefined,
+  since: string,
+  until: string,
+) {
+  return useQuery({
+    queryKey: ['projects', projectId, 'calendar', since, until],
+    queryFn: () => {
+      const qs = new URLSearchParams({ since, until });
+      return api.get<CalendarItem[]>(`/api/projects/${projectId}/calendar?${qs.toString()}`);
+    },
+    enabled: projectId !== undefined,
+  });
+}
+
+export function useScheduleMutations(projectId: number | undefined) {
+  const queryClient = useQueryClient();
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'calendar'] });
+    void queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'meetings'] });
+  };
+  return {
+    schedule: useMutation({
+      mutationFn: (payload: { title: string; at: string }) =>
+        api.post<unknown>(`/api/projects/${projectId}/scheduled-meetings`, payload),
+      onSuccess: refresh,
+    }),
+    reschedule: useMutation({
+      mutationFn: ({ meetingId, title, at }: { meetingId: number; title: string; at: string }) =>
+        api.patch<unknown>(`/api/scheduled-meetings/${meetingId}`, { title, at }),
+      onSuccess: refresh,
+    }),
+    cancel: useMutation({
+      mutationFn: (meetingId: number) =>
+        api.del<void>(`/api/scheduled-meetings/${meetingId}`),
+      onSuccess: refresh,
+    }),
+  };
+}
+
+export function useActivity(projectId: number | undefined, limit = 100) {
+  return useQuery({
+    queryKey: ['projects', projectId, 'activity', limit],
+    queryFn: () =>
+      api.get<ActivityEntry[]>(`/api/projects/${projectId}/activity?limit=${limit}`),
+    enabled: projectId !== undefined,
+  });
+}
+
+export function useFilteredProjectSearch(
+  projectId: number | undefined,
+  params: { q: string; assignee: string; status: string } | null,
+) {
+  const enabled =
+    projectId !== undefined &&
+    params !== null &&
+    canSearch(params.q, { assignee: params.assignee, status: params.status });
+  return useQuery({
+    queryKey: ['projects', projectId, 'search-page', params],
+    queryFn: () => {
+      const qs = new URLSearchParams();
+      if (params!.q.trim() !== '') qs.set('q', params!.q.trim());
+      if (params!.assignee !== '') qs.set('assignee_id', params!.assignee);
+      if (params!.status !== '') qs.set('status', params!.status);
+      return api.get<Hit[]>(`/api/projects/${projectId}/search?${qs.toString()}`);
+    },
+    enabled,
+    staleTime: 15_000,
+  });
 }
 
 

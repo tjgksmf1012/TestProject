@@ -95,9 +95,12 @@ export function labelOf(screen: ScreenId): string {
 export function appScreenOf(pathname: string): ScreenId {
   const path = (pathname || '/').replace(/^\/app(?=\/|$)/, '') || '/';
   if (/^\/project\/\d+\/chat/.test(path)) return 'chat';
+  if (/^\/project\/\d+\/calendar/.test(path)) return 'calendar';
   if (/^\/project\/\d+\/kanban/.test(path)) return 'kanban';
   if (/^\/project\/\d+\/contributions/.test(path)) return 'contributions';
   if (/^\/project\/\d+\/notifications/.test(path)) return 'notifications';
+  if (/^\/project\/\d+\/activity/.test(path)) return 'activity';
+  if (/^\/project\/\d+\/search/.test(path)) return 'search';
   if (/^\/project\/\d+\/reports/.test(path)) return 'reports';
   if (/^\/project\/\d+\/settings/.test(path)) return 'project';
   if (/^\/meeting\/\d+\/lobby/.test(path)) return 'lobby';
@@ -107,7 +110,7 @@ export function appScreenOf(pathname: string): ScreenId {
 
 /** SPA 보조 화면 주소 (`/app` 라우터 basename 제외). */
 export function appSecondaryHref(
-  screen: 'notifications' | 'reports' | 'chat',
+  screen: 'notifications' | 'reports' | 'chat' | 'calendar' | 'activity' | 'search',
   projectId: number,
 ): string {
   return `/project/${projectId}/${screen}`;

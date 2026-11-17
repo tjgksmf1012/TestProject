@@ -202,6 +202,13 @@ export function hrefFor(item: CalendarItem, projectId: number): string | null {
   return null;
 }
 
+/** SPA 달력 항목 목적지 (`/app` basename 제외). */
+export function appHrefFor(item: CalendarItem, projectId: number): string | null {
+  if (item.meeting_id !== null) return `/meeting/${item.meeting_id}/lobby`;
+  if (item.task_id !== null) return `/project/${projectId}/kanban?task=${item.task_id}`;
+  return null;
+}
+
 /**
  * 늦은 것인가 — **끝나지 않았고** 날짜가 지났는가.
  *

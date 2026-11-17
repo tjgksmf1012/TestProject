@@ -45,6 +45,7 @@ import {
   trendLine,
 } from '@lib/analytics/trends.ts';
 import { codeProblem, normalizeCode, titleProblem } from '@lib/project/setup.ts';
+import { appSecondaryHref } from '@lib/nav/links.ts';
 import { describeActionFailure } from '@lib/ui/load.ts';
 import { meetingLabel } from '@lib/ui/naming.ts';
 import { plainText } from '@lib/ui/plain.ts';
@@ -502,9 +503,27 @@ export default function Home() {
                   </Link>
                   <Link
                     className="btn btn--secondary btn--sm"
-                    to={`/project/${project.project_id}/reports`}
+                    to={appSecondaryHref('reports', project.project_id)}
                   >
                     보고서 →
+                  </Link>
+                  <Link
+                    className="btn btn--ghost btn--sm"
+                    to={appSecondaryHref('calendar', project.project_id)}
+                  >
+                    일정 달력
+                  </Link>
+                  <Link
+                    className="btn btn--ghost btn--sm"
+                    to={appSecondaryHref('activity', project.project_id)}
+                  >
+                    활동 기록
+                  </Link>
+                  <Link
+                    className="btn btn--ghost btn--sm"
+                    to={appSecondaryHref('search', project.project_id)}
+                  >
+                    통합 검색
                   </Link>
                 </div>
                 <button

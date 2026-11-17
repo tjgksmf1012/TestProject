@@ -22,6 +22,9 @@ const AiDemoLab = lazy(() => import('./screens/AiDemoLab.tsx'));
 const Notifications = lazy(() => import('./screens/Notifications.tsx'));
 const Reports = lazy(() => import('./screens/Reports.tsx'));
 const Chat = lazy(() => import('./screens/Chat.tsx'));
+const Calendar = lazy(() => import('./screens/Calendar.tsx'));
+const Activity = lazy(() => import('./screens/Activity.tsx'));
+const Search = lazy(() => import('./screens/Search.tsx'));
 import { watchForUncaught } from './api/diag.ts';
 import './app.css';
 import { CallStageModal } from './components/CallStageModal.tsx';
@@ -163,9 +166,12 @@ const router = createBrowserRouter(
         { path: '/project/:projectId/settings/:section', element: <Settings /> },
         { path: '/project/:projectId/settings', element: <Navigate to="role" replace /> },
         { path: '/project/:projectId/chat', element: <Chat /> },
+        { path: '/project/:projectId/calendar', element: <Calendar /> },
         { path: '/project/:projectId/kanban', element: <Kanban /> },
         { path: '/project/:projectId/contributions', element: <Contributions /> },
         { path: '/project/:projectId/notifications', element: <Notifications /> },
+        { path: '/project/:projectId/activity', element: <Activity /> },
+        { path: '/project/:projectId/search', element: <Search /> },
         { path: '/project/:projectId/reports', element: <Reports /> },
         { path: '/meeting/:meetingId/lobby', element: <Lobby /> },
         { path: '/meeting/:meetingId/review', element: <Review /> },
