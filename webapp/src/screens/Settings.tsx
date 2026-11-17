@@ -68,10 +68,8 @@ import { Problem } from '../components/Problem.tsx';
 
 const SECTIONS = [
   { group: '내 설정', key: 'role', label: '역할과 가중치' },
-  { group: '내 설정', key: 'github', label: 'GitHub 계정' },
   { group: '내 설정', key: 'profile', label: '내 정보' },
   { group: '프로젝트', key: 'members', label: '팀원' },
-  { group: '프로젝트', key: 'repo', label: '저장소 연결' },
   { group: '프로젝트', key: 'general', label: '이름과 초대' },
 ] as const;
 
@@ -1020,13 +1018,13 @@ function DangerSection({ revoke }: { revoke: ReturnType<typeof useSettingsMutati
           <h4>남는 것</h4>
           <ul>
             <li>회의록의 발화 텍스트</li>
-            <li>칸반 업무와 GitHub 활동</li>
+            <li>칸반 업무와 기여 기록</li>
           </ul>
         </div>
       </div>
       <Disclosure summary="기여도는 어떻게 되나요">
         <p>
-          회의 발화 텍스트와 업무·코드 활동은 남으므로 기여도 계산은 그대로
+          회의 발화 텍스트와 업무 활동은 남으므로 기여도 계산은 그대로
           이어집니다. 다만 지운 뒤의 회의는 내 트랙이 없어 회의 기여를 재지
           못할 수 있고, 그 구간은 0이 아니라 “측정하지 못했다”로 남습니다.
         </p>

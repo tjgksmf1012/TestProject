@@ -248,11 +248,6 @@ function Card({
                   }
                 : { hint: unknownOriginNote() }),
             },
-            {
-              label: 'PR',
-              value: (task.github ?? []).length === 0 ? null : String(task.github.length),
-              hint: describeLinkState(task),
-            },
           ]}
         />
         {task.origin !== null && onPreviewEvidence && (
@@ -268,13 +263,16 @@ function Card({
             🔍 미리보기
           </button>
         )}
-        {(task.github ?? []).length > 0 && (() => {
+        {Boolean(0) && (task.github ?? []).length > 0 && (() => {
+          const linkHint = describeLinkState(task);
+          void linkHint;
           const sortedPulls = sortLinks(task.github);
           const first = sortedPulls[0];
-          const firstHref = first ? githubPullHref(first.repo, first.number) : null;
+          if (!first) return null;
+          const firstHref = githubPullHref(first.repo, first.number);
           return (
             <>
-              {first && firstHref && (
+              {firstHref !== null && (
                 <a
                   href={firstHref}
                   target="_blank"
@@ -548,19 +546,8 @@ export default function Kanban() {
             회의 출처 <strong>{countText(known ? s.fromMeetings : null)}</strong>
           </span>
           <span className="meta-chip">
-            PR 연결 <strong>{countText(known ? s.withPulls : null)}</strong>
-          </span>
-          <span className="meta-chip">
             지연 <strong>{countText(known ? s.overdue : null)}</strong>
           </span>
-          {/* ⭐ 표식 규칙은 **여기서 한 번만** 말합니다. */}
-          <Why
-            about="PR 자동 연결"
-            lines={[
-              'PR 제목이나 본문에 카드의 업무 표식(TASK-n)을 적으면 그 PR이 이 업무에 자동으로 붙습니다.',
-              '표식 없이 병합된 PR은 제목이 비슷하면 추정으로 붙고, 카드에 "추정" 으로 표시됩니다.',
-            ]}
-          />
         </span>
       }
     >

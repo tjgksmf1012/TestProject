@@ -776,21 +776,12 @@ export function SettingsModal({
 
                     <div className="dc-acct-row">
                       <div>
-                        <div className="dc-r-title">소셜 로그인 및 GitHub 기여도 연결</div>
+                        <div className="dc-r-title">소셜 로그인</div>
                         <div className="dc-r-sub">
-                          Google 로그인은 로그인 화면에서 공식 OAuth 2.0으로 이용합니다. 이메일 인증
-                          발송은 아직 지원하지 않으며, GitHub 아이디는 프로젝트 설정에서 등록합니다.
+                          Google 로그인은 로그인 화면에서 공식 OAuth 2.0으로 이용합니다 (이메일 인증
+                          발송과 소셜 계정 추가 연결은 아직 지원하지 않습니다).
                         </div>
                       </div>
-                      {projectId !== undefined && (
-                        <Link
-                          to={`/project/${projectId}/settings/github`}
-                          className="dc-btn dc-btn--ghost dc-btn--link"
-                          onClick={onClose}
-                        >
-                          GitHub 설정
-                        </Link>
-                      )}
                     </div>
 
                     <div className="dc-acct-row dc-acct-row--last">

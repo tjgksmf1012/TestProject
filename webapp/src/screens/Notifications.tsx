@@ -60,6 +60,14 @@ export default function Notifications() {
     if (notice.task_id !== null) {
       return { internal: `${appRailHref('kanban', projectId)}?task=${notice.task_id}` };
     }
+    if (notice.message_id !== null) {
+      return {
+        internal:
+          notice.channel_id !== null
+            ? `/project/${projectId}/chat?channel=${notice.channel_id}`
+            : `/project/${projectId}/chat`,
+      };
+    }
     const legacy = hrefFor(notice, projectId);
     return legacy !== null ? { external: legacy } : null;
   };

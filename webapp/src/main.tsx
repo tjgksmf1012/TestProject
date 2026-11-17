@@ -21,6 +21,7 @@ const Review = lazy(() => import('./screens/Review.tsx'));
 const AiDemoLab = lazy(() => import('./screens/AiDemoLab.tsx'));
 const Notifications = lazy(() => import('./screens/Notifications.tsx'));
 const Reports = lazy(() => import('./screens/Reports.tsx'));
+const Chat = lazy(() => import('./screens/Chat.tsx'));
 import { watchForUncaught } from './api/diag.ts';
 import './app.css';
 import { CallStageModal } from './components/CallStageModal.tsx';
@@ -161,6 +162,7 @@ const router = createBrowserRouter(
         { path: '/project/:projectId/demo', element: <Navigate to="/demo" replace /> },
         { path: '/project/:projectId/settings/:section', element: <Settings /> },
         { path: '/project/:projectId/settings', element: <Navigate to="role" replace /> },
+        { path: '/project/:projectId/chat', element: <Chat /> },
         { path: '/project/:projectId/kanban', element: <Kanban /> },
         { path: '/project/:projectId/contributions', element: <Contributions /> },
         { path: '/project/:projectId/notifications', element: <Notifications /> },

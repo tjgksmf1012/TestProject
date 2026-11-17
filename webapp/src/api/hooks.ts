@@ -773,3 +773,91 @@ export function useGenerateReport(projectId: number | undefined) {
   });
 }
 
+export function useChatMutations(projectId: number | undefined) {
+  return {
+    sendMessage: useMutation({
+      mutationFn: ({
+        channelId,
+        body,
+        replyToId,
+      }: {
+        channelId: number;
+        body: string;
+        replyToId: number | null;
+      }) =>
+        api.post<{
+          id: number;
+          channel_id: number;
+          author_id: number;
+          author_name: string;
+          body: string;
+          reply_to_id: number | null;
+          created_at: string;
+          edited_at: string | null;
+          deleted: boolean;
+          mentions: string[];
+          reactions: Array<{ mark: string; label: string; count: number }>;
+          my_reaction: string | null;
+        }>(`/api/channels/${channelId}/messages`, {
+          body,
+          reply_to_id: replyToId,
+        }),
+    }),
+    editMessage: useMutation({
+      mutationFn: ({ messageId, body }: { messageId: number; body: string }) =>
+        api.patch<{
+          id: number;
+          channel_id: number;
+          author_id: number;
+          author_name: string;
+          body: string;
+          reply_to_id: number | null;
+          created_at: string;
+          edited_at: string | null;
+          deleted: boolean;
+          mentions: string[];
+          reactions: Array<{ mark: string; label: string; count: number }>;
+          my_reaction: string | null;
+        }>(`/api/messages/${messageId}`, { body }),
+    }),
+    deleteMessage: useMutation({
+      mutationFn: (messageId: number) => api.del<void>(`/api/messages/${messageId}`),
+    }),
+    setReaction: useMutation({
+      mutationFn: ({ messageId, mark }: { messageId: number; mark: string }) =>
+        api.put<unknown>(`/api/messages/${messageId}/reaction`, { mark }),
+    }),
+    removeReaction: useMutation({
+      mutationFn: (messageId: number) => api.del<void>(`/api/messages/${messageId}/reaction`),
+    }),
+    createChannel: useMutation({
+      mutationFn: (payload: { name: string; kind: string }) =>
+        api.post<{ id: number; kind: string; name: string; position: number }>(
+          `/api/projects/${projectId}/channels`,
+          payload,
+        ),
+    }),
+    renameChannel: useMutation({
+      mutationFn: ({ channelId, name }: { channelId: number; name: string }) =>
+        api.patch<unknown>(`/api/channels/${channelId}`, { name }),
+    }),
+    archiveChannel: useMutation({
+      mutationFn: (channelId: number) => api.del<void>(`/api/channels/${channelId}`),
+    }),
+    reorderChannels: useMutation({
+      mutationFn: (channelIds: number[]) =>
+        api.put<unknown>(`/api/projects/${projectId}/channels/order`, {
+          channel_ids: channelIds,
+        }),
+    }),
+    startVoiceMeeting: useMutation({
+      mutationFn: (title: string) =>
+        api.post<{ id: number; meeting_id?: number }>('/api/meetings', {
+          project_id: projectId,
+          title,
+        }),
+    }),
+  };
+}
+
+

@@ -67,7 +67,7 @@ import { Problem } from '../components/Problem.tsx';
 function evidenceChain(member: MemberScore): ChainLink[] {
   const gaps = new Set((member.measurement_gaps ?? []).map((g) => g.category));
   const counts = new Map(categoriesForDisplay(member).map((c) => [c.category, c.event_count]));
-  return ['meeting', 'task', 'code'].map((category) => {
+  return ['meeting', 'task'].map((category) => {
     const label = describeCategory(category);
     // ⚠️ **팀 전체에 잰 범주가 하나도 없으면 전부 빈 고리입니다** (결함 191).
     //    `counts` 가 비어 있다고 `0` 을 적으면, 프로젝트를 막 만든 팀의
@@ -383,8 +383,8 @@ export default function Contributions() {
           <div className="pane__body">
             {members.length === 0 ? (
               <div className="empty">
-                아직 기여도를 계산할 활동 기록이 없습니다. 회의를 열거나 GitHub
-                저장소를 연결하면 여기서 근거와 함께 볼 수 있습니다.
+                아직 기여도를 계산할 활동 기록이 없습니다. 회의를 열고 업무를
+                진행하면 여기서 근거와 함께 볼 수 있습니다.
               </div>
             ) : (
               members.map((member) => {
@@ -409,7 +409,7 @@ export default function Contributions() {
                     ? ['근거가 하나도 없는 숫자입니다 — 활동 기록이 이 사람에게 하나도 붙지 않았습니다.']
                     : []),
                   ...categoriesForDisplay(member)
-                    .filter((c) => c.event_count === 0)
+                    .filter((c) => c.category !== 'code' && c.event_count === 0)
                     .map(
                       (c) =>
                         `${describeCategory(c.category)} 활동은 기록이 0건입니다 — 안 한 것인지 측정이 안 닿은 것인지는 팀이 압니다.`,

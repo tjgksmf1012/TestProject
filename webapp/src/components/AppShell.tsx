@@ -133,6 +133,25 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
       icon: <IconHome />,
     },
     {
+      label: '채팅',
+      screen: 'chat',
+      active: pathname.includes('/chat'),
+      icon: (
+        <svg
+          className="rail__icon"
+          viewBox="0 0 18 18"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M2.5 3.5h13v8.5H6l-3.5 2.8V3.5z" />
+        </svg>
+      ),
+    },
+    {
       label: '칸반',
       screen: 'kanban' as const,
       active: pathname.includes('/kanban'),
@@ -152,7 +171,12 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
     },
   ].map((item) => ({
     ...item,
-    to: pid === undefined ? '/' : appRailHref(item.screen, pid),
+    to:
+      pid === undefined
+        ? '/'
+        : item.screen === 'chat'
+          ? appSecondaryHref('chat', pid)
+          : appRailHref(item.screen as never, pid),
     blocked: noProject && item.screen !== 'home',
   }));
 

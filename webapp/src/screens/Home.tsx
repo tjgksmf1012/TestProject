@@ -467,6 +467,12 @@ export default function Home() {
                   </button>
                   <Link
                     className="btn btn--secondary btn--sm"
+                    to={`/project/${project.project_id}/chat`}
+                  >
+                    프로젝트 채팅 →
+                  </Link>
+                  <Link
+                    className="btn btn--secondary btn--sm"
                     to={`/project/${project.project_id}/kanban`}
                   >
                     칸반 보드 →
@@ -530,6 +536,27 @@ export default function Home() {
                   <div className="tf-bento-card__top">
                     <span className="tf-bento-icon">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M4 5h16v10H8l-4 4V5z" />
+                      </svg>
+                    </span>
+                    <span className="tf-bento-badge">실시간 채널</span>
+                  </div>
+                  <div className="tf-bento-card__title">프로젝트 채팅</div>
+                  <div className="tf-bento-card__sub">
+                    #일반 등 채널별로 대화하고 @이름으로 팀원을 언급합니다 (기여도와 무관)
+                  </div>
+                  <Link
+                    className="btn btn--secondary btn--sm tf-bento-btn"
+                    to={`/project/${project.project_id}/chat`}
+                  >
+                    채팅 열기 →
+                  </Link>
+                </div>
+
+                <div className="tf-bento-card">
+                  <div className="tf-bento-card__top">
+                    <span className="tf-bento-icon">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                         <rect x="3" y="4" width="5" height="16" rx="1" />
                         <rect x="10" y="4" width="5" height="11" rx="1" />
                         <rect x="17" y="4" width="4" height="14" rx="1" />
@@ -541,7 +568,7 @@ export default function Home() {
                   </div>
                   <div className="tf-bento-card__title">칸반 보드</div>
                   <div className="tf-bento-card__sub">
-                    할 일 배정, 진행 상태, GitHub PR 연결 내역을 관리합니다
+                    회의에서 승인된 할 일 배정, 진행 상태, 마감 일정을 관리합니다
                   </div>
                   <Link
                     className="btn btn--secondary btn--sm tf-bento-btn"
@@ -565,7 +592,7 @@ export default function Home() {
                   </div>
                   <div className="tf-bento-card__title">팀원별 기여도</div>
                   <div className="tf-bento-card__sub">
-                    회의 참여, 업무 완료, 코드 기여 내역을 한눈에 확인합니다
+                    회의 참여와 업무 완료 근거를 바탕으로 팀원별 기여도를 확인합니다
                   </div>
                   <Link
                     className="btn btn--secondary btn--sm tf-bento-btn"

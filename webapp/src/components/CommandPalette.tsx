@@ -71,7 +71,10 @@ export function CommandPalette({
   }, [open, query]);
 
   const searchQuery = useProjectSearch(projectId, debouncedQuery);
-  const hits = searchQuery.data ?? [];
+  const hits = useMemo(
+    () => (searchQuery.data ?? []).filter((h) => h.kind !== 'github'),
+    [searchQuery.data],
+  );
 
   const commands = useMemo<PaletteItem[]>(() => {
     const closeAnd = (fn: () => void, suppressRestore = true) => {
@@ -95,7 +98,7 @@ export function CommandPalette({
               id: 'kanban',
               category: '업무',
               label: '칸반 보드',
-              detail: '업무 상태와 회의·PR 근거를 확인합니다',
+              detail: '업무 상태와 회의 근거를 확인합니다',
               run: () => closeAnd(() => navigate(appRailHref('kanban', projectId))),
             },
             {
@@ -108,7 +111,7 @@ export function CommandPalette({
             {
               id: 'project-settings',
               category: '설정',
-              label: '프로젝트 설정 (역할·GitHub·팀원)',
+              label: '프로젝트 설정 (역할·내 정보·팀원)',
               run: () => closeAnd(() => navigate(appRailHref('project', projectId))),
             },
             {
@@ -132,10 +135,9 @@ export function CommandPalette({
               id: 'chat',
               category: '채팅',
               label: '프로젝트 채팅',
-              detail: '채널별 실시간 팀 대화와 스레드·검색 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
-              hint: '새 탭',
+              detail: '채널별 실시간 팀 대화와 답글·반응·대화 찾기',
               run: () =>
-                closeAnd(() => window.open(`/chat.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
+                closeAnd(() => navigate(appSecondaryHref('chat', projectId))),
             },
             {
               id: 'reports',
