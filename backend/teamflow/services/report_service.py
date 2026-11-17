@@ -387,7 +387,7 @@ def generate_period(
         people=_people(session, project_id),
         period_start=period_start,
         period_end=period_end,
-        github_backfilled=project.github_backfilled_to is not None,
+        github_backfilled=True,
         confirmed=confirmed,
         # ⛔ 예전에는 `str(c)` 라 문서에 `document, schedule, peer` 가
         #    그대로 나갔습니다 (결함 291).

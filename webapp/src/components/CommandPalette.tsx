@@ -12,7 +12,11 @@ import {
   groupByKind,
   mayHaveMore,
 } from '@lib/search/view.ts';
-import { useProjectSearch, useUnreadNotifications } from '../api/hooks.ts';
+import {
+  useChatMessageSearch,
+  useProjectSearch,
+  useUnreadNotifications,
+} from '../api/hooks.ts';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -71,10 +75,12 @@ export function CommandPalette({
   }, [open, query]);
 
   const searchQuery = useProjectSearch(projectId, debouncedQuery);
+  const chatSearchQuery = useChatMessageSearch(projectId, debouncedQuery);
   const hits = useMemo(
     () => (searchQuery.data ?? []).filter((h) => h.kind !== 'github'),
     [searchQuery.data],
   );
+  const chatHits = useMemo(() => chatSearchQuery.data ?? [], [chatSearchQuery.data]);
 
   const commands = useMemo<PaletteItem[]>(() => {
     const closeAnd = (fn: () => void, suppressRestore = true) => {
@@ -123,53 +129,20 @@ export function CommandPalette({
                 closeAnd(() => navigate(appSecondaryHref('notifications', projectId))),
             },
             {
-              id: 'calendar',
-              category: '일정',
-              label: '일정 캘린더',
-              detail: '업무 마감일 월간 달력과 예정된 회의 목록 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
-              hint: '새 탭',
-              run: () =>
-                closeAnd(() => window.open(`/calendar.html?project=${projectId}`, '_blank', 'noopener,noreferrer')),
-            },
-            {
               id: 'chat',
               category: '채팅',
               label: '프로젝트 채팅',
-              detail: '채널별 실시간 팀 대화와 답글·반응·대화 찾기',
+              detail: '채널별 실시간 팀 대화, @멘션, 메시지에서 바로 칸반 업무 등록',
               run: () =>
                 closeAnd(() => navigate(appSecondaryHref('chat', projectId))),
             },
             {
               id: 'reports',
               category: '보고서',
-              label: '최종 기여도 보고서 (제출용)',
+              label: '회의록 · 제출용 기여도 보고서',
               detail: '회의록·주간·최종 보고서 조회, 마크다운(.md) 저장 및 인쇄/PDF 내보내기',
               run: () =>
                 closeAnd(() => navigate(appSecondaryHref('reports', projectId))),
-            },
-            {
-              id: 'activity',
-              category: '활동',
-              label: '활동 기록 (감사 로그)',
-              detail: '업무 변경, 후보 승인, 기여 확정 이력을 확인합니다 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
-              hint: '새 탭',
-              run: () =>
-                closeAnd(() =>
-                  window.open(`/activity.html?project=${projectId}`, '_blank', 'noopener,noreferrer'),
-                ),
-            },
-            {
-              id: 'full-search',
-              category: '검색',
-              label: '전체 통합 검색 화면 열기',
-              detail: '발언·업무·보고서 통합 검색 (새 탭 · 상단 복귀 링크로 돌아옵니다)',
-              hint: '새 탭',
-              run: () =>
-                closeAnd(() => {
-                  const qs = new URLSearchParams({ project: String(projectId) });
-                  if (query.trim()) qs.set('q', query.trim());
-                  window.open(`/search.html?${qs.toString()}`, '_blank', 'noopener,noreferrer');
-                }),
             },
           ]
         : [];
@@ -183,12 +156,6 @@ export function CommandPalette({
           closeAnd(() =>
             navigate(projectId !== undefined ? appRailHref('home', projectId) : '/'),
           ),
-      },
-      {
-        id: 'ai-lab',
-        category: '체험',
-        label: 'AI 데모 랩 (음향 벡터 · 규칙 체험)',
-        run: () => closeAnd(() => navigate('/demo')),
       },
       {
         id: 'voice-settings',
@@ -226,7 +193,7 @@ export function CommandPalette({
 
   const searchItems = useMemo<PaletteItem[]>(() => {
     if (projectId === undefined || !canSearch(debouncedQuery, null)) return [];
-    return hits.map((hit, index) => {
+    const base = hits.map((hit, index) => {
       const target = appHrefForHit(hit, projectId);
       const snippet = hit.body ? excerpt(hit.body, debouncedQuery, 68) : '';
       const detailParts = [hit.who, snippet, hit.status].filter(Boolean);
@@ -252,7 +219,20 @@ export function CommandPalette({
         },
       };
     });
-  }, [debouncedQuery, hits, navigate, onClose, projectId]);
+    const chatResults = chatHits.slice(0, 12).map((hit) => ({
+      id: `chat-hit-${hit.message.id}`,
+      category: '채팅',
+      label: `#${hit.channel_name} · ${hit.message.author_name}`,
+      detail: excerpt(hit.message.body, debouncedQuery, 68),
+      hint: '채널로 이동',
+      run: () => {
+        suppressRestoreRef.current = true;
+        onClose();
+        navigate(`/project/${projectId}/chat?channel=${hit.channel_id}`);
+      },
+    }));
+    return [...base, ...chatResults];
+  }, [chatHits, debouncedQuery, hits, navigate, onClose, projectId]);
 
   const items = useMemo(() => [...commands, ...searchItems], [commands, searchItems]);
   const truncatedKinds = useMemo(

@@ -321,7 +321,15 @@ export default function Kanban() {
   const { createTask, patchTask, setAssignees, deleteTask } = useTaskMutations(projectId);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [selectedAssignee, setSelectedAssignee] = useState<number | null>(null);
-  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
+  const requestedFilter = searchParams.get('filter');
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>(
+    requestedFilter === 'mine' ||
+      requestedFilter === 'meeting' ||
+      requestedFilter === 'manual' ||
+      requestedFilter === 'overdue'
+      ? requestedFilter
+      : 'all',
+  );
 
   // 새 업무 만들기 모달
   const [showCreateModal, setShowCreateModal] = useState(false);

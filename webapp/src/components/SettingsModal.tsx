@@ -428,7 +428,7 @@ export function SettingsModal({
                   className="dc-nav-btn dc-btn--link"
                   onClick={onClose}
                 >
-                  역할·GitHub 상세 설정 →
+                  프로젝트 상세 설정 →
                 </Link>
               </>
             )}
@@ -592,10 +592,9 @@ export function SettingsModal({
                       <div className="dc-voiceid-hdr">
                         <div className="dc-voiceid-title">
                           <div>
-                            <div className="dc-r-title">발언자 구분 안내</div>
+                            <div className="dc-r-title">발언자 구분 방식</div>
                             <div className="dc-r-sub">
-                              각자의 녹음 트랙으로 발언자를 구분합니다. 성문 자동 매칭과 목소리
-                              보정은 아직 지원하지 않습니다.
+                              참가자별 개별 녹음 트랙을 기준으로 발언자를 구분하므로 겹친 대화도 정확히 분리됩니다.
                             </div>
                           </div>
                         </div>
@@ -778,8 +777,7 @@ export function SettingsModal({
                       <div>
                         <div className="dc-r-title">소셜 로그인</div>
                         <div className="dc-r-sub">
-                          Google 로그인은 로그인 화면에서 공식 OAuth 2.0으로 이용합니다 (이메일 인증
-                          발송과 소셜 계정 추가 연결은 아직 지원하지 않습니다).
+                          Google 계정 OAuth 2.0 로그인을 로그인 화면에서 바로 이용할 수 있습니다.
                         </div>
                       </div>
                     </div>

@@ -1149,6 +1149,9 @@ def create_project(payload: ProjectIn, session: DbSession, user: CurrentUser) ->
         )
     )
     session.flush()
+    channel_service.create_channel(
+        session, project.id, kind="text", name="일반", created_by=user.id
+    )
 
     return ProjectOut(
         project_id=project.id,

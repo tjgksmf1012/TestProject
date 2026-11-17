@@ -143,9 +143,13 @@ function ProjectHealthPane({
             {progressText(analytics.progress)}
           </div>
           {late !== null && (
-            <div className="tf-late-pill">
-              <span aria-hidden="true">⚠</span> {late}
-            </div>
+            <Link
+              to={`/project/${projectId}/kanban?filter=overdue`}
+              className="tf-late-pill tf-late-pill--link"
+              title="마감이 지난 업무만 모아 칸반에서 확인합니다"
+            >
+              <span aria-hidden="true">⚠</span> {late} →
+            </Link>
           )}
         </div>
 
@@ -224,6 +228,18 @@ function ProjectHealthPane({
             )}
           </div>
         </details>
+
+        <div className="tf-health-card tf-health-card--footer">
+          <div className="tf-health-card__hdr">
+            <h3 className="tf-health-card__title">제출용 보고서</h3>
+          </div>
+          <p className="t12 muted" style={{ margin: '0 0 8px' }}>
+            회의록·주간·최종 기여도 보고서를 생성하고 .md 또는 PDF로 저장합니다.
+          </p>
+          <Link className="btn btn--secondary btn--sm" to={`/project/${projectId}/reports`}>
+            보고서 열기 →
+          </Link>
+        </div>
       </div>
     </section>
   );
@@ -433,21 +449,6 @@ export default function Home() {
           <button type="button" className="btn btn--ghost btn--sm" onClick={start('join')}>
             초대 코드
           </button>
-          {project !== undefined && (
-            <button
-              type="button"
-              className={`btn ${sections.needsReview.length > 0 ? 'btn--secondary' : 'btn--primary'}`}
-              disabled={m.openMeeting.isPending}
-              title="새 회의를 열고 회의 로비(이름 수정·트랙·회의록 관리)로 이동합니다"
-              onClick={() =>
-                m.openMeeting.mutate(undefined, {
-                  onSuccess: (meeting) => navigate(`/meeting/${meeting.meeting_id}/lobby`),
-                })
-              }
-            >
-              회의 열기
-            </button>
-          )}
         </div>
       }
     >
@@ -482,6 +483,12 @@ export default function Home() {
                     to={`/project/${project.project_id}/contributions`}
                   >
                     기여도 보기 →
+                  </Link>
+                  <Link
+                    className="btn btn--secondary btn--sm"
+                    to={`/project/${project.project_id}/reports`}
+                  >
+                    보고서 →
                   </Link>
                 </div>
                 <button
@@ -676,7 +683,7 @@ export default function Home() {
                       <strong style={{ fontSize: '13px' }}>칸반 보드 & 기여도 산출</strong>
                     </div>
                     <p className="t12 muted" style={{ margin: 0, lineHeight: 1.5 }}>
-                      승인된 업무가 칸반으로 넘어가고, GitHub PR과 함께 4대 불변식 기여도 구간으로 기록됩니다.
+                      승인된 업무가 칸반으로 넘어가고, 회의·업무·일정 근거를 바탕으로 기여도 구간과 제출용 보고서로 기록됩니다.
                     </p>
                   </div>
                 </div>
@@ -694,8 +701,8 @@ export default function Home() {
                   >
                     🎤 첫 회의 시작하기
                   </button>
-                  <Link to="/demo" className="btn btn--secondary">
-                    🧪 AI 기능 체험관 (Demo Lab) 둘러보기 →
+                  <Link to={`/project/${project.project_id}/chat`} className="btn btn--secondary">
+                    💬 프로젝트 채팅 열기 →
                   </Link>
                 </div>
               </div>

@@ -17,9 +17,9 @@ export interface RoleOption {
 
 /** 서버 `Role` 과 같은 셋. 늘리면 서버부터 늘려야 한다. */
 export const ROLE_OPTIONS: RoleOption[] = [
-  { key: 'developer', label: '개발', hint: '코드 35% · 업무 30%' },
-  { key: 'planner', label: '기획', hint: '문서 30% · 업무 30% · 코드 0%' },
-  { key: 'designer', label: '디자인', hint: '문서 35% · 업무 30% · 코드 0%' },
+  { key: 'developer', label: '개발', hint: '업무 완료 30% · 회의 10% · 일정 준수 10%' },
+  { key: 'planner', label: '기획', hint: '기획·문서 30% · 업무 30% · 회의 15%' },
+  { key: 'designer', label: '디자인', hint: '디자인 산출물 35% · 업무 30% · 회의 10%' },
 ];
 
 /** 화면에서 읽은 값의 합. 부동소수 먼지를 여기서 턴다. */

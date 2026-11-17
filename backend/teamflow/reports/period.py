@@ -166,15 +166,6 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
                     #    기간이 없는 최종 보고서에는 헷갈릴 것이 없으므로 안 붙입니다.
                     note=_snapshot_note("남은 업무", report_type),
                 ),
-                blocks.fact(
-                    "GitHub 활동",
-                    f"{data.github_events}건",
-                    note=(
-                        ""
-                        if data.github_backfilled
-                        else "연결 전 활동은 아직 안 훑었습니다"
-                    ),
-                ),
             ]
         )
     )
@@ -221,7 +212,7 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
                     range_high=p.range_high,
                     confidence=p.confidence,
                     confidence_label=p.confidence_label,
-                    reasons=p.reasons,
+                    reasons=[r for r in p.reasons if "GitHub" not in r],
                     evidence_count=p.evidence_count,
                     gaps=p.gaps,
                     final_value=p.final_value,
@@ -265,7 +256,8 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
         holes.append(f"처리에 실패한 회의 {failed}건 — 다시 처리해야 들어갑니다")
     if not data.github_backfilled:
         holes.append("GitHub 연결 전 활동 — 아직 훑지 않아 보이지 않습니다")
-    if data.skipped_categories:
+    skipped_visible = [c for c in data.skipped_categories if c != "코드"]
+    if skipped_visible:
         # ⛔ **여기서 이유를 지어내고 있었습니다** (결함 311). 예전 문장은
         #    「**가중치가 0이라** 계산에서 빠진 영역」이었는데, 이 목록을
         #    만드는 자는 `scoring.py` 의
@@ -281,7 +273,7 @@ def build(data: PeriodInput, report_type: ReportType) -> dict[str, Any]:
         #    (`contribution/view.ts`). 두 자리가 **같은 사실**을 말해야 합니다.
         holes.append(
             "팀 전체에 기록된 활동이 없어 계산에서 빠진 영역: "
-            + ", ".join(data.skipped_categories)
+            + ", ".join(skipped_visible)
             + " — 아무도 안 했다는 뜻이 아니라 이 계산에 잡힌 것이 없다는 뜻입니다"
         )
     for p in data.people:

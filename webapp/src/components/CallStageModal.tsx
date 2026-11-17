@@ -11,6 +11,7 @@ import {
 import { apiFailureText } from '../api/client.ts';
 import { EXTRA_CONSENTS } from '@lib/lobby/room.ts';
 import { meetingLabel } from '@lib/ui/naming.ts';
+import { ChatWorkspace } from './ChatWorkspace.tsx';
 import { Problem } from './Problem.tsx';
 
 type Launch = { projectId: number; minimized: boolean; opener: HTMLElement | null } | null;
@@ -43,14 +44,26 @@ export function triggerInstantCall(projectId: number | undefined): void {
 }
 
 /** 라우터 바깥에 한 번만 마운트해 화면 이동으로 장치가 끊기지 않게 합니다. */
-export function CallStageModal() {
+export function CallStageModal({
+  onNavigate,
+}: {
+  onNavigate?: (to: string) => void;
+} = {}) {
   const state = useSyncExternalStore(subscribe, () => launch);
   const { data: me } = useMe();
   useEffect(() => {
     if (me === null) publish(null);
   }, [me]);
   if (!state || !me) return null;
-  return <MeetingRoom key={state.projectId} state={state} userName={me.name} userId={me.user_id} />;
+  return (
+    <MeetingRoom
+      key={state.projectId}
+      state={state}
+      userName={me.name}
+      userId={me.user_id}
+      onNavigate={onNavigate}
+    />
+  );
 }
 
 function consentBadge(recording: boolean | null): { text: string; tone: string } {
@@ -63,10 +76,12 @@ function MeetingRoom({
   state,
   userId,
   userName,
+  onNavigate,
 }: {
   state: NonNullable<Launch>;
   userId: number;
   userName: string;
+  onNavigate?: (to: string) => void;
 }) {
   const [meetingId, setMeetingId] = useState<number>();
   const [draftTitle, setDraftTitle] = useState('');
@@ -202,7 +217,7 @@ function MeetingRoom({
         <Dialog.Portal forceMount>
           <Dialog.Content
             forceMount
-            className="dc-call-shell dc-call-shell--portal"
+            className={`dc-call-shell dc-call-shell--portal${started ? '' : ' dc-call-shell--compact'}`}
             hidden={state.minimized}
             onInteractOutside={(event) => event.preventDefault()}
             onCloseAutoFocus={(event) => {
@@ -511,23 +526,25 @@ function MeetingRoom({
                     role="tabpanel"
                     aria-labelledby={`room-tab-${key}`}
                     hidden={tab !== key}
-                    className="meeting-room__panel"
+                    className={`meeting-room__panel${key === 'chat' ? ' meeting-room__panel--chat' : ''}`}
                   >
-                    <iframe
-                      title={
-                        key === 'call'
-                          ? '실제 음성 통화'
-                          : key === 'record'
-                            ? '개별 트랙 녹음'
-                            : '프로젝트 채팅'
-                      }
-                      src={
-                        key === 'chat'
-                          ? `/chat.html?project=${state.projectId}&embedded=1`
-                          : `/${key === 'call' ? 'call' : 'index'}.html?meeting=${meetingId}&embedded=1`
-                      }
-                      allow="microphone; autoplay"
-                    />
+                    {key === 'chat' ? (
+                      <ChatWorkspace
+                        projectId={state.projectId}
+                        embedded
+                        onNavigate={(to) => {
+                          publish({ ...state, minimized: true });
+                          if (onNavigate) onNavigate(to);
+                          else window.location.assign(`/app${to}`);
+                        }}
+                      />
+                    ) : (
+                      <iframe
+                        title={key === 'call' ? '실제 음성 통화' : '개별 트랙 녹음'}
+                        src={`/${key === 'call' ? 'call' : 'index'}.html?meeting=${meetingId}&embedded=1`}
+                        allow="microphone; autoplay"
+                      />
+                    )}
                   </section>
                 ))}
               </div>

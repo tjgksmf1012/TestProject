@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { labelInList } from '@lib/people/labels.ts';
 import { teamDateTime } from '@lib/time/calendar.ts';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
+import { appSecondaryHref } from '@lib/nav/links.ts';
 import { AppShell } from '../components/AppShell.tsx';
 import { TrackRibbon } from '../components/TrackRibbon.tsx';
 import { Chain, type ChainLink } from '../components/Chain.tsx';
@@ -67,7 +68,7 @@ import { Problem } from '../components/Problem.tsx';
 function evidenceChain(member: MemberScore): ChainLink[] {
   const gaps = new Set((member.measurement_gaps ?? []).map((g) => g.category));
   const counts = new Map(categoriesForDisplay(member).map((c) => [c.category, c.event_count]));
-  return ['meeting', 'task'].map((category) => {
+  return ['meeting', 'task', 'schedule'].map((category) => {
     const label = describeCategory(category);
     // ⚠️ **팀 전체에 잰 범주가 하나도 없으면 전부 빈 고리입니다** (결함 191).
     //    `counts` 가 비어 있다고 `0` 을 적으면, 프로젝트를 막 만든 팀의
@@ -292,7 +293,14 @@ export default function Contributions() {
     );
   }
 
-  const team = score.data;
+  const rawTeam = score.data;
+  const team = {
+    ...rawTeam,
+    members: rawTeam.members.map((mem) => ({
+      ...mem,
+      confidence_reasons: mem.confidence_reasons.filter((r) => !r.includes('GitHub')),
+    })),
+  };
   // ⚠️ **나간 사람 이름도 찾을 수 있어야** 합니다 — 「측정 불가」 줄이
   //    그 사람을 부를 수 있습니다 (결함 222).
   const warnings = teamWarnings(team, everyone);
@@ -315,37 +323,47 @@ export default function Contributions() {
         </span>
       }
       actions={
-        <button
-          type="button"
-          className="btn btn--secondary btn--sm"
-          aria-label="기여도 요약 CSV 다운로드"
-          onClick={() => {
-            const rows = [
-              ['이름', '역할', '기여도 구간', '신뢰도', '총 근거 건수', '회의', '업무', '코드'].join(','),
-              ...members.map((m) => {
-                const name = nameOf(m.user_id, people, formerPeople);
-                const role = roleOf(m, people);
-                const range = `"${describeRange(m)}"`;
-                const conf = `"${teamConfidenceLine(m.confidence_label)}"`;
-                const meetingEv = m.categories.find((c) => c.category === 'meeting')?.event_count ?? 0;
-                const taskEv = m.categories.find((c) => c.category === 'task')?.event_count ?? 0;
-                const codeEv = m.categories.find((c) => c.category === 'code')?.event_count ?? 0;
-                const totalEv = m.categories.reduce((acc, c) => acc + (c.event_count ?? 0), 0);
-                return [name, role, range, conf, totalEv, meetingEv, taskEv, codeEv].join(',');
-              }),
-            ];
-            const csv = '\uFEFF' + rows.join('\r\n');
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `project-${projectId ?? 'team'}-contributions.csv`;
-            a.click();
-            URL.revokeObjectURL(url);
-          }}
-        >
-          CSV 내보내기
-        </button>
+        <div className="tf-row-actions">
+          <Link
+            to={appSecondaryHref('reports', projectId)}
+            className="btn btn--primary btn--sm"
+          >
+            제출용 보고서 →
+          </Link>
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            aria-label="기여도 요약 CSV 다운로드"
+            onClick={() => {
+              const rows = [
+                ['이름', '역할', '기여도 구간', '신뢰도', '총 근거 건수', '회의', '업무', '일정 준수'].join(','),
+                ...members.map((m) => {
+                  const name = nameOf(m.user_id, people, formerPeople);
+                  const role = roleOf(m, people);
+                  const range = `"${describeRange(m)}"`;
+                  const conf = `"${teamConfidenceLine(m.confidence_label)}"`;
+                  const meetingEv = m.categories.find((c) => c.category === 'meeting')?.event_count ?? 0;
+                  const taskEv = m.categories.find((c) => c.category === 'task')?.event_count ?? 0;
+                  const schedEv = m.categories.find((c) => c.category === 'schedule')?.event_count ?? 0;
+                  const totalEv = m.categories
+                    .filter((c) => c.category !== 'code')
+                    .reduce((acc, c) => acc + (c.event_count ?? 0), 0);
+                  return [name, role, range, conf, totalEv, meetingEv, taskEv, schedEv].join(',');
+                }),
+              ];
+              const csv = '\uFEFF' + rows.join('\r\n');
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `project-${projectId ?? 'team'}-contributions.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            CSV 내보내기
+          </button>
+        </div>
       }
     >
       <div className="panes">
@@ -494,7 +512,7 @@ export default function Contributions() {
                         id={`final-${member.user_id}`}
                         className="input input--num"
                         inputMode="decimal"
-                        placeholder={measured ? system : '직접 입력'}
+                        placeholder={measured ? '값 입력' : '직접 입력'}
                         aria-label={`${name} 확정값 (%) — 시스템 ${system}`}
                         value={values[member.user_id] ?? ''}
                         onChange={(e) =>
@@ -630,7 +648,10 @@ export default function Contributions() {
             )}
             {confirm.isSuccess && (
               <p className="confirmbar__notice" role="status">
-                확정했습니다. 시스템 값과 확정값이 함께 기록에 남습니다.
+                확정했습니다. 시스템 값과 확정값이 함께 기록에 남습니다.{' '}
+                <Link to={appSecondaryHref('reports', projectId)}>
+                  최종 기여도 보고서 만들기 →
+                </Link>
               </p>
             )}
             {/* ⛔ **서버가 준 글자를 그대로 붙이고 있었습니다** (결함 283).

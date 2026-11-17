@@ -216,7 +216,7 @@ createRoot(container).render(
       <Suspense fallback={<div className="boot" role="status"><span className="boot__dot" />화면을 불러오는 중입니다</div>}>
         <RouterProvider router={router} />
       </Suspense>
-      <CallStageModal />
+      <CallStageModal onNavigate={(to) => { void router.navigate(to); }} />
     </QueryClientProvider>
   </StrictMode>,
 );

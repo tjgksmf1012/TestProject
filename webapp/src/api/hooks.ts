@@ -702,6 +702,19 @@ export function useDemoAnalyzeMutation() {
   });
 }
 
+export interface ChatMessageSearchHit {
+  channel_id: number;
+  channel_name: string;
+  message: {
+    id: number;
+    channel_id: number;
+    author_id: number;
+    author_name: string;
+    body: string;
+    created_at: string;
+  };
+}
+
 export function useProjectSearch(projectId: number | undefined, query: string) {
   const trimmed = query.trim();
   const enabled = projectId !== undefined && canSearch(trimmed, null);
@@ -710,6 +723,20 @@ export function useProjectSearch(projectId: number | undefined, query: string) {
     queryFn: () => {
       const qs = new URLSearchParams({ q: trimmed });
       return api.get<Hit[]>(`/api/projects/${projectId}/search?${qs.toString()}`);
+    },
+    enabled,
+    staleTime: 15_000,
+  });
+}
+
+export function useChatMessageSearch(projectId: number | undefined, query: string) {
+  const trimmed = query.trim();
+  const enabled = projectId !== undefined && canSearch(trimmed, null);
+  return useQuery({
+    queryKey: ['projects', projectId, 'messages', 'search', trimmed],
+    queryFn: () => {
+      const qs = new URLSearchParams({ q: trimmed });
+      return api.get<ChatMessageSearchHit[]>(`/api/projects/${projectId}/messages/search?${qs.toString()}`);
     },
     enabled,
     staleTime: 15_000,

@@ -288,40 +288,8 @@ export function AppShell({ title, docTitle, actions, meta, projectId, children }
           {meta !== undefined && <span className="appbar__meta">{meta}</span>}
           <div className="appbar__spacer" />
 
-          {/* 깔끔하게 정돈된 상단 툴바: 검색(Ctrl+K) + AI 랩 + 화상회의 + 오디오·비디오 설정 */}
+          {/* 깔끔하게 정돈된 상단 툴바: 통합 검색(Ctrl+K) + 음성 회의 + 알림 + 환경 설정 + 테마 */}
           <nav className="appbar__tools tf-toolbar" aria-label="빠른 도구">
-            <Link
-              to="/demo"
-              className="tf-lab-pill"
-              title="음향 벡터와 키워드 규칙 예시 체험"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '4px 10px',
-                borderRadius: 'var(--r-full)',
-                background: 'var(--c-sunken)',
-                border: '1px solid var(--c-line)',
-                color: 'var(--c-ink)',
-                fontSize: 'var(--fs-12)',
-                fontWeight: 'var(--fw-medium)',
-                textDecoration: 'none',
-              }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                aria-hidden="true"
-              >
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-              </svg>
-              <span>AI 랩</span>
-            </Link>
-
             <button
               type="button"
               className="tf-search-pill"
