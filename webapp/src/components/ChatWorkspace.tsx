@@ -38,6 +38,7 @@ import {
   type ChatMessage,
   type ReactionChoice,
 } from '@lib/chat/view.ts';
+import { PRIORITY_DEFAULT } from '@lib/kanban/priority.ts';
 import { labelInList } from '@lib/people/labels.ts';
 import { blockedReason, canSearch, excerpt } from '@lib/search/view.ts';
 import { describeActionFailure, describeLoadFailure } from '@lib/ui/load.ts';
@@ -191,6 +192,7 @@ export function ChatWorkspace({
   const [editDraft, setEditDraft] = useState('');
   const [openReactionPickerFor, setOpenReactionPickerFor] = useState<number | null>(null);
   const [showMentionBar, setShowMentionBar] = useState(false);
+  const [cursorPos, setCursorPos] = useState(0);
 
   // 채팅 → 칸반 업무 변환 인라인 모달/폼 상태
   const [promotingMsg, setPromotingMsg] = useState<ChatMessage | null>(null);
@@ -416,13 +418,55 @@ export function ChatWorkspace({
     }
   };
 
+  const activeMentionToken = useMemo(() => {
+    const before = draft.slice(0, Math.min(cursorPos, draft.length));
+    const hit = /(?:^|\s)(@([^\s@]*))$/.exec(before);
+    if (!hit) return null;
+    const token = hit[1] ?? '@';
+    const query = (hit[2] ?? '').trim().toLowerCase();
+    return {
+      start: before.length - token.length,
+      end: before.length,
+      query,
+    };
+  }, [draft, cursorPos]);
+
+  const filteredMentionMembers = useMemo(() => {
+    if (!activeMentionToken || activeMentionToken.query === '') return members;
+    return members.filter(
+      (m) =>
+        m.name.toLowerCase().includes(activeMentionToken.query) ||
+        labelInList(m, members).toLowerCase().includes(activeMentionToken.query),
+    );
+  }, [members, activeMentionToken]);
+
   const insertMention = (name: string) => {
-    const needsSpace = draft.length > 0 && !/\s$/.test(draft);
-    const prefix = needsSpace ? ' ' : '';
-    const next = draft.endsWith('@') ? `${draft}${name} ` : `${draft}${prefix}@${name} `;
+    const el = composerRef.current;
+    const pos = el?.selectionStart ?? cursorPos;
+    const end = el?.selectionEnd ?? pos;
+    let next = '';
+    let nextCaret = 0;
+
+    if (activeMentionToken !== null) {
+      const replacement = `@${name} `;
+      next = draft.slice(0, activeMentionToken.start) + replacement + draft.slice(activeMentionToken.end);
+      nextCaret = activeMentionToken.start + replacement.length;
+    } else {
+      const safePos = Math.min(Math.max(0, pos), draft.length);
+      const safeEnd = Math.min(Math.max(safePos, end), draft.length);
+      const needsSpace = safePos > 0 && !/\s$/.test(draft.slice(0, safePos));
+      const insertion = `${needsSpace ? ' ' : ''}@${name} `;
+      next = draft.slice(0, safePos) + insertion + draft.slice(safeEnd);
+      nextCaret = safePos + insertion.length;
+    }
+
     setDraft(next);
+    setCursorPos(nextCaret);
     setShowMentionBar(false);
-    composerRef.current?.focus();
+    requestAnimationFrame(() => {
+      composerRef.current?.focus();
+      composerRef.current?.setSelectionRange(nextCaret, nextCaret);
+    });
   };
 
   const handleSend = async () => {
@@ -465,6 +509,7 @@ export function ChatWorkspace({
   };
 
   const handleDeleteMessage = async (messageId: number) => {
+    if (!window.confirm('이 메시지를 지울까요?')) return;
     setProblem(null);
     try {
       await chatMutations.deleteMessage.mutateAsync(messageId);
@@ -530,7 +575,10 @@ export function ChatWorkspace({
 
   const handleRenameChannel = async (channelId: number) => {
     const trimmed = renameChannelDraft.trim().replace(/^#+/, '');
-    if (trimmed === '') return;
+    if (trimmed === '') {
+      setProblem('채널 이름을 입력해 주세요.');
+      return;
+    }
     setProblem(null);
     try {
       await chatMutations.renameChannel.mutateAsync({ channelId, name: trimmed });
@@ -635,7 +683,7 @@ export function ChatWorkspace({
       const created = await taskMutations.createTask.mutateAsync({
         title: promoteTitle.trim(),
         status: promoteStatus,
-        priority: 1,
+        priority: PRIORITY_DEFAULT,
         deadline: promoteDeadline ? promoteDeadline : null,
         assignee_ids: promoteAssignees,
       });
@@ -887,6 +935,7 @@ export function ChatWorkspace({
                             <button
                               type="button"
                               className="tf-chat-tool-btn"
+                              aria-label={`${ch.name} 채널 이름 바꾸기`}
                               onClick={() => {
                                 setRenamingChannelId(ch.id);
                                 setRenameChannelDraft(ch.name);
@@ -898,6 +947,7 @@ export function ChatWorkspace({
                               <button
                                 type="button"
                                 className="tf-chat-tool-btn tf-chat-tool-btn--danger"
+                                aria-label={`${ch.name} 채널 지우기`}
                                 onClick={() => void handleArchiveChannel(ch)}
                               >
                                 지우기
@@ -1373,10 +1423,10 @@ export function ChatWorkspace({
                     </div>
                   )}
 
-                  {(showMentionBar || draft.endsWith('@')) && members.length > 0 && (
+                  {(showMentionBar || activeMentionToken !== null) && filteredMentionMembers.length > 0 && (
                     <div className="tf-chat-mention-chips" role="group" aria-label="팀원 빠른 멘션">
                       <span className="t11 muted">언급하기:</span>
-                      {members.map((m) => {
+                      {filteredMentionMembers.map((m) => {
                         const label = labelInList(m, members);
                         return (
                           <button
@@ -1411,7 +1461,13 @@ export function ChatWorkspace({
                       aria-label={`${channelTitle(activeChannel)}에 메시지 쓰기`}
                       placeholder={`${channelTitle(activeChannel)}에 메시지 보내기 (Enter 전송 · @ 멘션)`}
                       value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
+                      onChange={(e) => {
+                        setDraft(e.target.value);
+                        setCursorPos(e.target.selectionStart ?? e.target.value.length);
+                      }}
+                      onClick={(e) => setCursorPos(e.currentTarget.selectionStart ?? draft.length)}
+                      onKeyUp={(e) => setCursorPos(e.currentTarget.selectionStart ?? draft.length)}
+                      onSelect={(e) => setCursorPos(e.currentTarget.selectionStart ?? draft.length)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                           e.preventDefault();

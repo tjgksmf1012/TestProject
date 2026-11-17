@@ -399,7 +399,7 @@ export function CommandPalette({
 
             {truncatedKinds.length > 0 && (
               <div className="dc-cmdk__status">
-                {truncatedKinds.join('·')} 결과는 최대 건수에 도달했습니다 — 검색어를 좁히거나 전체 통합 검색을 여세요.
+                {truncatedKinds.join('·')} 결과는 최대 건수에 도달했습니다 — 검색어를 더 구체적으로 입력해 좁혀 보세요.
               </div>
             )}
 

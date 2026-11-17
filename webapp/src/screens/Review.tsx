@@ -64,6 +64,7 @@ import {
   withContext,
 } from '@lib/review/evidence.ts';
 import { agendaItems, issueViews } from '@lib/review/minutes.ts';
+import { findingViews } from '@lib/review/findings.ts';
 import { todayInTeamCalendar } from '@lib/time/calendar.ts';
 import { Problem } from '../components/Problem.tsx';
 import { draftStorageKey, parseDrafts, serializeDrafts } from '@lib/review/drafts.ts';
@@ -440,15 +441,17 @@ export default function Review() {
         cannotLoad === null ? (
           <span className="meta-chips">
             {lanes.pending > 0 ? (
-              <span className="meta-chip meta-chip--highlight">
-                검토 필요 <strong>{lanes.pending}</strong>
-              </span>
+            <span className="meta-chip meta-chip--highlight">
+              검토 필요 <strong>{lanes.pending}</strong>
+            </span>
             ) : (
               <span className="meta-chip">검토 완료</span>
             )}
-            <span className="meta-chip">
-              등록 <strong>{lanes.approve}</strong> · 거절 <strong>{lanes.reject}</strong>
-            </span>
+            {lanes.all > 0 && (
+              <span className="meta-chip">
+                등록 <strong>{lanes.approve}</strong> · 거절 <strong>{lanes.reject}</strong>
+              </span>
+            )}
           </span>
         ) : undefined
       }
@@ -666,9 +669,34 @@ export default function Review() {
                 </Disclosure>
                 {meeting.data.findings.length > 0 && (
                   <Disclosure summary={`눈에 띈 것 ${meeting.data.findings.length}건`}>
-                    <p className="t12 muted">
+                    <p className="t12 muted" style={{ marginBottom: 'var(--sp-2)' }}>
                       규칙 기반 관찰입니다 — 문제인지 아닌지는 팀이 정합니다.
                     </p>
+                    <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {findingViews(meeting.data.findings).map((view, idx) => (
+                        <li key={`${view.kind}-${idx}`} className="t13">
+                          <div>
+                            <strong>{view.title}</strong>
+                            {view.at !== null && (
+                              <span className="num muted"> · {view.at}</span>
+                            )}
+                          </div>
+                          {view.what !== null && <p className="t12" style={{ margin: '2px 0' }}>{view.what}</p>}
+                          {view.why !== null && <p className="t12 muted" style={{ margin: '2px 0' }}>{view.why}</p>}
+                          {view.evidence.length > 0 && (
+                            <EvidenceChips
+                              ids={view.evidence}
+                              onOpen={(id) =>
+                                rowRefs.current.get(id)?.scrollIntoView({
+                                  behavior: reduceMotion ? 'auto' : 'smooth',
+                                  block: 'center',
+                                })
+                              }
+                            />
+                          )}
+                        </li>
+                      ))}
+                    </ul>
                   </Disclosure>
                 )}
                 {/* ⭐ **무슨 말이 오갔나** (정의서 §10 · `REVIEW-005`) — 결함 352.
@@ -1023,7 +1051,9 @@ export default function Review() {
           <div className="pane__head">
             <h2 className="pane__title">후보</h2>
             <span className="pane__count">검토 필요 {lanes.pending}</span>
-            <span className="pane__count">등록 {lanes.approve} · 거절 {lanes.reject}</span>
+            {lanes.all > 0 && (
+              <span className="pane__count">등록 {lanes.approve} · 거절 {lanes.reject}</span>
+            )}
             {lanes.pending > 0 && (
               <>
                 <button
@@ -1133,7 +1163,10 @@ export default function Review() {
                           기준은 0.7 입니다. 제목도 `@lib` 이 답니다. */}
                       <Why
                         about={attentionAbout(candidate)}
-                        lines={attentionReasons(candidate)}
+                        lines={attentionReasons(candidate, {
+                          assignee_id: currentAssignee,
+                          deadline: effectiveDeadline(candidate, draft),
+                        })}
                       />
                     </span>
                   </div>
@@ -1211,7 +1244,7 @@ export default function Review() {
                         aria-label={`${candidate.title} — 업무 제목`}
                       />
                     </label>
-                    <label className="field" id={`cand-assignee-${candidate.id}`}>
+                    <div className="field" id={`cand-assignee-${candidate.id}`}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
                         <span className="field__label" style={{ margin: 0 }}>
                           담당자
@@ -1269,7 +1302,7 @@ export default function Review() {
                         emptyLabel="미지정"
                         ariaLabel={`${candidate.title} — 담당자`}
                       />
-                    </label>
+                    </div>
                     <label className="field" id={`cand-deadline-${candidate.id}`}>
                       <span className="field__label">마감</span>
                       {/* v2 F7 — `mm/dd/yyyy` 는 `lang` 으로도 `locale` 로도

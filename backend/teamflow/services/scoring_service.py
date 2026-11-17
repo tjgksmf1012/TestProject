@@ -353,7 +353,9 @@ def load_coverage(session: Session, project_id: int) -> CoverageStats:
     project = session.get(m.Project, project_id)
     project_days = 0
     github_days = 0
-    if project and project.started_at:
+    # GitHub 연동 UI가 제거된 프로젝트(github_repo 미설정)는
+    # 연결 전 커버리지 감점을 적용하지 않는다.
+    if project and project.started_at and project.github_repo:
         end = project.deadline or datetime.now(project.started_at.tzinfo)
         project_days = max(0, (end - project.started_at).days)
         # ⚠️ `github_connected_at`(이름을 **적어 넣은** 시각)이 아니라

@@ -285,8 +285,32 @@ export function attentionAbout(candidate: Candidate): string {
   return `${candidate.title} — 살펴봐야 하는 이유`;
 }
 
-export function attentionReasons(candidate: Candidate): string[] {
-  const reasons = [...(candidate.warnings ?? [])];
+export function attentionReasons(
+  candidate: Candidate,
+  draft?: { assignee_id?: number | null; assignee_ids?: readonly number[] | null; deadline?: string | null },
+): string[] {
+  const hasAssignee =
+    draft !== undefined &&
+    ((draft.assignee_ids !== undefined && draft.assignee_ids !== null && draft.assignee_ids.length > 0) ||
+      (draft.assignee_id !== undefined && draft.assignee_id !== null));
+  const hasDeadline =
+    draft !== undefined &&
+    draft.deadline !== undefined &&
+    draft.deadline !== null &&
+    draft.deadline.trim() !== '';
+  const reasons = (candidate.warnings ?? []).filter((w) => {
+    if (hasAssignee && w.startsWith('담당자 미확정')) return false;
+    if (
+      hasDeadline &&
+      (w.startsWith('마감일 미확정') ||
+        w.startsWith('회의에서 마감일이 언급되지') ||
+        w.startsWith('마감일 해석 확신도가') ||
+        w.startsWith('해석된 마감일이'))
+    ) {
+      return false;
+    }
+    return true;
+  });
   if (reasons.length === 0 && candidate.confidence < LOW_CONFIDENCE) {
     reasons.push(
       `AI 확신도가 낮습니다 (${Math.round(candidate.confidence * 100)}%) — 근거 발화를 확인하세요`,

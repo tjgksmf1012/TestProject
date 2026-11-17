@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../api/client.ts';
 import { validateLogin, validateSignup, describeAuthFailure } from '@lib/auth/session.ts';
 import { pageTitle } from '@lib/shell/title.ts';
@@ -16,20 +16,35 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const providers = useQuery({
+    queryKey: ['auth-providers'],
+    queryFn: () => api.get<{ google: boolean }>('/api/auth/providers'),
+    staleTime: Infinity,
+    retry: false,
+  });
+
   useEffect(() => {
     document.title = pageTitle(mode === 'login' ? '로그인' : '가입');
+  }, [mode]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const oauthError = params.get('oauth_error');
+    if (!oauthError) return;
     if (oauthError === 'no_client_id' || oauthError === 'no_credentials') {
       setError('Google 로그인을 사용할 수 없습니다. 이메일로 로그인하거나 관리자에게 문의해 주세요.');
     } else if (oauthError === 'invalid_state') {
       setError('로그인 요청이 만료되었거나 다른 창에서 시작되었습니다. Google 로그인을 다시 시작해 주세요.');
     } else if (oauthError === 'cancelled') {
       setError('Google 로그인이 취소되었습니다.');
-    } else if (oauthError) {
+    } else {
       setError(`Google 로그인 오류 (${oauthError})`);
     }
-  }, [mode]);
+    params.delete('oauth_error');
+    const cleanSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${cleanSearch ? `?${cleanSearch}` : ''}${window.location.hash}`;
+    window.history.replaceState(null, '', nextUrl);
+  }, []);
 
   const submit = async () => {
     const problems =
@@ -99,29 +114,33 @@ export default function Login() {
         >
           <p className="login__brand">TeamFlow</p>
 
-          {/* 소셜 원클릭 로그인 (Google 공식 OAuth 2.0) */}
-          <div className="oauth-btn-grid" style={{ gridTemplateColumns: '1fr' }}>
-            <button
-              type="button"
-              className="oauth-btn"
-              disabled={busy}
-              onClick={() => {
-                window.location.href = '/api/auth/google/login';
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z" />
-                <path fill="#34A853" d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.08.72-2.45 1.16-4.22 1.16-3.24 0-5.98-2.18-6.96-5.11H1.07v3.14C3.09 21.2 7.22 24 12 24z" />
-                <path fill="#FBBC05" d="M5.04 14.04c-.25-.72-.38-1.49-.38-2.29s.13-1.57.38-2.29V6.32H1.07C.39 7.68 0 9.21 0 11.75s.39 4.07 1.07 5.43l3.97-3.14z" />
-                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.22 0 3.09 2.8 1.07 6.32l3.97 3.14c.98-2.93 3.72-5.11 6.96-5.11z" />
-              </svg>
-              Google 계정으로 계속하기
-            </button>
-          </div>
+          {providers.data?.google === true && (
+            <>
+              {/* 소셜 원클릭 로그인 (Google 공식 OAuth 2.0 — 서버 설정 시에만 노출) */}
+              <div className="oauth-btn-grid" style={{ gridTemplateColumns: '1fr' }}>
+                <button
+                  type="button"
+                  className="oauth-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    window.location.href = '/api/auth/google/login';
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z" />
+                    <path fill="#34A853" d="M12 24c3.3 0 6.08-1.09 8.1-2.96l-3.88-3.05c-1.08.72-2.45 1.16-4.22 1.16-3.24 0-5.98-2.18-6.96-5.11H1.07v3.14C3.09 21.2 7.22 24 12 24z" />
+                    <path fill="#FBBC05" d="M5.04 14.04c-.25-.72-.38-1.49-.38-2.29s.13-1.57.38-2.29V6.32H1.07C.39 7.68 0 9.21 0 11.75s.39 4.07 1.07 5.43l3.97-3.14z" />
+                    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.22 0 3.09 2.8 1.07 6.32l3.97 3.14c.98-2.93 3.72-5.11 6.96-5.11z" />
+                  </svg>
+                  Google 계정으로 계속하기
+                </button>
+              </div>
 
-          <div style={{ textAlign: 'center', margin: '14px 0 10px', color: 'var(--c-ink-muted)', fontSize: '12px' }}>
-            또는 이메일 계정으로 {mode === 'login' ? '로그인' : '가입'}
-          </div>
+              <div style={{ textAlign: 'center', margin: '14px 0 10px', color: 'var(--c-ink-muted)', fontSize: '12px' }}>
+                또는 이메일 계정으로 {mode === 'login' ? '로그인' : '가입'}
+              </div>
+            </>
+          )}
 
           {mode === 'signup' && (
             <label className="field">

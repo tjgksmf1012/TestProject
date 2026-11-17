@@ -3,12 +3,13 @@ import { Link, useParams } from 'react-router-dom';
 import { AppShell } from '../components/AppShell.tsx';
 import { Problem } from '../components/Problem.tsx';
 import { apiFailureText } from '../api/client.ts';
-import { useDemoAnalyzeMutation, useDemoVoiceMatchMutation } from '../api/hooks.ts';
+import { useDemoAnalyzeMutation, useDemoVoiceMatchMutation, useMe } from '../api/hooks.ts';
 import { DEMO_SCRIPT_PRESETS, parseDemoScript, similarityPercent } from '@lib/audio/demo.ts';
 
 export default function AiDemoLab() {
   const params = useParams();
   const pid = params['projectId'] ? Number(params['projectId']) : undefined;
+  const me = useMe();
   const analyze = useDemoAnalyzeMutation();
   const compare = useDemoVoiceMatchMutation();
 
@@ -163,9 +164,8 @@ export default function AiDemoLab() {
 
   const similarityPct = similarityPercent(compare.data?.similarity);
 
-  return (
-    <AppShell title="AI 데모 랩" projectId={pid}>
-      <div className="pane__body demo-lab">
+  const labBody = (
+    <div className="pane__body demo-lab">
         <div className="demo-lab__hero">
           <div>
             <h1 className="sec__title">음향과 업무 추출 원리 체험</h1>
@@ -174,8 +174,8 @@ export default function AiDemoLab() {
               실제 ASR·화자 성문 모델·LLM을 실행하거나 프로젝트 업무·기여도에 저장하지 않습니다.
             </p>
           </div>
-          <Link className="btn btn--secondary" to="/">
-            프로젝트로 이동
+          <Link className="btn btn--secondary" to={me.data ? '/' : '/login'}>
+            {me.data ? '프로젝트로 이동' : '로그인하기'}
           </Link>
         </div>
 
@@ -429,6 +429,24 @@ export default function AiDemoLab() {
           </p>
         </section>
       </div>
-    </AppShell>
+  );
+
+  if (me.data) {
+    return (
+      <AppShell title="AI 데모 랩" projectId={pid}>
+        {labBody}
+      </AppShell>
+    );
+  }
+  return (
+    <main className="pane" style={{ minHeight: '100vh', background: 'var(--c-paper)' }}>
+      <header className="appbar" style={{ justifyContent: 'space-between' }}>
+        <strong className="t14">TeamFlow · AI 데모 랩</strong>
+        <Link className="btn btn--primary btn--sm" to="/login">
+          로그인 · 시작하기
+        </Link>
+      </header>
+      {labBody}
+    </main>
   );
 }

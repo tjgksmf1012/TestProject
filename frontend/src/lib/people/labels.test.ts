@@ -55,7 +55,7 @@ describe('labelInList', () => {
     const all = [이하늘, 이하늘_미연결];
     deepStrictEqual(all.map((p) => labelInList(p, all)), [
       '이하늘 · @haneul-fe',
-      '이하늘 · GitHub 미연결',
+      '이하늘 · 구분 미등록',
     ]);
   });
 
@@ -75,7 +75,7 @@ describe('tellsApartInList', () => {
     strictEqual(tellsApartInList(이하늘2, all), true);
   });
 
-  it('⭐ 둘 다 GitHub 미연결이면 **못 가른다** — 그 사실을 말해야 한다', () => {
+  it('⭐ 둘 다 구분 핸들이 없으면 **못 가른다** — 그 사실을 말해야 한다', () => {
     const all = [이하늘_미연결, 이하늘_미연결2];
     strictEqual(tellsApartInList(이하늘_미연결, all), false);
     strictEqual(tellsApartInList(이하늘_미연결2, all), false);
@@ -86,7 +86,7 @@ describe('tellsApartInList', () => {
   it('못 가른다는 말에 **무엇을 하면 되는지**가 들어 있다', () => {
     const note = cannotTellApartNote();
     strictEqual(note.includes('이름이 같은'), true);
-    strictEqual(note.includes('GitHub 아이디를 연결'), true);
+    strictEqual(note.includes('내 정보에서 이름'), true);
   });
 });
 

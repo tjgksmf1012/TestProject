@@ -481,6 +481,8 @@ PUBLIC: set[tuple[str, str]] = {
     ("GET", "/api/time"),
     ("GET", "/health"),
     # 로그인·가입·이메일 인증번호·소셜 OAuth 로그인은 로그인 전 경로입니다.
+    # /api/auth/providers 는 로그인 화면 OAuth 버튼 표시 여부 확인용이며 개인정보가 없습니다.
+    ("GET", "/api/auth/providers"),
     ("GET", "/api/auth/google/login"),
     ("GET", "/api/auth/google/callback"),
     ("POST", "/api/auth/login"),

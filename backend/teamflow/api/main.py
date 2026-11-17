@@ -29,7 +29,7 @@ from fastapi import (
 )
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, PlainSerializer
 from sqlalchemy import delete, event, func, select
@@ -594,6 +594,12 @@ def verify_email_code() -> None:
 def direct_oauth_login() -> None:
     raise HTTPException(status.HTTP_410_GONE,
                         "로그인 화면에서 공식 Google 로그인을 이용해 주세요")
+
+
+@app.get("/api/auth/providers")
+def auth_providers(settings: AppSettings) -> dict[str, bool]:
+    """로그인 화면에서 표시할 수 있는 외부 OAuth 공급자 사용 가능 여부."""
+    return {"google": bool(settings.google_client_id)}
 
 
 @app.get("/api/auth/google/login")
@@ -2309,17 +2315,26 @@ def list_tracks(
     meeting_id: int, session: DbSession, user: CurrentUser
 ) -> dict[str, Any]:
     """트랙별 상태. 승인 화면이 "이 트랙은 못 씁니다"를 띄우는 근거."""
-    _load_meeting_for(session, meeting_id, user)
+    meeting = _load_meeting_for(session, meeting_id, user)
     consent = recording_service.consent_status(session, meeting_id)
+    tracks = recording_service.track_health(session, meeting_id)
+    # ⛔ JSON 직렬화 전 naive UTC datetime 에 반드시 Z 를 붙여
+    # 9시간(540분) 오차를 막습니다 (결함 246).
+    for track in tracks:
+        for key in ("started_at", "ended_at"):
+            val = track.get(key)
+            if isinstance(val, datetime):
+                track[key] = _as_utc(val)
     return {
         "meeting_id": meeting_id,
+        "recording_frozen": recording_service.is_recording_frozen(meeting.status),
         "consent": {
             "total": consent.total,
             "granted": consent.granted,
             "refused": consent.refused,
             "all_confirmed": consent.all_confirmed,
         },
-        "tracks": recording_service.track_health(session, meeting_id),
+        "tracks": tracks,
     }
 
 
@@ -6114,11 +6129,20 @@ def demo_analyze_meeting(payload: DemoAnalyzeIn) -> DemoAnalyzeOut:
 
         keywords = ("까지", "구현", "작성", "검토", "맡을게요", "하겠습니다")
         if any(kw in txt for kw in keywords):
-            title = txt.split("까지")[-1].strip() if "까지" in txt else txt
-            for ending in ("하기로 하죠", "하겠습니다", "맡을게요", "할게요", "부탁드립니다"):
-                title = title.replace(ending, "").strip()
+            title = txt.strip()
+            # 문장 중간 단어 조각이 잘리지 않도록 선두 기한 표현과 문말 어미만 정밀하게 정리한다.
+            title = re.sub(
+                r"^(?:오늘|내일|모레|이번\s*주|다음\s*주|[월화수목금토일]요일|\d{1,2}일)까지\s+",
+                "",
+                title,
+            )
+            title = re.sub(
+                r"(?:하기로\s*하죠|하겠습니다|맡을게요|할게요|부탁드립니다)[.!?]*$",
+                "",
+                title,
+            ).strip()
             if not title:
-                title = txt
+                title = txt.strip()
 
             tasks.append(
                 DemoCandidateTaskOut(
@@ -6161,6 +6185,10 @@ def _mount_frontend(application: FastAPI) -> Path | None:
         # ⚠️ 307 로 `/app/` 에 보내지 않습니다. 그러면 주소가 React Router 가
         # 쓰는 것(`/app`)과 갈라져, 사람이 새로고침할 때마다 주소가 바뀝니다.
         # 같은 자리에서 **같은 index.html** 을 주고 라우팅은 브라우저가 합니다.
+        @application.get("/", include_in_schema=False)
+        async def _root_to_app() -> RedirectResponse:  # pragma: no cover - 정적 리다이렉트
+            return RedirectResponse(url="/app/", status_code=307)
+
         @application.get("/app", include_in_schema=False)
         async def _spa_root() -> FileResponse:  # pragma: no cover - 정적 파일
             return FileResponse(SPA_EXPECTED_AT / "index.html")

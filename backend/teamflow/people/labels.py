@@ -60,7 +60,7 @@ def label_in_list(person: PersonRef, all_people: list[PersonRef]) -> str:
         return name
 
     login = (person.github_login or "").strip()
-    return f"{name} · GitHub 미연결" if not login else f"{name} · @{login}"
+    return f"{name} · 구분 미등록" if not login else f"{name} · @{login}"
 
 
 def tells_apart_in_list(person: PersonRef, all_people: list[PersonRef]) -> bool:

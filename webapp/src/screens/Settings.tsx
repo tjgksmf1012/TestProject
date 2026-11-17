@@ -5,7 +5,6 @@ import { DiscordSelect } from '../components/SettingsModal.tsx';
 import { DatePicker } from '../components/DatePicker.tsx';
 import { Disclosure } from '../components/Disclosure.tsx';
 import {
-  useGithubHealth,
   useMe,
   useMembers,
   useProject,
@@ -19,15 +18,8 @@ import {
   tellsApartInList,
 } from '@lib/people/labels.ts';
 import { describeRoles } from '@lib/contribution/roles.ts';
-import { plainText } from '@lib/ui/plain.ts';
-import { describeHealth, describeHealthFailure } from '@lib/github/health.ts';
 import {
   codeToCopy,
-  disconnectConfirm,
-  githubLoginStatus,
-  isDisconnect,
-  normalizeRepo,
-  repoProblem,
   titleProblem,
   unknownSectionNote,
   whyCannotCopyCode,
@@ -163,66 +155,6 @@ function RoleSection({ mine, save }: { mine: Member | undefined; save: ReturnTyp
       </div>
       <Disclosure summary="왜 나만 바꿀 수 있나요">
         <p>{WHY_ONLY_ME}</p>
-      </Disclosure>
-    </div>
-  );
-}
-
-// ── 내 설정 > GitHub 계정 ───────────────────────────────────────
-function GithubSection({ mine, save }: { mine: Member | undefined; save: ReturnType<typeof useSettingsMutations>['saveGithubLogin'] }) {
-  const [value, setValue] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const login = value ?? mine?.github_login ?? '';
-  const dirty = value !== null;
-  const ghBlocked = whyCannotSave({ dirty, saving: save.isPending });
-  const justSaved = saved && !dirty;
-  return (
-    <div className="sec">
-      <h2 className="sec__title">GitHub 계정</h2>
-      <p className="sec__lead">이 아이디로 올린 PR·리뷰가 내 기여도로 들어옵니다.</p>
-      <div className="sec__row">
-        <input
-          className="input input--num"
-          id="gh-input"
-          placeholder="github-id"
-          aria-label="GitHub 아이디"
-          value={login}
-          onChange={(e) => {
-            setSaved(false);
-            setValue(e.target.value);
-          }}
-        />
-        {/* 결함 234 — `disabled` 는 초점을 못 받습니다. */}
-        <button
-          type="button"
-          className={`btn btn--primary${ghBlocked !== null ? ' btn--unmet' : ''}`}
-          aria-disabled={ghBlocked !== null}
-          aria-describedby={ghBlocked !== null ? 'gh-problem' : undefined}
-          onClick={() => {
-            if (save.isPending) return;
-            if (ghBlocked !== null) {
-              document.getElementById('gh-input')?.focus();
-              return;
-            }
-            save.mutate(login.trim(), {
-              onSuccess: () => {
-                setValue(null);
-                setSaved(true);
-              },
-            });
-          }}
-        >
-          저장
-        </button>
-        {justSaved && <span className="status-ok" role="status">저장됐습니다</span>}
-      </div>
-      <Problem id="gh-problem" tone="incomplete">{justSaved && ghBlocked === '바꾼 것이 없습니다' ? null : ghBlocked}</Problem>
-      <p className={mine?.github_login ? 'status-ok' : 'micro muted'} style={{ marginTop: 'var(--sp-3)' }}>
-        {githubLoginStatus(mine?.github_login ?? null)}
-      </p>
-      <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
-      <Disclosure summary="왜 나만 바꿀 수 있나요">
-        <p>{WHY_ONLY_ME} GitHub 아이디도 같은 이유로 본인만 바꿉니다 — 남의 아이디를 적으면 남의 활동이 내 기여도로 들어옵니다.</p>
       </Disclosure>
     </div>
   );
@@ -580,169 +512,6 @@ function MembersSection({
         </Problem>
         <Problem>{leave.isError ? mutationError(leave.error) : null}</Problem>
       </div>
-    </div>
-  );
-}
-
-// ── 프로젝트 > 저장소 연결 ──────────────────────────────────────
-function RepoSection({
-  projectId,
-  repo,
-  save,
-  backfill,
-  myRole,
-}: {
-  projectId: number;
-  repo: string | null;
-  /** 내 권한 — 저장소 연결은 관리자만 (결함 225). */
-  myRole: string | null | undefined;
-  save: ReturnType<typeof useSettingsMutations>['saveProject'];
-  backfill: ReturnType<typeof useSettingsMutations>['backfill'];
-}) {
-  const health = useGithubHealth(projectId);
-  const [value, setValue] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const input = value ?? repo ?? '';
-  const problem = input.trim() === '' ? null : repoProblem(input);
-  // 낱말이 **하는 일과 같아야** 합니다 (결함 256).
-  const disconnecting = isDisconnect(repo, input);
-  // 아직 연결할 수 없는 경우 — 안 고쳤거나(`value === null`), 주소가 틀렸거나.
-  /* ⚠️ 관리자만 되는 일입니다 (결함 225) — 구성원에게도 눌렸고, 서버는
-     403 을 주는데 화면은 아무 말도 안 했습니다. */
-  const manageBlocked = manageBlockedBecause(myRole, '저장소 연결');
-  /* ⛔ **안 건드린 첫 화면에서 「연결」이 막혔는데 이유가 없었습니다**
-     (결함 235). `aria-disabled` 라 초점은 받는데, `manageBlocked` 도
-     `problem` 도 `null` 이면 `aria-describedby` 가 안 붙어 **아무 말도
-     안 했습니다.** 234 를 고치면서 이 패널만 빼놨습니다 — 하필 그
-     넷의 **모범**이던 자리입니다. */
-  const connectBlocked = whyCannotSave({
-    noPermission: manageBlocked,
-    problem,
-    dirty: value !== null,
-    saving: save.isPending,
-  });
-  const view = health.data
-    ? describeHealth(health.data, new Date())
-    : health.isError
-      ? describeHealthFailure(health.error instanceof ApiError ? health.error.status : 0)
-      : null;
-
-  return (
-    <div className="sec">
-      <h2 className="sec__title">저장소 연결</h2>
-      <p className="sec__lead">이 저장소의 PR·리뷰가 팀의 기여 기록으로 들어옵니다.</p>
-      <div className="sec__row">
-        {/* ⚠️ 오류가 **바로 아래 적혀 있는데 칸과 이어져 있지 않았습니다.**
-            낭독기는 칸에 초점이 갔을 때 `aria-describedby` 가 가리키는 것만
-            읽습니다 — 이어 놓지 않으면 화면에만 뜨고 아무도 안 듣습니다. */}
-        <input
-          id="repo-input"
-          className="input input--num"
-          placeholder="owner/repo"
-          aria-label="GitHub 저장소"
-          aria-invalid={problem !== null}
-          aria-describedby="repo-problem"
-          value={input}
-          onChange={(e) => {
-            setSaved(false);
-            setValue(e.target.value);
-          }}
-        />
-        {/* ⚠️ `disabled` 가 아니라 `aria-disabled` 입니다 — 비활성 버튼은
-            초점을 못 받아 낭독기에 사유를 못 전합니다(GOV.UK). 사유(`problem`)
-            는 바로 아래 적혀 있는데, 그 자리로 닿는 길이 없었습니다.
-            누르면 저장소 칸으로 데려다 줍니다. */}
-        {/* ⛔ **칸을 비우고 누르면 연결이 끊겼습니다** — 확인도, 알림도,
-            되돌릴 실마리도 없이 (결함 256). 게다가 버튼에는 「연결」이라고
-            적혀 있었습니다. 낱말이 하는 일과 달랐던 것입니다.
-            판단(`isDisconnect`·`disconnectConfirm`)은 `@lib`. */}
-        <button
-          type="button"
-          className={`btn btn--primary${connectBlocked !== null ? ' btn--unmet' : ''}`}
-          aria-disabled={connectBlocked !== null}
-          aria-describedby={connectBlocked !== null ? 'repo-blocked' : undefined}
-          onClick={() => {
-            if (save.isPending || manageBlocked !== null) return;
-            if (connectBlocked !== null) {
-              document.getElementById('repo-input')?.focus();
-              return;
-            }
-            if (disconnecting && !window.confirm(disconnectConfirm(repo ?? ''))) return;
-            save.mutate(
-              { github_repo: normalizeRepo(input) },
-              {
-                onSuccess: () => {
-                  setValue(null);
-                  setSaved(true);
-                },
-              },
-            );
-          }}
-        >
-          {disconnecting ? '연결 해제' : '연결'}
-        </button>
-      </div>
-      {/* 칸 옆 오류는 **그 칸과** 이어져 있어야 합니다 — 입력칸이
-          `aria-describedby="repo-problem"` 으로 이 자리를 가리킵니다. */}
-      <Problem id="repo-problem" tone="incomplete">{problem}</Problem>
-      <Problem id="repo-blocked" tone="incomplete">
-        {saved && value === null && connectBlocked === '바꾼 것이 없습니다' ? null : connectBlocked}
-      </Problem>
-      {saved && value === null && <p className="status-ok" role="status">저장됐습니다</p>}
-      <Problem>{save.isError ? mutationError(save.error) : null}</Problem>
-      {view !== null && (
-        <div className={view.tone === 'ok' ? 'card' : 'notice'} style={{ marginTop: 'var(--sp-5)' }} role="note">
-          {/* ⛔ **마크다운 표시가 화면까지 나왔습니다** (결함 262).
-              서버 문구에는 강조(`**…**`)와 코드 표시(백틱)가 섞여 있고,
-              그건 같은 문장이 마크다운 보고서로도 나가기 때문입니다.
-              걷어낼 자리는 화면이고, 그 일은 `@lib` 의 `plainText` 한
-              벌이 합니다 — 예전에는 세 벌이 있었고 셋 다 백틱을 놓쳤습니다. */}
-          <p>
-            <strong>{plainText(view.headline)}</strong>
-          </p>
-          <p className="t13">{plainText(view.detail)}</p>
-          {view.nextStep !== null && <p className="t13">{plainText(view.nextStep)}</p>}
-          {view.warnings.map((w) => (
-            <p className="t12 muted" key={w}>
-              {plainText(w)}
-            </p>
-          ))}
-          {view.activity !== '' && <p className="t12 num">{view.activity}</p>}
-          {view.coverage !== '' && <p className="t12 muted">{view.coverage}</p>}
-          {/* ⚠️ **실패해도 아무 말도 안 했습니다** (결함 218). 500 을 받아도
-              화면이 그대로라 사람은 가져오는 중인 줄 알고 기다립니다. */}
-          {backfill.isError && (
-            <Problem>
-              {describeActionFailure(
-                '지난 활동 가져오기',
-                backfill.error instanceof ApiError ? backfill.error.status : null,
-                backfill.error instanceof ApiError ? backfill.error.detail : null,
-                /* ⭐ 서버가 「GitHub App 자격 증명이 없습니다」라고 정확히
-                   말하는데 화면이 버리고 있었습니다 (결함 300). */
-              )}
-            </Problem>
-          )}
-          {/* ⛔ **막혀 있으면 이유를 말합니다** (결함 380). 예전에는 서버가
-              409 로 거절할 상태에서도 단추가 그려졌고, 위 경고 줄은
-              「누르면 채웁니다」라고 약속하고 있었습니다. */}
-          {view.backfillBlocked !== '' && (
-            <p className="t12 muted" id="repo-backfill-why">
-              {view.backfillBlocked}
-            </p>
-          )}
-          {view.canBackfill && (
-            <button
-              type="button"
-              className="btn btn--secondary btn--sm"
-              style={{ marginTop: 'var(--sp-3)' }}
-              disabled={backfill.isPending || backfill.isSuccess}
-              onClick={() => backfill.mutate()}
-            >
-              {backfill.isSuccess ? '가져오는 중 — 잠시 뒤 새로 고쳐 보세요' : '지난 활동 가져오기'}
-            </button>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -1192,7 +961,6 @@ export default function Settings() {
                 사실처럼 보입니다. */}
             {cannotLoad !== null && <Problem>{cannotLoad}</Problem>}
             {cannotLoad === null && section === 'role' && <RoleSection mine={mine} save={m.saveRole} />}
-            {cannotLoad === null && section === 'github' && <GithubSection mine={mine} save={m.saveGithubLogin} />}
             {cannotLoad === null && section === 'profile' && <ProfileSection save={m.saveProfile} />}
             {cannotLoad === null && section === 'members' && (
               <MembersSection
@@ -1204,16 +972,7 @@ export default function Settings() {
                 removeMember={m.removeMember}
               />
             )}
-            {cannotLoad === null && section === 'repo' && (
-              <RepoSection
-                  myRole={myRole}
-                projectId={projectId}
-                repo={project.data?.github_repo ?? null}
-                save={m.saveProject}
-                backfill={m.backfill}
-              />
-            )}
-            {section === 'general' && project.data && (
+            {cannotLoad === null && section === 'general' && project.data && (
               <GeneralSection
                 myRole={myRole}
                 title={project.data.title}

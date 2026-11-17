@@ -300,7 +300,72 @@ async function refreshConsent(id: string): Promise<void> {
   // 로비에서 동의를 마치고 돌아온 자리입니다. 앞서 **동의가 없어서** 트랙을
   // 못 열었다면 지금이 다시 열 때입니다 — 안 그러면 조건은 다 찼는데
   // 올릴 자리만 없는 채로 남습니다 (결함 272).
-  if (client.state.track === 'blocked') void joinMeeting(id);
+  if (client.state.track === 'blocked') {
+    if (client.state.permission === 'granted') void joinMeeting(id);
+    else void checkMeetingEntry(id);
+  }
+}
+
+/**
+ * 회의 진입 시 읽기 전용으로 내 트랙/종료 여부만 확인합니다.
+ * 실제 `POST /tracks` 참가 등록은 사용자가 "녹음 시작"을 누를 때 수행해
+ * 마이크 권한 획득·녹음 시작 전부터 "녹음 중"으로 잘못 표시되는 현상을 막습니다.
+ */
+async function checkMeetingEntry(id: string): Promise<void> {
+  client.setTrack('pending');
+  const me = await tryGet(`${apiBase}/api/auth/me`);
+  if (me === null) {
+    client.setTrack('blocked');
+    showNote($('join-note'), unreachableText('회의에 들어가지 못했습니다'));
+    return;
+  }
+  if (!me.ok) {
+    location.href = loginUrlFor(location.pathname + location.search);
+    return;
+  }
+  const who = (await me.json()) as Me;
+  myUserId = who.user_id;
+  $('who').textContent = `${who.name} 님의 트랙으로 녹음합니다`;
+  await refreshConsent(id);
+  showNote($('join-note'), '');
+
+  const tracksRes = await tryGet(`${apiBase}/api/meetings/${id}/tracks`);
+  if (tracksRes === null) {
+    client.setTrack('blocked');
+    showNote($('join-note'), unreachableText('트랙 상태를 확인하지 못했습니다'));
+    return;
+  }
+  if (isSessionExpired(tracksRes.status)) {
+    location.href = loginUrlFor(location.pathname + location.search);
+    return;
+  }
+  if (!tracksRes.ok) {
+    const body = await tracksRes.json().catch(() => null);
+    client.setTrack('blocked');
+    showNote($('join-note'), detailText(body, `트랙 상태 확인 실패 (HTTP ${tracksRes.status})`));
+    return;
+  }
+
+  const data = (await tracksRes.json()) as {
+    recording_frozen?: boolean;
+    tracks?: { track_id: number; user_id: number; status: string }[];
+  };
+  const mine = (data.tracks ?? []).find((t) => t.user_id === myUserId);
+  if (data.recording_frozen || (mine !== undefined && mine.status !== 'recording')) {
+    client.setTrack('blocked');
+    showNote(
+      $('join-note'),
+      '이미 녹음을 마쳤거나 처리 중인 회의입니다. 새 녹음을 시작할 수 없습니다.',
+      'plain',
+    );
+    return;
+  }
+  if (mine !== undefined && mine.status === 'recording') {
+    trackUrl = `${apiBase}/api/meetings/${id}/tracks/${mine.track_id}`;
+    httpUpload.retarget(trackUrl);
+  }
+  client.setTrack('open');
+  render();
 }
 
 /**
@@ -404,7 +469,7 @@ $('consent').textContent = entryStep.label;
 client.setConsent(consentForEntry(meetingId));
 
 if (meetingId) {
-  void joinMeeting(meetingId);
+  void checkMeetingEntry(meetingId);
   // 로비에서 동의하고 **돌아왔을 때** 다시 묻습니다.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void refreshConsent(meetingId);
@@ -469,6 +534,10 @@ if (typeof navigator !== 'undefined' && navigator.mediaDevices?.addEventListener
 }
 
 $('start').addEventListener('click', async () => {
+  // 사용자가 실제로 "녹음 시작"을 누른 시점에 서버 트랙을 열어 시작 시각(00:00)과 상태를 맞춥니다.
+  if (meetingId && !trackUrl && sessionBlockers(client.state).length === 0) {
+    await joinMeeting(meetingId);
+  }
   // ⚠️ **잠금을 잡기 전에 막힌 국면부터 봅니다.** 순서가 반대였을 때는
   //    시작하지 못하는데도 화면 잠금을 잡고 끝났습니다 — 버튼이
   //    `aria-disabled` 라 눌리기 시작하면서 그 자리가 자주 지나갑니다.

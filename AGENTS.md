@@ -1,6 +1,6 @@
 # AGENTS.md — 이 저장소에서 일하는 법
 
-TeamFlow AI. 회의에서 정한 일이 칸반과 GitHub 을 거쳐 기여 기록까지
+TeamFlow AI. 회의·채팅에서 정한 일이 칸반을 거쳐 기여 기록까지
 이어지게 하는 도구. 제품 설명은 `docs/00-이-프로그램은-무엇인가.md`.
 
 ---
@@ -22,7 +22,7 @@ npm --prefix webapp run typecheck
 npm --prefix webapp run build        # dist/ 를 만들고, dist 는 커밋합니다
 
 # 데스크톱 셸 (Electron) — 서버를 먼저 띄워야 합니다
-TEAMFLOW_SERVER_URL=http://127.0.0.1:8811/home.html \
+TEAMFLOW_SERVER_URL=http://127.0.0.1:8811/app/ \
   npm --prefix frontend run desktop
 
 # 화면 스모크 — 서버를 **스스로** 띄우고 21화면을 보통·고대비로 걷습니다

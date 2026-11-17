@@ -3,7 +3,8 @@ cd /d "%~dp0"
 setlocal
 
 echo ====================================================================
-echo   TeamFlow AI - GitHub Anti-Gaming Demo Launcher
+echo   TeamFlow AI - Legacy GitHub Anti-Gaming Test Data Seeder
+echo   (Note: GitHub UI integration has been removed from the product.)
 echo ====================================================================
 echo.
 

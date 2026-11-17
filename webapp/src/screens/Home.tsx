@@ -1,5 +1,5 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AppShell, triggerInstantCall } from '../components/AppShell.tsx';
@@ -139,7 +139,13 @@ function ProjectHealthPane({
             <h3 className="tf-health-card__title">업무 진행률</h3>
             <Why about="업무 진행률 집계 기준" lines={[PROGRESS_NOTE]} countsAs="안내" />
           </div>
-          <div className="tf-health-card__metric num">
+          <div
+            className={
+              analytics.progress.total > 0
+                ? 'tf-health-card__metric num'
+                : 'tf-health-card__metric'
+            }
+          >
             {progressText(analytics.progress)}
           </div>
           {late !== null && (
@@ -190,7 +196,7 @@ function ProjectHealthPane({
                         <Link
                           key={tid}
                           className="chip chip--evidence"
-                          to={`/project/${projectId}/kanban`}
+                          to={`/project/${projectId}/kanban?task=${tid}`}
                         >
                           #{tid}
                         </Link>
@@ -206,13 +212,14 @@ function ProjectHealthPane({
           )}
         </div>
 
-        {/* 4. 회의 품질 추세 (기본 접힘 처리로 화면 난잡함 방지) */}
+        {/* 4. 회의 품질 추세 (기본 접힘 처리 — button 을 summary 안에 중첩하지 않습니다) */}
         <details className="disc tf-trend-disc">
-          <summary>
-            <span>회의 추세 분석 요약</span>
-            <Why about="회의 추세 비교 방식" lines={[TRENDS_NOTE]} countsAs="안내" />
-          </summary>
+          <summary>회의 추세 분석 요약</summary>
           <div className="disc__body">
+            <div className="tf-health-card__hdr" style={{ marginBottom: 'var(--sp-2)' }}>
+              <span className="t12 muted">회의 품질 변화 기준</span>
+              <Why about="회의 추세 비교 방식" lines={[TRENDS_NOTE]} countsAs="안내" />
+            </div>
             {!analytics.meeting_trends.measurable ? (
               <p className="t12 gap">{notMeasurableText(analytics.meeting_trends)}</p>
             ) : allQuiet(analytics.meeting_trends.kinds) ? (
@@ -261,7 +268,16 @@ function StartDialog({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // 모달을 닫았다 다시 열 때마다 이전 입력·오류·busy 잠금을 초기화합니다.
+  useEffect(() => {
+    setTitle('');
+    setCode('');
+    setError(null);
+    setBusy(false);
+  }, [focus]);
+
   const land = async (projectId: number) => {
+    setBusy(false);
     await queryClient.invalidateQueries({ queryKey: ['projects'] });
     navigate(`/?project=${projectId}`);
     onClose();

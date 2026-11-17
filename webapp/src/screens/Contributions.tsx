@@ -84,7 +84,12 @@ function evidenceChain(member: MemberScore): ChainLink[] {
     return {
       label,
       value: String(n),
-      hint: n === 0 ? `${label} 활동 기록이 0건입니다 — 측정은 됐고, 값이 0입니다` : `${label} 근거 ${n}건`,
+      hint:
+        n === 0
+          ? `${label} 활동 기록이 0건입니다 — 측정은 됐고, 값이 0입니다`
+          : category === 'meeting'
+            ? `회의 발언 근거 ${n}건 (발언 횟수 기준)`
+            : `${label} 근거 ${n}건`,
     };
   });
 }
@@ -294,6 +299,12 @@ export default function Contributions() {
   }
 
   const rawTeam = score.data;
+  const memberOrder = new Map(members.map((m, idx) => [m.user_id, idx]));
+  const orderedFinals = finals.data
+    ? [...finals.data.finals].sort(
+        (a, b) => (memberOrder.get(a.user_id) ?? Number.MAX_SAFE_INTEGER) - (memberOrder.get(b.user_id) ?? Number.MAX_SAFE_INTEGER),
+      )
+    : [];
   const team = {
     ...rawTeam,
     members: rawTeam.members.map((mem) => ({
@@ -475,9 +486,9 @@ export default function Contributions() {
             {/* 예전에는 여기 안내 한 문장(37자)과 아래 비활성 사유 한
                 문장(33자)이 **같은 말을 두 번** 하고 있었습니다. 한 줄만
                 남기고 전문은 `?` 로. */}
-            {finals.data && finals.data.finals.length > 0 && (
+            {orderedFinals.length > 0 && (
               <p className="confirmbar__status status-ok" role="status">
-                <strong>확정 완료</strong> · {describeFinals(finals.data.finals, peopleLabels)}
+                <strong>확정 완료</strong> · {describeFinals(orderedFinals, peopleLabels)}
               </p>
             )}
             <p className="confirmbar__notice">
@@ -486,8 +497,8 @@ export default function Contributions() {
                 about="확정에 대해"
                 lines={[
                   team.notice,
-                  ...(finals.data && finals.data.finals.length > 0
-                    ? [describeFinals(finals.data.finals, peopleLabels)]
+                  ...(orderedFinals.length > 0
+                    ? [describeFinals(orderedFinals, peopleLabels)]
                     : []),
                 ]}
               />

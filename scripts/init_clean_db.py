@@ -47,7 +47,22 @@ def init_clean_db(database_url: str | None = None, reset: bool = False) -> None:
             )
             session.add(proj)
             session.flush()
-            print(f"[초기화 완료] 깨끗한 워크스페이스 생성됨 (ID: 1, 초대코드: {invite_code})")
+            session.add(
+                m.Channel(
+                    project_id=proj.id,
+                    kind="text",
+                    name="일반",
+                    position=0,
+                )
+            )
+            session.flush()
+            print(
+                f"[초기화 완료] 깨끗한 워크스페이스 생성됨 (ID: 1, 기본 채널: #일반, 초대코드: {invite_code})"
+            )
+            print(
+                "[안내] 웹 회원가입 후 '+ 새 프로젝트'로 소유자 권한 워크스페이스를 만들거나 "
+                "위 초대코드로 합류할 수 있습니다."
+            )
         else:
             print(f"[초기화 확인] 기존 워크스페이스(ID: 1, 초대코드: {proj.invite_code}) 유지됨.")
 

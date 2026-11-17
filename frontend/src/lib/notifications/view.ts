@@ -147,6 +147,6 @@ export function emptyNote(): { what: string; why: string; how: string } {
   return {
     what: '지금 볼 알림이 없습니다',
     why: '알림은 나를 부르거나, 업무를 맡거나, 마감이 다가올 때 생깁니다.',
-    how: '채팅에서 `@이름`으로 부르면 그 사람에게 알림이 갑니다.',
+    how: '채팅에서 @이름으로 부르면 그 사람에게 알림이 갑니다.',
   };
 }

@@ -773,7 +773,7 @@ describe('떠난 사람의 기록 (결함 222)', () => {
     // 화면에는 둘이 **같이** 그려집니다. 지금 구성원끼리만 안 겹친다고
     // 안심하면, 나간 박지원과 남아 있는 박지원이 같은 줄로 읽힙니다.
     const 겹침: Person[] = [{ user_id: 9, name: '박지원', github_login: 'jiwon-old' }];
-    strictEqual(nameOf(3, PEOPLE, 겹침), '박지원 · GitHub 미연결');
+    strictEqual(nameOf(3, PEOPLE, 겹침), '박지원 · 구분 미등록');
     strictEqual(nameOf(9, PEOPLE, 겹침), '박지원 · @jiwon-old');
   });
 

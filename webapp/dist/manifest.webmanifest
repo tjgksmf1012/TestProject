@@ -8,7 +8,6 @@
   "scope": "/app/",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
-  "orientation": "portrait",
   "background_color": "#121319",
   "theme_color": "#5865f2",
   "categories": ["productivity", "collaboration", "business"],
@@ -42,10 +41,6 @@
     {
       "name": "홈",
       "url": "/app/"
-    },
-    {
-      "name": "칸반",
-      "url": "/app/project/1/kanban"
     }
   ]
 }

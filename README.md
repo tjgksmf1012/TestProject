@@ -3,7 +3,7 @@
 > AI 기반 팀 프로젝트 협업 및 회의 리뷰 통합 플랫폼
 > 회의에서 나온 결정을 실제 업무와 코드 활동까지 연결한다.
 
-**현재 상태: PC 웹·PC 앱의 실제 회의 흐름 구현 및 Google·GitHub 실계정 연동 검증.**
+**현재 상태: PC 웹·PC 앱의 실제 회의·채팅·칸반 흐름 구현 및 Google·음성·AI 파이프라인 연동 검증.**
 - **접속 도메인**: [https://teamflow-ai.stream/app/](https://teamflow-ai.stream/app/) (좁은 창·확대 화면 대응)
 - **로컬 개발 주소**: `http://127.0.0.1:8811/app`
 - **2026-11-03 검증**: 백엔드 **2,301개**, 프런트엔드 **2,170개** 통과. 타입·린트·빌드·22화면 검사 통과.
@@ -11,9 +11,9 @@
 > **실제 제공하는 기능과 검증 범위**
 > - Google 로그인은 실제 계정 선택부터 서비스 복귀까지 확인했습니다. 새 계정은 기존 프로젝트에 자동 참가하지 않습니다.
 > - 각자의 녹음 트랙으로 발언자를 구분합니다. 실제 Qwen3-ASR·Qwen2.5-3B 모델로 합성 한국어 음성의 업무·담당자·마감과 승인 흐름을 확인했습니다.
-> - GitHub App 읽기 권한·서명된 설치 웹훅·기존 PR 12건의 기여 근거 반영을 확인했습니다.
+> - 팀 채팅 채널·`@이름` 멘션 알림·채팅 메시지의 `업무로` 칸반 전환을 지원합니다. (GitHub 연동 기능은 UI·시연·점수 집계에서 제거했습니다.)
 > - `/app/demo`는 192개 주파수 값 비교와 텍스트 키워드 예시입니다. 성문 인식·실시간 ASR·LLM 정확도를 시연하는 화면은 아닙니다.
-> - 워치독은 서버·터널·회의·GitHub·보존기간 실행기를 감시합니다. 무중단이나 일정 시간 안의 복구를 보장하지 않습니다.
+> - 워치독은 서버·터널·회의·보존기간 실행기를 감시합니다. 무중단이나 일정 시간 안의 복구를 보장하지 않습니다.
 > 상세 결과와 남은 실기기 검증은 **[docs/27 실환경 검증과 릴리스](docs/27-실환경-검증-및-릴리스.md)** 를 참고하세요.
 
 이 저장소는 "무엇을 어떻게 만들 것인가"를 검증·기록하고, 검증된 것부터 코드로 옮기는 곳입니다.
@@ -22,12 +22,12 @@
 
 ## 무엇을 만드는가
 
-대학생 팀 프로젝트에서 **회의 → 업무 → 코드 활동**을 자동으로 연결하고,
+대학생 팀 프로젝트에서 **회의·채팅 → 업무 → 수행·일정 준수**를 자동으로 연결하고,
 그 연결을 근거로 팀원별 기여도와 프로젝트 위험을 **설명 가능한 형태로** 보여주는 웹 플랫폼.
 
 ```
 회의 녹음 → 화자별 회의록 → "민수가 금요일까지 로그인 API 구현" 업무 추출
-        → 사람이 승인 → 칸반 등록 → 관련 PR 병합 → 업무 카드에 수행 근거 연결
+        → 사람이 승인(또는 채팅에서 '업무로' 전환) → 칸반 등록 · 완료 · 일정 준수
         → 기여도 화면에 근거와 함께 반영
 ```
 
@@ -198,11 +198,11 @@ GPU 없이 **완전히 검증 가능한 부분**부터 코드로 옮기고 있�
 | ~~안드로이드 셸~~ | ⛔ **접었습니다** — 실기기가 없고 `gradlew` 조차 없어 **빌드 자체가 불가능**했습니다 | [docs/14](docs/14-모바일.md) 머리말 |
 | **브라우저 통화로 회의** (WebRTC 메시 5명 · 헤드폰 확인) | ✅ 같은 기기 3인 통화로 확인 / **실제 네트워크는 미검증** | `backend/teamflow/call/`, `frontend/src/lib/call/`, `public/call.html` |
 | **PC 화면** (48rem↑ 상단 탭·칸반 3열 가로) | ✅ | `frontend/public/app.css`, [docs/15](docs/15-PC-우선-방향.md) §4.7 |
-| **GitHub 백필** (연결 전 활동 + 커버리지 표시) | ✅ 실제 PR 12건 수집·재실행 중복 방지 확인 | `backend/teamflow/github/backfill.py`, [docs/27](docs/27-실환경-검증-및-릴리스.md) |
-| 프로젝트 만들기·회의 열기·저장소 연결 **화면** | ✅ | `public/home.html`(만들기·초대코드 참가), `public/project.html`(회의 열기·저장소 연결), `frontend/src/lib/project/setup.ts` |
+| **GitHub 백필·웹훅·PR 연동** *(현재 제품 UI·자동 수집 제거, 백엔드 모듈만 보존)* | ➖ | `backend/teamflow/github/` |
+| 프로젝트 만들기·회의 열기·팀 관리 **화면** | ✅ | `public/home.html`(만들기·초대코드 참가), `webapp/src/screens/` |
 | **업무 완료 → 기여 이벤트** (마감 준수 포함) | ✅ | `backend/teamflow/services/task_service.py` |
+| **팀 채팅** (`#채널` · `@이름` 멘션 · 메시지 `업무로` 칸반 전환) | ✅ | `backend/teamflow/services/chat_service.py`, `webapp/src/components/ChatWorkspace.tsx` |
 | **보고서** (회의록·주간·최종 · 글자로 내보내기) | ✅ | `backend/teamflow/reports/`, `services/report_service.py`, `public/reports.html` |
-| **GitHub 활동 → 기여 이벤트** (App 인증·diff 조회·멱등) | ✅ 실제 이력의 기여 근거 12건 저장 / 새 병합 웹훅은 다음 정상 PR에서 확인 | `backend/teamflow/github/client.py`, `services/github_ingest_service.py` |
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
@@ -214,7 +214,7 @@ npm --prefix frontend test                       # 설치 불필요 — 개수�
 npm --prefix frontend ci && npm --prefix frontend run typecheck
 .venv/bin/python scripts/make_icons.py           # 앱 아이콘 (stdlib 만 씀)
 
-TEAMFLOW_SERVER_URL=http://127.0.0.1:8811/home.html \
+TEAMFLOW_SERVER_URL=http://127.0.0.1:8811/app/ \
   npm --prefix frontend run desktop               # 데스크톱 앱 — docs/21
 
 cp .env.example .env                             # 시크릿 채우기
@@ -239,6 +239,7 @@ start_live.bat
 - 💻 **로컬 개발 주소**: [http://127.0.0.1:8811/app](http://127.0.0.1:8811/app)
   - `/app/login` — Google 공식 OAuth 2.0 및 이메일 로그인
   - `/app/` — 프로젝트 홈 대시보드 & 3단계 온보딩 가이드
+  - `/app/project/:id/chat` — 팀 채팅 채널 · `@이름` 멘션 · 메시지 `업무로` 칸반 전환
   - `/app/meeting/:id/lobby` — 회의 로비·트랙 상태·본인의 개별 녹음 동의
   - `/app/meeting/:id/review` — AI 회의 검토·담당자·마감·원문 근거 확인
   - `/app/project/:id/kanban` — 칸반 보드 (근거 인라인 미리보기 모달 지원)

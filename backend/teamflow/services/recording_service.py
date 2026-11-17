@@ -102,6 +102,11 @@ _MEETING_AUDIO_FROZEN = frozenset(
 )
 
 
+def is_recording_frozen(meeting_status: str) -> bool:
+    """이미 처리 중·완료돼 더 이상 새 녹음을 받을 수 없는 회의 상태인지 반환한다."""
+    return meeting_status in _MEETING_AUDIO_FROZEN
+
+
 def describe_track_state(status: str) -> str:
     """트랙 상태 → 사람이 읽을 한 줄. 모르는 값은 **그대로** 돌려준다."""
     known = _TRACK_STATE_MESSAGE.get(status)

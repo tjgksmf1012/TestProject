@@ -33,6 +33,7 @@
 }
 
 :root {
+  color-scheme: light;
   /* ---------- 색: 무채색 ---------- */
   --c-paper:            #FAFAFB;
   --c-surface:          #FFFFFF;
@@ -173,6 +174,7 @@
 /* 다크 — 반전이 아니라 별도 설계.
    베이스 명도 8~12%, elevation 은 명도 +4~8%, 액센트는 밝히고 채도 낮춤 */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --c-paper: #121319;          --c-surface: #191B23;
   --c-surface-raised: #21242E; --c-sunken: #0E0F14;
   --c-line: #2A2E3B;           --c-line-strong-base: #3D4354;
@@ -191,6 +193,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --c-paper: #121319;          --c-surface: #191B23;
     --c-surface-raised: #21242E; --c-sunken: #0E0F14;
     --c-line: #2A2E3B;           --c-line-strong-base: #3D4354;
@@ -4849,6 +4852,17 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 48rem) {
+  .tabs {
+    flex-wrap: wrap;
+    padding: 0 var(--sp-3);
+    gap: var(--sp-1);
+    overflow-x: visible;
+  }
+  .tabs__group { flex-wrap: wrap; gap: var(--sp-1); }
+  .tabs__sep { display: none; }
+  .tabs__item { height: 38px; padding: 0 var(--sp-3); }
+  .tabs__item--danger { margin-left: 0; }
+
   /* Kanban Mobile Column Pills and Swipe Snap */
   .mobile-col-pills {
     display: flex;

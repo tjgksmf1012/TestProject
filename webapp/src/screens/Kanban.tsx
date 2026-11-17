@@ -29,6 +29,8 @@ import {
 import { canDropOn, dragPayload, draggedTaskId, TASK_DRAG_TYPE } from '@lib/kanban/dnd.ts';
 import { labelInList } from '@lib/people/labels.ts';
 import {
+  PRIORITIES,
+  PRIORITY_DEFAULT,
   describePriority,
   priorityChoices,
   priorityTone,
@@ -335,14 +337,16 @@ export default function Kanban() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newStatus, setNewStatus] = useState('todo');
-  const [newPriority, setNewPriority] = useState(1);
+  const [newPriority, setNewPriority] = useState<number>(PRIORITY_DEFAULT);
   const [newStartDate, setNewStartDate] = useState('');
   const [newDeadline, setNewDeadline] = useState('');
   const [newAssignees, setNewAssignees] = useState<number[]>([]);
+  const [createTitleError, setCreateTitleError] = useState<string | null>(null);
 
   // 업무 수정 모달
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [editTitleError, setEditTitleError] = useState<string | null>(null);
   const [previewEvidenceTask, setPreviewEvidenceTask] = useState<Task | null>(null);
   const previewTimeline = useTimeline(previewEvidenceTask?.origin?.meeting_id);
   const [editStartDate, setEditStartDate] = useState('');
@@ -392,6 +396,8 @@ export default function Kanban() {
   const hasActiveFilter = selectedAssignee !== null || quickFilter !== 'all';
   const openCreateModal = (defaultStatus = 'todo') => {
     setNewStatus(statuses.includes(defaultStatus) ? defaultStatus : (statuses[0] ?? 'todo'));
+    setCreateTitleError(null);
+    createTask.reset();
     setShowCreateModal(true);
   };
   const createDateProblem =
@@ -473,7 +479,12 @@ export default function Kanban() {
 
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim() || createDateProblem !== null) return;
+    if (!newTitle.trim()) {
+      setCreateTitleError('업무 제목을 입력해 주세요');
+      return;
+    }
+    if (createDateProblem !== null) return;
+    setCreateTitleError(null);
     createTask.mutate(
       {
         title: newTitle.trim(),
@@ -488,10 +499,11 @@ export default function Kanban() {
           setShowCreateModal(false);
           setNewTitle('');
           setNewStatus('todo');
-          setNewPriority(1);
+          setNewPriority(PRIORITY_DEFAULT);
           setNewStartDate('');
           setNewDeadline('');
           setNewAssignees([]);
+          setCreateTitleError(null);
         },
       }
     );
@@ -499,7 +511,13 @@ export default function Kanban() {
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingTask || !editTitle.trim() || editDateProblem !== null) return;
+    if (!editingTask) return;
+    if (!editTitle.trim()) {
+      setEditTitleError('업무 제목을 입력해 주세요');
+      return;
+    }
+    if (editDateProblem !== null) return;
+    setEditTitleError(null);
     patchTask.mutate(
       {
         taskId: editingTask.id,
@@ -511,7 +529,10 @@ export default function Kanban() {
         },
       },
       {
-        onSuccess: () => setEditingTask(null),
+        onSuccess: () => {
+          setEditingTask(null);
+          setEditTitleError(null);
+        },
       }
     );
   };
@@ -752,7 +773,7 @@ export default function Kanban() {
             <Dialog.Title className="sec__title" style={{ margin: '0 0 16px', fontSize: '16px', fontWeight: 600 }}>
               새 업무 추가
             </Dialog.Title>
-            <form onSubmit={handleCreateTask} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <form noValidate onSubmit={handleCreateTask} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
                 <span>제목 (필수)</span>
                 <input
@@ -767,10 +788,14 @@ export default function Kanban() {
                     color: 'var(--c-ink)',
                   }}
                   value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
+                  onChange={(e) => {
+                    setNewTitle(e.target.value);
+                    if (createTitleError !== null) setCreateTitleError(null);
+                  }}
                   placeholder="할 일을 입력하세요"
                 />
               </label>
+              <Problem id="create-title-problem" tone="incomplete">{createTitleError}</Problem>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1 }}>
                   <span>생성 열 (상태)</span>
@@ -791,11 +816,10 @@ export default function Kanban() {
                     ariaLabel="우선순위"
                     value={String(newPriority)}
                     onChange={(val) => setNewPriority(Number(val))}
-                    options={[
-                      { value: '0', label: '긴급' },
-                      { value: '1', label: '보통' },
-                      { value: '2', label: '낮음' },
-                    ]}
+                    options={PRIORITIES.map((p) => ({
+                      value: String(p),
+                      label: describePriority(p),
+                    }))}
                   />
                 </div>
               </div>
@@ -851,6 +875,11 @@ export default function Kanban() {
                 </div>
               </div>
               <Problem id="create-date-problem" tone="incomplete">{createDateProblem}</Problem>
+              {createTask.error != null && (
+                <Problem>
+                  {describeActionFailure('새 업무 만들기', statusOf(createTask.error), detailOf(createTask.error))}
+                </Problem>
+              )}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                 <Dialog.Close asChild>
                   <button
@@ -977,14 +1006,23 @@ export default function Kanban() {
         </Dialog.Portal>
       </Dialog.Root>
 
-      <Dialog.Root open={editingTask !== null} onOpenChange={(open) => { if (!open) setEditingTask(null); }}>
+      <Dialog.Root
+        open={editingTask !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingTask(null);
+            setEditTitleError(null);
+            patchTask.reset();
+          }
+        }}
+      >
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-backdrop" />
           <Dialog.Content className="dialog" aria-label="업무 수정">
             <Dialog.Title className="sec__title" style={{ margin: '0 0 16px', fontSize: '16px', fontWeight: 600 }}>
               업무 수정
             </Dialog.Title>
-            <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <form noValidate onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
                 <span>제목</span>
                 <input
@@ -999,9 +1037,13 @@ export default function Kanban() {
                     color: 'var(--c-ink)',
                   }}
                   value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
+                  onChange={(e) => {
+                    setEditTitle(e.target.value);
+                    if (editTitleError !== null) setEditTitleError(null);
+                  }}
                 />
               </label>
+              <Problem id="edit-title-problem" tone="incomplete">{editTitleError}</Problem>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', flex: 1, minWidth: '140px' }}>
                   <span>시작일</span>
@@ -1023,6 +1065,11 @@ export default function Kanban() {
                 </div>
               </div>
               <Problem id="edit-date-problem" tone="incomplete">{editDateProblem}</Problem>
+              {patchTask.error != null && (
+                <Problem>
+                  {describeActionFailure('업무 바꾸기', statusOf(patchTask.error), detailOf(patchTask.error))}
+                </Problem>
+              )}
               {tasks.filter((t) => t.id !== editingTask?.id).length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px' }}>
                   <span>선행 업무 (이 업무보다 먼저 끝나야 하는 일)</span>

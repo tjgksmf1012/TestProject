@@ -336,7 +336,7 @@ def create_task(
     actor_id: int,
     title: str,
     status: str = "todo",
-    priority: int = 1,
+    priority: int = int(vocab.TASK_PRIORITY_DEFAULT),
     start_date: date | None = None,
     deadline: date | None = None,
     assignee_ids: list[int] | None = None,

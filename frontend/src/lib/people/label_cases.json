@@ -26,16 +26,16 @@
         { "user_id": 2, "name": "이하늘", "github_login": "haneul-fe" },
         { "user_id": 4, "name": "이하늘", "github_login": null }
       ],
-      "labels": ["이하늘 · @haneul-fe", "이하늘 · GitHub 미연결"],
+      "labels": ["이하늘 · @haneul-fe", "이하늘 · 구분 미등록"],
       "tells_apart": [true, true]
     },
     {
-      "왜": "둘 다 GitHub 미연결이면 못 가른다 — 그 사실을 말해야 한다",
+      "왜": "둘 다 구분 핸들이 없으면 못 가른다 — 그 사실을 말해야 한다",
       "people": [
         { "user_id": 4, "name": "이하늘", "github_login": null },
         { "user_id": 5, "name": "이하늘", "github_login": null }
       ],
-      "labels": ["이하늘 · GitHub 미연결", "이하늘 · GitHub 미연결"],
+      "labels": ["이하늘 · 구분 미등록", "이하늘 · 구분 미등록"],
       "tells_apart": [false, false]
     },
     {

@@ -135,7 +135,7 @@ function ReportContentBody({ content }: { content: ReportContent }) {
   }
   return (
     <div className="tf-rep-doc">
-      <h1 className="tf-rep-title">{content.title}</h1>
+      <h2 className="tf-rep-title">{content.title}</h2>
       {content.notices.length > 0 && (
         <div className="tf-rep-notices" role="note">
           {content.notices.map((notice) => (

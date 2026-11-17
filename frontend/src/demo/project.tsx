@@ -12,8 +12,10 @@ import { createRoot } from 'react-dom/client';
 
 import {
   codeToCopy,
+  disconnectConfirm,
   formatCode,
   githubLoginStatus,
+  isDisconnect,
   nextStepAfterCreate,
   NO_CODE,
   normalizeRepo,
@@ -471,6 +473,9 @@ function ProjectSettings() {
     // 주소를 붙여넣었으면 고쳐서 보내고, 고친 결과를 칸에도 되돌려 줍니다 —
     // 무엇이 저장됐는지 보이지 않으면 다음에 또 주소를 넣습니다.
     const clean = normalizeRepo(repo);
+    if (isDisconnect(detail?.github_repo, clean) && !window.confirm(disconnectConfirm(detail?.github_repo ?? ''))) {
+      return;
+    }
     setRepo(clean);
     void guarded(async () => {
       const r = await send(`/api/projects/${projectId}`, {

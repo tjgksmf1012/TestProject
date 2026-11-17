@@ -523,8 +523,7 @@ export function teamWarnings(score: TeamScore, people: readonly Person[]): strin
   const shaky = score.members.filter((m) => m.confidence < LOW_CONFIDENCE);
   if (score.members.every(nothingMeasured)) {
     warnings.push(
-      '아직 이 팀에서 잰 활동이 없습니다. 회의를 열거나 GitHub 저장소를 ' +
-        '연결하면 근거와 함께 값이 생깁니다.',
+      '아직 이 팀에서 잰 활동이 없습니다. 회의를 열어 논의하고 업무를 진행하면 근거와 함께 값이 생깁니다.',
     );
   } else if (shaky.length === score.members.length) {
     // ⚠️ 혼자면 「서로」가 없습니다. 같은 말을 억지로 쓰면 화면이 사람을

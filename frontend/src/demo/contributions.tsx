@@ -599,7 +599,7 @@ function Contributions() {
             html={emptyHtml({
               what: '여기에는 팀원별 기여 구간과 그 근거가 나옵니다.',
               why: '아직 이을 활동이 하나도 없습니다 — 아무도 안 했다는 뜻이 아닙니다.',
-              how: '회의를 녹음하거나 GitHub 저장소를 연결하면 활동이 여기로 이어집니다.',
+              how: '회의를 녹음하고 업무를 진행하면 활동이 여기로 이어집니다.',
               action: { label: '프로젝트 설정', href: `/project.html?project=${projectId}` },
             })}
           />

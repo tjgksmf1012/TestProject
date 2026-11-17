@@ -4837,7 +4837,7 @@ describe('SPA 의 「안 됩니다」 는 들려야 한다 (docs/22 · WCAG 4.1.
       join(ROOT, '..', 'webapp', 'src', 'screens', 'Settings.tsx'),
       'utf8',
     );
-    for (const id of ['repo-problem', 'title-problem']) {
+    for (const id of ['title-problem']) {
       ok(
         settings.includes(`aria-describedby="${id}"`),
         `${id} 을 가리키는 입력칸이 없습니다`,
@@ -7190,18 +7190,10 @@ describe('⛔ 되돌릴 수 없는 것은 **묻고, 보이고, 좁아야** 한�
     codeOf(readFileSync(join(ROOT, '..', 'webapp', 'src', 'screens', 'Settings.tsx'), 'utf8'));
   const css = (): string => readFileSync(join(ROOT, '..', 'webapp', 'src', 'app.css'), 'utf8');
 
-  it('⭐ 저장소 **연결 해제**는 묻고 나서 한다 (결함 256)', () => {
-    /* 칸을 비우고 「연결」을 누르면 `PATCH {github_repo: ""}` 가 그냥
-       나갔습니다 — 확인도, 알림도, 되돌릴 실마리도 없이. 게다가 버튼에는
-       「연결」이라고 적혀 있어 **낱말이 하는 일과 달랐습니다.** */
+  it('⭐ SPA 설정 화면은 GitHub·저장소 구역을 노출하지 않는다 (GitHub 연동 제거)', () => {
     const code = settings();
-    ok(/isDisconnect\(/.test(code), '연결 해제를 가려내지 않습니다');
-    ok(/disconnectConfirm\(/.test(code), '연결을 끊기 전에 묻지 않습니다');
-    // 물어본 답이 **막는가** — `window.confirm(...)` 이 `return` 으로 이어지는가.
-    ok(
-      /!window\.confirm\(disconnectConfirm\([^)]*\)\)\s*\)?\s*return/.test(code),
-      '물어만 보고 그대로 보냅니다 — 아니라고 답해도 나갑니다',
-    );
+    ok(!/section === 'github'/.test(code), 'SPA Settings 에 숨은 github 라우트가 남아 있습니다');
+    ok(!/section === 'repo'/.test(code), 'SPA Settings 에 숨은 repo 라우트가 남아 있습니다');
   });
 
   it('⭐ 위험한 것이 화면에서 **제일 약하지 않다** (결함 257)', () => {
@@ -8522,7 +8514,7 @@ describe('관리자만 되는 일을 **구성원에게 열어 두지 않는다**
 
        요구는 이것입니다: **권한 판단의 값이 버튼의 막힘 판단으로
        흘러가고, 그 막힘이 사유로 이어진다.** */
-    for (const name of ['프로젝트 이름 바꾸기', '초대 코드 새로 만들기', '저장소 연결']) {
+    for (const name of ['프로젝트 이름 바꾸기', '초대 코드 새로 만들기']) {
       const assign = new RegExp(
         `const (\\w+) = manageBlockedBecause\\(myRole, '${name}'\\)`,
       ).exec(settings);
@@ -8555,7 +8547,7 @@ describe('관리자만 되는 일을 **구성원에게 열어 두지 않는다**
         [...(m[1] ?? '').matchAll(/(\w+) !== null/g)].map((x) => x[1] ?? ''),
       ),
     );
-    for (const name of ['프로젝트 이름 바꾸기', '초대 코드 새로 만들기', '저장소 연결']) {
+    for (const name of ['프로젝트 이름 바꾸기', '초대 코드 새로 만들기']) {
       const v =
         new RegExp(`const (\\w+) = manageBlockedBecause\\(myRole, '${name}'\\)`).exec(settings)?.[1] ??
         '';
@@ -11241,7 +11233,6 @@ describe('결함 380 — 「누르면 채웁니다」는 서버가 될 때만 (�
      337·345·348·352·365·367·372·373·374). */
   const ROOTS: Array<[string, string]> = [
     ['레거시', join(DEMO, 'project.tsx')],
-    ['SPA', join(ROOT, '..', 'webapp', 'src', 'screens', 'Settings.tsx')],
   ];
 
   for (const [rootName, path] of ROOTS) {

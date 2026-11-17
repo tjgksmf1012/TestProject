@@ -75,7 +75,7 @@ export function labelInList(person: PersonRef, all: readonly PersonRef[]): strin
   if (!nameRepeatsInList(person, all)) return name;
 
   const login = (person.github_login ?? '').trim();
-  return login === '' ? `${name} · GitHub 미연결` : `${name} · @${login}`;
+  return login === '' ? `${name} · 구분 미등록` : `${name} · @${login}`;
 }
 
 /**
@@ -98,5 +98,5 @@ export function tellsApartInList(person: PersonRef, all: readonly PersonRef[]): 
 
 /** 못 가르는 줄에 붙이는 한 줄. */
 export function cannotTellApartNote(): string {
-  return '이름이 같은 팀원이 있습니다 — GitHub 아이디를 연결하면 구분됩니다';
+  return '이름이 같은 팀원이 있습니다 — 내 정보에서 이름에 별칭(예: 김민수A)을 붙여 구분해 주세요';
 }

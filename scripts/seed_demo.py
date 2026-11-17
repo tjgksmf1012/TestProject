@@ -250,7 +250,8 @@ def seed(*, reset: bool) -> dict:
         project = m.Project(
             title=PROJECT_TITLE,
             started_at=MEETING_START - timedelta(days=14),
-            github_repo="tjgksmf1012/teamflow-demo",
+            # GitHub 연동 UI 제거 후 시연 프로젝트는 회의·업무·일정 기준으로만 산정되도록 비워 둡니다.
+            github_repo=None,
             # ⚠️ **API 가 만드는 프로젝트와 같은 모양이어야 한다** (결함 91).
             #
             # 이게 없던 동안 시연 프로젝트만 `invite_code` 가 NULL 이었다.
@@ -540,20 +541,12 @@ def seed(*, reset: bool) -> dict:
 _EVENTS: list[tuple[int, str, str, float, int, int]] = [
     # (팀원 index, event_type, source_kind, magnitude, 회의 시작 후 며칠, 슬롯)
     #                                                  ↑ 같은 슬롯 = 같은 업무
-    (0, "pr_merged", "github_event", 180.0, 1, 0),
-    (0, "pr_merged", "github_event", 240.0, 3, 1),
-    (0, "review_given", "github_event", 1.0, 2, 2),
-    (0, "review_given", "github_event", 1.0, 4, 3),
     (0, "task_completed", "task", 1.0, 3, 4),
     (0, "deadline_missed", "task", 1.0, 3, 4),
-    (1, "pr_merged", "github_event", 90.0, 2, 5),
-    (1, "review_given", "github_event", 1.0, 3, 6),
     (1, "task_completed", "task", 1.0, 2, 7),
     (1, "deadline_met", "task", 1.0, 2, 7),
     (1, "task_completed", "task", 1.0, 5, 8),
     (1, "deadline_met", "task", 1.0, 5, 8),
-    (2, "pr_merged", "github_event", 120.0, 4, 9),
-    (2, "review_given", "github_event", 1.0, 5, 10),
     (2, "task_completed", "task", 1.0, 4, 11),
     (2, "deadline_met", "task", 1.0, 4, 11),
     # ⚠️ `utt_*` 는 **여기 없습니다.** 예전에는 손으로 넣었는데, 이제
